@@ -9,13 +9,13 @@ from openai import OpenAI
 
 from pydantic import BaseModel
 
-from app.database import get_connection, init_db # type: ignore
+from database import get_connection, init_db # type: ignore
 
 # Initialize the database when the app starts
 init_db()
 
-from app.models import ChatRequest # type: ignore
-from app.weather import get_weather # type: ignore
+from models import ChatRequest # type: ignore
+from weather import get_weather # type: ignore
 
 # Use ChatRequest for chat, but a minimal model for reset
 class ResetRequest(BaseModel):
