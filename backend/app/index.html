@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AI Chat</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    #chat { border: 1px solid #ccc; padding: 1em; min-height: 200px; margin-bottom: 1em; background: #fafafa; }
+    .user { color: #333; font-weight: bold; }
+    .ai { color: #0074d9; margin-bottom: 1em; }
+    #msg { width: 70%; padding: 0.5em; }
+    #send, #reset { padding: 0.5em 1em; margin-left: 0.5em; }
+    #status { color: green; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h2>AI Chat</h2>
+  <div id="chat"></div>
+  <input id="msg" placeholder="Type message..." />
+  <button id="send">Send</button>
+  <button id="reset">Reset Memory</button>
+  <div id="status"></div>
+
+  <script>
+    const userId = "saye";
+    const chatDiv = document.getElementById("chat");
+    const msgInput = document.getElementById("msg");
+    const statusDiv = document.getElementById("status");
+    document.getElementById("send").onclick = send;
+    document.getElementById("reset").onclick = resetMemory;
+
+    function appendMessage(role, text) {
+      const div = document.createElement("div");
+      div.className = role === "user" ? "user" : "ai";
+      div.textContent = (role === "user" ? "You: " : "AI: ") + text;
+      chatDiv.appendChild(div);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+
+    async function send() {
+      const message = msgInput.value.trim();
+      if (!message) return;
+      appendMessage("user", message);
+      msgInput.value = "";
+      statusDiv.textContent = "";
+
+      const res = await fetch("http://127.0.0.1:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, message })
+      });
+      const data = await res.json();
+      if (data.reply) {
+        appendMessage("ai", data.reply);
+      } else if (data.error) {
+        appendMessage("ai", "[Error: " + data.error + "]");
+      }
+    }
+
+    async function resetMemory() {
+      statusDiv.textContent = "";
+      const res = await fetch("http://127.0.0.1:8000/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId })
+      });
+      const data = await res.json();
+      if (data.status === "memory cleared") {
+        chatDiv.innerHTML = "";
+        statusDiv.textContent = "Memory cleared!";
+      } else {
+        statusDiv.textContent = "Failed to clear memory.";
+      }
+    }
+  </script>
+</body>
+</html>
