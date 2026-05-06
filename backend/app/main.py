@@ -9,19 +9,19 @@ from openai import OpenAI
 
 from pydantic import BaseModel
 
-from backend.app.database import get_connection, init_db # type: ignore
+from app.database import get_connection, init_db # type: ignore
 
 # Initialize the database when the app starts
 init_db()
 
-from backend.app.models import ChatRequest # type: ignore
-from backend.app.weather import get_weather # type: ignore
+from app.models import ChatRequest # type: ignore
+from app.weather import get_weather # type: ignore
 
 # Use ChatRequest for chat, but a minimal model for reset
 class ResetRequest(BaseModel):
     user_id: str
 
-load_dotenv("../.env")
+load_dotenv()
 
 app = FastAPI()
 
