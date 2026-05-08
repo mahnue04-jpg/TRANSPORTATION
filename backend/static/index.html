@@ -4,7 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Amicor — Your AI Assistant</title>
+
+  <!-- KaTeX — math rendering (no bundler needed) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    crossorigin="anonymous"
+    onload="window._katexReady = true;"></script>
+
   <style>
+    /* KaTeX block equations: centre and allow horizontal scroll on small screens */
+    .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
     /* ── Reset & Base ─────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -533,7 +543,70 @@
 
   // ── Bubble factory ───────────────────────────────────────
 
-  const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼" };
+  const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼", education:"🎓" };
+
+  // ── Content renderer (markdown + KaTeX) ─────────────────────
+  // Called only for AI bubbles. User bubbles stay plain text for safety.
+
+  function renderContent(text) {
+    // 1. Escape HTML to prevent injection before we add markup
+    const escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    // 2. Basic markdown → HTML (bold, italic, inline code, code blocks, lists)
+    let html = escaped
+      // fenced code blocks  ```...```
+      .replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>")
+      // inline code  `...`
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      // bold  **...**
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      // italic  *...*
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      // unordered list items  - ...  or  * ...  at line start
+      .replace(/^[\s]*[-*] (.+)/gm, "<li>$1</li>")
+      // numbered list items  1. ...
+      .replace(/^\d+\. (.+)/gm, "<li>$1</li>")
+      // wrap consecutive <li> in <ul>
+      .replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, (m) => `<ul>${m}</ul>`)
+      // double line breaks → paragraph breaks
+      .replace(/\n\n/g, "</p><p>")
+      // single line breaks → <br>
+      .replace(/\n/g, "<br>");
+
+    html = `<p>${html}</p>`;
+
+    return html;
+  }
+
+  // Apply KaTeX auto-render to a DOM node once the library is loaded
+  function applyKatex(el) {
+    function run() {
+      if (window.renderMathInElement) {
+        renderMathInElement(el, {
+          delimiters: [
+            { left: "\\[", right: "\\]", display: true  },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "$$",  right: "$$",  display: true  },
+            { left: "$",   right: "$",   display: false },
+          ],
+          throwOnError: false,
+        });
+      }
+    }
+
+    // auto-render.min.js loads with `defer` so it may not be ready immediately
+    if (window.renderMathInElement) {
+      run();
+    } else {
+      // poll until the deferred script is ready (usually < 200 ms)
+      const t = setInterval(() => {
+        if (window.renderMathInElement) { clearInterval(t); run(); }
+      }, 50);
+    }
+  }
 
   function addBubble(role, text, tool, isError = false) {
     hideWelcome();
@@ -551,7 +624,13 @@
 
     const bubble = document.createElement("div");
     bubble.className = "bubble" + (isError ? " error" : "");
-    bubble.textContent = text;
+
+    if (role === "ai") {
+      bubble.innerHTML = renderContent(text);
+      applyKatex(bubble);
+    } else {
+      bubble.textContent = text;
+    }
 
     row.appendChild(label);
     row.appendChild(bubble);
