@@ -43,12 +43,12 @@ def reset_chat(req: ResetRequest):  # type: ignore
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest): # type: ignore
     print("MESSAGE:", request.message)
     try:
-        result = route_message(request.message)
-        print("TOOL:", result["tool"], "RESPONSE:", result["response"])
-        return {"reply": result["response"]}
+        result = route_message(request.message, user_id=request.user_id)
+        print("TOOL:", result["tool"], "RESPONSE:", result["response"]) # type: ignore
+        return {"reply": result["response"]} # type: ignore
     except Exception as e:
         print("ROUTER ERROR:", str(e))
         return {"reply": f"Error: {str(e)}"}
