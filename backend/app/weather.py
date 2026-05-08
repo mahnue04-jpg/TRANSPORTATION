@@ -1,7 +1,7 @@
 import os
 import requests
 
-API_KEY = os.getenv("WEATHER_API_KEY")
+API_KEY = os.getenv("OPENWEATHER_API_KEY")
 def get_weather(city): # type: ignore
     if not API_KEY:
         return "Weather unavailable (missing API key)."
