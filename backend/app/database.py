@@ -1,12 +1,13 @@
 import sqlite3
 import os
 
-DB_FILENAME = os.path.join(os.path.dirname(__file__), 'chat.db')
+DB_FILENAME = os.getenv("DB_FILENAME", "/data/chat.db")
 
 def get_connection():
     return sqlite3.connect(DB_FILENAME)
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_FILENAME), exist_ok=True)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""

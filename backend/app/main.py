@@ -46,7 +46,7 @@ def reset_chat(req: ResetRequest):  # type: ignore
 async def chat(request: ChatRequest): # type: ignore
     print("MESSAGE:", request.message)
     try:
-        result = route_message(request.message, user_id=request.user_id)
+        result = route_message(request.message, user_id=request.user_id) # type: ignore
         print("TOOL:", result["tool"], "RESPONSE:", result["response"]) # type: ignore
         return {"reply": result["response"]} # type: ignore
     except Exception as e:
