@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Amicor — Your AI Assistant</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+
+    :root {
+      --bg:           #0b0b10;
+      --surface:      #13131c;
+      --surface2:     #1c1c28;
+      --surface3:     #252535;
+      --border:       #2a2a3e;
+      --border2:      #353550;
+      --accent:       #6c63ff;
+      --accent-light: #8b85ff;
+      --accent-glow:  rgba(108, 99, 255, 0.3);
+      --text:         #e9e9f4;
+      --text-dim:     #9494b8;
+      --text-muted:   #5c5c7e;
+      --user-bg:      #1e1e30;
+      --ai-bg:        #151520;
+      --error:        #ff5f72;
+      --success:      #43c98a;
+      --warn:         #f5a623;
+      --radius:       18px;
+      --radius-sm:    10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar / Header ─────────────────────────────────── */
+    header {
+      flex-shrink: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-avatar {
+      width: 34px; height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px;
+      flex-shrink: 0;
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+
+    .brand-text h1 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+    }
+
+    .brand-text p {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      font-weight: 400;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.18s;
+      white-space: nowrap;
+    }
+    .pill-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface3); }
+    .pill-btn svg   { flex-shrink: 0; }
+
+    /* ── Capability chips ─────────────────────────────────── */
+    #capability-bar {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    #capability-bar::-webkit-scrollbar { display: none; }
+
+    .chip {
+      flex-shrink: 0;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-size: 0.68rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--accent-light); background: rgba(108,99,255,0.08); }
+
+    /* ── Chat area ────────────────────────────────────────── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom scrollbar */
+    #chat::-webkit-scrollbar { width: 4px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Empty / Welcome ──────────────────────────────────── */
+    #welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 14px;
+      padding: 32px 24px;
+      pointer-events: none;
+    }
+
+    .welcome-avatar {
+      width: 64px; height: 64px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px;
+      box-shadow: 0 0 30px var(--accent-glow);
+      margin-bottom: 4px;
+    }
+
+    #welcome h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    #welcome p {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      max-width: 280px;
+      line-height: 1.55;
+    }
+
+    .welcome-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      max-width: 320px;
+      pointer-events: all;
+      margin-top: 6px;
+    }
+
+    .welcome-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.18s;
+      text-align: left;
+    }
+    .welcome-card:hover { border-color: var(--accent); background: rgba(108,99,255,0.07); }
+    .welcome-card .wc-icon { font-size: 1.1rem; margin-bottom: 4px; }
+    .welcome-card .wc-label { font-size: 0.72rem; color: var(--text-dim); font-weight: 500; }
+
+    /* ── Message bubbles ──────────────────────────────────── */
+    .msg-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 78%;
+      gap: 4px;
+    }
+    .msg-row.user { align-self: flex-end; align-items: flex-end; }
+    .msg-row.ai   { align-self: flex-start; align-items: flex-start; }
+
+    .msg-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0 4px;
+    }
+
+    .bubble {
+      padding: 11px 15px;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      line-height: 1.65;
+      word-break: break-word;
+      white-space: pre-wrap;
+      border: 1px solid transparent;
+    }
+
+    .msg-row.user .bubble {
+      background: var(--user-bg);
+      border-color: var(--border);
+      border-bottom-right-radius: 5px;
+      color: var(--text);
+    }
+
+    .msg-row.ai .bubble {
+      background: var(--ai-bg);
+      border-color: var(--border);
+      border-bottom-left-radius: 5px;
+      color: var(--text);
+    }
+
+    .bubble.error {
+      border-color: var(--error) !important;
+      color: var(--error);
+    }
+
+    /* Tool badge */
+    .tool-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0 4px;
+    }
+    .tool-badge span { font-size: 0.75rem; }
+
+    /* ── Typing indicator ─────────────────────────────────── */
+    .typing-bubble {
+      display: inline-flex;
+      gap: 5px;
+      align-items: center;
+      padding: 13px 16px;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.4;
+      animation: dotPulse 1.4s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dotPulse {
+      0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+      40%           { opacity: 1;   transform: scale(1.15); }
+    }
+
+    /* ── Status bar ───────────────────────────────────────── */
+    #status-bar {
+      flex-shrink: 0;
+      height: 24px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    #status-text {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    #status-text.listen  { color: var(--accent-light); }
+    #status-text.speak   { color: var(--success);      }
+    #status-text.load    { color: var(--warn);         }
+    #status-text.err     { color: var(--error);        }
+
+    /* ── Input area ───────────────────────────────────────── */
+    #input-wrap {
+      flex-shrink: 0;
+      padding: 10px 12px 14px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+
+    .input-box {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 6px 6px 6px 14px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input-box:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    #msg {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      resize: none;
+      max-height: 120px;
+      overflow-y: auto;
+      padding: 7px 0;
+      font-family: inherit;
+    }
+    #msg::placeholder { color: var(--text-muted); }
+    #msg::-webkit-scrollbar { width: 3px; }
+    #msg::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .action-btn {
+      flex-shrink: 0;
+      width: 40px; height: 40px;
+      border-radius: 12px;
+      border: none;
+      background: var(--surface3);
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.18s, color 0.18s, transform 0.1s, box-shadow 0.18s;
+    }
+    .action-btn:hover  { background: var(--border2); color: var(--text); }
+    .action-btn:active { transform: scale(0.91); }
+
+    #btn-mic {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 10px var(--accent-glow);
+    }
+    #btn-mic:hover { background: var(--accent-light); }
+
+    #btn-mic.recording {
+      background: var(--error);
+      box-shadow: 0 0 0 0 rgba(255,95,114,0.5);
+      animation: micPulse 1.2s infinite;
+    }
+    #btn-mic.speaking {
+      background: var(--success);
+      box-shadow: 0 2px 10px rgba(67,201,138,0.35);
+    }
+
+    #btn-send {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 10px var(--accent-glow);
+    }
+    #btn-send:hover    { background: var(--accent-light); }
+    #btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    @keyframes micPulse {
+      0%   { box-shadow: 0 0 0 0   rgba(255,95,114,0.55); }
+      70%  { box-shadow: 0 0 0 12px rgba(255,95,114,0);   }
+      100% { box-shadow: 0 0 0 0   rgba(255,95,114,0);    }
+    }
+
+    /* ── Responsive ───────────────────────────────────────── */
+    @media (min-width: 640px) {
+      body { max-width: 680px; margin: 0 auto; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+      .msg-row { max-width: 72%; }
+    }
+
+    @media (max-width: 380px) {
+      .welcome-grid { grid-template-columns: 1fr 1fr; }
+      .msg-row { max-width: 88%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ───────────────────────────────────────────── -->
+<header>
+  <div class="brand">
+    <div class="brand-avatar">🤖</div>
+    <div class="brand-text">
+      <h1>Amicor</h1>
+      <p>Your AI Assistant</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="pill-btn" id="btn-reset">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+      Clear Memory
+    </button>
+  </div>
+</header>
+
+<!-- ── Capability chips ──────────────────────────────────── -->
+<div id="capability-bar">
+  <div class="chip" data-prompt="Search the latest tech news">📰 News</div>
+  <div class="chip" data-prompt="What's the weather in Miami?">🌤 Weather</div>
+  <div class="chip" data-prompt="What time is it in Tokyo?">🕐 Time</div>
+  <div class="chip" data-prompt="Help me write a professional email">✉️ Draft Email</div>
+  <div class="chip" data-prompt="Explain machine learning in simple terms">🎓 Explain</div>
+  <div class="chip" data-prompt="Give me 5 ideas for a small business">💡 Ideas</div>
+  <div class="chip" data-prompt="Summarize the key points of the Paris Agreement">🔍 Research</div>
+</div>
+
+<!-- ── Chat ─────────────────────────────────────────────── -->
+<div id="chat">
+  <div id="welcome">
+    <div class="welcome-avatar">🤖</div>
+    <h2>Hi, I'm Amicor</h2>
+    <p>Your personal AI assistant for work, research, news, and everyday tasks.</p>
+    <div class="welcome-grid">
+      <div class="welcome-card" data-prompt="Search the latest headlines">
+        <div class="wc-icon">📰</div>
+        <div class="wc-label">Latest News</div>
+      </div>
+      <div class="welcome-card" data-prompt="What's the weather in New York?">
+        <div class="wc-icon">🌤</div>
+        <div class="wc-label">Weather</div>
+      </div>
+      <div class="welcome-card" data-prompt="Help me draft a business proposal">
+        <div class="wc-icon">✍️</div>
+        <div class="wc-label">Write & Draft</div>
+      </div>
+      <div class="welcome-card" data-prompt="What are the top AI trends right now?">
+        <div class="wc-icon">🔍</div>
+        <div class="wc-label">Research</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Status bar ────────────────────────────────────────── -->
+<div id="status-bar">
+  <span id="status-text">Ready</span>
+</div>
+
+<!-- ── Input ─────────────────────────────────────────────── -->
+<div id="input-wrap">
+  <div class="input-box">
+    <textarea id="msg" rows="1" placeholder="Ask Amicor anything…"></textarea>
+    <button class="action-btn" id="btn-mic" title="Tap to speak">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3"/>
+        <path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/>
+      </svg>
+    </button>
+    <button class="action-btn" id="btn-send" title="Send">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+  const API   = "";   // same-origin — served by FastAPI
+  const UID   = "test123";
+
+  const chatEl     = document.getElementById("chat");
+  const welcomeEl  = document.getElementById("welcome");
+  const msgEl      = document.getElementById("msg");
+  const btnSend    = document.getElementById("btn-send");
+  const btnMic     = document.getElementById("btn-mic");
+  const btnReset   = document.getElementById("btn-reset");
+  const statusEl   = document.getElementById("status-text");
+
+  let isListening = false;
+  let isSpeaking  = false;
+  let recognition = null;
+
+  // ── Helpers ──────────────────────────────────────────────
+
+  function setStatus(msg, cls = "") {
+    statusEl.textContent = msg;
+    statusEl.className   = cls;
+  }
+
+  function hideWelcome() {
+    if (welcomeEl && welcomeEl.parentNode === chatEl) {
+      chatEl.removeChild(welcomeEl);
+    }
+  }
+
+  function scrollBottom() {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function autoResize() {
+    msgEl.style.height = "auto";
+    msgEl.style.height = Math.min(msgEl.scrollHeight, 120) + "px";
+  }
+
+  // ── Bubble factory ───────────────────────────────────────
+
+  const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖" };
+
+  function addBubble(role, text, tool, isError = false) {
+    hideWelcome();
+    const row = document.createElement("div");
+    row.className = `msg-row ${role}`;
+
+    const label = document.createElement("div");
+    label.className = "msg-label";
+
+    if (role === "ai" && tool && tool !== "openai") {
+      label.innerHTML = `<span class="tool-badge"><span>${TOOL_ICONS[tool] || "⚙️"}</span>${tool}</span>`;
+    } else {
+      label.textContent = role === "user" ? "You" : "Amicor";
+    }
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble" + (isError ? " error" : "");
+    bubble.textContent = text;
+
+    row.appendChild(label);
+    row.appendChild(bubble);
+    chatEl.appendChild(row);
+    scrollBottom();
+    return bubble;
+  }
+
+  function showTyping() {
+    hideWelcome();
+    const row = document.createElement("div");
+    row.className = "msg-row ai";
+    row.id = "typing";
+
+    const label = document.createElement("div");
+    label.className = "msg-label";
+    label.textContent = "Amicor";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = `<div class="typing-bubble"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+
+    row.appendChild(label);
+    row.appendChild(bubble);
+    chatEl.appendChild(row);
+    scrollBottom();
+  }
+
+  function removeTyping() {
+    const el = document.getElementById("typing");
+    if (el) el.remove();
+  }
+
+  // ── API send ─────────────────────────────────────────────
+
+  async function sendMessage(text) {
+    text = text.trim();
+    if (!text) return;
+
+    addBubble("user", text);
+    msgEl.value = "";
+    autoResize();
+    btnSend.disabled = true;
+    showTyping();
+    setStatus("Thinking…", "load");
+
+    try {
+      const res = await fetch(`${API}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: UID, message: text })
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      removeTyping();
+
+      const reply = data.reply || "No response.";
+      const tool  = data.tool  || "openai";
+      const isErr = reply.startsWith("Error:") || reply.startsWith("Web search error");
+      addBubble("ai", reply, tool, isErr);
+
+      if (!isErr) speakText(reply);
+      setStatus("Ready");
+    } catch (err) {
+      removeTyping();
+      addBubble("ai", `Connection error: ${err.message}`, null, true);
+      setStatus("Request failed", "err");
+    } finally {
+      btnSend.disabled = false;
+    }
+  }
+
+  // ── Speech synthesis ─────────────────────────────────────
+
+  function speakText(text) {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+
+    // Truncate very long responses for speech
+    const spoken = text.length > 400 ? text.slice(0, 400) + "…" : text;
+    const utter  = new SpeechSynthesisUtterance(spoken);
+    utter.rate   = 1.05;
+    utter.pitch  = 1;
+
+    utter.onstart = () => {
+      isSpeaking = true;
+      btnMic.classList.add("speaking");
+      setStatus("Speaking…", "speak");
+    };
+    const done = () => {
+      isSpeaking = false;
+      btnMic.classList.remove("speaking");
+      setStatus("Ready");
+    };
+    utter.onend   = done;
+    utter.onerror = done;
+
+    // Chrome bug: speech stops after ~15s on long text without this
+    window.speechSynthesis.speak(utter);
+  }
+
+  // ── Speech recognition ────────────────────────────────────
+
+  function buildRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const r = new SR();
+    r.continuous     = false;
+    r.interimResults = true;
+    r.lang           = "en-US";
+
+    r.onstart  = () => { isListening = true; btnMic.classList.add("recording"); setStatus("Listening…", "listen"); };
+    r.onresult = (e) => {
+      msgEl.value = Array.from(e.results).map(x => x[0].transcript).join("");
+      autoResize();
+    };
+    r.onerror  = (e) => {
+      stopRecognition();
+      if (e.error === "not-allowed") setStatus("Microphone access denied", "err");
+      else if (e.error !== "no-speech") setStatus(`Mic error: ${e.error}`, "err");
+    };
+    r.onend    = () => {
+      stopRecognition();
+      if (msgEl.value.trim()) sendMessage(msgEl.value);
+    };
+    return r;
+  }
+
+  function startRecognition() {
+    if (isSpeaking) { window.speechSynthesis.cancel(); }
+    if (!recognition) recognition = buildRecognition();
+    if (!recognition) { setStatus("Speech recognition not supported. Use Chrome.", "err"); return; }
+    try { recognition.start(); } catch (_) {}
+  }
+
+  function stopRecognition() {
+    isListening = false;
+    btnMic.classList.remove("recording");
+    if (recognition) try { recognition.stop(); } catch (_) {}
+  }
+
+  // ── Events ───────────────────────────────────────────────
+
+  btnMic.addEventListener("click", () => {
+    isListening ? stopRecognition() : startRecognition();
+  });
+
+  btnSend.addEventListener("click", () => sendMessage(msgEl.value));
+
+  msgEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgEl.value); }
+  });
+
+  msgEl.addEventListener("input", autoResize);
+
+  btnReset.addEventListener("click", async () => {
+    try {
+      const res  = await fetch(`${API}/api/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: UID })
+      });
+      const data = await res.json();
+      if (data.status === "memory cleared") {
+        chatEl.innerHTML = "";
+        chatEl.appendChild(welcomeEl);
+        setStatus("Memory cleared", "speak");
+        setTimeout(() => setStatus("Ready"), 2500);
+      } else {
+        setStatus("Failed to clear memory", "err");
+      }
+    } catch (err) {
+      setStatus(`Reset error: ${err.message}`, "err");
+    }
+  });
+
+  // Capability chips + welcome cards
+  document.querySelectorAll(".chip, .welcome-card").forEach(el => {
+    el.addEventListener("click", () => {
+      const prompt = el.dataset.prompt;
+      if (prompt) { msgEl.value = prompt; autoResize(); msgEl.focus(); }
+    });
+  });
+
+  // Mic unsupported visual hint
+  if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
+    btnMic.style.opacity = "0.35";
+    btnMic.style.cursor  = "not-allowed";
+    btnMic.title = "Speech recognition requires Chrome or Edge";
+  }
+</script>
+</body>
+</html>
