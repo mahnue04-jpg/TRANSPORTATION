@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from app.database import get_connection, init_db  # type: ignore
 from app.models import ChatRequest  # type: ignore
 from app.weather import get_weather  # type: ignore
+from app.web_search import search_web  # type: ignore
+from app.web_search import search_web  # type: ignore
 
 init_db()
 
@@ -63,6 +65,22 @@ async def chat(request: ChatRequest):
         except Exception as e:
             print("WEATHER ERROR:", str(e))
             return {"reply": f"Weather error: {str(e)}"}
+
+    search_triggers = ["search", "look up", "find", "latest", "news", "headline", "what happened"]
+    if any(trigger in message for trigger in search_triggers):
+        print("WEB SEARCH")
+        result = search_web(request.message)
+        return {"reply": result}
+
+    search_triggers = ["search", "look up", "find", "latest", "news", "headline", "what happened"]
+    if any(trigger in message for trigger in search_triggers):
+        try:
+            result = search_web(request.message)
+            print("SEARCH RESULT:", result)
+            return {"reply": result}
+        except Exception as e:
+            print("SEARCH ERROR:", str(e))
+            return {"reply": f"Search error: {str(e)}"}
 
     print("OPENAI FALLBACK")
     response = client.chat.completions.create(
