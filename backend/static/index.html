@@ -5,12 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Amicor — Your AI Assistant</title>
 
-  <!-- KaTeX — math rendering (no bundler needed) -->
+  <!-- KaTeX — math rendering (synchronous load so katex.renderToString is always ready) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-    crossorigin="anonymous"
-    onload="window._katexReady = true;"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
 
   <style>
     /* KaTeX block equations: centre and allow horizontal scroll on small screens */
@@ -546,46 +543,65 @@
   const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼", education:"🎓" };
 
   // ── Content renderer (markdown + KaTeX) ─────────────────────
-  // Called only for AI bubbles. User bubbles stay plain text for safety.
+  // Called only for AI bubbles.  User bubbles stay plain text.
   //
-  // CRITICAL ORDER:
-  //   1. Extract LaTeX blocks into placeholders  ← must be FIRST
-  //   2. HTML-escape the remaining text
-  //   3. Apply markdown (bold, lists, line-breaks, etc.)
-  //   4. Restore LaTeX placeholders with original raw strings
-  //   5. Call applyKatex() so KaTeX finds intact \( \) delimiters
+  // Strategy: use katex.renderToString() during STRING BUILDING —
+  // before any DOM insertion.  This avoids all DOM-scanning / timing
+  // issues that plagued renderMathInElement (auto-render extension).
   //
-  // Why this order matters: the \n→<br> markdown step would split a
-  // multiline \(...\n...\) block across separate DOM text nodes, making
-  // renderMathInElement unable to find the opening/closing delimiters.
+  // Order:
+  //   1. Extract every LaTeX span, render it to KaTeX HTML immediately.
+  //      Store the rendered HTML in mathBlocks[].
+  //   2. HTML-escape the remaining non-math text (XSS protection).
+  //   3. Apply markdown (bold, lists, \n → <br>).
+  //   4. Splice the pre-rendered KaTeX HTML back at placeholder positions.
+  //
+  // Because math is rendered in step 1, the \n → <br> pass in step 3
+  // never sees any LaTeX — the multiline-delimiter split bug is impossible.
+
+  function _renderMath(inner, displayMode) {
+    if (!window.katex) {
+      // katex.min.js not yet available — show raw (should never happen after page load)
+      return displayMode ? `\\[${inner}\\]` : `\\(${inner}\\)`;
+    }
+    try {
+      return window.katex.renderToString(inner.trim(), {
+        displayMode,
+        throwOnError: false,
+        output: "html",
+      });
+    } catch (_) {
+      return displayMode ? `\\[${inner}\\]` : `\\(${inner}\\)`;
+    }
+  }
 
   function renderContent(text) {
     const mathBlocks = [];
 
-    // Step 1 — pull out LaTeX spans before anything else touches them
+    // Step 1 — extract every LaTeX span and render it immediately to HTML
     let safe = text
-      // block math  \[ ... \]  (possibly multiline)
-      .replace(/\\\[([\s\S]*?)\\\]/g, (match) => {
+      // \[ ... \]  block (possibly multiline)
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => {
         const i = mathBlocks.length;
-        mathBlocks.push(match);
+        mathBlocks.push(_renderMath(inner, true));
         return `%%MATH_${i}%%`;
       })
-      // inline math  \( ... \)  (possibly multiline)
-      .replace(/\\\(([\s\S]*?)\\\)/g, (match) => {
+      // \( ... \)  inline (possibly multiline)
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => {
         const i = mathBlocks.length;
-        mathBlocks.push(match);
+        mathBlocks.push(_renderMath(inner, false));
         return `%%MATH_${i}%%`;
       })
-      // block math  $$ ... $$
-      .replace(/\$\$([\s\S]*?)\$\$/g, (match) => {
+      // $$ ... $$  block
+      .replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => {
         const i = mathBlocks.length;
-        mathBlocks.push(match);
+        mathBlocks.push(_renderMath(inner, true));
         return `%%MATH_${i}%%`;
       })
-      // inline math  $ ... $  (single-line only to avoid false positives)
-      .replace(/\$([^\n$]+?)\$/g, (match) => {
+      // $ ... $  inline (single-line only, avoids false positives on prices)
+      .replace(/\$([^\n$]+?)\$/g, (_, inner) => {
         const i = mathBlocks.length;
-        mathBlocks.push(match);
+        mathBlocks.push(_renderMath(inner, false));
         return `%%MATH_${i}%%`;
       });
 
@@ -595,7 +611,7 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    // Step 3 — markdown → HTML
+    // Step 3 — markdown → HTML (LaTeX is already gone; only plain text here)
     let html = safe
       .replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -609,37 +625,10 @@
 
     html = `<p>${html}</p>`;
 
-    // Step 4 — restore LaTeX strings exactly as received (raw, unescaped)
+    // Step 4 — splice pre-rendered KaTeX HTML back at placeholder positions
     html = html.replace(/%%MATH_(\d+)%%/g, (_, i) => mathBlocks[parseInt(i, 10)]);
 
     return html;
-  }
-
-  // Apply KaTeX auto-render to a DOM node once the library is loaded
-  function applyKatex(el) {
-    function run() {
-      if (window.renderMathInElement) {
-        renderMathInElement(el, {
-          delimiters: [
-            { left: "\\[", right: "\\]", display: true  },
-            { left: "\\(", right: "\\)", display: false },
-            { left: "$$",  right: "$$",  display: true  },
-            { left: "$",   right: "$",   display: false },
-          ],
-          throwOnError: false,
-        });
-      }
-    }
-
-    // auto-render.min.js loads with `defer` so it may not be ready immediately
-    if (window.renderMathInElement) {
-      run();
-    } else {
-      // poll until the deferred script is ready (usually < 200 ms)
-      const t = setInterval(() => {
-        if (window.renderMathInElement) { clearInterval(t); run(); }
-      }, 50);
-    }
   }
 
   function addBubble(role, text, tool, isError = false) {
@@ -660,8 +649,7 @@
     bubble.className = "bubble" + (isError ? " error" : "");
 
     if (role === "ai") {
-      bubble.innerHTML = renderContent(text);
-      applyKatex(bubble);
+      bubble.innerHTML = renderContent(text);  // KaTeX already rendered inline
     } else {
       bubble.textContent = text;
     }
