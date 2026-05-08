@@ -543,78 +543,84 @@
   const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼", education:"🎓" };
 
   // ── Content renderer (markdown + KaTeX) ─────────────────────
-  // Called only for AI bubbles.  User bubbles stay plain text.
+  // Single-phase pipeline — math is converted to KaTeX HTML BEFORE
+  // any DOM insertion.  No auto-render, no DOM scanning, no timing races.
   //
-  // Strategy: use katex.renderToString() during STRING BUILDING —
-  // before any DOM insertion.  This avoids all DOM-scanning / timing
-  // issues that plagued renderMathInElement (auto-render extension).
-  //
-  // Order:
-  //   1. Extract every LaTeX span, render it to KaTeX HTML immediately.
-  //      Store the rendered HTML in mathBlocks[].
+  // Pipeline:
+  //   0. Normalise double-backslash delimiters  \\( → \(  etc.
+  //   1. Extract every LaTeX block, call katex.renderToString() immediately,
+  //      store the resulting HTML in mathBlocks[], leave a %%MATH_n%% token.
+  //   1b. Strip any stray unmatched delimiters that survived step 1.
   //   2. HTML-escape the remaining non-math text (XSS protection).
-  //   3. Apply markdown (bold, lists, \n → <br>).
-  //   4. Splice the pre-rendered KaTeX HTML back at placeholder positions.
+  //   3. Apply markdown (bold, lists, headings, \n → <br>).
+  //      LaTeX is completely absent here — line-break injection can't split it.
+  //   4. Splice pre-rendered KaTeX HTML back at %%MATH_n%% positions.
   //
-  // Because math is rendered in step 1, the \n → <br> pass in step 3
-  // never sees any LaTeX — the multiline-delimiter split bug is impossible.
+  // Fallback: if katex.renderToString() throws, the raw inner expression is
+  // returned as plain escaped text — no delimiters are re-inserted, so nothing
+  // leaks.  If window.katex is somehow not loaded, same plain-text fallback.
 
   function _renderMath(inner, displayMode) {
-    if (!window.katex) {
-      // katex.min.js not yet available — show raw (should never happen after page load)
-      return displayMode ? `\\[${inner}\\]` : `\\(${inner}\\)`;
-    }
+    const trimmed = inner.trim();
+    if (!window.katex) return trimmed;   // library not loaded — plain text only
     try {
-      return window.katex.renderToString(inner.trim(), {
+      return window.katex.renderToString(trimmed, {
         displayMode,
         throwOnError: false,
         output: "html",
       });
     } catch (_) {
-      return displayMode ? `\\[${inner}\\]` : `\\(${inner}\\)`;
+      // Bad LaTeX — show the expression as plain text, never re-insert delimiters
+      return trimmed
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
     }
   }
 
-  function renderContent(text) {
+  function renderContent(rawText) {
+    // Step 0 — normalise: AI models sometimes emit \\( instead of \(
+    // Collapse double backslashes before recognised delimiters only.
+    let text = rawText
+      .replace(/\\\\\[/g, "\\[")
+      .replace(/\\\\\]/g, "\\]")
+      .replace(/\\\\\(/g, "\\(")
+      .replace(/\\\\\)/g, "\\)");
+
     const mathBlocks = [];
 
-    // Step 1 — extract every LaTeX span and render it immediately to HTML
-    let safe = text
-      // \[ ... \]  block (possibly multiline)
-      .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => {
-        const i = mathBlocks.length;
-        mathBlocks.push(_renderMath(inner, true));
-        return `%%MATH_${i}%%`;
-      })
-      // \( ... \)  inline (possibly multiline)
-      .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => {
-        const i = mathBlocks.length;
-        mathBlocks.push(_renderMath(inner, false));
-        return `%%MATH_${i}%%`;
-      })
-      // $$ ... $$  block
-      .replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => {
-        const i = mathBlocks.length;
-        mathBlocks.push(_renderMath(inner, true));
-        return `%%MATH_${i}%%`;
-      })
-      // $ ... $  inline (single-line only, avoids false positives on prices)
-      .replace(/\$([^\n$]+?)\$/g, (_, inner) => {
-        const i = mathBlocks.length;
-        mathBlocks.push(_renderMath(inner, false));
-        return `%%MATH_${i}%%`;
-      });
+    function extract(inner, displayMode) {
+      const i = mathBlocks.length;
+      mathBlocks.push(_renderMath(inner, displayMode));
+      return `%%MATH_${i}%%`;
+    }
 
-    // Step 2 — HTML-escape the non-math text (prevents injection)
+    // Step 1 — find every complete delimiter+content+delimiter span and
+    //           render it immediately.  The FULL match (including delimiters)
+    //           is replaced by the placeholder — delimiters are consumed here.
+    let safe = text
+      .replace(/\\\[([\s\S]*?)\\\]/g,  (_, inner) => extract(inner, true))   // \[ … \]
+      .replace(/\\\(([\s\S]*?)\\\)/g,  (_, inner) => extract(inner, false))  // \( … \)
+      .replace(/\$\$([\s\S]*?)\$\$/g,  (_, inner) => extract(inner, true))   // $$ … $$
+      .replace(/\$([^\n$]+?)\$/g,       (_, inner) => extract(inner, false)); // $ … $
+
+    // Step 1b — remove any leftover unmatched delimiter sequences so they
+    //            never appear as raw characters in the rendered output.
+    safe = safe.replace(/\\[\[\]()]/g, "");
+
+    // Step 2 — HTML-escape non-math text
     safe = safe
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    // Step 3 — markdown → HTML (LaTeX is already gone; only plain text here)
+    // Step 3 — markdown → HTML  (no LaTeX present here)
     let html = safe
       .replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/^### (.+)/gm, "<h3>$1</h3>")
+      .replace(/^## (.+)/gm,  "<h2>$1</h2>")
+      .replace(/^# (.+)/gm,   "<h1>$1</h1>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/\*([^*]+)\*/g, "<em>$1</em>")
       .replace(/^[\s]*[-*] (.+)/gm, "<li>$1</li>")
@@ -625,7 +631,7 @@
 
     html = `<p>${html}</p>`;
 
-    // Step 4 — splice pre-rendered KaTeX HTML back at placeholder positions
+    // Step 4 — splice pre-rendered KaTeX HTML back; no second render pass
     html = html.replace(/%%MATH_(\d+)%%/g, (_, i) => mathBlocks[parseInt(i, 10)]);
 
     return html;
