@@ -547,36 +547,70 @@
 
   // ── Content renderer (markdown + KaTeX) ─────────────────────
   // Called only for AI bubbles. User bubbles stay plain text for safety.
+  //
+  // CRITICAL ORDER:
+  //   1. Extract LaTeX blocks into placeholders  ← must be FIRST
+  //   2. HTML-escape the remaining text
+  //   3. Apply markdown (bold, lists, line-breaks, etc.)
+  //   4. Restore LaTeX placeholders with original raw strings
+  //   5. Call applyKatex() so KaTeX finds intact \( \) delimiters
+  //
+  // Why this order matters: the \n→<br> markdown step would split a
+  // multiline \(...\n...\) block across separate DOM text nodes, making
+  // renderMathInElement unable to find the opening/closing delimiters.
 
   function renderContent(text) {
-    // 1. Escape HTML to prevent injection before we add markup
-    const escaped = text
+    const mathBlocks = [];
+
+    // Step 1 — pull out LaTeX spans before anything else touches them
+    let safe = text
+      // block math  \[ ... \]  (possibly multiline)
+      .replace(/\\\[([\s\S]*?)\\\]/g, (match) => {
+        const i = mathBlocks.length;
+        mathBlocks.push(match);
+        return `%%MATH_${i}%%`;
+      })
+      // inline math  \( ... \)  (possibly multiline)
+      .replace(/\\\(([\s\S]*?)\\\)/g, (match) => {
+        const i = mathBlocks.length;
+        mathBlocks.push(match);
+        return `%%MATH_${i}%%`;
+      })
+      // block math  $$ ... $$
+      .replace(/\$\$([\s\S]*?)\$\$/g, (match) => {
+        const i = mathBlocks.length;
+        mathBlocks.push(match);
+        return `%%MATH_${i}%%`;
+      })
+      // inline math  $ ... $  (single-line only to avoid false positives)
+      .replace(/\$([^\n$]+?)\$/g, (match) => {
+        const i = mathBlocks.length;
+        mathBlocks.push(match);
+        return `%%MATH_${i}%%`;
+      });
+
+    // Step 2 — HTML-escape the non-math text (prevents injection)
+    safe = safe
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    // 2. Basic markdown → HTML (bold, italic, inline code, code blocks, lists)
-    let html = escaped
-      // fenced code blocks  ```...```
+    // Step 3 — markdown → HTML
+    let html = safe
       .replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>")
-      // inline code  `...`
       .replace(/`([^`]+)`/g, "<code>$1</code>")
-      // bold  **...**
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      // italic  *...*
       .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-      // unordered list items  - ...  or  * ...  at line start
       .replace(/^[\s]*[-*] (.+)/gm, "<li>$1</li>")
-      // numbered list items  1. ...
       .replace(/^\d+\. (.+)/gm, "<li>$1</li>")
-      // wrap consecutive <li> in <ul>
       .replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, (m) => `<ul>${m}</ul>`)
-      // double line breaks → paragraph breaks
       .replace(/\n\n/g, "</p><p>")
-      // single line breaks → <br>
       .replace(/\n/g, "<br>");
 
     html = `<p>${html}</p>`;
+
+    // Step 4 — restore LaTeX strings exactly as received (raw, unescaped)
+    html = html.replace(/%%MATH_(\d+)%%/g, (_, i) => mathBlocks[parseInt(i, 10)]);
 
     return html;
   }
