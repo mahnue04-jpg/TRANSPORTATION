@@ -1,4 +1,4 @@
-from app.modules import weather, news, search, business
+from app.modules import weather, news, search, business, education
 from app.modules import time as time_module
 from app.ai import ask_openai
 from app.database import save_message, get_recent_messages
@@ -16,7 +16,8 @@ CAPABILITIES = {
     "time":     {"triggers": time_module.TRIGGERS,  "handler": time_module.handle,  "needs_history": False},
     "news":     {"triggers": news.TRIGGERS,         "handler": news.handle,         "needs_history": False},
     "search":   {"triggers": search.TRIGGERS,       "handler": search.handle,       "needs_history": False},
-    "business": {"triggers": business.TRIGGERS,     "handler": business.handle,     "needs_history": True},
+    "business":  {"triggers": business.TRIGGERS,   "handler": business.handle,   "needs_history": True},
+    "education": {"triggers": education.TRIGGERS,  "handler": education.handle,  "needs_history": True},
 }
 
 
