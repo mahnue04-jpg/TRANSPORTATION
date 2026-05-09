@@ -844,6 +844,9 @@
     this._destroyed = true;
   };
 
+  // shutdown() is the canonical alias for destroy() (used by hardened runtime and tests)
+  ToolRuntime.prototype.shutdown = function () { return this.destroy(); };
+
   ToolRuntime.prototype._assertAlive = function () {
     if (this._destroyed) throw new Error("[AmiCorToolRuntime] Runtime has been destroyed");
   };
@@ -868,16 +871,26 @@
     getMetrics:       function (name)             { return _defaultRuntime.getMetrics(name); },
     activeExecutions: function ()                 { return _defaultRuntime.activeExecutions(); },
     createSession:    function (opts)             { return _defaultRuntime.createSession(opts); },
+    destroy:          function ()                 { return _defaultRuntime.destroy(); },
+    shutdown:         function ()                 { return _defaultRuntime.shutdown(); },
 
     // Factory: create an isolated runtime instance
     createRuntime:    function (opts)             { return new ToolRuntime(opts); },
 
-    // Exposed internals for testing
+    // Exposed internals for testing (old API — backward compat)
     _validateSchema:  validateSchema,
     _ToolResult:      ToolResult,
     _ExecutionContext: ExecutionContext,
     _EXEC_STATES:     EXEC_STATES,
     _ToolRuntime:     ToolRuntime,
+
+    // New hardened runtime modules (from runtime/ subdirectory)
+    // Available once the runtime/*.js scripts are loaded before tools.js.
+    get _errors()    { return (global._AmiCorRT || {}).errors; },
+    get _lifecycle() { return (global._AmiCorRT || {}).lifecycle; },
+    get _rtMetrics() { return (global._AmiCorRT || {}).metrics; },
+    get _registry()  { return (global._AmiCorRT || {}).registry; },
+    get _newRuntime(){ return (global._AmiCorRT || {}).runtime; },
   };
 
   global.AmiCorToolRuntime = AmiCorToolRuntime;
