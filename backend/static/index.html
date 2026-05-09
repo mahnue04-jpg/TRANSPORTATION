@@ -28,6 +28,10 @@
   <script src="/static/ux/uploadUX.js"></script>
   <script src="/static/ux/errorRecovery.js"></script>
   <script src="/static/ux/skeletonLoader.js"></script>
+  <!-- Session & auth modules (MVP stabilization) -->
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/ux/authUI.js"></script>
+  <script src="/static/ux/reconnectHandler.js"></script>
   <!-- Production monitoring -->
   <script src="/static/monitoring/productionMonitor.js"></script>
 
@@ -561,7 +565,7 @@
 
 <script>
   const API   = "";   // same-origin — served by FastAPI
-  const UID   = "test123";
+  let UID     = null; // Dynamically set after session/auth
 
   const chatEl      = document.getElementById("chat");
   const welcomeEl   = document.getElementById("welcome");
@@ -577,6 +581,96 @@
   let isListening = false;
   let isSpeaking  = false;
   let recognition = null;
+
+  // ── Session & Auth Init ──────────────────────────────────
+
+  /**
+   * Initialize auth flow: restore session from storage, or show login/signup.
+   */
+  async function initializeAuth() {
+    // Try to restore existing session
+    if (window.AmiCorSession) {
+      const restored = AmiCorSession.restore();
+      if (restored && restored.identity) {
+        UID = restored.identity.userId;
+        setStatus(`Welcome ${restored.identity.name}!`, "load");
+        setTimeout(() => setStatus("Ready"), 2000);
+        return;
+      }
+    }
+
+    // No session — show auth UI
+    return new Promise((resolve) => {
+      if (!window.AmiCorAuthUI) {
+        // Fallback if authUI not loaded
+        UID = "guest_" + Date.now();
+        resolve();
+        return;
+      }
+
+      const toggleToSignup = () => {
+        showSignupFlow();
+      };
+      const toggleToLogin = () => {
+        showLoginFlow();
+      };
+
+      const showSignupFlow = () => {
+        AmiCorAuthUI.showSignup(
+          (identity) => {
+            // User submitted signup form
+            if (window.AmiCorSession) {
+              AmiCorSession.start(identity);
+              UID = window.AmiCorSession.getUserId();
+            } else {
+              UID = identity.email.split("@")[0] + "_" + Date.now();
+            }
+            msgEl.focus();
+            resolve();
+          },
+          toggleToLogin
+        );
+      };
+
+      const showLoginFlow = () => {
+        AmiCorAuthUI.showLogin(
+          (identity) => {
+            // User submitted login form (MVP: no backend auth)
+            if (window.AmiCorSession) {
+              AmiCorSession.start(identity);
+              UID = window.AmiCorSession.getUserId();
+            } else {
+              UID = identity.email.split("@")[0] + "_" + Date.now();
+            }
+            msgEl.focus();
+            resolve();
+          },
+          toggleToSignup
+        );
+      };
+
+      // Show signup by default
+      showSignupFlow();
+    });
+  }
+
+  // ── Reconnect monitoring ─────────────────────────────────
+
+  if (window.AmiCorReconnect) {
+    AmiCorReconnect.startMonitoring((status) => {
+      if (status.status === "offline") {
+        setStatus("Offline — will reconnect", "err");
+        msgEl.disabled = true;
+        btnSend.disabled = true;
+      } else if (status.status === "reconnecting") {
+        setStatus(`Reconnecting… (${status.nextRetryMs}ms)`, "load");
+      } else if (status.status === "online") {
+        setStatus("Reconnected", "speak");
+        msgEl.disabled = false;
+        setTimeout(() => setStatus("Ready"), 2000);
+      }
+    });
+  }
 
   // ── UX modules init ──────────────────────────────────────
 
@@ -618,7 +712,7 @@
     }
   }
 
-  // Onboarding: show on first visit
+  // Onboarding: show on first visit (only if user is authenticated)
   if (window.AmiCorOnboarding) {
     AmiCorOnboarding.init({ onComplete: () => { msgEl.focus(); } });
   }
@@ -711,6 +805,11 @@
   // ── API send ─────────────────────────────────────────────
 
   async function sendMessage(text) {
+    if (!UID) {
+      setStatus("Session lost. Please refresh.", "err");
+      return;
+    }
+
     text = text.trim();
     if (!text) return;
 
@@ -865,6 +964,7 @@
   msgEl.addEventListener("input", autoResize);
 
   btnReset.addEventListener("click", async () => {
+    if (!UID) return;
     try {
       const res  = await fetch(`${API}/api/reset`, {
         method: "POST",
@@ -899,6 +999,14 @@
     btnMic.style.cursor  = "not-allowed";
     btnMic.title = "Speech recognition requires Chrome or Edge";
   }
+
+  // ── Bootstrap: Init auth on page load ────────────────────
+
+  (async () => {
+    await initializeAuth();
+    // After auth succeeds, app is ready for use
+    msgEl.focus();
+  })();
 </script>
 </body>
 </html>
