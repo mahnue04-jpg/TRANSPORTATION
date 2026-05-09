@@ -22,6 +22,7 @@
     "test:deployment": "node backend/static/runDeploymentTests.js",
     "benchmark:deployment": "node backend/static/deploymentBenchmarks/index.js",
     "test:runtime": "node backend/static/runToolTests.js",
+    "test:production": "node backend/static/runProductionTests.js",
     "test": "npm run test:tools"
   },
   "keywords": [

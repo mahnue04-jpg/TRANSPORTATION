@@ -23,6 +23,13 @@
   <script src="/static/runtime/streaming.js"></script>
   <script src="/static/runtime/runtime.js"></script>
   <script src="/static/tools.js"></script>
+  <!-- UX polish modules -->
+  <script src="/static/ux/onboarding.js"></script>
+  <script src="/static/ux/uploadUX.js"></script>
+  <script src="/static/ux/errorRecovery.js"></script>
+  <script src="/static/ux/skeletonLoader.js"></script>
+  <!-- Production monitoring -->
+  <script src="/static/monitoring/productionMonitor.js"></script>
 
   <style>
     /* KaTeX block equations: centre and allow horizontal scroll on small screens */
@@ -432,6 +439,39 @@
       .welcome-grid { grid-template-columns: 1fr 1fr; }
       .msg-row { max-width: 88%; }
     }
+
+    /* ── Safe area (iPhone notch) ──────────────────────────── */
+    #input-wrap {
+      padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    }
+
+    /* ── Upload preview strip ──────────────────────────────── */
+    #upload-preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 2px 8px;
+      min-height: 0;
+    }
+
+    /* ── Monitoring status dot ─────────────────────────────── */
+    #monitor-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      flex-shrink: 0;
+      transition: background 0.4s;
+      box-shadow: 0 0 5px currentColor;
+    }
+    #monitor-dot.warn  { background: var(--warn); }
+    #monitor-dot.error { background: var(--error); }
+
+    /* ── Mobile thumb-friendly input ───────────────────────── */
+    @media (max-width: 480px) {
+      .action-btn { width: 44px; height: 44px; }
+      #msg { font-size: 1rem; padding: 9px 0; }
+      .input-box { padding: 6px 6px 6px 12px; }
+    }
   </style>
 </head>
 <body>
@@ -446,6 +486,7 @@
     </div>
   </div>
   <div class="header-actions">
+    <span id="monitor-dot" title="Service healthy"></span>
     <button class="pill-btn" id="btn-reset">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
       Clear Memory
@@ -498,8 +539,11 @@
 
 <!-- ── Input ─────────────────────────────────────────────── -->
 <div id="input-wrap">
+  <!-- Upload preview strip (file chips rendered here) -->
+  <div id="upload-preview"></div>
   <div class="input-box">
     <textarea id="msg" rows="1" placeholder="Ask Amicor anything…"></textarea>
+    <!-- Upload button injected by AmiCorUpload.init() -->
     <button class="action-btn" id="btn-mic" title="Tap to speak">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="9" y="2" width="6" height="12" rx="3"/>
@@ -519,17 +563,65 @@
   const API   = "";   // same-origin — served by FastAPI
   const UID   = "test123";
 
-  const chatEl     = document.getElementById("chat");
-  const welcomeEl  = document.getElementById("welcome");
-  const msgEl      = document.getElementById("msg");
-  const btnSend    = document.getElementById("btn-send");
-  const btnMic     = document.getElementById("btn-mic");
-  const btnReset   = document.getElementById("btn-reset");
-  const statusEl   = document.getElementById("status-text");
+  const chatEl      = document.getElementById("chat");
+  const welcomeEl   = document.getElementById("welcome");
+  const msgEl       = document.getElementById("msg");
+  const btnSend     = document.getElementById("btn-send");
+  const btnMic      = document.getElementById("btn-mic");
+  const btnReset    = document.getElementById("btn-reset");
+  const statusEl    = document.getElementById("status-text");
+  const monitorDot  = document.getElementById("monitor-dot");
+  const inputWrap   = document.getElementById("input-wrap");
+  const uploadStrip = document.getElementById("upload-preview");
 
   let isListening = false;
   let isSpeaking  = false;
   let recognition = null;
+
+  // ── UX modules init ──────────────────────────────────────
+
+  // Skeleton: hide immediately (page is already rendered)
+  if (window.AmiCorSkeleton) AmiCorSkeleton.hidePageSkeleton({ animate: false });
+
+  // Production monitor: start heartbeat
+  if (window.AmiCorMonitor) {
+    AmiCorMonitor.start({ heartbeatMs: 60000 });
+    AmiCorMonitor.subscribe(report => {
+      if (!monitorDot) return;
+      if (!report.heartbeatOk) {
+        monitorDot.className = "error";
+        monitorDot.title     = "Service health check failed";
+      } else if (report.errorRate > 0.2) {
+        monitorDot.className = "warn";
+        monitorDot.title     = `High error rate: ${(report.errorRate * 100).toFixed(0)}%`;
+      } else {
+        monitorDot.className = "";
+        monitorDot.title     = "Service healthy";
+      }
+    });
+  }
+
+  // Upload UX: init after DOM ready
+  if (window.AmiCorUpload) {
+    const uploadBtn = AmiCorUpload.init({
+      stripContainer: uploadStrip,
+      dropZoneEl:     document.querySelector(".input-box"),
+      onAttach: (list) => {
+        // Enable/disable send hint
+        if (list.some(a => a.status === "uploading")) setStatus("Uploading file…", "load");
+        else setStatus("Ready");
+      },
+    });
+    // Insert upload button before the mic button inside .input-box
+    if (uploadBtn && btnMic && btnMic.parentNode) {
+      btnMic.parentNode.insertBefore(uploadBtn, btnMic);
+    }
+  }
+
+  // Onboarding: show on first visit
+  if (window.AmiCorOnboarding) {
+    AmiCorOnboarding.init({ onComplete: () => { msgEl.focus(); } });
+  }
 
   // ── Helpers ──────────────────────────────────────────────
 
@@ -622,19 +714,32 @@
     text = text.trim();
     if (!text) return;
 
+    // Gather any uploaded file context
+    let fullText = text;
+    if (window.AmiCorUpload) {
+      const ctx = AmiCorUpload.getExtractedContext();
+      if (ctx) fullText = text + "\n\n" + ctx;
+    }
+
     addBubble("user", text);
     msgEl.value = "";
     autoResize();
     btnSend.disabled = true;
+    if (window.AmiCorSkeleton) AmiCorSkeleton.showInputLock(inputWrap);
     showTyping();
     setStatus("Thinking…", "load");
+    if (window.AmiCorMonitor) AmiCorMonitor.trackActivity();
 
+    const t0 = Date.now();
     try {
       const res = await fetch(`${API}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: UID, message: text })
+        body: JSON.stringify({ user_id: UID, message: fullText })
       });
+
+      const durationMs = Date.now() - t0;
+      if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, !res.ok);
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -643,16 +748,35 @@
       const reply = data.reply || "No response.";
       const tool  = data.tool  || "openai";
       const isErr = reply.startsWith("Error:") || reply.startsWith("Web search error");
-      addBubble("ai", reply, tool, isErr);
+      const bubble = addBubble("ai", reply, tool, isErr);
+
+      // Attach retry button to error bubbles
+      if (isErr && window.AmiCorErrorRecovery) {
+        AmiCorErrorRecovery.addRetryButton(bubble.parentElement, async () => {
+          bubble.parentElement.remove();
+          await sendMessage(text);
+        });
+      }
 
       if (!isErr) speakText(reply);
+      if (window.AmiCorUpload) AmiCorUpload.clear();
       setStatus("Ready");
     } catch (err) {
+      const durationMs = Date.now() - t0;
+      if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, true);
+      if (window.AmiCorErrorRecovery) AmiCorErrorRecovery.trackError("sendMessage", err);
       removeTyping();
-      addBubble("ai", `Connection error: ${err.message}`, null, true);
+      const bubble = addBubble("ai", `Connection error: ${err.message}`, null, true);
+      if (window.AmiCorErrorRecovery) {
+        AmiCorErrorRecovery.addRetryButton(bubble.parentElement, async () => {
+          bubble.parentElement.remove();
+          await sendMessage(text);
+        });
+      }
       setStatus("Request failed", "err");
     } finally {
       btnSend.disabled = false;
+      if (window.AmiCorSkeleton) AmiCorSkeleton.hideInputLock();
     }
   }
 

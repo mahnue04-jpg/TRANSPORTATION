@@ -1,0 +1,40 @@
+# docker-compose.yml — local development
+# Usage: docker compose up --build
+#
+# Mounts the backend source as a volume so uvicorn --reload picks up changes.
+# Reads secrets from .env (copy .env.template → .env and fill in your keys).
+
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      LOG_LEVEL: DEBUG
+      APP_VERSION: dev
+      DB_FILENAME: /data/chat.db
+    volumes:
+      - ./backend:/app        # live reload
+      - amicor_data:/data     # SQLite persistence
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  amicor_data:
