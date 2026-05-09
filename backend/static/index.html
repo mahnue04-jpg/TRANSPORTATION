@@ -826,7 +826,8 @@
     };
     r.onerror  = (e) => {
       stopRecognition();
-      if (e.error === "not-allowed") setStatus("Microphone access denied", "err");
+      // User denying mic permission is non-fatal; keep health/status in warning state.
+      if (e.error === "not-allowed") setStatus("Microphone access denied", "load");
       else if (e.error !== "no-speech") setStatus(`Mic error: ${e.error}`, "err");
     };
     r.onend    = () => {
