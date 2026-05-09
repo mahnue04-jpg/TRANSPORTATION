@@ -24,6 +24,7 @@
     "test:runtime": "node backend/static/runToolTests.js",
     "test:production": "node backend/static/runProductionTests.js",
     "test:mvp": "node backend/static/runMVPTests.js",
+    "test:runtime-live": "node backend/static/runRuntimeLiveTests.js",
     "test": "npm run test:tools"
   },
   "keywords": [
