@@ -7,6 +7,8 @@
     "test:tools": "node backend/static/runToolTests.js",
     "test:realtools": "node backend/static/runRealToolTests.js",
     "benchmark:tools": "node backend/static/runToolBenchmarks.js",
+    "test:memory": "node backend/static/runMemoryTests.js",
+    "benchmark:memory": "node backend/static/runMemoryBenchmarks.js",
     "test:runtime": "node backend/static/runToolTests.js",
     "test": "npm run test:tools"
   },
