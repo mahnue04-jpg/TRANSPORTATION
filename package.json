@@ -9,6 +9,8 @@
     "benchmark:tools": "node backend/static/runToolBenchmarks.js",
     "test:memory": "node backend/static/runMemoryTests.js",
     "benchmark:memory": "node backend/static/runMemoryBenchmarks.js",
+    "test:planning": "node backend/static/runPlanningTests.js",
+    "benchmark:planning": "node backend/static/runPlanningBenchmarks.js",
     "test:runtime": "node backend/static/runToolTests.js",
     "test": "npm run test:tools"
   },
