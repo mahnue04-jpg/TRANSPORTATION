@@ -27,6 +27,8 @@ from collections import deque
 from threading import Lock
 from typing import Any, Callable
 
+from app import logging_utils
+
 logger = logging.getLogger("amicor.resilience")
 
 
@@ -97,7 +99,16 @@ class CircuitBreaker:
             if self._state == OPEN:
                 elapsed = time.monotonic() - self._last_failure
                 if elapsed >= self.recovery_timeout:
-                    logger.info("[resilience] %s OPEN→HALF_OPEN after %.1fs", self.name, elapsed)
+                    logging_utils.log_event(
+                        logger,
+                        logging.INFO,
+                        event="provider.breaker.state_change",
+                        message="Provider circuit state changed",
+                        provider=self.name,
+                        from_state=OPEN,
+                        to_state=HALF_OPEN,
+                        elapsed_s=round(elapsed, 1),
+                    )
                     self._state = HALF_OPEN
                     self._success_count = 0
                     return True
@@ -114,7 +125,15 @@ class CircuitBreaker:
             if self._state == HALF_OPEN:
                 self._success_count += 1
                 if self._success_count >= self.success_threshold:
-                    logger.info("[resilience] %s HALF_OPEN→CLOSED", self.name)
+                    logging_utils.log_event(
+                        logger,
+                        logging.INFO,
+                        event="provider.breaker.state_change",
+                        message="Provider circuit state changed",
+                        provider=self.name,
+                        from_state=HALF_OPEN,
+                        to_state=CLOSED,
+                    )
                     self._state = CLOSED
 
     def record_failure(self) -> None:
@@ -124,9 +143,15 @@ class CircuitBreaker:
             self._failure_count += 1
             if self._state in (CLOSED, HALF_OPEN):
                 if self._failure_count >= self.failure_threshold:
-                    logger.warning(
-                        "[resilience] %s tripped OPEN after %d failures",
-                        self.name, self._failure_count,
+                    logging_utils.log_event(
+                        logger,
+                        logging.WARNING,
+                        event="provider.breaker.state_change",
+                        message="Provider circuit state changed",
+                        provider=self.name,
+                        from_state=self._state,
+                        to_state=OPEN,
+                        failure_count=self._failure_count,
                     )
                     self._state = OPEN
 
@@ -198,7 +223,14 @@ def resilient_call(
 
     for name, breaker, fn in providers:
         if not breaker.is_available():
-            logger.debug("[resilience] Skipping %s (circuit OPEN)", name)
+            logging_utils.log_event(
+                logger,
+                logging.DEBUG,
+                event="provider.call.skipped",
+                message="Provider call skipped",
+                provider=name,
+                reason="circuit_open",
+            )
             errors.append(f"{name}: circuit open")
             continue
 
@@ -207,12 +239,29 @@ def resilient_call(
             try:
                 result = fn(*args, **kwargs)
                 breaker.record_success()
-                logger.debug("[resilience] %s succeeded (attempt %d)", name, attempt + 1)
+                logging_utils.log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="provider.call.success",
+                    message="Provider call succeeded",
+                    provider=name,
+                    attempt=attempt + 1,
+                    state=breaker.state,
+                )
                 return result, name
             except Exception as exc:
                 breaker.record_failure()
                 err_msg = f"{name} attempt {attempt + 1}: {exc}"
-                logger.warning("[resilience] %s", err_msg)
+                logging_utils.log_event(
+                    logger,
+                    logging.WARNING,
+                    event="provider.call.error",
+                    message="Provider call failed",
+                    provider=name,
+                    attempt=attempt + 1,
+                    state=breaker.state,
+                    error=logging_utils.safe_exception_message(exc),
+                )
                 errors.append(err_msg)
 
                 if budget.can_retry():

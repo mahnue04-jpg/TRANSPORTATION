@@ -17,6 +17,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app import observability
+from app import logging_utils
+
 logger = logging.getLogger("amicor.middleware")
 audit_logger = logging.getLogger("amicor.audit")
 
@@ -81,30 +84,65 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = req_id
+        request_id_token = logging_utils.set_request_id(req_id)
 
         t0 = time.monotonic()
-        response = await call_next(request)
-        latency_ms = int((time.monotonic() - t0) * 1000)
-
-        response.headers["X-Request-ID"] = req_id
-        response.headers["X-Response-Time"] = f"{latency_ms}ms"
-
         path = request.url.path
-        is_quiet = any(path.startswith(p) for p in self._QUIET_PATHS)
+        method = request.method
 
-        log_level = logging.DEBUG if is_quiet else logging.INFO
-        audit_logger.log(
-            log_level,
-            '"%s %s" %d %dms req_id=%s',
-            request.method, path,
-            response.status_code, latency_ms, req_id,
-        )
+        try:
+            response = await call_next(request)
+            latency_ms = int((time.monotonic() - t0) * 1000)
 
-        # Best-effort write to audit table
-        if not is_quiet and response.status_code >= 400:
-            _write_audit_log(req_id, request, response.status_code, latency_ms)
+            response.headers["X-Request-ID"] = req_id
+            response.headers["X-Response-Time"] = f"{latency_ms}ms"
 
-        return response
+            is_quiet = any(path.startswith(p) for p in self._QUIET_PATHS)
+
+            observability.increment("http.requests.total")
+            observability.increment(f"http.requests.method.{method}")
+            observability.increment(f"http.responses.status.{response.status_code}")
+            observability.record_latency("http.requests.latency_ms", float(latency_ms))
+
+            log_level = logging.DEBUG if is_quiet else logging.INFO
+            logging_utils.log_event(
+                audit_logger,
+                log_level,
+                event="http.request.complete",
+                message="HTTP request completed",
+                method=method,
+                path=path,
+                status_code=response.status_code,
+                latency_ms=latency_ms,
+            )
+
+            # Best-effort write to audit table
+            if not is_quiet and response.status_code >= 400:
+                observability.increment("http.requests.errors")
+                observability.record_error(path, response.status_code, "request failed")
+                _write_audit_log(req_id, request, response.status_code, latency_ms)
+
+            return response
+        except Exception as exc:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            observability.increment("http.requests.total")
+            observability.increment(f"http.requests.method.{method}")
+            observability.increment("http.requests.errors")
+            observability.record_latency("http.requests.latency_ms", float(latency_ms))
+            observability.record_error(path, 500, logging_utils.safe_exception_message(exc))
+            logging_utils.log_event(
+                logger,
+                logging.ERROR,
+                event="http.request.exception",
+                message="Unhandled request exception",
+                method=method,
+                path=path,
+                latency_ms=latency_ms,
+                error=logging_utils.safe_exception_message(exc),
+            )
+            raise
+        finally:
+            logging_utils.reset_request_id(request_id_token)
 
 
 def _write_audit_log(
