@@ -155,6 +155,37 @@ loadScript(path.join(staticDir, "tools.js"));
 console.log(""); // blank line
 
 // ─────────────────────────────────────────────────────────────────────────
+// Load mock tools
+// ─────────────────────────────────────────────────────────────────────────
+
+console.log("Loading mock tools...\n");
+
+const mockToolsDir = path.join(staticDir, "mockTools");
+const mockTools = [
+  "delayTool.js",
+  "streamTool.js",
+  "failTool.js",
+  "retryTool.js",
+  "permissionTool.js",
+  "largeChunkTool.js",
+  "concurrentTool.js",
+  "cancellationTool.js",
+  "timeoutTool.js",
+  "partialFailureTool.js",
+  "index.js",
+];
+
+mockTools.forEach((tool) => {
+  const toolPath = path.join(mockToolsDir, tool);
+  if (fs.existsSync(toolPath)) {
+    console.log("  ✓ Loading " + tool);
+    loadScript(toolPath);
+  }
+});
+
+console.log(""); // blank line
+
+// ─────────────────────────────────────────────────────────────────────────
 // Load test files
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -165,6 +196,9 @@ loadScript(path.join(staticDir, "toolRuntime.test.js"));
 
 console.log("  ✓ Loading toolRuntime.harden.test.js");
 loadScript(path.join(staticDir, "toolRuntime.harden.test.js"));
+
+console.log("  ✓ Loading mockToolTests.js");
+loadScript(path.join(staticDir, "mockToolTests.js"));
 
 console.log(""); // blank line
 
@@ -178,6 +212,7 @@ async function runAllTests() {
   const results = {
     runtimeTests: null,
     hardenTests: null,
+    mockTests: null,
   };
 
   // Run toolRuntimeTests
@@ -216,6 +251,25 @@ async function runAllTests() {
     results.hardenTests = { passed: 0, failed: 1, total: 1 };
   }
 
+  console.log("\n");
+
+  // Run mockToolTests
+  console.log("╔════════════════════════════════════════════════════════════════════════════╗");
+  console.log("║ Running: mockToolTests                                                     ║");
+  console.log("╚════════════════════════════════════════════════════════════════════════════╝\n");
+
+  try {
+    if (typeof global.runMockToolTests === "function") {
+      results.mockTests = await global.runMockToolTests();
+    } else {
+      console.error("ERROR: runMockToolTests not found");
+      results.mockTests = { passed: 0, failed: 1, total: 1 };
+    }
+  } catch (err) {
+    console.error("ERROR running mockToolTests:", err);
+    results.mockTests = { passed: 0, failed: 1, total: 1 };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Summary
   // ─────────────────────────────────────────────────────────────────────────
@@ -225,15 +279,17 @@ async function runAllTests() {
   console.log("─────────────────────────────────────────────────────────────────────────────\n");
 
   const totalPassed =
-    (results.runtimeTests?.passed || 0) + (results.hardenTests?.passed || 0);
+    (results.runtimeTests?.passed || 0) + (results.hardenTests?.passed || 0) + (results.mockTests?.passed || 0);
   const totalFailed =
-    (results.runtimeTests?.failed || 0) + (results.hardenTests?.failed || 0);
-  const totalTests = (results.runtimeTests?.total || 0) + (results.hardenTests?.total || 0);
+    (results.runtimeTests?.failed || 0) + (results.hardenTests?.failed || 0) + (results.mockTests?.failed || 0);
+  const totalTests = (results.runtimeTests?.total || 0) + (results.hardenTests?.total || 0) + (results.mockTests?.total || 0);
 
   console.log("  toolRuntimeTests:  " + (results.runtimeTests?.passed || 0) + "/" + (results.runtimeTests?.total || 0) + " passed" +
     (results.runtimeTests?.failed ? " (" + results.runtimeTests.failed + " FAILED)" : ""));
   console.log("  toolHardenTests:   " + (results.hardenTests?.passed || 0) + "/" + (results.hardenTests?.total || 0) + " passed" +
     (results.hardenTests?.failed ? " (" + results.hardenTests.failed + " FAILED)" : ""));
+  console.log("  mockToolTests:     " + (results.mockTests?.passed || 0) + "/" + (results.mockTests?.total || 0) + " passed" +
+    (results.mockTests?.failed ? " (" + results.mockTests.failed + " FAILED)" : ""));
 
   console.log("");
   console.log("  ──────────────────────────────────────────────────────────────────────");
