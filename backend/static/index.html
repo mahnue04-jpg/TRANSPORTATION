@@ -30,6 +30,7 @@
   <script src="/static/ux/uploadUX.js"></script>
   <script src="/static/ux/errorRecovery.js"></script>
   <script src="/static/ux/skeletonLoader.js"></script>
+  <script src="/static/ux/productExperience.js"></script>
   <!-- Session & auth modules (MVP stabilization) -->
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/ux/authUI.js"></script>
@@ -179,6 +180,175 @@
     }
     .chip:hover { border-color: var(--accent); color: var(--accent-light); background: rgba(108,99,255,0.08); }
 
+    /* ── Product toolbar ─────────────────────────────────── */
+    #product-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    #conv-search {
+      flex: 1;
+      min-width: 140px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 0.78rem;
+      padding: 7px 10px;
+      outline: none;
+    }
+
+    #conv-search:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .toolbar-btn {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: all 0.18s;
+    }
+
+    .toolbar-btn:hover {
+      color: var(--text);
+      border-color: var(--border2);
+      background: var(--surface3);
+    }
+
+    #conversation-search-results {
+      flex-shrink: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 4px 10px 8px;
+    }
+
+    .conv-hit {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      border-radius: 10px;
+      margin: 6px 0;
+      padding: 7px 9px;
+    }
+
+    .conv-hit.pinned {
+      border-color: rgba(108,99,255,0.45);
+      background: rgba(108,99,255,0.08);
+    }
+
+    .conv-hit-title {
+      font-size: 0.7rem;
+      color: var(--accent-light);
+      margin-bottom: 2px;
+      font-weight: 600;
+    }
+
+    .conv-hit-body {
+      font-size: 0.73rem;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+
+    .conv-hit.empty {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.74rem;
+    }
+
+    #workflow-center {
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      padding: 10px 12px;
+    }
+
+    .wf-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .wf-input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 0.78rem;
+      padding: 7px 9px;
+      outline: none;
+    }
+
+    .wf-input:focus {
+      border-color: var(--accent);
+    }
+
+    #workflow-templates,
+    #workflow-runs {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 128px;
+      overflow-y: auto;
+      padding-right: 3px;
+    }
+
+    .workflow-item,
+    .workflow-run {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      border-radius: 9px;
+      padding: 7px 8px;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    .workflow-item { cursor: pointer; }
+    .workflow-item:hover { border-color: var(--accent); color: var(--text); }
+
+    .workflow-name {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.74rem;
+      margin-bottom: 2px;
+    }
+
+    .workflow-tags {
+      color: var(--text-muted);
+      font-size: 0.68rem;
+    }
+
+    .workflow-empty {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 6px;
+    }
+
+    #trust-strip {
+      flex-shrink: 0;
+      padding: 5px 16px;
+      font-size: 0.68rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-dim);
+    }
+
+    #trust-strip.healthy { color: var(--success); }
+    #trust-strip.degraded { color: var(--warn); }
+    #trust-strip.critical { color: var(--error); }
+
     /* ── Chat area ────────────────────────────────────────── */
     #chat {
       flex: 1;
@@ -262,6 +432,8 @@
     }
     .msg-row.user { align-self: flex-end; align-items: flex-end; }
     .msg-row.ai   { align-self: flex-start; align-items: flex-start; }
+    .msg-row.grouped .msg-label { display: none; }
+    .msg-row.grouped { margin-top: -8px; }
 
     .msg-label {
       font-size: 0.65rem;
@@ -635,6 +807,27 @@
   <div class="chip" data-prompt="Summarize the key points of the Paris Agreement">🔍 Research</div>
 </div>
 
+<div id="product-toolbar">
+  <input id="conv-search" type="text" placeholder="Search this conversation" />
+  <button class="toolbar-btn" id="btn-pin">Pin Chat</button>
+  <button class="toolbar-btn" id="btn-workflows">Workflows</button>
+  <button class="toolbar-btn" id="btn-trust-refresh">Trust</button>
+</div>
+
+<div id="conversation-search-results" hidden></div>
+
+<div id="workflow-center" hidden>
+  <div class="wf-grid">
+    <input id="workflow-name" class="wf-input" type="text" placeholder="Workflow name" />
+    <input id="workflow-prompt" class="wf-input" type="text" placeholder="Reusable prompt" />
+    <button class="toolbar-btn" id="workflow-save">Save Workflow</button>
+    <div id="workflow-templates"></div>
+    <div id="workflow-runs"></div>
+  </div>
+</div>
+
+<div id="trust-strip">Trust: waiting for diagnostics...</div>
+
 <!-- ── Toast container ───────────────────────────────────── -->
 <div id="toast-container"></div>
 
@@ -707,10 +900,23 @@
   const inputWrap   = document.getElementById("input-wrap");
   const uploadStrip = document.getElementById("upload-preview");
   const toastCtr    = document.getElementById("toast-container");
+  const convSearchEl = document.getElementById("conv-search");
+  const convSearchResultsEl = document.getElementById("conversation-search-results");
+  const btnPin = document.getElementById("btn-pin");
+  const btnWorkflows = document.getElementById("btn-workflows");
+  const btnTrustRefresh = document.getElementById("btn-trust-refresh");
+  const workflowPanel = document.getElementById("workflow-center");
+  const workflowNameEl = document.getElementById("workflow-name");
+  const workflowPromptEl = document.getElementById("workflow-prompt");
+  const workflowSaveEl = document.getElementById("workflow-save");
+  const workflowTemplatesEl = document.getElementById("workflow-templates");
+  const workflowRunsEl = document.getElementById("workflow-runs");
+  const trustStripEl = document.getElementById("trust-strip");
 
   let isListening = false;
   let isSpeaking  = false;
   let recognition = null;
+  let productUX   = null;
 
   // ── Toast system ─────────────────────────────────────────
   function showToast(text, type = "") {
@@ -860,6 +1066,7 @@
         monitorDot.className = "";
         monitorDot.title     = "Service healthy";
       }
+      if (productUX) productUX.updateTrustSnapshot();
     });
   }
 
@@ -915,6 +1122,53 @@
     AmiCorOnboarding.init({ onComplete: () => { msgEl.focus(); } });
   }
 
+  function initProductExperience() {
+    if (!window.AmiCorProductExperience || !UID) return;
+
+    productUX = AmiCorProductExperience.createController({
+      namespace: UID,
+      refs: {
+        searchInput: convSearchEl,
+        searchResults: convSearchResultsEl,
+        pinBtn: btnPin,
+        workflowToggleBtn: btnWorkflows,
+        workflowPanel: workflowPanel,
+        workflowName: workflowNameEl,
+        workflowPrompt: workflowPromptEl,
+        workflowSaveBtn: workflowSaveEl,
+        workflowTemplates: workflowTemplatesEl,
+        workflowRuns: workflowRunsEl,
+        trustStrip: trustStripEl,
+        refreshTrustBtn: btnTrustRefresh,
+      },
+      onSetupComplete: function () {
+        showToast("Setup profile saved", "success");
+      },
+    });
+
+    if (productUX.listWorkflowTemplates().length === 0) {
+      productUX.saveWorkflowTemplate({
+        name: "Client Follow-up",
+        prompt: "Draft a concise client follow-up with action items",
+        actions: [{ type: "chat" }, { type: "email_draft" }],
+      });
+      productUX.saveWorkflowTemplate({
+        name: "Daily Brief",
+        prompt: "Summarize top updates and produce a priority checklist",
+        actions: [{ type: "search" }, { type: "chat" }],
+      });
+      productUX.refreshWorkflowPanel();
+    }
+
+    if (!productUX.isSetupCompleted()) {
+      productUX.completeSetup({
+        mode: "guided-default",
+        createdAt: new Date().toISOString(),
+      });
+      showToast("First-run setup completed", "success");
+    }
+  }
+
   // ── Helpers ──────────────────────────────────────────────
 
   function setStatus(msg, cls = "") {
@@ -965,6 +1219,11 @@
     hideWelcome();
     const row = document.createElement("div");
     row.className = `msg-row ${role}`;
+
+    const lastRow = chatEl.lastElementChild;
+    if (lastRow && lastRow.classList && lastRow.classList.contains("msg-row") && lastRow.classList.contains(role)) {
+      row.classList.add("grouped");
+    }
 
     const label = document.createElement("div");
     label.className = "msg-label";
@@ -1017,6 +1276,13 @@
     }
 
     chatEl.appendChild(row);
+    if (productUX) {
+      productUX.trackMessage(role, text, {
+        tool: tool || null,
+        isError: !!isError,
+        hasSources: !!(meta && meta.sources && meta.sources.length),
+      });
+    }
     if (!skipScroll) scrollBottom();
     return bubble;
   }
@@ -1180,6 +1446,12 @@
       }
 
       const isErr = fullContent.startsWith("Error:") || fullContent.startsWith("Connection error");
+      if (productUX) {
+        productUX.trackMessage("ai", fullContent, {
+          tool: toolResult && toolResult.tool ? toolResult.tool : "openai",
+          status: toolResult && toolResult.status ? toolResult.status : "success",
+        });
+      }
       if (isErr && window.AmiCorErrorRecovery) {
         AmiCorErrorRecovery.addRetryButton(row, async () => { row.remove(); await sendMessage(text); });
       }
@@ -1332,6 +1604,7 @@
 
   (async () => {
     await initializeAuth();
+    initProductExperience();
     // After auth succeeds, app is ready for use
     msgEl.focus();
   })();

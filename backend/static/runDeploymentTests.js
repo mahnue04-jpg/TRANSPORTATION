@@ -72,6 +72,7 @@ const {
   HEALTH_STATUSES,
   ENVIRONMENTS,
 } = require("./deployment/index");
+const { runDeploymentPreflight } = require("./deployment/preflight");
 
 // ─── Integration Manager ─────────────────────────────────────────────────────
 
@@ -791,6 +792,26 @@ test("DeploymentValidator: generateReport aggregates results", function () {
   ok(report.issues.length === 1, "1 issue");
   ok(report.warnings.length === 1, "1 warning");
   ok(!report.summary.readyToDeploy, "not ready to deploy");
+});
+
+test("DeploymentPreflight: cloud config checks include target platforms", function () {
+  var report = runDeploymentPreflight();
+  ok(Array.isArray(report.cloudConfigs), "cloudConfigs array");
+  ok(report.cloudConfigs.some(function (c) { return c.name === "render"; }), "render check present");
+  ok(report.cloudConfigs.some(function (c) { return c.name === "railway"; }), "railway check present");
+  ok(report.cloudConfigs.some(function (c) { return c.name === "fly"; }), "fly check present");
+});
+
+test("DeploymentPreflight: health endpoint declarations detected", function () {
+  var report = runDeploymentPreflight();
+  ok(report.health.hasLiveness, "has /api/health");
+  ok(report.health.hasReadiness, "has /api/health/detail");
+});
+
+test("DeploymentPreflight: includes SSL and backup guidance", function () {
+  var report = runDeploymentPreflight();
+  ok(Array.isArray(report.guidance.ssl) && report.guidance.ssl.length >= 2, "ssl guidance populated");
+  ok(Array.isArray(report.guidance.backup) && report.guidance.backup.length >= 2, "backup guidance populated");
 });
 
 // ─── Cross-user isolation (Integration Manager) ───────────────────────────────
