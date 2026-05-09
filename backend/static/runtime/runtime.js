@@ -113,6 +113,16 @@
     this._maxChunkBytes     = opts.maxChunkBytes || 50 * 1024 * 1024;
     this._shuttingDown      = false;
     this._timers            = [];
+
+    /* Register lifecycle hooks if provided */
+    var self = this;
+    if (opts.hooks) {
+      Object.keys(opts.hooks).forEach(function (hookName) {
+        if (typeof opts.hooks[hookName] === "function") {
+          self._hooks.add(hookName, opts.hooks[hookName]);
+        }
+      });
+    }
   }
 
   /* ── Registration pass-through ── */

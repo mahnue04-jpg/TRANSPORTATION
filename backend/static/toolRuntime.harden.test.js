@@ -247,8 +247,8 @@
     var HookSet = ns().events.HookSet;
     var hooks = new HookSet();
     var fired = false;
-    hooks.add(function () { fired = true; });
-    hooks.fire({});
+    hooks.add("test", function () { fired = true; });
+    hooks.fire("test", {});
     return ok(fired, "HookSet.fire() calls added hooks");
   });
 
@@ -269,14 +269,14 @@
   sync("registry-register-and-has", function () {
     var ToolRegistry = ns().registry.ToolRegistry;
     var reg = new ToolRegistry();
-    reg.register({ name: "ping", handler: function () { return "pong"; } });
+    reg.register("ping", { handler: function () { return "pong"; } });
     return ok(reg.has("ping"), "registry.has() returns true after register");
   });
 
   sync("registry-unregister", function () {
     var ToolRegistry = ns().registry.ToolRegistry;
     var reg = new ToolRegistry();
-    reg.register({ name: "tmp", handler: function () {} });
+    reg.register("tmp", { handler: function () {} });
     reg.unregister("tmp");
     return ok(!reg.has("tmp"), "unregister removes tool");
   });
@@ -284,8 +284,8 @@
   sync("registry-list-returns-array", function () {
     var ToolRegistry = ns().registry.ToolRegistry;
     var reg = new ToolRegistry();
-    reg.register({ name: "a", handler: function () {} });
-    reg.register({ name: "b", handler: function () {} });
+    reg.register("a", { handler: function () {} });
+    reg.register("b", { handler: function () {} });
     var list = reg.list();
     return ok(Array.isArray(list) && list.length === 2, "list() returns array of 2");
   });
@@ -459,14 +459,14 @@
     return ok(uuidRe.test(id), "genUUID produces valid v4 UUID: " + id);
   });
 
-  sync("uuid-ToolRuntime-execId-is-uuid-format", function () {
+  async_("uuid-ToolRuntime-execId-is-uuid-format", function () {
     var ToolRuntime = ns().runtime && ns().runtime.ToolRuntime;
     if (!ToolRuntime) {
       return ok(true, "ToolRuntime not on ns().runtime — skipping");
     }
     var rt = new ToolRuntime();
     var uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-    rt.register({ name: "id-check", handler: function () { return 1; } });
+    rt.register("id-check", { handler: function () { return 1; } });
     var p = rt.execute("id-check", {}, { timeout: 5000 });
     return p.then(function (res) {
       return ok(res && uuidRe.test(res.execId), "execId is UUID-shaped: " + (res && res.execId));
@@ -489,7 +489,7 @@
         onComplete: function () { hooks.completed = true; },
       }
     });
-    rt.register({ name: "hook-tool", handler: function () { return "done"; } });
+    rt.register("hook-tool", { handler: function () { return "done"; } });
     return rt.execute("hook-tool", {}, { timeout: 5000 }).then(function () {
       return [
         ok(hooks.started,   "onStart hook fired"),
@@ -504,10 +504,13 @@
       return Promise.resolve(ok(true, "ToolRuntime not in ns().runtime — skipping"));
     }
     var rt = new ToolRuntime();
-    rt.register({ name: "slow-h", handler: function () {
+    rt.register("slow-h", { handler: function () {
       return new Promise(function (res) { setTimeout(res, 5000); });
     }});
-    rt.execute("slow-h", {}, { timeout: 0 });
+    // Start execution but don't await it (will be cancelled)
+    rt.execute("slow-h", {}, { timeout: 0 }).catch(function () {
+      // Expected to be cancelled
+    });
     rt.shutdown();
     return delay(20).then(function () {
       return ok(true, "shutdown() did not throw");
@@ -520,7 +523,7 @@
       return Promise.resolve(ok(true, "ToolRuntime not in ns().runtime — skipping"));
     }
     var rt = new ToolRuntime({ maxConcurrentExecutions: 2, queueLimit: 1 });
-    rt.register({ name: "bp-tool", handler: function () {
+    rt.register("bp-tool", { handler: function () {
       return new Promise(function (res) { setTimeout(res, 200); });
     }});
     rt.execute("bp-tool", {}, { timeout: 5000 });

@@ -277,14 +277,16 @@
     return ok(threw, "register() throws after destroy()");
   });
 
-  sync("session-execute-rejects-after-destroy", function () {
+  async_("session-execute-rejects-after-destroy", function () {
     var r    = rt();
     var sess = r.createSession({ permissions: [] });
     r.register({ name: "t2", execute: function () { return 1; } });
     sess.destroy();
-    var rejected = false;
-    sess.execute("t2", {}).catch(function () { rejected = true; });
-    return ok(rejected, "session.execute() rejects after session.destroy()");
+    return sess.execute("t2", {}).then(function () {
+      return ok(false, "session.execute() should have rejected");
+    }).catch(function () {
+      return ok(true, "session.execute() rejects after session.destroy()");
+    });
   });
 
   // ── Metrics ────────────────────────────────────────────────────────────────
@@ -536,8 +538,9 @@
 
   // ── Event ordering ─────────────────────────────────────────────────────────
   async_("event-order-start-then-complete", function () {
-    var r = rt(), log = captureRuntimeEvents(r);
+    var r = rt();
     r.register({ name: "evtool", execute: function () { return 1; }});
+    var log = captureRuntimeEvents(r);
     return r.execute("evtool", {}, { timeoutMs: 5000 }).then(function () {
       var names = log.map(function (e) { return e.event; });
       return [

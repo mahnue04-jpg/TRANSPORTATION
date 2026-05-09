@@ -1,0 +1,22 @@
+{
+  "name": "amicore",
+  "version": "1.0.0",
+  "description": "AI-powered tool runtime and orchestration system",
+  "main": "backend/app/main.py",
+  "scripts": {
+    "test:tools": "node backend/static/runToolTests.js",
+    "test:runtime": "node backend/static/runToolTests.js",
+    "test": "npm run test:tools"
+  },
+  "keywords": [
+    "runtime",
+    "tools",
+    "execution",
+    "orchestration"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
