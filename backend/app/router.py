@@ -84,20 +84,65 @@ def _extract_preferences(message: str) -> dict:
         found["location"] = message.split("i live in ", 1)[1].split(".")[0].strip()
     if "i prefer " in lower:
         found["preference"] = message.split("i prefer ", 1)[1].split(".")[0].strip()
+    if "i work in " in lower:
+        found["industry"] = message.split("i work in ", 1)[1].split(".")[0].strip()
+    if "i am a " in lower:
+        found["role"] = message.split("i am a ", 1)[1].split(".")[0].strip()
     return found
 
 
 def _summarize_history(history: list) -> str | None:
+    """
+    Compress recent conversation history into a memory summary string.
+    Uses OpenAI when available for quality compression; falls back to
+    extractive heuristic.
+    """
     if not history:
         return None
+
+    import os
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key and len(history) >= 4:
+        try:
+            import importlib
+            openai_mod = importlib.import_module("openai")
+            client = openai_mod.OpenAI(api_key=api_key)
+            # Build a compact transcript for compression
+            transcript_parts = []
+            for item in history[-12:]:
+                role = "User" if item["role"] == "user" else "Assistant"
+                transcript_parts.append(f"{role}: {item['content'][:300]}")
+            transcript = "\n".join(transcript_parts)
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=180,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Summarize this conversation fragment in 1-3 concise sentences. "
+                            "Focus on: user's goal, key topics, important facts mentioned, "
+                            "and any preferences expressed. Be factual and brief."
+                        ),
+                    },
+                    {"role": "user", "content": transcript},
+                ],
+            )
+            summary = (resp.choices[0].message.content or "").strip()
+            if summary:
+                return summary[:800]
+        except Exception:
+            pass  # fall through to heuristic
+
+    # Heuristic fallback
     user_points = [item["content"] for item in history if item["role"] == "user"][-3:]
     assistant_points = [item["content"] for item in history if item["role"] == "assistant"][-2:]
     parts = []
     if user_points:
-        parts.append("Recent user topics: " + " | ".join(user_points))
+        parts.append("Recent user topics: " + " | ".join(p[:120] for p in user_points))
     if assistant_points:
-        parts.append("Recent assistant help: " + " | ".join(assistant_points))
-    return "; ".join(parts)[:1000] if parts else None
+        parts.append("Recent assistant help: " + " | ".join(p[:80] for p in assistant_points))
+    return "; ".join(parts)[:800] if parts else None
 
 
 def _normalize_result(tool_name: str, raw_result, capability: dict) -> dict:

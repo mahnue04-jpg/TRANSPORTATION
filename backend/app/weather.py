@@ -3,6 +3,8 @@ from typing import Any
 
 import requests
 
+from app.providers.resilience import get_breaker  # type: ignore
+
 _HEADERS = {"User-Agent": "Amicor/1.0 weather client"}
 
 
@@ -119,50 +121,65 @@ def _wttr_fallback(location: dict[str, Any]) -> dict[str, Any]:
 def get_weather(message: str) -> dict[str, Any]:
     provider_errors: list[str] = []
     location = resolve_location(message)
-    try:
-        payload = _open_meteo_weather(location)
-        current = payload["current"]
-        daily = payload["daily"]
-        response = (
-            f"Current weather for {location['name']}"
-            + (f", {location['region']}" if location.get("region") else "")
-            + f": {current['temperature_2m']}°F, feels like {current['apparent_temperature']}°F, "
-              f"{_weather_code_description(int(current['weather_code']))}, wind {current['wind_speed_10m']} mph.\n"
-              f"Forecast: Today {daily['temperature_2m_max'][0]}°/{daily['temperature_2m_min'][0]}°F with {daily['precipitation_probability_max'][0]}% precipitation chance; "
-              f"Tomorrow {daily['temperature_2m_max'][1]}°/{daily['temperature_2m_min'][1]}°F."
-        )
-        return {
-            "response": response,
-            "sources": [
-                {"title": "Open-Meteo Forecast", "url": "https://open-meteo.com/", "label": "open-meteo.com"},
-                {"title": "Location Source", "url": "https://geocoding-api.open-meteo.com/", "label": location["source"]},
-            ],
-            "status": "success",
-            "meta": {"provider": "open-meteo", "timezone": location["timezone"], "location": location["name"]},
-        }
-    except Exception as exc:
-        provider_errors.append(f"open-meteo: {exc}")
 
-    try:
-        payload = _wttr_fallback(location)
-        current = payload.get("current_condition", [{}])[0]
-        upcoming = payload.get("weather", [{}])[:2]
-        response = (
-            f"Current weather for {location['name']}: {current.get('temp_F', '?')}°F with "
-            f"{current.get('weatherDesc', [{}])[0].get('value', 'unavailable')}. "
-            f"Forecast: today high {upcoming[0].get('maxtempF', '?')}°F, low {upcoming[0].get('mintempF', '?')}°F; "
-            f"tomorrow high {upcoming[1].get('maxtempF', '?')}°F, low {upcoming[1].get('mintempF', '?')}°F."
-        )
-        return {
-            "response": response,
-            "sources": [
-                {"title": "wttr.in Forecast", "url": "https://wttr.in/", "label": "wttr.in"},
-            ],
-            "status": "partial",
-            "meta": {"provider": "wttr.in", "provider_errors": provider_errors, "location": location["name"]},
-        }
-    except Exception as exc:
-        provider_errors.append(f"wttr.in: {exc}")
+    # Circuit breakers for weather providers
+    breaker_meteo  = get_breaker("open_meteo",   failure_threshold=3, recovery_timeout=30)
+    breaker_wttr   = get_breaker("wttr_in",      failure_threshold=4, recovery_timeout=20)
+
+    if breaker_meteo.is_available():
+        try:
+            payload = _open_meteo_weather(location)
+            current = payload["current"]
+            daily = payload["daily"]
+            response = (
+                f"Current weather for {location['name']}"
+                + (f", {location['region']}" if location.get("region") else "")
+                + f": {current['temperature_2m']}°F, feels like {current['apparent_temperature']}°F, "
+                  f"{_weather_code_description(int(current['weather_code']))}, wind {current['wind_speed_10m']} mph.\n"
+                  f"Forecast: Today {daily['temperature_2m_max'][0]}°/{daily['temperature_2m_min'][0]}°F with {daily['precipitation_probability_max'][0]}% precipitation chance; "
+                  f"Tomorrow {daily['temperature_2m_max'][1]}°/{daily['temperature_2m_min'][1]}°F."
+            )
+            breaker_meteo.record_success()
+            return {
+                "response": response,
+                "sources": [
+                    {"title": "Open-Meteo Forecast", "url": "https://open-meteo.com/", "label": "open-meteo.com"},
+                    {"title": "Location Source", "url": "https://geocoding-api.open-meteo.com/", "label": location["source"]},
+                ],
+                "status": "success",
+                "meta": {"provider": "open-meteo", "timezone": location["timezone"], "location": location["name"]},
+            }
+        except Exception as exc:
+            breaker_meteo.record_failure()
+            provider_errors.append(f"open-meteo: {exc}")
+    else:
+        provider_errors.append(f"open-meteo: circuit open (health={breaker_meteo.health_score:.2f})")
+
+    if breaker_wttr.is_available():
+        try:
+            payload = _wttr_fallback(location)
+            current = payload.get("current_condition", [{}])[0]
+            upcoming = payload.get("weather", [{}])[:2]
+            response = (
+                f"Current weather for {location['name']}: {current.get('temp_F', '?')}°F with "
+                f"{current.get('weatherDesc', [{}])[0].get('value', 'unavailable')}. "
+                f"Forecast: today high {upcoming[0].get('maxtempF', '?')}°F, low {upcoming[0].get('mintempF', '?')}°F; "
+                f"tomorrow high {upcoming[1].get('maxtempF', '?')}°F, low {upcoming[1].get('mintempF', '?')}°F."
+            )
+            breaker_wttr.record_success()
+            return {
+                "response": response,
+                "sources": [
+                    {"title": "wttr.in Forecast", "url": "https://wttr.in/", "label": "wttr.in"},
+                ],
+                "status": "partial",
+                "meta": {"provider": "wttr.in", "provider_errors": provider_errors, "location": location["name"]},
+            }
+        except Exception as exc:
+            breaker_wttr.record_failure()
+            provider_errors.append(f"wttr.in: {exc}")
+    else:
+        provider_errors.append(f"wttr.in: circuit open (health={breaker_wttr.health_score:.2f})")
 
     return {
         "response": "Weather is temporarily unavailable. " + "; ".join(provider_errors),

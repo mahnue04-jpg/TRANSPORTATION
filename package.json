@@ -26,6 +26,9 @@
     "test:mvp": "node backend/static/runMVPTests.js",
     "test:capabilities-live": "node backend/static/runCapabilitiesLiveTests.js",
     "test:runtime-live": "node backend/static/runRuntimeLiveTests.js",
+    "test:multimodal": "node backend/static/runMultimodalTests.js",
+    "test:resilience": "node backend/static/runResilienceTests.js",
+    "benchmark:providers": "node backend/static/runProviderBenchmarks.js",
     "test": "npm run test:tools"
   },
   "keywords": [

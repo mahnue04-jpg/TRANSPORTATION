@@ -496,6 +496,85 @@
       min-height: 0;
     }
 
+    /* ── Image OCR preview card ─────────────────────────────── */
+    .ocr-preview {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      max-width: 100%;
+      margin-top: 4px;
+    }
+    .ocr-preview .ocr-label {
+      font-weight: 600;
+      color: var(--accent-light);
+      margin-bottom: 3px;
+    }
+    .ocr-preview .ocr-desc {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    .ocr-preview .ocr-method {
+      font-size: 0.64rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    /* ── Toast system ───────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--surface3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-size: 0.78rem;
+      padding: 8px 16px;
+      border-radius: 999px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      animation: toastIn 0.25s ease, toastOut 0.3s ease 2.5s forwards;
+      pointer-events: all;
+      white-space: nowrap;
+    }
+    .toast.success { border-color: var(--success); color: var(--success); }
+    .toast.warn    { border-color: var(--warn);    color: var(--warn);    }
+    .toast.error   { border-color: var(--error);   color: var(--error);   }
+    @keyframes toastIn  { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes toastOut { from { opacity:1; } to { opacity:0; pointer-events:none; } }
+
+    /* ── Streaming cursor ───────────────────────────────────── */
+    .streaming-cursor::after {
+      content: "▋";
+      color: var(--accent);
+      animation: cursorBlink 0.8s step-end infinite;
+    }
+    @keyframes cursorBlink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+
+    /* ── Provider badge ─────────────────────────────────────── */
+    .provider-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 0.62rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(108,99,255,0.08);
+      border: 1px solid rgba(108,99,255,0.15);
+      color: var(--text-muted);
+    }
+    .provider-badge.fallback { background: rgba(245,166,35,0.08); border-color: rgba(245,166,35,0.2); color: var(--warn); }
+
     /* ── Monitoring status dot ─────────────────────────────── */
     #monitor-dot {
       width: 8px; height: 8px;
@@ -546,6 +625,9 @@
   <div class="chip" data-prompt="Give me 5 ideas for a small business">💡 Ideas</div>
   <div class="chip" data-prompt="Summarize the key points of the Paris Agreement">🔍 Research</div>
 </div>
+
+<!-- ── Toast container ───────────────────────────────────── -->
+<div id="toast-container"></div>
 
 <!-- ── Chat ─────────────────────────────────────────────── -->
 <div id="chat">
@@ -615,10 +697,20 @@
   const monitorDot  = document.getElementById("monitor-dot");
   const inputWrap   = document.getElementById("input-wrap");
   const uploadStrip = document.getElementById("upload-preview");
+  const toastCtr    = document.getElementById("toast-container");
 
   let isListening = false;
   let isSpeaking  = false;
   let recognition = null;
+
+  // ── Toast system ─────────────────────────────────────────
+  function showToast(text, type = "") {
+    const el = document.createElement("div");
+    el.className = "toast" + (type ? " " + type : "");
+    el.textContent = text;
+    toastCtr.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 2900);
+  }
 
   function escapeHtmlText(value) {
     return String(value || "")
@@ -768,9 +860,39 @@
       stripContainer: uploadStrip,
       dropZoneEl:     document.querySelector(".input-box"),
       onAttach: (list) => {
-        // Enable/disable send hint
         if (list.some(a => a.status === "uploading")) setStatus("Uploading file…", "load");
         else setStatus("Ready");
+      },
+      onUploadComplete: (attachments) => {
+        // Render OCR preview card for image attachments
+        attachments.forEach(att => {
+          if (!att.ocrResult) return;
+          const ocr = att.ocrResult;
+          const prev = document.createElement("div");
+          prev.className = "ocr-preview";
+          const label = document.createElement("div");
+          label.className = "ocr-label";
+          label.textContent = `🔍 Image Analysis — ${att.file.name}`;
+          prev.appendChild(label);
+          if (ocr.description) {
+            const desc = document.createElement("div");
+            desc.className = "ocr-desc";
+            desc.textContent = ocr.description.slice(0, 160) + (ocr.description.length > 160 ? "…" : "");
+            prev.appendChild(desc);
+          }
+          if (ocr.text) {
+            const txt = document.createElement("div");
+            txt.style.cssText = "margin-top:4px; color:var(--text); font-size:0.70rem;";
+            txt.textContent = ocr.text.slice(0, 120) + (ocr.text.length > 120 ? "…" : "");
+            prev.appendChild(txt);
+          }
+          const method = document.createElement("div");
+          method.className = "ocr-method";
+          method.textContent = `Method: ${ocr.method} · Confidence: ${Math.round((ocr.confidence || 0)*100)}% · ${ocr.word_count} words`;
+          prev.appendChild(method);
+          uploadStrip.appendChild(prev);
+        });
+        showToast("File attached and analyzed", "success");
       },
     });
     // Insert upload button before the mic button inside .input-box
@@ -797,9 +919,25 @@
     }
   }
 
-  function scrollBottom() {
-    chatEl.scrollTop = chatEl.scrollHeight;
+  function scrollBottom(force) {
+    const threshold = 150;
+    const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < threshold;
+    if (force || nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
   }
+
+  // ── Keyboard shortcuts ───────────────────────────────────
+  document.addEventListener("keydown", e => {
+    // Ctrl+K — focus input
+    if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+      e.preventDefault();
+      msgEl.focus();
+      msgEl.select();
+    }
+    // Escape — blur input
+    if (e.key === "Escape" && document.activeElement === msgEl) {
+      msgEl.blur();
+    }
+  });
 
   function autoResize() {
     msgEl.style.height = "auto";
@@ -899,7 +1037,7 @@
     if (el) el.remove();
   }
 
-  // ── API send ─────────────────────────────────────────────
+  // ── API send (streaming) ─────────────────────────────────
 
   async function sendMessage(text) {
     if (!UID) {
@@ -928,37 +1066,118 @@
 
     const t0 = Date.now();
     try {
-      const res = await fetch(`${API}/api/chat`, {
+      const res = await fetch(`${API}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: UID, message: fullText })
       });
 
-      const durationMs = Date.now() - t0;
-      if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, !res.ok);
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+
       removeTyping();
+      hideWelcome();
 
-      const reply = data.reply || "No response.";
-      const tool  = data.tool  || "openai";
-      const sources = Array.isArray(data.sources) ? data.sources : [];
-      const status  = data.status || "success";
-      const isErr = status === "error" || reply.startsWith("Error:") || reply.startsWith("Web search error");
-      const bubble = addBubble("ai", reply, tool, isErr, { sources, status, capability: data.capability || {}, meta: data.meta || {} });
+      // Create streaming bubble
+      const row    = document.createElement("div");
+      row.className = "msg-row ai";
+      const label  = document.createElement("div");
+      label.className = "msg-label";
+      label.textContent = "Amicor";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble streaming-cursor";
+      row.appendChild(label);
+      row.appendChild(bubble);
+      chatEl.appendChild(row);
+      scrollBottom();
 
-      // Attach retry button to error bubbles
-      if (isErr && window.AmiCorErrorRecovery) {
-        AmiCorErrorRecovery.addRetryButton(bubble.parentElement, async () => {
-          bubble.parentElement.remove();
-          await sendMessage(text);
-        });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+      let toolResult = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") break;
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.type === "token") {
+              fullContent += evt.content;
+              bubble.innerHTML = AmiCorRenderer.renderContent(fullContent);
+              bubble.classList.add("streaming-cursor");
+              scrollBottom();
+            } else if (evt.type === "complete") {
+              // Tool call result — render as full bubble
+              toolResult = evt;
+              fullContent = evt.reply || "";
+              const tool = evt.tool || "openai";
+              label.innerHTML = `<span class="tool-badge"><span>${TOOL_ICONS[tool] || "⚙️"}</span>${tool}</span>`;
+              bubble.innerHTML = AmiCorRenderer.renderContent(fullContent);
+            } else if (evt.type === "error") {
+              bubble.className = "bubble error";
+              bubble.textContent = evt.content;
+            }
+          } catch (_) {}
+        }
       }
 
-      if (!isErr) speakText(reply);
+      // Remove streaming cursor
+      bubble.classList.remove("streaming-cursor");
+
+      const durationMs = Date.now() - t0;
+      if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, false);
+
+      // Render metadata for tool results
+      if (toolResult) {
+        const sources = Array.isArray(toolResult.sources) ? toolResult.sources : [];
+        const status  = toolResult.status || "success";
+        if (sources.length || status === "partial") {
+          const metaEl = document.createElement("div");
+          metaEl.className = "bubble-meta";
+          if (status === "partial") {
+            const state = document.createElement("span");
+            state.className = "capability-state";
+            state.textContent = "Live result with fallback";
+            metaEl.appendChild(state);
+          }
+          if (sources.length) {
+            const srcList = document.createElement("div");
+            srcList.className = "source-list";
+            sources.forEach(source => {
+              const a = document.createElement("a");
+              a.className = "source-link";
+              a.href = source.url; a.target = "_blank"; a.rel = "noreferrer noopener";
+              a.textContent = source.label || source.title || source.url;
+              srcList.appendChild(a);
+            });
+            metaEl.appendChild(srcList);
+          }
+          if (toolResult.meta && toolResult.meta.provider) {
+            const pb = document.createElement("span");
+            pb.className = "provider-badge" + (status === "partial" ? " fallback" : "");
+            pb.textContent = toolResult.meta.provider;
+            metaEl.appendChild(pb);
+          }
+          row.appendChild(metaEl);
+        }
+      }
+
+      const isErr = fullContent.startsWith("Error:") || fullContent.startsWith("Connection error");
+      if (isErr && window.AmiCorErrorRecovery) {
+        AmiCorErrorRecovery.addRetryButton(row, async () => { row.remove(); await sendMessage(text); });
+      }
+
+      if (!isErr) speakText(fullContent);
       if (window.AmiCorUpload) AmiCorUpload.clear();
-      setStatus(status === "partial" ? "Completed with fallback data" : "Ready");
+      setStatus("Ready");
     } catch (err) {
       const durationMs = Date.now() - t0;
       if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, true);
@@ -972,6 +1191,7 @@
         });
       }
       setStatus("Request failed", "err");
+      showToast("Request failed — tap retry", "error");
     } finally {
       btnSend.disabled = false;
       if (window.AmiCorSkeleton) AmiCorSkeleton.hideInputLock();

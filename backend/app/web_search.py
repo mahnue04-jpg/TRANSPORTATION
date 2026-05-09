@@ -7,6 +7,8 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 
 import requests
 
+from app.providers.resilience import get_breaker, resilient_call, RetryBudget  # type: ignore
+
 
 def _clean_text(value: str) -> str:
     cleaned = re.sub(r"\s+", " ", html.unescape(value or "")).strip()
@@ -162,27 +164,53 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
     if news_mode:
         today = datetime.now(UTC).strftime("%B %d, %Y")
         normalized_query = f"{normalized_query} latest news {today}".strip()
-    provider_errors = []
-    payload = None
-    providers = [_tavily_search]
+
+    # ── Build provider chain with circuit breakers ─────────────────────────
     if news_mode:
-        providers.extend([_google_news_search, _duckduckgo_search])
+        provider_chain = [
+            ("tavily",       get_breaker("tavily", failure_threshold=3, recovery_timeout=30),       lambda q, n: _tavily_search(q, n)),
+            ("google-news",  get_breaker("google_news", failure_threshold=3, recovery_timeout=60),  lambda q, n: _google_news_search(q, n)),
+            ("duckduckgo",   get_breaker("duckduckgo", failure_threshold=4, recovery_timeout=20),   lambda q, n: _duckduckgo_search(q, n)),
+        ]
     else:
-        providers.extend([_duckduckgo_search, _wikipedia_search])
-    for provider in providers:
+        provider_chain = [
+            ("tavily",       get_breaker("tavily", failure_threshold=3, recovery_timeout=30),       lambda q, n: _tavily_search(q, n)),
+            ("duckduckgo",   get_breaker("duckduckgo", failure_threshold=4, recovery_timeout=20),   lambda q, n: _duckduckgo_search(q, n)),
+            ("wikipedia",    get_breaker("wikipedia", failure_threshold=5, recovery_timeout=60),    lambda q, n: _wikipedia_search(q, n)),
+        ]
+
+    used_provider = "unknown"
+    payload = None
+    provider_errors: list[str] = []
+
+    for pname, breaker, fn in provider_chain:
+        if not breaker.is_available():
+            provider_errors.append(f"{pname}: circuit open (health={breaker.health_score:.2f})")
+            continue
         try:
-            payload = provider(normalized_query, max_results)
-            if payload and payload.get("results"):
+            result = fn(normalized_query, max_results)
+            if result and result.get("results"):
+                breaker.record_success()
+                payload = result
+                used_provider = pname
                 break
+            else:
+                breaker.record_failure()
+                provider_errors.append(f"{pname}: empty results")
         except Exception as exc:
-            provider_errors.append(f"{provider.__name__}: {exc}")
+            breaker.record_failure()
+            provider_errors.append(f"{pname}: {exc}")
+
     if not payload or not payload.get("results"):
         detail = "; ".join(provider_errors) if provider_errors else "No search provider returned results."
         return {
             "response": f"Search is temporarily unavailable. {detail}",
             "sources": [],
             "status": "error",
-            "meta": {"provider_errors": provider_errors},
+            "meta": {
+                "provider_errors": provider_errors,
+                "provider": "none",
+            },
         }
 
     results = payload.get("results", [])
@@ -191,13 +219,16 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
         for item in results[:4]
     ]
     response = _summarize_results(normalized_query, results, payload.get("answer", ""))
+    status = "partial" if provider_errors else "success"
     return {
         "response": response,
         "sources": sources,
-        "status": "success",
+        "status": status,
         "meta": {
-            "provider": payload.get("provider", "unknown"),
+            "provider": used_provider,
             "result_count": len(results),
             "query": normalized_query,
+            "fallback_used": bool(provider_errors),
+            "provider_errors": provider_errors if provider_errors else [],
         },
     }

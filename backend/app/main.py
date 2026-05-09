@@ -2,23 +2,26 @@ print("MAIN.PY LOADED")
 from dotenv import load_dotenv
 load_dotenv()
 
+import asyncio
+import json
 import os
 import logging
 import importlib
 from io import BytesIO
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, AsyncIterator
 from zipfile import BadZipFile
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.database import clear_user_memory, get_chat_history, get_memory_summary, get_preferences, init_db  # type: ignore
 from app.models import ChatRequest, ResetRequest   # type: ignore
 from app.router import route_message              # type: ignore
 from app import startup as app_startup            # type: ignore
+from app import image_ocr                         # type: ignore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
@@ -112,30 +115,37 @@ def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> list[s
     return chunks
 
 
-def _extract_upload_text(filename: str | None, content_type: str, content: bytes) -> tuple[str | None, dict[str, Any]]:
+def _extract_upload_text(filename: str | None, content_type: str, content: bytes) -> tuple[str | None, dict[str, Any], dict | None]: # type: ignore
     diagnostics: dict[str, Any] = {
         "parser": "none",
         "warnings": [],
     }
     if content_type.startswith("text/") or content_type == "application/json":
         diagnostics["parser"] = "utf8-text"
-        return content.decode("utf-8", errors="replace"), diagnostics
+        return content.decode("utf-8", errors="replace"), diagnostics, None
     if content_type == "application/pdf":
         pypdf = importlib.import_module("pypdf")
 
         diagnostics["parser"] = "pypdf"
         reader = pypdf.PdfReader(BytesIO(content))
         pages: list[str] = [str(page.extract_text() or "") for page in reader.pages]
-        return "\n\n".join(filter(None, pages)).strip(), diagnostics
+        return "\n\n".join(filter(None, pages)).strip(), diagnostics, None
     if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         docx = importlib.import_module("docx")
 
         diagnostics["parser"] = "python-docx"
         document = docx.Document(BytesIO(content))
         paragraphs: list[str] = [str(paragraph.text) for paragraph in document.paragraphs if str(paragraph.text).strip()]
-        return "\n".join(paragraphs).strip(), diagnostics
+        return "\n".join(paragraphs).strip(), diagnostics, None
+    if content_type in ("image/png", "image/jpeg", "image/webp"):
+        diagnostics["parser"] = "image-ocr"
+        ocr_result = image_ocr.extract(content_type, content) # type: ignore
+        diagnostics["ocr"] = ocr_result["diagnostics"]
+        diagnostics["ocr_method"] = ocr_result["method"]
+        combined = image_ocr.build_context_block(filename, ocr_result)
+        return combined, diagnostics, ocr_result # type: ignore
     diagnostics["warnings"].append(f"No extractor available for {content_type}.")
-    return None, diagnostics
+    return None, diagnostics, None
 
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
@@ -243,7 +253,7 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
     try:
-        extracted_text, diagnostics = _extract_upload_text(file.filename, content_type, content)
+        extracted_text, diagnostics, ocr_result = _extract_upload_text(file.filename, content_type, content) # type: ignore
     except (BadZipFile, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse upload: {exc}")
     except Exception as exc:
@@ -257,7 +267,8 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
         "Upload: filename=%r type=%s size=%d bytes",
         file.filename, content_type, len(content),
     )
-    return {
+
+    response_payload: dict[str, Any] = {
         "filename":       file.filename,
         "content_type":   content_type,
         "size_bytes":     len(content),
@@ -269,5 +280,134 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
             "text_length": len(extracted_text or ""),
             "truncated": bool(extracted_text and len(extracted_text) > 8000),
         },
-        "status":         "uploaded",
-    } # type: ignore
+        "status": "uploaded",
+    }
+
+    # Attach OCR-specific fields for images
+    if ocr_result:
+        response_payload["ocr"] = {
+            "method":      ocr_result["method"],
+            "confidence":  ocr_result["confidence"],
+            "word_count":  ocr_result["word_count"],
+            "description": ocr_result.get("description"), # type: ignore
+            "has_text":    bool(ocr_result.get("text")), # type: ignore
+        }
+
+    return response_payload  # type: ignore
+
+
+# ── Streaming chat ────────────────────────────────────────────────────────────
+
+async def _stream_openai(message: str, user_id: str) -> AsyncIterator[str]:
+    """Yield Server-Sent Event chunks for OpenAI streaming responses."""
+    import os as _os
+    from app.database import (  # type: ignore
+        get_memory_summary, get_preferences, get_recent_messages, # type: ignore
+        save_message, save_memory_summary,
+    )
+    from app.router import _memory_context, _extract_preferences, _summarize_history  # type: ignore
+
+    openai_mod = importlib.import_module("openai")
+    api_key = _os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        yield f"data: {json.dumps({'type': 'error', 'content': 'OpenAI not configured.'})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    client = openai_mod.OpenAI(api_key=api_key)
+    history = _memory_context(user_id) + get_recent_messages(user_id, limit=10) # type: ignore
+    history.append({"role": "user", "content": message}) # type: ignore
+
+    # Save user message before streaming
+    save_message(user_id, "user", message)
+    prefs = _extract_preferences(message) # type: ignore
+    from app.database import save_preference  # type: ignore
+    for k, v in prefs.items(): # type: ignore
+        save_preference(user_id, k, v) # type: ignore
+
+    full_response = []
+    try:
+        stream = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=history,
+            stream=True,
+            max_tokens=1024,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                token = delta.content
+                full_response.append(token) # type: ignore
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                await asyncio.sleep(0)  # yield to event loop
+    except Exception as exc:
+        logger.exception("Streaming error for user=%s", user_id)
+        yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+    # Save completed response and update summary
+    if full_response:
+        assembled = "".join(full_response) # type: ignore
+        save_message(user_id, "assistant", assembled)
+        recent = get_recent_messages(user_id, limit=12) # type: ignore
+        summary = _summarize_history(recent)
+        if summary:
+            save_memory_summary(user_id, summary)
+
+    yield "data: [DONE]\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):  # type: ignore
+    """
+    Streaming variant of /api/chat.
+    Returns text/event-stream with SSE chunks:
+      data: {"type": "token", "content": "..."}\n\n
+      data: [DONE]\n\n
+    Falls back to non-streaming for tool calls (weather, search, etc.)
+    """
+    lower = request.message.lower()
+    from app.router import CAPABILITIES  # type: ignore
+
+    # Check if a tool capability matches — if so, use standard route and emit as single event
+    for name, cap in CAPABILITIES.items(): # type: ignore
+        if any(t in lower for t in cap["triggers"]): # type: ignore
+            try:
+                result = route_message(request.message, user_id=request.user_id) # type: ignore
+                payload = json.dumps({
+                    "type":       "complete",
+                    "reply":      result["response"],
+                    "tool":       result.get("tool", name), # type: ignore
+                    "sources":    result.get("sources", []), # type: ignore
+                    "status":     result.get("status", "success"), # type: ignore
+                    "capability": result.get("capability", {}), # type: ignore
+                    "meta":       result.get("meta", {}), # type: ignore
+                })
+                async def _tool_stream():  # type: ignore
+                    yield f"data: {payload}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(_tool_stream(), media_type="text/event-stream")
+            except Exception as exc:
+                logger.exception("Tool stream error for user=%s", request.user_id)
+                raise HTTPException(status_code=500, detail=str(exc))
+
+    # OpenAI streaming
+    return StreamingResponse(
+        _stream_openai(request.message, request.user_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Provider resilience diagnostics ──────────────────────────────────────────
+
+@app.get("/api/diagnostics/providers")
+def provider_diagnostics():
+    """Return health and circuit-breaker state for all providers."""
+    from app.providers.resilience import all_diagnostics  # type: ignore
+    return {
+        "providers": all_diagnostics(),
+        "version": os.environ.get("APP_VERSION", "dev"),
+    }
