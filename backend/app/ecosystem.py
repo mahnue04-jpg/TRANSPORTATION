@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import math
 import os
 import re
@@ -34,34 +33,32 @@ from app.db.models import (
     WorkflowTemplate,
 )
 from app.db.session import SessionLocal
+from app.helpers import ensure_user_id, json_dumps, json_loads_or, now
 from app.router import route_message
 from app.web_search import get_search_diagnostics, search_web
 
 router = APIRouter(prefix="/api", tags=["ecosystem"])
 
 
+# ── Helpers with underscore prefix for backward compatibility within this module ──
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    """Backward compatibility wrapper. Use now() from helpers."""
+    return now()
 
 
 def _ensure_user_id(user_id: str) -> str:
-    uid = (user_id or "").strip()
-    if not uid:
-        raise HTTPException(status_code=422, detail="user_id is required")
-    return uid
+    """Backward compatibility wrapper. Use ensure_user_id() from helpers."""
+    return ensure_user_id(user_id)
 
 
 def _json_loads_or(value: str | None, fallback: Any) -> Any:
-    if not value:
-        return fallback
-    try:
-        return json.loads(value)
-    except Exception:
-        return fallback
+    """Backward compatibility wrapper. Use json_loads_or() from helpers."""
+    return json_loads_or(value, fallback)
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=True)
+    """Backward compatibility wrapper. Use json_dumps() from helpers."""
+    return json_dumps(value)
 
 
 def _find_integration(db, user_id: str, service: str, provider: str) -> IntegrationAccount | None:

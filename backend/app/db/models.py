@@ -13,14 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _uuid4() -> str:
-    return str(uuid.uuid4())
+from app.helpers import now, uuid4
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -28,13 +21,13 @@ def _uuid4() -> str:
 class User(Base):
     __tablename__ = "platform_users"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     conversations: Mapped[list["Conversation"]] = relationship(
@@ -53,14 +46,14 @@ class User(Base):
 class Conversation(Base):
     __tablename__ = "platform_conversations"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("platform_users.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
     title: Mapped[str] = mapped_column(String(256), default="New Conversation")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     user: Mapped["User"] = relationship(back_populates="conversations")
     messages: Mapped[list["PlatformMessage"]] = relationship(
@@ -82,7 +75,7 @@ class PlatformMessage(Base):
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
@@ -92,7 +85,7 @@ class PlatformMessage(Base):
 class Upload(Base):
     __tablename__ = "platform_uploads"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("platform_users.id", ondelete="SET NULL"),
         nullable=True, index=True,
@@ -103,7 +96,7 @@ class Upload(Base):
     ocr_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     ocr_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     user: Mapped["User | None"] = relationship(back_populates="uploads")
 
@@ -116,7 +109,7 @@ class MemoryRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Provider logs ──────────────────────────────────────────────────────────────
@@ -133,7 +126,7 @@ class ProviderLog(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_msg: Mapped[str | None] = mapped_column(String(512), nullable=True)
     endpoint: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Refresh tokens ─────────────────────────────────────────────────────────────
@@ -141,14 +134,14 @@ class ProviderLog(Base):
 class RefreshToken(Base):
     __tablename__ = "platform_refresh_tokens"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("platform_users.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
@@ -171,7 +164,7 @@ class AuditLog(Base):
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Integration accounts (OAuth/SMTP/Provider config) ───────────────────────
@@ -182,7 +175,7 @@ class IntegrationAccount(Base):
         Index("ix_integrations_user_service", "user_id", "service"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     service: Mapped[str] = mapped_column(String(32), nullable=False)  # email | calendar
     provider: Mapped[str] = mapped_column(String(32), nullable=False)  # gmail | outlook | smtp
@@ -192,8 +185,8 @@ class IntegrationAccount(Base):
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Email drafts (multi-draft platform store) ────────────────────────────────
@@ -204,7 +197,7 @@ class EmailDraftRecord(Base):
         Index("ix_email_drafts_user_updated", "user_id", "updated_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="smtp")
     to_recipients: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -214,8 +207,8 @@ class EmailDraftRecord(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     attachments_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Calendar events (provider-synced + local) ────────────────────────────────
@@ -226,7 +219,7 @@ class CalendarEventRecord(Base):
         Index("ix_calendar_events_user_start", "user_id", "start_time"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="local")
     external_event_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -238,7 +231,7 @@ class CalendarEventRecord(Base):
     attendees_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     reminder_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="confirmed")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Search cache ──────────────────────────────────────────────────────────────
@@ -249,13 +242,13 @@ class SearchCacheRecord(Base):
         Index("ix_search_cache_query_created", "query_key", "created_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     query_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     query_text: Mapped[str] = mapped_column(String(512), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     news_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     response_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -267,13 +260,13 @@ class MemoryVectorRecord(Base):
         Index("ix_memory_vectors_user_created", "user_id", "created_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="conversation")
     text_chunk: Mapped[str] = mapped_column(Text, nullable=False)
     embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
     priority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 # ── Workflow templates and execution history ─────────────────────────────────
@@ -284,15 +277,15 @@ class WorkflowTemplate(Base):
         Index("ix_workflows_user_updated", "user_id", "updated_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     reusable_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     action_chain_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class WorkflowRunRecord(Base):
@@ -301,7 +294,7 @@ class WorkflowRunRecord(Base):
         Index("ix_workflow_runs_workflow_created", "workflow_id", "created_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid4)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     workflow_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     input_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -309,5 +302,5 @@ class WorkflowRunRecord(Base):
     step_results_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
     error_msg: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
