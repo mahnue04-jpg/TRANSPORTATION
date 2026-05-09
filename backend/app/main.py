@@ -26,6 +26,7 @@ from app.middleware import SecurityHeadersMiddleware, RequestTracingMiddleware, 
 from app import auth as auth_module               # type: ignore
 from app import observability                     # type: ignore
 from app import ecosystem as ecosystem_module     # type: ignore
+from app import responses as responses_module     # type: ignore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
@@ -235,24 +236,54 @@ def root():
 
 @app.get("/api/health")
 def health():
-    """Shallow liveness check — returns 200 if the process is alive."""
-    return {"status": "ok", "version": os.environ.get("APP_VERSION", "dev")}
+    """Shallow liveness check — returns 200 if the process is alive.
+    
+    Normalized response format:
+      { ok: true, data: {...}, error: null, meta: {...} }
+    """
+    return responses_module.normalize_success(
+        data={
+            "status": "ok",
+            "version": os.environ.get("APP_VERSION", "dev"),
+        },
+        version=os.environ.get("APP_VERSION", "dev"),
+    )
 
 
 @app.get("/api/health/detail")
 def health_detail():
-    """Deep readiness check — env validation + live DB probe."""
+    """Deep readiness check — env validation + live DB probe.
+    
+    Normalized response format:
+      { ok: true/false, data: {...}, error: null, meta: {...} }
+    """
     report   = app_startup.startup_report() # type: ignore
     db_check = app_startup.validate_database() # type: ignore
     all_ok   = report.get("ok", False) and db_check["ok"] # type: ignore
+    
+    status_code = 200 if all_ok else 503
+    response_data = { # type: ignore
+        "status": "healthy" if all_ok else "degraded",
+        "db": db_check,
+        "startup": report,
+        "version": os.environ.get("APP_VERSION", "dev"),
+    }
+    
+    if all_ok:
+        response = responses_module.normalize_success(
+            data=response_data,
+            version=os.environ.get("APP_VERSION", "dev"),
+        )
+    else:
+        response = responses_module.normalize_error(
+            error_msg="System degraded: health check failed",
+            latency_ms=0,
+        )
+        response.data = response_data  # Include diagnostic data even on error
+    
     return JSONResponse(
-        status_code=200 if all_ok else 503,
-        content={
-            "status":  "healthy" if all_ok else "degraded",
-            "db":      db_check,
-            "startup": report,
-            "version": os.environ.get("APP_VERSION", "dev"),
-        },
+        status_code=status_code,
+        content=responses_module.as_dict(response),
     )
 
 
@@ -266,20 +297,36 @@ def serve_app():
 # ── Chat ──────────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
 async def chat(request: ChatRequest):  # type: ignore
+    """Process a chat message and return AI response.
+    
+    Normalized response format:
+      { ok: true, data: {...}, error: null, meta: {...} }
+    
+    Data includes: reply, tool, sources, status, capability, meta
+    """
     logger.debug("Chat from user=%s: %r", request.user_id, request.message[:80])
     try:
         result: dict[str, Any] = route_message(request.message, user_id=request.user_id)  # type: ignore
-        return {
+        response_data = {
             "reply": result["response"],
             "tool": result.get("tool", "openai"),
             "sources": result.get("sources", []),
             "status": result.get("status", "success"),
             "capability": result.get("capability", {}),
             "meta": result.get("meta", {}),
-        } # type: ignore
+        }
+        return responses_module.normalize_success(
+            data=response_data,
+        ) # type: ignore
     except Exception as exc:
         logger.exception("Router error for user=%s", request.user_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        error_response = responses_module.normalize_error(
+            error_msg=f"Chat processing failed: {str(exc)}"
+        )
+        return JSONResponse(
+            status_code=500,
+            content=responses_module.as_dict(error_response),
+        )
 
 
 @app.get("/api/history/{user_id}")
@@ -499,12 +546,31 @@ async def chat_stream(request: ChatRequest):  # type: ignore
 
 @app.get("/api/diagnostics/providers")
 def provider_diagnostics(): # type: ignore
-    """Return health and circuit-breaker state for all providers."""
-    from app.providers.resilience import all_diagnostics  # type: ignore
-    return {
-        "providers": all_diagnostics(),
-        "version": os.environ.get("APP_VERSION", "dev"),
-    } # type: ignore
+    """Return health and circuit-breaker state for all providers.
+    
+    Normalized response format:
+      { ok: true, data: {...}, error: null, meta: {...} }
+    """
+    try:
+        from app.providers.resilience import all_diagnostics  # type: ignore
+        providers_data = all_diagnostics() # type: ignore
+        return responses_module.normalize_success(
+            data={
+                "providers": providers_data,
+                "version": os.environ.get("APP_VERSION", "dev"),
+            },
+            version=os.environ.get("APP_VERSION", "dev"),
+        )
+    except Exception as exc:
+        logger.exception("Provider diagnostics error")
+        return JSONResponse(
+            status_code=500,
+            content=responses_module.as_dict(
+                responses_module.normalize_error(
+                    error_msg=f"Failed to retrieve provider diagnostics: {str(exc)}"
+                )
+            ),
+        )
 
 
 # ── Admin dashboard ───────────────────────────────────────────────────────────

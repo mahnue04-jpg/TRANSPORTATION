@@ -38,6 +38,7 @@
     "test:multimodal": "node backend/static/runMultimodalTests.js",
     "test:resilience": "node backend/static/runResilienceTests.js",
     "benchmark:providers": "node backend/static/runProviderBenchmarks.js",
+    "test:responses": "node backend/static/runResponseNormalizationTests.js",
     "test": "npm run test:tools"
   },
   "keywords": [
