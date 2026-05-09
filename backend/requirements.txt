@@ -7,6 +7,7 @@ aiofiles
 python-multipart
 pypdf
 python-docx
+openpyxl
 sqlalchemy>=2.0
 psycopg2-binary
 alembic

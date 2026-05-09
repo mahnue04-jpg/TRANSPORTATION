@@ -25,6 +25,7 @@ from app import image_ocr                         # type: ignore
 from app.middleware import SecurityHeadersMiddleware, RequestTracingMiddleware, log_upload  # type: ignore
 from app import auth as auth_module               # type: ignore
 from app import observability                     # type: ignore
+from app import ecosystem as ecosystem_module     # type: ignore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
@@ -40,6 +41,7 @@ ALLOWED_UPLOAD_TYPES = frozenset({
     "text/plain", "text/markdown", "text/csv",
     "application/json", "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "image/png", "image/jpeg", "image/webp",
 })
 
@@ -118,6 +120,7 @@ app.add_middleware(RequestTracingMiddleware)
 
 # ── Auth router ───────────────────────────────────────────────────────────────
 app.include_router(auth_module.router)
+app.include_router(ecosystem_module.router)
 
 # Serve static files from backend/static/
 _static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
@@ -159,6 +162,22 @@ def _extract_upload_text(filename: str | None, content_type: str, content: bytes
         document = docx.Document(BytesIO(content))
         paragraphs: list[str] = [str(paragraph.text) for paragraph in document.paragraphs if str(paragraph.text).strip()]
         return "\n".join(paragraphs).strip(), diagnostics, None
+    if content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        diagnostics["parser"] = "openpyxl"
+        try:
+            openpyxl = importlib.import_module("openpyxl")
+            workbook = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+            rows_out: list[str] = []
+            for sheet in workbook.worksheets[:4]:
+                rows_out.append(f"[Sheet: {sheet.title}]")
+                for row in sheet.iter_rows(min_row=1, max_row=40, values_only=True):
+                    values = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+                    if values:
+                        rows_out.append(" | ".join(values[:12]))
+            return "\n".join(rows_out).strip(), diagnostics, None
+        except Exception as exc:
+            diagnostics["warnings"].append(f"Spreadsheet parse failed: {exc}")
+            return None, diagnostics, None
     if content_type in ("image/png", "image/jpeg", "image/webp"):
         diagnostics["parser"] = "image-ocr"
         ocr_result = image_ocr.extract(content_type, content) # type: ignore
@@ -168,6 +187,44 @@ def _extract_upload_text(filename: str | None, content_type: str, content: bytes
         return combined, diagnostics, ocr_result # type: ignore
     diagnostics["warnings"].append(f"No extractor available for {content_type}.")
     return None, diagnostics, None
+
+
+def _categorize_upload(content_type: str, filename: str | None, extracted_text: str | None) -> str:
+    name = (filename or "").lower()
+    text = (extracted_text or "").lower()
+    if content_type.startswith("image/"):
+        return "image"
+    if "spreadsheet" in content_type or name.endswith(".xlsx") or name.endswith(".csv"):
+        return "spreadsheet"
+    if "invoice" in name or "invoice" in text:
+        return "invoice"
+    if "resume" in name or "curriculum" in text:
+        return "resume"
+    if "report" in name or "summary" in name:
+        return "report"
+    if "application/pdf" == content_type:
+        return "pdf_document"
+    if "wordprocessingml" in content_type:
+        return "docx_document"
+    return "text_document"
+
+
+def _summarize_document_text(text: str | None, max_len: int = 420) -> str | None:
+    if not text:
+        return None
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return None
+    # Extractive lightweight summary for predictable runtime behavior.
+    sentences = [s.strip() for s in cleaned.split(".") if s.strip()]
+    if not sentences:
+        return cleaned[:max_len]
+    summary = ". ".join(sentences[:3]).strip()
+    if len(summary) > max_len:
+        summary = summary[: max_len - 3].rstrip() + "..."
+    elif not summary.endswith("."):
+        summary += "."
+    return summary
 
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
@@ -295,6 +352,8 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
         "content_type":   content_type,
         "size_bytes":     len(content),
         "extracted_text": truncated_text,
+        "upload_category": _categorize_upload(content_type, file.filename, extracted_text),
+        "document_summary": _summarize_document_text(extracted_text),
         "chunk_count":    len(chunks),
         "chunks":         chunks[:8],
         "diagnostics":    {

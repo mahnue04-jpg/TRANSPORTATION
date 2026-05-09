@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#6c63ff" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
   <title>Amicor — Your AI Assistant</title>
 
   <!-- KaTeX — math rendering (synchronous load so katex.renderToString is always ready) -->
@@ -36,6 +38,13 @@
   <script src="/static/ux/runtimeDiagnostics.js"></script>
   <!-- Production monitoring -->
   <script src="/static/monitoring/productionMonitor.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("/static/sw.js").catch(function () {});
+      });
+    }
+  </script>
 
   <style>
     /* KaTeX block equations: centre and allow horizontal scroll on small screens */

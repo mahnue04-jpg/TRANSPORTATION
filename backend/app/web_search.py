@@ -1,7 +1,11 @@
 import html
+import hashlib
+import json
 import os
 import re
+import time
 from datetime import datetime, UTC
+from typing import Any
 from xml.etree import ElementTree
 from urllib.parse import parse_qs, quote_plus, urlparse
 
@@ -9,10 +13,67 @@ import requests
 
 from app.providers.resilience import get_breaker, resilient_call, RetryBudget  # type: ignore
 
+_CACHE_TTL_S = int(os.getenv("SEARCH_CACHE_TTL", "300"))
+_SEARCH_CACHE: dict[str, tuple[float, dict]] = {}
+_SEARCH_DIAGNOSTICS: dict[str, Any] = {
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "provider_calls": {},
+    "provider_failures": {},
+    "fallback_events": 0,
+    "last_queries": [],
+}
+
 
 def _clean_text(value: str) -> str:
     cleaned = re.sub(r"\s+", " ", html.unescape(value or "")).strip()
     return cleaned
+
+
+def _cache_key(query: str, max_results: int, news_mode: bool) -> str:
+    raw = f"{query.strip().lower()}|{max_results}|{1 if news_mode else 0}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str) -> dict | None:
+    entry = _SEARCH_CACHE.get(key)
+    if not entry:
+        _SEARCH_DIAGNOSTICS["cache_misses"] += 1
+        return None
+    expires_at, payload = entry
+    if expires_at < time.time():
+        _SEARCH_CACHE.pop(key, None)
+        _SEARCH_DIAGNOSTICS["cache_misses"] += 1
+        return None
+    _SEARCH_DIAGNOSTICS["cache_hits"] += 1
+    return json.loads(json.dumps(payload))
+
+
+def _cache_put(key: str, payload: dict) -> None:
+    _SEARCH_CACHE[key] = (time.time() + _CACHE_TTL_S, json.loads(json.dumps(payload)))
+
+
+def _diag_count(bucket: str, key: str) -> None:
+    store = _SEARCH_DIAGNOSTICS[bucket]
+    store[key] = int(store.get(key, 0)) + 1
+
+
+def get_search_diagnostics() -> dict:
+    last = _SEARCH_DIAGNOSTICS["last_queries"][-20:]
+    return {
+        "cache": {
+            "size": len(_SEARCH_CACHE),
+            "ttl_seconds": _CACHE_TTL_S,
+            "hits": _SEARCH_DIAGNOSTICS["cache_hits"],
+            "misses": _SEARCH_DIAGNOSTICS["cache_misses"],
+        },
+        "providers": {
+            "calls": dict(_SEARCH_DIAGNOSTICS["provider_calls"]),
+            "failures": dict(_SEARCH_DIAGNOSTICS["provider_failures"]),
+            "fallback_events": _SEARCH_DIAGNOSTICS["fallback_events"],
+        },
+        "last_queries": list(last),
+    }
 
 
 def _extract_ddg_results(markup: str, limit: int = 5) -> list[dict]:
@@ -165,6 +226,21 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
         today = datetime.now(UTC).strftime("%B %d, %Y")
         normalized_query = f"{normalized_query} latest news {today}".strip()
 
+    cache_key = _cache_key(normalized_query, max_results, news_mode)
+    cached = _cache_get(cache_key)
+    if cached:
+        cached.setdefault("meta", {})
+        cached["meta"]["cache_hit"] = True
+        return cached
+
+    _SEARCH_DIAGNOSTICS["last_queries"].append(
+        {
+            "query": normalized_query[:180],
+            "news_mode": news_mode,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
+
     # ── Build provider chain with circuit breakers ─────────────────────────
     if news_mode:
         provider_chain = [
@@ -182,13 +258,17 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
     used_provider = "unknown"
     payload = None
     provider_errors: list[str] = []
+    provider_latency_ms: dict[str, int] = {}
 
     for pname, breaker, fn in provider_chain:
         if not breaker.is_available():
             provider_errors.append(f"{pname}: circuit open (health={breaker.health_score:.2f})")
             continue
         try:
+            _diag_count("provider_calls", pname)
+            t0 = time.perf_counter()
             result = fn(normalized_query, max_results)
+            provider_latency_ms[pname] = int((time.perf_counter() - t0) * 1000)
             if result and result.get("results"):
                 breaker.record_success()
                 payload = result
@@ -196,9 +276,11 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
                 break
             else:
                 breaker.record_failure()
+                _diag_count("provider_failures", pname)
                 provider_errors.append(f"{pname}: empty results")
         except Exception as exc:
             breaker.record_failure()
+            _diag_count("provider_failures", pname)
             provider_errors.append(f"{pname}: {exc}")
 
     if not payload or not payload.get("results"):
@@ -220,7 +302,10 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
     ]
     response = _summarize_results(normalized_query, results, payload.get("answer", ""))
     status = "partial" if provider_errors else "success"
-    return {
+    if provider_errors:
+        _SEARCH_DIAGNOSTICS["fallback_events"] += 1
+
+    final_payload = {
         "response": response,
         "sources": sources,
         "status": status,
@@ -230,5 +315,9 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
             "query": normalized_query,
             "fallback_used": bool(provider_errors),
             "provider_errors": provider_errors if provider_errors else [],
+            "provider_latency_ms": provider_latency_ms,
+            "cache_hit": False,
         },
     }
+    _cache_put(cache_key, final_payload)
+    return final_payload
