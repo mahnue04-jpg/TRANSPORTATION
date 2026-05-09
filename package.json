@@ -5,6 +5,8 @@
   "main": "backend/app/main.py",
   "scripts": {
     "test:tools": "node backend/static/runToolTests.js",
+    "test:realtools": "node backend/static/runRealToolTests.js",
+    "benchmark:tools": "node backend/static/runToolBenchmarks.js",
     "test:runtime": "node backend/static/runToolTests.js",
     "test": "npm run test:tools"
   },
