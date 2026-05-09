@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amicor — Admin Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+  header { background: #1a1d27; border-bottom: 1px solid #2d3148; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.2rem; font-weight: 600; color: #a78bfa; }
+  header span { font-size: 0.8rem; color: #64748b; }
+  main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 0.75rem; padding: 1.25rem; }
+  .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 0.75rem; }
+  .stat { font-size: 2rem; font-weight: 700; color: #e2e8f0; }
+  .stat-sub { font-size: 0.8rem; color: #64748b; margin-top: 0.25rem; }
+  .badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 999px; font-weight: 600; }
+  .badge.green  { background: #14532d; color: #86efac; }
+  .badge.red    { background: #7f1d1d; color: #fca5a5; }
+  .badge.yellow { background: #713f12; color: #fde047; }
+  .badge.gray   { background: #1e293b; color: #94a3b8; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid #2d3148; }
+  th { color: #64748b; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .section-title { font-size: 0.9rem; font-weight: 600; color: #94a3b8; margin: 1.5rem 0 0.75rem; }
+  .refresh-btn { background: #2d3148; border: 1px solid #3d4270; color: #a78bfa; padding: 0.4rem 1rem; border-radius: 0.4rem; cursor: pointer; font-size: 0.85rem; }
+  .refresh-btn:hover { background: #3d4270; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.green  { background: #22c55e; }
+  .dot.red    { background: #ef4444; }
+  .dot.yellow { background: #eab308; }
+  pre { background: #0f1117; border: 1px solid #2d3148; border-radius: 0.5rem; padding: 1rem; font-size: 0.8rem; overflow-x: auto; color: #94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Amicor Admin</h1>
+  <span id="ts">—</span>
+  <span style="flex:1"></span>
+  <button class="refresh-btn" onclick="load()">↺ Refresh</button>
+</header>
+
+<main>
+  <!-- Summary cards -->
+  <div class="grid" id="summary-cards">
+    <div class="card"><h2>Registered Users</h2><div class="stat" id="c-users">—</div></div>
+    <div class="card"><h2>Total Uploads</h2><div class="stat" id="c-uploads">—</div></div>
+    <div class="card"><h2>Database</h2><div class="stat" id="c-db">—</div><div class="stat-sub" id="c-db-sub"></div></div>
+    <div class="card"><h2>Uptime</h2><div class="stat" id="c-uptime">—</div></div>
+  </div>
+
+  <!-- Counters -->
+  <div class="section-title">Request Counters</div>
+  <div class="card" style="margin-bottom:1rem">
+    <div id="counters-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.75rem"></div>
+  </div>
+
+  <!-- Provider states -->
+  <div class="section-title">Provider Circuit Breakers</div>
+  <div class="card" style="margin-bottom:1rem">
+    <table>
+      <thead><tr><th>Provider</th><th>State</th><th>Health</th><th>Calls</th><th>Failures</th></tr></thead>
+      <tbody id="providers-body"><tr><td colspan="5" style="color:#64748b">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Latencies -->
+  <div class="section-title">Latency Summaries</div>
+  <div class="card" style="margin-bottom:1rem">
+    <table>
+      <thead><tr><th>Key</th><th>Count</th><th>Avg</th><th>P50</th><th>P95</th><th>Max</th></tr></thead>
+      <tbody id="latency-body"><tr><td colspan="6" style="color:#64748b">No data yet</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Recent provider logs -->
+  <div class="section-title">Recent Provider Logs</div>
+  <div class="card" style="margin-bottom:1rem">
+    <table>
+      <thead><tr><th>Time</th><th>Provider</th><th>Result</th><th>Latency</th><th>Error</th></tr></thead>
+      <tbody id="logs-body"><tr><td colspan="5" style="color:#64748b">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Recent errors -->
+  <div class="section-title">Recent Errors</div>
+  <div class="card" style="margin-bottom:1rem">
+    <table>
+      <thead><tr><th>Time</th><th>Path</th><th>Status</th><th>Message</th></tr></thead>
+      <tbody id="errors-body"><tr><td colspan="4" style="color:#64748b">No errors</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+function fmt(ms) {
+  if (ms < 1000) return ms + 'ms';
+  return (ms/1000).toFixed(1) + 's';
+}
+function fmtUptime(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return `${h}h ${m}m ${sec}s`;
+}
+function stateBadge(state) {
+  const cls = {CLOSED:'green', OPEN:'red', HALF_OPEN:'yellow'}[state] || 'gray';
+  return `<span class="badge ${cls}"><span class="dot ${cls}"></span>${state}</span>`;
+}
+function boolBadge(ok) {
+  return ok
+    ? '<span class="badge green">OK</span>'
+    : '<span class="badge red">FAIL</span>';
+}
+
+async function load() {
+  document.getElementById('ts').textContent = new Date().toLocaleTimeString();
+  try {
+    const res = await fetch('/api/admin/dashboard');
+    const d = await res.json();
+
+    // Summary cards
+    document.getElementById('c-users').textContent   = d.platform?.registered_users ?? '—';
+    document.getElementById('c-uploads').textContent = d.platform?.total_uploads ?? '—';
+    const dbOk = d.database?.reachable;
+    document.getElementById('c-db').innerHTML = boolBadge(dbOk);
+    document.getElementById('c-db-sub').textContent = dbOk ? 'Connected' : 'Unreachable';
+    document.getElementById('c-uptime').textContent  = fmtUptime(d.observability?.uptime_seconds ?? 0);
+
+    // Counters
+    const counters = d.observability?.counters ?? {};
+    const cGrid = document.getElementById('counters-grid');
+    cGrid.innerHTML = Object.entries(counters).length
+      ? Object.entries(counters).map(([k,v]) =>
+          `<div style="background:#0f1117;border:1px solid #2d3148;border-radius:0.5rem;padding:0.6rem 0.75rem">
+            <div style="font-size:0.7rem;color:#64748b">${k}</div>
+            <div style="font-size:1.3rem;font-weight:700">${v}</div>
+          </div>`).join('')
+      : '<span style="color:#64748b;font-size:0.85rem">No counters yet</span>';
+
+    // Providers
+    const providers = d.providers ?? {};
+    document.getElementById('providers-body').innerHTML =
+      Object.keys(providers).length
+        ? Object.entries(providers).map(([name, p]) =>
+            `<tr>
+              <td>${name}</td>
+              <td>${stateBadge(p.state)}</td>
+              <td>${typeof p.health_score === 'number' ? (p.health_score*100).toFixed(0)+'%' : '—'}</td>
+              <td>${p.total_calls ?? 0}</td>
+              <td>${p.failure_count ?? 0}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="5" style="color:#64748b">No providers warmed up yet</td></tr>';
+
+    // Latencies
+    const lats = d.observability?.latencies ?? {};
+    document.getElementById('latency-body').innerHTML =
+      Object.keys(lats).length
+        ? Object.entries(lats).map(([k, l]) =>
+            `<tr><td>${k}</td><td>${l.count}</td><td>${l.avg_ms}ms</td><td>${l.p50_ms}ms</td><td>${l.p95_ms}ms</td><td>${l.max_ms}ms</td></tr>`).join('')
+        : '<tr><td colspan="6" style="color:#64748b">No latency data yet</td></tr>';
+
+    // Provider logs
+    const logs = d.recent_provider_logs ?? [];
+    document.getElementById('logs-body').innerHTML = logs.length
+      ? logs.map(l =>
+          `<tr>
+            <td style="white-space:nowrap;font-size:0.75rem">${new Date(l.created_at).toLocaleTimeString()}</td>
+            <td>${l.provider}</td>
+            <td>${boolBadge(l.success)}</td>
+            <td>${l.latency_ms != null ? l.latency_ms+'ms' : '—'}</td>
+            <td style="color:#ef4444;font-size:0.78rem">${l.error_msg ?? ''}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="5" style="color:#64748b">No logs yet</td></tr>';
+
+    // Recent errors
+    const errs = d.observability?.recent_errors ?? [];
+    document.getElementById('errors-body').innerHTML = errs.length
+      ? errs.slice(-10).reverse().map(e =>
+          `<tr>
+            <td style="white-space:nowrap;font-size:0.75rem">${new Date(e.ts).toLocaleTimeString()}</td>
+            <td style="font-size:0.8rem">${e.path}</td>
+            <td><span class="badge red">${e.status_code}</span></td>
+            <td style="font-size:0.8rem;color:#94a3b8">${e.message}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="4" style="color:#64748b">No errors</td></tr>';
+
+  } catch (err) {
+    console.error('Dashboard load failed:', err);
+  }
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

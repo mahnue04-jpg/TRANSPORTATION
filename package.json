@@ -4,6 +4,10 @@
   "description": "AI-powered tool runtime and orchestration system",
   "main": "backend/app/main.py",
   "scripts": {
+    "test:platform":       "node backend/static/runPlatformTests.js",
+    "test:database":       "node backend/static/runDatabaseTests.js",
+    "test:security":       "node backend/static/runSecurityTests.js",
+    "benchmark:runtime":   "node backend/static/runRuntimeBenchmarks.js",
     "test:tools": "node backend/static/runToolTests.js",
     "test:realtools": "node backend/static/runRealToolTests.js",
     "benchmark:tools": "node backend/static/runToolBenchmarks.js",

@@ -3,6 +3,9 @@
 #
 # Mounts the backend source as a volume so uvicorn --reload picks up changes.
 # Reads secrets from .env (copy .env.template → .env and fill in your keys).
+#
+# PostgreSQL is available but optional — set DATABASE_URL in .env to enable it.
+# SQLite (default) works without the db service.
 
 version: "3.9"
 
@@ -28,6 +31,9 @@ services:
     volumes:
       - ./backend:/app        # live reload
       - amicor_data:/data     # SQLite persistence
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -36,5 +42,22 @@ services:
       retries: 3
       start_period: 10s
 
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-amicor}
+      POSTGRES_USER:     ${POSTGRES_USER:-amicor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-amicor_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - amicor_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amicor} -d ${POSTGRES_DB:-amicor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   amicor_data:
+  amicor_pg:

@@ -1,4 +1,3 @@
-print("MAIN.PY LOADED")
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,6 +22,10 @@ from app.router import route_message              # type: ignore
 from app import startup as app_startup            # type: ignore
 from app import image_ocr                         # type: ignore
 
+from app.middleware import SecurityHeadersMiddleware, RequestTracingMiddleware, log_upload  # type: ignore
+from app import auth as auth_module               # type: ignore
+from app import observability                     # type: ignore
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
 logging.basicConfig(
@@ -46,7 +49,13 @@ def _allowed_origins() -> list: # type: ignore
     raw = os.environ.get("ALLOWED_ORIGINS", "")
     if raw.strip():
         return [o.strip() for o in raw.split(",") if o.strip()] # type: ignore
-    return ["*"]  # type: ignore # dev default — override via ALLOWED_ORIGINS in production
+    # Secure-by-default local dev origins; override via ALLOWED_ORIGINS in deployment.
+    return [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+    ] # type: ignore
 
 
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
@@ -73,6 +82,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.critical("Database unavailable after retries — chat persistence disabled.")
 
+    # ── Platform DB (SQLAlchemy) ──────────────────────────────────────────
+    try:
+        from app.db.session import init_platform_db  # type: ignore
+        init_platform_db()
+        logger.info("Platform database tables ready.")
+    except Exception as exc:
+        logger.error("Platform DB init failed: %s", exc)
+
     logger.info("Amicor ready. version=%s", report.get("version", "dev")) # type: ignore
 
     yield  # ── APPLICATION RUNNING ──────────────────────────────────────────
@@ -96,6 +113,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTracingMiddleware)
+
+# ── Auth router ───────────────────────────────────────────────────────────────
+app.include_router(auth_module.router)
 
 # Serve static files from backend/static/
 _static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
@@ -142,7 +164,7 @@ def _extract_upload_text(filename: str | None, content_type: str, content: bytes
         ocr_result = image_ocr.extract(content_type, content) # type: ignore
         diagnostics["ocr"] = ocr_result["diagnostics"]
         diagnostics["ocr_method"] = ocr_result["method"]
-        combined = image_ocr.build_context_block(filename, ocr_result)
+        combined = image_ocr.build_context_block(filename, ocr_result) # type: ignore
         return combined, diagnostics, ocr_result # type: ignore
     diagnostics["warnings"].append(f"No extractor available for {content_type}.")
     return None, diagnostics, None
@@ -293,11 +315,24 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
             "has_text":    bool(ocr_result.get("text")), # type: ignore
         }
 
+    # Record upload metrics and persist to platform_uploads
+    ocr_result_ref = response_payload.get("ocr")
+    log_upload(
+        filename=file.filename,
+        content_type=content_type,
+        size_bytes=len(content),
+        ocr_method=(ocr_result_ref or {}).get("method") if ocr_result_ref else None, # type: ignore
+        ocr_confidence=(ocr_result_ref or {}).get("confidence") if ocr_result_ref else None, # type: ignore
+        ocr_word_count=(ocr_result_ref or {}).get("word_count") if ocr_result_ref else None, # type: ignore
+    )
+    observability.increment("uploads.total")
+    if content_type.startswith("image/"):
+        observability.increment("uploads.images")
+
     return response_payload  # type: ignore
 
 
 # ── Streaming chat ────────────────────────────────────────────────────────────
-
 async def _stream_openai(message: str, user_id: str) -> AsyncIterator[str]:
     """Yield Server-Sent Event chunks for OpenAI streaming responses."""
     import os as _os
@@ -404,10 +439,85 @@ async def chat_stream(request: ChatRequest):  # type: ignore
 # ── Provider resilience diagnostics ──────────────────────────────────────────
 
 @app.get("/api/diagnostics/providers")
-def provider_diagnostics():
+def provider_diagnostics(): # type: ignore
     """Return health and circuit-breaker state for all providers."""
     from app.providers.resilience import all_diagnostics  # type: ignore
     return {
         "providers": all_diagnostics(),
         "version": os.environ.get("APP_VERSION", "dev"),
-    }
+    } # type: ignore
+
+
+# ── Admin dashboard ───────────────────────────────────────────────────────────
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(): # type: ignore
+    """
+    Aggregated platform status: DB health, provider states, session counters,
+    upload stats, observability metrics.
+    Not auth-protected in dev mode; add require_auth in production.
+    """
+    from app.providers.resilience import all_diagnostics  # type: ignore
+    from app.db.session import check_db_connection        # type: ignore
+
+    db_ok = check_db_connection()
+
+    # Count registered users and recent uploads from platform tables
+    user_count   = 0
+    upload_count = 0
+    recent_logs: list = [] # type: ignore
+    try:
+        from app.db.session import SessionLocal   # type: ignore
+        from app.db.models import User, Upload, ProviderLog  # type: ignore
+        db = SessionLocal()
+        try:
+            user_count   = db.query(User).count()
+            upload_count = db.query(Upload).count()
+            recent_logs  = [ # type: ignore
+                {
+                    "provider": r.provider_name,
+                    "success":  r.success,
+                    "latency_ms": r.latency_ms,
+                    "error_msg":  r.error_msg,
+                    "created_at": r.created_at.isoformat(),
+                }
+                for r in db.query(ProviderLog)
+                          .order_by(ProviderLog.id.desc())
+                          .limit(20)
+                          .all()
+            ]
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Admin dashboard DB query failed: %s", exc)
+
+    return {
+        "status": "ok",
+        "database": {
+            "reachable": db_ok,
+        },
+        "platform": {
+            "registered_users": user_count,
+            "total_uploads":    upload_count,
+        },
+        "providers": all_diagnostics(),
+        "observability": observability.get_metrics(),
+        "recent_provider_logs": recent_logs,
+        "version": os.environ.get("APP_VERSION", "dev"),
+    } # type: ignore
+
+
+@app.get("/api/admin/metrics")
+def admin_metrics():
+    """Lightweight metrics endpoint — counters, latencies, recent errors."""
+    return observability.get_metrics()
+
+
+# ── Admin UI (serves static admin.html) ───────────────────────────────────────
+
+@app.get("/admin")
+def serve_admin():
+    admin_html = os.path.join(_static_dir, "admin.html")
+    if os.path.isfile(admin_html):
+        return FileResponse(admin_html, media_type="text/html")
+    return JSONResponse({"error": "Admin UI not found"}, status_code=404)
