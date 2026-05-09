@@ -11,6 +11,8 @@
     "benchmark:memory": "node backend/static/runMemoryBenchmarks.js",
     "test:planning": "node backend/static/runPlanningTests.js",
     "benchmark:planning": "node backend/static/runPlanningBenchmarks.js",
+    "test:assistant": "node backend/static/runAssistantTests.js",
+    "benchmark:assistant": "node backend/static/runAssistantBenchmarks.js",
     "test:runtime": "node backend/static/runToolTests.js",
     "test": "npm run test:tools"
   },

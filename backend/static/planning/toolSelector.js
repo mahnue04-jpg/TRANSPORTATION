@@ -108,7 +108,9 @@ function selectToolForTask(task, options) {
     if (tools[j].metadata && tools[j].metadata.supportedTaskTypes && tools[j].metadata.supportedTaskTypes.indexOf(task.type) >= 0) {
       score += 4;
     }
-    ranked.push({ tool: tools[j], score: score });
+    if (score > 0) {
+      ranked.push({ tool: tools[j], score: score });
+    }
   }
 
   ranked.sort(function (a, b) {
