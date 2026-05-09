@@ -3,3 +3,4 @@ backend/.env
 backend/app/.env
 __pycache__/
 *.pyc
+backend/data/

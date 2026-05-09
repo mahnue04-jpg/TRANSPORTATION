@@ -5,3 +5,5 @@ requests
 python-dotenv
 aiofiles
 python-multipart
+pypdf
+python-docx

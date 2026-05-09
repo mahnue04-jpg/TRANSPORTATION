@@ -52,7 +52,7 @@ def _get_client() -> OpenAI:
     return _client
 
 
-def handle(message: str, history: list = None) -> str:
+def handle(message: str, history: list = None, user_id: str = "default") -> str:
     client = _get_client()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:

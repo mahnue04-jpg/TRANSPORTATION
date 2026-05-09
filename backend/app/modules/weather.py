@@ -1,12 +1,8 @@
 """Weather capability module."""
 from app.weather import get_weather
 
-TRIGGERS = ["weather"]
+TRIGGERS = ["weather", "forecast", "temperature", "rain", "snow"]
 
 
-def handle(message: str, history: list = None) -> str:
-    city = "miami"
-    lower = message.lower()
-    if "weather in" in lower:
-        city = lower.split("weather in", 1)[1].strip()
-    return get_weather(city)
+def handle(message: str, history: list = None, user_id: str = "default") -> dict:
+    return get_weather(message)

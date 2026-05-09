@@ -20,5 +20,5 @@ TRIGGERS = [
 ]
 
 
-def handle(message: str, history: list = None) -> str:
+def handle(message: str, history: list = None, user_id: str = "default") -> str:
     return handle_business_request(message, history=history)

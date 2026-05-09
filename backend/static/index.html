@@ -306,6 +306,42 @@
     }
     .tool-badge span { font-size: 0.75rem; }
 
+    .bubble-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    .capability-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(108,99,255,0.12);
+      border: 1px solid rgba(108,99,255,0.18);
+    }
+
+    .source-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .source-link {
+      color: var(--text-dim);
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(148,148,184,0.35);
+    }
+
+    .source-link:hover {
+      color: var(--text);
+      border-bottom-color: rgba(233,233,244,0.65);
+    }
+
     /* ── Typing indicator ─────────────────────────────────── */
     .typing-bubble {
       display: inline-flex;
@@ -584,6 +620,32 @@
   let isSpeaking  = false;
   let recognition = null;
 
+  function escapeHtmlText(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function restoreHistory() {
+    if (!UID) return;
+    try {
+      const res = await fetch(`${API}/api/history/${encodeURIComponent(UID)}?limit=40`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const messages = Array.isArray(data.messages) ? data.messages : [];
+      if (!messages.length) return;
+      messages.forEach((item) => {
+        if (item.role === "user") addBubble("user", item.content, null, false, null, true);
+        else if (item.role === "assistant") addBubble("ai", item.content, "openai", false, null, true);
+      });
+      scrollBottom();
+    } catch (err) {
+      console.warn("[AmiCor] History restore failed:", err.message);
+    }
+  }
+
   // ── Session & Auth Init ──────────────────────────────────
 
   /**
@@ -595,6 +657,7 @@
       const restored = AmiCorSession.restore();
       if (restored && restored.identity) {
         UID = restored.identity.userId;
+        await restoreHistory();
         setStatus(`Welcome ${restored.identity.name}!`, "load");
         setTimeout(() => setStatus("Ready"), 2000);
         return;
@@ -627,6 +690,7 @@
             } else {
               UID = identity.email.split("@")[0] + "_" + Date.now();
             }
+            restoreHistory();
             msgEl.focus();
             resolve();
           },
@@ -644,6 +708,7 @@
             } else {
               UID = identity.email.split("@")[0] + "_" + Date.now();
             }
+            restoreHistory();
             msgEl.focus();
             resolve();
           },
@@ -743,13 +808,13 @@
 
   // ── Bubble factory ───────────────────────────────────────
 
-  const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼", education:"🎓" };
+  const TOOL_ICONS = { weather:"🌤", time:"🕐", news:"📰", search:"🔍", openai:"🤖", business:"💼", education:"🎓", email:"✉️" };
 
   // ── Content renderer ─────────────────────────────────────────
   // Delegated entirely to render.js (window.AmiCorRenderer).
   // See backend/static/render.js for the full pipeline documentation.
 
-  function addBubble(role, text, tool, isError = false) {
+  function addBubble(role, text, tool, isError = false, meta = null, skipScroll = false) {
     hideWelcome();
     const row = document.createElement("div");
     row.className = `msg-row ${role}`;
@@ -774,8 +839,38 @@
 
     row.appendChild(label);
     row.appendChild(bubble);
+
+    if (role === "ai" && meta && (meta.status || (meta.sources && meta.sources.length))) {
+      const metaEl = document.createElement("div");
+      metaEl.className = "bubble-meta";
+
+      if (meta.status) {
+        const state = document.createElement("span");
+        state.className = "capability-state";
+        state.textContent = meta.status === "partial" ? "Live result with fallback" : meta.status === "error" ? "Capability error" : "Live capability";
+        metaEl.appendChild(state);
+      }
+
+      if (meta.sources && meta.sources.length) {
+        const sources = document.createElement("div");
+        sources.className = "source-list";
+        meta.sources.forEach((source) => {
+          const link = document.createElement("a");
+          link.className = "source-link";
+          link.href = source.url;
+          link.target = "_blank";
+          link.rel = "noreferrer noopener";
+          link.textContent = source.label || source.title || source.url;
+          sources.appendChild(link);
+        });
+        metaEl.appendChild(sources);
+      }
+
+      row.appendChild(metaEl);
+    }
+
     chatEl.appendChild(row);
-    scrollBottom();
+    if (!skipScroll) scrollBottom();
     return bubble;
   }
 
@@ -848,8 +943,10 @@
 
       const reply = data.reply || "No response.";
       const tool  = data.tool  || "openai";
-      const isErr = reply.startsWith("Error:") || reply.startsWith("Web search error");
-      const bubble = addBubble("ai", reply, tool, isErr);
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+      const status  = data.status || "success";
+      const isErr = status === "error" || reply.startsWith("Error:") || reply.startsWith("Web search error");
+      const bubble = addBubble("ai", reply, tool, isErr, { sources, status, capability: data.capability || {}, meta: data.meta || {} });
 
       // Attach retry button to error bubbles
       if (isErr && window.AmiCorErrorRecovery) {
@@ -861,7 +958,7 @@
 
       if (!isErr) speakText(reply);
       if (window.AmiCorUpload) AmiCorUpload.clear();
-      setStatus("Ready");
+      setStatus(status === "partial" ? "Completed with fallback data" : "Ready");
     } catch (err) {
       const durationMs = Date.now() - t0;
       if (window.AmiCorMonitor) AmiCorMonitor.record(durationMs, true);

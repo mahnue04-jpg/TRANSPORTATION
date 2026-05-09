@@ -24,6 +24,7 @@
   const ALLOWED_TYPES = new Set([
     "text/plain", "text/markdown", "text/csv",
     "application/json", "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "image/png", "image/jpeg", "image/webp",
   ]);
 
@@ -32,6 +33,7 @@
     "image/":       "🖼️",
     "application/json": "{ }",
     "application/pdf":  "📋",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "📝",
     "default":      "📎",
   };
 
@@ -134,7 +136,12 @@
       size.className = "chip-size";
       size.textContent = att.status === "uploading" ? "uploading…"
                        : att.status === "error"     ? "failed"
+                       : att.diagnostics?.parser      ? `${att.diagnostics.parser} • ${att.chunkCount || 0} chunks`
                        : formatBytes(att.file.size);
+
+      if (att.diagnostics) {
+        chip.title = `Parser: ${att.diagnostics.parser || "unknown"}${att.diagnostics.text_length ? ` | ${att.diagnostics.text_length} chars` : ""}`;
+      }
 
       const rm = document.createElement("button");
       rm.className = "chip-remove";
@@ -173,6 +180,8 @@
         const data = await res.json();
         att.status        = "done";
         att.extractedText = data.extracted_text || null;
+        att.chunkCount    = data.chunk_count || 0;
+        att.diagnostics   = data.diagnostics || null;
         renderStrip();
         return;
       } catch (err) {
@@ -201,7 +210,7 @@
         }
         continue;
       }
-      const att = { file, id: nextId(), status: "uploading", extractedText: null };
+      const att = { file, id: nextId(), status: "uploading", extractedText: null, chunkCount: 0, diagnostics: null };
       _attachments.push(att);
       renderStrip();
       uploadWithRetry(att); // fire-and-forget; renderStrip() called on completion

@@ -17,16 +17,19 @@ from typing import Optional
 
 logger = logging.getLogger("amicor.startup")
 
+_DEFAULT_DB = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "data", "chat.db")
+)
+
 # ── Required / optional env-var declarations ───────────────────────────────────
 REQUIRED_VARS: list[str] = [
     "OPENAI_API_KEY",
 ]
 
 OPTIONAL_VARS: dict[str, str] = {
-    "weather_api_key": "Weather module will be disabled without this.",
     "ALLOWED_ORIGINS":  "Defaults to * — unsafe for production, set to your domain.",
     "LOG_LEVEL":        "Defaults to INFO.",
-    "DB_FILENAME":      "Defaults to /data/chat.db.",
+    "DB_FILENAME":      f"Defaults to {_DEFAULT_DB}.",
     "MAX_HISTORY":      "Defaults to 10 messages.",
     "APP_VERSION":      "Defaults to 'dev'.",
 }
@@ -73,7 +76,7 @@ def validate_environment() -> dict:
 def validate_database(db_path: Optional[str] = None) -> dict:
     """Check that the SQLite database path is accessible and writable."""
     if db_path is None:
-        db_path = os.environ.get("DB_FILENAME", "/data/chat.db")
+        db_path = os.environ.get("DB_FILENAME", _DEFAULT_DB)
 
     try:
         # Ensure parent directory exists (mirrors database.py behaviour)

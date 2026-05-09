@@ -4,16 +4,19 @@ load_dotenv()
 
 import os
 import logging
+import importlib
+from io import BytesIO
 from contextlib import asynccontextmanager
+from typing import Any
+from zipfile import BadZipFile
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
 
-from app.database import get_connection, init_db  # type: ignore
-from app.models import ChatRequest                 # type: ignore
+from app.database import clear_user_memory, get_chat_history, get_memory_summary, get_preferences, init_db  # type: ignore
+from app.models import ChatRequest, ResetRequest   # type: ignore
 from app.router import route_message              # type: ignore
 from app import startup as app_startup            # type: ignore
 
@@ -30,6 +33,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_UPLOAD_TYPES = frozenset({
     "text/plain", "text/markdown", "text/csv",
     "application/json", "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "image/png", "image/jpeg", "image/webp",
 })
 
@@ -96,9 +100,42 @@ if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
-class ResetRequest(BaseModel):
-    user_id: str
+def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> list[str]:
+    if not text:
+        return []
+    chunks: list[str] = []
+    start = 0
+    step = max(1, chunk_size - overlap)
+    while start < len(text):
+        chunks.append(text[start:start + chunk_size])
+        start += step
+    return chunks
+
+
+def _extract_upload_text(filename: str | None, content_type: str, content: bytes) -> tuple[str | None, dict[str, Any]]:
+    diagnostics: dict[str, Any] = {
+        "parser": "none",
+        "warnings": [],
+    }
+    if content_type.startswith("text/") or content_type == "application/json":
+        diagnostics["parser"] = "utf8-text"
+        return content.decode("utf-8", errors="replace"), diagnostics
+    if content_type == "application/pdf":
+        pypdf = importlib.import_module("pypdf")
+
+        diagnostics["parser"] = "pypdf"
+        reader = pypdf.PdfReader(BytesIO(content))
+        pages: list[str] = [str(page.extract_text() or "") for page in reader.pages]
+        return "\n\n".join(filter(None, pages)).strip(), diagnostics
+    if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        docx = importlib.import_module("docx")
+
+        diagnostics["parser"] = "python-docx"
+        document = docx.Document(BytesIO(content))
+        paragraphs: list[str] = [str(paragraph.text) for paragraph in document.paragraphs if str(paragraph.text).strip()]
+        return "\n".join(paragraphs).strip(), diagnostics
+    diagnostics["warnings"].append(f"No extractor available for {content_type}.")
+    return None, diagnostics
 
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
@@ -142,11 +179,32 @@ def serve_app():
 async def chat(request: ChatRequest):  # type: ignore
     logger.debug("Chat from user=%s: %r", request.user_id, request.message[:80])
     try:
-        result = route_message(request.message, user_id=request.user_id)  # type: ignore
-        return {"reply": result["response"], "tool": result.get("tool", "openai")} # type: ignore
+        result: dict[str, Any] = route_message(request.message, user_id=request.user_id)  # type: ignore
+        return {
+            "reply": result["response"],
+            "tool": result.get("tool", "openai"),
+            "sources": result.get("sources", []),
+            "status": result.get("status", "success"),
+            "capability": result.get("capability", {}),
+            "meta": result.get("meta", {}),
+        } # type: ignore
     except Exception as exc:
         logger.exception("Router error for user=%s", request.user_id)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/history/{user_id}")
+def history(user_id: str, limit: int = 50) -> dict[str, Any]:
+    if not user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id required")
+    return {
+        "user_id": user_id,
+        "messages": get_chat_history(user_id, limit=max(1, min(limit, 100))),
+        "memory": {
+            "summary": get_memory_summary(user_id),
+            "preferences": get_preferences(user_id),
+        },
+    }
 
 
 # ── Memory reset ──────────────────────────────────────────────────────────────
@@ -156,11 +214,7 @@ def reset_chat(req: ResetRequest):
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id required")
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
+        clear_user_memory(user_id)
         logger.info("Memory cleared for user=%s", user_id)
         return {"user_id": user_id, "status": "memory cleared"}
     except Exception as exc: # type: ignore
@@ -188,12 +242,16 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
-    extracted_text = None
-    if content_type.startswith("text/") or content_type == "application/json":
-        try:
-            extracted_text = content.decode("utf-8", errors="replace")[:8000]
-        except Exception:
-            extracted_text = None
+    try:
+        extracted_text, diagnostics = _extract_upload_text(file.filename, content_type, content)
+    except (BadZipFile, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse upload: {exc}")
+    except Exception as exc:
+        logger.exception("Upload parse error for %s", file.filename)
+        raise HTTPException(status_code=500, detail=f"Upload parsing failed: {exc}")
+
+    truncated_text = extracted_text[:8000] if extracted_text else None
+    chunks = _chunk_text(extracted_text or "")
 
     logger.info(
         "Upload: filename=%r type=%s size=%d bytes",
@@ -203,6 +261,13 @@ async def upload_file(file: UploadFile = File(...)): # type: ignore
         "filename":       file.filename,
         "content_type":   content_type,
         "size_bytes":     len(content),
-        "extracted_text": extracted_text,
+        "extracted_text": truncated_text,
+        "chunk_count":    len(chunks),
+        "chunks":         chunks[:8],
+        "diagnostics":    {
+            **diagnostics,
+            "text_length": len(extracted_text or ""),
+            "truncated": bool(extracted_text and len(extracted_text) > 8000),
+        },
         "status":         "uploaded",
     } # type: ignore
