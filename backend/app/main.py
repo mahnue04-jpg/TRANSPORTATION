@@ -28,6 +28,7 @@ from app import observability                     # type: ignore
 from app import ecosystem as ecosystem_module     # type: ignore
 from app import responses as responses_module     # type: ignore
 from app import validation as validation_module   # type: ignore
+from app import logging_utils                     # type: ignore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
@@ -410,30 +411,75 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:  # type: 
         HTTPException 413 if file too large
         HTTPException 400 if parse error
     """
-    content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
-    validation_module.validate_content_type(content_type, ALLOWED_UPLOAD_TYPES) # type: ignore
-
     content = await file.read(MAX_UPLOAD_BYTES + 1)
-    validation_module.validate_file_size(len(content), MAX_UPLOAD_BYTES, file.filename)
 
     try:
-        extracted_text, diagnostics, ocr_result = _extract_upload_text(file.filename, content_type, content) # type: ignore
+        filename = validation_module.validate_filename(file.filename)
+        content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
+        validation_module.validate_content_type(content_type, ALLOWED_UPLOAD_TYPES) # type: ignore
+        validation_module.validate_extension_mime_policy(content_type, filename)
+        validation_module.validate_file_size(len(content), MAX_UPLOAD_BYTES, filename)
+        validation_module.validate_file_signature(content_type, content, filename)
+        validation_module.validate_archive_safety(content_type, content, filename)
+    except HTTPException as exc:
+        observability.increment("uploads.rejected")
+        logging_utils.log_event(
+            logger,
+            logging.WARNING,
+            event="upload.rejected.validation",
+            message="Upload rejected by validation",
+            filename=file.filename,
+            content_type=(file.content_type or "application/octet-stream"),
+            size_bytes=len(content),
+            status_code=exc.status_code,
+            error=str(exc.detail),
+        )
+        raise
+
+    try:
+        extracted_text, diagnostics, ocr_result = _extract_upload_text(filename, content_type, content) # type: ignore
     except (BadZipFile, ValueError) as exc:
+        observability.increment("uploads.rejected")
+        logging_utils.log_event(
+            logger,
+            logging.WARNING,
+            event="upload.rejected.parse",
+            message="Upload rejected due to parse error",
+            filename=filename,
+            content_type=content_type,
+            size_bytes=len(content),
+            error=logging_utils.safe_exception_message(exc),
+        )
         raise HTTPException(status_code=400, detail=f"Could not parse upload: {exc}")
     except Exception as exc:
-        logger.exception("Upload parse error for %s", file.filename)
+        observability.increment("uploads.errors")
+        logging_utils.log_event(
+            logger,
+            logging.ERROR,
+            event="upload.error.parse",
+            message="Upload parse error",
+            filename=filename,
+            content_type=content_type,
+            size_bytes=len(content),
+            error=logging_utils.safe_exception_message(exc),
+        )
         raise HTTPException(status_code=500, detail=f"Upload parsing failed: {exc}")
 
     truncated_text = extracted_text[:8000] if extracted_text else None
     chunks = _chunk_text(extracted_text or "")
 
-    logger.info(
-        "Upload: filename=%r type=%s size=%d bytes",
-        file.filename, content_type, len(content),
+    logging_utils.log_event(
+        logger,
+        logging.INFO,
+        event="upload.accepted",
+        message="Upload accepted",
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(content),
     )
 
     response_payload: dict[str, Any] = {
-        "filename":       file.filename,
+        "filename":       filename,
         "content_type":   content_type,
         "size_bytes":     len(content),
         "extracted_text": truncated_text,
@@ -462,7 +508,7 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:  # type: 
     # Record upload metrics and persist to platform_uploads
     ocr_result_ref = response_payload.get("ocr")
     log_upload(
-        filename=file.filename,
+        filename=filename,
         content_type=content_type,
         size_bytes=len(content),
         ocr_method=(ocr_result_ref or {}).get("method") if ocr_result_ref else None, # type: ignore
