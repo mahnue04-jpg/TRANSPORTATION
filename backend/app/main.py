@@ -14,7 +14,7 @@ from zipfile import BadZipFile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
 
 from app.database import clear_user_memory, get_chat_history, get_memory_summary, get_preferences, init_db  # type: ignore
 from app.models import ChatRequest, ResetRequest   # type: ignore
@@ -27,6 +27,7 @@ from app import auth as auth_module               # type: ignore
 from app import observability                     # type: ignore
 from app import ecosystem as ecosystem_module     # type: ignore
 from app import responses as responses_module     # type: ignore
+from app import validation as validation_module   # type: ignore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO)
@@ -230,7 +231,8 @@ def _summarize_document_text(text: str | None, max_len: int = 420) -> str | None
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
 @app.get("/")
-def root():
+def root() -> dict[str, str]:
+    """Root endpoint — returns basic status."""
     return {"status": "ok", "version": os.environ.get("APP_VERSION", "dev")}
 
 
@@ -289,20 +291,30 @@ def health_detail():
 
 # ── App shell ─────────────────────────────────────────────────────────────────
 @app.get("/app")
-def serve_app():
+def serve_app() -> FileResponse:
+    """Serve main application UI."""
     index = os.path.join(_static_dir, "index.html")
     return FileResponse(index, media_type="text/html")
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
-async def chat(request: ChatRequest):  # type: ignore
+async def chat(request: ChatRequest) -> responses_module.NormalizedResponse:
     """Process a chat message and return AI response.
     
     Normalized response format:
       { ok: true, data: {...}, error: null, meta: {...} }
     
     Data includes: reply, tool, sources, status, capability, meta
+    
+    Args:
+        request: Chat request with validated user_id and message
+        
+    Returns:
+        Normalized success response with chat reply
+        
+    Raises:
+        HTTPException 422 if validation fails
     """
     logger.debug("Chat from user=%s: %r", request.user_id, request.message[:80])
     try:
@@ -317,7 +329,7 @@ async def chat(request: ChatRequest):  # type: ignore
         }
         return responses_module.normalize_success(
             data=response_data,
-        ) # type: ignore
+        )
     except Exception as exc:
         logger.exception("Router error for user=%s", request.user_id)
         error_response = responses_module.normalize_error(
@@ -326,29 +338,49 @@ async def chat(request: ChatRequest):  # type: ignore
         return JSONResponse(
             status_code=500,
             content=responses_module.as_dict(error_response),
-        )
+        ) # type: ignore
 
 
 @app.get("/api/history/{user_id}")
 def history(user_id: str, limit: int = 50) -> dict[str, Any]:
-    if not user_id.strip():
-        raise HTTPException(status_code=400, detail="user_id required")
+    """Retrieve chat history and memory for user.
+    
+    Args:
+        user_id: User identifier (validated)
+        limit: Max messages to retrieve (1-100)
+        
+    Returns:
+        Dict with user_id, messages, and memory summary
+    """
+    validated_user_id = validation_module.validate_user_id(user_id)
+    validated_limit = max(1, min(int(limit), 100))
+    
     return {
-        "user_id": user_id,
-        "messages": get_chat_history(user_id, limit=max(1, min(limit, 100))),
+        "user_id": validated_user_id,
+        "messages": get_chat_history(validated_user_id, limit=validated_limit),
         "memory": {
-            "summary": get_memory_summary(user_id),
-            "preferences": get_preferences(user_id),
+            "summary": get_memory_summary(validated_user_id),
+            "preferences": get_preferences(validated_user_id),
         },
     }
 
 
 # ── Memory reset ──────────────────────────────────────────────────────────────
 @app.post("/api/reset")
-def reset_chat(req: ResetRequest):
-    user_id = req.user_id.strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id required")
+def reset_chat(req: ResetRequest) -> dict[str, str]:
+    """Clear user memory and reset conversation state.
+    
+    Args:
+        req: Reset request with validated user_id
+        
+    Returns:
+        Dict confirming reset status
+        
+    Raises:
+        HTTPException 422 if validation fails
+        HTTPException 500 if reset fails
+    """
+    user_id = req.user_id
     try:
         clear_user_memory(user_id)
         logger.info("Memory cleared for user=%s", user_id)
@@ -360,23 +392,29 @@ def reset_chat(req: ResetRequest):
 
 # ── File upload ───────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)): # type: ignore
+async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:  # type: ignore
     """Accept a user-uploaded document for context injection.
 
     - Max 10 MB.
     - Allowed: text/*, application/json, application/pdf, image/png, jpeg, webp.
     - Returns extracted UTF-8 text for text-type files (first 8 000 chars).
+    
+    Args:
+        file: Uploaded file with validated content type and size
+        
+    Returns:
+        Dict with extracted text, diagnostics, and metadata
+        
+    Raises:
+        HTTPException 415 if unsupported content type
+        HTTPException 413 if file too large
+        HTTPException 400 if parse error
     """
     content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
-    if content_type not in ALLOWED_UPLOAD_TYPES:
-        raise HTTPException(
-            status_code=415,
-            detail=f"Unsupported type '{content_type}'. Allowed: {sorted(ALLOWED_UPLOAD_TYPES)}",
-        )
+    validation_module.validate_content_type(content_type, ALLOWED_UPLOAD_TYPES) # type: ignore
 
     content = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+    validation_module.validate_file_size(len(content), MAX_UPLOAD_BYTES, file.filename)
 
     try:
         extracted_text, diagnostics, ocr_result = _extract_upload_text(file.filename, content_type, content) # type: ignore
@@ -498,7 +536,7 @@ async def _stream_openai(message: str, user_id: str) -> AsyncIterator[str]:
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):  # type: ignore
+async def chat_stream(request: ChatRequest) -> StreamingResponse:  # type: ignore
     """
     Streaming variant of /api/chat.
     Returns text/event-stream with SSE chunks:
@@ -545,11 +583,14 @@ async def chat_stream(request: ChatRequest):  # type: ignore
 # ── Provider resilience diagnostics ──────────────────────────────────────────
 
 @app.get("/api/diagnostics/providers")
-def provider_diagnostics(): # type: ignore
+def provider_diagnostics() -> responses_module.NormalizedResponse:  # type: ignore
     """Return health and circuit-breaker state for all providers.
     
     Normalized response format:
       { ok: true, data: {...}, error: null, meta: {...} }
+    
+    Returns:
+        Normalized response with provider diagnostics
     """
     try:
         from app.providers.resilience import all_diagnostics  # type: ignore
@@ -570,17 +611,19 @@ def provider_diagnostics(): # type: ignore
                     error_msg=f"Failed to retrieve provider diagnostics: {str(exc)}"
                 )
             ),
-        )
+        ) # type: ignore
 
 
 # ── Admin dashboard ───────────────────────────────────────────────────────────
 
 @app.get("/api/admin/dashboard")
-def admin_dashboard(): # type: ignore
-    """
-    Aggregated platform status: DB health, provider states, session counters,
+def admin_dashboard() -> dict[str, Any]:  # type: ignore
+    """Aggregated platform status: DB health, provider states, session counters,
     upload stats, observability metrics.
     Not auth-protected in dev mode; add require_auth in production.
+    
+    Returns:
+        Dict with comprehensive platform status
     """
     from app.providers.resilience import all_diagnostics  # type: ignore
     from app.db.session import check_db_connection        # type: ignore
@@ -633,15 +676,24 @@ def admin_dashboard(): # type: ignore
 
 
 @app.get("/api/admin/metrics")
-def admin_metrics():
-    """Lightweight metrics endpoint — counters, latencies, recent errors."""
+def admin_metrics() -> dict[str, Any]:
+    """Lightweight metrics endpoint — counters, latencies, recent errors.
+    
+    Returns:
+        Dict with observability metrics
+    """
     return observability.get_metrics()
 
 
 # ── Admin UI (serves static admin.html) ───────────────────────────────────────
 
 @app.get("/admin")
-def serve_admin():
+def serve_admin() -> Response:
+    """Serve admin dashboard UI.
+    
+    Returns:
+        Admin HTML page or 404 error
+    """
     admin_html = os.path.join(_static_dir, "admin.html")
     if os.path.isfile(admin_html):
         return FileResponse(admin_html, media_type="text/html")
