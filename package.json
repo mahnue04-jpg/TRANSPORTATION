@@ -19,6 +19,8 @@
     "benchmark:capabilities": "node backend/static/runCapabilitiesBenchmarks.js",
     "test:auth": "node backend/static/runAuthTests.js",
     "benchmark:auth": "node backend/static/runAuthBenchmarks.js",
+    "test:deployment": "node backend/static/runDeploymentTests.js",
+    "benchmark:deployment": "node backend/static/deploymentBenchmarks/index.js",
     "test:runtime": "node backend/static/runToolTests.js",
     "test": "npm run test:tools"
   },
