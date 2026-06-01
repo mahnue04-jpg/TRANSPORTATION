@@ -14,6 +14,8 @@ if (-not (Test-Path $startScript)) {
 }
 $startupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $startupLauncher = Join-Path $startupDir "$TaskName.cmd"
+$runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$runValueName = $TaskName
 
 $command = "powershell.exe"
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -BindAddress $BindAddress -Port $Port -LogLevel $LogLevel"
@@ -37,7 +39,10 @@ setlocal
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$startScript" -BindAddress $BindAddress -Port $Port -LogLevel $LogLevel
 "@
   Set-Content -Path $startupLauncher -Value $startupContent -Encoding ASCII
+  New-Item -Path $runKeyPath -Force | Out-Null
+  New-ItemProperty -Path $runKeyPath -Name $runValueName -PropertyType String -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -BindAddress $BindAddress -Port $Port -LogLevel $LogLevel" -Force | Out-Null
   Write-Host "[Amicor Prod] Startup-folder launcher installed: $startupLauncher"
+  Write-Host "[Amicor Prod] HKCU Run entry installed: $runValueName"
   Write-Host "[Amicor Prod] It will auto-start on user logon. Boot-start requires elevated SYSTEM registration."
   exit 0
 }

@@ -42,7 +42,7 @@ The platform proved the ride API lifecycle in a live runtime, but the full opera
 3. The required 3-ride stress test was not completed under the production startup path.
 
 ## Deployment Risks
-- Auto-start now has a non-admin startup-folder fallback for user logon, but boot-start still depends on privileged Windows registration.
+- Auto-start now has non-admin startup-folder and HKCU Run fallbacks for user logon, but boot-start still depends on privileged Windows registration.
 - Production startup health is still sensitive to process ownership and runtime port state.
 - The current evidence proves API correctness for one ride lifecycle, but not the full operator resilience path across reboot/sleep events.
 - Any production rollout without a confirmed auto-restart path risks needing manual intervention after host restarts or power-state transitions.
@@ -63,7 +63,7 @@ Proceed only after:
 
 ## Latest Execution Note
 - The live ride workflow itself is now fully proven in production-style API calls, including assignment, pickup progression, and completion.
-- The startup installer now succeeds via a user-profile Startup-folder fallback when SYSTEM task registration is denied.
+- The startup installer now succeeds via user-profile Startup-folder and HKCU Run fallbacks when SYSTEM task registration is denied.
 - The unattended operator validation still cannot prove reboot and sleep/wake auto-start in this session, because those checks require host-level control outside this workspace.
 
 ## Notes
