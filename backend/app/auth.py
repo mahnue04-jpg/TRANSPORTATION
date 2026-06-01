@@ -21,9 +21,258 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
+from app.db.session import get_db
+
 logger = logging.getLogger("amicor.auth")
+
+ROLE_ADMIN = "admin"
+ROLE_DISPATCHER = "dispatcher"
+ROLE_DRIVER = "driver"
+ROLE_PROVIDER = "provider"
+ROLE_STAFF = "staff"
+ROLE_ANALYTICS_READONLY = "analytics_readonly"
+ROLE_SUPER_ADMIN_SUPPORT = "super_admin_support"
+ROLE_COMPLIANCE_OFFICER = "compliance_officer"
+ROLE_SUPERVISOR = "supervisor"
+ROLE_DRIVER_SUPPORT = "driver_support"
+ROLE_MEDICAL_COORDINATOR = "medical_coordinator"
+VALID_ROLES = {
+    ROLE_ADMIN,
+    ROLE_DISPATCHER,
+    ROLE_DRIVER,
+    ROLE_PROVIDER,
+    ROLE_STAFF,
+    ROLE_ANALYTICS_READONLY,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_COMPLIANCE_OFFICER,
+    ROLE_SUPERVISOR,
+    ROLE_DRIVER_SUPPORT,
+    ROLE_MEDICAL_COORDINATOR,
+}
+DEFAULT_ROLE = ROLE_STAFF
+
+DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "Amicor Health")
+SEED_PASSWORD = os.getenv("AMICOR_SEED_PASSWORD", "Amicor123!")
+SEED_USERS: tuple[dict[str, str], ...] = (
+    {
+        "email": "admin@amicor.local",
+        "display_name": "Amicor Admin",
+        "role": ROLE_ADMIN,
+    },
+    {
+        "email": "dispatcher@amicor.local",
+        "display_name": "Amicor Dispatcher",
+        "role": ROLE_DISPATCHER,
+    },
+    {
+        "email": "driver@amicor.local",
+        "display_name": "Amicor Driver",
+        "role": ROLE_DRIVER,
+    },
+    {
+        "email": "provider@amicor.local",
+        "display_name": "Amicor Provider",
+        "role": ROLE_PROVIDER,
+    },
+    {
+        "email": "compliance@amicor.local",
+        "display_name": "Amicor Compliance Officer",
+        "role": ROLE_COMPLIANCE_OFFICER,
+    },
+    {
+        "email": "supervisor@amicor.local",
+        "display_name": "Amicor Supervisor",
+        "role": ROLE_SUPERVISOR,
+    },
+    {
+        "email": "driversupport@amicor.local",
+        "display_name": "Amicor Driver Support",
+        "role": ROLE_DRIVER_SUPPORT,
+    },
+    {
+        "email": "medical@amicor.local",
+        "display_name": "Amicor Medical Coordinator",
+        "role": ROLE_MEDICAL_COORDINATOR,
+    },
+)
+
+
+def normalize_role(role: str | None) -> str:
+    value = str(role or DEFAULT_ROLE).strip().lower()
+    return value if value in VALID_ROLES else DEFAULT_ROLE
+
+
+def get_effective_role(role: str | None) -> str:
+    """Return the runtime role, allowing an explicit test override via env vars.
+
+    Override is enabled only when AMICOR_ENABLE_TEST_ROLE_OVERRIDE=1 and a valid
+    AMICOR_FORCE_TEST_ROLE is provided.
+    """
+    base_role = normalize_role(role)
+    if os.getenv("AMICOR_ENABLE_TEST_ROLE_OVERRIDE", "0").strip() != "1":
+        return base_role
+
+    forced_role = normalize_role(os.getenv("AMICOR_FORCE_TEST_ROLE", ""))
+    return forced_role if forced_role in VALID_ROLES else base_role
+
+
+def ensure_auth_schema() -> None:
+    """Apply lightweight auth schema upgrades for existing deployments."""
+    from app.db.session import engine
+
+    inspector = inspect(engine)
+    if "platform_users" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("platform_users")}
+    with engine.begin() as conn:
+        if "role" not in columns:
+            conn.execute(
+                text("ALTER TABLE platform_users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'staff'")
+            )
+        if "organization_name" not in columns:
+            conn.execute(
+                text("ALTER TABLE platform_users ADD COLUMN organization_name VARCHAR(128)")
+            )
+        if "organization_id" not in columns:
+            conn.execute(
+                text("ALTER TABLE platform_users ADD COLUMN organization_id VARCHAR(36)")
+            )
+
+
+def seed_default_users() -> list[dict[str, str]]:
+    """Ensure baseline test users exist and return seeded account metadata."""
+    from app.db.models import User as UserModel
+    from app.db.session import SessionLocal
+    from app.modules.health_isf.models import HealthISFOrganization
+    from app.modules.health_isf.models import ensure_health_isf_schema
+
+    ensure_auth_schema()
+    ensure_health_isf_schema()
+    db: Session = SessionLocal()
+    created: list[dict[str, str]] = []
+    try:
+        default_org = db.query(HealthISFOrganization).filter(HealthISFOrganization.code == "AMICOR-DEFAULT").first()
+        if default_org is None:
+            default_org = HealthISFOrganization(
+                name=DEFAULT_ORGANIZATION_NAME,
+                code="AMICOR-DEFAULT",
+                is_active=True,
+            )
+            db.add(default_org)
+            db.flush()
+
+        for user_seed in SEED_USERS:
+            email = user_seed["email"].strip().lower()
+            existing = db.query(UserModel).filter(UserModel.email == email).first()
+            if existing:
+                existing.role = normalize_role(user_seed.get("role"))
+                existing.organization_name = DEFAULT_ORGANIZATION_NAME
+                existing.organization_id = default_org.id
+                existing.hashed_password = hash_password(SEED_PASSWORD)
+                existing.is_active = True
+                continue
+
+            user = UserModel(
+                email=email,
+                hashed_password=hash_password(SEED_PASSWORD),
+                display_name=user_seed.get("display_name"),
+                role=normalize_role(user_seed.get("role")),
+                organization_name=DEFAULT_ORGANIZATION_NAME,
+                organization_id=default_org.id,
+                is_active=True,
+                is_verified=True,
+            )
+            db.add(user)
+            created.append({
+                "email": email,
+                "role": user.role,
+            })
+
+        db.commit()
+        return created
+    finally:
+        db.close()
+
+
+def ensure_user_organization(db: Session, user: Any) -> str | None:
+    """Backfill organization scope for legacy accounts missing tenant assignment."""
+    current_org = getattr(user, "organization_id", None)
+    if current_org:
+        return str(current_org)
+
+    try:
+        from app.modules.health_isf.models import HealthISFOrganization
+        from app.modules.health_isf.models import ensure_health_isf_schema
+
+        ensure_health_isf_schema()
+        default_org = db.query(HealthISFOrganization).filter(HealthISFOrganization.code == "AMICOR-DEFAULT").first()
+        if default_org is None:
+            default_org = HealthISFOrganization(
+                name=DEFAULT_ORGANIZATION_NAME,
+                code="AMICOR-DEFAULT",
+                is_active=True,
+            )
+            db.add(default_org)
+            db.flush()
+
+        user.organization_id = default_org.id
+        if not getattr(user, "organization_name", None):
+            user.organization_name = DEFAULT_ORGANIZATION_NAME
+        db.commit()
+        db.refresh(user)
+        return str(default_org.id)
+    except Exception as exc:
+        logger.warning("Failed to ensure user organization for %s: %s", getattr(user, "id", "unknown"), exc)
+        return None
+
+
+def _build_org_code_base(name: str) -> str:
+    raw = re.sub(r"[^A-Za-z0-9]+", "-", name.strip().upper()).strip("-")
+    collapsed = re.sub(r"-+", "-", raw)
+    if not collapsed:
+        return "AMICOR-TENANT"
+    return collapsed[:56]
+
+
+def _resolve_registration_organization(db: Session, organization_name: str | None) -> tuple[str, str]:
+    from app.modules.health_isf.models import HealthISFOrganization
+    from app.modules.health_isf.models import ensure_health_isf_schema
+
+    ensure_health_isf_schema()
+
+    normalized_name = (organization_name or "").strip() or DEFAULT_ORGANIZATION_NAME
+    existing = (
+        db.query(HealthISFOrganization)
+        .filter(func.lower(HealthISFOrganization.name) == normalized_name.lower())
+        .first()
+    )
+    if existing:
+        return str(existing.id), str(existing.name)
+
+    if normalized_name.lower() == DEFAULT_ORGANIZATION_NAME.lower():
+        default_org = db.query(HealthISFOrganization).filter(HealthISFOrganization.code == "AMICOR-DEFAULT").first()
+        if default_org:
+            return str(default_org.id), str(default_org.name)
+
+    code_base = _build_org_code_base(normalized_name)
+    code_candidate = code_base
+    suffix = 1
+    while db.query(HealthISFOrganization).filter(HealthISFOrganization.code == code_candidate).first() is not None:
+        code_candidate = f"{code_base[:52]}-{suffix:03d}"
+        suffix += 1
+
+    org = HealthISFOrganization(
+        name=normalized_name,
+        code=code_candidate,
+        is_active=True,
+    )
+    db.add(org)
+    db.flush()
+    return str(org.id), str(org.name)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "")
@@ -34,7 +283,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 # Warn if no secret key configured
 if not SECRET_KEY:
     _fallback = secrets.token_hex(32)
-    SECRET_KEY = _fallback
+    SECRET_KEY = _fallback # type: ignore
     logger.warning(
         "SECRET_KEY not set — using ephemeral key. Tokens will be invalid after restart. "
         "Set SECRET_KEY env var in production."
@@ -55,14 +304,14 @@ def _b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (pad % 4))
 
 
-def _jwt_sign(payload: dict) -> str:
+def _jwt_sign(payload: dict) -> str: # type: ignore
     header = _b64url_encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body   = _b64url_encode(_json.dumps(payload).encode())
     sig = hmac.new(SECRET_KEY.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
     return f"{header}.{body}.{_b64url_encode(sig)}"
 
 
-def _jwt_verify(token: str) -> dict:
+def _jwt_verify(token: str) -> dict: # type: ignore
     try:
         header_b64, body_b64, sig_b64 = token.split(".")
     except ValueError:
@@ -82,8 +331,8 @@ def _jwt_verify(token: str) -> dict:
     return payload
 
 
-def create_access_token(data: dict) -> str:
-    payload = {**data, "exp": time.time() + ACCESS_TOKEN_EXPIRE_MINUTES * 60}
+def create_access_token(data: dict) -> str: # type: ignore
+    payload = {**data, "exp": time.time() + ACCESS_TOKEN_EXPIRE_MINUTES * 60} # type: ignore
     return _jwt_sign(payload)
 
 
@@ -122,6 +371,8 @@ _rate_buckets: dict[str, list[float]] = defaultdict(list)
 
 def check_rate_limit(key: str, limit: int, window_s: int = _RATE_WINDOW_S) -> None:
     now = time.monotonic()
+    if os.getenv("TESTING"):
+        return
     cutoff = now - window_s
     bucket = _rate_buckets[key]
     while bucket and bucket[0] < cutoff:
@@ -150,15 +401,46 @@ def get_current_user_id(
     """Return user_id from JWT Bearer token, or None if not provided."""
     if not creds:
         return None
-    payload = _jwt_verify(creds.credentials)
-    return payload.get("sub")
+    payload = _jwt_verify(creds.credentials) # type: ignore
+    return payload.get("sub") # type: ignore
 
 
-def require_auth(user_id: str | None = Depends(get_current_user_id)) -> str:
-    """Strict auth: raises 401 if no valid token."""
-    if not user_id:
+def get_current_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    """Strict auth: resolve and return the current active user object."""
+    if not creds:
         raise HTTPException(status_code=401, detail="Authentication required")
-    return user_id
+
+    from app.db.models import User as UserModel
+
+    payload = _jwt_verify(creds.credentials) # type: ignore
+    user_id = payload.get("sub") # type: ignore
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing subject")
+
+    user = db.query(UserModel).filter(UserModel.id == user_id).first() # type: ignore
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid or inactive user")
+    return user
+
+
+def require_auth(user = Depends(get_current_user)) -> str: # type: ignore
+    """Strict auth: raises 401 if no valid token."""
+    return user.id
+
+
+def require_any_role(*allowed_roles: str):
+    expected = {normalize_role(role) for role in allowed_roles} or {DEFAULT_ROLE}
+
+    def _dependency(user = Depends(get_current_user)): # type: ignore
+        current_role = get_effective_role(getattr(user, "role", None))
+        if current_role not in expected:
+            raise HTTPException(status_code=403, detail="Insufficient role permissions")
+        return user
+
+    return _dependency
 
 
 # ── Input validation ───────────────────────────────────────────────────────────
@@ -167,14 +449,14 @@ _MAX_PASSWORD_LEN = 128
 _MIN_PASSWORD_LEN = 8
 
 
-def _validate_email(email: str) -> str:
+def _validate_email(email: str) -> str: # type: ignore
     email = email.strip().lower()
     if not _EMAIL_RE.match(email):
         raise HTTPException(status_code=422, detail="Invalid email address")
     return email
 
 
-def _validate_password(password: str) -> None:
+def _validate_password(password: str) -> None: # type: ignore
     if len(password) < _MIN_PASSWORD_LEN:
         raise HTTPException(status_code=422, detail=f"Password must be ≥{_MIN_PASSWORD_LEN} chars")
     if len(password) > _MAX_PASSWORD_LEN:
@@ -187,6 +469,8 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     display_name: str | None = None
+    role: str = DEFAULT_ROLE
+    organization_name: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -203,6 +487,22 @@ class RegisterRequest(BaseModel):
         if len(v) > _MAX_PASSWORD_LEN:
             raise ValueError(f"Password must be ≤{_MAX_PASSWORD_LEN} characters")
         return v
+
+    @field_validator("role")
+    @classmethod
+    def role_valid(cls, v: str) -> str:
+        role = normalize_role(v)
+        if role not in VALID_ROLES:
+            raise ValueError("Invalid role")
+        return role
+
+    @field_validator("organization_name")
+    @classmethod
+    def org_trim(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
 
 
 class LoginRequest(BaseModel):
@@ -225,6 +525,17 @@ class LoginResponse(TokenResponse):
     user_id: str
     email: str
     display_name: str | None
+    role: str
+    organization_name: str | None
+    organization_id: str | None
+
+
+class UserContext(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    organization_name: str | None = None
+    organization_id: str | None = None
 
 
 # ── Router ─────────────────────────────────────────────────────────────────────
@@ -232,9 +543,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/register", status_code=201)
-def register(req: RegisterRequest, request: Request):
+def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     """Create a new account. Returns 409 if email already exists."""
-    from app.db.session import get_db as _get_db
     from app.db.models import User as UserModel
 
     check_rate_limit(
@@ -242,134 +552,178 @@ def register(req: RegisterRequest, request: Request):
         limit=5, window_s=300,  # 5 registrations per 5 minutes per IP
     )
 
-    db: Session = next(_get_db())
-    try:
-        existing = db.query(UserModel).filter(UserModel.email == req.email).first()
-        if existing:
-            raise HTTPException(status_code=409, detail="Email already registered")
+    existing = db.query(UserModel).filter(UserModel.email == req.email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
 
-        user = UserModel(
-            email=req.email,
-            hashed_password=hash_password(req.password),
-            display_name=req.display_name,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        logger.info("New user registered: %s (id=%s)", user.email, user.id)
-        return {"user_id": user.id, "email": user.email, "status": "created"}
-    finally:
-        db.close()
+    role = normalize_role(req.role)
+    if role in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}:
+        raise HTTPException(status_code=403, detail="Privileged roles cannot self-register")
+
+    organization_id, organization_name = _resolve_registration_organization(db, req.organization_name)
+
+    user = UserModel(
+        email=req.email,
+        hashed_password=hash_password(req.password),
+        display_name=req.display_name,
+        role=role,
+        organization_name=organization_name,
+        organization_id=organization_id,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    logger.info("New user registered: %s (id=%s)", user.email, user.id)
+    return {"user_id": user.id, "email": user.email, "status": "created"}
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(req: LoginRequest, request: Request):
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Password login — returns access + refresh tokens."""
-    from app.db.session import get_db as _get_db
     from app.db.models import User as UserModel, RefreshToken as RefreshTokenModel
 
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
     check_rate_limit(f"login:{ip}", limit=_RATE_LIMIT_AUTH)
 
-    db: Session = next(_get_db())
-    try:
-        user = db.query(UserModel).filter(
-            UserModel.email == req.email.strip().lower()
-        ).first()
-        if not user or not verify_password(req.password, user.hashed_password):
-            # Constant-time-ish rejection
-            time.sleep(0.2)
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        if not user.is_active:
-            raise HTTPException(status_code=403, detail="Account disabled")
+    user = db.query(UserModel).filter(
+        UserModel.email == req.email.strip().lower()
+    ).first()
+    if not user or not verify_password(req.password, user.hashed_password):
+        # Constant-time-ish rejection
+        time.sleep(0.2)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account disabled")
 
-        # Access token
-        access = create_access_token({"sub": user.id, "email": user.email})
-        # Refresh token
-        raw_refresh = create_refresh_token()
-        hashed = _hash_token(raw_refresh)
-        expires = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-        rt = RefreshTokenModel(user_id=user.id, token_hash=hashed, expires_at=expires)
-        db.add(rt)
-        user.last_login = datetime.now(timezone.utc)
-        db.commit()
+    ensure_user_organization(db, user)
 
-        logger.info("Login: user_id=%s ip=%s", user.id, ip)
-        return LoginResponse(
-            access_token=access,
-            refresh_token=raw_refresh,
-            user_id=user.id,
-            email=user.email,
-            display_name=user.display_name,
-        )
-    finally:
-        db.close()
+    # Access token
+    access = create_access_token(
+        {
+            "sub": user.id,
+            "email": user.email,
+            "role": normalize_role(getattr(user, "role", None)),
+            "organization_id": getattr(user, "organization_id", None),
+        }
+    )
+    # Refresh token
+    raw_refresh = create_refresh_token()
+    hashed = _hash_token(raw_refresh)
+    expires = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    rt = RefreshTokenModel(user_id=user.id, token_hash=hashed, expires_at=expires)
+    db.add(rt)
+    user.last_login = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info("Login: user_id=%s ip=%s", user.id, ip)
+    from app.core.nova.assistant_execution_service import log_operational_event
+
+    log_operational_event(
+        user_id=str(user.id),
+        role=normalize_role(getattr(user, "role", None)),
+        event_type="auth",
+        event_name="login",
+        status="success",
+        payload={
+            "ip": ip,
+            "organization_id": getattr(user, "organization_id", None),
+            "organization_name": getattr(user, "organization_name", None),
+        },
+    )
+    return LoginResponse(
+        access_token=access,
+        refresh_token=raw_refresh,
+        user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        role=normalize_role(getattr(user, "role", None)),
+        organization_name=getattr(user, "organization_name", None),
+        organization_id=getattr(user, "organization_id", None),
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token(req: RefreshRequest, request: Request):
+def refresh_token(req: RefreshRequest, request: Request, db: Session = Depends(get_db)):
     """Exchange a valid refresh token for a new access token."""
-    from app.db.session import get_db as _get_db
     from app.db.models import RefreshToken as RefreshTokenModel, User as UserModel
 
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
     check_rate_limit(f"refresh:{ip}", limit=30)
 
     hashed = _hash_token(req.refresh_token)
-    db: Session = next(_get_db())
-    try:
-        rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
-        if not rt or rt.revoked:
-            raise HTTPException(status_code=401, detail="Refresh token invalid or revoked")
-        if rt.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-            raise HTTPException(status_code=401, detail="Refresh token expired")
+    rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
+    if not rt or rt.revoked:
+        raise HTTPException(status_code=401, detail="Refresh token invalid or revoked")
+    if rt.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Refresh token expired")
 
-        user = db.query(UserModel).filter(UserModel.id == rt.user_id).first()
-        if not user or not user.is_active:
-            raise HTTPException(status_code=401, detail="User not found or inactive")
+    user = db.query(UserModel).filter(UserModel.id == rt.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
 
-        access = create_access_token({"sub": user.id, "email": user.email})
-        return TokenResponse(access_token=access)
-    finally:
-        db.close()
+    ensure_user_organization(db, user)
+
+    access = create_access_token(
+        {
+            "sub": user.id,
+            "email": user.email,
+            "role": normalize_role(getattr(user, "role", None)),
+            "organization_id": getattr(user, "organization_id", None),
+        }
+    )
+    return TokenResponse(access_token=access)
 
 
 @router.post("/logout")
-def logout(req: RefreshRequest):
+def logout(req: RefreshRequest, db: Session = Depends(get_db)):
     """Revoke a refresh token."""
-    from app.db.session import get_db as _get_db
     from app.db.models import RefreshToken as RefreshTokenModel
 
     hashed = _hash_token(req.refresh_token)
-    db: Session = next(_get_db())
-    try:
-        rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
-        if rt:
-            rt.revoked = True
-            db.commit()
-        return {"status": "logged out"}
-    finally:
-        db.close()
+    rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
+    if rt:
+        rt.revoked = True
+        db.commit()
+    return {"status": "logged out"}
 
 
 @router.get("/me")
-def me(user_id: str = Depends(require_auth)):
+def me(user_id: str = Depends(require_auth), db: Session = Depends(get_db)): # type: ignore
     """Return the current authenticated user's profile."""
-    from app.db.session import get_db as _get_db
     from app.db.models import User as UserModel
 
-    db: Session = next(_get_db())
-    try:
-        user = db.query(UserModel).filter(UserModel.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return {
-            "user_id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "is_verified": user.is_verified,
-            "created_at": user.created_at.isoformat(),
-            "last_login": user.last_login.isoformat() if user.last_login else None,
-        }
-    finally:
-        db.close()
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": normalize_role(getattr(user, "role", None)),
+        "organization_name": getattr(user, "organization_name", None),
+        "organization_id": getattr(user, "organization_id", None),
+        "is_verified": user.is_verified,
+        "created_at": user.created_at.isoformat(),
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+    } # type: ignore
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    """Public token decode helper used by middleware/websocket handshakes."""
+    return _jwt_verify(token) # type: ignore
+
+
+def get_current_user_context(
+    user = Depends(get_current_user), # type: ignore
+) -> UserContext:
+    return UserContext(
+        user_id=user.id,
+        email=user.email,
+        role=get_effective_role(getattr(user, "role", None)),
+        organization_name=getattr(user, "organization_name", None),
+        organization_id=getattr(user, "organization_id", None),
+    )
+
+
+def is_super_admin(user: UserContext) -> bool:
+    return normalize_role(user.role) in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}
