@@ -4260,6 +4260,49 @@
     return buttons.join("");
   }
 
+  function getDriverActiveAssignmentCount(driverId, excludedRideId) {
+    const targetDriverId = String(driverId || "");
+    const excludedId = String(excludedRideId || "");
+    if (!targetDriverId) return 0;
+    return (Array.isArray(state.rides) ? state.rides : []).filter(function (ride) {
+      if (String(ride && ride.id || "") === excludedId) return false;
+      if (String(ride && ride.driver_id || "") !== targetDriverId) return false;
+      return ['pending', 'accepted', 'in_transit', 'assigned'].indexOf(String(ride && ride.status || '').toLowerCase()) !== -1;
+    }).length;
+  }
+
+  function isDriverAssignableForRide(driver, rideId) {
+    if (!driver || !driver.id || driver.is_active === false) return false;
+    const status = String(driver.status || '').toLowerCase();
+    if (status !== 'available') return false;
+    return getDriverActiveAssignmentCount(driver.id, rideId) === 0;
+  }
+
+  function buildAssignableDriverOptions(ride) {
+    const rideId = String(ride && ride.id || '');
+    const currentDriverId = String(ride && ride.driver_id || '');
+    const currentDriver = currentDriverId
+      ? (Array.isArray(state.drivers) ? state.drivers : []).find(function (driver) {
+          return String(driver && driver.id || '') === currentDriverId;
+        })
+      : null;
+    const options = [];
+
+    if (currentDriver && !isDriverAssignableForRide(currentDriver, rideId)) {
+      options.push('<option value="">' + escapeHtml('Current: ' + String(currentDriver.name || 'Driver') + ' (' + String(currentDriver.status || 'assigned') + ')') + '</option>');
+    } else {
+      options.push('<option value="">Select driver</option>');
+    }
+
+    (Array.isArray(state.drivers) ? state.drivers : []).filter(function (driver) {
+      return isDriverAssignableForRide(driver, rideId);
+    }).forEach(function (driver) {
+      options.push('<option value="' + escapeHtml(String(driver.id || '')) + '">' + escapeHtml(String(driver.name || 'Driver') + ' (' + String(driver.status || 'available') + ')') + '</option>');
+    });
+
+    return options.join('');
+  }
+
   function statusActionButton(ride, status, label) {
     const statusValue = String(ride.status || "").toLowerCase();
     const terminal = statusValue === "completed" || statusValue === "cancelled";
@@ -4273,17 +4316,7 @@
   function driverAssignControl(ride) {
     const statusValue = String(ride.status || "").toLowerCase();
     const terminal = statusValue === "completed" || statusValue === "cancelled";
-    const options = ['<option value="">Select driver</option>']
-      .concat(
-        state.drivers.map((driver) => {
-          const selected = ride.driver_id === driver.id ? " selected" : "";
-          const disabled = String(driver.status || "") !== "available" ? " disabled" : "";
-          return '<option value="' + driver.id + '"' + selected + disabled + '>' +
-            escapeHtml(driver.name + " (" + driver.status + ")") +
-            "</option>";
-        })
-      )
-      .join("");
+    const options = buildAssignableDriverOptions(ride);
 
     if (!canMutateRides()) {
       return '<span class="health-summary">Restricted</span>';
@@ -4838,13 +4871,6 @@
       return ['pending', 'accepted', 'in_transit', 'assigned'].indexOf(status) !== -1;
     });
     const drivers = getDriverRows();
-    const assignableDrivers = drivers.filter(function (driver) {
-      const availability = String(driver.availability || '').toLowerCase();
-      return availability === 'available' || availability === 'assigned';
-    });
-    const driverOptions = assignableDrivers.map(function (driver) {
-      return '<option value="' + escapeHtml(driver.id) + '">' + escapeHtml(driver.name) + ' (' + escapeHtml(driver.availability || driver.status) + ')</option>';
-    }).join('');
 
     els.dispatchWorklist.innerHTML = rides.length
       ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Status</th><th>Priority</th><th>Driver assignment</th><th>Actions</th></tr></thead><tbody>'
@@ -4854,7 +4880,7 @@
             + '<td>' + escapeHtml(ride.passengerName || 'Passenger') + '</td>'
             + '<td><span class="health-pill ' + pillClass(ride.status || 'pending') + '">' + escapeHtml(ride.status || 'pending') + '</span></td>'
             + '<td>' + escapeHtml(getPriorityTag(ride.raw || {}) || 'normal') + '</td>'
-            + '<td><select data-dispatch-driver-select="' + escapeHtml(ride.id) + '"><option value="">Select driver</option>' + driverOptions + '</select></td>'
+            + '<td><select data-dispatch-driver-select="' + escapeHtml(ride.id) + '">' + buildAssignableDriverOptions(ride.raw || ride) + '</select></td>'
             + '<td><div class="health-row-actions health-row-actions-inline">'
             + '<button class="health-row-btn" data-dispatch-assign="' + escapeHtml(ride.id) + '">Assign</button>'
             + '<button class="health-row-btn secondary" data-dispatch-select-ride="' + escapeHtml(ride.id) + '">Focus</button>'
@@ -4985,6 +5011,12 @@
   }
 
   async function assignDriver(rideId, driverId) {
+    const selectedDriver = (Array.isArray(state.drivers) ? state.drivers : []).find(function (driver) {
+      return String(driver && driver.id || '') === String(driverId || '');
+    });
+    if (!isDriverAssignableForRide(selectedDriver, rideId)) {
+      throw new Error('Selected driver is no longer assignable. Choose a currently available driver and try again.');
+    }
     await fetchJson("/api/health-isf/rides/" + encodeURIComponent(rideId) + "/assign-driver", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
