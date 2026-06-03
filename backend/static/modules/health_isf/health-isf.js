@@ -1761,6 +1761,7 @@
 
     if (rows.length) return rows;
     if (state.enterpriseDashboard) {
+      const enterpriseMetrics = state.enterpriseDashboard.metrics || {};
       return [{
         id: "network-aggregate",
         name: "Network Aggregate",
@@ -1772,7 +1773,7 @@
         utilization: Number((state.enterpriseDashboard.utilization_metrics || {}).driver_utilization_percent || 0),
         alerts: getEnterpriseAlerts().length,
         responseTimeMinutes: Number((state.enterpriseDashboard.metrics || {}).average_assignment_time_seconds || 0) / 60,
-        completed: Number((state.dashboard && state.dashboard.completed_rides) || 0),
+        completed: Number(enterpriseMetrics.completed_rides || state.enterpriseDashboard.completed_rides || 0),
         active: Number(state.enterpriseDashboard.active_rides || 0),
         updatedAt: state.enterpriseDashboard.last_synced_at,
       }];
@@ -1820,6 +1821,7 @@
 
     if (rows.length) return rows;
     if (state.enterpriseDashboard) {
+      const enterpriseMetrics = state.enterpriseDashboard.metrics || {};
       return [{
         id: "driver-aggregate",
         name: "Fleet Aggregate",
@@ -1830,7 +1832,7 @@
         utilization: Number((state.enterpriseDashboard.utilization_metrics || {}).driver_utilization_percent || 0),
         availability: Number(state.enterpriseDashboard.available_drivers || 0) > 0 ? "available" : "limited",
         shiftState: Number(state.enterpriseDashboard.available_drivers || 0) > 0 ? "on shift" : "watch",
-        totalTrips: Number((state.dashboard && state.dashboard.total_trips_completed) || 0),
+        totalTrips: Number(enterpriseMetrics.total_trips_completed || state.enterpriseDashboard.total_trips_completed || 0),
         rating: 0,
         updatedAt: state.enterpriseDashboard.last_synced_at,
       }];
@@ -4301,6 +4303,7 @@
     const els = getEls();
     const d = state.dashboard;
     const enterprise = state.enterpriseDashboard || {};
+    const enterpriseReady = !!state.enterpriseDashboard && !state.hydration.enterpriseDashboardError && !enterprise.stale;
     if (!els.dashboardCards || !els.dispatchSummary) return;
     if (!d) {
       els.dashboardCards.innerHTML = "<p class=\"health-summary\">Dashboard unavailable.</p>";
@@ -4308,37 +4311,51 @@
       return;
     }
 
-    const utilization = enterprise.utilization_metrics || {};
-    const slaStatus = enterprise.sla_status || {};
-    const freshnessStamp = enterprise.last_synced_at || state.hydration.lastRefreshAt || d.timestamp || null;
+    const utilization = enterpriseReady ? (enterprise.utilization_metrics || {}) : {};
+    const slaStatus = enterpriseReady ? (enterprise.sla_status || {}) : {};
+    const freshnessStamp = state.hydration.lastRefreshAt || d.timestamp || null;
     const freshnessAgeMs = freshnessStamp ? Math.max(0, Date.now() - new Date(freshnessStamp).getTime()) : null;
     const freshnessLabel = freshnessStamp ? formatDateShort(freshnessStamp) : "pending";
-    const freshnessBadgeClass = enterprise.stale || (freshnessAgeMs !== null && freshnessAgeMs > 90000) ? "warn" : "live";
+    const freshnessBadgeClass = freshnessAgeMs !== null && freshnessAgeMs > 90000 ? "warn" : "live";
 
     const rides = Array.isArray(state.rides) ? state.rides : [];
     const drivers = Array.isArray(state.drivers) ? state.drivers : [];
     const providers = Array.isArray(state.providers) ? state.providers : [];
+    const pendingCount = rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'pending'; }).length;
+    const activeCount = rides.filter(function (ride) { return ['accepted', 'in_transit'].includes(String(ride.status || '').toLowerCase()); }).length;
     const completedToday = rides.filter(function (ride) {
       return String(ride.status || '').toLowerCase() === 'completed';
+    }).length;
+    const availableDriversCount = drivers.filter(function (driver) {
+      return String(driver.status || '').toLowerCase() === 'available';
+    }).length;
+    const busyDriversCount = drivers.filter(function (driver) {
+      return ['assigned', 'busy', 'en_route_pickup', 'waiting_at_pickup', 'in_transit'].includes(String(driver.status || '').toLowerCase());
     }).length;
     const onTimeCount = rides.filter(function (ride) {
       return !isOverdueRide(ride) && ['accepted', 'in_transit', 'completed'].includes(String(ride.status || '').toLowerCase());
     }).length;
     const serviceLevel = rides.length ? Math.round((onTimeCount / rides.length) * 100) : Number(slaStatus.score || 0);
+    const providersOnlineCount = providers.filter(function (provider) {
+      return String(firstDefined(provider.status, provider.operational_status, 'active') || 'active').toLowerCase() !== 'offline';
+    }).length;
+    const fleetUtilization = drivers.length ? Math.round((busyDriversCount / drivers.length) * 100) : Number(d.busy_drivers || 0);
+    const dispatchPosture = enterpriseReady ? String(enterprise.dispatch_health || 'stable') : 'degraded';
+    const workflowHealth = enterpriseReady ? String(enterprise.workflow_health || 'stable') : 'degraded';
 
     const kpiRows = [
       ['Trips booked today', formatNumber(d.total_rides_today), 'Total ride requests received for today'],
-      ['Trips in motion', formatNumber(enterprise.active_rides != null ? enterprise.active_rides : d.active_rides), 'Rides currently in pickup or transport flow'],
-      ['Awaiting dispatch', formatNumber(enterprise.pending_rides != null ? enterprise.pending_rides : d.pending_rides), 'Requests waiting for assignment'],
-      ['Drivers ready', formatNumber(enterprise.available_drivers != null ? enterprise.available_drivers : d.available_drivers), 'Dispatch-ready drivers in roster'],
-      ['Providers online', formatNumber(enterprise.providers_online != null ? enterprise.providers_online : (providers.length || d.total_providers)), 'Partner facilities currently active'],
+      ['Trips in motion', formatNumber(activeCount || d.active_rides), 'Rides currently in pickup or transport flow'],
+      ['Awaiting dispatch', formatNumber(pendingCount || d.pending_rides), 'Requests waiting for assignment'],
+      ['Drivers ready', formatNumber(availableDriversCount || d.available_drivers), 'Dispatch-ready drivers in roster'],
+      ['Providers online', formatNumber(providersOnlineCount || providers.length || d.total_providers), 'Partner facilities currently active'],
       ['Trips completed', formatNumber(completedToday || d.completed_rides), 'Trips completed in this operating window'],
       ['Service level', formatNumber(serviceLevel) + '%', 'On-time execution performance'],
-      ['Dispatch posture', escapeHtml(enterprise.dispatch_health || 'stable'), 'Current workload pressure state'],
+      ['Dispatch posture', escapeHtml(dispatchPosture), enterpriseReady ? 'Current workload pressure state' : 'Supporting enterprise snapshot unavailable in this refresh'],
       ['Avg trip time', Number(d.average_ride_duration_minutes || 0).toFixed(1) + ' min', 'Average end-to-end trip duration'],
       ['Pending payouts', '$' + Number(d.pending_payouts_usd || 0).toFixed(2), 'Outstanding financial settlements'],
-      ['Workflow health', escapeHtml(enterprise.workflow_health || 'stable'), 'Operational process health'],
-      ['Fleet utilization', Number(utilization.driver_utilization_percent || d.busy_drivers || 0).toFixed(1) + '%', 'Driver capacity currently utilized'],
+      ['Workflow health', escapeHtml(workflowHealth), enterpriseReady ? 'Operational process health' : 'Supporting enterprise snapshot unavailable in this refresh'],
+      ['Fleet utilization', Number(fleetUtilization || utilization.driver_utilization_percent || 0).toFixed(1) + '%', 'Driver capacity currently utilized'],
     ];
     els.dashboardCards.innerHTML = '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>KPI</th><th>Value</th><th>Operational meaning</th></tr></thead><tbody>'
       + kpiRows.map(function (row) {
@@ -4369,20 +4386,18 @@
 
     const loadBadge = getDispatchLoadBadge();
     const liveUpdated = state.lastRealtimeMessageAt ? formatDateShort(state.lastRealtimeMessageAt) : "No realtime feed yet";
-    const alertCount = Array.isArray(enterprise.operational_alerts) ? enterprise.operational_alerts.length : 0;
-    const recommendationCount = Array.isArray(enterprise.ai_recommendations) ? enterprise.ai_recommendations.length : 0;
+    const alertCount = enterpriseReady && Array.isArray(enterprise.operational_alerts) ? enterprise.operational_alerts.length : 0;
+    const recommendationCount = enterpriseReady && Array.isArray(enterprise.ai_recommendations) ? enterprise.ai_recommendations.length : 0;
     const operationalSummary = summarySummaryText();
 
     const riskRides = getRideRows(rides).filter(function (row) {
       return row.delayed || row.emergency || String(row.slaRisk || '').toLowerCase() === 'high';
     }).slice(0, 6);
-    const openAlerts = getEnterpriseAlerts().slice(0, 5);
-    const openRecommendations = getEnterpriseRecommendations().slice(0, 5);
+    const openAlerts = enterpriseReady ? getEnterpriseAlerts().slice(0, 5) : [];
+    const openRecommendations = enterpriseReady ? getEnterpriseRecommendations().slice(0, 5) : [];
     const idleDrivers = drivers.filter(function (driver) {
       return String(driver.status || '').toLowerCase() === 'available';
     }).slice(0, 5);
-    const pendingCount = rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'pending'; }).length;
-    const activeCount = rides.filter(function (ride) { return ['accepted', 'in_transit'].includes(String(ride.status || '').toLowerCase()); }).length;
     const completedCount = rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'completed'; }).length;
     const cancelledCount = rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'cancelled'; }).length;
     const coveragePct = drivers.length ? Math.round((idleDrivers.length / drivers.length) * 100) : 0;
@@ -4437,6 +4452,7 @@
         + MetricCard('Completed', formatNumber(d.total_trips_completed), 'Trips closed successfully today', 'ok')
         + MetricCard('Payouts due', '$' + Number(d.pending_payouts_usd || 0).toFixed(2), 'Outstanding provider or driver payouts', Number(d.pending_payouts_usd || 0) > 0 ? 'warn' : 'ok')
       + '</div>',
+      (!enterpriseReady ? '<p class="health-summary">Enterprise dashboard adjunct metrics are unavailable for this refresh window. Core dispatch KPIs are rendered from the local operations snapshot only.</p>' : ''),
       '<p class="health-summary">' + escapeHtml(operationalSummary) + '</p>',
       '</section>',
       '</div>',
