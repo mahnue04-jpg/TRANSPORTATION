@@ -1,0 +1,36 @@
+{
+  "name": "amicor-nova-backend",
+  "version": "1.0.0",
+  "description": "Amicor Nova health transportation dispatch API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "setup": "node scripts/setup.js"
+  },
+  "keywords": [
+    "amicor",
+    "nova",
+    "nemt",
+    "dispatch",
+    "health-transportation"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.1",
+    "stripe": "^17.5.0",
+    "uuid": "^11.0.5"
+  }
+}
