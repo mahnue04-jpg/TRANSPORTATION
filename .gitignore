@@ -4,3 +4,50 @@ backend/app/.env
 __pycache__/
 *.pyc
 backend/data/
+
+# Python and virtual environments
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Runtime state and logs
+.runtime/
+backend/runtime/
+backend/runtime_validation/
+backend/logs/
+*.log
+*.out
+*.err
+uvicorn_stdout.log
+uvicorn_stderr.log
+
+# Temp and generated local diagnostics
+.collect.log
+.collect.out
+.compile.log
+.compileall.out
+.run_*.log
+.tests*.out
+.tests*.log
+.pytest*.log
+.pytest*.txt
+.pytest*.xml
+.phase*.out
+.phase*.txt
+
+# Build/test artifacts
+artifacts/
+project_snapshots/
+*.tmp
+*.temp
+
+# Tooling/editor
+node_modules/
+.vscode/
+
+# Large generated reports and snapshots
+phase*_*.json
+phase*_*.txt
+diff_output.txt
+final_json_output.txt

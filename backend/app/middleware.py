@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import uuid
+import asyncio
 from typing import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -52,7 +53,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "X-Frame-Options":           "DENY",
         "X-XSS-Protection":          "1; mode=block",
         "Referrer-Policy":           "strict-origin-when-cross-origin",
-        "Permissions-Policy":        "camera=(), microphone=(), geolocation=()",
+        "Permissions-Policy":        "camera=(), microphone=(self), geolocation=()",
         "Content-Security-Policy": (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
@@ -62,11 +63,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         ),
     }
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        response = await call_next(request)
+    async def dispatch(self, request: Request, call_next: Callable) -> Response: # type: ignore
+        response = await call_next(request) # type: ignore
         for header, value in self._HEADERS.items():
-            response.headers.setdefault(header, value)
-        return response
+            response.headers.setdefault(header, value) # type: ignore
+        return response # type: ignore
 
 
 # ── Request tracing + audit logging ───────────────────────────────────────────
@@ -81,7 +82,7 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
     # Paths that are too noisy to audit at INFO level
     _QUIET_PATHS = frozenset({"/api/health", "/api/health/detail", "/static", "/favicon.ico"})
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response: # type: ignore
         req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = req_id
         request_id_token = logging_utils.set_request_id(req_id)
@@ -89,19 +90,27 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
         t0 = time.monotonic()
         path = request.url.path
         method = request.method
+        logging_utils.log_request_lifecycle(
+            audit_logger,
+            logging.INFO,
+            event="REQUEST_START",
+            route=path,
+            status="started",
+            method=method,
+        )
 
         try:
-            response = await call_next(request)
+            response = await call_next(request) # type: ignore
             latency_ms = int((time.monotonic() - t0) * 1000)
 
-            response.headers["X-Request-ID"] = req_id
-            response.headers["X-Response-Time"] = f"{latency_ms}ms"
+            response.headers["X-Request-ID"] = req_id # type: ignore
+            response.headers["X-Response-Time"] = f"{latency_ms}ms" # type: ignore
 
             is_quiet = any(path.startswith(p) for p in self._QUIET_PATHS)
 
             observability.increment("http.requests.total")
             observability.increment(f"http.requests.method.{method}")
-            observability.increment(f"http.responses.status.{response.status_code}")
+            observability.increment(f"http.responses.status.{response.status_code}") # type: ignore
             observability.record_latency("http.requests.latency_ms", float(latency_ms))
 
             log_level = logging.DEBUG if is_quiet else logging.INFO
@@ -112,19 +121,29 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                 message="HTTP request completed",
                 method=method,
                 path=path,
-                status_code=response.status_code,
+                status_code=response.status_code, # type: ignore
                 latency_ms=latency_ms,
+            )
+            logging_utils.log_request_lifecycle(
+                audit_logger,
+                log_level,
+                event="REQUEST_COMPLETE",
+                route=path,
+                latency_ms=latency_ms,
+                status=str(response.status_code), # type: ignore
+                method=method,
             )
 
             # Best-effort write to audit table
-            if not is_quiet and response.status_code >= 400:
+            if not is_quiet and response.status_code >= 400: # type: ignore
                 observability.increment("http.requests.errors")
-                observability.record_error(path, response.status_code, "request failed")
-                _write_audit_log(req_id, request, response.status_code, latency_ms)
+                observability.record_error(path, response.status_code, "request failed") # type: ignore
+                _write_audit_log(req_id, request, response.status_code, latency_ms) # type: ignore
 
-            return response
+            return response # type: ignore
         except Exception as exc:
             latency_ms = int((time.monotonic() - t0) * 1000)
+            is_timeout = isinstance(exc, (asyncio.TimeoutError, TimeoutError))
             observability.increment("http.requests.total")
             observability.increment(f"http.requests.method.{method}")
             observability.increment("http.requests.errors")
@@ -138,6 +157,27 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                 method=method,
                 path=path,
                 latency_ms=latency_ms,
+                error=logging_utils.safe_exception_message(exc),
+            )
+            if is_timeout:
+                logging_utils.log_request_lifecycle(
+                    audit_logger,
+                    logging.ERROR,
+                    event="REQUEST_TIMEOUT",
+                    route=path,
+                    latency_ms=latency_ms,
+                    status="timeout",
+                    method=method,
+                    error=logging_utils.safe_exception_message(exc),
+                )
+            logging_utils.log_request_lifecycle(
+                audit_logger,
+                logging.ERROR,
+                event="REQUEST_COMPLETE",
+                route=path,
+                latency_ms=latency_ms,
+                status="error",
+                method=method,
                 error=logging_utils.safe_exception_message(exc),
             )
             raise

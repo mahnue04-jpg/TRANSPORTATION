@@ -191,6 +191,48 @@
       '<img data-blocked="evil()">'
     ));
 
+    tests.push(stageEq(
+      "S5-05 | provider font tags stripped before render",
+      S.sanitizeProviderText,
+      '<font color="red">Bad</font> https://example.com',
+      'Bad https://example.com'
+    ));
+
+    tests.push(stageEq(
+      "S5-06 | escaped anchors become markdown links",
+      S.sanitizeProviderText,
+      '&lt;a href="https://example.com/story"&gt;Example Story&lt;/a&gt;',
+      '[Example Story](https://example.com/story)'
+    ));
+
+    tests.push(stageEq(
+      "S5-07 | normalizeFeed strips CDATA wrappers",
+      S.normalizeFeed,
+      '<![CDATA[ Breaking update ]]>',
+      '  Breaking update  '
+    ));
+
+    tests.push(stageEq(
+      "S5-08 | sanitizeHTML removes target/href/style artifacts",
+      S.sanitizeHTML,
+      'TARGET="_BLANK" href="https://example.com" style="color:red" <A HREF="https://example.com">Read</A>',
+      'Read'
+    ));
+
+    tests.push(stageEq(
+      "S5-09 | extractMetadata enforces structured output defaults",
+      (input) => JSON.stringify(S.extractMetadata(input)),
+      [{ title: 'Title', source: '', summary: '', url: 'https://example.com', publishedAt: '', category: '' }],
+      JSON.stringify({
+        title: 'Title',
+        source: 'Source',
+        summary: 'Open the full article for details.',
+        url: 'https://example.com/',
+        publishedAt: '',
+        category: '',
+      })
+    ));
+
     // ── renderContent: inline math ──────────────────────────────────────────
 
     tests.push(notContains(
@@ -253,10 +295,52 @@
       "katex"
     ));
 
+    tests.push(contains(
+      "RC-10 | sanitized plain url becomes safe-link anchor",
+      '<font color="red">Bad</font> https://example.com',
+      'class="safe-link"'
+    ));
+
+    tests.push(notContains(
+      "RC-11 | provider font markup is not leaked",
+      '<font color="red">Bad</font> https://example.com',
+      '<font'
+    ));
+
+    tests.push(contains(
+      "RC-12 | escaped anchor renders as safe-link anchor",
+      '&lt;a href="https://example.com/story"&gt;Example Story&lt;/a&gt;',
+      'Example Story'
+    ));
+
+    tests.push(contains(
+      "RC-13 | structured news payload renders cards",
+      'Search results for "AI news": 1. Anthropic raises more funding - Reuters: https://news.google.com/rss/articles/abc Reuters 2. OpenAI ships update - The Verge: https://news.google.com/rss/articles/def The Verge',
+      'news-result-card'
+    ));
+
+    tests.push(contains(
+      "RC-14 | structured news payload keeps kicker",
+      'Search results for "AI news": 1. Anthropic raises more funding - Reuters: https://news.google.com/rss/articles/abc Reuters 2. OpenAI ships update - The Verge: https://news.google.com/rss/articles/def The Verge',
+      'news-result-kicker'
+    ));
+
+    tests.push(contains(
+      "RC-14b | structured news cards use Open Article button label",
+      'Search results for "AI news": 1. Anthropic raises more funding - Reuters: https://news.google.com/rss/articles/abc Reuters 2. OpenAI ships update - The Verge: https://news.google.com/rss/articles/def The Verge',
+      'Open Article'
+    ));
+
+    tests.push(notContains(
+      "RC-14c | structured news cards do not expose raw provider urls in label text",
+      'Search results for "AI news": 1. Anthropic raises more funding - Reuters: https://news.google.com/rss/articles/abc Reuters 2. OpenAI ships update - The Verge: https://news.google.com/rss/articles/def The Verge',
+      'Open article: news.google.com'
+    ));
+
     // ── renderContent: double-backslash AI output ───────────────────────────
 
     tests.push(notContains(
-      "RC-10 | \\\\( normalised and rendered — no raw \\\\( in output",
+      "RC-15 | \\\\( normalised and rendered — no raw \\\\( in output",
       "\\\\(2x + 3 = 11\\\\)",
       "\\\\("
     ));

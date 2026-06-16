@@ -4,6 +4,8 @@ Handles tutoring, explanations, quizzes, homework help, study plans,
 and all general educational requests using a specialist system prompt.
 """
 import os
+from typing import Any, cast
+
 from openai import OpenAI
 
 TRIGGERS = [
@@ -43,27 +45,29 @@ Your style:
 """
 
 _client = None
+OPENAI_TIMEOUT_SECONDS = 30.0
 
 
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=OPENAI_TIMEOUT_SECONDS)
     return _client
 
 
-def handle(message: str, history: list = None, user_id: str = "default") -> str:
+def handle(message: str, history: list[dict[str, Any]] | None = None, user_id: str = "default") -> str:
     client = _get_client()
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": message})
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=messages,
+            messages=cast(Any, messages),
             temperature=0.7,
+            timeout=OPENAI_TIMEOUT_SECONDS,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
     except Exception as e:
         return f"Education module error: {str(e)}"

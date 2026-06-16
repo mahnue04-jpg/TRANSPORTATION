@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.session import Base, DATABASE_URL  # noqa: E402
 import app.db.models  # noqa: F401, E402 — registers all ORM models with Base
+import app.modules.health_isf.models  # noqa: F401, E402 — include Health ISF metadata
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
@@ -28,6 +29,15 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def include_object(object_, name, type_, reflected, compare_to):
+    """Limit autogeneration to SQLAlchemy-managed platform and health_isf tables."""
+    if type_ == "table":
+        if name == "alembic_version":
+            return True
+        return name.startswith("platform_") or name.startswith("health_isf_")
+    return True
+
+
 # ── Run migrations ───────────────────────────────────────────────────────────
 
 def run_migrations_offline() -> None:
@@ -36,6 +46,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -54,6 +65,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

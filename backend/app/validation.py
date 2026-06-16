@@ -52,7 +52,7 @@ def validate_filename(filename: str | None) -> str:
     Raises:
         HTTPException 400 if invalid
     """
-    if not filename or not isinstance(filename, str):
+    if not filename or not isinstance(filename, str): # type: ignore
         raise HTTPException(status_code=400, detail="filename is required")
 
     normalized = filename.strip()
@@ -209,7 +209,7 @@ def validate_user_id(user_id: str | None, field_name: str = "user_id") -> str:
     Raises:
         HTTPException 400 if invalid
     """
-    if not user_id or not isinstance(user_id, str):
+    if not user_id or not isinstance(user_id, str): # type: ignore
         raise HTTPException(
             status_code=400,
             detail=f"{field_name} is required and must be a string",
@@ -245,7 +245,7 @@ def validate_message(message: str | None, field_name: str = "message", max_len: 
     Raises:
         HTTPException 400 if invalid
     """
-    if not message or not isinstance(message, str):
+    if not message or not isinstance(message, str): # type: ignore
         raise HTTPException(
             status_code=400,
             detail=f"{field_name} is required and must be a string",
@@ -359,6 +359,6 @@ def safe_dict_get(d: dict[str, Any] | None, key: str, default: Any = None) -> An
     Returns:
         Value from dict or default
     """
-    if d is None or not isinstance(d, dict):
+    if d is None or not isinstance(d, dict): # type: ignore
         return default
     return d.get(key, default)

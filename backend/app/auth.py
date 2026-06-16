@@ -32,6 +32,7 @@ ROLE_ADMIN = "admin"
 ROLE_DISPATCHER = "dispatcher"
 ROLE_DRIVER = "driver"
 ROLE_PROVIDER = "provider"
+ROLE_RIDER = "rider"
 ROLE_STAFF = "staff"
 ROLE_ANALYTICS_READONLY = "analytics_readonly"
 ROLE_SUPER_ADMIN_SUPPORT = "super_admin_support"
@@ -44,6 +45,7 @@ VALID_ROLES = {
     ROLE_DISPATCHER,
     ROLE_DRIVER,
     ROLE_PROVIDER,
+    ROLE_RIDER,
     ROLE_STAFF,
     ROLE_ANALYTICS_READONLY,
     ROLE_SUPER_ADMIN_SUPPORT,
@@ -71,6 +73,11 @@ SEED_USERS: tuple[dict[str, str], ...] = (
         "email": "driver@amicor.local",
         "display_name": "Amicor Driver",
         "role": ROLE_DRIVER,
+    },
+    {
+        "email": "rider@amicor.local",
+        "display_name": "Amicor Rider",
+        "role": ROLE_RIDER,
     },
     {
         "email": "provider@amicor.local",
@@ -276,18 +283,31 @@ def _resolve_registration_organization(db: Session, organization_name: str | Non
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
 _ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+JWT_ISSUER = os.getenv("JWT_ISSUER", "").strip()
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "").strip()
+
+if SECRET_KEY and JWT_SECRET and SECRET_KEY != JWT_SECRET:
+    logger.warning(
+        "SECRET_KEY and JWT_SECRET differ; using JWT_SECRET for token signing and verification."
+    )
+
+TOKEN_SIGNING_SECRET = (JWT_SECRET or SECRET_KEY).strip()
 
 # Warn if no secret key configured
-if not SECRET_KEY:
+if not TOKEN_SIGNING_SECRET:
     _fallback = secrets.token_hex(32)
-    SECRET_KEY = _fallback # type: ignore
+    TOKEN_SIGNING_SECRET = _fallback # type: ignore
     logger.warning(
-        "SECRET_KEY not set — using ephemeral key. Tokens will be invalid after restart. "
-        "Set SECRET_KEY env var in production."
+        "JWT_SECRET/SECRET_KEY not set — using ephemeral key. Tokens will be invalid after restart. "
+        "Set JWT_SECRET (or SECRET_KEY) env var in production."
     )
+
+# Keep SECRET_KEY aligned for compatibility with modules importing it directly.
+SECRET_KEY = TOKEN_SIGNING_SECRET
 
 # ── JWT (pure stdlib — no extra deps) ─────────────────────────────────────────
 import base64
@@ -307,7 +327,7 @@ def _b64url_decode(s: str) -> bytes:
 def _jwt_sign(payload: dict) -> str: # type: ignore
     header = _b64url_encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body   = _b64url_encode(_json.dumps(payload).encode())
-    sig = hmac.new(SECRET_KEY.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
+    sig = hmac.new(TOKEN_SIGNING_SECRET.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
     return f"{header}.{body}.{_b64url_encode(sig)}"
 
 
@@ -317,7 +337,7 @@ def _jwt_verify(token: str) -> dict: # type: ignore
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid token format")
     expected_sig = hmac.new(
-        SECRET_KEY.encode(), f"{header_b64}.{body_b64}".encode(), hashlib.sha256
+        TOKEN_SIGNING_SECRET.encode(), f"{header_b64}.{body_b64}".encode(), hashlib.sha256
     ).digest()
     if not hmac.compare_digest(expected_sig, _b64url_decode(sig_b64)):
         raise HTTPException(status_code=401, detail="Token signature invalid")
@@ -328,11 +348,19 @@ def _jwt_verify(token: str) -> dict: # type: ignore
     exp = payload.get("exp")
     if exp and time.time() > exp:
         raise HTTPException(status_code=401, detail="Token expired")
+    if JWT_ISSUER and payload.get("iss") != JWT_ISSUER:
+        raise HTTPException(status_code=401, detail="Token issuer invalid")
+    if JWT_AUDIENCE and payload.get("aud") != JWT_AUDIENCE:
+        raise HTTPException(status_code=401, detail="Token audience invalid")
     return payload
 
 
 def create_access_token(data: dict) -> str: # type: ignore
     payload = {**data, "exp": time.time() + ACCESS_TOKEN_EXPIRE_MINUTES * 60} # type: ignore
+    if JWT_ISSUER:
+        payload["iss"] = JWT_ISSUER
+    if JWT_AUDIENCE:
+        payload["aud"] = JWT_AUDIENCE
     return _jwt_sign(payload)
 
 
@@ -616,20 +644,23 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     logger.info("Login: user_id=%s ip=%s", user.id, ip)
-    from app.core.nova.assistant_execution_service import log_operational_event
+    try:
+        from app.core.nova.assistant_execution_service import log_operational_event
 
-    log_operational_event(
-        user_id=str(user.id),
-        role=normalize_role(getattr(user, "role", None)),
-        event_type="auth",
-        event_name="login",
-        status="success",
-        payload={
-            "ip": ip,
-            "organization_id": getattr(user, "organization_id", None),
-            "organization_name": getattr(user, "organization_name", None),
-        },
-    )
+        log_operational_event(
+            user_id=str(user.id),
+            role=normalize_role(getattr(user, "role", None)),
+            event_type="auth",
+            event_name="login",
+            status="success",
+            payload={
+                "ip": ip,
+                "organization_id": getattr(user, "organization_id", None),
+                "organization_name": getattr(user, "organization_name", None),
+            },
+        )
+    except Exception:
+        logger.warning("Non-critical login telemetry failed for user_id=%s", user.id, exc_info=True)
     return LoginResponse(
         access_token=access,
         refresh_token=raw_refresh,

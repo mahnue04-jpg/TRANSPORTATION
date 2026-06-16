@@ -1,0 +1,189 @@
+{
+  "run_id": "rev220260607042445",
+  "db_path": "C:\\Users\\smoni\\OneDrive\\New folder\\New folder\\Amicore_Rebuild\\backend\\data\\chat.db",
+  "steps": [
+    {
+      "name": "1_create_driver",
+      "api": {
+        "status": 201,
+        "id": "23379af1-2460-4926-88ab-914c7f9de653"
+      },
+      "db": {
+        "id": "23379af1-2460-4926-88ab-914c7f9de653",
+        "name": "Revenue Driver rev220260607042445",
+        "status": "offline"
+      }
+    },
+    {
+      "name": "2_driver_visible_dispatcher",
+      "api": {
+        "set_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "23379af1-2460-4926-88ab-914c7f9de653",
+        "status": "available"
+      }
+    },
+    {
+      "name": "3_create_patient",
+      "api": {
+        "status": 201,
+        "id": "2a9a7adc-01d5-4059-81ea-f30e45d07fe4"
+      },
+      "db": {
+        "id": "2a9a7adc-01d5-4059-81ea-f30e45d07fe4",
+        "rider_name": "Revenue Patient rev220260607042445",
+        "dispatch_status": "pending"
+      }
+    },
+    {
+      "name": "4_patient_visible_dispatcher",
+      "api": {
+        "list_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "2a9a7adc-01d5-4059-81ea-f30e45d07fe4",
+        "dispatch_status": "pending"
+      }
+    },
+    {
+      "name": "5_create_ride",
+      "api": {
+        "status": 201,
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700"
+      },
+      "db": {
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "pending",
+        "lifecycle_state": "queued"
+      }
+    },
+    {
+      "name": "6_ride_visible_dispatcher",
+      "api": {
+        "list_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "pending",
+        "driver_id": null
+      }
+    },
+    {
+      "name": "7_assign_driver",
+      "api": {
+        "status": 200
+      },
+      "db": {
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "accepted",
+        "driver_id": "23379af1-2460-4926-88ab-914c7f9de653",
+        "assigned_at": "2026-06-07 04:24:50.411023"
+      }
+    },
+    {
+      "name": "8_dispatch_ride",
+      "api": {
+        "status": 200
+      },
+      "db": {
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "accepted",
+        "lifecycle_state": "driver_en_route",
+        "enroute_at": "2026-06-07 04:24:50.516984"
+      }
+    },
+    {
+      "name": "9_complete_ride",
+      "api": {
+        "arrived": 200,
+        "picked_up": 200,
+        "in_progress": 200,
+        "completed": 200
+      },
+      "db": {
+        "id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "completed",
+        "lifecycle_state": "completed",
+        "completed_at": "2026-06-07 04:24:51.309973"
+      }
+    },
+    {
+      "name": "10_generate_trip_record",
+      "api": {
+        "trip_table_has_row": true
+      },
+      "db": {
+        "trip_row": {
+          "id": "57266ef1-18c7-4e18-b8fd-7ce31d78a533",
+          "ride_id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+          "driver_id": "23379af1-2460-4926-88ab-914c7f9de653",
+          "status": "COMPLETED",
+          "start_time": "2026-06-07 04:24:50.411033",
+          "end_time": "2026-06-07 04:24:51.309973",
+          "distance_miles": 7.2,
+          "duration_minutes": 0,
+          "created_at": "2026-06-07 04:24:51.311049",
+          "updated_at": "2026-06-07 04:24:51.311050"
+        },
+        "status_history_rows": 7
+      }
+    },
+    {
+      "name": "11_generate_invoice",
+      "api": {
+        "status": 200,
+        "payment_id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+        "invoice_reference": "INV-rev220260607042445"
+      },
+      "db": {
+        "id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+        "ride_id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+        "status": "requires_capture",
+        "invoice_reference": "INV-rev220260607042445",
+        "amount_usd": 159.0
+      }
+    },
+    {
+      "name": "12_show_payment_workflow",
+      "api": {
+        "capture_status": 200,
+        "settle_status": 200,
+        "ride_payments_status": 200,
+        "ride_payments_count": 1
+      },
+      "db": {
+        "payment_id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+        "ledger_rows": [
+          {
+            "id": "87d913d1-6c2d-4c6d-bd53-6bf97f2f4376",
+            "payment_transaction_id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+            "participant_type": "driver",
+            "net_amount_usd": 95.4,
+            "status": "processed"
+          },
+          {
+            "id": "26659b62-85d4-4bfc-a880-9f20846b2d40",
+            "payment_transaction_id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+            "participant_type": "provider",
+            "net_amount_usd": 63.6,
+            "status": "processed"
+          }
+        ]
+      }
+    }
+  ],
+  "entities": {
+    "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+    "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+    "driver_id": "23379af1-2460-4926-88ab-914c7f9de653",
+    "patient_request_id": "2a9a7adc-01d5-4059-81ea-f30e45d07fe4",
+    "ride_id": "8e7e4189-3737-4895-aa3e-5110c9d80700",
+    "invoice_reference": "INV-rev220260607042445",
+    "payment_id": "eab78dff-5952-48bb-94a3-f5ed77a0d56f",
+    "token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZTY2NzUyNjYtM2UxMy00MDhhLThkYmMtMmZiMzE2NTFjYzlkIiwgImVtYWlsIjogImRpc3BhdGNoZXJAYW1pY29yLmxvY2FsIiwgInJvbGUiOiAiZGlzcGF0Y2hlciIsICJvcmdhbml6YXRpb25faWQiOiAiY2E4ZDBjN2MtMWZmZi00NDY1LTk5ZDctNzVhMWZjNTE1NDNlIiwgImV4cCI6IDE3ODA4MDk4ODguNzQ0MTI3fQ.iOfoCWlZkjEW9FQCiltU5wveWnRq0dakGNxWwyd7zBg"
+  }
+}

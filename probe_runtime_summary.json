@@ -1,0 +1,73 @@
+﻿{
+    "listener":  {
+                     "host":  "127.0.0.1",
+                     "port":  8011,
+                     "tcp_success":  false
+                 },
+    "auth":  {
+                 "dispatcher":  false,
+                 "supervisor":  false,
+                 "driver":  false,
+                 "compliance":  false
+             },
+    "runtime_health":  {
+                           "runtime_diag_ok":  false,
+                           "live_status_ok":  false,
+                           "dashboard_summary_ok":  false,
+                           "command_center_runtime_ok":  false,
+                           "hydration_healthy":  false
+                       },
+    "route_checks":  {
+                         "dispatch_route_ok":  false,
+                         "supervisor_route_ok":  false,
+                         "driver_route_ok":  false,
+                         "compliance_route_ok":  false,
+                         "dispatch_role_view":  "",
+                         "supervisor_role_view":  "",
+                         "driver_role_view":  "",
+                         "compliance_role_view":  ""
+                     },
+    "replay_continuity":  {
+                              "replay_ok":  false,
+                              "sequence_monotonic":  true,
+                              "utc_normalized":  true,
+                              "duplicate_event_ids":  0,
+                              "duplicate_assignment_keys":  0,
+                              "malformed_events":  0,
+                              "replay_safe_flag":  false,
+                              "sequence_monotonic_flag":  false
+                          },
+    "degraded_modules":  {
+                             "health_runtime_operational_state":  "",
+                             "health_runtime_modules":  null,
+                             "command_center_operational_state":  "",
+                             "command_center_modules":  null,
+                             "continuity_degraded_reasons":  [
+                                                                 null
+                                                             ],
+                             "nova_overall_status":  "",
+                             "nova_degraded_subsystems":  [
+                                                              null
+                                                          ]
+                         },
+    "hydration_chain":  {
+                            "persistent_recovery_ok":  false,
+                            "mobile_hydration":  {
+
+                                                 }
+                        },
+    "raw_errors":  {
+                       "runtime_diag_error":  "Unable to connect to the remote server",
+                       "live_status_error":  "Unable to connect to the remote server",
+                       "dashboard_summary_error":  "Unable to connect to the remote server",
+                       "command_center_runtime_error":  "Unable to connect to the remote server",
+                       "dispatch_route_error":  "Unable to connect to the remote server",
+                       "supervisor_route_error":  "Unable to connect to the remote server",
+                       "driver_route_error":  "Unable to connect to the remote server",
+                       "compliance_route_error":  "Unable to connect to the remote server",
+                       "replay_error":  "Unable to connect to the remote server",
+                       "persistent_recovery_error":  "Unable to connect to the remote server",
+                       "nova_runtime_error":  "Unable to connect to the remote server",
+                       "nova_checks_error":  "Unable to connect to the remote server"
+                   }
+}

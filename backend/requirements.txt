@@ -11,3 +11,6 @@ openpyxl
 sqlalchemy>=2.0
 psycopg2-binary
 alembic
+psutil
+redis>=5.0
+pytest-asyncio

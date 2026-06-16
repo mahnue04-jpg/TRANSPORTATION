@@ -1,0 +1,160 @@
+{
+  "run_id": "rev20260607041654",
+  "db_path": "C:\\Users\\smoni\\OneDrive\\New folder\\New folder\\Amicore_Rebuild\\backend\\data\\chat.db",
+  "steps": [
+    {
+      "name": "1_create_driver",
+      "api": {
+        "status": 201,
+        "id": "46a8a737-0cb6-44d9-80e4-fcba53c202fd"
+      },
+      "db": {
+        "id": "46a8a737-0cb6-44d9-80e4-fcba53c202fd",
+        "name": "Revenue Driver rev20260607041654",
+        "phone": "+164677041654",
+        "status": "offline",
+        "is_active": 1
+      }
+    },
+    {
+      "name": "2_driver_visible_dispatcher",
+      "api": {
+        "set_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "46a8a737-0cb6-44d9-80e4-fcba53c202fd",
+        "status": "available",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    {
+      "name": "3_create_patient",
+      "api": {
+        "status": 201,
+        "id": "566b0dc6-4a90-45a6-b86e-8425440385ab"
+      },
+      "db": {
+        "id": "566b0dc6-4a90-45a6-b86e-8425440385ab",
+        "rider_name": "Revenue Patient rev20260607041654",
+        "dispatch_status": "pending",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    {
+      "name": "4_patient_visible_dispatcher",
+      "api": {
+        "list_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "566b0dc6-4a90-45a6-b86e-8425440385ab",
+        "dispatch_status": "pending"
+      }
+    },
+    {
+      "name": "5_create_ride",
+      "api": {
+        "status": 201,
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3"
+      },
+      "db": {
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+        "status": "pending",
+        "lifecycle_state": "queued",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    {
+      "name": "6_ride_visible_dispatcher",
+      "api": {
+        "list_status": 200,
+        "visible": true
+      },
+      "db": {
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+        "status": "pending",
+        "driver_id": null
+      }
+    },
+    {
+      "name": "7_assign_driver",
+      "api": {
+        "status": 200
+      },
+      "db": {
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+        "status": "accepted",
+        "driver_id": "46a8a737-0cb6-44d9-80e4-fcba53c202fd",
+        "assigned_at": "2026-06-07 04:17:11.946645"
+      }
+    },
+    {
+      "name": "8_dispatch_ride",
+      "api": {
+        "status": 500
+      },
+      "db": {
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+        "status": "accepted",
+        "lifecycle_state": "assigned",
+        "enroute_at": null
+      }
+    },
+    {
+      "name": "9_complete_ride",
+      "api": {
+        "arrived": 200,
+        "pickup_complete": 500,
+        "dropoff_complete": 400
+      },
+      "db": {
+        "id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+        "status": "accepted",
+        "lifecycle_state": "arrived",
+        "completed_at": null
+      }
+    },
+    {
+      "name": "10_generate_trip_record",
+      "api": {
+        "trip_table_has_row": false
+      },
+      "db": {
+        "trip_row": null,
+        "status_history_rows": 3
+      }
+    },
+    {
+      "name": "11_generate_invoice",
+      "api": {
+        "status": 500,
+        "payment_id": null,
+        "invoice_reference": "INV-rev20260607041654"
+      },
+      "db": null
+    },
+    {
+      "name": "12_show_payment_workflow",
+      "api": {
+        "capture_status": 0,
+        "settle_status": 0,
+        "ride_payments_status": 200,
+        "ride_payments_count": 0
+      },
+      "db": {
+        "ledger_rows": []
+      }
+    }
+  ],
+  "entities": {
+    "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+    "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+    "driver_id": "46a8a737-0cb6-44d9-80e4-fcba53c202fd",
+    "patient_request_id": "566b0dc6-4a90-45a6-b86e-8425440385ab",
+    "ride_id": "3454b280-d3bb-4689-9e52-f1a4718cf7c3",
+    "invoice_reference": "INV-rev20260607041654",
+    "payment_id": null,
+    "token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZTY2NzUyNjYtM2UxMy00MDhhLThkYmMtMmZiMzE2NTFjYzlkIiwgImVtYWlsIjogImRpc3BhdGNoZXJAYW1pY29yLmxvY2FsIiwgInJvbGUiOiAiZGlzcGF0Y2hlciIsICJvcmdhbml6YXRpb25faWQiOiAiY2E4ZDBjN2MtMWZmZi00NDY1LTk5ZDctNzVhMWZjNTE1NDNlIiwgImV4cCI6IDE3ODA4MDk0MTQuODIzNjY3OH0.O5GcbnL902LoycaQAOYg34WaGseKGZGjifTh2_I3wyo"
+  }
+}

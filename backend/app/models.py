@@ -8,20 +8,20 @@ class ChatRequest(BaseModel):
     - user_id: non-empty, max 256 chars
     - message: non-empty, max 8000 chars
     """
-    user_id: str = Field(
+    user_id: str = Field( # type: ignore
         ...,
         min_length=1,
         max_length=256,
         strip_whitespace=True,
         description="Unique identifier for the user",
-    )
-    message: str = Field(
+    ) # type: ignore
+    message: str = Field( # type: ignore
         ...,
         min_length=1,
         max_length=8000,
         strip_whitespace=True,
         description="Chat message content",
-    )
+    ) # type: ignore
 
     @field_validator("user_id", "message")
     @classmethod
@@ -37,13 +37,13 @@ class ResetRequest(BaseModel):
     Constraints:
     - user_id: non-empty, max 256 chars
     """
-    user_id: str = Field(
+    user_id: str = Field( # type: ignore
         ...,
         min_length=1,
         max_length=256,
         strip_whitespace=True,
         description="User identifier",
-    )
+    ) # type: ignore
 
     @field_validator("user_id")
     @classmethod

@@ -1,0 +1,30 @@
+{
+  "operations_api_status": [
+    {"path": "/api/health-isf/operations/map-preview", "status": 200},
+    {"path": "/api/health-isf/operations/workflow-overview", "status": 200},
+    {"path": "/api/health-isf/operations/workflow-events", "status": 200},
+    {"path": "/api/health-isf/operations/timeline", "status": 200},
+    {"path": "/api/health-isf/providers", "status": 200},
+    {"path": "/api/health-isf/providers/6e0c86e1-fce3-4ac6-ba56-b55717e84cb2/transport-queue?include_completed=true", "status": 200},
+    {"path": "/api/health-isf/operations/revenue-workflow?window_hours=24", "status": 200}
+  ],
+  "reports_summary": {
+    "completed_trips": 0,
+    "dispatcher_load_index": 5067.5,
+    "timeline_events": 5
+  },
+  "map_summary": {
+    "driver_coordinates": 0,
+    "route_paths": 0,
+    "eta_updates": null
+  },
+  "support_api_probe": [
+    {"path": "/api/health-isf/support/tickets", "status": 404},
+    {"path": "/api/health-isf/support/payouts", "status": 404},
+    {"path": "/api/health-isf/support/documents", "status": 404}
+  ],
+  "rider_button_persistence_check": {
+    "phone": "+15550999123",
+    "customer_history_count": 0
+  }
+}

@@ -42,6 +42,7 @@
         position: fixed; inset: 0; z-index: 8000;
         background: #0b0b10;
         display: flex; flex-direction: column;
+        pointer-events: none;
       }
       .sk-header {
         height: 58px; border-bottom: 1px solid #2a2a3e;

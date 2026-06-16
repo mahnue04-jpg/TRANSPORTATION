@@ -268,6 +268,115 @@
     } catch (_err) {}
   }
 
+  const PICKUP_TRACE_EVENT = "health-isf-pickup-trace";
+  let pickupTraceAttached = false;
+  let pickupTraceRenderCount = 0;
+  const pickupTraceObservedForms = typeof WeakSet === "function" ? new WeakSet() : null;
+
+  function getPickupFieldNodes() {
+    return Array.from(document.querySelectorAll('[name="pickup_address"]'));
+  }
+
+  function describePickupNode(node) {
+    if (!node) return null;
+    const form = node.closest ? node.closest("form") : null;
+    return {
+      formId: form && form.id ? form.id : null,
+      tagName: node.tagName || null,
+      name: node.getAttribute ? node.getAttribute("name") : null,
+      valueLength: Number(String(node.value || "").length || 0),
+      connected: !!node.isConnected,
+    };
+  }
+
+  function emitPickupTrace(stage, extra) {
+    const pickupNodes = getPickupFieldNodes();
+    const activeElement = document.activeElement || null;
+    const activeNode = activeElement && activeElement.getAttribute && activeElement.getAttribute("name") === "pickup_address"
+      ? activeElement
+      : null;
+    const activeForm = activeElement && activeElement.closest ? activeElement.closest("form") : null;
+    const payload = Object.assign({
+      stage: stage,
+      at: stampNow(),
+      renderCount: pickupTraceRenderCount,
+      pickupCount: pickupNodes.length,
+      activeTag: activeElement && activeElement.tagName ? activeElement.tagName : null,
+      activeName: activeElement && activeElement.getAttribute ? activeElement.getAttribute("name") : null,
+      activeFormId: activeForm && activeForm.id ? activeForm.id : null,
+      activeIsPickup: !!activeNode,
+      pickupStates: pickupNodes.map(describePickupNode),
+    }, extra || {});
+
+    try {
+      console.info("[Health ISF][PickupTrace]", payload);
+      if (window.dispatchEvent && typeof window.CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent(PICKUP_TRACE_EVENT, { detail: payload }));
+      }
+    } catch (_err) {}
+  }
+
+  function observePickupForm(form) {
+    if (!form || !pickupTraceObservedForms || pickupTraceObservedForms.has(form)) return;
+    pickupTraceObservedForms.add(form);
+    if (typeof MutationObserver !== "function") return;
+    const observer = new MutationObserver(function (mutations) {
+      const pickupField = form.querySelector('[name="pickup_address"]');
+      emitPickupTrace("mutation", {
+        formId: form.id || null,
+        mutationCount: mutations.length,
+        pickupConnected: !!(pickupField && pickupField.isConnected),
+      });
+    });
+    observer.observe(form, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden", "style"] });
+  }
+
+  function attachPickupTracing() {
+    if (pickupTraceAttached) return;
+    pickupTraceAttached = true;
+
+    document.addEventListener("focusin", function (event) {
+      const target = event && event.target ? event.target : null;
+      if (!target || !target.getAttribute || target.getAttribute("name") !== "pickup_address") return;
+      emitPickupTrace("focusin", describePickupNode(target));
+    }, true);
+
+    document.addEventListener("focusout", function (event) {
+      const target = event && event.target ? event.target : null;
+      if (!target || !target.getAttribute || target.getAttribute("name") !== "pickup_address") return;
+      const relatedTarget = event && event.relatedTarget ? event.relatedTarget : null;
+      emitPickupTrace("focusout", Object.assign(describePickupNode(target), {
+        relatedTag: relatedTarget && relatedTarget.tagName ? relatedTarget.tagName : null,
+        relatedName: relatedTarget && relatedTarget.getAttribute ? relatedTarget.getAttribute("name") : null,
+        relatedFormId: relatedTarget && relatedTarget.closest ? (relatedTarget.closest("form") && relatedTarget.closest("form").id) || null : null,
+      }));
+    }, true);
+
+    document.addEventListener("input", function (event) {
+      const target = event && event.target ? event.target : null;
+      if (!target || !target.getAttribute || target.getAttribute("name") !== "pickup_address") return;
+      emitPickupTrace("input", describePickupNode(target));
+      window.requestAnimationFrame(function () {
+        emitPickupTrace("input-frame", describePickupNode(target));
+      });
+    }, true);
+
+    document.addEventListener("change", function (event) {
+      const target = event && event.target ? event.target : null;
+      if (!target || !target.getAttribute || target.getAttribute("name") !== "pickup_address") return;
+      emitPickupTrace("change", describePickupNode(target));
+    }, true);
+
+    getPickupFieldNodes().forEach(observePickupForm);
+  }
+
+  function tracePickupRerender(stage, extra) {
+    pickupTraceRenderCount += 1;
+    emitPickupTrace(stage, Object.assign({
+      rerenderIndex: pickupTraceRenderCount,
+    }, extra || {}));
+  }
+
   function normalizeApiError(error) {
     const message = String(error && error.message ? error.message : error || "Request failed");
     const lower = message.toLowerCase();
@@ -3775,8 +3884,8 @@
     const problem = [];
     rides.forEach((ride) => {
       const status = String(ride.status || "").toLowerCase();
-      if (status === "pending") pending.push(ride);
-      else if (status === "accepted" || status === "in_transit") active.push(ride);
+      if (status === "pending" || status === "assigned" || status === "queued") pending.push(ride);
+      else if (["accepted", "in_transit", "driver_en_route", "arrived", "in_progress", "rider_onboard"].includes(status)) active.push(ride);
       else if (status === "completed") completed.push(ride);
       if (status === "cancelled" || hasOperationalWarning(ride)) {
         problem.push(ride);
@@ -4399,7 +4508,7 @@
     const sections = [
       ["Pending Rides", state.rides.filter((ride) => String(ride.status || "").toLowerCase() === "pending")],
       ["Assigned Rides", state.rides.filter((ride) => String(ride.status || "").toLowerCase() === "accepted" && ride.driver_id)],
-      ["Active Rides", state.rides.filter((ride) => ["accepted", "in_transit"].includes(String(ride.status || "").toLowerCase()))],
+      ["Active Rides", state.rides.filter((ride) => ["accepted", "in_transit", "driver_en_route", "arrived", "in_progress", "rider_onboard"].includes(String(ride.status || "").toLowerCase()))],
       ["Completed Rides", state.rides.filter((ride) => String(ride.status || "").toLowerCase() === "completed")],
       ["Cancelled Rides", state.rides.filter((ride) => String(ride.status || "").toLowerCase() === "cancelled")],
       ["Available Drivers", state.drivers.filter((driver) => String(driver.status || "").toLowerCase() === "available")],
@@ -4723,10 +4832,12 @@
       const listHtml = queueRows.length
         ? '<div class="health-stack-list">' + queueRows.slice(0, 8).map(function (item) {
             const aging = item.requested_at ? formatRelativeTime(item.requested_at) : 'n/a';
+            const dispatcherMessage = String(item.dispatcher_message || '');
             return '<article class="health-stack-item">'
               + '<div class="health-stack-title-row"><strong>' + escapeHtml(item.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(item.assignment_state || 'queued') + '">' + escapeHtml(item.assignment_state || 'queued') + '</span></div>'
               + '<p>Ride ' + escapeHtml(String(item.ride_id || '').slice(0, 8)) + ' · attempt ' + escapeHtml(String(item.attempt_index || 0)) + ' · age ' + escapeHtml(aging) + '</p>'
               + '<small>Offered driver: ' + escapeHtml(item.offered_driver_id ? String(item.offered_driver_id).slice(0, 8) : 'none') + '</small>'
+              + (dispatcherMessage ? '<div class="health-summary">' + escapeHtml(dispatcherMessage) + '</div>' : '')
               + '</article>';
           }).join('') + '</div>'
         : '<p class="health-summary">Dispatch queue is clear.</p>';
@@ -4868,7 +4979,7 @@
 
     const rides = getRideRows(filteredRides()).filter(function (row) {
       const status = String(row.status || '').toLowerCase();
-      return ['pending', 'accepted', 'in_transit', 'assigned'].indexOf(status) !== -1;
+      return ['pending', 'accepted', 'in_transit', 'assigned', 'queued', 'driver_en_route', 'arrived', 'in_progress', 'rider_onboard'].indexOf(status) !== -1;
     });
     const drivers = getDriverRows();
 
@@ -5052,7 +5163,12 @@
       body: JSON.stringify({ ride_id: rideId }),
     });
     state.selectedRideId = rideId;
-    await refreshData();
+    await Promise.all([
+      fetchDriverAssignedRides(driverId).catch(function () { return []; }),
+      refreshDriverRuntimeStatus().catch(function () { return null; }),
+      refreshDriverLiveWorkspace().catch(function () { return null; }),
+      refreshData(),
+    ]);
   }
 
   async function escalateRideIssue(rideId) {
@@ -5236,6 +5352,9 @@
     if (!inputs.driverId) {
       throw new Error('Select a driver first');
     }
+    if (rideId) {
+      state.selectedRideId = String(rideId);
+    }
     await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(inputs.driverId) + '/route-progress', {
       method: 'POST',
       actionName: 'driver_route_progress',
@@ -5391,11 +5510,81 @@
     if (state.selectedRideId) {
       return String(state.selectedRideId);
     }
+    // Only fall back to queue scanning if no workflow is active
     const pending = (state.rides || []).find(function (ride) {
       const status = String((ride && ride.status) || '').toLowerCase();
-      return status === 'pending' || status === 'accepted';
+      // Do not auto-select rides that are in active driver workflow stages
+      return status === 'pending';
     });
     return pending ? String(pending.id) : '';
+  }
+
+  function resolvePinnedRideId() {
+    const rides = Array.isArray(state.rides) ? state.rides : [];
+    if (!rides.length) {
+      return '';
+    }
+
+    var byId = Object.create(null);
+    rides.forEach(function (ride) {
+      var id = String((ride && ride.id) || '');
+      if (id) {
+        byId[id] = true;
+      }
+    });
+
+    var existing = String(state.selectedRideId || '');
+    if (existing && byId[existing]) {
+      return existing;
+    }
+
+    var liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
+    var workspaceRideId = String(firstDefined(
+      liveWorkspace && liveWorkspace.active_ride && liveWorkspace.active_ride.id,
+      liveWorkspace && liveWorkspace.active_assignment && liveWorkspace.active_assignment.ride_id,
+      ''
+    ) || '');
+    if (workspaceRideId && byId[workspaceRideId]) {
+      return workspaceRideId;
+    }
+
+    var activeAssignments = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
+    for (var i = 0; i < activeAssignments.length; i += 1) {
+      var assignmentRideId = String(activeAssignments[i] && activeAssignments[i].ride_id || '');
+      if (assignmentRideId && byId[assignmentRideId]) {
+        return assignmentRideId;
+      }
+    }
+
+    var prioritizedStatus = {
+      pending: 1,
+      queued: 1,
+      assigned: 2,
+      accepted: 3,
+      driver_en_route: 4,
+      arrived: 5,
+      rider_onboard: 6,
+      in_progress: 6,
+      in_transit: 6,
+      completed: 99,
+      cancelled: 99,
+      canceled: 99,
+    };
+
+    var ranked = rides.slice().sort(function (a, b) {
+      var sa = String((a && a.status) || '').toLowerCase();
+      var sb = String((b && b.status) || '').toLowerCase();
+      var pa = Object.prototype.hasOwnProperty.call(prioritizedStatus, sa) ? prioritizedStatus[sa] : 50;
+      var pb = Object.prototype.hasOwnProperty.call(prioritizedStatus, sb) ? prioritizedStatus[sb] : 50;
+      if (pa !== pb) {
+        return pa - pb;
+      }
+      var ta = Date.parse(String((a && (a.updated_at || a.created_at || a.requested_at)) || '')) || 0;
+      var tb = Date.parse(String((b && (b.updated_at || b.created_at || b.requested_at)) || '')) || 0;
+      return tb - ta;
+    });
+
+    return String(ranked[0] && ranked[0].id || '');
   }
 
   function computeDispatchTimeline() {
@@ -5441,12 +5630,18 @@
     if (!rideId) {
       throw new Error('Select a ride before auto-assign');
     }
+    state.selectedRideId = String(rideId);
     await fetchJson('/api/health-isf/dispatch/auto-assign', {
       method: 'POST',
       actionName: 'dispatch_auto_assign',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
     });
+    await Promise.all([
+      refreshDispatchIntelligence().catch(function () { return null; }),
+      refreshData(),
+    ]);
+    await refreshRideTimeline().catch(function () { return null; });
   }
 
   async function runDispatchReassign() {
@@ -5454,12 +5649,18 @@
     if (!rideId) {
       throw new Error('Select a ride before reassignment');
     }
+    state.selectedRideId = String(rideId);
     await fetchJson('/api/health-isf/dispatch/reassign', {
       method: 'POST',
       actionName: 'dispatch_reassign',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
     });
+    await Promise.all([
+      refreshDispatchIntelligence().catch(function () { return null; }),
+      refreshData(),
+    ]);
+    await refreshRideTimeline().catch(function () { return null; });
   }
 
   function getSelectedCustomerRequestId() {
@@ -5487,15 +5688,26 @@
     if (!requestId) {
       throw new Error('Enter or select a customer request ID first');
     }
-    await fetchJson('/api/health-isf/dispatcher/customer-requests/' + encodeURIComponent(requestId) + pathSuffix, {
+    const response = await fetchJson('/api/health-isf/dispatcher/customer-requests/' + encodeURIComponent(requestId) + pathSuffix, {
       method: method,
       actionName: 'dispatcher_request_action',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     });
-    if (state.selectedRideId) {
-      await refreshRideTimeline().catch(function () { return null; });
+    const rideId = String(firstDefined(
+      response && response.ride_id,
+      response && response.data && response.data.ride_id,
+      body && body.ride_id,
+      ''
+    ) || '');
+    if (rideId) {
+      state.selectedRideId = rideId;
     }
+    await Promise.all([
+      refreshDispatchIntelligence().catch(function () { return null; }),
+      refreshData(),
+    ]);
+    await refreshRideTimeline().catch(function () { return null; });
   }
 
   async function acceptDriverIncomingOffer() {
@@ -5518,6 +5730,47 @@
       method: 'POST',
       actionName: 'driver_offer_reject',
     });
+  }
+
+  async function acceptDriverAssignedRide(rideId) {
+    const inputs = getDriverRuntimeInputs();
+    if (!inputs.driverId || !rideId) {
+      throw new Error('Driver and ride are required');
+    }
+    state.selectedRideId = String(rideId);
+    await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(inputs.driverId) + '/accept-ride', {
+      method: 'POST',
+      actionName: 'driver_accept_ride',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ride_id: rideId }),
+    });
+    await Promise.all([
+      fetchDriverAssignedRides(inputs.driverId).catch(function () { return []; }),
+      refreshDriverRuntimeStatus().catch(function () { return null; }),
+      refreshDriverLiveWorkspace().catch(function () { return null; }),
+      refreshDispatchIntelligence().catch(function () { return null; }),
+      refreshData(),
+    ]);
+  }
+
+  async function rejectDriverAssignedRide(rideId) {
+    const inputs = getDriverRuntimeInputs();
+    if (!inputs.driverId || !rideId) {
+      throw new Error('Driver and ride are required');
+    }
+    await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(inputs.driverId) + '/decline-ride', {
+      method: 'POST',
+      actionName: 'driver_reject_ride',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ride_id: rideId, note: 'driver_rejected_from_workspace' }),
+    });
+    await Promise.all([
+      fetchDriverAssignedRides(inputs.driverId).catch(function () { return []; }),
+      refreshDriverRuntimeStatus().catch(function () { return null; }),
+      refreshDriverLiveWorkspace().catch(function () { return null; }),
+      refreshDispatchIntelligence().catch(function () { return null; }),
+      refreshData(),
+    ]);
   }
 
   async function submitDriverApplication(formData) {
@@ -5578,8 +5831,12 @@
   }
 
   async function refreshRideTimeline() {
-    const ride = state.rides.find((item) => item.id === state.selectedRideId) || state.rides[0] || null;
+    var pinnedRideId = resolvePinnedRideId();
+    const ride = state.rides.find(function (item) {
+      return String(item && item.id || '') === String(pinnedRideId || '');
+    }) || null;
     state.selectedRideId = ride ? ride.id : null;
+    persistRuntimeState("refresh_ride_timeline");
     if (ride) {
       const [history, dispatchHistory, operationalTimeline, workflowProof] = await Promise.all([
         fetchRideHistory(ride.id),
@@ -5818,17 +6075,55 @@
     if (driverEls.driverAssignedRides) {
       const items = Array.isArray(state.selectedDriverAssignedRides) ? state.selectedDriverAssignedRides : [];
       const selectedDriverName = lookupDriverName(state.selectedDriverId);
+      const liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
+      const activeAssignment = liveWorkspace && liveWorkspace.active_assignment ? liveWorkspace.active_assignment : null;
+      const activeAssignmentRideId = String(activeAssignment && activeAssignment.ride_id || '');
+      const activeAssignmentState = String(activeAssignment && activeAssignment.assignment_state || '').toLowerCase();
       if (!state.selectedDriverId) {
         driverEls.driverAssignedRides.innerHTML = '<p class="health-summary">Select a driver to inspect active assigned rides.</p>';
       } else if (!items.length) {
         driverEls.driverAssignedRides.innerHTML = '<p class="health-summary">No active assigned rides for ' + escapeHtml(selectedDriverName) + '.</p>';
       } else {
         driverEls.driverAssignedRides.innerHTML = items.map(function (ride) {
+          const rideId = String(ride.id || '');
+          const rideStatus = String(ride.status || '').toLowerCase();
+          const isThisActiveRide = rideId === activeAssignmentRideId || rideId === String(state.selectedRideId || '');
+
+          // Determine which action buttons to show based on ride status
+          var actionButtons = '';
+          if (['assigned', 'pending', 'accepted', 'queued'].includes(rideStatus)
+              && (['offered', 'assigned'].includes(activeAssignmentState) || isThisActiveRide)) {
+            // Stage: Requested/Assigned — Accept or Reject
+            actionButtons = '<div class="health-row-actions">'
+              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="accept" data-driver-ride-id="' + escapeHtml(rideId) + '">Accept Ride</button>'
+              + '<button type="button" class="health-row-btn danger" data-driver-ride-action="reject" data-driver-ride-id="' + escapeHtml(rideId) + '">Reject Ride</button>'
+              + '</div>';
+          } else if (['driver_en_route', 'accepted'].includes(rideStatus)) {
+            // Stage: Driver en route — Arrived at pickup
+            actionButtons = '<div class="health-row-actions">'
+              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="arrived" data-driver-ride-id="' + escapeHtml(rideId) + '">Arrived at Pickup</button>'
+              + '</div>';
+          } else if (rideStatus === 'arrived') {
+            // Stage: Arrived — Pickup rider
+            actionButtons = '<div class="health-row-actions">'
+              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="pickup" data-driver-ride-id="' + escapeHtml(rideId) + '">Pickup Rider</button>'
+              + '</div>';
+          } else if (['in_progress', 'rider_onboard'].includes(rideStatus)) {
+            // Stage: In progress — Complete trip
+            actionButtons = '<div class="health-row-actions">'
+              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="complete" data-driver-ride-id="' + escapeHtml(rideId) + '">Complete Trip</button>'
+              + '</div>';
+          } else if (rideStatus === 'completed') {
+            // Stage: Completed — Billing handoff
+            actionButtons = '<div class="health-row-actions"><span class="health-pill ok">Trip complete · Billing handoff ready</span></div>';
+          }
+
           return '<article class="health-item-card">'
             + '<div class="health-row"><strong>' + escapeHtml(ride.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(ride.status) + '">' + escapeHtml(ride.status || 'pending') + '</span></div>'
-            + '<div class="health-summary">Ride ID: ' + escapeHtml(String(ride.id || '').slice(0, 8)) + ' · Category: ' + escapeHtml(formatServiceCategoryLabel(ride.service_type || 'medical_transport')) + '</div>'
+            + '<div class="health-summary">Ride ID: ' + escapeHtml(rideId.slice(0, 8)) + ' · Category: ' + escapeHtml(formatServiceCategoryLabel(ride.service_type || 'medical_transport')) + '</div>'
             + '<div class="health-summary">Pickup: ' + escapeHtml(ride.pickup_address || '-') + '</div>'
             + '<div class="health-summary">Dropoff: ' + escapeHtml(ride.dropoff_address || '-') + '</div>'
+            + actionButtons
             + '</article>';
         }).join('');
       }
@@ -6488,6 +6783,10 @@
   }
 
   function renderAll() {
+    tracePickupRerender("renderAll:start", {
+      route: state.route,
+      modalOpen: !!(getEls().modal && !getEls().modal.hidden),
+    });
     applyRoleUiAccess();
     // Hydrate the create-ride provider select early so unrelated view errors do not block options.
     hydrateProviderSelect();
@@ -6505,6 +6804,10 @@
     renderAnalytics();
     renderBillingWorkspace();
     renderOperationsRail();
+    tracePickupRerender("renderAll:end", {
+      route: state.route,
+      modalOpen: !!(getEls().modal && !getEls().modal.hidden),
+    });
   }
 
   function renderOperationsRail() {
@@ -6657,6 +6960,11 @@
     if (providerList.length > 0) {
       clearCreateRideErrors();
     }
+    if (modal && !modal.hidden) {
+      tracePickupRerender("hydrateProviderSelect", {
+        activeElementName: document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("name") : null,
+      });
+    }
   }
 
   function showView(route) {
@@ -6779,6 +7087,11 @@
         renderRuntimeShell("refresh_blocked");
         return;
       }
+
+      tracePickupRerender("refreshData:start", {
+        route: state.route,
+        modalOpen: !!(getEls().modal && !getEls().modal.hidden),
+      });
 
       state.lastActionAt = stampNow();
       const activeRoute = VIEW_ROUTES.includes(state.route) ? state.route : PRIMARY_ROUTE;
@@ -7006,13 +7319,22 @@
       websocketStatus: state.websocketStatus,
       memoryManagerLoaded: !!window.AmiCorMemoryManager,
     });
-    if (!state.selectedRideId && state.rides.length > 0) {
-      state.selectedRideId = state.rides[0].id;
+    if (state.rides.length > 0) {
+      var selectedRideExists = state.selectedRideId && state.rides.some(function (ride) {
+        return String(ride && ride.id || '') === String(state.selectedRideId || '');
+      });
+      if (!selectedRideExists) {
+        state.selectedRideId = resolvePinnedRideId() || null;
+      }
     }
     // Keep provider options current even if a later renderer throws.
     hydrateProviderSelect();
     persistRuntimeState("refresh_data");
     renderAll();
+      tracePickupRerender("refreshData:afterRenderAll", {
+        route: state.route,
+        modalOpen: !!(getEls().modal && !getEls().modal.hidden),
+      });
     await refreshRideTimeline().catch(() => {});
     })();
 
@@ -7036,6 +7358,10 @@
     clearCreateRideErrors();
     els.modal.hidden = false;
     els.modal.style.display = "grid";
+    attachPickupTracing();
+    tracePickupRerender("openModal", {
+      activeElementName: document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("name") : null,
+    });
     attachAutoDistanceListeners();
     // Always reset stale hydration promise so a fresh load is attempted each open.
     state.providerHydrationPromise = null;
@@ -7287,6 +7613,7 @@
   function attachAutoDistanceListeners() {
     const els = getEls();
     if (!els.form) return;
+    observePickupForm(els.form);
     const pickupField = els.form.querySelector('[name="pickup_address"]');
     const dropoffField = els.form.querySelector('[name="dropoff_address"]');
     const distanceField = els.form.querySelector('[name="estimated_distance_miles"]');
@@ -7869,49 +8196,52 @@
   function bindEvents() {
     const els = getEls();
 
-    els.tabs.forEach((tab) => {
-      tab.addEventListener("click", (event) => {
+    document.addEventListener("click", (event) => {
+      const target = event && event.target ? event.target : null;
+      if (!target) return;
+
+      const tab = target.closest(".health-tab[data-health-route]");
+      if (tab) {
         if (shouldSuppressSyntheticEvent(event, "tab_navigation")) return;
         navigate(tab.getAttribute("data-health-route") || "dashboard", false, { source: "tab-click" });
-      });
-    });
+        return;
+      }
 
-    els.navOpeners.forEach((button) => {
-      button.addEventListener("click", (event) => {
+      const navOpener = target.closest("[data-health-nav-open]");
+      if (navOpener) {
         if (shouldSuppressSyntheticEvent(event, "nav_opener")) return;
-        navigate(button.getAttribute("data-health-nav-open") || "dashboard", false, { source: "nav-open" });
-      });
-    });
+        navigate(navOpener.getAttribute("data-health-nav-open") || "dashboard", false, { source: "nav-open" });
+        return;
+      }
 
-    els.actions.forEach((button) => {
-      button.addEventListener("click", () => {
-        const action = button.getAttribute("data-health-action");
-        if (action === "create-ride") openModal().catch(() => {});
-        if (action === "refresh") refreshData().catch(() => {});
-        if (action === "close") closeModule();
-        if (action === "shell-login") openAuthFlow("login");
-        if (action === "shell-signup") openAuthFlow("signup");
-        if (action === "logout") {
-          if (window.AmiCorSession && typeof window.AmiCorSession.logout === "function") {
-            window.AmiCorSession.logout().finally(() => {
-              state.pendingRoute = null;
-              setModuleVisibility(false, { authGate: true });
-              renderRuntimeShell("logout");
-            });
-          }
+      const actionButton = target.closest("[data-health-action]");
+      if (!actionButton) return;
+      const action = actionButton.getAttribute("data-health-action");
+      if (action === "create-ride") openModal().catch(() => {});
+      if (action === "refresh") refreshData().catch(() => {});
+      if (action === "close") closeModule();
+      if (action === "shell-login") openAuthFlow("login");
+      if (action === "shell-signup") openAuthFlow("signup");
+      if (action === "logout") {
+        if (window.AmiCorSession && typeof window.AmiCorSession.logout === "function") {
+          window.AmiCorSession.logout().finally(() => {
+            state.pendingRoute = null;
+            setModuleVisibility(false, { authGate: true });
+            renderRuntimeShell("logout");
+          });
         }
-        if (action === "clear-role-override") {
-          state.shellRoleOverride = null;
-          persistRuntimeState("clear_role_override");
-          const currentProfile = getSessionProfile();
-          const next = clampRouteForRole(state.route, getEffectiveShellRole(currentProfile.role));
-          renderRuntimeShell("clear_role_override");
-          if (next !== state.route) {
-            navigate(next, true, { source: "clear-role-override" });
-          }
+      }
+      if (action === "clear-role-override") {
+        state.shellRoleOverride = null;
+        persistRuntimeState("clear_role_override");
+        const currentProfile = getSessionProfile();
+        const next = clampRouteForRole(state.route, getEffectiveShellRole(currentProfile.role));
+        renderRuntimeShell("clear_role_override");
+        if (next !== state.route) {
+          navigate(next, true, { source: "clear-role-override" });
         }
-        if (action === "dismiss-modal") closeModal();
-      });
+      }
+      if (action === "dismiss-modal") closeModal();
     });
 
     document.addEventListener("change", (event) => {
@@ -7997,6 +8327,52 @@
     });
 
     document.addEventListener('click', function (event) {
+      const driverRideActionButton = event.target.closest('[data-driver-ride-action]');
+      if (driverRideActionButton) {
+        const action = driverRideActionButton.getAttribute('data-driver-ride-action');
+        const rideId = driverRideActionButton.getAttribute('data-driver-ride-id') || '';
+        const inputs = getDriverRuntimeInputs();
+
+        // Full lifecycle action dispatch — pin the ride ID on every action
+        if (action === 'accept') {
+          state.selectedRideId = rideId;
+          acceptDriverAssignedRide(rideId).then(function () {
+            showToastSafe('Driver accepted ride.', 'success');
+          }).catch(function (error) {
+            showToastSafe('Ride acceptance failed: ' + error.message, 'error');
+          });
+        } else if (action === 'reject') {
+          rejectDriverAssignedRide(rideId).then(function () {
+            if (state.selectedRideId === rideId) state.selectedRideId = null;
+            showToastSafe('Driver rejected ride and returned it for reassignment.', 'warn');
+          }).catch(function (error) {
+            showToastSafe('Ride rejection failed: ' + error.message, 'error');
+          });
+        } else if (action === 'arrived') {
+          state.selectedRideId = rideId;
+          runDriverWorkflow(rideId, inputs.driverId, 'arrived').then(function () {
+            showToastSafe('Driver marked arrived at pickup.', 'success');
+          }).catch(function (error) {
+            showToastSafe('Arrived update failed: ' + error.message, 'error');
+          });
+        } else if (action === 'pickup') {
+          state.selectedRideId = rideId;
+          runDriverWorkflow(rideId, inputs.driverId, 'pickup').then(function () {
+            showToastSafe('Rider picked up — trip in progress.', 'success');
+          }).catch(function (error) {
+            showToastSafe('Pickup update failed: ' + error.message, 'error');
+          });
+        } else if (action === 'complete') {
+          state.selectedRideId = rideId;
+          runDriverWorkflow(rideId, inputs.driverId, 'complete').then(function () {
+            showToastSafe('Trip completed. Billing handoff ready.', 'success');
+          }).catch(function (error) {
+            showToastSafe('Trip completion failed: ' + error.message, 'error');
+          });
+        }
+        return;
+      }
+
       const routeProgressButton = event.target.closest('[data-driver-route-progress]');
       if (routeProgressButton) {
         const targetState = routeProgressButton.getAttribute('data-driver-route-progress');
@@ -8746,6 +9122,7 @@
   function init() {
     const els = getEls();
     if (!els.shell) return;
+    attachPickupTracing();
     restoreRuntimeState();
     ensureShellChrome();
     renderRuntimeShell("init");

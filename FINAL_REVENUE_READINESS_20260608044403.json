@@ -1,0 +1,352 @@
+{
+  "run_id": "20260608044403",
+  "created": {
+    "request_id": "c4f460c8-95cd-48b9-b1ca-9c601cd06747",
+    "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+    "driver_id": "00b2680c-b48e-41ee-a38e-3e1c61cc09d5",
+    "payment_id": "a7499c2d-b38d-4db1-b227-6287409ce95a",
+    "invoice_reference": "INV-044403",
+    "rider_name": "Revenue Patient 044403",
+    "driver_name": "Revenue Driver 044403"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "name": "Create PatientAPI response",
+      "result": "PASS",
+      "evidence": {
+        "status": 201,
+        "request_id": "c4f460c8-95cd-48b9-b1ca-9c601cd06747",
+        "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+        "response_excerpt": {
+          "id": "c4f460c8-95cd-48b9-b1ca-9c601cd06747",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "rider_name": "Revenue Patient 044403",
+          "rider_phone": "+1212555044403",
+          "pickup_address": "101 Revenue St, New York, NY 10001",
+          "dropoff_address": "202 Billing Ave, New York, NY 10002",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": "final revenue readiness test",
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-08T04:44:04.295147",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-08T04:44:04.295148",
+          "updated_at": "2026-06-08T04:44:04.295148"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "c4f460c8-95cd-48b9-b1ca-9c601cd06747",
+          "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "rider_name": "Revenue Patient 044403",
+          "dispatch_status": "pending",
+          "created_at": "2026-06-08 04:44:04.295148"
+        }
+      }
+    },
+    {
+      "step": 3,
+      "name": "Dashboard visibility",
+      "result": "PASS",
+      "evidence": {
+        "dashboard_status": 200,
+        "list_status": 200,
+        "request_visible": true
+      }
+    },
+    {
+      "step": 4,
+      "name": "Create DriverAPI response",
+      "result": "PASS",
+      "evidence": {
+        "status": 201,
+        "driver_id": "00b2680c-b48e-41ee-a38e-3e1c61cc09d5",
+        "response_excerpt": {
+          "name": "Revenue Driver 044403",
+          "phone": "+1310555044403",
+          "vehicle_type": "sedan",
+          "vehicle_plate": "RVR044403",
+          "id": "00b2680c-b48e-41ee-a38e-3e1c61cc09d5",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-08T04:44:04.543573",
+          "updated_at": "2026-06-08T04:44:04.543578"
+        }
+      }
+    },
+    {
+      "step": 5,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "00b2680c-b48e-41ee-a38e-3e1c61cc09d5",
+          "name": "Revenue Driver 044403",
+          "phone": "+1310555044403",
+          "status": "offline",
+          "created_at": "2026-06-08 04:44:04.543573"
+        }
+      }
+    },
+    {
+      "step": 6,
+      "name": "Driver page visibility",
+      "result": "FAIL",
+      "evidence": {
+        "status": 200,
+        "driver_visible": false
+      }
+    },
+    {
+      "step": 7,
+      "name": "Create Ride from PatientAPI response",
+      "result": "PASS",
+      "evidence": {
+        "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+        "source_request_id": "c4f460c8-95cd-48b9-b1ca-9c601cd06747"
+      }
+    },
+    {
+      "step": 8,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "passenger_name": "Revenue Patient 044403",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "driver_id": null,
+          "created_at": "2026-06-08 04:44:04.262810"
+        }
+      }
+    },
+    {
+      "step": 9,
+      "name": "Ride Operations visibility",
+      "result": "PASS",
+      "evidence": {
+        "status": 200,
+        "ride_visible": true
+      }
+    },
+    {
+      "step": 10,
+      "name": "Assign DriverDriver ID attached to ride",
+      "result": "FAIL",
+      "evidence": {
+        "approve_status": 200,
+        "assign_status": 500,
+        "assigned_driver_id": null,
+        "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b"
+      }
+    },
+    {
+      "step": 11,
+      "name": "Database proof",
+      "result": "FAIL",
+      "evidence": {
+        "ride_row": {
+          "id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "driver_id": null,
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "assigned_at": null
+        }
+      }
+    },
+    {
+      "step": 12,
+      "name": "UI proof",
+      "result": "FAIL",
+      "evidence": {
+        "rides_status": 200,
+        "assignment_visible_in_live_feed": false
+      }
+    },
+    {
+      "step": 13,
+      "name": "Dispatch RideStatus changes in DB",
+      "result": "FAIL",
+      "evidence": {
+        "api_sequence": [
+          {
+            "action": "accept",
+            "status": 400,
+            "ride_status": null,
+            "lifecycle_state": null
+          },
+          {
+            "action": "arrived",
+            "status": 400,
+            "ride_status": null,
+            "lifecycle_state": null
+          },
+          {
+            "action": "pickup_complete",
+            "status": 400,
+            "ride_status": null,
+            "lifecycle_state": null
+          }
+        ],
+        "history_tail": [
+          {
+            "to_status": "queued",
+            "created_at": "2026-06-08 04:44:04.269159"
+          }
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "name": "Status changes in UI",
+      "result": "FAIL",
+      "evidence": {
+        "rides_status": 200,
+        "ui_status": "pending"
+      }
+    },
+    {
+      "step": 15,
+      "name": "Start TripLifecycle state updated",
+      "result": "FAIL",
+      "evidence": {
+        "ride_row": {
+          "id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "picked_up_at": null,
+          "transporting_at": null
+        }
+      }
+    },
+    {
+      "step": 16,
+      "name": "Database proof",
+      "result": "FAIL",
+      "evidence": {
+        "ride_lifecycle_state": "queued"
+      }
+    },
+    {
+      "step": 17,
+      "name": "UI proof",
+      "result": "FAIL",
+      "evidence": {
+        "ui_lifecycle_state": "queued"
+      }
+    },
+    {
+      "step": 18,
+      "name": "Complete TripCompletion stored",
+      "result": "FAIL",
+      "evidence": {
+        "status": 400,
+        "response_excerpt": {
+          "detail": "Ride is not assigned to this driver"
+        }
+      }
+    },
+    {
+      "step": 19,
+      "name": "Database proof",
+      "result": "FAIL",
+      "evidence": {
+        "ride_row": {
+          "id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "completed_at": null,
+          "driver_id": null
+        },
+        "trip_row": null,
+        "payout_rows": []
+      }
+    },
+    {
+      "step": 20,
+      "name": "UI proof",
+      "result": "FAIL",
+      "evidence": {
+        "ui_final_state": "queued"
+      }
+    },
+    {
+      "step": 21,
+      "name": "Generate BillingBilling row exists",
+      "result": "PASS",
+      "evidence": {
+        "create_payment_status": 200,
+        "payment_row": {
+          "id": "a7499c2d-b38d-4db1-b227-6287409ce95a",
+          "ride_id": "a756dccb-38f7-46eb-a76c-3e9996561b5b",
+          "status": "requires_capture",
+          "invoice_reference": "INV-044403",
+          "amount_usd": 72.25,
+          "settlement_status": "pending"
+        }
+      }
+    },
+    {
+      "step": 22,
+      "name": "Billing ID exists",
+      "result": "PASS",
+      "evidence": {
+        "payment_id": "a7499c2d-b38d-4db1-b227-6287409ce95a"
+      }
+    },
+    {
+      "step": 23,
+      "name": "Revenue record exists",
+      "result": "PASS",
+      "evidence": {
+        "capture_status": 200,
+        "settle_status": 200,
+        "settlement_rows": [
+          {
+            "id": "92eabc1e-9879-4f8d-b055-340bac29d02c",
+            "payment_transaction_id": "a7499c2d-b38d-4db1-b227-6287409ce95a",
+            "participant_type": "driver",
+            "net_amount_usd": 52.02,
+            "status": "processed"
+          },
+          {
+            "id": "198e42d6-639b-4b3a-915f-91637ad53875",
+            "payment_transaction_id": "a7499c2d-b38d-4db1-b227-6287409ce95a",
+            "participant_type": "provider",
+            "net_amount_usd": 20.23,
+            "status": "processed"
+          }
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "name": "Refresh application",
+      "result": "FAIL",
+      "evidence": {
+        "patient_exists": true,
+        "driver_exists": true,
+        "ride_exists": true,
+        "assignment_exists": false,
+        "billing_exists": true
+      }
+    }
+  ]
+}

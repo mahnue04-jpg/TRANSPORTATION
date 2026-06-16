@@ -76,3 +76,27 @@ def log_event(
         logger.log(level, "%s | %s", message, field_text)
     else:
         logger.log(level, "%s", message)
+
+
+def log_request_lifecycle(
+    logger: Any,
+    level: int,
+    event: str,
+    route: str,
+    latency_ms: int | None = None,
+    provider: str | None = None,
+    status: str | None = None,
+    **fields: Any,
+) -> None:
+    """Emit standardized request lifecycle events used for freeze diagnostics."""
+    log_event(
+        logger,
+        level,
+        event=event,
+        message=event,
+        route=route,
+        latency_ms=latency_ms,
+        provider=provider,
+        status=status,
+        **fields,
+    )

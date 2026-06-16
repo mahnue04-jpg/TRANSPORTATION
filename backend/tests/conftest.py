@@ -8,6 +8,13 @@ from pathlib import Path
 
 os.environ.setdefault("TESTING", "true")
 
+# Keep tests isolated from the live runtime DB to avoid sqlite lock contention.
+if os.environ.get("TESTING", "").lower() == "true":
+    test_db_name = f"chat_test_{os.getpid()}.db"
+    test_db_path = Path(__file__).resolve().parents[1] / "data" / test_db_name
+    os.environ["DB_FILENAME"] = str(test_db_path)
+    os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_REPO_ROOT) not in sys.path:

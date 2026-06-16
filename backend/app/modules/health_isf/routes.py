@@ -84,6 +84,9 @@ from app.modules.health_isf.schemas import (
     RecurringScheduleResponse,
     RecurringScheduleStatusUpdateRequest,
     RideCreate, RideHistoryEventResponse, RideResponse, RideStatusUpdateRequest,
+    RideArrivalStatusResponse,
+    RideCompletionHandoffResponse,
+    RidePickupStatusResponse,
     VehicleCreate,
     VehicleResponse,
     StatusResponse, TripResponse, ActivityFeedResponse, DispatcherActivityResponse, WebSocketMessage,
@@ -178,6 +181,7 @@ from app.modules.health_isf.service_categories import (
     service_category_status,
 )
 from app.modules.health_isf.workflow_extensions import get_workflow_extension_registry
+from app.modules.health_isf.authorization_adapter import evaluate_customer_request_authorization
 from app.observability import increment as increment_metric
 
 logger = logging.getLogger("amicor.health_isf.routes")
@@ -578,6 +582,24 @@ def _serialize_customer_request(row: Any) -> CustomerRideRequestResponse:
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _assert_request_dispatch_authorized(
+    request_row: Any,
+    *,
+    allowed_statuses: set[str],
+    operation: str,
+) -> None:
+    current_status = str(getattr(request_row, "dispatch_status", "") or "").lower()
+    if current_status not in allowed_statuses:
+        allowed = ", ".join(sorted(allowed_statuses))
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{operation} requires an authorized request status. "
+                f"Current status '{current_status}' is not dispatch-authorized. Allowed: {allowed}."
+            ),
+        )
 
 
 def _serialize_recurring_schedule(
@@ -2421,21 +2443,24 @@ async def execute_phase52_dispatch_recovery(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if strategy == "reassign":
-        recovery_result = service.reassign_expired_request(
-            db,
-            ride_id=ride_id,
-            offer_timeout_seconds=120,
-            reason="phase52_dispatch_recovery",
-            actor_user_id=user.user_id,
-        )
-    else:
-        recovery_result = service.auto_assign_request(
-            db,
-            ride_id=ride_id,
-            offer_timeout_seconds=120,
-            actor_user_id=user.user_id,
-        )
+    try:
+        if strategy == "reassign":
+            recovery_result = service.reassign_expired_request(
+                db,
+                ride_id=ride_id,
+                offer_timeout_seconds=120,
+                reason="phase52_dispatch_recovery",
+                actor_user_id=user.user_id,
+            )
+        else:
+            recovery_result = service.auto_assign_request(
+                db,
+                ride_id=ride_id,
+                offer_timeout_seconds=120,
+                actor_user_id=user.user_id,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     ride = recovery_result.get("ride") if isinstance(recovery_result, dict) else None
     if not ride:
@@ -4782,6 +4807,24 @@ async def escalate_workflow(
         escalation_level=payload.escalation_level,
         details=payload.details,
     )
+    try:
+        SecurityAuditService.log_action(
+            db,
+            organization_id=effective_org_id,
+            action_type="workflow_escalated",
+            actor_user_id=_user.id,
+            ride_id=payload.ride_id,
+            details={
+                "incident_id": payload.incident_id,
+                "ride_id": payload.ride_id,
+                "severity": payload.severity,
+                "target_role": payload.target_role,
+                "escalation_level": payload.escalation_level,
+                "summary": payload.summary,
+            },
+        )
+    except Exception:
+        logger.warning("Escalation audit log failed", exc_info=True)
     return WorkflowOperationResponse(**response)
 
 
@@ -4914,6 +4957,16 @@ async def create_customer_ride_request(
     db: Session = Depends(get_db),
 ):
     organization_id = enforce_tenant_scope(user, user.organization_id)
+    auth_decision = evaluate_customer_request_authorization(
+        organization_id=organization_id,
+        rider_name=payload.rider_name,
+        ride_type=payload.ride_type,
+        scheduled_time=payload.scheduled_time,
+        recurring=payload.recurring,
+    )
+    if auth_decision.hard_block:
+        raise HTTPException(status_code=403, detail=auth_decision.reason)
+
     idempotency_key = (request.headers.get("X-Idempotency-Key") or "").strip()
     if idempotency_key:
         existing_key = IdempotencyService.get_key(db, idempotency_key)
@@ -4949,69 +5002,82 @@ async def create_customer_ride_request(
             resource_id=request_row.id,
         )
 
-    emitter = get_emitter()
-    await _emit_with_retry_queue(
-        db=db,
-        organization_id=organization_id,
-        event_type="customer_ride_requested",
-        event_payload={
-            "request_id": request_row.id,
-            "ride_id": ride.id,
-            "ride_type": request_row.ride_type,
-            "scheduled_time": request_row.scheduled_time.isoformat() if request_row.scheduled_time else None,
-            "dispatch_status": request_row.dispatch_status,
-        },
-        emit_callable=lambda: emitter.emit_ride_created(
+    try:
+        emitter = get_emitter()
+        await _emit_with_retry_queue(
+            db=db,
+            organization_id=organization_id,
+            event_type="customer_ride_requested",
+            event_payload={
+                "request_id": request_row.id,
+                "ride_id": ride.id,
+                "ride_type": request_row.ride_type,
+                "scheduled_time": request_row.scheduled_time.isoformat() if request_row.scheduled_time else None,
+                "dispatch_status": request_row.dispatch_status,
+                "authorization_status": auth_decision.status,
+                "authorization_reason": auth_decision.reason,
+                "authorization_source": auth_decision.decision_source,
+            },
+            emit_callable=lambda: emitter.emit_ride_created(
+                organization_id=organization_id,
+                ride_id=ride.id,
+                passenger_name=ride.passenger_name,
+                priority_score=float(ride.priority_score or 0.0),
+                priority_tag=str(ride.priority_tag or "normal"),
+                actor_user_id=user.user_id,
+                details={
+                    "source": "customer_request",
+                    "request_id": request_row.id,
+                    "ride_type": request_row.ride_type,
+                    "authorization_status": auth_decision.status,
+                    "authorization_source": auth_decision.decision_source,
+                },
+            ),
+            idempotency_key=_event_key("customer_request_created", request_row.id, ride.id),
+            ride_id=ride.id,
+        )
+
+        await _emit_dispatch_lifecycle_event(
+            db=db,
             organization_id=organization_id,
             ride_id=ride.id,
-            passenger_name=ride.passenger_name,
-            priority_score=float(ride.priority_score or 0.0),
-            priority_tag=str(ride.priority_tag or "normal"),
+            event_name="ride-created",
             actor_user_id=user.user_id,
             details={
-                "source": "customer_request",
                 "request_id": request_row.id,
+                "ride_id": ride.id,
+                "rider_name": request_row.rider_name,
                 "ride_type": request_row.ride_type,
             },
-        ),
-        idempotency_key=_event_key("customer_request_created", request_row.id, ride.id),
-        ride_id=ride.id,
-    )
+            request_id=idempotency_key or f"customer_request_{request_row.id}",
+            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+            transition_reason="customer_request_created",
+            assignment_transition_source="customer_workspace",
+        )
 
-    await _emit_dispatch_lifecycle_event(
-        db=db,
-        organization_id=organization_id,
-        ride_id=ride.id,
-        event_name="ride-created",
-        actor_user_id=user.user_id,
-        details={
-            "request_id": request_row.id,
-            "ride_id": ride.id,
-            "rider_name": request_row.rider_name,
-            "ride_type": request_row.ride_type,
-        },
-        request_id=idempotency_key or f"customer_request_{request_row.id}",
-        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
-        transition_reason="customer_request_created",
-        assignment_transition_source="customer_workspace",
-    )
-
-    await _emit_dispatch_lifecycle_event(
-        db=db,
-        organization_id=organization_id,
-        ride_id=ride.id,
-        event_name="provider-request-created",
-        actor_user_id=user.user_id,
-        details={
-            "provider_id": ride.provider_id,
-            "request_id": request_row.id,
-            "ride_id": ride.id,
-        },
-        request_id=idempotency_key or f"provider_request_{request_row.id}",
-        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
-        transition_reason="provider_request_created",
-        assignment_transition_source="customer_workspace",
-    )
+        await _emit_dispatch_lifecycle_event(
+            db=db,
+            organization_id=organization_id,
+            ride_id=ride.id,
+            event_name="provider-request-created",
+            actor_user_id=user.user_id,
+            details={
+                "provider_id": ride.provider_id,
+                "request_id": request_row.id,
+                "ride_id": ride.id,
+            },
+            request_id=idempotency_key or f"provider_request_{request_row.id}",
+            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+            transition_reason="provider_request_created",
+            assignment_transition_source="customer_workspace",
+        )
+    except Exception:
+        logger.warning(
+            "Non-critical customer request side effects failed for request_id=%s ride_id=%s",
+            request_row.id,
+            ride.id,
+            exc_info=True,
+        )
 
     return _serialize_customer_request(request_row)
 
@@ -5019,6 +5085,7 @@ async def create_customer_ride_request(
 @router.get("/customer-requests", response_model=list[CustomerRideRequestResponse])
 def list_customer_ride_requests(
     dispatch_status: str | None = Query(None),
+    prioritize: bool = Query(True),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=300),
     organization_id: str | None = Query(None),
@@ -5031,6 +5098,7 @@ def list_customer_ride_requests(
         db,
         organization_id=effective_org_id,
         dispatch_status=dispatch_status,
+        prioritize=prioritize,
         skip=skip,
         limit=limit,
     )
@@ -5135,6 +5203,11 @@ async def cancel_customer_workspace_request(
     request_row = service.get_customer_ride_request_by_id(db, request_id)
     if not request_row or request_row.organization_id != effective_org_id:
         raise HTTPException(status_code=404, detail="Customer request not found")
+    _assert_request_dispatch_authorized(
+        request_row,
+        allowed_statuses={"approved", "dispatchable", "broadcasted", "accepted", "assigned"},
+        operation="Driver assignment",
+    )
 
     if str(request_row.dispatch_status or "").lower() in {"completed", "cancelled"}:
         return _serialize_customer_request(request_row)
@@ -5467,6 +5540,11 @@ async def progress_driver_route(
     if not ride_id:
         raise HTTPException(status_code=400, detail="No active ride found for route progression")
 
+    ride_for_guard = service.get_ride_by_id(db, ride_id)
+    if not ride_for_guard:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    lifecycle_state = RideLifecycleManager.normalize_state(getattr(ride_for_guard, "lifecycle_state", None) or ride_for_guard.status)
+
     emitter = get_emitter()
 
     if payload.target_state == "en_route_pickup":
@@ -5509,9 +5587,24 @@ async def progress_driver_route(
             details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "trip_in_progress":
-        ride = service.get_ride_by_id(db, ride_id)
-        if not ride:
-            raise HTTPException(status_code=404, detail="Ride not found")
+        if lifecycle_state not in {RideStatus.RIDER_ONBOARD.value, RideStatus.IN_PROGRESS.value}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Illegal route progression to trip_in_progress from '{lifecycle_state}'",
+            )
+        ride = ride_for_guard
+        if lifecycle_state == RideStatus.RIDER_ONBOARD.value:
+            try:
+                ride = service.update_ride_status(
+                    db,
+                    ride_id=ride_id,
+                    status=RideStatus.IN_PROGRESS.value,
+                    actor_user_id=user.user_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not ride:
+                raise HTTPException(status_code=404, detail="Ride not found")
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
@@ -5525,9 +5618,12 @@ async def progress_driver_route(
             details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "arrived_destination":
-        ride = service.get_ride_by_id(db, ride_id)
-        if not ride:
-            raise HTTPException(status_code=404, detail="Ride not found")
+        if lifecycle_state not in {RideStatus.IN_PROGRESS.value}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Illegal route progression to arrived_destination from '{lifecycle_state}'",
+            )
+        ride = ride_for_guard
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
@@ -5885,13 +5981,21 @@ async def dispatcher_assign_driver_for_customer_request(
     request_row = service.get_customer_ride_request_by_id(db, request_id)
     if not request_row or request_row.organization_id != effective_org_id:
         raise HTTPException(status_code=404, detail="Customer request not found")
-
-    ride = service.assign_driver_to_ride(
-        db,
-        ride_id=request_row.ride_id,
-        driver_id=payload.driver_id,
-        actor_user_id=user.user_id,
+    _assert_request_dispatch_authorized(
+        request_row,
+        allowed_statuses={"approved", "dispatchable", "broadcasted", "accepted", "assigned"},
+        operation="Driver assignment",
     )
+
+    try:
+        ride = service.assign_driver_to_ride(
+            db,
+            ride_id=request_row.ride_id,
+            driver_id=payload.driver_id,
+            actor_user_id=user.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
 
@@ -5962,15 +6066,11 @@ async def dispatcher_auto_dispatch_customer_request(
     if not request_row or request_row.organization_id != effective_org_id:
         raise HTTPException(status_code=404, detail="Customer request not found")
 
-    if str(request_row.dispatch_status or "").lower() == "pending":
-        request_row = service.update_customer_ride_request_status(
-            db,
-            organization_id=effective_org_id,
-            request_id=request_row.id,
-            dispatch_status="approved",
-        )
-        if not request_row:
-            raise HTTPException(status_code=404, detail="Customer request not found")
+    _assert_request_dispatch_authorized(
+        request_row,
+        allowed_statuses={"approved", "dispatchable", "broadcasted"},
+        operation="Auto-dispatch",
+    )
     request_row = service.update_customer_ride_request_status(
         db,
         organization_id=effective_org_id,
@@ -6857,6 +6957,47 @@ def get_ride_workflow_path(
     }
 
 
+@router.get("/rides/{ride_id}/completion-handoff", response_model=RideCompletionHandoffResponse)
+def get_ride_completion_handoff(
+    ride_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ride = service.get_ride_by_id(db, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+
+    lifecycle_state = RideLifecycleManager.normalize_state(getattr(ride, "lifecycle_state", None) or ride.status)
+    completed = lifecycle_state == RideStatus.COMPLETED.value
+
+    completion_artifact = service.get_latest_ride_execution_action(
+        db,
+        ride_id=ride.id,
+        action_types=["dropoff_completed"],
+    )
+    trip = service.get_latest_trip_for_ride(db, ride_id=ride.id)
+    payout = service.get_payout_for_trip(db, trip_id=trip.id) if trip else None
+    request_row = service.get_customer_request_by_ride_id(db, ride.id)
+
+    provider_queue_ready = bool(ride.provider_id and request_row and completed)
+    billing_queue_ready = bool(trip and payout and str(getattr(payout, "status", "")).lower() == "pending")
+
+    return RideCompletionHandoffResponse(
+        ride_id=ride.id,
+        organization_id=ride.organization_id,
+        lifecycle_state=lifecycle_state,
+        completed=completed,
+        completion_artifact_id=getattr(completion_artifact, "event_id", None),
+        completion_artifact_source=getattr(completion_artifact, "source", None),
+        completion_artifact_created_at=getattr(completion_artifact, "created_at", None),
+        trip_id=getattr(trip, "id", None),
+        payout_id=getattr(payout, "id", None),
+        provider_queue_ready=provider_queue_ready,
+        billing_queue_ready=billing_queue_ready,
+    )
+
+
 # ── Drivers Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/vehicles/active", response_model=list[VehicleResponse])
@@ -7028,61 +7169,68 @@ async def create_driver(
     if idempotency_key:
         IdempotencyService.bind_resource(db, idempotency_key=idempotency_key, resource_id=driver.id)
 
-    await get_emitter().emit_driver_status_changed(
-        organization_id=organization_id,
-        driver_id=driver.id,
-        from_status="offline",
-        to_status=str(driver.status),
-        actor_user_id=_user.id,
-    )
-    SecurityAuditService.log_action(
-        db,
-        organization_id=organization_id,
-        action_type="driver_created",
-        actor_user_id=user.user_id,
-        details={
-            "driver_id": driver.id,
-            "driver_phone": driver.phone,
-            "idempotency_key": bool(idempotency_key),
-        },
-    )
-    WorkflowOrchestrationService.record_onboarding_hook(
-        db,
-        organization_id=organization_id,
-        entity_type="driver",
-        entity_id=driver.id,
-        actor_user_id=_user.id,
-        payload={
-            "driver_phone": driver.phone,
-            "status": str(driver.status),
-        },
-    )
-    RealTimeEventService.log_event(
-        db,
-        organization_id=organization_id,
-        event_type=EventType.DRIVER_STATUS_CHANGED,
-        payload={
-            "driver_id": driver.id,
-            "status": str(driver.status),
-            "operation": "create",
-        },
-        driver_id=driver.id,
-        created_by_user_id=_user.id,
-    )
-    OperationalSynchronizationEngine.publish_event(
-        organization_id=organization_id,
-        event_type=OperationalEventType.DRIVER_STATE_CHANGED,
-        payload={
-            "event_type": "driver_created",
-            "organization_id": organization_id,
-            "driver_id": driver.id,
-            "status": str(driver.status),
-            "actor_user_id": _user.id,
-        },
-        role_scope=["dispatcher", "driver", "staff", "admin"],
-        source_nonce=f"onboarding_driver:{organization_id}:{driver.id}",
-        metadata={"source": "onboarding_api"},
-    )
+    try:
+        await get_emitter().emit_driver_status_changed(
+            organization_id=organization_id,
+            driver_id=driver.id,
+            from_status="offline",
+            to_status=str(driver.status),
+            actor_user_id=_user.id,
+        )
+        SecurityAuditService.log_action(
+            db,
+            organization_id=organization_id,
+            action_type="driver_created",
+            actor_user_id=user.user_id,
+            details={
+                "driver_id": driver.id,
+                "driver_phone": driver.phone,
+                "idempotency_key": bool(idempotency_key),
+            },
+        )
+        WorkflowOrchestrationService.record_onboarding_hook(
+            db,
+            organization_id=organization_id,
+            entity_type="driver",
+            entity_id=driver.id,
+            actor_user_id=_user.id,
+            payload={
+                "driver_phone": driver.phone,
+                "status": str(driver.status),
+            },
+        )
+        RealTimeEventService.log_event(
+            db,
+            organization_id=organization_id,
+            event_type=EventType.DRIVER_STATUS_CHANGED,
+            payload={
+                "driver_id": driver.id,
+                "status": str(driver.status),
+                "operation": "create",
+            },
+            driver_id=driver.id,
+            created_by_user_id=_user.id,
+        )
+        OperationalSynchronizationEngine.publish_event(
+            organization_id=organization_id,
+            event_type=OperationalEventType.DRIVER_STATE_CHANGED,
+            payload={
+                "event_type": "driver_created",
+                "organization_id": organization_id,
+                "driver_id": driver.id,
+                "status": str(driver.status),
+                "actor_user_id": _user.id,
+            },
+            role_scope=["dispatcher", "driver", "staff", "admin"],
+            source_nonce=f"onboarding_driver:{organization_id}:{driver.id}",
+            metadata={"source": "onboarding_api"},
+        )
+    except Exception:
+        logger.warning(
+            "Non-critical driver onboarding side effects failed for driver_id=%s",
+            driver.id,
+            exc_info=True,
+        )
     return driver
 
 
@@ -7503,6 +7651,18 @@ async def driver_decline_ride(
         actor_user_id=_user.id,
         details={"source": "driver_decline_route"},
     )
+    await emitter.emit_dispatch_changed(
+        organization_id=ride.organization_id,
+        event_name="assignment-rejected",
+        actor_user_id=_user.id,
+        details={"ride_id": ride.id, "driver_id": driver_id, "note": payload.note},
+    )
+    await emitter.emit_dispatch_changed(
+        organization_id=ride.organization_id,
+        event_name="driver-offer-rejected",
+        actor_user_id=_user.id,
+        details={"ride_id": ride.id, "driver_id": driver_id, "note": payload.note},
+    )
     return ride
 
 
@@ -7525,6 +7685,46 @@ def driver_arrived_pickup(
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
     return ride
+
+
+@router.get("/rides/{ride_id}/arrival-status", response_model=RideArrivalStatusResponse)
+def get_ride_arrival_status(
+    ride_id: str,
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ride = service.get_ride_by_id(db, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+
+    lifecycle_state = RideLifecycleManager.normalize_state(getattr(ride, "lifecycle_state", None) or ride.status)
+    arrived = lifecycle_state in {
+        RideStatus.ARRIVED.value,
+        RideStatus.RIDER_ONBOARD.value,
+        RideStatus.IN_PROGRESS.value,
+        RideStatus.COMPLETED.value,
+    } or bool(getattr(ride, "arrived_at", None))
+
+    evidence = service.get_latest_ride_execution_action(
+        db,
+        ride_id=ride.id,
+        action_types=["driver_arrived_pickup"],
+    )
+    evidence_payload = _safe_json_load(getattr(evidence, "payload", None), {}) if evidence else {}
+
+    return RideArrivalStatusResponse(
+        ride_id=ride.id,
+        organization_id=ride.organization_id,
+        lifecycle_state=lifecycle_state,
+        arrived=bool(arrived),
+        arrived_at=getattr(ride, "arrived_at", None) or getattr(evidence, "created_at", None),
+        evidence_event_id=getattr(evidence, "event_id", None),
+        evidence_source=getattr(evidence, "source", None),
+        evidence_captured_at=getattr(evidence, "created_at", None),
+        driver_id=str((evidence_payload or {}).get("driver_id") or getattr(ride, "driver_id", None) or "") or None,
+    )
 
 
 @router.post("/drivers/{driver_id}/pickup-complete", response_model=RideResponse)
@@ -7569,6 +7769,49 @@ async def driver_pickup_complete(
         details={"ride_id": ride.id, "driver_id": driver_id},
     )
     return ride
+
+
+@router.get("/rides/{ride_id}/pickup-status", response_model=RidePickupStatusResponse)
+def get_ride_pickup_status(
+    ride_id: str,
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ride = service.get_ride_by_id(db, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+
+    lifecycle_state = RideLifecycleManager.normalize_state(getattr(ride, "lifecycle_state", None) or ride.status)
+    picked_up = lifecycle_state in {
+        RideStatus.RIDER_ONBOARD.value,
+        RideStatus.IN_PROGRESS.value,
+        RideStatus.COMPLETED.value,
+    } or bool(getattr(ride, "picked_up_at", None))
+    in_progress = lifecycle_state in {RideStatus.IN_PROGRESS.value, RideStatus.COMPLETED.value}
+
+    evidence = service.get_latest_ride_execution_action(
+        db,
+        ride_id=ride.id,
+        action_types=["pickup_completed", "transport_started"],
+    )
+    evidence_payload = _safe_json_load(getattr(evidence, "payload", None), {}) if evidence else {}
+
+    return RidePickupStatusResponse(
+        ride_id=ride.id,
+        organization_id=ride.organization_id,
+        lifecycle_state=lifecycle_state,
+        picked_up=bool(picked_up),
+        in_progress=bool(in_progress),
+        picked_up_at=getattr(ride, "picked_up_at", None)
+        or getattr(ride, "transporting_at", None)
+        or getattr(evidence, "created_at", None),
+        evidence_event_id=getattr(evidence, "event_id", None),
+        evidence_source=getattr(evidence, "source", None),
+        evidence_captured_at=getattr(evidence, "created_at", None),
+        driver_id=str((evidence_payload or {}).get("driver_id") or getattr(ride, "driver_id", None) or "") or None,
+    )
 
 
 @router.post("/drivers/{driver_id}/dropoff-complete", response_model=RideResponse)
@@ -8043,7 +8286,7 @@ async def dispatch_auto_assign(
         offer = result.get("offer")
         selected_driver_id = None
         selected_score = None
-        assignment_state = "searching"
+        assignment_state = "pending_assignment"
         if offer:
             selected_driver_id = offer.driver_id
             selected_score = float(offer.score) if offer.score is not None else None

@@ -1,6 +1,7 @@
 "use strict";
 
 const { ASSISTANT_STATES, createExecutionRequest, createAssistantResult, createReasoningStep } = require("./assistantSchemas");
+const memoryPolicy = require("../ux/memoryManager.js");
 
 function createAssistantExecutor(options) {
   var config = Object.assign(
@@ -19,6 +20,29 @@ function createAssistantExecutor(options) {
   );
 
   var inflight = new Map();
+
+  function enforceFinalResponseText(responseText, context) {
+    if (!memoryPolicy || typeof memoryPolicy.enforceAssistantVisibleResponse !== "function") {
+      return responseText;
+    }
+    var source = context && context.source ? context.source : "assistant-executor";
+    var hasMemory = !!(context && context.memoryContext && (context.memoryContext.context || context.memoryContext.memorySummary));
+    try {
+      return memoryPolicy.enforceAssistantVisibleResponse(responseText, {
+        memoryEnabled: true,
+        hasMemory: hasMemory,
+        source: source,
+        responsePath: "assistant-executor",
+        responseSourceIdentifier: source,
+        throwOnViolation: true,
+      }).text;
+    } catch (error) {
+      if (error && error.code === memoryPolicy.POLICY_VIOLATION_CODE) {
+        return error.replacementText || "I don't know that yet.";
+      }
+      throw error;
+    }
+  }
 
   function listRuntimeTools() {
     if (!config.runtime || typeof config.runtime.listTools !== "function") {
@@ -72,7 +96,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.failed,
-          responseText: "Request blocked by assistant safety guardrails.",
+          responseText: enforceFinalResponseText("Request blocked by assistant safety guardrails.", { source: "assistant-executor-safety" }),
           reasoningTrace: reasoning.concat(createReasoningStep("safety", "Request blocked", requestSafety)),
           safety: requestSafety,
           errors: errors,
@@ -90,7 +114,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.failed,
-          responseText: "I could not parse your goal. Please provide a clear request.",
+          responseText: enforceFinalResponseText("I could not parse your goal. Please provide a clear request.", { source: "assistant-executor-parse" }),
           reasoningTrace: reasoning,
           errors: errors,
           startedAt: startedAt,
@@ -111,7 +135,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.failed,
-          responseText: "I found conflicting tasks in your request. Please simplify the goal.",
+          responseText: enforceFinalResponseText("I found conflicting tasks in your request. Please simplify the goal.", { source: "assistant-executor-conflict" }),
           reasoningTrace: reasoning,
           errors: errors,
           startedAt: startedAt,
@@ -125,7 +149,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.interrupted,
-          responseText: "Execution interrupted.",
+          responseText: enforceFinalResponseText("Execution interrupted.", { source: "assistant-executor-interrupt" }),
           reasoningTrace: reasoning,
           startedAt: startedAt,
           completedAt: Date.now(),
@@ -143,13 +167,45 @@ function createAssistantExecutor(options) {
         overflow: context.overflow,
       }));
 
+      if (memoryPolicy && typeof memoryPolicy.buildMemoryCapabilityResponse === "function") {
+        var memoryCapability = memoryPolicy.buildMemoryCapabilityResponse(request.userGoal, {
+          memoryContext: context.memoryContext || null,
+          hasMemory: !!(context.memoryContext && (context.memoryContext.context || context.memoryContext.memorySummary)),
+          source: "assistant-executor-memory-capability",
+        });
+        if (memoryCapability.matched) {
+          markState(ASSISTANT_STATES.completed, { reason: "memory-capability" });
+          if (conversationState) {
+            conversationState.addMessage("user", request.userGoal, { requestId: request.id });
+            conversationState.addMessage("assistant", memoryCapability.text, {
+              requestId: request.id,
+              status: ASSISTANT_STATES.completed,
+            });
+          }
+          return createAssistantResult({
+            requestId: request.id,
+            conversationId: request.conversationId,
+            status: ASSISTANT_STATES.completed,
+            responseText: enforceFinalResponseText(memoryCapability.text, {
+              source: "assistant-executor-memory-capability",
+              memoryContext: context.memoryContext || null,
+            }),
+            reasoningTrace: reasoning.concat(createReasoningStep("responding", "Answered from memory capability helper", {
+              matched: true,
+            })),
+            startedAt: startedAt,
+            completedAt: Date.now(),
+          });
+        }
+      }
+
       if (isInterrupted()) {
         markState(ASSISTANT_STATES.interrupted, { phase: "planning" });
         return createAssistantResult({
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.interrupted,
-          responseText: "Execution interrupted.",
+          responseText: enforceFinalResponseText("Execution interrupted.", { source: "assistant-executor-interrupt" }),
           reasoningTrace: reasoning,
           startedAt: startedAt,
           completedAt: Date.now(),
@@ -175,7 +231,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.interrupted,
-          responseText: "Execution interrupted.",
+          responseText: enforceFinalResponseText("Execution interrupted.", { source: "assistant-executor-interrupt" }),
           planning: coordinated.planning,
           workflowResult: coordinated.workflowResult,
           reasoningTrace: reasoning,
@@ -194,7 +250,7 @@ function createAssistantExecutor(options) {
           requestId: request.id,
           conversationId: request.conversationId,
           status: ASSISTANT_STATES.failed,
-          responseText: "Unable to complete execution safely.",
+          responseText: enforceFinalResponseText("Unable to complete execution safely.", { source: "assistant-executor-failed" }),
           planning: coordinated.planning,
           workflowResult: coordinated.workflowResult,
           reasoningTrace: reasoning,
@@ -210,6 +266,10 @@ function createAssistantExecutor(options) {
         request: request,
         context: context,
         execution: coordinated,
+      });
+      response.text = enforceFinalResponseText(response.text, {
+        source: "assistant-executor-complete",
+        memoryContext: context.memoryContext || null,
       });
       reasoning = reasoning.concat(response.reasoning || []);
 
@@ -249,7 +309,7 @@ function createAssistantExecutor(options) {
         requestId: request.id,
         conversationId: request.conversationId,
         status: ASSISTANT_STATES.failed,
-        responseText: "Assistant execution failed due to an internal error.",
+        responseText: enforceFinalResponseText("Assistant execution failed due to an internal error.", { source: "assistant-executor-error" }),
         reasoningTrace: reasoning,
         errors: errors,
         startedAt: startedAt,

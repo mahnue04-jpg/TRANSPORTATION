@@ -72,6 +72,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     RideStatus.REQUESTED.value: {RideStatus.QUEUED.value, RideStatus.CANCELLED.value, RideStatus.FAILED.value},
     RideStatus.QUEUED.value: {RideStatus.ASSIGNED.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
     RideStatus.ASSIGNED.value: {
+        RideStatus.QUEUED.value,
         RideStatus.DRIVER_EN_ROUTE.value,
         RideStatus.ARRIVED.value,
         RideStatus.CANCELLED.value,

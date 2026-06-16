@@ -2,7 +2,7 @@
 
 ## Production Environment Checklist
 
-- Set `OPENAI_API_KEY`, `SECRET_KEY`, and `DATABASE_URL`.
+- Set `OPENAI_API_KEY`, `SECRET_KEY`, `JWT_SECRET`, and `DATABASE_URL`.
 - Set OAuth client secrets for Gmail/Outlook if email/calendar integrations are enabled.
 - Set `ALLOWED_ORIGINS` to production domains.
 - Run migrations: `cd backend && alembic upgrade head`.

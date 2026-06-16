@@ -1,0 +1,287 @@
+{
+  "run_tag": "CHAIN_20260608042528",
+  "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+  "db_path": "C:\\Users\\smoni\\OneDrive\\New folder\\New folder\\Amicore_Rebuild\\backend\\data\\chat.db",
+  "steps": {
+    "1_create_patient": {
+      "api_status": 201,
+      "api": {
+        "user_id": "3fcc13b5-d678-4963-98ae-bb9b7ff5b932",
+        "email": "patient.20260608042528@amicor.local",
+        "status": "created"
+      }
+    },
+    "2_patient_db_row": {
+      "db": {
+        "id": "3fcc13b5-d678-4963-98ae-bb9b7ff5b932",
+        "email": "patient.20260608042528@amicor.local",
+        "display_name": "Patient Proof 20260608042528",
+        "role": "rider",
+        "organization_id": "00000000-0000-0000-0000-00000000a1c0",
+        "created_at": "2026-06-08 04:25:29.188653"
+      },
+      "pass": true
+    },
+    "3_create_rra": {
+      "api_status": 201,
+      "api": {
+        "id": "abb15f36-4475-4942-aa19-eb7b01ea3762",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "rider_name": "Patient Proof 20260608042528",
+        "rider_phone": "+12135552528",
+        "pickup_address": "100 Clinic Ave",
+        "dropoff_address": "200 Recovery Rd",
+        "scheduled_time": "2026-06-08T04:55:29",
+        "ride_type": "healthcare",
+        "recurring": false,
+        "recurring_pattern": null,
+        "notes": "Operational proof chain run",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-08T04:25:29.286434",
+        "broadcasted_at": null,
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "cancelled_at": null,
+        "created_at": "2026-06-08T04:25:29.286435",
+        "updated_at": "2026-06-08T04:25:29.286435"
+      }
+    },
+    "4_rra_db_row": {
+      "db": {
+        "id": "abb15f36-4475-4942-aa19-eb7b01ea3762",
+        "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "rider_name": "Patient Proof 20260608042528",
+        "rider_phone": "+12135552528",
+        "dispatch_status": "pending",
+        "created_at": "2026-06-08 04:25:29.286435"
+      },
+      "pass": true
+    },
+    "5_rra_on_dispatcher_dashboard": {
+      "api_status_customer_requests": 200,
+      "api_status_dispatcher_queues": 200,
+      "contains_rra": true,
+      "customer_requests_excerpt": "[{'id': 'abb15f36-4475-4942-aa19-eb7b01ea3762', 'organization_id': 'ca8d0c7c-1fff-4465-99d7-75a1fc51543e', 'ride_id': 'af850355-248d-4f78-95ad-dcd0f75489a1', 'rider_name': 'Patient Proof 20260608042528', 'rider_phone': '+12135552528', 'pickup_address': '100 Clinic Ave', 'dropoff_address': '200 Recovery Rd', 'scheduled_time': '2026-06-08T04:55:29', 'ride_type': 'healthcare', 'recurring': False, 're",
+      "dispatcher_queues_excerpt": "{'organization_id': 'ca8d0c7c-1fff-4465-99d7-75a1fc51543e', 'queues': {'active': [{'id': '5ff4ae8a-6883-4c81-8094-99b1bf701cd2', 'passenger_name': 'Dispatcher Test 38a16cc1', 'pickup_address': '10 Dispatch St, New York, NY 10001', 'dropoff_address': '22 Command Ave, New York, NY 10002', 'status': 'accepted', 'lifecycle_state': 'driver_en_route', 'priority_tag': 'emergency', 'priority_score': 100.0"
+    },
+    "6_assign_driver_pre_approve": {
+      "api_status": 200,
+      "api": {
+        "request": "{\"id\": \"abb15f36-4475-4942-aa19-eb7b01ea3762\", \"organization_id\": \"ca8d0c7c-1fff-4465-99d7-75a1fc51543e\", \"ride_id\": \"af850355-248d-4f78-95ad-dcd0f75489a1\", \"rider_name\": \"Patient Proof 20260608042528\", \"rider_phone\": \"+...",
+        "ride": "{\"passenger_name\": \"Patient Proof 20260608042528\", \"passenger_phone\": \"+12135552528\", \"pickup_address\": \"100 Clinic Ave\", \"dropoff_address\": \"200 Recovery Rd\", \"service_type\": \"medical_transport\", \"notes\": \"Operational p...",
+        "offer": null,
+        "message": "Customer request approved for dispatch workflow."
+      }
+    },
+    "6_assign_driver": {
+      "api_status": 200,
+      "api": {
+        "request": "{\"id\": \"abb15f36-4475-4942-aa19-eb7b01ea3762\", \"organization_id\": \"ca8d0c7c-1fff-4465-99d7-75a1fc51543e\", \"ride_id\": \"af850355-248d-4f78-95ad-dcd0f75489a1\", \"rider_name\": \"Patient Proof 20260608042528\", \"rider_phone\": \"+...",
+        "ride": "{\"passenger_name\": \"Patient Proof 20260608042528\", \"passenger_phone\": \"+12135552528\", \"pickup_address\": \"100 Clinic Ave\", \"dropoff_address\": \"200 Recovery Rd\", \"service_type\": \"medical_transport\", \"notes\": \"Operational p...",
+        "offer": null,
+        "message": "Driver assigned from dispatcher customer-request workflow."
+      }
+    },
+    "7_db_after_assignment": {
+      "ride": {
+        "id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+        "vehicle_id": null,
+        "status": "accepted",
+        "lifecycle_state": "assigned",
+        "accepted_at": "2026-06-08 04:25:30.355364",
+        "updated_at": "2026-06-08 04:25:30.355353"
+      },
+      "request": {
+        "id": "abb15f36-4475-4942-aa19-eb7b01ea3762",
+        "dispatch_status": "assigned",
+        "assigned_at": "2026-06-08 04:25:30.377711",
+        "updated_at": "2026-06-08 04:25:30.382849"
+      },
+      "pass": true
+    },
+    "8_dispatch_ride": {
+      "api_status": 200,
+      "api": {
+        "passenger_name": "Patient Proof 20260608042528",
+        "passenger_phone": "+12135552528",
+        "pickup_address": "100 Clinic Ave",
+        "dropoff_address": "200 Recovery Rd",
+        "service_type": "medical_transport",
+        "notes": "Operational proof chain run",
+        "id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+        "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+        "vehicle_id": "8433993b-c78f-4c76-acd7-72d82fe89aed",
+        "status": "accepted",
+        "lifecycle_state": "driver_en_route",
+        "estimated_distance_miles": null,
+        "estimated_duration_minutes": null,
+        "priority_score": null,
+        "priority_tag": null,
+        "is_emergency": false,
+        "appointment_time": "2026-06-08T04:55:29",
+        "recurring_trip_pattern": null,
+        "recurring_schedule_id": null,
+        "recurring_instance_date": null,
+        "ai_dispatch_context": null,
+        "requested_at": "2026-06-08T04:25:29.257313",
+        "assigned_at": "2026-06-08T04:25:30.355357",
+        "enroute_at": "2026-06-08T04:25:30.463180",
+        "arrived_at": null,
+        "picked_up_at": null,
+        "transporting_at": null,
+        "accepted_at": "2026-06-08T04:25:30.355364",
+        "completed_at": null
+      }
+    },
+    "9_start_trip": {
+      "arrived_status": 200,
+      "pickup_complete_status": 200,
+      "start_status": 200,
+      "api_final": {
+        "passenger_name": "Patient Proof 20260608042528",
+        "passenger_phone": "+12135552528",
+        "pickup_address": "100 Clinic Ave",
+        "dropoff_address": "200 Recovery Rd",
+        "service_type": "medical_transport",
+        "notes": "Operational proof chain run",
+        "id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+        "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+        "vehicle_id": "8433993b-c78f-4c76-acd7-72d82fe89aed",
+        "status": "in_transit",
+        "lifecycle_state": "in_progress",
+        "estimated_distance_miles": null,
+        "estimated_duration_minutes": null,
+        "priority_score": null,
+        "priority_tag": null,
+        "is_emergency": false,
+        "appointment_time": "2026-06-08T04:55:29",
+        "recurring_trip_pattern": null,
+        "recurring_schedule_id": null,
+        "recurring_instance_date": null,
+        "ai_dispatch_context": null,
+        "requested_at": "2026-06-08T04:25:29.257313",
+        "assigned_at": "2026-06-08T04:25:30.355357",
+        "enroute_at": "2026-06-08T04:25:30.463180",
+        "arrived_at": "2026-06-08T04:25:30.508171",
+        "picked_up_at": "2026-06-08T04:25:30.577514",
+        "transporting_at": "2026-06-08T04:25:30.580756",
+        "accepted_at": "2026-06-08T04:25:30.355364",
+        "completed_at": null
+      }
+    },
+    "10_complete_trip": {
+      "api_status": 200,
+      "api": {
+        "passenger_name": "Patient Proof 20260608042528",
+        "passenger_phone": "+12135552528",
+        "pickup_address": "100 Clinic Ave",
+        "dropoff_address": "200 Recovery Rd",
+        "service_type": "medical_transport",
+        "notes": "Operational proof chain run",
+        "id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+        "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+        "vehicle_id": "8433993b-c78f-4c76-acd7-72d82fe89aed",
+        "status": "completed",
+        "lifecycle_state": "completed",
+        "estimated_distance_miles": null,
+        "estimated_duration_minutes": null,
+        "priority_score": null,
+        "priority_tag": null,
+        "is_emergency": false,
+        "appointment_time": "2026-06-08T04:55:29",
+        "recurring_trip_pattern": null,
+        "recurring_schedule_id": null,
+        "recurring_instance_date": null,
+        "ai_dispatch_context": null,
+        "requested_at": "2026-06-08T04:25:29.257313",
+        "assigned_at": "2026-06-08T04:25:30.355357",
+        "enroute_at": "2026-06-08T04:25:30.463180",
+        "arrived_at": "2026-06-08T04:25:30.508171",
+        "picked_up_at": "2026-06-08T04:25:30.577514",
+        "transporting_at": "2026-06-08T04:25:30.580756",
+        "accepted_at": "2026-06-08T04:25:30.355364",
+        "completed_at": "2026-06-08T04:25:30.646441"
+      }
+    },
+    "11_generate_billing": {
+      "api_status": 200,
+      "api": {
+        "id": "e4ca3b84-4f69-4000-9645-ba0ffceed64b",
+        "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+        "gateway": "simulated",
+        "gateway_payment_intent_id": "pi_a2f6f14656bd41dc8e1c58ea",
+        "status": "succeeded",
+        "amount_usd": 51.0,
+        "currency": "usd",
+        "settlement_status": "pending",
+        "invoice_reference": "INV-20260608042528"
+      }
+    },
+    "12_generate_revenue_record": {
+      "api_status": 200,
+      "api": {
+        "payment_id": "e4ca3b84-4f69-4000-9645-ba0ffceed64b",
+        "settlement_status": "processed",
+        "entries": "[{\"participant_type\": \"driver\", \"participant_id\": \"d110dd2e-9af9-4daf-a41e-ff179d3457e9\", \"net_amount_usd\": 35.7, \"status\": \"processed\"}, {\"participant_type\": \"provider\", \"participant_id\": \"6e0c86e1-fce3-4ac6-ba56-b55717..."
+      }
+    }
+  },
+  "db_verification": {
+    "ride_final": {
+      "id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+      "status": "completed",
+      "lifecycle_state": "completed",
+      "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+      "vehicle_id": "8433993b-c78f-4c76-acd7-72d82fe89aed",
+      "requested_at": "2026-06-08 04:25:29.257313",
+      "accepted_at": "2026-06-08 04:25:30.355364",
+      "transporting_at": "2026-06-08 04:25:30.580756",
+      "completed_at": "2026-06-08 04:25:30.646441",
+      "updated_at": "2026-06-08 04:25:30.646398"
+    },
+    "payment_row": {
+      "id": "e4ca3b84-4f69-4000-9645-ba0ffceed64b",
+      "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+      "status": "succeeded",
+      "amount_usd": 51.0,
+      "currency": "usd",
+      "settlement_status": "processed",
+      "invoice_reference": "INV-20260608042528",
+      "paid_at": "2026-06-08 04:25:30.694154",
+      "created_at": "2026-06-08 04:25:30.694151"
+    },
+    "revenue_row": {
+      "id": "418dc37b-45eb-46dc-93d3-ce7438a7057f",
+      "payment_transaction_id": "e4ca3b84-4f69-4000-9645-ba0ffceed64b",
+      "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+      "participant_type": "driver",
+      "participant_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+      "gross_amount_usd": 51.0,
+      "net_amount_usd": 35.7,
+      "status": "processed",
+      "processed_at": "2026-06-08 04:25:30.719085",
+      "created_at": "2026-06-08 04:25:30.719088"
+    }
+  },
+  "ids": {
+    "patient_user_id": "3fcc13b5-d678-4963-98ae-bb9b7ff5b932",
+    "patient_email": "patient.20260608042528@amicor.local",
+    "patient_name": "Patient Proof 20260608042528",
+    "patient_phone": "+12135552528",
+    "request_id": "abb15f36-4475-4942-aa19-eb7b01ea3762",
+    "ride_id": "af850355-248d-4f78-95ad-dcd0f75489a1",
+    "driver_id": "d110dd2e-9af9-4daf-a41e-ff179d3457e9",
+    "vehicle_id": "8433993b-c78f-4c76-acd7-72d82fe89aed",
+    "payment_id": "e4ca3b84-4f69-4000-9645-ba0ffceed64b"
+  }
+}

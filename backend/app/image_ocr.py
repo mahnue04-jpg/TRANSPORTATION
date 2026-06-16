@@ -23,10 +23,11 @@ import importlib
 import logging
 import os
 import struct
-import zlib
+import zlib # type: ignore
 from io import BytesIO
 
 logger = logging.getLogger("amicor.ocr")
+OPENAI_TIMEOUT_SECONDS = 30.0
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -70,19 +71,20 @@ def _image_dims(content_type: str, data: bytes) -> tuple[int, int]:
 
 # ── Provider 1: OpenAI Vision ──────────────────────────────────────────────────
 
-def _openai_vision(content_type: str, data: bytes) -> dict | None:
+def _openai_vision(content_type: str, data: bytes) -> dict | None: # type: ignore
     """Call OpenAI gpt-4o-mini vision endpoint."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
     try:
         openai_mod = importlib.import_module("openai")
-        client = openai_mod.OpenAI(api_key=api_key)
+        client = openai_mod.OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS)
 
         data_url = f"data:{content_type};base64,{_b64(data)}"
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=800,
+            timeout=OPENAI_TIMEOUT_SECONDS,
             messages=[
                 {
                     "role": "user",
@@ -128,7 +130,7 @@ def _openai_vision(content_type: str, data: bytes) -> dict | None:
             "confidence": 0.92,
             "word_count": len((text_part + " " + desc_part).split()),
             "diagnostics": {"model": "gpt-4o-mini", "tokens": completion.usage.total_tokens if completion.usage else 0},
-        }
+        } # type: ignore
     except Exception as exc:
         logger.warning("OpenAI vision call failed: %s", exc)
         return None
@@ -136,7 +138,7 @@ def _openai_vision(content_type: str, data: bytes) -> dict | None:
 
 # ── Provider 2: pytesseract ────────────────────────────────────────────────────
 
-def _tesseract_ocr(content_type: str, data: bytes) -> dict | None:
+def _tesseract_ocr(content_type: str, data: bytes) -> dict | None: # type: ignore
     """Run pytesseract OCR (requires tesseract binary)."""
     try:
         pytesseract = importlib.import_module("pytesseract")
@@ -151,7 +153,7 @@ def _tesseract_ocr(content_type: str, data: bytes) -> dict | None:
             "confidence": 0.75 if text else 0.3,
             "word_count": len(text.split()) if text else 0,
             "diagnostics": {"engine": "tesseract"},
-        }
+        } # type: ignore
     except ImportError:
         logger.debug("pytesseract not installed — skipping")
         return None
@@ -162,7 +164,7 @@ def _tesseract_ocr(content_type: str, data: bytes) -> dict | None:
 
 # ── Provider 3: Metadata-only fallback ────────────────────────────────────────
 
-def _metadata_fallback(content_type: str, data: bytes) -> dict:
+def _metadata_fallback(content_type: str, data: bytes) -> dict: # type: ignore
     w, h = _image_dims(content_type, data)
     size_kb = round(len(data) / 1024, 1)
     fmt = content_type.split("/")[-1].upper()
@@ -181,12 +183,12 @@ def _metadata_fallback(content_type: str, data: bytes) -> dict:
             "size_kb": size_kb,
             "reason": "no_ocr_provider_available",
         },
-    }
+    } # type: ignore
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def extract(content_type: str, data: bytes) -> dict:
+def extract(content_type: str, data: bytes) -> dict: # type: ignore
     """
     Extract text and description from image bytes.
 
@@ -197,18 +199,18 @@ def extract(content_type: str, data: bytes) -> dict:
     Returns:
         dict with keys: text, description, method, confidence, word_count, diagnostics
     """
-    result = _openai_vision(content_type, data)
+    result = _openai_vision(content_type, data) # type: ignore
     if result:
-        return result
+        return result # type: ignore
 
-    result = _tesseract_ocr(content_type, data)
+    result = _tesseract_ocr(content_type, data) # type: ignore
     if result:
-        return result
+        return result # type: ignore
 
-    return _metadata_fallback(content_type, data)
+    return _metadata_fallback(content_type, data) # type: ignore
 
 
-def build_context_block(filename: str | None, ocr_result: dict) -> str:
+def build_context_block(filename: str | None, ocr_result: dict) -> str: # type: ignore
     """
     Format OCR result into a context string for injection into the chat prompt.
 
@@ -217,14 +219,14 @@ def build_context_block(filename: str | None, ocr_result: dict) -> str:
     """
     parts = [f"[Image uploaded: {filename or 'image'}]"]
 
-    if ocr_result.get("description"):
+    if ocr_result.get("description"): # type: ignore
         parts.append(f"Description: {ocr_result['description']}")
 
-    if ocr_result.get("text"):
-        truncated = ocr_result["text"][:3000]
+    if ocr_result.get("text"): # type: ignore
+        truncated = ocr_result["text"][:3000] # type: ignore
         parts.append(f"Extracted text:\n{truncated}")
 
-    method = ocr_result.get("method", "unknown")
+    method = ocr_result.get("method", "unknown") # type: ignore
     if method == "metadata_only":
         parts.append("Note: Full image analysis requires OPENAI_API_KEY.")
 

@@ -2,11 +2,25 @@
 // Live runtime diagnostics: Track API requests, responses, and performance
 
 (function initRuntimeDiagnostics() {
+  function isDevDiagnosticsEnabled() {
+    try {
+      if (typeof window === "undefined") return false;
+      const host = String(window.location && window.location.hostname || "").toLowerCase();
+      const localHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+      const queryEnabled = /[?&]diag=1\b/.test(String(window.location && window.location.search || ""));
+      const storageEnabled = localStorage.getItem("amicor_diag_dev") === "1";
+      return localHost || queryEnabled || storageEnabled;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ── Module Export ─────────────────────────────────────────────────────────
   const AmiCorDiagnostics = {
-    isEnabled: true,
+    isEnabled: isDevDiagnosticsEnabled(),
     requests: [],
     errors: [],
+    events: [],
     performance: {},
 
     // Enable/disable logging
@@ -73,12 +87,38 @@
       }
     },
 
+    emitEvent(type, payload) {
+      const evt = {
+        ts: new Date().toISOString(),
+        type: String(type || "unknown"),
+        payload: payload || {},
+      };
+      this.events.push(evt);
+      if (this.events.length > 500) this.events.shift();
+      if (this.isEnabled) {
+        console.info("[DIAG_EVENT]", evt);
+      }
+      return evt;
+    },
+
+    classifyPreStreamFailure(context) {
+      const c = context || {};
+      if (c.phase === "pre_stream" && !c.userId) return "auth_gate_failure";
+      if (c.phase === "pre_stream" && c.sessionActive === false) return "expired_session";
+      if (c.phase === "pre_stream" && c.cookiesPresent === false) return "missing_cookies";
+      if (c.phase === "transport_init" && c.errorType === "bootstrap") return "transport_bootstrap_failure";
+      if (c.phase === "transport_init" && c.errorType === "abort") return "aborted_stream";
+      if (c.phase === "transport_init" && c.errorType === "network") return "edge_runtime_exception";
+      return "unknown";
+    },
+
     // Export diagnostics to JSON
     exportJSON() {
       return JSON.stringify({
         summary: this.getSummary(),
         allRequests: this.requests,
         allErrors: this.errors,
+        events: this.events,
         exportedAt: new Date().toISOString()
       }, null, 2);
     },
@@ -91,6 +131,7 @@
       console.log(`Total Errors: ${summary.totalErrors}`);
       console.log(`Error Rate: ${summary.errorRate}%`);
       console.log(`Average Latency: ${summary.avgLatency}ms`);
+      console.log(`Structured Events: ${this.events.length}`);
       if (summary.recentErrors.length > 0) {
         console.group('Recent Errors:');
         summary.recentErrors.forEach(err => {

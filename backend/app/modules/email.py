@@ -1,6 +1,7 @@
 """Email drafting capability module."""
 
 import re
+from typing import Any
 
 from app.database import get_email_draft, save_email_draft
 
@@ -73,7 +74,7 @@ def _compose_body(recipient: str, goal: str, tone: str) -> str:
     )
 
 
-def handle(message: str, history: list = None, user_id: str = "default") -> dict:
+def handle(message: str, history: list[dict[str, Any]] | None = None, user_id: str = "default") -> dict:
     lower = message.lower()
     if "send this email" in lower or lower.strip().startswith("send email"):
         draft = get_email_draft(user_id)

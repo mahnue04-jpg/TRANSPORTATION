@@ -1,0 +1,16 @@
+{
+  "db": "backend/data/chat.db",
+  "ride_id": "b275ec28-2ad6-4782-95b2-1ad63fe7c814",
+  "trip": {
+    "id": "d64729b7-04cf-4867-ac7e-34d4d3996e14",
+    "status": "COMPLETED",
+    "start_time": "2026-06-11 05:43:05.729681",
+    "end_time": "2026-06-11 05:43:05.910013"
+  },
+  "payout": {
+    "id": "e4c64eda-9aa7-46c3-868c-691cf90a8656",
+    "status": "pending",
+    "amount_usd": 25.0,
+    "trip_id": "d64729b7-04cf-4867-ac7e-34d4d3996e14"
+  }
+}

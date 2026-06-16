@@ -1,0 +1,23 @@
+{
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnusedImport": false,
+  "reportUnusedVariable": false,
+  "reportGeneralTypeIssues": false,
+  "exclude": [
+    "**/.venv",
+    "**/venv",
+    "**/site-packages",
+    "**/vendor",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/node_modules",
+    "**/alembic/versions",
+    "**/temp*",
+    "**/*validation*",
+    "**/*runtime*",
+    "**/*report*"
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "failed_step": "dispatcher_queue_visibility",
+  "message": "New ride request did not appear in /api/health-isf/dispatch/queue after creation.",
+  "result": {
+    "base_url": "http://127.0.0.1:8011",
+    "db_path": "C:\\Users\\smoni\\OneDrive\\New folder\\New folder\\Amicore_Rebuild\\backend\\data\\chat.db",
+    "api_calls": [
+      {
+        "step": "dispatcher_me",
+        "method": "GET",
+        "path": "/api/auth/me",
+        "status": 200,
+        "response": {
+          "user_id": "e6675266-3e13-408a-8dbc-2fb31651cc9d",
+          "email": "dispatcher@amicor.local",
+          "display_name": "Amicor Dispatcher",
+          "role": "dispatcher",
+          "organization_name": "Amicor Health",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "is_verified": true,
+          "created_at": "2026-05-18T00:25:27.416615",
+          "last_login": "2026-06-01T06:45:41.817876"
+        }
+      },
+      {
+        "step": "ride_creation",
+        "method": "POST",
+        "path": "/api/health-isf/customer-requests",
+        "request": {
+          "rider_name": "Evidence Rider",
+          "rider_phone": "+15554803290",
+          "pickup_address": "101 Evidence Way",
+          "dropoff_address": "202 Evidence Ave",
+          "ride_type": "healthcare",
+          "notes": "Lifecycle evidence run"
+        },
+        "status": 201,
+        "response": {
+          "id": "3498ba6b-7516-4efa-97ef-e6ea8e4678bf",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "d04d9ec2-ec10-45f4-8ee3-ba7856ff00ce",
+          "rider_name": "Evidence Rider",
+          "rider_phone": "+15554803290",
+          "pickup_address": "101 Evidence Way",
+          "dropoff_address": "202 Evidence Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": "Lifecycle evidence run",
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-01T06:45:42.587408",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-01T06:45:42.587410",
+          "updated_at": "2026-06-01T06:45:42.587410"
+        }
+      },
+      {
+        "step": "dispatcher_queue_after_create",
+        "method": "GET",
+        "path": "/api/health-isf/dispatch/queue?limit=100",
+        "status": 200,
+        "response": {
+          "queue_count": 100,
+          "matching_item": null
+        }
+      }
+    ],
+    "db": {
+      "customer_request": {
+        "id": "3498ba6b-7516-4efa-97ef-e6ea8e4678bf",
+        "ride_id": "d04d9ec2-ec10-45f4-8ee3-ba7856ff00ce",
+        "rider_name": "Evidence Rider",
+        "rider_phone": "+15554803290",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-01 06:45:42.587408",
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "created_at": "2026-06-01 06:45:42.587410",
+        "updated_at": "2026-06-01 06:45:42.587410"
+      },
+      "ride": {
+        "id": "d04d9ec2-ec10-45f4-8ee3-ba7856ff00ce",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "passenger_name": "Evidence Rider",
+        "passenger_phone": "+15554803290",
+        "status": "PENDING",
+        "lifecycle_state": "queued",
+        "driver_id": null,
+        "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+        "requested_at": "2026-06-01 06:45:42.544051",
+        "created_at": "2026-06-01 06:45:42.544055",
+        "updated_at": "2026-06-01 06:45:42.550888"
+      }
+    },
+    "rider_login": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiOWI0MTI5NjEtMzJjYy00ODJjLWJiOGYtNGNjN2VmZWE2MWY2IiwgImVtYWlsIjogInJpZGVyQGFtaWNvci5sb2NhbCIsICJyb2xlIjogInN0YWZmIiwgIm9yZ2FuaXphdGlvbl9pZCI6ICJjYThkMGM3Yy0xZmZmLTQ0NjUtOTlkNy03NWExZmM1MTU0M2UiLCAiZXhwIjogMTc4MDI5OTk0MS40Nzg4ODk1fQ.2acuvLvz6bXugiuKjrHGHS_wgayQGplqFDa_spcNceY",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "l5DUDWzaaOOSmoRO0OaIyEuq2QdFSEh0jOJqAaOgPqUh8-URCqNAM_gK96AeB19W",
+        "user_id": "9b412961-32cc-482c-bb8f-4cc7efea61f6",
+        "email": "rider@amicor.local",
+        "display_name": "Amicor Rider",
+        "role": "staff",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "dispatcher_login": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZTY2NzUyNjYtM2UxMy00MDhhLThkYmMtMmZiMzE2NTFjYzlkIiwgImVtYWlsIjogImRpc3BhdGNoZXJAYW1pY29yLmxvY2FsIiwgInJvbGUiOiAiZGlzcGF0Y2hlciIsICJvcmdhbml6YXRpb25faWQiOiAiY2E4ZDBjN2MtMWZmZi00NDY1LTk5ZDctNzVhMWZjNTE1NDNlIiwgImV4cCI6IDE3ODAyOTk5NDEuODE3NjI5fQ.PJfPaZvCAVKT_kGvMeg5DqBXiy0_qJICsDmPb-bwmwI",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "Smhg8V-0FCIxLgl6gaE3O-a3TapPsrvu9Nthx9AlaWUUX_p0R56OeR9Ptwfc5Nmu",
+        "user_id": "e6675266-3e13-408a-8dbc-2fb31651cc9d",
+        "email": "dispatcher@amicor.local",
+        "display_name": "Amicor Dispatcher",
+        "role": "dispatcher",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "driver_user_login": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiYjZlMWZjN2UtYzAwNi00ZWRlLWJhNmYtMTFmYzQ1MTEwYmY3IiwgImVtYWlsIjogImRyaXZlckBhbWljb3IubG9jYWwiLCAicm9sZSI6ICJkcml2ZXIiLCAib3JnYW5pemF0aW9uX2lkIjogImNhOGQwYzdjLTFmZmYtNDQ2NS05OWQ3LTc1YTFmYzUxNTQzZSIsICJleHAiOiAxNzgwMjk5OTQyLjA4NTE5NjN9.RYROvyWidcb3jNhMQ5laACqtyP7rQv1axh1QoMRR6K4",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "0Rd_poZ_SRdwZpv3x18j9wId5q91xXApmN2NXOLh3Qj8gNZ0kaIP7Ep-A3nsOPWJ",
+        "user_id": "b6e1fc7e-c006-4ede-ba6f-11fc45110bf7",
+        "email": "driver@amicor.local",
+        "display_name": "Amicor Driver",
+        "role": "driver",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "admin_login": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZjg0MDZjOTQtYzA5OC00MmFkLWE3ODEtMjI3YjRkNTAyZTU3IiwgImVtYWlsIjogImFkbWluQGFtaWNvci5sb2NhbCIsICJyb2xlIjogImFkbWluIiwgIm9yZ2FuaXphdGlvbl9pZCI6ICJjYThkMGM3Yy0xZmZmLTQ0NjUtOTlkNy03NWExZmM1MTU0M2UiLCAiZXhwIjogMTc4MDI5OTk0Mi4zMjU5Mjg3fQ.VI1AFRPr5JO5r4tKwqY_Xy1m7uIh63vnlsro832cKWM",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "jpaHawuNVcgk9qf9ZBmZKSG8pY2bLOiqmSYRyk75E5W3YrZfRsXtEj-3BqObLbwM",
+        "user_id": "f8406c94-c098-42ad-a781-227b4d502e57",
+        "email": "admin@amicor.local",
+        "display_name": "Amicor Admin",
+        "role": "admin",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    }
+  }
+}

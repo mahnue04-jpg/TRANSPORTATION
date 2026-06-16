@@ -1,4 +1,4 @@
-const BASE_URL = process.env.AMICOR_BASE_URL || "http://127.0.0.1:8000";
+const BASE_URL = process.env.AMICOR_BASE_URL || "http://127.0.0.1:8011";
 const USER_ID = `cap_live_${Date.now()}`;
 
 let passed = 0;

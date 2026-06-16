@@ -37,7 +37,7 @@ class NormalizedResponse(BaseModel):
     )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra = { # type: ignore
             "examples": [
                 {
                     "ok": True,

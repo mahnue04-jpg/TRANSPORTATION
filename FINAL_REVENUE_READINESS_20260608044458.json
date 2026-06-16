@@ -1,0 +1,633 @@
+{
+  "run_id": "20260608044458",
+  "created": {
+    "request_id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+    "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+    "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+    "payment_id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4",
+    "rider_name": "Revenue Patient 044458",
+    "driver_name": "Revenue Driver 044458",
+    "invoice_reference": "INV-044458"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "name": "Create PatientAPI response",
+      "result": "PASS",
+      "evidence": {
+        "status": 201,
+        "request_id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+        "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+        "response": {
+          "id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "rider_name": "Revenue Patient 044458",
+          "rider_phone": "+1212666044458",
+          "pickup_address": "333 Revenue St, New York, NY 10001",
+          "dropoff_address": "444 Billing Ave, New York, NY 10002",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": "final readiness rerun",
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-08T04:44:58.809137",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-08T04:44:58.809138",
+          "updated_at": "2026-06-08T04:44:58.809138"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+          "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "rider_name": "Revenue Patient 044458",
+          "dispatch_status": "pending"
+        }
+      }
+    },
+    {
+      "step": 3,
+      "name": "Dashboard visibility",
+      "result": "PASS",
+      "evidence": {
+        "dashboard_status": 200,
+        "customer_list_status": 200,
+        "visible": true
+      }
+    },
+    {
+      "step": 4,
+      "name": "Create DriverAPI response",
+      "result": "PASS",
+      "evidence": {
+        "status": 201,
+        "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+        "response": {
+          "name": "Revenue Driver 044458",
+          "phone": "+1310666044458",
+          "vehicle_type": "sedan",
+          "vehicle_plate": "RVX044458",
+          "id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-08T04:44:59.230028",
+          "updated_at": "2026-06-08T04:44:59.230034"
+        }
+      }
+    },
+    {
+      "step": 5,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "name": "Revenue Driver 044458",
+          "phone": "+1310666044458",
+          "status": "offline",
+          "is_active": 1
+        }
+      }
+    },
+    {
+      "step": 6,
+      "name": "Driver page visibility",
+      "result": "FAIL",
+      "evidence": {
+        "set_status": 200,
+        "set_status_resp": {
+          "name": "Revenue Driver 044458",
+          "phone": "+1310666044458",
+          "vehicle_type": "sedan",
+          "vehicle_plate": "RVX044458",
+          "id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "status": "available",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-08T04:44:59.230028",
+          "updated_at": "2026-06-08T04:44:59.296908"
+        },
+        "active_status": 200,
+        "visible": false
+      }
+    },
+    {
+      "step": 7,
+      "name": "Create Ride from PatientAPI response",
+      "result": "PASS",
+      "evidence": {
+        "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d"
+      }
+    },
+    {
+      "step": 8,
+      "name": "Database row",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "driver_id": null
+        }
+      }
+    },
+    {
+      "step": 9,
+      "name": "Ride Operations visibility",
+      "result": "PASS",
+      "evidence": {
+        "status": 200,
+        "visible": true
+      }
+    },
+    {
+      "step": 10,
+      "name": "Assign DriverDriver ID attached to ride",
+      "result": "PASS",
+      "evidence": {
+        "approve_status": 200,
+        "approve_resp": {
+          "request": {
+            "id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+            "rider_name": "Revenue Patient 044458",
+            "rider_phone": "+1212666044458",
+            "pickup_address": "333 Revenue St, New York, NY 10001",
+            "dropoff_address": "444 Billing Ave, New York, NY 10002",
+            "scheduled_time": null,
+            "ride_type": "healthcare",
+            "recurring": false,
+            "recurring_pattern": null,
+            "notes": "final readiness rerun",
+            "dispatch_status": "approved",
+            "pending_at": "2026-06-08T04:44:58.809137",
+            "broadcasted_at": "2026-06-08T04:44:59.392566",
+            "accepted_at": null,
+            "assigned_at": null,
+            "in_progress_at": null,
+            "completed_at": null,
+            "cancelled_at": null,
+            "created_at": "2026-06-08T04:44:58.809138",
+            "updated_at": "2026-06-08T04:44:59.392583"
+          },
+          "ride": {
+            "passenger_name": "Revenue Patient 044458",
+            "passenger_phone": "+1212666044458",
+            "pickup_address": "333 Revenue St, New York, NY 10001",
+            "dropoff_address": "444 Billing Ave, New York, NY 10002",
+            "service_type": "medical_transport",
+            "notes": "final readiness rerun",
+            "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+            "driver_id": null,
+            "vehicle_id": null,
+            "status": "pending",
+            "lifecycle_state": "queued",
+            "estimated_distance_miles": null,
+            "estimated_duration_minutes": null,
+            "priority_score": null,
+            "priority_tag": null,
+            "is_emergency": false,
+            "appointment_time": null,
+            "recurring_trip_pattern": null,
+            "recurring_schedule_id": null,
+            "recurring_instance_date": null,
+            "ai_dispatch_context": null,
+            "requested_at": "2026-06-08T04:44:58.796524",
+            "assigned_at": null,
+            "enroute_at": null,
+            "arrived_at": null,
+            "picked_up_at": null,
+            "transporting_at": null,
+            "accepted_at": null,
+            "completed_at": null
+          },
+          "offer": null,
+          "message": "Customer request approved for dispatch workflow."
+        },
+        "assign_status": 200,
+        "assign_resp": {
+          "request": {
+            "id": "17eba250-ae5f-4d63-8db1-361a10c2400e",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+            "rider_name": "Revenue Patient 044458",
+            "rider_phone": "+1212666044458",
+            "pickup_address": "333 Revenue St, New York, NY 10001",
+            "dropoff_address": "444 Billing Ave, New York, NY 10002",
+            "scheduled_time": null,
+            "ride_type": "healthcare",
+            "recurring": false,
+            "recurring_pattern": null,
+            "notes": "final readiness rerun",
+            "dispatch_status": "assigned",
+            "pending_at": "2026-06-08T04:44:58.809137",
+            "broadcasted_at": "2026-06-08T04:44:59.392566",
+            "accepted_at": null,
+            "assigned_at": "2026-06-08T04:44:59.466245",
+            "in_progress_at": null,
+            "completed_at": null,
+            "cancelled_at": null,
+            "created_at": "2026-06-08T04:44:58.809138",
+            "updated_at": "2026-06-08T04:44:59.469678"
+          },
+          "ride": {
+            "passenger_name": "Revenue Patient 044458",
+            "passenger_phone": "+1212666044458",
+            "pickup_address": "333 Revenue St, New York, NY 10001",
+            "dropoff_address": "444 Billing Ave, New York, NY 10002",
+            "service_type": "medical_transport",
+            "notes": "final readiness rerun",
+            "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+            "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+            "vehicle_id": null,
+            "status": "accepted",
+            "lifecycle_state": "assigned",
+            "estimated_distance_miles": null,
+            "estimated_duration_minutes": null,
+            "priority_score": null,
+            "priority_tag": null,
+            "is_emergency": false,
+            "appointment_time": null,
+            "recurring_trip_pattern": null,
+            "recurring_schedule_id": null,
+            "recurring_instance_date": null,
+            "ai_dispatch_context": null,
+            "requested_at": "2026-06-08T04:44:58.796524",
+            "assigned_at": "2026-06-08T04:44:59.438244",
+            "enroute_at": null,
+            "arrived_at": null,
+            "picked_up_at": null,
+            "transporting_at": null,
+            "accepted_at": "2026-06-08T04:44:59.438255",
+            "completed_at": null
+          },
+          "offer": null,
+          "message": "Driver assigned from dispatcher customer-request workflow."
+        },
+        "assigned_driver": "05a0b997-c8f6-4f83-9041-f05ddecca086"
+      }
+    },
+    {
+      "step": 11,
+      "name": "Database proof",
+      "result": "PASS",
+      "evidence": {
+        "ride_row": {
+          "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "status": "accepted",
+          "lifecycle_state": "assigned",
+          "assigned_at": "2026-06-08 04:44:59.438244"
+        }
+      }
+    },
+    {
+      "step": 12,
+      "name": "UI proof",
+      "result": "PASS",
+      "evidence": {
+        "status": 200,
+        "visible_assignment": true
+      }
+    },
+    {
+      "step": 13,
+      "name": "Dispatch RideStatus changes in DB",
+      "result": "PASS",
+      "evidence": {
+        "sequence": [
+          {
+            "action": "accept",
+            "status": 200,
+            "resp": {
+              "passenger_name": "Revenue Patient 044458",
+              "passenger_phone": "+1212666044458",
+              "pickup_address": "333 Revenue St, New York, NY 10001",
+              "dropoff_address": "444 Billing Ave, New York, NY 10002",
+              "service_type": "medical_transport",
+              "notes": "final readiness rerun",
+              "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+              "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+              "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+              "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+              "vehicle_id": null,
+              "status": "accepted",
+              "lifecycle_state": "driver_en_route",
+              "estimated_distance_miles": null,
+              "estimated_duration_minutes": null,
+              "priority_score": null,
+              "priority_tag": null,
+              "is_emergency": false,
+              "appointment_time": null,
+              "recurring_trip_pattern": null,
+              "recurring_schedule_id": null,
+              "recurring_instance_date": null,
+              "ai_dispatch_context": null,
+              "requested_at": "2026-06-08T04:44:58.796524",
+              "assigned_at": "2026-06-08T04:44:59.438244",
+              "enroute_at": "2026-06-08T04:44:59.649262",
+              "arrived_at": null,
+              "picked_up_at": null,
+              "transporting_at": null,
+              "accepted_at": "2026-06-08T04:44:59.438255",
+              "completed_at": null
+            }
+          },
+          {
+            "action": "arrived",
+            "status": 200,
+            "resp": {
+              "passenger_name": "Revenue Patient 044458",
+              "passenger_phone": "+1212666044458",
+              "pickup_address": "333 Revenue St, New York, NY 10001",
+              "dropoff_address": "444 Billing Ave, New York, NY 10002",
+              "service_type": "medical_transport",
+              "notes": "final readiness rerun",
+              "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+              "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+              "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+              "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+              "vehicle_id": null,
+              "status": "accepted",
+              "lifecycle_state": "arrived",
+              "estimated_distance_miles": null,
+              "estimated_duration_minutes": null,
+              "priority_score": null,
+              "priority_tag": null,
+              "is_emergency": false,
+              "appointment_time": null,
+              "recurring_trip_pattern": null,
+              "recurring_schedule_id": null,
+              "recurring_instance_date": null,
+              "ai_dispatch_context": null,
+              "requested_at": "2026-06-08T04:44:58.796524",
+              "assigned_at": "2026-06-08T04:44:59.438244",
+              "enroute_at": "2026-06-08T04:44:59.649262",
+              "arrived_at": "2026-06-08T04:44:59.689473",
+              "picked_up_at": null,
+              "transporting_at": null,
+              "accepted_at": "2026-06-08T04:44:59.438255",
+              "completed_at": null
+            }
+          },
+          {
+            "action": "pickup_complete",
+            "status": 200,
+            "resp": {
+              "passenger_name": "Revenue Patient 044458",
+              "passenger_phone": "+1212666044458",
+              "pickup_address": "333 Revenue St, New York, NY 10001",
+              "dropoff_address": "444 Billing Ave, New York, NY 10002",
+              "service_type": "medical_transport",
+              "notes": "final readiness rerun",
+              "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+              "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+              "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+              "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+              "vehicle_id": null,
+              "status": "in_transit",
+              "lifecycle_state": "in_progress",
+              "estimated_distance_miles": null,
+              "estimated_duration_minutes": null,
+              "priority_score": null,
+              "priority_tag": null,
+              "is_emergency": false,
+              "appointment_time": null,
+              "recurring_trip_pattern": null,
+              "recurring_schedule_id": null,
+              "recurring_instance_date": null,
+              "ai_dispatch_context": null,
+              "requested_at": "2026-06-08T04:44:58.796524",
+              "assigned_at": "2026-06-08T04:44:59.438244",
+              "enroute_at": "2026-06-08T04:44:59.649262",
+              "arrived_at": "2026-06-08T04:44:59.689473",
+              "picked_up_at": "2026-06-08T04:44:59.724586",
+              "transporting_at": "2026-06-08T04:44:59.727871",
+              "accepted_at": "2026-06-08T04:44:59.438255",
+              "completed_at": null
+            }
+          }
+        ],
+        "statuses": [
+          "queued",
+          "assigned",
+          "driver_en_route",
+          "arrived",
+          "rider_onboard",
+          "in_progress"
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "name": "Status changes in UI",
+      "result": "PASS",
+      "evidence": {
+        "ui_state": "in_progress"
+      }
+    },
+    {
+      "step": 15,
+      "name": "Start TripLifecycle state updated",
+      "result": "PASS",
+      "evidence": {
+        "row": {
+          "lifecycle_state": "in_progress",
+          "status": "in_transit",
+          "picked_up_at": "2026-06-08 04:44:59.724586",
+          "transporting_at": "2026-06-08 04:44:59.727871"
+        }
+      }
+    },
+    {
+      "step": 16,
+      "name": "Database proof",
+      "result": "PASS",
+      "evidence": {
+        "lifecycle_state": "in_progress"
+      }
+    },
+    {
+      "step": 17,
+      "name": "UI proof",
+      "result": "PASS",
+      "evidence": {
+        "ui_lifecycle": "in_progress"
+      }
+    },
+    {
+      "step": 18,
+      "name": "Complete TripCompletion stored",
+      "result": "PASS",
+      "evidence": {
+        "status": 200,
+        "resp": {
+          "passenger_name": "Revenue Patient 044458",
+          "passenger_phone": "+1212666044458",
+          "pickup_address": "333 Revenue St, New York, NY 10001",
+          "dropoff_address": "444 Billing Ave, New York, NY 10002",
+          "service_type": "medical_transport",
+          "notes": "final readiness rerun",
+          "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "vehicle_id": null,
+          "status": "completed",
+          "lifecycle_state": "completed",
+          "estimated_distance_miles": null,
+          "estimated_duration_minutes": null,
+          "priority_score": null,
+          "priority_tag": null,
+          "is_emergency": false,
+          "appointment_time": null,
+          "recurring_trip_pattern": null,
+          "recurring_schedule_id": null,
+          "recurring_instance_date": null,
+          "ai_dispatch_context": null,
+          "requested_at": "2026-06-08T04:44:58.796524",
+          "assigned_at": "2026-06-08T04:44:59.438244",
+          "enroute_at": "2026-06-08T04:44:59.649262",
+          "arrived_at": "2026-06-08T04:44:59.689473",
+          "picked_up_at": "2026-06-08T04:44:59.724586",
+          "transporting_at": "2026-06-08T04:44:59.727871",
+          "accepted_at": "2026-06-08T04:44:59.438255",
+          "completed_at": "2026-06-08T04:44:59.876241"
+        }
+      }
+    },
+    {
+      "step": 19,
+      "name": "Database proof",
+      "result": "PASS",
+      "evidence": {
+        "ride": {
+          "id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "status": "completed",
+          "lifecycle_state": "completed",
+          "completed_at": "2026-06-08 04:44:59.876241",
+          "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086"
+        },
+        "trip": {
+          "id": "2a5bdc5d-4d94-4aad-97df-ca8fccb3b494",
+          "status": "COMPLETED",
+          "start_time": "2026-06-08 04:44:59.438255",
+          "end_time": "2026-06-08 04:44:59.876241"
+        },
+        "payout": [
+          {
+            "id": "16da4ee7-c858-4513-9d3e-c930abd1976b",
+            "trip_id": "2a5bdc5d-4d94-4aad-97df-ca8fccb3b494",
+            "amount_usd": 25.0,
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "name": "UI proof",
+      "result": "PASS",
+      "evidence": {
+        "ui_state": "completed"
+      }
+    },
+    {
+      "step": 21,
+      "name": "Generate BillingBilling row exists",
+      "result": "PASS",
+      "evidence": {
+        "status": 200,
+        "payment_row": {
+          "id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4",
+          "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "status": "requires_capture",
+          "invoice_reference": "INV-044458"
+        },
+        "resp": {
+          "id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4",
+          "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "gateway": "simulated",
+          "gateway_payment_intent_id": "pi_afb2baeadcb74e4f90a2705f",
+          "status": "requires_capture",
+          "amount_usd": 88.4,
+          "currency": "usd",
+          "settlement_status": "pending",
+          "invoice_reference": "INV-044458"
+        }
+      }
+    },
+    {
+      "step": 22,
+      "name": "Billing ID exists",
+      "result": "PASS",
+      "evidence": {
+        "payment_id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4"
+      }
+    },
+    {
+      "step": 23,
+      "name": "Revenue record exists",
+      "result": "PASS",
+      "evidence": {
+        "capture_status": 200,
+        "settle_status": 200,
+        "settlements": [
+          {
+            "id": "7af03ab0-a580-4fef-9e0e-1d563641d897",
+            "payment_transaction_id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4",
+            "participant_type": "driver",
+            "net_amount_usd": 63.65,
+            "status": "processed"
+          },
+          {
+            "id": "9d8a46e1-15dc-4fb5-8ba1-2b4226b7307f",
+            "payment_transaction_id": "c5ba865e-5dbe-44ce-aadd-b3a58e5bd3b4",
+            "participant_type": "provider",
+            "net_amount_usd": 24.75,
+            "status": "processed"
+          }
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "name": "Refresh application",
+      "result": "PASS",
+      "evidence": {
+        "patient_exists": true,
+        "driver_exists": true,
+        "ride_exists": true,
+        "assignment_exists": true,
+        "billing_exists": true,
+        "assignment_row": {
+          "id": "ff5db1f8-624d-4178-881e-feafc57e2c94",
+          "ride_id": "4709e52b-bfa0-41b3-8c3d-b9aeb908b47d",
+          "driver_id": "05a0b997-c8f6-4f83-9041-f05ddecca086",
+          "assignment_state": "dropoff_complete"
+        }
+      }
+    }
+  ]
+}

@@ -6,7 +6,17 @@ import requests
 
 from app.weather import resolve_location
 
-TRIGGERS = ["time", "what time", "current time"]
+# Triggers only for EXPLICIT time queries
+# Narrowed to avoid matching business/research prompts
+TRIGGERS = [
+    "what time",          # explicit time question
+    "current time",       # explicit current time
+    "what is the time",   # explicit time query
+    "time zone",          # timezone query
+    "timezone",           # timezone query
+    "what time is it",    # explicit time check
+]
+PROVIDER_TIMEOUT_SECONDS = 15
 
 _TZ_MAP = {
     "new york": ("America/New_York", -4),
@@ -55,7 +65,7 @@ def handle(message: str, history: list = None, user_id: str = "default") -> dict
     try:
         response = requests.get(
             f"https://worldtimeapi.org/api/timezone/{timezone_name}",
-            timeout=(3.05, 8),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
             headers={"User-Agent": "Amicor/1.0 time client"},
         )
         response.raise_for_status()

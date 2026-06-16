@@ -1,6 +1,7 @@
 "use strict";
 
 const { createTaskPlanner, createWorkflowEngine } = require("../planning");
+const memoryPolicy = require("../ux/memoryManager.js");
 const {
   CAPABILITY_TYPES,
   CAPABILITY_STATUS,
@@ -42,6 +43,31 @@ function toStreamChunks(text) {
     chunks.push(value.slice(i, i + size));
   }
   return chunks;
+}
+
+function hasMemoryContext(memoryContext) {
+  return !!(memoryContext && (memoryContext.memorySummary || (memoryContext.retrievedMemories && memoryContext.retrievedMemories.length)));
+}
+
+function enforceAssistantSummary(text, memoryContext, source) {
+  if (!memoryPolicy || typeof memoryPolicy.enforceAssistantVisibleResponse !== "function") {
+    return String(text || "");
+  }
+  try {
+    return memoryPolicy.enforceAssistantVisibleResponse(String(text || ""), {
+      memoryEnabled: true,
+      hasMemory: hasMemoryContext(memoryContext),
+      source: source,
+      responsePath: "capability-router",
+      responseSourceIdentifier: source,
+      throwOnViolation: true,
+    }).text;
+  } catch (error) {
+    if (error && error.code === memoryPolicy.POLICY_VIOLATION_CODE) {
+      return error.replacementText || "I don't know that yet.";
+    }
+    throw error;
+  }
 }
 
 function createCapabilityRouter(options) {
@@ -160,7 +186,7 @@ function createCapabilityRouter(options) {
         requestId: request.id,
         capability: request.capability,
         status: CAPABILITY_STATUS.failed,
-        summary: "Missing goal or template for capability execution",
+        summary: enforceAssistantSummary("Missing goal or template for capability execution", null, "capability-malformed"),
         errors: [{ code: "malformed-input", message: "Goal or templateId is required" }],
         startedAt: startedAt,
       });
@@ -171,7 +197,7 @@ function createCapabilityRouter(options) {
         requestId: request.id,
         capability: request.capability,
         status: CAPABILITY_STATUS.failed,
-        summary: "Conflicting task directives detected",
+        summary: enforceAssistantSummary("Conflicting task directives detected", null, "capability-conflict"),
         errors: [{ code: "conflicting-tasks", message: "Request contains both cancellation and execution directives" }],
         startedAt: startedAt,
       });
@@ -188,7 +214,7 @@ function createCapabilityRouter(options) {
           requestId: request.id,
           capability: capability,
           status: CAPABILITY_STATUS.failed,
-          summary: "Unknown workflow template",
+          summary: enforceAssistantSummary("Unknown workflow template", memoryContext, "capability-template-missing"),
           errors: [{ code: "template-not-found", message: "Template not found: " + request.templateId }],
           startedAt: startedAt,
         });
@@ -204,7 +230,7 @@ function createCapabilityRouter(options) {
         requestId: request.id,
         capability: capability,
         status: CAPABILITY_STATUS.failed,
-        summary: "Unable to resolve capability workflow",
+        summary: enforceAssistantSummary("Unable to resolve capability workflow", memoryContext, "capability-missing-builder"),
         errors: [{ code: "capability-not-implemented", message: "No builder for capability: " + capability }],
         startedAt: startedAt,
       });
@@ -236,7 +262,7 @@ function createCapabilityRouter(options) {
         workflowId: workflow.id,
         capability: capability,
         status: CAPABILITY_STATUS.failed,
-        summary: "Planning validation failed for capability workflow",
+        summary: enforceAssistantSummary("Planning validation failed for capability workflow", memoryContext, "capability-validation"),
         errors: planResult.validation.errors || [],
         memoryContext: memoryContext,
         startedAt: startedAt,
@@ -263,8 +289,9 @@ function createCapabilityRouter(options) {
         ? CAPABILITY_STATUS.interrupted
         : CAPABILITY_STATUS.failed;
 
-    var summary = definition.summary + " (status: " + status + ")";
-    var chunks = toStreamChunks(summary + "\nWorkflow " + workflow.id + " processed " + (workflow.tasks || []).length + " tasks.");
+    var summary = enforceAssistantSummary(definition.summary + " (status: " + status + ")", memoryContext, "capability-summary");
+    var streamedText = enforceAssistantSummary(summary + "\nWorkflow " + workflow.id + " processed " + (workflow.tasks || []).length + " tasks.", memoryContext, "capability-stream");
+    var chunks = toStreamChunks(streamedText);
 
     if (typeof input.onStreamChunk === "function") {
       for (var i = 0; i < chunks.length; i++) {
@@ -317,7 +344,7 @@ function createCapabilityRouter(options) {
       return createCapabilityResult({
         workflowId: workflowId,
         status: CAPABILITY_STATUS.failed,
-        summary: "Cannot continue unknown workflow",
+        summary: enforceAssistantSummary("Cannot continue unknown workflow", null, "capability-continue-missing"),
         errors: [{ code: "workflow-not-found", message: "No persisted workflow found" }],
       });
     }
@@ -328,7 +355,7 @@ function createCapabilityRouter(options) {
         workflowId: workflowId,
         capability: record.capability,
         status: CAPABILITY_STATUS.failed,
-        summary: "Workflow continuation requires prior snapshot",
+        summary: enforceAssistantSummary("Workflow continuation requires prior snapshot", record.result ? record.result.memoryContext : null, "capability-continue-snapshot"),
         errors: [{ code: "workflow-no-snapshot", message: "Persisted workflow lacks execution snapshot" }],
       });
     }
@@ -353,7 +380,7 @@ function createCapabilityRouter(options) {
       capability: record.capability,
       status: status,
       workflowResult: workflowResult,
-      summary: "Workflow continuation result: " + status,
+      summary: enforceAssistantSummary("Workflow continuation result: " + status, record.result.memoryContext, "capability-continue-result"),
       memoryContext: record.result.memoryContext,
       persisted: true,
       startedAt: Date.now(),

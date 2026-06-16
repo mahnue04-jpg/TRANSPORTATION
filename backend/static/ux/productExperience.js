@@ -117,6 +117,52 @@
       return state;
     }
 
+    function hasStoredMemory() {
+      if (!global.AmiCorMemoryManager || typeof global.AmiCorMemoryManager.loadMemory !== "function") {
+        return false;
+      }
+      try {
+        var memory = global.AmiCorMemoryManager.loadMemory();
+        var longTerm = (memory && memory.long_term_memory) || {};
+        return !!(
+          longTerm.user_name ||
+          (Array.isArray(longTerm.preferences) && longTerm.preferences.length) ||
+          (Array.isArray(longTerm.likes_dislikes) && longTerm.likes_dislikes.length) ||
+          (Array.isArray(longTerm.goals) && longTerm.goals.length) ||
+          (Array.isArray(longTerm.recurring_interests) && longTerm.recurring_interests.length) ||
+          (Array.isArray(longTerm.active_projects) && longTerm.active_projects.length) ||
+          (Array.isArray(longTerm.assistant_notes) && longTerm.assistant_notes.length)
+        );
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function finalizeAssistantText(role, text, meta) {
+      var normalizedRole = String(role || "").toLowerCase();
+      if (normalizedRole !== "ai" && normalizedRole !== "assistant") {
+        return String(text || "");
+      }
+      if (!global.AmiCorMemoryManager || typeof global.AmiCorMemoryManager.enforceAssistantVisibleResponse !== "function") {
+        return String(text || "");
+      }
+      try {
+        return global.AmiCorMemoryManager.enforceAssistantVisibleResponse(String(text || ""), {
+          memoryEnabled: true,
+          hasMemory: hasStoredMemory(),
+          source: "product-experience-cache",
+          responsePath: "cached-assistant-response",
+          responseSourceIdentifier: meta && meta.tool ? meta.tool : "product-experience-cache",
+          throwOnViolation: true,
+        }).text;
+      } catch (error) {
+        if (error && error.code === global.AmiCorMemoryManager.POLICY_VIOLATION_CODE) {
+          return error.replacementText || "I don't know that yet.";
+        }
+        throw error;
+      }
+    }
+
     function ensureActive(state, titleHint) {
       if (state.activeConversationId) {
         var existing = state.conversations.find(function (c) { return c.id === state.activeConversationId; });
@@ -139,18 +185,19 @@
 
     function appendMessage(role, text, meta) {
       var state = load();
-      var conversation = ensureActive(state, role === "user" ? text : "Amicor Chat");
+      var finalText = finalizeAssistantText(role, text, meta);
+      var conversation = ensureActive(state, role === "user" ? finalText : "Amicor Chat");
       var message = {
         id: uid("msg"),
         role: role,
-        text: String(text || ""),
+        text: String(finalText || ""),
         createdAt: nowIso(),
         meta: meta || {},
       };
       conversation.messages.push(message);
       conversation.updatedAt = nowIso();
 
-      var inferred = inferBusinessTags(text);
+      var inferred = inferBusinessTags(finalText);
       inferred.forEach(function (tag) {
         if (conversation.tags.indexOf(tag) === -1) conversation.tags.push(tag);
       });

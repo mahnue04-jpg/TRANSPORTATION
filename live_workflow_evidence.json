@@ -1,0 +1,106 @@
+{
+  "ride_id": "b275ec28-2ad6-4782-95b2-1ad63fe7c814",
+  "request_id": "7bf0bb86-0868-4511-96ef-9823f376e3ff",
+  "driver_id": "c3c93507-4d21-4ea2-844a-f8f6c57374b2",
+  "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+  "rider_phone": "+1 212-555-6611",
+  "steps": [
+    {
+      "step": "auth_login",
+      "status": 200,
+      "user": "dispatcher@amicor.local"
+    },
+    {
+      "step": "provider_resolved",
+      "status": 200,
+      "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+      "provider_count": 39
+    },
+    {
+      "step": "driver_created_for_workflow",
+      "status": 201,
+      "driver_id": "c3c93507-4d21-4ea2-844a-f8f6c57374b2"
+    },
+    {
+      "step": "driver_set_available",
+      "status": 200,
+      "driver_id": "c3c93507-4d21-4ea2-844a-f8f6c57374b2",
+      "driver_status": "available"
+    },
+    {
+      "step": "driver_resolved",
+      "status": 200,
+      "driver_id": "c3c93507-4d21-4ea2-844a-f8f6c57374b2",
+      "assignable_count": 0
+    },
+    {
+      "step": "ride_created",
+      "status": 201,
+      "ride_id": "b275ec28-2ad6-4782-95b2-1ad63fe7c814",
+      "request_id": "7bf0bb86-0868-4511-96ef-9823f376e3ff"
+    },
+    {
+      "step": "ride_visible_dispatch",
+      "status": 200,
+      "request_in_dispatch_queue": true,
+      "queue_size": 100
+    },
+    {
+      "step": "request_approved",
+      "status": 200,
+      "dispatch_status": null
+    },
+    {
+      "step": "driver_assigned",
+      "status": 200,
+      "assigned_driver_id": null
+    },
+    {
+      "step": "driver_receives_ride",
+      "status": 200,
+      "offer_present": true,
+      "offer_ride_id": "b275ec28-2ad6-4782-95b2-1ad63fe7c814"
+    },
+    {
+      "step": "driver_accepts_ride",
+      "status": 200,
+      "ride_status": "accepted",
+      "lifecycle_state": "driver_en_route"
+    },
+    {
+      "step": "driver_marks_arrived",
+      "status": 200,
+      "ride_status": "accepted",
+      "lifecycle_state": "arrived"
+    },
+    {
+      "step": "driver_marks_pickup",
+      "status": 200,
+      "ride_status": "in_transit",
+      "lifecycle_state": "in_progress"
+    },
+    {
+      "step": "driver_completes_trip",
+      "status": 200,
+      "ride_status": "completed",
+      "lifecycle_state": "completed",
+      "completed_at": "2026-06-11T05:43:05.910013"
+    },
+    {
+      "step": "rider_screen_api_state",
+      "status": 200,
+      "has_active_ride": true,
+      "active_ride_id": "32f21ea6-701e-42f1-bd3d-45c9a7295f44",
+      "timeline_count": 0
+    },
+    {
+      "step": "billing_completion_handoff",
+      "status": 200,
+      "provider_queue_ready": true,
+      "billing_queue_ready": true,
+      "trip_id": "d64729b7-04cf-4867-ac7e-34d4d3996e14",
+      "payout_id": "e4c64eda-9aa7-46c3-868c-691cf90a8656",
+      "completion_artifact_id": "a4fd34ab-5bcc-4cbd-abc2-b0f75a88c02b"
+    }
+  ]
+}

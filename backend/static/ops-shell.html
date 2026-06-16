@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amicor Nova Operational Platform</title>
+  <link rel="stylesheet" href="/static/ops-shell.css?v=20260525.4" />
+</head>
+<body>
+  <div id="ops-app" class="ops-app">
+    <aside class="ops-sidebar">
+      <div class="ops-brand">
+        <h1>Amicor Nova</h1>
+        <p>Operational Platform</p>
+      </div>
+      <nav class="ops-nav" aria-label="Primary navigation">
+        <a href="/dashboard" data-route="dashboard">Dashboard</a>
+        <a href="/dispatch" data-route="dispatch">Dispatch</a>
+        <a href="/trips" data-route="trips">Trips</a>
+        <a href="/drivers" data-route="drivers">Drivers</a>
+        <a href="/riders" data-route="riders">Riders / Patients</a>
+        <a href="/providers" data-route="providers">Providers</a>
+        <a href="/vehicles" data-route="vehicles">Vehicles</a>
+        <a href="/billing" data-route="billing">Billing</a>
+        <a href="/analytics" data-route="analytics">Analytics</a>
+        <a href="/alerts" data-route="alerts">Alerts</a>
+        <a href="/mobile" data-route="mobile">Mobile Apps</a>
+        <a href="/ai-assistant" data-route="ai-assistant">AI Assistant</a>
+        <a href="/settings" data-route="settings">Settings</a>
+      </nav>
+      <section class="ops-role-box" aria-label="Role selector">
+        <label for="role-select">Role view</label>
+        <select id="role-select">
+          <option value="admin">admin</option>
+          <option value="dispatcher">dispatcher</option>
+          <option value="rider">rider</option>
+          <option value="driver">driver</option>
+          <option value="provider">provider</option>
+           <option value="compliance_officer">compliance_officer</option>
+           <option value="supervisor">supervisor</option>
+           <option value="driver_support">driver_support</option>
+           <option value="medical_coordinator">medical_coordinator</option>
+        </select>
+        <p id="role-context" class="ops-role-context">Role context loading...</p>
+      </section>
+    </aside>
+
+    <main class="ops-main">
+      <header class="ops-topbar">
+        <div>
+          <p class="ops-kicker">Amicor Enterprise Operations Network</p>
+          <h2 id="page-title">Dashboard</h2>
+          <p id="page-subtitle" class="ops-subtitle">Operational platform surface</p>
+        </div>
+        <div class="ops-topbar-meta">
+          <label class="ops-search" for="ops-search-input">
+            <span class="sr-only">Search operational entities</span>
+            <input id="ops-search-input" type="search" placeholder="Search trips, drivers, patients..." autocomplete="off" />
+          </label>
+          <span id="workspace-pill" class="badge badge-soft">workspace: operations</span>
+          <span id="connection-badge" class="badge badge-neutral">checking backend</span>
+          <span id="notification-pill" class="badge badge-warn">alerts: 0</span>
+          <span id="role-badge" class="badge badge-soft">role: admin</span>
+          <div class="ops-user-pill" aria-label="Current operator">
+            <strong>John Dispatcher</strong>
+            <small>Dispatcher</small>
+          </div>
+        </div>
+      </header>
+
+      <section id="page-content" class="ops-content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <script src="/static/roles/role-navigation.js?v=20260525.7"></script>
+  <script src="/static/roles/role-workspaces.js?v=20260525.7"></script>
+  <script src="/static/modules/operational-events.js?v=20260525.8"></script>
+  <script src="/static/modules/trip-lifecycle.js?v=20260525.8"></script>
+  <script src="/static/modules/dispatch-runtime.js?v=20260525.8"></script>
+  <script src="/static/modules/driver-runtime.js?v=20260525.8"></script>
+  <script src="/static/modules/rider-runtime.js?v=20260525.8"></script>
+  <script src="/static/modules/telemetry-engine.js?v=20260525.8"></script>
+  <script src="/static/modules/notifications-engine.js?v=20260525.8"></script>
+  <script src="/static/modules/mobile-runtime.js?v=20260525.8"></script>
+  <script src="/static/ops-shell.js?v=20260612.2"></script>
+</body>
+</html>

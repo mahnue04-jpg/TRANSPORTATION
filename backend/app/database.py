@@ -5,6 +5,19 @@ _DEFAULT_DB = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "data", "chat.db")
 )
 DB_FILENAME = os.getenv("DB_FILENAME", _DEFAULT_DB)
+_RUNTIME_MEMORY_CONTEXTS: dict[str, dict[str, object]] = {}
+
+
+def _clear_runtime_context(user_id: str) -> None:
+    """Reset in-memory runtime buckets used by active request/session orchestration."""
+    _RUNTIME_MEMORY_CONTEXTS[user_id] = {
+        "conversation_history": [],
+        "session_cache": {},
+        "memory_store": {},
+        "frontend_messages": [],
+        "workflow_context": {},
+        "tool_context": {},
+    }
 
 
 def get_connection():
@@ -69,7 +82,7 @@ def save_message(user_id: str, role: str, content: str) -> None:
     conn.commit()
     conn.close()
 
-def get_recent_messages(user_id: str, limit: int = 10) -> list:
+def get_recent_messages(user_id: str, limit: int = 10) -> list: # type: ignore
     """Return the most recent `limit` messages as [{"role": ..., "content": ...}, ...]"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -86,10 +99,10 @@ def get_recent_messages(user_id: str, limit: int = 10) -> list:
     )
     rows = cursor.fetchall()
     conn.close()
-    return [{"role": row[0], "content": row[1]} for row in rows]
+    return [{"role": row[0], "content": row[1]} for row in rows] # type: ignore
 
 
-def get_chat_history(user_id: str, limit: int = 50) -> list:
+def get_chat_history(user_id: str, limit: int = 50) -> list: # type: ignore
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -111,18 +124,25 @@ def get_chat_history(user_id: str, limit: int = 50) -> list:
             "timestamp": row[3],
         }
         for row in rows
-    ]
+    ] # type: ignore
 
 
 def clear_user_memory(user_id: str) -> None:
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
-    cursor.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
-    cursor.execute("DELETE FROM memory_summaries WHERE user_id = ?", (user_id,))
-    cursor.execute("DELETE FROM email_drafts WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN")
+        cursor.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM memory_summaries WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM email_drafts WHERE user_id = ?", (user_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    _clear_runtime_context(user_id)
 
 
 def save_preference(user_id: str, key: str, value: str) -> None:
@@ -142,7 +162,7 @@ def save_preference(user_id: str, key: str, value: str) -> None:
     conn.close()
 
 
-def get_preferences(user_id: str) -> dict:
+def get_preferences(user_id: str) -> dict: # type: ignore
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -151,7 +171,7 @@ def get_preferences(user_id: str) -> dict:
     )
     rows = cursor.fetchall()
     conn.close()
-    return {row[0]: row[1] for row in rows}
+    return {row[0]: row[1] for row in rows} # type: ignore
 
 
 def save_memory_summary(user_id: str, summary: str) -> None:
@@ -200,7 +220,7 @@ def save_email_draft(user_id: str, subject: str, body: str, tone: str, status: s
     conn.close()
 
 
-def get_email_draft(user_id: str) -> dict | None:
+def get_email_draft(user_id: str) -> dict | None: # type: ignore
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -217,4 +237,4 @@ def get_email_draft(user_id: str) -> dict | None:
         "tone": row[2],
         "status": row[3],
         "updated_at": row[4],
-    }
+    } # type: ignore

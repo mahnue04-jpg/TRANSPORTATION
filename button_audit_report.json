@@ -1,0 +1,81 @@
+[
+  {
+    "route": "/app/riders",
+    "totalVisibleButtons": 7,
+    "clicked": [
+      {"text": "Request Ride Now", "changed": false, "urlChanged": false},
+      {"text": "Schedule Recurring Ride", "changed": false, "urlChanged": false},
+      {"text": "Contact Support", "changed": false, "urlChanged": false},
+      {"text": "Share Live Trip", "changed": false, "urlChanged": false}
+    ],
+    "failed": [
+      {"text": "Cancel Active Ride", "reason": "disabled"},
+      {"text": "Advisory only", "reason": "disabled"},
+      {"text": "Supervisor confirmation required", "reason": "disabled"}
+    ]
+  },
+  {
+    "route": "/app/drivers",
+    "totalVisibleButtons": 0,
+    "clicked": [],
+    "failed": []
+  },
+  {
+    "route": "/app/providers",
+    "totalVisibleButtons": 0,
+    "clicked": [],
+    "failed": []
+  },
+  {
+    "route": "/app/dispatch",
+    "totalVisibleButtons": 4,
+    "clicked": [],
+    "failed": [
+      {"text": "Preview active operations summary", "reason": "disabled"},
+      {"text": "Preview delayed workflows", "reason": "disabled"},
+      {"text": "Preview protected endpoint status", "reason": "disabled"},
+      {"text": "Preview map foundation", "reason": "disabled"}
+    ]
+  },
+  {
+    "route": "/app/billing",
+    "totalVisibleButtons": 0,
+    "clicked": [],
+    "failed": []
+  },
+  {
+    "route": "/app/analytics",
+    "totalVisibleButtons": 0,
+    "clicked": [],
+    "failed": []
+  },
+  {
+    "route": "/app/alerts",
+    "totalVisibleButtons": 0,
+    "clicked": [],
+    "failed": []
+  },
+  {
+    "route": "/app/mobile",
+    "totalVisibleButtons": 15,
+    "clicked": [
+      {"text": "No Show", "changed": false, "urlChanged": false},
+      {"text": "Open Transport", "changed": false, "urlChanged": false},
+      {"text": "Open Transport", "changed": false, "urlChanged": false},
+      {"text": "Open Transport", "changed": false, "urlChanged": false},
+      {"text": "Earnings", "changed": false, "urlChanged": false},
+      {"text": "Documents", "changed": false, "urlChanged": false},
+      {"text": "History", "changed": false, "urlChanged": false},
+      {"text": "Request Ride Now", "changed": false, "urlChanged": false},
+      {"text": "Schedule Recurring Ride", "changed": false, "urlChanged": false},
+      {"text": "Contact Support", "changed": false, "urlChanged": false},
+      {"text": "Share Live Trip", "changed": false, "urlChanged": false}
+    ],
+    "failed": [
+      {"text": "Arrived", "reason": "disabled"},
+      {"text": "Pickup", "reason": "disabled"},
+      {"text": "Complete Trip", "reason": "disabled"},
+      {"text": "Cancel Active Ride", "reason": "disabled"}
+    ]
+  }
+]

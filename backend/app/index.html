@@ -334,6 +334,7 @@
   let recognition = null;
   let isListening = false;
   let isSpeaking  = false;
+  let currentAudio = null;
 
   // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -437,24 +438,95 @@
 
   // ── Speech synthesis ─────────────────────────────────────────────────
 
-  function speak(text) {
+  function startSpeakingUi() {
+    isSpeaking = true;
+    btnMic.classList.add("speaking");
+    setStatus("Speaking…", "success");
+  }
+
+  function stopSpeakingUi() {
+    isSpeaking = false;
+    btnMic.classList.remove("speaking");
+    setStatus("Ready");
+  }
+
+  function speakWithBrowserFallback(text) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
+    const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+    const preferred = voices.find((v) => /aria|jenny|guy|google|natural|neural|samantha|daniel/i.test(String(v && v.name || ""))) || null;
     const utter = new SpeechSynthesisUtterance(text);
-    utter.rate  = 1.05;
-    utter.pitch = 1;
+    utter.voice = preferred;
+    utter.lang = preferred && preferred.lang ? preferred.lang : "en-US";
+    utter.rate = 0.98;
+    utter.pitch = 1.0;
 
-    utter.onstart = () => {
-      isSpeaking = true;
-      btnMic.classList.add("speaking");
-      setStatus("Speaking…", "success");
-    };
-    utter.onend = utter.onerror = () => {
-      isSpeaking = false;
-      btnMic.classList.remove("speaking");
-      setStatus("Ready");
-    };
+    utter.onstart = startSpeakingUi;
+    utter.onend = utter.onerror = stopSpeakingUi;
     window.speechSynthesis.speak(utter);
+  }
+
+  async function speak(text) {
+    if (!text || !text.trim()) return;
+
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio = null;
+    }
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/voice/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          mode: "Warm Conversational",
+          preferred_provider: "openai_realtime_voice"
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Voice API failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (!data || !data.audio_b64) {
+        throw new Error("Voice API returned empty audio");
+      }
+
+      const binary = atob(data.audio_b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const mime = data.mime_type || "audio/mpeg";
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+
+      audio.onplay = startSpeakingUi;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === audio) currentAudio = null;
+        stopSpeakingUi();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === audio) currentAudio = null;
+        stopSpeakingUi();
+        speakWithBrowserFallback(text);
+      };
+
+      await audio.play();
+    } catch (_) {
+      speakWithBrowserFallback(text);
+    }
   }
 
   // ── Speech recognition ────────────────────────────────────────────────

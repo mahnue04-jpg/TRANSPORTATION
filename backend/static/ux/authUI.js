@@ -114,14 +114,36 @@ function injectStyles() {
   document.head.appendChild(style);
 }
 
+async function parseJson(response) {
+  try {
+    return await response.json();
+  } catch (_) {
+    return {};
+  }
+}
+
+async function apiPost(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJson(response);
+  if (!response.ok) {
+    const message = data && data.detail ? String(data.detail) : "Request failed";
+    throw new Error(message);
+  }
+  return data;
+}
+
 function createSignupModal(onSignup, onToggleLogin) {
   const overlay = document.createElement("div");
   overlay.id = "amicor-auth-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
   
   const modal = document.createElement("div");
   modal.className = "amicor-auth-modal";
-  
-  let errorMsg = "";
   
   modal.innerHTML = `
     <h2>Sign Up</h2>
@@ -130,7 +152,7 @@ function createSignupModal(onSignup, onToggleLogin) {
     <form class="amicor-auth-form">
       <input type="text" class="amicor-auth-input" placeholder="Full name" required>
       <input type="email" class="amicor-auth-input" placeholder="Email" required>
-      <input type="password" class="amicor-auth-input" placeholder="Password (min 6 chars)" required>
+      <input type="password" class="amicor-auth-input" placeholder="Password (min 8 chars)" required>
       <div class="amicor-auth-buttons">
         <button type="submit" class="amicor-auth-btn amicor-auth-btn-primary">Sign Up</button>
         <button type="button" class="amicor-auth-btn amicor-auth-btn-secondary">Cancel</button>
@@ -147,7 +169,7 @@ function createSignupModal(onSignup, onToggleLogin) {
   const cancelBtn = modal.querySelector("button[type='button']");
   const toggleLink = modal.querySelector(".amicor-auth-toggle a");
   
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = inputs[0].value.trim();
     const email = inputs[1].value.trim();
@@ -158,14 +180,37 @@ function createSignupModal(onSignup, onToggleLogin) {
       errorDiv.style.display = "block";
       return;
     }
-    if (password.length < 6) {
-      errorDiv.textContent = "Password must be at least 6 characters";
+    if (password.length < 8) {
+      errorDiv.textContent = "Password must be at least 8 characters";
       errorDiv.style.display = "block";
       return;
     }
-    
-    overlay.remove();
-    onSignup({ name, email });
+
+    try {
+      errorDiv.style.display = "none";
+      await apiPost("/api/auth/register", {
+        email,
+        password,
+        display_name: name,
+        role: "staff",
+      });
+      const loginPayload = await apiPost("/api/auth/login", { email, password });
+      overlay.remove();
+      onSignup({
+        user_id: loginPayload.user_id,
+        email: loginPayload.email,
+        display_name: loginPayload.display_name,
+        role: loginPayload.role,
+        organization_name: loginPayload.organization_name,
+        organization_id: loginPayload.organization_id,
+        access_token: loginPayload.access_token,
+        refresh_token: loginPayload.refresh_token,
+        tokenExpiresAt: Date.now() + Number(loginPayload.expires_in || 3600) * 1000,
+      });
+    } catch (err) {
+      errorDiv.textContent = err && err.message ? err.message : "Signup failed";
+      errorDiv.style.display = "block";
+    }
   });
   
   cancelBtn.addEventListener("click", () => {
@@ -185,6 +230,8 @@ function createSignupModal(onSignup, onToggleLogin) {
 function createLoginModal(onLogin, onToggleSignup) {
   const overlay = document.createElement("div");
   overlay.id = "amicor-auth-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
   
   const modal = document.createElement("div");
   modal.className = "amicor-auth-modal";
@@ -212,7 +259,7 @@ function createLoginModal(onLogin, onToggleSignup) {
   const cancelBtn = modal.querySelector("button[type='button']");
   const toggleLink = modal.querySelector(".amicor-auth-toggle a");
   
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = inputs[0].value.trim();
     const password = inputs[1].value.trim();
@@ -222,10 +269,26 @@ function createLoginModal(onLogin, onToggleSignup) {
       errorDiv.style.display = "block";
       return;
     }
-    
-    overlay.remove();
-    // For MVP: accept any email + password combo (no real auth backend)
-    onLogin({ email, name: email.split("@")[0] });
+
+    try {
+      errorDiv.style.display = "none";
+      const payload = await apiPost("/api/auth/login", { email, password });
+      overlay.remove();
+      onLogin({
+        user_id: payload.user_id,
+        email: payload.email,
+        display_name: payload.display_name,
+        role: payload.role,
+        organization_name: payload.organization_name,
+        organization_id: payload.organization_id,
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+        tokenExpiresAt: Date.now() + Number(payload.expires_in || 3600) * 1000,
+      });
+    } catch (err) {
+      errorDiv.textContent = err && err.message ? err.message : "Login failed";
+      errorDiv.style.display = "block";
+    }
   });
   
   cancelBtn.addEventListener("click", () => {

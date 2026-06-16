@@ -116,6 +116,8 @@
     let step = 0;
 
     const overlay = el("div", { id: "amicor-onboarding-overlay" });
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     const card    = el("div", { id: "amicor-onboarding-card" });
     overlay.appendChild(card);
 

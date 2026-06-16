@@ -3,6 +3,8 @@
 Delegates to app.business.handle_business_request which carries
 a specialist OpenAI system prompt for small-business owners.
 """
+from typing import Any
+
 from app.business import handle_business_request
 
 TRIGGERS = [
@@ -20,5 +22,5 @@ TRIGGERS = [
 ]
 
 
-def handle(message: str, history: list = None, user_id: str = "default") -> str:
-    return handle_business_request(message, history=history)
+def handle(message: str, history: list[dict[str, Any]] | None = None, user_id: str = "default") -> str:
+    return handle_business_request(message, history=history or [])

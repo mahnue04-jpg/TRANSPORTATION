@@ -1,6 +1,7 @@
 "use strict";
 
 const { createReasoningStep } = require("./assistantSchemas");
+const memoryPolicy = require("../ux/memoryManager.js");
 
 function chunkText(text, size) {
   var out = [];
@@ -102,6 +103,27 @@ function createResponseSynthesizer(options) {
     var evidence = config.safetyGuardrails ? config.safetyGuardrails.validateEvidence(responseText, execution.workflowResult || {}) : { valid: true, issues: [] };
     if (!evidence.valid) {
       responseText = "Execution completed with limited confidence. Some response claims were removed due to insufficient evidence.";
+    }
+
+    if (memoryPolicy && typeof memoryPolicy.enforceAssistantVisibleResponse === "function") {
+      var memoryContext = context.memoryContext || {};
+      try {
+        var enforced = memoryPolicy.enforceAssistantVisibleResponse(responseText, {
+          memoryEnabled: true,
+          hasMemory: !!(memoryContext.context || memoryContext.memorySummary),
+          source: "response-synthesizer",
+          responsePath: "assistant-synthesis",
+          responseSourceIdentifier: "response-synthesizer",
+          throwOnViolation: true,
+        });
+        responseText = enforced.text;
+      } catch (error) {
+        if (error && error.code === memoryPolicy.POLICY_VIOLATION_CODE) {
+          responseText = error.replacementText || "I don't know that yet.";
+        } else {
+          throw error;
+        }
+      }
     }
 
     return {

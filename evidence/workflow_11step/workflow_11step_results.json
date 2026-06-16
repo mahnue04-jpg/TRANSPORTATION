@@ -1,0 +1,1006 @@
+{
+  "generated_at": "2026-06-10T03:42:46.383279+00:00",
+  "base_url": "http://127.0.0.1:8010",
+  "db_path": "C:\\Users\\smoni\\OneDrive\\New folder\\New folder\\Amicore_Rebuild\\backend\\data\\chat.db",
+  "request_id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+  "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+  "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+  "passed_steps": 11,
+  "total_steps": 11,
+  "all_passed": true,
+  "steps": [
+    {
+      "step": 1,
+      "name": "Provider requests ride",
+      "timestamp": "2026-06-10T03:42:44.763156+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/customer-requests",
+        "status": 201,
+        "response": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "pending"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:44.731351"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "driver_id": null,
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": null,
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:44.675789"
+        },
+        "assignments": [],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_01.png"
+    },
+    {
+      "step": 2,
+      "name": "Ride appears in dispatch queue",
+      "timestamp": "2026-06-10T03:42:44.808340+00:00",
+      "api": {
+        "method": "GET",
+        "path": "/api/health-isf/dispatch/queue?limit=100",
+        "status": 200,
+        "response": {
+          "queue_match": {
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "passenger_name": "Provider Requested Rider",
+            "requested_at": "2026-06-10T03:42:44.675009",
+            "ride_status": "RideStatus.PENDING",
+            "assignment_state": "pending_assignment",
+            "dispatcher_message": "No available driver",
+            "attempt_index": 0,
+            "offered_driver_id": null,
+            "offer_expires_at": null,
+            "score": null,
+            "queued_at": "2026-06-10T03:42:44.675009",
+            "search_started_at": null,
+            "offered_at": null,
+            "assigned_at": null,
+            "accepted_at": null,
+            "reassignment_pending_at": null,
+            "reassignment_started_at": null,
+            "reassignment_completed_at": null,
+            "reassignment_attempt_count": 0,
+            "reassignment_reason": null,
+            "reassignment_chain_id": null
+          },
+          "count": 56
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:44.731351"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "pending",
+          "lifecycle_state": "queued",
+          "driver_id": null,
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": null,
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:44.675789"
+        },
+        "assignments": [],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_02.png"
+    },
+    {
+      "step": 3,
+      "name": "Automatic driver assignment executes",
+      "timestamp": "2026-06-10T03:42:45.064799+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/dispatcher/rides/28177374-8d16-454a-89ef-0769518dedb5/auto-assign",
+        "status": 200,
+        "response": {
+          "approve_status": 200,
+          "approve_response": {
+            "offer": null,
+            "request": {
+              "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+              "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+              "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+              "rider_name": "Provider Requested Rider",
+              "rider_phone": "+15559296731",
+              "pickup_address": "111 Provider Clinic Way",
+              "dropoff_address": "222 Care Center Ave",
+              "scheduled_time": null,
+              "ride_type": "healthcare",
+              "recurring": false,
+              "recurring_pattern": null,
+              "notes": "Step1 provider request",
+              "dispatch_status": "approved",
+              "pending_at": "2026-06-10T03:42:44.731350",
+              "broadcasted_at": "2026-06-10T03:42:44.837057",
+              "accepted_at": null,
+              "assigned_at": null,
+              "in_progress_at": null,
+              "completed_at": null,
+              "cancelled_at": null,
+              "created_at": "2026-06-10T03:42:44.731351",
+              "updated_at": "2026-06-10T03:42:44.837108"
+            },
+            "ride": {
+              "passenger_name": "Provider Requested Rider",
+              "passenger_phone": "+15559296731",
+              "pickup_address": "111 Provider Clinic Way",
+              "dropoff_address": "222 Care Center Ave",
+              "service_type": "medical_transport",
+              "notes": "Step1 provider request",
+              "id": "28177374-8d16-454a-89ef-0769518dedb5",
+              "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+              "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+              "driver_id": null,
+              "vehicle_id": null,
+              "status": "pending",
+              "lifecycle_state": "queued",
+              "estimated_distance_miles": null,
+              "estimated_duration_minutes": null,
+              "priority_score": null,
+              "priority_tag": null,
+              "is_emergency": false,
+              "appointment_time": null,
+              "recurring_trip_pattern": null,
+              "recurring_schedule_id": null,
+              "recurring_instance_date": null,
+              "ai_dispatch_context": null,
+              "requested_at": "2026-06-10T03:42:44.675009",
+              "assigned_at": null,
+              "enroute_at": null,
+              "arrived_at": null,
+              "picked_up_at": null,
+              "transporting_at": null,
+              "accepted_at": null,
+              "completed_at": null
+            },
+            "message": "Customer request approved for dispatch workflow."
+          },
+          "auto_assign_response": {
+            "id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "status": "accepted",
+            "lifecycle_state": "assigned"
+          }
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.033658"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "assigned",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.021503"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "offered",
+            "offered_at": null,
+            "assigned_at": null,
+            "accepted_at": null,
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.020791"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_03.png"
+    },
+    {
+      "step": 4,
+      "name": "Driver sees ride",
+      "timestamp": "2026-06-10T03:42:45.084398+00:00",
+      "api": {
+        "method": "GET",
+        "path": "/api/health-isf/drivers/2434bc0c-13d8-4cb3-b2c0-284ef44c859d/active-offer",
+        "status": 200,
+        "response": {
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "offer": {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "offer_id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "offered",
+            "attempt_index": 1,
+            "score": null,
+            "score_breakdown": {},
+            "timeout_seconds": 90,
+            "queued_at": "2026-06-10T03:42:45.020791",
+            "search_started_at": "2026-06-10T03:42:45.020791",
+            "offered_at": null,
+            "offer_expires_at": null,
+            "assigned_at": null,
+            "accepted_at": null,
+            "en_route_pickup_at": null,
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "reassignment_pending_at": null,
+            "reassignment_started_at": null,
+            "reassignment_completed_at": null,
+            "reassignment_attempt_count": 0,
+            "reassignment_reason": null,
+            "reassignment_chain_id": "17cfeda4-1f13-4ad2-bfc0-2aa98f5bb2f6",
+            "rejected_at": null,
+            "expired_at": null,
+            "closed_reason": null
+          }
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.033658"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "assigned",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.021503"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "offered",
+            "offered_at": null,
+            "assigned_at": null,
+            "accepted_at": null,
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.020791"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_04.png"
+    },
+    {
+      "step": 5,
+      "name": "Driver accepts ride",
+      "timestamp": "2026-06-10T03:42:45.144906+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/dispatch/offers/2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb/accept",
+        "status": 200,
+        "response": {
+          "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "assignment_state": "accepted"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.112178"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "assigned",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.021503"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "accepted",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.114536"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_05.png"
+    },
+    {
+      "step": 6,
+      "name": "Dispatcher sees accepted ride",
+      "timestamp": "2026-06-10T03:42:45.255773+00:00",
+      "api": {
+        "method": "GET",
+        "path": "/api/health-isf/dispatch/active-assignments?limit=100",
+        "status": 200,
+        "response": {
+          "match": {
+            "offer_id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "driver_name": "Revenue Driver 1c4700",
+            "assignment_state": "accepted",
+            "attempt_index": 1,
+            "offered_at": null,
+            "offer_expires_at": null,
+            "assigned_at": "2026-06-10T03:42:45.103830",
+            "accepted_at": "2026-06-10T03:42:45.114536",
+            "en_route_pickup_at": null,
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "reassignment_pending_at": null,
+            "reassignment_started_at": null,
+            "reassignment_completed_at": null,
+            "reassignment_attempt_count": 0,
+            "reassignment_reason": null,
+            "reassignment_chain_id": "17cfeda4-1f13-4ad2-bfc0-2aa98f5bb2f6",
+            "score": null,
+            "passenger_name": "Provider Requested Rider",
+            "ride_status": "RideStatus.ACCEPTED",
+            "ownership_locked": false,
+            "ownership_locked_by_user_id": null,
+            "ownership_locked_at": null,
+            "ownership_lock_expires_at": null,
+            "ownership_is_current_user": false
+          }
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": null,
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.112178"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "assigned",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.021503"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "accepted",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.114536"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_06.png"
+    },
+    {
+      "step": 7,
+      "name": "Driver marks en route",
+      "timestamp": "2026-06-10T03:42:45.323062+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/drivers/2434bc0c-13d8-4cb3-b2c0-284ef44c859d/accept-ride",
+        "status": 200,
+        "response": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "status": "accepted",
+          "lifecycle_state": "driver_en_route"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": "2026-06-10 03:42:45.303389",
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.304349"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "driver_en_route",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.295031"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "en_route_pickup",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.296644"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          },
+          {
+            "from_status": "assigned",
+            "to_status": "driver_en_route",
+            "note": "Driver accepted assignment",
+            "created_at": "2026-06-10 03:42:45.295075"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_07.png"
+    },
+    {
+      "step": 8,
+      "name": "Driver marks arrived",
+      "timestamp": "2026-06-10T03:42:45.368214+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/drivers/2434bc0c-13d8-4cb3-b2c0-284ef44c859d/arrived-pickup",
+        "status": 200,
+        "response": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "status": "accepted",
+          "lifecycle_state": "arrived"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "assigned",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": "2026-06-10 03:42:45.303389",
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.304349"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "accepted",
+          "lifecycle_state": "arrived",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": null,
+          "transporting_at": null,
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.346630"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "en_route_pickup",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": null,
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.347415"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          },
+          {
+            "from_status": "assigned",
+            "to_status": "driver_en_route",
+            "note": "Driver accepted assignment",
+            "created_at": "2026-06-10 03:42:45.295075"
+          },
+          {
+            "from_status": "driver_en_route",
+            "to_status": "arrived",
+            "note": "Driver arrived at pickup",
+            "created_at": "2026-06-10 03:42:45.346674"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_08.png"
+    },
+    {
+      "step": 9,
+      "name": "Driver marks pickup complete",
+      "timestamp": "2026-06-10T03:42:45.420417+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/drivers/2434bc0c-13d8-4cb3-b2c0-284ef44c859d/pickup-complete",
+        "status": 200,
+        "response": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "status": "in_transit",
+          "lifecycle_state": "in_progress"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "in_progress",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": "2026-06-10 03:42:45.303389",
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": "2026-06-10 03:42:45.395676",
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.395698"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "in_transit",
+          "lifecycle_state": "in_progress",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": "2026-06-10 03:42:45.382601",
+          "transporting_at": "2026-06-10 03:42:45.385981",
+          "completed_at": null,
+          "updated_at": "2026-06-10 03:42:45.385971"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "pickup_complete",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": "2026-06-10 03:42:45.387245",
+            "dropoff_complete_at": null,
+            "updated_at": "2026-06-10 03:42:45.387245"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          },
+          {
+            "from_status": "assigned",
+            "to_status": "driver_en_route",
+            "note": "Driver accepted assignment",
+            "created_at": "2026-06-10 03:42:45.295075"
+          },
+          {
+            "from_status": "driver_en_route",
+            "to_status": "arrived",
+            "note": "Driver arrived at pickup",
+            "created_at": "2026-06-10 03:42:45.346674"
+          },
+          {
+            "from_status": "arrived",
+            "to_status": "rider_onboard",
+            "note": "Pickup completed",
+            "created_at": "2026-06-10 03:42:45.382632"
+          },
+          {
+            "from_status": "rider_onboard",
+            "to_status": "in_progress",
+            "note": "Transport started after pickup completed",
+            "created_at": "2026-06-10 03:42:45.386013"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_09.png"
+    },
+    {
+      "step": 10,
+      "name": "Driver marks dropoff complete",
+      "timestamp": "2026-06-10T03:42:45.474534+00:00",
+      "api": {
+        "method": "POST",
+        "path": "/api/health-isf/drivers/2434bc0c-13d8-4cb3-b2c0-284ef44c859d/dropoff-complete",
+        "status": 200,
+        "response": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "status": "completed",
+          "lifecycle_state": "completed"
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "completed",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": "2026-06-10 03:42:45.303389",
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": "2026-06-10 03:42:45.395676",
+          "completed_at": "2026-06-10 03:42:45.449635",
+          "updated_at": "2026-06-10 03:42:45.449670"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "completed",
+          "lifecycle_state": "completed",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": "2026-06-10 03:42:45.382601",
+          "transporting_at": "2026-06-10 03:42:45.385981",
+          "completed_at": "2026-06-10 03:42:45.436286",
+          "updated_at": "2026-06-10 03:42:45.436271"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "dropoff_complete",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": "2026-06-10 03:42:45.387245",
+            "dropoff_complete_at": "2026-06-10 03:42:45.444745",
+            "updated_at": "2026-06-10 03:42:45.444745"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          },
+          {
+            "from_status": "assigned",
+            "to_status": "driver_en_route",
+            "note": "Driver accepted assignment",
+            "created_at": "2026-06-10 03:42:45.295075"
+          },
+          {
+            "from_status": "driver_en_route",
+            "to_status": "arrived",
+            "note": "Driver arrived at pickup",
+            "created_at": "2026-06-10 03:42:45.346674"
+          },
+          {
+            "from_status": "arrived",
+            "to_status": "rider_onboard",
+            "note": "Pickup completed",
+            "created_at": "2026-06-10 03:42:45.382632"
+          },
+          {
+            "from_status": "rider_onboard",
+            "to_status": "in_progress",
+            "note": "Transport started after pickup completed",
+            "created_at": "2026-06-10 03:42:45.386013"
+          },
+          {
+            "from_status": "in_progress",
+            "to_status": "completed",
+            "note": "Dropoff completed",
+            "created_at": "2026-06-10 03:42:45.436312"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_10.png"
+    },
+    {
+      "step": 11,
+      "name": "Ride status becomes completed",
+      "timestamp": "2026-06-10T03:42:46.383231+00:00",
+      "api": {
+        "method": "GET",
+        "path": "/api/health-isf/rides/28177374-8d16-454a-89ef-0769518dedb5",
+        "status": 200,
+        "response": {
+          "ride": {
+            "id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "status": "completed",
+            "lifecycle_state": "completed"
+          }
+        }
+      },
+      "db": {
+        "customer_request": {
+          "id": "7272bb8e-2965-4e14-b61c-5d909fb43cae",
+          "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "dispatch_status": "completed",
+          "pending_at": "2026-06-10 03:42:44.731350",
+          "accepted_at": "2026-06-10 03:42:45.303389",
+          "assigned_at": "2026-06-10 03:42:45.033637",
+          "in_progress_at": "2026-06-10 03:42:45.395676",
+          "completed_at": "2026-06-10 03:42:45.449635",
+          "updated_at": "2026-06-10 03:42:45.449670"
+        },
+        "ride": {
+          "id": "28177374-8d16-454a-89ef-0769518dedb5",
+          "status": "completed",
+          "lifecycle_state": "completed",
+          "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "accepted_at": "2026-06-10 03:42:45.021517",
+          "picked_up_at": "2026-06-10 03:42:45.382601",
+          "transporting_at": "2026-06-10 03:42:45.385981",
+          "completed_at": "2026-06-10 03:42:45.436286",
+          "updated_at": "2026-06-10 03:42:45.436271"
+        },
+        "assignments": [
+          {
+            "id": "2a11c5a5-cf11-4ec8-9f0f-14aa03a445eb",
+            "ride_id": "28177374-8d16-454a-89ef-0769518dedb5",
+            "driver_id": "2434bc0c-13d8-4cb3-b2c0-284ef44c859d",
+            "assignment_state": "dropoff_complete",
+            "offered_at": null,
+            "assigned_at": "2026-06-10 03:42:45.103830",
+            "accepted_at": "2026-06-10 03:42:45.114536",
+            "pickup_complete_at": "2026-06-10 03:42:45.387245",
+            "dropoff_complete_at": "2026-06-10 03:42:45.444745",
+            "updated_at": "2026-06-10 03:42:45.444745"
+          }
+        ],
+        "status_history": [
+          {
+            "from_status": "requested",
+            "to_status": "queued",
+            "note": "Ride created and queued for dispatch",
+            "created_at": "2026-06-10 03:42:44.675811"
+          },
+          {
+            "from_status": "queued",
+            "to_status": "assigned",
+            "note": "Driver assigned",
+            "created_at": "2026-06-10 03:42:45.021528"
+          },
+          {
+            "from_status": "assigned",
+            "to_status": "driver_en_route",
+            "note": "Driver accepted assignment",
+            "created_at": "2026-06-10 03:42:45.295075"
+          },
+          {
+            "from_status": "driver_en_route",
+            "to_status": "arrived",
+            "note": "Driver arrived at pickup",
+            "created_at": "2026-06-10 03:42:45.346674"
+          },
+          {
+            "from_status": "arrived",
+            "to_status": "rider_onboard",
+            "note": "Pickup completed",
+            "created_at": "2026-06-10 03:42:45.382632"
+          },
+          {
+            "from_status": "rider_onboard",
+            "to_status": "in_progress",
+            "note": "Transport started after pickup completed",
+            "created_at": "2026-06-10 03:42:45.386013"
+          },
+          {
+            "from_status": "in_progress",
+            "to_status": "completed",
+            "note": "Dropoff completed",
+            "created_at": "2026-06-10 03:42:45.436312"
+          }
+        ]
+      },
+      "passed": true,
+      "note": null,
+      "screenshot": "evidence/workflow_11step/step_11.png"
+    }
+  ]
+}

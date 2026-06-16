@@ -4,6 +4,7 @@ require.extensions[".jsx"] = require.extensions[".js"];
 
 const { createCapabilityRouter } = require("./capabilities");
 const { createConversationStore } = require("../../frontend/src/conversation");
+const memoryPolicy = require("./ux/memoryManager.js");
 
 function createRuntime(options) {
   var config = Object.assign({ delayMs: 0, failTaskType: null }, options || {});
@@ -164,6 +165,39 @@ async function runCapabilitiesTests() {
 
     ok(!!result.memoryContext, "memory context exists");
     ok(String(result.memoryContext.memorySummary || "").indexOf("client prefers concise reports") >= 0, "memory summary propagated");
+  });
+
+  test("category modes normalize contradictory stateless templates", async function () {
+    var capabilityModes = ["workflowTemplates", "researchAssistant", "emailAssistant", "businessSummarizer"];
+    for (var index = 0; index < capabilityModes.length; index++) {
+      var enforced = memoryPolicy.enforceMemoryAwareResponse(
+        "Each session is independent.",
+        { memoryEnabled: true, hasMemory: true, source: capabilityModes[index] }
+      );
+      ok(enforced.text.indexOf("I remember") === 0, "category mode " + capabilityModes[index] + " uses memory-aware policy");
+    }
+  });
+
+  test("capability router summaries use assistant-visible policy wrapper", async function () {
+    var original = memoryPolicy.enforceAssistantVisibleResponse;
+    var called = 0;
+    memoryPolicy.enforceAssistantVisibleResponse = function (text) {
+      called += 1;
+      return { text: text, blocked: false };
+    };
+    try {
+      var router = buildHarness();
+      var result = await router.runCapability({
+        id: "cap-policy-1",
+        capability: "researchAssistant",
+        goal: "Investigate industry trends",
+      });
+
+      ok(result.status === "completed", "capability execution completed");
+      ok(called >= 2, "capability summaries and stream text used assistant-visible wrapper");
+    } finally {
+      memoryPolicy.enforceAssistantVisibleResponse = original;
+    }
   });
 
   for (var i = 0; i < tests.length; i++) {

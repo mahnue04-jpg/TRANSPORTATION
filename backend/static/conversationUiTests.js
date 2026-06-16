@@ -3,6 +3,7 @@
 require.extensions[".jsx"] = require.extensions[".js"];
 
 const { createAssistantController } = require("./assistant");
+const ProductExperience = require("./ux/productExperience.js");
 const {
   createConversationController,
   createConversationStore,
@@ -41,13 +42,13 @@ function createMockRuntime(options) {
 }
 
 function createMockMemory(options) {
-  var config = Object.assign({ large: false }, options || {});
+  var config = Object.assign({ large: false, contextText: null }, options || {});
   return {
     async retrieve() {
       return { items: [{ id: "m1", content: "memory item" }] };
     },
     async assembleContext() {
-      var context = config.large ? new Array(6000).join("context ") : "compact context";
+      var context = config.contextText || (config.large ? new Array(6000).join("context ") : "compact context");
       return { context: context, compressed: { consumedTokens: Math.ceil(context.length / 4), overflow: config.large } };
     },
     async addWorkflowMemory() {
@@ -179,6 +180,67 @@ async function runConversationUiTests() {
 
     var snapshot = controller.snapshot().store;
     ok(snapshot.activeSession.messages.length <= 120, "store trimmed message history to configured limit");
+  });
+
+  test("what do you know about me uses stored memory context", async function () {
+    var controller = createConversationHarness({
+      memoryManager: createMockMemory({ contextText: "name=Riley | preferences=concise summaries | projects=Amicor rebuild" }),
+    });
+
+    var result = await controller.submitGoal({
+      id: "conv-memory-known",
+      conversationId: "session-memory-known",
+      userGoal: "what do you know about me",
+    });
+
+    ok(result.result.status === "completed", "self-knowledge question completed");
+    ok(/you|memory|remember/i.test(result.result.responseText), "response stays user-centered");
+    ok(result.result.responseText.indexOf("short_term_memory") < 0, "response avoids short_term_memory label");
+    ok(result.result.responseText.indexOf("long_term_memory") < 0, "response avoids long_term_memory label");
+  });
+
+  test("delete memory question explains clear-memory behavior", async function () {
+    var controller = createConversationHarness();
+
+    var result = await controller.submitGoal({
+      id: "conv-delete-memory",
+      conversationId: "session-delete-memory",
+      userGoal: "how do I delete memory",
+    });
+
+    ok(result.result.status === "completed", "delete memory question completed");
+    ok(result.result.responseText.indexOf("Clear Memory") >= 0, "response points to Clear Memory");
+    ok(result.result.responseText.indexOf("recent and saved memory") >= 0, "response explains both memory layers naturally");
+    ok(result.result.responseText.indexOf("short_term_memory") < 0, "response avoids short_term_memory label");
+    ok(result.result.responseText.indexOf("long_term_memory") < 0, "response avoids long_term_memory label");
+  });
+
+  test("cached assistant responses are normalized before persistence", async function () {
+    var storage = {
+      _data: {},
+      getItem: function (key) { return this._data[key] || null; },
+      setItem: function (key, value) { this._data[key] = String(value); },
+      removeItem: function (key) { delete this._data[key]; },
+    };
+    global.AmiCorMemoryManager = {
+      POLICY_VIOLATION_CODE: "assistant-memory-policy-violation",
+      loadMemory: function () {
+        return { long_term_memory: { user_name: "Riley", preferences: [], likes_dislikes: [], goals: [], recurring_interests: [], active_projects: [], assistant_notes: [] } };
+      },
+      enforceAssistantVisibleResponse: function () {
+        var error = new Error("policy violation");
+        error.code = "assistant-memory-policy-violation";
+        error.replacementText = "I remember what you've shared and will use it to personalize how I help.";
+        throw error;
+      },
+    };
+    try {
+      var vault = ProductExperience.createConversationVault({ storage: storage, namespace: "cache-test" });
+      var message = vault.appendMessage("ai", "I don't have any information about you specifically.", { tool: "openai" });
+      ok(message.text.indexOf("I remember what you've shared") === 0, "cached assistant response replaced before persistence");
+    } finally {
+      delete global.AmiCorMemoryManager;
+    }
   });
 
   for (var i = 0; i < tests.length; i++) {

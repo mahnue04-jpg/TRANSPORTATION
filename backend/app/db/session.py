@@ -21,12 +21,19 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", _default_url)
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
+# Keep SQLite usable under concurrent API polling by allowing a sufficient shared pool.
+# SQLite WAL mode supports concurrent reads; use 20 overflow to handle 27+ parallel refresh calls.
+_default_pool_size = "5" if _is_sqlite else "10"
+_default_max_overflow = "20" if _is_sqlite else "20"
+_pool_size = int(os.getenv("DB_POOL_SIZE", _default_pool_size))
+_max_overflow = int(os.getenv("DB_MAX_OVERFLOW", _default_max_overflow))
+
 engine = create_engine(
     DATABASE_URL,
     connect_args=_connect_args,
     pool_pre_ping=True,
-    pool_size=5 if not _is_sqlite else 1,
-    max_overflow=10 if not _is_sqlite else 0,
+    pool_size=_pool_size,
+    max_overflow=_max_overflow,
     echo=os.getenv("DB_ECHO", "0") == "1",
 )
 

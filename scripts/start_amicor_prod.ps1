@@ -1,7 +1,9 @@
 param(
   [string]$BindAddress = "0.0.0.0",
   [int]$Port = 8000,
-  [string]$LogLevel = "info"
+  [string]$LogLevel = "info",
+  [int]$StartupTimeoutSeconds = 120,
+  [int]$HealthCheckIntervalSeconds = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +18,19 @@ if (-not (Test-Path $runtimeDir)) {
 
 $watchdogStateFile = Join-Path $runtimeDir "prod_watchdog_state.json"
 $canonicalStateFile = Join-Path $runtimeDir "canonical_runtime_state.json"
+
+function Write-RuntimeDiagnostic {
+  param([string]$Event, [hashtable]$Data)
+  $diagFile = Join-Path $runtimeDir "runtime_diagnostics.jsonl"
+  $payload = [ordered]@{
+    ts = (Get-Date).ToUniversalTime().ToString("o")
+    event = $Event
+  }
+  foreach ($key in $Data.Keys) {
+    $payload[$key] = $Data[$key]
+  }
+  $payload | ConvertTo-Json -Compress | Add-Content -Path $diagFile -Encoding UTF8
+}
 
 function Test-PidAliveByTasklist {
   param([int]$ProcessId)
@@ -72,9 +87,10 @@ $args = @(
 
 $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden -PassThru
 Write-Host "[Amicor Prod] Watchdog started (PID=$($proc.Id))."
+Write-RuntimeDiagnostic -Event "process.start" -Data @{ role = "watchdog"; pid = $proc.Id; port = $Port; bind_address = $BindAddress }
 
 $healthUrl = "http://127.0.0.1:$Port/api/health"
-$maxChecks = 45
+$maxChecks = [Math]::Max(1, [int][Math]::Ceiling($StartupTimeoutSeconds / [double]$HealthCheckIntervalSeconds))
 $healthy = $false
 for ($i = 0; $i -lt $maxChecks; $i++) {
   $status = Get-HealthyStatus -Url $healthUrl
@@ -82,11 +98,23 @@ for ($i = 0; $i -lt $maxChecks; $i++) {
     $healthy = $true
     break
   }
-  Start-Sleep -Seconds 1
+  if ($i -lt ($maxChecks - 1)) {
+    Start-Sleep -Seconds $HealthCheckIntervalSeconds
+  }
 }
 
 if (-not $healthy) {
-  Write-Host "[Amicor Prod] Runtime did not become healthy at $healthUrl within timeout."
+  $timeoutSeconds = $maxChecks * $HealthCheckIntervalSeconds
+  $probeState = @{}
+  if (Test-Path $canonicalStateFile) {
+    try {
+      $probeState = Get-Content $canonicalStateFile -Raw | ConvertFrom-Json
+    } catch {}
+  }
+  $readyFlag = if ($probeState.PSObject.Properties.Name -contains "ready") { [bool]$probeState.ready } else { $false }
+  $listenerPid = if ($probeState.PSObject.Properties.Name -contains "uvicorn_pid") { [int]$probeState.uvicorn_pid } else { 0 }
+  Write-Host "[Amicor Prod] Runtime did not become healthy at $healthUrl within ${timeoutSeconds}s (checks=$maxChecks, ready=$readyFlag, uvicorn_pid=$listenerPid)."
+  Write-RuntimeDiagnostic -Event "health_probe.failed" -Data @{ role = "runtime"; port = $Port; health_url = $healthUrl; timeout_checks = $maxChecks; timeout_seconds = $timeoutSeconds; ready = $readyFlag; uvicorn_pid = $listenerPid }
   exit 1
 }
 
@@ -104,4 +132,5 @@ if (Test-Path $canonicalStateFile) {
 
 Write-Host "[Amicor Prod] App: http://127.0.0.1:$Port/app"
 Write-Host "[Amicor Prod] API Health: $healthUrl"
+Write-RuntimeDiagnostic -Event "process.start_completed" -Data @{ role = "runtime"; port = $Port; health_url = $healthUrl; watchdog_pid = $proc.Id }
 exit 0

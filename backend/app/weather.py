@@ -1,11 +1,16 @@
 import re
+import logging
+import time
 from typing import Any
 
 import requests
 
 from app.providers.resilience import get_breaker  # type: ignore
+from app import logging_utils
 
 _HEADERS = {"User-Agent": "Amicor/1.0 weather client"}
+PROVIDER_TIMEOUT_SECONDS = 15
+logger = logging.getLogger("amicor.weather")
 
 
 def _extract_location(message: str) -> str | None:
@@ -32,7 +37,7 @@ def resolve_location(message: str, fallback_label: str = "your area") -> dict[st
         geo = requests.get(
             "https://geocoding-api.open-meteo.com/v1/search",
             params={"name": query, "count": 1, "language": "en", "format": "json"},
-            timeout=(3.05, 10),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
             headers=_HEADERS,
         )
         geo.raise_for_status()
@@ -49,7 +54,7 @@ def resolve_location(message: str, fallback_label: str = "your area") -> dict[st
                 "source": "open-meteo-geocoding",
             }
 
-    ip_geo = requests.get("https://ipwho.is/", timeout=(3.05, 6), headers=_HEADERS)
+    ip_geo = requests.get("https://ipwho.is/", timeout=PROVIDER_TIMEOUT_SECONDS, headers=_HEADERS)
     ip_geo.raise_for_status()
     payload: dict[str, Any] = ip_geo.json()
     if not payload.get("success", True):
@@ -101,7 +106,7 @@ def _open_meteo_weather(location: dict[str, Any]) -> dict[str, Any]:
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
         },
-        timeout=(3.05, 10),
+        timeout=PROVIDER_TIMEOUT_SECONDS,
         headers=_HEADERS,
     )
     response.raise_for_status()
@@ -111,7 +116,7 @@ def _open_meteo_weather(location: dict[str, Any]) -> dict[str, Any]:
 def _wttr_fallback(location: dict[str, Any]) -> dict[str, Any]:
     response = requests.get(
         f"https://wttr.in/{location['name']}?format=j1",
-        timeout=(3.05, 10),
+        timeout=PROVIDER_TIMEOUT_SECONDS,
         headers=_HEADERS,
     )
     response.raise_for_status()
@@ -127,6 +132,15 @@ def get_weather(message: str) -> dict[str, Any]:
     breaker_wttr   = get_breaker("wttr_in",      failure_threshold=4, recovery_timeout=20)
 
     if breaker_meteo.is_available():
+        provider_t0 = time.perf_counter()
+        logging_utils.log_request_lifecycle(
+            logger,
+            logging.INFO,
+            event="REQUEST_PROVIDER_BEGIN",
+            route="/api/chat",
+            provider="open-meteo",
+            status="begin",
+        )
         try:
             payload = _open_meteo_weather(location)
             current = payload["current"]
@@ -140,6 +154,15 @@ def get_weather(message: str) -> dict[str, Any]:
                   f"Tomorrow {daily['temperature_2m_max'][1]}°/{daily['temperature_2m_min'][1]}°F."
             )
             breaker_meteo.record_success()
+            logging_utils.log_request_lifecycle(
+                logger,
+                logging.INFO,
+                event="REQUEST_PROVIDER_SUCCESS",
+                route="/api/chat",
+                latency_ms=int((time.perf_counter() - provider_t0) * 1000),
+                provider="open-meteo",
+                status="ok",
+            )
             return {
                 "response": response,
                 "sources": [
@@ -151,11 +174,43 @@ def get_weather(message: str) -> dict[str, Any]:
             }
         except Exception as exc:
             breaker_meteo.record_failure()
+            latency_ms = int((time.perf_counter() - provider_t0) * 1000)
+            err_msg = logging_utils.safe_exception_message(exc)
+            if "timed out" in err_msg.lower() or isinstance(exc, requests.exceptions.Timeout):
+                logging_utils.log_request_lifecycle(
+                    logger,
+                    logging.ERROR,
+                    event="REQUEST_TIMEOUT",
+                    route="/api/chat",
+                    latency_ms=latency_ms,
+                    provider="open-meteo",
+                    status="timeout",
+                    error=err_msg,
+                )
+            logging_utils.log_request_lifecycle(
+                logger,
+                logging.ERROR,
+                event="REQUEST_PROVIDER_FAIL",
+                route="/api/chat",
+                latency_ms=latency_ms,
+                provider="open-meteo",
+                status="failed",
+                error=err_msg,
+            )
             provider_errors.append(f"open-meteo: {exc}")
     else:
         provider_errors.append(f"open-meteo: circuit open (health={breaker_meteo.health_score:.2f})")
 
     if breaker_wttr.is_available():
+        provider_t0 = time.perf_counter()
+        logging_utils.log_request_lifecycle(
+            logger,
+            logging.INFO,
+            event="REQUEST_PROVIDER_BEGIN",
+            route="/api/chat",
+            provider="wttr.in",
+            status="begin",
+        )
         try:
             payload = _wttr_fallback(location)
             current = payload.get("current_condition", [{}])[0]
@@ -167,23 +222,63 @@ def get_weather(message: str) -> dict[str, Any]:
                 f"tomorrow high {upcoming[1].get('maxtempF', '?')}°F, low {upcoming[1].get('mintempF', '?')}°F."
             )
             breaker_wttr.record_success()
+            logging_utils.log_request_lifecycle(
+                logger,
+                logging.INFO,
+                event="REQUEST_PROVIDER_SUCCESS",
+                route="/api/chat",
+                latency_ms=int((time.perf_counter() - provider_t0) * 1000),
+                provider="wttr.in",
+                status="ok",
+            )
             return {
                 "response": response,
                 "sources": [
                     {"title": "wttr.in Forecast", "url": "https://wttr.in/", "label": "wttr.in"},
                 ],
                 "status": "partial",
-                "meta": {"provider": "wttr.in", "provider_errors": provider_errors, "location": location["name"]},
+                "meta": {"provider": "wttr.in", "location": location["name"]},
             }
         except Exception as exc:
             breaker_wttr.record_failure()
+            latency_ms = int((time.perf_counter() - provider_t0) * 1000)
+            err_msg = logging_utils.safe_exception_message(exc)
+            if "timed out" in err_msg.lower() or isinstance(exc, requests.exceptions.Timeout):
+                logging_utils.log_request_lifecycle(
+                    logger,
+                    logging.ERROR,
+                    event="REQUEST_TIMEOUT",
+                    route="/api/chat",
+                    latency_ms=latency_ms,
+                    provider="wttr.in",
+                    status="timeout",
+                    error=err_msg,
+                )
+            logging_utils.log_request_lifecycle(
+                logger,
+                logging.ERROR,
+                event="REQUEST_PROVIDER_FAIL",
+                route="/api/chat",
+                latency_ms=latency_ms,
+                provider="wttr.in",
+                status="failed",
+                error=err_msg,
+            )
             provider_errors.append(f"wttr.in: {exc}")
     else:
         provider_errors.append(f"wttr.in: circuit open (health={breaker_wttr.health_score:.2f})")
 
+    # Log provider errors internally only — never expose to user
+    if provider_errors:
+        logger.warning(
+            "WEATHER_PROVIDER_CHAIN_EXHAUSTED",
+            extra={"errors": provider_errors, "location": location["name"]}
+        )
+    
+    # User-facing fallback: graceful and conversational
     return {
-        "response": "Weather is temporarily unavailable. " + "; ".join(provider_errors),
+        "response": "Weather information is temporarily unavailable. Please try again in a moment.",
         "sources": [],
-        "status": "error",
-        "meta": {"provider_errors": provider_errors},
+        "status": "degraded",
+        "meta": {"location": location["name"]},
     }

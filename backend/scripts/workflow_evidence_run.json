@@ -1,0 +1,1327 @@
+{
+  "started_at": "2026-06-09T05:28:52.520876+00:00",
+  "base_url": "http://127.0.0.1:8011",
+  "db_path": "data\\chat.db",
+  "seed": {
+    "patients": [
+      {
+        "request": {
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        },
+        "status": 201,
+        "response": {
+          "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:53.579490",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:53.579493",
+          "updated_at": "2026-06-09T05:28:53.579494"
+        }
+      },
+      {
+        "request": {
+          "rider_name": "WF Patient 2",
+          "rider_phone": "+1555202002",
+          "pickup_address": "102 Seed St",
+          "dropoff_address": "202 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        },
+        "status": 201,
+        "response": {
+          "id": "7a507c26-aa76-43eb-a368-c86ee914a2aa",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "aca5e7e8-6a6d-488f-afec-ca33d138f96f",
+          "rider_name": "WF Patient 2",
+          "rider_phone": "+1555202002",
+          "pickup_address": "102 Seed St",
+          "dropoff_address": "202 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:53.735769",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:53.735771",
+          "updated_at": "2026-06-09T05:28:53.735772"
+        }
+      },
+      {
+        "request": {
+          "rider_name": "WF Patient 3",
+          "rider_phone": "+1555202003",
+          "pickup_address": "103 Seed St",
+          "dropoff_address": "203 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        },
+        "status": 201,
+        "response": {
+          "id": "7d9e655a-4781-4c78-b69b-4571e54c6cae",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "aa8fcd19-d9a8-42d9-93a9-f22f66247283",
+          "rider_name": "WF Patient 3",
+          "rider_phone": "+1555202003",
+          "pickup_address": "103 Seed St",
+          "dropoff_address": "203 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:53.904385",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:53.904386",
+          "updated_at": "2026-06-09T05:28:53.904387"
+        }
+      },
+      {
+        "request": {
+          "rider_name": "WF Patient 4",
+          "rider_phone": "+1555202004",
+          "pickup_address": "104 Seed St",
+          "dropoff_address": "204 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        },
+        "status": 201,
+        "response": {
+          "id": "5bb37e62-f6cd-45e9-ad2d-afb5df166222",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "370be48f-159e-4c06-8efb-f8cfd0971d4d",
+          "rider_name": "WF Patient 4",
+          "rider_phone": "+1555202004",
+          "pickup_address": "104 Seed St",
+          "dropoff_address": "204 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:54.038649",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:54.038651",
+          "updated_at": "2026-06-09T05:28:54.038652"
+        }
+      },
+      {
+        "request": {
+          "rider_name": "WF Patient 5",
+          "rider_phone": "+1555202005",
+          "pickup_address": "105 Seed St",
+          "dropoff_address": "205 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        },
+        "status": 201,
+        "response": {
+          "id": "54e399ec-e2bb-48ee-afa2-e640c4475370",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "32764113-2400-4b61-a92f-04272e30639a",
+          "rider_name": "WF Patient 5",
+          "rider_phone": "+1555202005",
+          "pickup_address": "105 Seed St",
+          "dropoff_address": "205 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:54.161148",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:54.161150",
+          "updated_at": "2026-06-09T05:28:54.161150"
+        }
+      }
+    ],
+    "drivers": [
+      {
+        "request": {
+          "name": "WF Driver 1",
+          "phone": "+1555101001",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV01"
+        },
+        "status": 201,
+        "response": {
+          "name": "WF Driver 1",
+          "phone": "+1555101001",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV01",
+          "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:53.426113",
+          "updated_at": "2026-06-09T05:28:53.426117"
+        }
+      },
+      {
+        "request": {
+          "name": "WF Driver 2",
+          "phone": "+1555101002",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV02"
+        },
+        "status": 201,
+        "response": {
+          "name": "WF Driver 2",
+          "phone": "+1555101002",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV02",
+          "id": "a093f073-5318-42eb-a230-21160f467f9b",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:53.632778",
+          "updated_at": "2026-06-09T05:28:53.632783"
+        }
+      },
+      {
+        "request": {
+          "name": "WF Driver 3",
+          "phone": "+1555101003",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV03"
+        },
+        "status": 201,
+        "response": {
+          "name": "WF Driver 3",
+          "phone": "+1555101003",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV03",
+          "id": "6d4a60b0-9a46-4141-a175-6e369c41e6d0",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:53.786085",
+          "updated_at": "2026-06-09T05:28:53.786088"
+        }
+      },
+      {
+        "request": {
+          "name": "WF Driver 4",
+          "phone": "+1555101004",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV04"
+        },
+        "status": 201,
+        "response": {
+          "name": "WF Driver 4",
+          "phone": "+1555101004",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV04",
+          "id": "8ed3ebdb-689e-4ca2-afd9-d3a8d1f6bccd",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:53.930573",
+          "updated_at": "2026-06-09T05:28:53.930578"
+        }
+      },
+      {
+        "request": {
+          "name": "WF Driver 5",
+          "phone": "+1555101005",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV05"
+        },
+        "status": 201,
+        "response": {
+          "name": "WF Driver 5",
+          "phone": "+1555101005",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV05",
+          "id": "c31b7622-ea45-4deb-8aa1-d30616a7d9f6",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:54.076825",
+          "updated_at": "2026-06-09T05:28:54.076828"
+        }
+      }
+    ],
+    "vehicles": [
+      {
+        "request": {
+          "plate_number": "WFVEH01",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        },
+        "status": 422,
+        "response": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH01",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "request": {
+          "plate_number": "WFVEH02",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        },
+        "status": 422,
+        "response": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH02",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "request": {
+          "plate_number": "WFVEH03",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        },
+        "status": 422,
+        "response": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH03",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "request": {
+          "plate_number": "WFVEH04",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        },
+        "status": 422,
+        "response": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH04",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "request": {
+          "plate_number": "WFVEH05",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        },
+        "status": 422,
+        "response": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH05",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "rides": [
+      {
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "request_id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "from": "customer-requests"
+      },
+      {
+        "ride_id": "aca5e7e8-6a6d-488f-afec-ca33d138f96f",
+        "request_id": "7a507c26-aa76-43eb-a368-c86ee914a2aa",
+        "from": "customer-requests"
+      },
+      {
+        "ride_id": "aa8fcd19-d9a8-42d9-93a9-f22f66247283",
+        "request_id": "7d9e655a-4781-4c78-b69b-4571e54c6cae",
+        "from": "customer-requests"
+      },
+      {
+        "ride_id": "370be48f-159e-4c06-8efb-f8cfd0971d4d",
+        "request_id": "5bb37e62-f6cd-45e9-ad2d-afb5df166222",
+        "from": "customer-requests"
+      },
+      {
+        "ride_id": "32764113-2400-4b61-a92f-04272e30639a",
+        "request_id": "54e399ec-e2bb-48ee-afa2-e640c4475370",
+        "from": "customer-requests"
+      }
+    ]
+  },
+  "workflow_steps": [
+    {
+      "step": "create_patient",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/customer-requests?organization_id=ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:53.579490",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:53.579493",
+          "updated_at": "2026-06-09T05:28:53.579494"
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.579494"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "pending",
+        "lifecycle_state": "queued",
+        "driver_id": null,
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": null,
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.552824"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "available",
+        "availability_state": "offline",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:53.489720"
+      },
+      "db_assignment_tail": []
+    },
+    {
+      "step": "create_driver",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/drivers",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "name": "WF Driver 1",
+          "phone": "+1555101001",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV01"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "name": "WF Driver 1",
+          "phone": "+1555101001",
+          "vehicle_type": "medical_van",
+          "vehicle_plate": "WFDRV01",
+          "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "status": "offline",
+          "is_active": true,
+          "total_trips": 0,
+          "rating": 5.0,
+          "created_at": "2026-06-09T05:28:53.426113",
+          "updated_at": "2026-06-09T05:28:53.426117"
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.579494"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "pending",
+        "lifecycle_state": "queued",
+        "driver_id": null,
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": null,
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.552824"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "available",
+        "availability_state": "offline",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:53.489720"
+      },
+      "db_assignment_tail": []
+    },
+    {
+      "step": "create_vehicle",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/vehicles",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "plate_number": "WFVEH01",
+          "vehicle_type": "medical_van",
+          "capacity": 2,
+          "status": "active"
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "vehicle_plate"
+              ],
+              "msg": "Field required",
+              "input": {
+                "plate_number": "WFVEH01",
+                "vehicle_type": "medical_van",
+                "capacity": 2,
+                "status": "active"
+              }
+            }
+          ]
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.579494"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "pending",
+        "lifecycle_state": "queued",
+        "driver_id": null,
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": null,
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.552824"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "available",
+        "availability_state": "offline",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:53.489720"
+      },
+      "db_assignment_tail": []
+    },
+    {
+      "step": "create_ride",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/customer-requests?organization_id=ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "ride_type": "healthcare",
+          "recurring": false
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "rider_name": "WF Patient 1",
+          "rider_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "scheduled_time": null,
+          "ride_type": "healthcare",
+          "recurring": false,
+          "recurring_pattern": null,
+          "notes": null,
+          "dispatch_status": "pending",
+          "pending_at": "2026-06-09T05:28:53.579490",
+          "broadcasted_at": null,
+          "accepted_at": null,
+          "assigned_at": null,
+          "in_progress_at": null,
+          "completed_at": null,
+          "cancelled_at": null,
+          "created_at": "2026-06-09T05:28:53.579493",
+          "updated_at": "2026-06-09T05:28:53.579494"
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "pending",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": null,
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.579494"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "pending",
+        "lifecycle_state": "queued",
+        "driver_id": null,
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": null,
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:53.552824"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "available",
+        "availability_state": "offline",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:53.489720"
+      },
+      "db_assignment_tail": []
+    },
+    {
+      "step": "assign_driver",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/dispatcher/customer-requests/8817756b-bb3a-42e5-9ba9-474dc79f0b8a/assign-driver",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "request": {
+            "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+            "rider_name": "WF Patient 1",
+            "rider_phone": "+1555202001",
+            "pickup_address": "101 Seed St",
+            "dropoff_address": "201 Seed Ave",
+            "scheduled_time": null,
+            "ride_type": "healthcare",
+            "recurring": false,
+            "recurring_pattern": null,
+            "notes": null,
+            "dispatch_status": "assigned",
+            "pending_at": "2026-06-09T05:28:53.579490",
+            "broadcasted_at": "2026-06-09T05:28:54.222211",
+            "accepted_at": null,
+            "assigned_at": "2026-06-09T05:28:54.278701",
+            "in_progress_at": null,
+            "completed_at": null,
+            "cancelled_at": null,
+            "created_at": "2026-06-09T05:28:53.579493",
+            "updated_at": "2026-06-09T05:28:54.282174"
+          },
+          "ride": {
+            "passenger_name": "WF Patient 1",
+            "passenger_phone": "+1555202001",
+            "pickup_address": "101 Seed St",
+            "dropoff_address": "201 Seed Ave",
+            "service_type": "medical_transport",
+            "notes": null,
+            "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+            "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+            "vehicle_id": null,
+            "status": "accepted",
+            "lifecycle_state": "assigned",
+            "estimated_distance_miles": null,
+            "estimated_duration_minutes": null,
+            "priority_score": null,
+            "priority_tag": null,
+            "is_emergency": false,
+            "appointment_time": null,
+            "recurring_trip_pattern": null,
+            "recurring_schedule_id": null,
+            "recurring_instance_date": null,
+            "ai_dispatch_context": null,
+            "requested_at": "2026-06-09T05:28:53.546316",
+            "assigned_at": "2026-06-09T05:28:54.252534",
+            "enroute_at": null,
+            "arrived_at": null,
+            "picked_up_at": null,
+            "transporting_at": null,
+            "accepted_at": "2026-06-09T05:28:54.252542",
+            "completed_at": null
+          },
+          "offer": null,
+          "message": "Driver assigned from dispatcher customer-request workflow."
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "assigned",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": "2026-06-09 05:28:54.278701",
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.282174"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "accepted",
+        "lifecycle_state": "assigned",
+        "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": "2026-06-09 05:28:54.252542",
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.252530"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "assigned",
+        "availability_state": "on_trip",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:54.252493"
+      },
+      "db_assignment_tail": [
+        {
+          "id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "assignment_state": "offered",
+          "attempt_index": 1,
+          "offered_at": null,
+          "assigned_at": null,
+          "accepted_at": null,
+          "pickup_complete_at": null,
+          "dropoff_complete_at": null,
+          "updated_at": "2026-06-09 05:28:54.248689"
+        }
+      ]
+    },
+    {
+      "step": "dispatch_ride",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/dispatch/offers/3d9bf939-e706-4e39-8829-4991b060b3f0/accept",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": null
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "offer_id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "assignment_state": "accepted",
+          "attempt_index": 1,
+          "score": null,
+          "score_breakdown": {},
+          "timeout_seconds": 90,
+          "queued_at": "2026-06-09T05:28:54.248689",
+          "search_started_at": "2026-06-09T05:28:54.248689",
+          "offered_at": null,
+          "offer_expires_at": null,
+          "assigned_at": "2026-06-09T05:28:54.346768",
+          "accepted_at": "2026-06-09T05:28:54.359118",
+          "en_route_pickup_at": null,
+          "pickup_complete_at": null,
+          "dropoff_complete_at": null,
+          "reassignment_pending_at": null,
+          "reassignment_started_at": null,
+          "reassignment_completed_at": null,
+          "reassignment_attempt_count": 0,
+          "reassignment_reason": null,
+          "reassignment_chain_id": "4c7debc9-09a1-47e2-8834-c310f1c7ea4b",
+          "rejected_at": null,
+          "expired_at": null,
+          "closed_reason": null
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "assigned",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": "2026-06-09 05:28:54.278701",
+        "in_progress_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.355122"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "accepted",
+        "lifecycle_state": "assigned",
+        "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": "2026-06-09 05:28:54.252542",
+        "picked_up_at": null,
+        "transporting_at": null,
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.252530"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "assigned",
+        "availability_state": "on_trip",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:54.370537"
+      },
+      "db_assignment_tail": [
+        {
+          "id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "assignment_state": "accepted",
+          "attempt_index": 1,
+          "offered_at": null,
+          "assigned_at": "2026-06-09 05:28:54.346768",
+          "accepted_at": "2026-06-09 05:28:54.359118",
+          "pickup_complete_at": null,
+          "dropoff_complete_at": null,
+          "updated_at": "2026-06-09 05:28:54.359118"
+        }
+      ]
+    },
+    {
+      "step": "start_trip",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/drivers/fbf6a158-d013-40a9-b929-831f9066e79a/pickup-complete",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476"
+        },
+        "prereq_arrived": {
+          "status": 200,
+          "body": {
+            "passenger_name": "WF Patient 1",
+            "passenger_phone": "+1555202001",
+            "pickup_address": "101 Seed St",
+            "dropoff_address": "201 Seed Ave",
+            "service_type": "medical_transport",
+            "notes": null,
+            "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+            "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+            "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+            "vehicle_id": null,
+            "status": "accepted",
+            "lifecycle_state": "arrived",
+            "estimated_distance_miles": null,
+            "estimated_duration_minutes": null,
+            "priority_score": null,
+            "priority_tag": null,
+            "is_emergency": false,
+            "appointment_time": null,
+            "recurring_trip_pattern": null,
+            "recurring_schedule_id": null,
+            "recurring_instance_date": null,
+            "ai_dispatch_context": null,
+            "requested_at": "2026-06-09T05:28:53.546316",
+            "assigned_at": "2026-06-09T05:28:54.252534",
+            "enroute_at": null,
+            "arrived_at": "2026-06-09T05:28:54.530386",
+            "picked_up_at": null,
+            "transporting_at": null,
+            "accepted_at": "2026-06-09T05:28:54.252542",
+            "completed_at": null
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "passenger_name": "WF Patient 1",
+          "passenger_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "service_type": "medical_transport",
+          "notes": null,
+          "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "vehicle_id": null,
+          "status": "in_transit",
+          "lifecycle_state": "in_progress",
+          "estimated_distance_miles": null,
+          "estimated_duration_minutes": null,
+          "priority_score": null,
+          "priority_tag": null,
+          "is_emergency": false,
+          "appointment_time": null,
+          "recurring_trip_pattern": null,
+          "recurring_schedule_id": null,
+          "recurring_instance_date": null,
+          "ai_dispatch_context": null,
+          "requested_at": "2026-06-09T05:28:53.546316",
+          "assigned_at": "2026-06-09T05:28:54.252534",
+          "enroute_at": null,
+          "arrived_at": "2026-06-09T05:28:54.530386",
+          "picked_up_at": "2026-06-09T05:28:54.668157",
+          "transporting_at": "2026-06-09T05:28:54.674447",
+          "accepted_at": "2026-06-09T05:28:54.252542",
+          "completed_at": null
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "in_progress",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": "2026-06-09 05:28:54.278701",
+        "in_progress_at": "2026-06-09 05:28:54.695473",
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.695498"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "in_transit",
+        "lifecycle_state": "in_progress",
+        "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": "2026-06-09 05:28:54.252542",
+        "picked_up_at": "2026-06-09 05:28:54.668157",
+        "transporting_at": "2026-06-09 05:28:54.674447",
+        "completed_at": null,
+        "updated_at": "2026-06-09 05:28:54.674433"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "in_transit",
+        "availability_state": "on_trip",
+        "total_trips": 0,
+        "updated_at": "2026-06-09 05:28:54.656439"
+      },
+      "db_assignment_tail": [
+        {
+          "id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "assignment_state": "pickup_complete",
+          "attempt_index": 1,
+          "offered_at": null,
+          "assigned_at": "2026-06-09 05:28:54.346768",
+          "accepted_at": "2026-06-09 05:28:54.359118",
+          "pickup_complete_at": "2026-06-09 05:28:54.676007",
+          "dropoff_complete_at": null,
+          "updated_at": "2026-06-09 05:28:54.676007"
+        }
+      ]
+    },
+    {
+      "step": "complete_trip",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/health-isf/drivers/fbf6a158-d013-40a9-b929-831f9066e79a/dropoff-complete",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": "Bearer <dispatcher_token>"
+        },
+        "payload": {
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "passenger_name": "WF Patient 1",
+          "passenger_phone": "+1555202001",
+          "pickup_address": "101 Seed St",
+          "dropoff_address": "201 Seed Ave",
+          "service_type": "medical_transport",
+          "notes": null,
+          "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+          "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "vehicle_id": null,
+          "status": "completed",
+          "lifecycle_state": "completed",
+          "estimated_distance_miles": null,
+          "estimated_duration_minutes": null,
+          "priority_score": null,
+          "priority_tag": null,
+          "is_emergency": false,
+          "appointment_time": null,
+          "recurring_trip_pattern": null,
+          "recurring_schedule_id": null,
+          "recurring_instance_date": null,
+          "ai_dispatch_context": null,
+          "requested_at": "2026-06-09T05:28:53.546316",
+          "assigned_at": "2026-06-09T05:28:54.252534",
+          "enroute_at": null,
+          "arrived_at": "2026-06-09T05:28:54.530386",
+          "picked_up_at": "2026-06-09T05:28:54.668157",
+          "transporting_at": "2026-06-09T05:28:54.674447",
+          "accepted_at": "2026-06-09T05:28:54.252542",
+          "completed_at": "2026-06-09T05:28:54.771276"
+        }
+      },
+      "db_customer_request": {
+        "id": "8817756b-bb3a-42e5-9ba9-474dc79f0b8a",
+        "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "rider_name": "WF Patient 1",
+        "rider_phone": "+1555202001",
+        "dispatch_status": "completed",
+        "pending_at": "2026-06-09 05:28:53.579490",
+        "accepted_at": null,
+        "assigned_at": "2026-06-09 05:28:54.278701",
+        "in_progress_at": "2026-06-09 05:28:54.695473",
+        "completed_at": "2026-06-09 05:28:54.797078",
+        "updated_at": "2026-06-09 05:28:54.797118"
+      },
+      "db_ride": {
+        "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+        "status": "completed",
+        "lifecycle_state": "completed",
+        "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "requested_at": "2026-06-09 05:28:53.546316",
+        "accepted_at": "2026-06-09 05:28:54.252542",
+        "picked_up_at": "2026-06-09 05:28:54.668157",
+        "transporting_at": "2026-06-09 05:28:54.674447",
+        "completed_at": "2026-06-09 05:28:54.771276",
+        "updated_at": "2026-06-09 05:28:54.771257"
+      },
+      "db_driver": {
+        "id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+        "name": "WF Driver 1",
+        "phone": "+1555101001",
+        "status": "completed",
+        "availability_state": "available",
+        "total_trips": 1,
+        "updated_at": "2026-06-09 05:28:54.764427"
+      },
+      "db_assignment_tail": [
+        {
+          "id": "3d9bf939-e706-4e39-8829-4991b060b3f0",
+          "ride_id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+          "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+          "assignment_state": "dropoff_complete",
+          "attempt_index": 1,
+          "offered_at": null,
+          "assigned_at": "2026-06-09 05:28:54.346768",
+          "accepted_at": "2026-06-09 05:28:54.359118",
+          "pickup_complete_at": "2026-06-09 05:28:54.676007",
+          "dropoff_complete_at": "2026-06-09 05:28:54.793072",
+          "updated_at": "2026-06-09 05:28:54.793072"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "dispatcher": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZTY2NzUyNjYtM2UxMy00MDhhLThkYmMtMmZiMzE2NTFjYzlkIiwgImVtYWlsIjogImRpc3BhdGNoZXJAYW1pY29yLmxvY2FsIiwgInJvbGUiOiAiZGlzcGF0Y2hlciIsICJvcmdhbml6YXRpb25faWQiOiAiY2E4ZDBjN2MtMWZmZi00NDY1LTk5ZDctNzVhMWZjNTE1NDNlIiwgImV4cCI6IDE3ODA5ODY1MzIuODA4MTgxOH0.wLvJIfWsBU06CH7J0L8KRpwYQ2lYtEZ1xzN3V-E5sGM",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "kyQGhSTfMJyUa_gpjUTfWZ8GMXvtKTv6yQ5twUn3vV3YClH76Cg_yqGTED6L04LG",
+        "user_id": "e6675266-3e13-408a-8dbc-2fb31651cc9d",
+        "email": "dispatcher@amicor.local",
+        "display_name": "Amicor Dispatcher",
+        "role": "dispatcher",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "rider": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiOWI0MTI5NjEtMzJjYy00ODJjLWJiOGYtNGNjN2VmZWE2MWY2IiwgImVtYWlsIjogInJpZGVyQGFtaWNvci5sb2NhbCIsICJyb2xlIjogInJpZGVyIiwgIm9yZ2FuaXphdGlvbl9pZCI6ICJjYThkMGM3Yy0xZmZmLTQ0NjUtOTlkNy03NWExZmM1MTU0M2UiLCAiZXhwIjogMTc4MDk4NjUzMi45OTIzNjI3fQ.nIzypf37X9wjlmEFDr-wTdwKOV_-GS3xyf09nbkb8_c",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "0Ky7FDsrPXxrdjdQjhurU7C8ik0pkvG-tGF-TlBoj1Ve4tUxwTpKyrZksSYQg--8",
+        "user_id": "9b412961-32cc-482c-bb8f-4cc7efea61f6",
+        "email": "rider@amicor.local",
+        "display_name": "Amicor Rider",
+        "role": "rider",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "admin": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZjg0MDZjOTQtYzA5OC00MmFkLWE3ODEtMjI3YjRkNTAyZTU3IiwgImVtYWlsIjogImFkbWluQGFtaWNvci5sb2NhbCIsICJyb2xlIjogImFkbWluIiwgIm9yZ2FuaXphdGlvbl9pZCI6ICJjYThkMGM3Yy0xZmZmLTQ0NjUtOTlkNy03NWExZmM1MTU0M2UiLCAiZXhwIjogMTc4MDk4NjUzMy4xNzg0NDl9.-4k3unjv7UF6z-KOzX6QLsqqcb3eOxarOMnAuCIzmgs",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "6jtmqFroCj3DR3vS01d4aFTDamw6J-iQ819AKVzaIrrZX4gf-yIQ25T69iC7G_ew",
+        "user_id": "f8406c94-c098-42ad-a781-227b4d502e57",
+        "email": "admin@amicor.local",
+        "display_name": "Amicor Admin",
+        "role": "admin",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    },
+    "driver_user": {
+      "status": 200,
+      "response": {
+        "access_token": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiYjZlMWZjN2UtYzAwNi00ZWRlLWJhNmYtMTFmYzQ1MTEwYmY3IiwgImVtYWlsIjogImRyaXZlckBhbWljb3IubG9jYWwiLCAicm9sZSI6ICJkcml2ZXIiLCAib3JnYW5pemF0aW9uX2lkIjogImNhOGQwYzdjLTFmZmYtNDQ2NS05OWQ3LTc1YTFmYzUxNTQzZSIsICJleHAiOiAxNzgwOTg2NTMzLjM3MDYyMjl9.SyAi081xsYoCMncXW9QWRQHOiRhbdMHzT5HFGr_uMR0",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "g2GTdDrDZX-k-DlpZNgofoToy0MX575t5YiBZg5ryD1LvBz2uovvCuFI2p4jx_Wy",
+        "user_id": "b6e1fc7e-c006-4ede-ba6f-11fc45110bf7",
+        "email": "driver@amicor.local",
+        "display_name": "Amicor Driver",
+        "role": "driver",
+        "organization_name": "Amicor Health",
+        "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e"
+      }
+    }
+  },
+  "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+  "persistence_check": {
+    "status": 200,
+    "ride": {
+      "passenger_name": "WF Patient 1",
+      "passenger_phone": "+1555202001",
+      "pickup_address": "101 Seed St",
+      "dropoff_address": "201 Seed Ave",
+      "service_type": "medical_transport",
+      "notes": null,
+      "id": "81aab432-95a3-4c7d-918b-577a3dd9a476",
+      "organization_id": "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+      "provider_id": "6e0c86e1-fce3-4ac6-ba56-b55717e84cb2",
+      "driver_id": "fbf6a158-d013-40a9-b929-831f9066e79a",
+      "vehicle_id": null,
+      "status": "completed",
+      "lifecycle_state": "completed",
+      "estimated_distance_miles": null,
+      "estimated_duration_minutes": null,
+      "priority_score": null,
+      "priority_tag": null,
+      "is_emergency": false,
+      "appointment_time": null,
+      "recurring_trip_pattern": null,
+      "recurring_schedule_id": null,
+      "recurring_instance_date": null,
+      "ai_dispatch_context": null,
+      "requested_at": "2026-06-09T05:28:53.546316",
+      "assigned_at": "2026-06-09T05:28:54.252534",
+      "enroute_at": null,
+      "arrived_at": "2026-06-09T05:28:54.530386",
+      "picked_up_at": "2026-06-09T05:28:54.668157",
+      "transporting_at": "2026-06-09T05:28:54.674447",
+      "accepted_at": "2026-06-09T05:28:54.252542",
+      "completed_at": "2026-06-09T05:28:54.771276"
+    }
+  },
+  "completed_at": "2026-06-09T05:28:54.819934+00:00"
+}
