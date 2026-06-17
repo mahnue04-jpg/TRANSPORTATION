@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amicor Nova Stable</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <script src="/js/stable-ui.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Amicor Nova <span class="pill good" style="font-size:0.7rem">STABLE</span></h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+
+  <main id="loginView" class="card" style="max-width:420px;margin:24px auto">
+    <h2>Sign in</h2>
+    <p>Demo: <code>dispatcher@amicor.local</code> / <code>Amicor123!</code> or <code>admin@amicor.com</code> / <code>admin123</code></p>
+    <label>Email<input id="loginEmail" value="dispatcher@amicor.local" /></label>
+    <label>Password<input id="loginPassword" type="password" value="Amicor123!" /></label>
+    <button id="loginBtn">Login</button>
+    <p id="loginError" style="color:#fca5a5"></p>
+  </main>
+
+  <main id="hubView" class="hidden">
+    <section class="card">
+      <h2>Operational Portals</h2>
+      <p class="nav-links">
+        <a href="/dispatcher">Dispatch Command Center</a>
+        <a href="/driver">Driver Mobile</a>
+        <a href="/rider">Rider Booking</a>
+        <a href="/provider">Provider Portal</a>
+      </p>
+      <p class="muted" style="font-size:0.85rem;color:var(--muted)">HTTP polling only — refreshes every 30s. No WebSockets.</p>
+    </section>
+    <section class="card grid-2" id="metrics"></section>
+    <section class="card">
+      <h3>Quick Trip Create</h3>
+      <label>Rider name (optional)<input id="riderName" placeholder="e.g. John Smith" /></label>
+      <label>Pickup<input id="pickup" placeholder="Pickup address" /></label>
+      <label>Dropoff<input id="dropoff" placeholder="Destination address" /></label>
+      <button id="createTripBtn">Create Trip</button>
+      <button class="secondary" id="autoDispatchBtn">Create + Auto-Dispatch</button>
+      <button class="secondary" id="refreshBtn">Refresh Now</button>
+    </section>
+    <section class="card"><div id="tripsTable"></div></section>
+  </main>
+  <div id="toast"></div>
+  <script src="/js/core.js"></script>
+  <script>
+    (function () {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          regs.forEach(function (r) { r.unregister(); });
+        });
+      }
+
+      var lastHubSig = '';
+
+      function showHub() {
+        document.getElementById('loginView').classList.add('hidden');
+        document.getElementById('hubView').classList.remove('hidden');
+        Amicor.renderUserBar();
+        refresh();
+        AmicorStable.startPolling(function () { refresh(); }, AmicorStable.POLL_MS);
+      }
+
+      function formatRoute(t) {
+        var from = (t.pickup || t.pickup_address || '').trim();
+        var to = (t.dropoff || t.destination || '').trim();
+        if (from && to && from.toLowerCase() !== to.toLowerCase()) return from + ' → ' + to;
+        return from || to || '—';
+      }
+
+      function formatPatient(t) {
+        if (t.patient_name) return t.patient_name;
+        if (t.notes && String(t.notes).trim()) return String(t.notes).trim();
+        return 'Walk-in';
+      }
+
+      function tripPayload() {
+        var pickup = document.getElementById('pickup').value.trim();
+        var dropoff = document.getElementById('dropoff').value.trim();
+        var riderName = document.getElementById('riderName').value.trim();
+        if (!pickup || !dropoff) throw new Error('Pickup and dropoff are required.');
+        if (pickup.toLowerCase() === dropoff.toLowerCase()) throw new Error('Pickup and dropoff must be different.');
+        var body = { pickup: pickup, dropoff: dropoff };
+        if (riderName) body.notes = riderName;
+        return body;
+      }
+
+      function refresh() {
+        return Promise.all([
+          Amicor.api('/trips'),
+          Amicor.api('/revenue').catch(function () { return {}; }),
+        ]).then(function (results) {
+          var trips = results[0];
+          var revenue = results[1];
+          var sig = JSON.stringify({
+            a: revenue.active_trips,
+            c: revenue.completed_trips,
+            r: revenue.revenue_total,
+            t: trips.slice(0, 15).map(function (t) { return t.id + ':' + t.status; }).join('|'),
+          });
+          if (sig === lastHubSig) return;
+          lastHubSig = sig;
+          var metricsHtml =
+            '<div class="metric"><span>Active</span><strong>' + (revenue.active_trips || 0) + '</strong></div>' +
+            '<div class="metric"><span>Completed</span><strong>' + (revenue.completed_trips || 0) + '</strong></div>' +
+            '<div class="metric"><span>Revenue</span><strong>$' + Number(revenue.revenue_total || 0).toFixed(2) + '</strong></div>';
+          var tableHtml = '<table><thead><tr><th>Status</th><th>Patient</th><th>Route</th><th>Driver</th></tr></thead><tbody>' +
+            trips.slice(0, 15).map(function (t) {
+              return '<tr><td><span class="pill">' + t.status + '</span></td><td>' + formatPatient(t) + '</td><td>' + formatRoute(t) + '</td><td>' + (t.driver_name || '—') + '</td></tr>';
+            }).join('') +
+            '</tbody></table>';
+          AmicorStable.setHtmlIfChanged(document.getElementById('metrics'), metricsHtml);
+          AmicorStable.setHtmlIfChanged(document.getElementById('tripsTable'), tableHtml);
+        }).catch(function (e) { Amicor.toast(e.message); });
+      }
+
+      document.getElementById('loginBtn').onclick = function () {
+        document.getElementById('loginError').textContent = '';
+        Amicor.login(
+          document.getElementById('loginEmail').value,
+          document.getElementById('loginPassword').value
+        ).then(function () {
+          var redirect = new URLSearchParams(location.search).get('redirect');
+          if (redirect) location.href = redirect;
+          else showHub();
+        }).catch(function (e) {
+          document.getElementById('loginError').textContent = e.message;
+        });
+      };
+
+      document.getElementById('refreshBtn').onclick = function () {
+        lastHubSig = '';
+        refresh();
+      };
+
+      document.getElementById('createTripBtn').onclick = function () {
+        try {
+          Amicor.api('/trips', { method: 'POST', body: JSON.stringify(tripPayload()) })
+            .then(function () { Amicor.toast('Trip created'); lastHubSig = ''; refresh(); })
+            .catch(function (e) { Amicor.toast(e.message); });
+        } catch (e) { Amicor.toast(e.message); }
+      };
+
+      document.getElementById('autoDispatchBtn').onclick = function () {
+        try {
+          Amicor.api('/trips', { method: 'POST', body: JSON.stringify(tripPayload()) })
+            .then(function (t) { return Amicor.api('/dispatch/auto-assign/' + t.id, { method: 'POST' }); })
+            .then(function () { Amicor.toast('Trip created and auto-dispatched'); lastHubSig = ''; refresh(); })
+            .catch(function (e) { Amicor.toast(e.message); });
+        } catch (e) { Amicor.toast(e.message); }
+      };
+
+      if (Amicor.token && Amicor.user) showHub();
+    })();
+  </script>
+</body>
+</html>

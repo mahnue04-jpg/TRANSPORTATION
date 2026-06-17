@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dispatch Command Center — Nova Stable</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    main.dispatch-main { max-width: 1200px; }
+    .dispatch-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .dispatch-stats span { background: #0f172a; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem; }
+    #map, #tripsPanel, #driversPanel, #statsBar { contain: layout style paint; }
+    .leaflet-container { background: #0b1220 !important; }
+    .leaflet-fade-anim .leaflet-tile { transition: none !important; }
+  </style>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Dispatch Command Center</h1>
+    <div id="userBar" class="hidden">
+      <span id="userLabel"></span>
+      <a href="/" style="margin:0 8px">Hub</a>
+      <button class="secondary" id="logoutBtn">Logout</button>
+    </div>
+  </header>
+  <main class="dispatch-main">
+    <section class="card grid-2">
+      <button id="autoAllBtn">Auto-Dispatch All Pending</button>
+      <button class="secondary" id="refreshBtn">Refresh Now</button>
+      <button class="secondary" id="freeFleetBtn">Free Fleet</button>
+    </section>
+    <div id="capacityAlert" class="card hidden" style="border-color:#f59e0b;background:#1a1408"></div>
+    <section class="card">
+      <div class="dispatch-stats" id="statsBar"></div>
+      <h3>Live Map <small style="color:var(--muted)">(30s poll — no live socket)</small></h3>
+      <div id="map"></div>
+    </section>
+    <section class="card grid-2">
+      <div><h3>Active Trips</h3><div id="tripsPanel"></div></div>
+      <div><h3>Drivers</h3><div id="driversPanel"></div></div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script src="/js/core.js"></script>
+  <script>
+    (function () {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) { regs.forEach(function (r) { r.unregister(); }); });
+      }
+      if (!Amicor.requireAuth(['dispatcher', 'admin', 'supervisor'])) return;
+      Amicor.renderUserBar();
+
+      var map, markers = {}, lastBoardSig = '', lastMapSig = '', mapFitted = false, refreshInFlight = false;
+      var statusColor = { available: '#22c55e', busy: '#ef4444', offline: '#94a3b8', online: '#22c55e' };
+
+      function toast(msg) { Amicor.toast(msg); }
+
+      function boardSignature(data) {
+        return JSON.stringify({
+          t: (data.trips || []).map(function (t) { return t.id + ':' + t.status + ':' + (t.driver_id || ''); }).join('|'),
+          d: (data.drivers || []).map(function (d) { return d.id + ':' + (d.status || '') + ':' + (d.active_trip_count || 0); }).join('|'),
+        });
+      }
+
+      function mapSignature(drivers) {
+        return (drivers || []).map(function (d) {
+          return d.id + ':' + Number(d.lat || 0).toFixed(3) + ':' + Number(d.lng || 0).toFixed(3);
+        }).join('|');
+      }
+
+      function updateMapDrivers(drivers) {
+        var sig = mapSignature(drivers);
+        if (sig === lastMapSig) return;
+        lastMapSig = sig;
+        drivers.forEach(function (d) {
+          if (!d.lat || !d.lng) return;
+          var lat = Number(d.lat), lng = Number(d.lng), color = statusColor[d.status] || '#38bdf8';
+          if (markers[d.id]) {
+            var pos = markers[d.id].getLatLng();
+            if (Math.abs(pos.lat - lat) < 0.0001 && Math.abs(pos.lng - lng) < 0.0001) return;
+            markers[d.id].setLatLng([lat, lng]);
+          } else {
+            var icon = L.divIcon({ className: '', html: '<div style="background:' + color + ';width:14px;height:14px;border-radius:50%;border:2px solid #fff"></div>' });
+            markers[d.id] = L.marker([lat, lng], { icon: icon }).addTo(map).bindPopup(driverText(d));
+          }
+        });
+        if (!mapFitted && drivers.length) {
+          var bounds = drivers.filter(function (d) { return d.lat && d.lng; }).map(function (d) { return [Number(d.lat), Number(d.lng)]; });
+          if (bounds.length > 1) { map.fitBounds(bounds, { padding: [30, 30], animate: false }); mapFitted = true; }
+          else if (bounds.length === 1) { map.setView(bounds[0], 12, { animate: false }); mapFitted = true; }
+        }
+      }
+
+      function bindTripActions() {
+        document.querySelectorAll('[data-assign]').forEach(function (btn) {
+          btn.onclick = function () {
+            Amicor.api('/dispatch/auto-assign/' + btn.getAttribute('data-assign'), { method: 'POST' })
+              .then(function (r) {
+                toast('Assigned ' + ((r.dispatch && r.dispatch.driver_name) || 'driver'));
+                lastBoardSig = ''; refreshBoard(true);
+              }).catch(function (e) { toast(e.message); });
+          };
+        });
+      }
+
+      function routeText(t) {
+        var from = (t.pickup || '').trim(), to = (t.dropoff || '').trim();
+        if (from && to && from.toLowerCase() !== to.toLowerCase()) return from + ' → ' + to;
+        return from || to || 'Route pending';
+      }
+      function patientText(t) { return t.patient_name || 'Walk-in'; }
+      function driverText(d) { return d.name || d.id || 'Driver'; }
+
+      function initMap() {
+        map = L.map('map', { preferCanvas: true, zoomAnimation: false, fadeAnimation: false }).setView([40.7128, -74.006], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, updateWhenIdle: true, updateWhenZooming: false }).addTo(map);
+      }
+
+      function refreshBoard(force) {
+        if (refreshInFlight) return Promise.resolve();
+        refreshInFlight = true;
+        return Amicor.api('/dispatcher/live').then(function (data) {
+          var sig = boardSignature(data);
+          if (!force && sig === lastBoardSig) return;
+          lastBoardSig = sig;
+          var trips = data.trips || [], drivers = data.drivers || [];
+          var pending = trips.filter(function (t) { return t.status === 'pending' && !t.driver_id; }).length;
+          var availableDrivers = drivers.filter(function (d) { return Number(d.active_trip_count || 0) === 0 && d.status !== 'offline'; }).length;
+          AmicorStable.setHtmlIfChanged(document.getElementById('statsBar'),
+            '<span>' + trips.length + ' active</span><span>' + drivers.length + ' drivers</span>' +
+            '<span>' + availableDrivers + ' available</span><span>' + pending + ' pending</span>');
+          var alertEl = document.getElementById('capacityAlert');
+          if (pending > 0 && availableDrivers === 0) {
+            alertEl.classList.remove('hidden');
+            AmicorStable.setHtmlIfChanged(alertEl, '<strong>Fleet at capacity.</strong> ' + pending + ' waiting. Use Free Fleet or complete trips in Driver app.');
+          } else if (!alertEl.classList.contains('hidden')) alertEl.classList.add('hidden');
+          var tripsHtml = trips.map(function (t) {
+            var assignBtn = (!t.driver_id && t.status === 'pending')
+              ? '<button data-assign="' + t.id + '">Auto-Assign</button>'
+              : '<span class="pill good">Assigned</span>';
+            return '<div class="card" style="margin-bottom:10px;padding:12px"><strong>' + patientText(t) + '</strong> <span class="pill">' + t.status + '</span><br><small>' + routeText(t) + '</small><br>' + assignBtn + '</div>';
+          }).join('') || '<p>No active trips</p>';
+          var driversHtml = drivers.map(function (d) {
+            var n = Number(d.active_trip_count || 0);
+            var label = n === 0 ? 'available' : 'busy · ' + n + ' active';
+            return '<div style="margin-bottom:10px"><strong>' + driverText(d) + '</strong> <span class="pill ' + (n === 0 ? 'good' : 'warn') + '">' + label + '</span></div>';
+          }).join('') || '<p>No drivers</p>';
+          AmicorStable.setHtmlIfChanged(document.getElementById('tripsPanel'), tripsHtml);
+          AmicorStable.setHtmlIfChanged(document.getElementById('driversPanel'), driversHtml);
+          updateMapDrivers(drivers);
+          bindTripActions();
+        }).finally(function () { refreshInFlight = false; });
+      }
+
+      document.getElementById('refreshBtn').onclick = function () { lastBoardSig = ''; refreshBoard(true); };
+      document.getElementById('autoAllBtn').onclick = function () {
+        Amicor.api('/dispatch/auto-assign-pending', { method: 'POST' })
+          .then(function (r) { toast('Assigned ' + (r.assigned || 0)); lastBoardSig = ''; refreshBoard(true); })
+          .catch(function (e) { toast(e.message); });
+      };
+      document.getElementById('freeFleetBtn').onclick = function () {
+        if (!confirm('Complete all active trips and free drivers?')) return;
+        Amicor.api('/ops/free-capacity', { method: 'POST' })
+          .then(function (r) { toast('Completed ' + (r.completed_trips || 0)); lastBoardSig = ''; lastMapSig = ''; refreshBoard(true); })
+          .catch(function (e) { toast(e.message); });
+      };
+
+      initMap();
+      refreshBoard(true);
+      AmicorStable.startPolling(function () { refreshBoard(false); }, AmicorStable.POLL_MS);
+    })();
+  </script>
+</body>
+</html>

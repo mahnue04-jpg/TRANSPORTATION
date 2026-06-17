@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Driver — Nova Stable</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="/js/core.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Driver Mobile</h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+  <main>
+    <section class="card grid-2" id="earningsPanel"></section>
+    <section class="card" id="tripPanel"><p>Loading trip...</p></section>
+    <section class="card">
+      <h3>GPS (optional)</h3>
+      <p id="gpsStatus">Not tracking</p>
+      <button id="gpsToggle" class="secondary">Start GPS</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    if (!Amicor.requireAuth(['driver', 'dispatcher', 'admin'])) throw new Error('auth');
+    Amicor.renderUserBar();
+
+    var activeTrip = null, driver = null, gpsWatch = null, lastTripSig = '', lastGpsSend = 0;
+
+    function loadDriver() {
+      return Amicor.api('/driver/me').then(function (data) {
+        driver = data.driver;
+        activeTrip = data.active_trip;
+        renderEarnings();
+        renderTrip();
+      });
+    }
+
+    function renderEarnings() {
+      Amicor.api('/driver/earnings').then(function (e) {
+        var html =
+          '<div class="metric"><span>Today</span><strong>$' + Number(e.earnings_today || 0).toFixed(2) + '</strong></div>' +
+          '<div class="metric"><span>Trips</span><strong>' + (e.trips_today || 0) + '</strong></div>' +
+          '<div class="metric"><span>Lifetime</span><strong>$' + Number(e.lifetime_earnings || 0).toFixed(2) + '</strong></div>' +
+          '<div class="metric"><span>Status</span><strong>' + (driver && driver.status || 'offline') + '</strong></div>';
+        AmicorStable.setHtmlIfChanged(document.getElementById('earningsPanel'), html);
+      }).catch(function (err) { Amicor.toast(err.message); });
+    }
+
+    function renderTrip() {
+      var panel = document.getElementById('tripPanel');
+      if (!activeTrip) {
+        AmicorStable.setHtmlIfChanged(panel, '<h3>No active trip</h3><p>Check dispatch for assignments.</p>');
+        lastTripSig = '';
+        return;
+      }
+      var sig = activeTrip.id + ':' + activeTrip.status;
+      if (sig === lastTripSig) return;
+      lastTripSig = sig;
+      var s = activeTrip.status;
+      panel.innerHTML =
+        '<h3>Trip ' + activeTrip.id + ' <span class="pill">' + s + '</span></h3>' +
+        '<p><strong>Rider:</strong> ' + (activeTrip.patient_name || 'Patient') + '</p>' +
+        '<p><strong>Pickup:</strong> ' + activeTrip.pickup + '</p>' +
+        '<p><strong>Dropoff:</strong> ' + activeTrip.dropoff + '</p>' +
+        '<div>' +
+          '<button data-a="accept"' + (['assigned','pending'].includes(s) ? '' : ' disabled') + '>Accept</button>' +
+          '<button data-a="arrived"' + (['driver_en_route','assigned'].includes(s) ? '' : ' disabled') + '>Arrived</button>' +
+          '<button data-a="onboard"' + (s === 'arrived' ? '' : ' disabled') + '>Onboard</button>' +
+          '<button data-a="transport"' + (s === 'rider_onboard' ? '' : ' disabled') + '>Transport</button>' +
+          '<button data-a="complete"' + (['in_progress','rider_onboard'].includes(s) ? '' : ' disabled') + '>Complete</button>' +
+          '<button class="secondary" data-a="contact">Call Rider</button>' +
+        '</div>';
+      panel.querySelectorAll('[data-a]').forEach(function (btn) {
+        btn.onclick = function () { runAction(btn.getAttribute('data-a')); };
+      });
+    }
+
+    function runAction(action) {
+      if (!activeTrip) return;
+      var id = activeTrip.id;
+      var chain = Promise.resolve();
+      if (action === 'accept') chain = Amicor.api('/trips/' + id + '/accept', { method: 'POST' });
+      else if (action === 'arrived') chain = Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'arrived' }) });
+      else if (action === 'onboard') chain = Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'rider_onboard' }) });
+      else if (action === 'transport') chain = Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'in_progress' }) });
+      else if (action === 'complete') chain = Amicor.api('/trips/' + id + '/complete', { method: 'PUT' });
+      else if (action === 'contact') chain = Amicor.api('/trips/' + id + '/contact-rider', { method: 'POST' }).then(function (r) {
+        if (r.dial_target) location.href = 'tel:' + r.dial_target;
+      });
+      chain.then(function () { Amicor.toast('Updated'); lastTripSig = ''; return loadDriver(); })
+        .catch(function (e) { Amicor.toast(e.message); });
+    }
+
+    document.getElementById('gpsToggle').onclick = function () {
+      if (gpsWatch) {
+        navigator.geolocation.clearWatch(gpsWatch);
+        gpsWatch = null;
+        this.textContent = 'Start GPS';
+        return;
+      }
+      if (!navigator.geolocation) return Amicor.toast('GPS unavailable');
+      this.textContent = 'Stop GPS';
+      gpsWatch = navigator.geolocation.watchPosition(function (pos) {
+        document.getElementById('gpsStatus').textContent = pos.coords.latitude.toFixed(5) + ', ' + pos.coords.longitude.toFixed(5);
+        var now = Date.now();
+        if (now - lastGpsSend < 30000) return;
+        lastGpsSend = now;
+        Amicor.api('/driver/gps', { method: 'POST', body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }) }).catch(function () {});
+      }, function (err) { document.getElementById('gpsStatus').textContent = err.message; });
+    };
+
+    loadDriver().catch(function (e) { Amicor.toast(e.message); });
+    AmicorStable.startPolling(function () { loadDriver().catch(function () {}); }, AmicorStable.POLL_MS);
+  </script>
+</body>
+</html>

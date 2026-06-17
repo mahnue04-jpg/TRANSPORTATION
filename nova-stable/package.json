@@ -1,0 +1,21 @@
+{
+  "name": "amicor-nova-stable",
+  "version": "1.0.0",
+  "description": "Amicor Nova stable dispatch platform — SQLite + HTTP polling only (no WebSockets/SSE)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "sqlite3": "^5.1.7"
+  }
+}

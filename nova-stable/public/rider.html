@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rider — Nova Stable</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/js/core.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Rider Portal</h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+  <main>
+    <section class="card">
+      <h3>Book a Trip</h3>
+      <label>Name<input id="name" /></label>
+      <label>Phone<input id="phone" placeholder="+1..." /></label>
+      <label>Pickup<input id="pickup" /></label>
+      <label>Destination<input id="dropoff" /></label>
+      <label>Notes<textarea id="notes" rows="2"></textarea></label>
+      <button id="bookBtn">Request Trip & Auto-Dispatch</button>
+    </section>
+    <section class="card">
+      <h3>Track Ride</h3>
+      <label>Trip ID<input id="trackId" /></label>
+      <button class="secondary" id="trackBtn">Load</button>
+      <div id="trackInfo"></div>
+      <div id="map" style="margin-top:12px;height:280px"></div>
+      <button id="payBtn" class="hidden secondary">Pay Completed Trip</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    if (!Amicor.requireAuth(['rider', 'dispatcher', 'admin'])) throw new Error('auth');
+    Amicor.renderUserBar();
+
+    var map, driverMarker, lastTrackSig = '';
+    var params = new URLSearchParams(location.search);
+    if (params.get('trip')) document.getElementById('trackId').value = params.get('trip');
+
+    function loadTrack() {
+      var id = document.getElementById('trackId').value.trim();
+      if (!id) return Promise.resolve();
+      return Amicor.api('/rider/track/' + id).then(function (data) {
+        var t = data.trip;
+        var sig = t.id + ':' + t.status + ':' + (t.driver_lat || '') + ':' + (t.driver_lng || '');
+        if (sig === lastTrackSig) return;
+        lastTrackSig = sig;
+        AmicorStable.setHtmlIfChanged(document.getElementById('trackInfo'),
+          '<p><span class="pill">' + t.status + '</span> Driver: ' + (t.driver_name || 'Assigning...') + '</p><p>' + t.pickup + ' → ' + t.dropoff + '</p>');
+        if (!map) {
+          map = L.map('map', { zoomAnimation: false }).setView([40.7128, -74.006], 12);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { updateWhenIdle: true }).addTo(map);
+        }
+        if (t.driver_lat && t.driver_lng) {
+          var latlng = [Number(t.driver_lat), Number(t.driver_lng)];
+          if (driverMarker) driverMarker.setLatLng(latlng);
+          else driverMarker = L.marker(latlng).addTo(map);
+          map.setView(latlng, 13, { animate: false });
+        }
+        document.getElementById('payBtn').classList.toggle('hidden', t.status !== 'completed');
+      });
+    }
+
+    document.getElementById('bookBtn').onclick = function () {
+      Amicor.api('/rider/book', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: document.getElementById('name').value,
+          phone: document.getElementById('phone').value,
+          pickup: document.getElementById('pickup').value,
+          dropoff: document.getElementById('dropoff').value,
+          notes: document.getElementById('notes').value,
+          auto_dispatch: true,
+        }),
+      }).then(function (result) {
+        document.getElementById('trackId').value = result.trip.id;
+        lastTrackSig = '';
+        Amicor.toast('Booked — driver ' + ((result.dispatch && result.dispatch.driver_name) || 'pending'));
+        loadTrack();
+      }).catch(function (e) { Amicor.toast(e.message); });
+    };
+
+    document.getElementById('trackBtn').onclick = function () { lastTrackSig = ''; loadTrack().catch(function (e) { Amicor.toast(e.message); }); };
+    document.getElementById('payBtn').onclick = function () {
+      Amicor.api('/rider/pay/' + document.getElementById('trackId').value, { method: 'POST' })
+        .then(function () { Amicor.toast('Payment recorded'); })
+        .catch(function (e) { Amicor.toast(e.message); });
+    };
+
+    if (document.getElementById('trackId').value) loadTrack().catch(function () {});
+    AmicorStable.startPolling(function () {
+      if (document.getElementById('trackId').value) loadTrack().catch(function () {});
+    }, AmicorStable.POLL_MS);
+  </script>
+</body>
+</html>
