@@ -4,6 +4,7 @@ MVP routes: status, rides (GET/POST), drivers, providers, dashboard.
 Real-time routes: WebSocket, activity feed, events.
 """
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 import asyncio
 import json
@@ -72,7 +73,7 @@ from app.modules.health_isf.schemas import (
     DispatcherCustomerRequestAutoDispatchRequest,
     DispatcherCustomerRequestReassignRequest,
     DispatcherCustomerRequestReasonRequest,
-    DashboardMetrics, DispatchLogResponse, DriverCreate, DriverResponse, DriverRideActionRequest, DriverStatusUpdateRequest,
+    DashboardMetrics, DispatchLogResponse, DriverCreate, DriverContactRiderRequest, DriverContactRiderResponse, DriverResponse, DriverRideActionRequest, DriverStatusUpdateRequest,
     DriverApplicationCreateRequest,
     DriverApplicationResponse,
     DriverApplicationStatusUpdateRequest,
@@ -5079,6 +5080,20 @@ async def create_customer_ride_request(
             exc_info=True,
         )
 
+    try:
+        from app.modules.health_isf import notifications as notify
+
+        base_url = os.getenv("AMICOR_PUBLIC_URL", "http://127.0.0.1:8010")
+        tracking_url = f"{base_url.rstrip('/')}/app/riders?track={ride.id}"
+        notify.send_sms(
+            db,
+            to_phone=payload.rider_phone,
+            message=notify.build_rider_tracking_message(ride_id=ride.id, tracking_url=tracking_url),
+            ride_id=ride.id,
+        )
+    except Exception:
+        logger.warning("Rider confirmation SMS failed for ride_id=%s", ride.id, exc_info=True)
+
     return _serialize_customer_request(request_row)
 
 
@@ -7666,6 +7681,66 @@ async def driver_decline_ride(
     return ride
 
 
+@router.post("/drivers/{driver_id}/no-show", response_model=RideResponse)
+async def driver_no_show(
+    driver_id: str,
+    payload: DriverRideActionRequest,
+    _user = Depends(require_driver_workflow_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    try:
+        ride = service.driver_no_show(
+            db,
+            driver_id=driver_id,
+            ride_id=payload.ride_id,
+            actor_user_id=_user.id,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    emitter = get_emitter()
+    await emitter.emit_dispatch_changed(
+        organization_id=ride.organization_id,
+        event_name="rider-no-show",
+        actor_user_id=_user.id,
+        details={"ride_id": ride.id, "driver_id": driver_id, "note": payload.note},
+    )
+    return ride
+
+
+@router.post("/drivers/{driver_id}/contact-rider", response_model=DriverContactRiderResponse)
+async def driver_contact_rider(
+    driver_id: str,
+    payload: DriverContactRiderRequest,
+    _user = Depends(require_driver_workflow_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    try:
+        result = service.driver_contact_rider(
+            db,
+            driver_id=driver_id,
+            ride_id=payload.ride_id,
+            channel=payload.channel,
+            message=payload.message,
+            actor_user_id=_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DriverContactRiderResponse(**result)
+
+
 @router.post("/drivers/{driver_id}/arrived-pickup", response_model=RideResponse)
 def driver_arrived_pickup(
     driver_id: str,
@@ -9918,6 +9993,19 @@ def seed_phase43_data(
 ):
     effective_org_id = enforce_tenant_scope(user, organization_id)
     return service.seed_phase43_mvp(db, organization_id=effective_org_id)
+
+
+@router.post("/ops/seed-production-demo")
+def seed_production_demo_data(
+    organization_id: str | None = Query(None),
+    force: bool = Query(False),
+    _: None = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Seed 50+ drivers, 100+ patients, and 200+ trips for pilot/demo operations."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    return service.seed_production_demo_data(db, organization_id=effective_org_id, force=force)
 
 
 # ── Dashboard Endpoint ────────────────────────────────────────────────────────

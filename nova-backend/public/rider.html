@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amicor Rider Portal</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="/socket.io/socket.io.js" onerror="void 0"></script>
+  <script src="/js/core.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Rider Portal</h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+  <main>
+    <section class="card">
+      <h3>Book a Trip</h3>
+      <label>Your name<input id="name" /></label>
+      <label>Phone<input id="phone" placeholder="+1..." /></label>
+      <label>Email (for invoice)<input id="email" type="email" /></label>
+      <label>Pickup<input id="pickup" /></label>
+      <label>Destination<input id="dropoff" /></label>
+      <label>Notes<textarea id="notes" rows="2"></textarea></label>
+      <button id="bookBtn">Request Trip & Auto-Dispatch</button>
+    </section>
+    <section class="card">
+      <h3>Track Your Ride</h3>
+      <label>Trip ID<input id="trackId" /></label>
+      <button class="secondary" id="trackBtn">Load Tracking</button>
+      <div id="trackInfo"></div>
+      <div id="map" style="margin-top:12px"></div>
+      <button id="payBtn" class="hidden">Pay for Completed Trip</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    if (!Amicor.requireAuth(['rider', 'dispatcher', 'admin'])) throw new Error('auth');
+    Amicor.renderUserBar();
+    let map, driverMarker;
+    const params = new URLSearchParams(location.search);
+    if (params.get('trip')) document.getElementById('trackId').value = params.get('trip');
+
+    document.getElementById('bookBtn').onclick = async () => {
+      try {
+        const result = await Amicor.api('/rider/book', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: document.getElementById('name').value,
+            phone: document.getElementById('phone').value,
+            email: document.getElementById('email').value,
+            pickup: document.getElementById('pickup').value,
+            dropoff: document.getElementById('dropoff').value,
+            notes: document.getElementById('notes').value,
+            auto_dispatch: true,
+          }),
+        });
+        document.getElementById('trackId').value = result.trip.id;
+        Amicor.toast('Trip booked — driver ' + (result.dispatch && result.dispatch.driver_name || 'pending'));
+        loadTrack();
+      } catch (e) { Amicor.toast(e.message); }
+    };
+
+    async function loadTrack() {
+      const id = document.getElementById('trackId').value.trim();
+      if (!id) return;
+      const data = await Amicor.api('/rider/track/' + id);
+      const t = data.trip;
+      document.getElementById('trackInfo').innerHTML =
+        '<p><span class="pill">' + t.status + '</span> Driver: ' + (t.driver_name || 'Assigning...') + '</p>' +
+        '<p>' + t.pickup + ' → ' + t.dropoff + '</p>';
+      if (!map) {
+        map = L.map('map').setView([40.7128, -74.006], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      }
+      if (t.driver_lat && t.driver_lng) {
+        const latlng = [Number(t.driver_lat), Number(t.driver_lng)];
+        if (driverMarker) driverMarker.setLatLng(latlng);
+        else driverMarker = L.marker(latlng).addTo(map).bindPopup('Your driver');
+        map.setView(latlng, 13);
+      }
+      document.getElementById('payBtn').classList.toggle('hidden', t.status !== 'completed');
+    }
+
+    document.getElementById('trackBtn').onclick = () => loadTrack().catch((e) => Amicor.toast(e.message));
+    document.getElementById('payBtn').onclick = async () => {
+      try {
+        await Amicor.api('/rider/pay/' + document.getElementById('trackId').value, { method: 'POST' });
+        Amicor.toast('Payment recorded');
+      } catch (e) { Amicor.toast(e.message); }
+    };
+
+    Amicor.connectSocket({
+      refresh: (typeof AmicorStable !== 'undefined')
+        ? AmicorStable.debounce(() => { if (document.getElementById('trackId').value) loadTrack().catch(() => {}); }, 3000)
+        : () => { if (document.getElementById('trackId').value) loadTrack().catch(() => {}); },
+    });
+    if (document.getElementById('trackId').value) loadTrack().catch(() => {});
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+# Live operations deploy — PostgreSQL + full dispatch platform
+databases:
+  - name: amicor-nova-db
+    plan: free
+
+services:
+  - type: web
+    name: amicor-nova-live
+    runtime: node
+    rootDir: nova-backend
+    plan: free
+    buildCommand: npm install
+    startCommand: node scripts/setup.js && npm start
+    healthCheckPath: /api/ops/readiness
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: amicor-nova-db
+          property: connectionString
+      - key: AMICOR_PUBLIC_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+
+  # SQLite demo — no database addon required
+  - type: web
+    name: amicor-nova-stable
+    runtime: node
+    rootDir: nova-backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start:stable
+    healthCheckPath: /api/ops/readiness
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true

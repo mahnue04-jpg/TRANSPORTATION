@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amicor Provider Portal</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="/js/core.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Provider Portal</h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+  <main>
+    <section class="card">
+      <h3>Facility</h3>
+      <label>Select facility<select id="facilitySelect"></select></label>
+      <button id="refreshBtn" class="secondary">Refresh Dashboard</button>
+    </section>
+    <section class="card">
+      <h3>Bulk Schedule Trips</h3>
+      <p>Add rows for dialysis / recurring transports. Each row creates a real trip in the database.</p>
+      <div id="bulkRows"></div>
+      <button id="addRowBtn" class="secondary">Add Patient Row</button>
+      <button id="submitBulkBtn">Submit Bulk Schedule</button>
+    </section>
+    <section class="card">
+      <h3>Facility Trips</h3>
+      <div id="tripsTable"></div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    if (!Amicor.requireAuth(['provider', 'dispatcher', 'admin'])) throw new Error('auth');
+    Amicor.renderUserBar();
+
+    function addRow(values) {
+      const wrap = document.createElement('div');
+      wrap.className = 'card';
+      wrap.innerHTML =
+        '<label>Patient<input class="pname" value="' + (values && values.patient_name || '') + '" /></label>' +
+        '<label>Phone<input class="pphone" value="' + (values && values.phone || '') + '" /></label>' +
+        '<label>Pickup<input class="ppickup" value="' + (values && values.pickup || '') + '" /></label>' +
+        '<label>Dropoff<input class="pdropoff" value="' + (values && values.dropoff || '') + '" /></label>' +
+        '<label>Type<select class="ptype"><option>medical</option><option>dialysis</option><option>discharge</option></select></label>';
+      document.getElementById('bulkRows').appendChild(wrap);
+    }
+
+    async function loadFacilities() {
+      const facilities = await Amicor.api('/facilities');
+      document.getElementById('facilitySelect').innerHTML = facilities.map((f) =>
+        '<option value="' + f.id + '">' + f.name + '</option>'
+      ).join('');
+      refreshDashboard();
+    }
+
+    async function refreshDashboard() {
+      const facilityId = document.getElementById('facilitySelect').value;
+      const data = await Amicor.api('/provider/dashboard?facility_id=' + encodeURIComponent(facilityId));
+      const html = '<table><thead><tr><th>Status</th><th>Patient</th><th>Route</th><th>Fare</th></tr></thead><tbody>' +
+        data.trips.map((t) => '<tr><td><span class="pill">' + t.status + '</span></td><td>' + (t.patient_name||'—') + '</td><td>' + t.pickup + '</td><td>$' + Number(t.estimated_fare||0).toFixed(2) + '</td></tr>').join('') +
+        '</tbody></table>';
+      if (typeof AmicorStable !== 'undefined') AmicorStable.setHtmlIfChanged(document.getElementById('tripsTable'), html);
+      else document.getElementById('tripsTable').innerHTML = html;
+    }
+
+    const refreshDashboardStable = (typeof AmicorStable !== 'undefined')
+      ? AmicorStable.debounce(() => refreshDashboard().catch((e) => Amicor.toast(e.message)), 2500)
+      : () => refreshDashboard().catch((e) => Amicor.toast(e.message));
+
+    document.getElementById('addRowBtn').onclick = () => addRow({});
+    document.getElementById('refreshBtn').onclick = () => refreshDashboardStable();
+    document.getElementById('submitBulkBtn').onclick = async () => {
+      const trips = Array.from(document.querySelectorAll('#bulkRows .card')).map((row) => ({
+        patient_name: row.querySelector('.pname').value,
+        phone: row.querySelector('.pphone').value,
+        pickup: row.querySelector('.ppickup').value,
+        dropoff: row.querySelector('.pdropoff').value,
+        type: row.querySelector('.ptype').value,
+      })).filter((t) => t.pickup && t.dropoff);
+      try {
+        const result = await Amicor.api('/provider/bulk-schedule', {
+          method: 'POST',
+          body: JSON.stringify({
+            facility_id: document.getElementById('facilitySelect').value,
+            label: 'Provider bulk upload',
+            trips,
+          }),
+        });
+        Amicor.toast('Created ' + result.trips.length + ' trips');
+        document.getElementById('bulkRows').innerHTML = '';
+        refreshDashboard();
+      } catch (e) { Amicor.toast(e.message); }
+    };
+
+    addRow({ patient_name: 'Dialysis Patient A', pickup: '100 Main St', dropoff: 'Queens Dialysis Center' });
+    addRow({ patient_name: 'Dialysis Patient B', pickup: '200 Oak Ave', dropoff: 'Queens Dialysis Center' });
+    loadFacilities().catch((e) => Amicor.toast(e.message));
+  </script>
+</body>
+</html>

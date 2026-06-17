@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#38bdf8" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>Amicor Driver</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <script src="/js/stable-ui.js"></script>
+  <script src="/socket.io/socket.io.js" onerror="void 0"></script>
+  <script src="/js/core.js"></script>
+</head>
+<body class="stable-boot">
+  <header class="app-header">
+    <h1>Driver Mobile</h1>
+    <div id="userBar" class="hidden"><span id="userLabel"></span> <button class="secondary" id="logoutBtn">Logout</button></div>
+  </header>
+  <main>
+    <section class="card grid-2" id="earningsPanel"></section>
+    <section class="card" id="tripPanel"><p class="muted">Loading trip...</p></section>
+    <section class="card">
+      <h3>GPS Tracking</h3>
+      <p id="gpsStatus">Waiting for location...</p>
+      <button id="gpsToggle">Start GPS Tracking</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    if (!Amicor.requireAuth(['driver', 'dispatcher', 'admin'])) throw new Error('auth');
+    Amicor.renderUserBar();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (r) { r.unregister(); });
+      });
+    }
+
+    let activeTrip = null;
+    let driver = null;
+    let gpsWatch = null;
+    let lastTripSig = '';
+    let lastGpsSend = 0;
+
+    async function loadDriver() {
+      const data = await Amicor.api('/driver/me');
+      driver = data.driver;
+      activeTrip = data.active_trip;
+      renderEarnings();
+      renderTrip();
+    }
+
+    function renderEarnings() {
+      Amicor.api('/driver/earnings').then((e) => {
+        document.getElementById('earningsPanel').innerHTML =
+          '<div class="metric"><span>Today</span><strong>$' + Number(e.earnings_today || 0).toFixed(2) + '</strong></div>' +
+          '<div class="metric"><span>Trips Today</span><strong>' + (e.trips_today || 0) + '</strong></div>' +
+          '<div class="metric"><span>Lifetime</span><strong>$' + Number(e.lifetime_earnings || 0).toFixed(2) + '</strong></div>' +
+          '<div class="metric"><span>Status</span><strong>' + (driver.status || 'offline') + '</strong></div>';
+      }).catch((err) => Amicor.toast(err.message));
+    }
+
+    function renderTrip() {
+      const panel = document.getElementById('tripPanel');
+      if (!activeTrip) {
+        const html = '<h3>No active trip</h3><p>Check dispatch for new assignments.</p>';
+        if (typeof AmicorStable !== 'undefined') AmicorStable.setHtmlIfChanged(panel, html);
+        else panel.innerHTML = html;
+        lastTripSig = '';
+        return;
+      }
+      const sig = activeTrip.id + ':' + activeTrip.status;
+      if (sig === lastTripSig) return;
+      lastTripSig = sig;
+      const s = activeTrip.status;
+      panel.innerHTML =
+        '<h3>Trip ' + activeTrip.id.slice(0, 8) + ' <span class="pill">' + s + '</span></h3>' +
+        '<p><strong>Rider:</strong> ' + (activeTrip.patient_name || 'Patient') + '</p>' +
+        '<p><strong>Pickup:</strong> ' + activeTrip.pickup + '</p>' +
+        '<p><strong>Dropoff:</strong> ' + activeTrip.dropoff + '</p>' +
+        '<p><strong>Fare:</strong> $' + Number(activeTrip.estimated_fare || 0).toFixed(2) + '</p>' +
+        '<div>' +
+          '<button data-a="accept"' + (['assigned','pending'].includes(s)?'':' disabled') + '>Accept</button>' +
+          '<button data-a="arrived"' + (['driver_en_route','assigned'].includes(s)?'':' disabled') + '>Arrived</button>' +
+          '<button data-a="onboard"' + (['arrived'].includes(s)?'':' disabled') + '>Rider Onboard</button>' +
+          '<button data-a="transport"' + (['rider_onboard'].includes(s)?'':' disabled') + '>Start Transport</button>' +
+          '<button data-a="complete"' + (['in_progress','rider_onboard'].includes(s)?'':' disabled') + '>Complete</button>' +
+          '<button class="secondary" data-a="contact">Call/SMS Rider</button>' +
+          '<button class="danger" data-a="noshow">No Show</button>' +
+        '</div>';
+      panel.querySelectorAll('[data-a]').forEach((btn) => {
+        btn.onclick = () => runAction(btn.getAttribute('data-a'));
+      });
+    }
+
+    async function runAction(action) {
+      if (!activeTrip) return;
+      const id = activeTrip.id;
+      try {
+        if (action === 'accept') await Amicor.api('/trips/' + id + '/accept', { method: 'POST' });
+        else if (action === 'arrived') await Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'arrived' }) });
+        else if (action === 'onboard') await Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'rider_onboard' }) });
+        else if (action === 'transport') await Amicor.api('/trips/' + id + '/status', { method: 'PUT', body: JSON.stringify({ status: 'in_progress' }) });
+        else if (action === 'complete') {
+          await Amicor.api('/trips/' + id + '/complete', { method: 'PUT' });
+          await Amicor.api('/create-payment-intent', { method: 'POST', body: JSON.stringify({ trip_id: id }) });
+        }
+        else if (action === 'contact') {
+          const r = await Amicor.api('/trips/' + id + '/contact-rider', { method: 'POST' });
+          if (r.dial_target) window.location.href = 'tel:' + r.dial_target;
+        }
+        else if (action === 'noshow') await Amicor.api('/trips/' + id + '/no-show', { method: 'POST' });
+        Amicor.toast('Updated');
+        await loadDriver();
+      } catch (e) { Amicor.toast(e.message); }
+    }
+
+    document.getElementById('gpsToggle').onclick = function () {
+      if (gpsWatch) {
+        navigator.geolocation.clearWatch(gpsWatch);
+        gpsWatch = null;
+        this.textContent = 'Start GPS Tracking';
+        return;
+      }
+      if (!navigator.geolocation) return Amicor.toast('GPS unavailable');
+      this.textContent = 'Stop GPS Tracking';
+      gpsWatch = navigator.geolocation.watchPosition(async (pos) => {
+        const { latitude: lat, longitude: lng, speed } = pos.coords;
+        document.getElementById('gpsStatus').textContent = 'Lat ' + lat.toFixed(5) + ', Lng ' + lng.toFixed(5);
+        const now = Date.now();
+        if (now - lastGpsSend < 12000) return;
+        lastGpsSend = now;
+        try {
+          await Amicor.api('/driver/gps', {
+            method: 'POST',
+            body: JSON.stringify({ lat, lng, speed_kph: speed, trip_id: activeTrip && activeTrip.id }),
+          });
+        } catch (_) {}
+      }, (err) => { document.getElementById('gpsStatus').textContent = err.message; }, { enableHighAccuracy: true });
+    };
+
+    const loadDriverStable = (typeof AmicorStable !== 'undefined')
+      ? AmicorStable.throttle(() => loadDriver().catch((e) => Amicor.toast(e.message)), 8000)
+      : () => loadDriver().catch((e) => Amicor.toast(e.message));
+
+    setInterval(function () {
+      if (!document.hidden) loadDriverStable();
+    }, 45000);
+    loadDriver();
+  </script>
+</body>
+</html>

@@ -1,24 +1,22 @@
 {
   "name": "amicor-nova-backend",
   "version": "1.0.0",
-  "description": "Amicor Nova health transportation dispatch API",
+  "description": "Amicor Nova health transportation dispatch API (Express + PostgreSQL + Socket.IO)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:stable": "node server-stable.js",
     "dev": "node --watch server.js",
-    "setup": "node scripts/setup.js"
+    "dev:stable": "node --watch server-stable.js",
+    "setup": "node scripts/setup.js",
+    "postgres:docker": "powershell -ExecutionPolicy Bypass -File scripts/start-postgres-docker.ps1",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
   },
-  "keywords": [
-    "amicor",
-    "nova",
-    "nemt",
-    "dispatch",
-    "health-transportation"
-  ],
-  "license": "ISC",
   "engines": {
     "node": ">=18.0.0"
   },
+  "license": "ISC",
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -30,6 +28,7 @@
     "morgan": "^1.10.0",
     "pg": "^8.13.1",
     "socket.io": "^4.8.1",
+    "sqlite3": "^5.1.7",
     "stripe": "^17.5.0",
     "uuid": "^11.0.5"
   }

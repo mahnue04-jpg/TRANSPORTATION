@@ -3499,6 +3499,66 @@ def decline_driver_ride(
     return ride
 
 
+def driver_no_show(
+    db: Session,
+    driver_id: str,
+    ride_id: str,
+    actor_user_id: Optional[str] = None,
+    note: Optional[str] = None,
+) -> Optional[HealthISFRide]:
+    """Mark rider no-show, release driver, and return ride to dispatch queue."""
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        return None
+    if ride.driver_id != driver.id:
+        raise ValueError("Ride is not assigned to this driver")
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle_state in (RideStatus.COMPLETED.value, RideStatus.CANCELLED.value):
+        raise ValueError("Cannot mark no-show on a terminal ride")
+
+    ride.driver_id = None
+    ride.assigned_by_user_id = actor_user_id
+    ride.accepted_at = None
+    ride.arrived_at = None
+    _set_driver_status(db, driver, DriverStatus.AVAILABLE)
+    driver.availability_state = "available"
+    driver.is_online = True
+    driver.auth_state = "active"
+    driver.last_seen_at = now()
+
+    RideLifecycleManager.transition_ride(
+        db,
+        ride,
+        target_state=RideStatus.CANCELLED.value,
+        action_type="rider_no_show",
+        actor_user_id=actor_user_id,
+        note=note or "Rider no-show reported by driver",
+        payload={"driver_id": driver.id, "no_show": True},
+    )
+    assignment = _mark_dispatch_assignment_state(
+        db,
+        ride_id=ride.id,
+        assignment_state=DispatchAssignmentState.REJECTED.value,
+        note=note or "Rider no-show",
+    )
+    if assignment:
+        assignment.closed_reason = "rider_no_show"
+        assignment.closed_at = assignment.closed_at or now()
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.CANCELLED.value)
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    _safe_runtime_update(
+        ride=ride,
+        state=RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status),
+        source="driver_no_show",
+        driver_id=None,
+    )
+    return ride
+
+
 def driver_arrived_pickup(
     db: Session,
     driver_id: str,
@@ -4364,6 +4424,271 @@ def seed_phase43_mvp(db: Session, *, organization_id: Optional[str] = None) -> d
         "base_seed": base_summary,
         "created_recurring_templates": created_recurring,
         "created_driver_applications": created_applications,
+    }
+
+
+def driver_contact_rider(
+    db: Session,
+    *,
+    driver_id: str,
+    ride_id: str,
+    channel: str = "sms",
+    message: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Notify rider via SMS/email or return dial target for voice contact."""
+    from app.modules.health_isf import notifications as notify
+
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        raise ValueError("Driver or ride not found")
+    if ride.driver_id and ride.driver_id != driver.id:
+        raise ValueError("Ride is not assigned to this driver")
+
+    rider_phone = str(ride.passenger_phone or "").strip()
+    normalized_channel = str(channel or "sms").strip().lower()
+    if normalized_channel in {"call", "voice", "phone"}:
+        if not rider_phone:
+            raise ValueError("Rider phone number is unavailable for this ride")
+        return {
+            "ok": True,
+            "channel": "call",
+            "dial_target": rider_phone,
+            "message": "Use device dialer to contact rider",
+        }
+
+    if not rider_phone:
+        raise ValueError("Rider phone number is unavailable for this ride")
+
+    default_message = (
+        f"Amicor driver {driver.name} is en route for your transport to "
+        f"{ride.dropoff_address or 'your destination'}. Reply if you need assistance."
+    )
+    sms_body = str(message or default_message).strip()
+    result = notify.send_sms(
+        db,
+        to_phone=rider_phone,
+        message=sms_body,
+        ride_id=ride.id,
+        driver_id=driver.id,
+        metadata={"actor_user_id": actor_user_id, "ride_id": ride.id},
+    )
+    result["dial_target"] = rider_phone
+    return result
+
+
+def seed_production_demo_data(
+    db: Session,
+    *,
+    organization_id: Optional[str] = None,
+    force: bool = False,
+    target_drivers: int = 50,
+    target_rides: int = 200,
+    target_patients: int = 100,
+) -> dict[str, Any]:
+    """Populate realistic demo volume for sales, QA, and pilot operations."""
+    org = _get_or_create_default_org(db) if not organization_id else _get_organization_by_id(db, organization_id)
+    if not org:
+        raise ValueError("Organization not found for production demo seeding")
+
+    init_sample_data(db)
+
+    existing_drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).count()
+    existing_rides = db.query(HealthISFRide).filter(HealthISFRide.organization_id == org.id).count()
+    existing_providers = db.query(HealthISFProvider).filter(HealthISFProvider.organization_id == org.id).count()
+
+    if existing_rides >= target_rides and existing_drivers >= target_drivers and not force:
+        return {
+            "seed": "production_demo",
+            "organization_id": org.id,
+            "already_sufficient": True,
+            "drivers": existing_drivers,
+            "rides": existing_rides,
+            "providers": existing_providers,
+        }
+
+    provider_names = [
+        "Lincoln Medical Center",
+        "Queens Dialysis Facility",
+        "Manhattan Health Hub",
+        "Brooklyn Community Clinic",
+        "Bronx Care Network",
+        "Staten Island Rehab Center",
+        "Harlem Wellness Center",
+        "Jamaica NEMT Hub",
+        "Flushing Medical Plaza",
+        "Yonkers Senior Care",
+    ]
+    providers = get_all_providers(db, limit=100)
+    providers_map = {p.name: p for p in providers}
+    created_providers = 0
+    for idx, name in enumerate(provider_names):
+        if name in providers_map:
+            continue
+        provider = create_provider(
+            db,
+            organization_id=org.id,
+            name=name,
+            address=f"{100 + idx} Care Blvd, New York, NY 100{idx % 10}",
+            phone=f"212-555-{3100 + idx}",
+            service_type="clinic" if idx % 2 == 0 else "facility",
+        )
+        providers_map[name] = provider
+        created_providers += 1
+    providers = list(providers_map.values())
+
+    first_names = [
+        "Patricia", "Robert", "Jennifer", "Michael", "Linda", "William", "Elizabeth", "David",
+        "Barbara", "Richard", "Susan", "Joseph", "Jessica", "Thomas", "Sarah", "Charles",
+        "Karen", "Christopher", "Nancy", "Daniel", "Lisa", "Matthew", "Betty", "Anthony",
+        "Margaret", "Donald", "Sandra", "Mark", "Ashley", "Paul", "Kimberly", "Steven",
+        "Emily", "Andrew", "Donna", "Joshua", "Michelle", "Kenneth", "Carol", "Kevin",
+        "Amanda", "Brian", "Melissa", "George", "Deborah", "Edward", "Stephanie", "Ronald",
+        "Rebecca", "Timothy", "Laura", "Jason", "Sharon", "Jeffrey", "Cynthia", "Ryan",
+        "Kathleen", "Jacob", "Amy", "Gary", "Angela", "Nicholas", "Shirley", "Eric",
+        "Anna", "Jonathan", "Brenda", "Stephen", "Pamela", "Larry", "Emma", "Justin",
+        "Nicole", "Scott", "Helen", "Brandon", "Samantha", "Benjamin", "Katherine", "Samuel",
+        "Christine", "Gregory", "Debra", "Alexander", "Rachel", "Patrick", "Carolyn", "Frank",
+        "Janet", "Raymond", "Catherine", "Jack", "Maria", "Dennis", "Heather", "Jerry",
+        "Diane", "Tyler", "Julie", "Aaron", "Joyce", "Jose", "Victoria", "Adam",
+    ]
+    last_names = [
+        "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez",
+        "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor",
+        "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White", "Harris",
+        "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen",
+    ]
+    driver_first = ["James", "Maria", "David", "Sarah", "Carlos", "Aisha", "Brian", "Nina"]
+    driver_last = ["Smith", "Garcia", "Chen", "Patel", "Johnson", "Williams", "Brown", "Davis"]
+    vehicle_types = ["sedan", "van", "wheelchair_van", "sedan", "van"]
+    driver_statuses = [DriverStatus.AVAILABLE, DriverStatus.BUSY, DriverStatus.OFFLINE]
+    ride_statuses = [
+        RideStatus.PENDING,
+        RideStatus.ACCEPTED,
+        RideStatus.IN_TRANSIT,
+        RideStatus.COMPLETED,
+        RideStatus.CANCELLED,
+    ]
+    service_types = ["dialysis", "medical_appointment", "medical_transport", "discharge", "recurring"]
+
+    created_drivers = 0
+    drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).all()
+    driver_target = max(target_drivers, existing_drivers)
+    while len(drivers) < driver_target:
+        idx = len(drivers)
+        vehicle = HealthISFVehicle(
+            id=uuid4(),
+            organization_id=org.id,
+            vehicle_type=vehicle_types[idx % len(vehicle_types)],
+            vehicle_plate=f"NYC-{4000 + idx}",
+            capacity=4 if vehicle_types[idx % len(vehicle_types)] != "wheelchair_van" else 2,
+            is_active=True,
+            created_at=now(),
+            updated_at=now(),
+        )
+        db.add(vehicle)
+        db.flush()
+        driver = HealthISFDriver(
+            id=uuid4(),
+            organization_id=org.id,
+            vehicle_id=vehicle.id,
+            name=f"{driver_first[idx % len(driver_first)]} {driver_last[idx % len(driver_last)]}",
+            phone=f"917-555-{5000 + idx}",
+            vehicle_type=vehicle.vehicle_type,
+            vehicle_plate=vehicle.vehicle_plate,
+            status=driver_statuses[idx % len(driver_statuses)],
+            is_active=True,
+            total_trips=idx % 40,
+            rating=round(4.5 + ((idx % 5) * 0.1), 1),
+            created_at=now(),
+            updated_at=now(),
+        )
+        db.add(driver)
+        db.flush()
+        drivers.append(driver)
+        created_drivers += 1
+
+    created_rides = 0
+    ride_target = max(target_rides, existing_rides)
+    for idx in range(existing_rides, ride_target):
+        status = ride_statuses[idx % len(ride_statuses)]
+        assigned_driver = drivers[idx % len(drivers)] if status != RideStatus.PENDING else None
+        if status == RideStatus.PENDING:
+            assigned_driver = None
+        passenger = f"{first_names[idx % len(first_names)]} {last_names[idx % len(last_names)]}"
+        ride = HealthISFRide(
+            id=uuid4(),
+            organization_id=org.id,
+            provider_id=providers[idx % len(providers)].id,
+            driver_id=assigned_driver.id if assigned_driver else None,
+            passenger_name=passenger,
+            passenger_phone=f"646-555-{6000 + (idx % target_patients)}",
+            pickup_address=f"{100 + (idx % 900)} Main St, New York, NY 100{idx % 10}",
+            dropoff_address=f"{200 + (idx % 800)} Health Ave, Brooklyn, NY 112{idx % 10}",
+            service_type=service_types[idx % len(service_types)],
+            status=status,
+            lifecycle_state=(
+                RideStatus.COMPLETED.value
+                if status == RideStatus.COMPLETED
+                else RideStatus.ASSIGNED.value
+                if status in (RideStatus.ACCEPTED, RideStatus.IN_TRANSIT)
+                else RideStatus.QUEUED.value
+            ),
+            estimated_distance_miles=round(2.5 + (idx % 18) * 0.5, 1),
+            estimated_duration_minutes=10 + (idx % 45),
+            requested_at=now() - timedelta(hours=idx % 72),
+            accepted_at=now() - timedelta(hours=max(0, (idx % 72) - 1)) if assigned_driver else None,
+            completed_at=now() - timedelta(hours=max(0, (idx % 72) - 2)) if status == RideStatus.COMPLETED else None,
+            created_at=now(),
+            updated_at=now(),
+        )
+        db.add(ride)
+        db.flush()
+        _record_dispatch(db, ride_id=ride.id, action="ride_created", note="Production demo seed", driver_id=ride.driver_id)
+        _record_status_history(db, ride.id, None, str(ride.status))
+        created_rides += 1
+
+        if status == RideStatus.COMPLETED and assigned_driver:
+            trip = HealthISFTrip(
+                id=uuid4(),
+                ride_id=ride.id,
+                driver_id=assigned_driver.id,
+                status=TripStatus.COMPLETED,
+                start_time=now(),
+                end_time=now(),
+                distance_miles=ride.estimated_distance_miles,
+                duration_minutes=ride.estimated_duration_minutes,
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(trip)
+            db.flush()
+            payout = HealthISFPayout(
+                id=uuid4(),
+                driver_id=assigned_driver.id,
+                trip_id=trip.id,
+                amount_usd=round(15.0 + (idx % 25), 2),
+                status="processed",
+                description=f"Demo payout for trip {trip.id[:8]}",
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(payout)
+
+    db.commit()
+    return {
+        "seed": "production_demo",
+        "organization_id": org.id,
+        "created_providers": created_providers,
+        "created_drivers": created_drivers,
+        "created_rides": created_rides,
+        "totals": {
+            "drivers": db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).count(),
+            "rides": db.query(HealthISFRide).filter(HealthISFRide.organization_id == org.id).count(),
+            "providers": db.query(HealthISFProvider).filter(HealthISFProvider.organization_id == org.id).count(),
+            "unique_patients": min(target_patients, target_rides),
+        },
     }
 
 

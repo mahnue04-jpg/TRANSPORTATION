@@ -36,10 +36,21 @@ function generateSessionId() {
 function currentRuntimeHost() {
   try {
     if (typeof window !== "undefined" && window.location && window.location.host) {
-      return String(window.location.host || "").toLowerCase();
+      return normalizeRuntimeHost(String(window.location.host || ""));
     }
   } catch (_) {}
   return "";
+}
+
+function normalizeRuntimeHost(host) {
+  const value = String(host || "").toLowerCase();
+  if (value === "localhost:8010" || value === "127.0.0.1:8010") {
+    return "local-dev:8010";
+  }
+  if (value === "localhost:8011" || value === "127.0.0.1:8011") {
+    return "local-dev:8011";
+  }
+  return value;
 }
 
 function emitSessionEvent(name, detail) {
@@ -381,9 +392,11 @@ const AmiCorSession = {
       const expiresIn = Number(payload.expires_in || 3600);
       _identity.tokenExpiresAt = Date.now() + (expiresIn * 1000);
       saveToStorage();
-      emitSessionEvent("amicor:session-recovered", {
-        reason: force ? "forced_refresh" : "scheduled_refresh",
-      });
+      if (force) {
+        emitSessionEvent("amicor:session-recovered", {
+          reason: "forced_refresh",
+        });
+      }
       return !!_identity.accessToken;
     } catch (_) {
       return false;

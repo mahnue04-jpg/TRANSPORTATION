@@ -86,6 +86,21 @@ class DriverRideActionRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=1024)
 
 
+class DriverContactRiderRequest(BaseModel):
+    ride_id: str = Field(..., min_length=1, max_length=36)
+    channel: str = Field("sms", min_length=1, max_length=16)
+    message: Optional[str] = Field(None, max_length=512)
+
+
+class DriverContactRiderResponse(BaseModel):
+    ok: bool = True
+    channel: str
+    provider: Optional[str] = None
+    reference: Optional[str] = None
+    dial_target: Optional[str] = None
+    message: Optional[str] = None
+
+
 class DriverResponse(DriverBase):
     id: str
     status: str

@@ -1,7 +1,8 @@
 services:
   - type: web
-    name: amicor-api
+    name: amicor-health-isf
     runtime: python
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -13,5 +14,27 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      - key: JWT_SECRET
+        sync: false
       - key: ALLOWED_ORIGINS
+        sync: false
+      - key: AMICOR_SEED_PASSWORD
+        sync: false
+      - key: AMICOR_PUBLIC_URL
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "10"
+      - key: DB_MAX_OVERFLOW
+        value: "20"
+      - key: HEALTH_ISF_STRIPE_ENABLED
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: SENTRY_DSN
         sync: false

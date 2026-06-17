@@ -115,6 +115,18 @@ body {
 .ops-main {
   padding: 16px;
   overflow-x: hidden;
+  will-change: transform;
+  contain: layout style;
+}
+
+#page-content.ops-content {
+  will-change: transform;
+  contain: layout style paint;
+}
+
+.ops-sidebar {
+  will-change: transform;
+  contain: layout style;
 }
 
 .ops-topbar {

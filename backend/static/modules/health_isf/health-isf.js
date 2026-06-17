@@ -9,7 +9,20 @@
   const REALTIME_STALE_THRESHOLD_MS = 45000;
   const NAVIGATION_COOLDOWN_MS = 650;
   const REFRESH_TRIGGER_COOLDOWN_MS = 1800;
+  const REALTIME_EVENT_REFRESH_COOLDOWN_MS = 12000;
+  const AUTO_REFRESH_INTERVAL_MS = 60000;
+  const REALTIME_SCHEDULE_DEBOUNCE_MS = 5000;
   const HYDRATION_EVENT_COOLDOWN_MS = 5000;
+  const PATH_ROUTE_ALIASES = {
+    dispatcher: "dispatch",
+    dispatch: "dispatch",
+    drivers: "drivers",
+    providers: "providers",
+    rides: "rides",
+    dashboard: "dashboard",
+    analytics: "analytics",
+    billing: "billing",
+  };
   const HASH_ROUTE_SUPPRESSION_MS = 2000;
   const RECONNECT_BURST_WINDOW_MS = 30000;
   const RECONNECT_BURST_LIMIT = 6;
@@ -114,6 +127,8 @@
     lastActionAt: null,
     activeOrganizationId: null,
     shellRoleOverride: null,
+    shellRenderInitialized: false,
+    lastRenderSignature: "",
     customerWorkspace: {
       riderPhone: "",
       history: [],
@@ -439,7 +454,10 @@
     if (!state.active) return;
     const refreshSource = String(source || "unknown");
     const bypassCooldown = !!opts.bypassCooldown;
-    if (!bypassCooldown && shouldThrottleBySource("lastRefreshBySource", refreshSource, REFRESH_TRIGGER_COOLDOWN_MS)) {
+    const refreshCooldownMs = refreshSource === "realtime-event"
+      ? REALTIME_EVENT_REFRESH_COOLDOWN_MS
+      : REFRESH_TRIGGER_COOLDOWN_MS;
+    if (!bypassCooldown && shouldThrottleBySource("lastRefreshBySource", refreshSource, refreshCooldownMs)) {
       incrementStabilityCounter("refreshSuppressed", 1);
       logDiag("Refresh suppressed", { source: refreshSource, reason: "cooldown" });
       return null;
@@ -1187,7 +1205,8 @@
       ".health-isf-shell[data-shell-mode=auth-gate] .health-isf-subnav,.health-isf-shell[data-shell-mode=auth-gate] .health-isf-grid{display:none !important}",
       ".health-runtime-shell{display:none !important}",
       ".health-isf-shell[data-diagnostics-visible=true] .health-runtime-shell{display:block !important}",
-      ".health-tab.is-locked{opacity:0.42;filter:saturate(0.7);cursor:not-allowed}",
+      ".health-isf-grid[hidden]{display:none !important;visibility:hidden;}",
+      ".health-isf-shell{contain:layout style;}",
       ".health-shell-route-hint{font-size:0.76rem;color:var(--text-dim);margin-left:auto;max-width:100%}",
     ].join("\n");
     document.head.appendChild(style);
@@ -1269,7 +1288,11 @@
     const developerMode = isDevelopmentPreviewMode();
     const diagnosticsVisible = developerMode || effectiveRole === "admin";
     state.shellProfile = Object.assign({}, profile, { effectiveRole: effectiveRole });
-    state.authGateVisible = !profile.active;
+    if (!profile.active && !state.active) {
+      state.authGateVisible = true;
+    } else if (profile.active) {
+      state.authGateVisible = false;
+    }
     els.shell.dataset.shellMode = shellMode;
     els.shell.dataset.devPreview = developerMode ? "true" : "false";
     els.shell.dataset.diagnosticsVisible = diagnosticsVisible ? "true" : "false";
@@ -1287,7 +1310,6 @@
 
     const sessionBar = document.getElementById("health-shell-session");
     if (sessionBar) {
-      incrementStabilityCounter("shellRenderReplacements", 1);
       const roleLabel = String(effectiveRole || "guest").replace(/^./, (m) => m.toUpperCase());
       const routeLabel = profile.active ? clampRouteForRole(state.route, effectiveRole) : "locked";
       const expiryLabel = profile.tokenExpiresInMinutes === null ? "no expiry" : profile.tokenExpiresInMinutes + " min";
@@ -1295,27 +1317,39 @@
         const severity = String((event && (event.severity || event.alert_level || event.priority)) || "").toLowerCase();
         return severity === "urgent" || severity === "high" || severity === "critical";
       }).length;
-      const roleOptions = Object.keys(ROLE_ROUTE_ACCESS).filter(function (role) {
-        return role !== "guest";
-      }).map(function (role) {
-        const selected = effectiveRole === role ? " selected" : "";
-        return '<option value="' + escapeHtml(role) + '"' + selected + '>' + escapeHtml(role) + '</option>';
-      }).join("");
-      sessionBar.innerHTML = [
-        '<span class="health-shell-chip" data-tone="' + (profile.active ? "ok" : "warn") + '">' + escapeHtml(profile.active ? (profile.displayName || "Authenticated user") : "Session required") + '</span>',
-        '<span class="health-shell-chip">Organization: ' + escapeHtml(profile.organizationName || profile.organizationId || "tenant scoped") + '</span>',
-        '<span class="health-shell-chip">Role: ' + escapeHtml(roleLabel) + '</span>',
-        '<span class="health-shell-chip">Route: ' + escapeHtml(routeLabel) + '</span>',
-        '<span class="health-shell-chip" data-tone="' + (notifications > 0 ? 'warn' : 'ok') + '">Notifications: ' + escapeHtml(String(notifications)) + '</span>',
-        '<span class="health-shell-chip">Shift: ' + escapeHtml(profile.active ? 'active' : 'inactive') + '</span>',
-        (diagnosticsVisible ? '<span class="health-shell-chip" data-tone="warn">Diagnostics Overlay</span>' : ''),
-        '<span class="health-shell-chip">Token: ' + escapeHtml(profile.accessTokenPresent ? expiryLabel : "missing") + '</span>',
-        '<label class="health-shell-chip">Workspace <select data-health-action="switch-role" id="health-shell-role-switch">' + roleOptions + '</select></label>',
-        '<button type="button" class="toolbar-btn" data-health-action="clear-role-override">Use session role</button>',
-        profile.active
-          ? '<button type="button" class="toolbar-btn" data-health-action="logout">Sign out</button>'
-          : '<button type="button" class="toolbar-btn" data-health-action="shell-login">Sign in</button>',
-      ].join("");
+      const sessionBarSignature = [
+        profile.active ? "1" : "0",
+        effectiveRole,
+        routeLabel,
+        notifications,
+        profile.accessTokenPresent ? "1" : "0",
+        expiryLabel,
+      ].join("|");
+      if (sessionBar.dataset.renderSig !== sessionBarSignature) {
+        incrementStabilityCounter("shellRenderReplacements", 1);
+        sessionBar.dataset.renderSig = sessionBarSignature;
+        const roleOptions = Object.keys(ROLE_ROUTE_ACCESS).filter(function (role) {
+          return role !== "guest";
+        }).map(function (role) {
+          const selected = effectiveRole === role ? " selected" : "";
+          return '<option value="' + escapeHtml(role) + '"' + selected + '>' + escapeHtml(role) + '</option>';
+        }).join("");
+        sessionBar.innerHTML = [
+          '<span class="health-shell-chip" data-tone="' + (profile.active ? "ok" : "warn") + '">' + escapeHtml(profile.active ? (profile.displayName || "Authenticated user") : "Session required") + '</span>',
+          '<span class="health-shell-chip">Organization: ' + escapeHtml(profile.organizationName || profile.organizationId || "tenant scoped") + '</span>',
+          '<span class="health-shell-chip">Role: ' + escapeHtml(roleLabel) + '</span>',
+          '<span class="health-shell-chip">Route: ' + escapeHtml(routeLabel) + '</span>',
+          '<span class="health-shell-chip" data-tone="' + (notifications > 0 ? 'warn' : 'ok') + '">Notifications: ' + escapeHtml(String(notifications)) + '</span>',
+          '<span class="health-shell-chip">Shift: ' + escapeHtml(profile.active ? 'active' : 'inactive') + '</span>',
+          (diagnosticsVisible ? '<span class="health-shell-chip" data-tone="warn">Diagnostics Overlay</span>' : ''),
+          '<span class="health-shell-chip">Token: ' + escapeHtml(profile.accessTokenPresent ? expiryLabel : "missing") + '</span>',
+          '<label class="health-shell-chip">Workspace <select data-health-action="switch-role" id="health-shell-role-switch">' + roleOptions + '</select></label>',
+          '<button type="button" class="toolbar-btn" data-health-action="clear-role-override">Use session role</button>',
+          profile.active
+            ? '<button type="button" class="toolbar-btn" data-health-action="logout">Sign out</button>'
+            : '<button type="button" class="toolbar-btn" data-health-action="shell-login">Sign in</button>',
+        ].join("");
+      }
     }
 
     const topbarOrg = document.getElementById("ops-topbar-org");
@@ -1371,9 +1405,13 @@
       roleSwitch.disabled = !profile.active;
     }
 
-    els.views.forEach((view) => {
-      view.hidden = !profile.active;
-    });
+    if (!profile.active) {
+      els.views.forEach((view) => {
+        view.hidden = true;
+      });
+    } else {
+      showView(clampRouteForRole(state.route, effectiveRole));
+    }
 
     if (reason) {
       logDiag("Shell render", { reason, mode: shellMode, route: state.route, role: effectiveRole, allowedRoutes: allowedRoutes.slice() });
@@ -1661,6 +1699,14 @@
 
   function card(label, value) {
     return '<article class="health-card"><div class="label">' + label + '</div><div class="value">' + value + "</div></article>";
+  }
+
+  function setHtmlIfChanged(el, html) {
+    if (!el) return false;
+    if (el.__stableHtml === html) return false;
+    el.__stableHtml = html;
+    el.innerHTML = html;
+    return true;
   }
 
   function escapeHtml(input) {
@@ -2241,8 +2287,33 @@
     if (state.realtimeRefreshTimer) return;
     state.realtimeRefreshTimer = setTimeout(() => {
       state.realtimeRefreshTimer = null;
+      if (document.hidden) return;
       triggerRefresh("realtime-event");
-    }, 400);
+    }, REALTIME_SCHEDULE_DEBOUNCE_MS);
+  }
+
+  function routeFromPathname() {
+    const parts = String(window.location.pathname || "").replace(/\/+$/, "").split("/");
+    const seg = String(parts[parts.length - 1] || "").toLowerCase();
+    return PATH_ROUTE_ALIASES[seg] || null;
+  }
+
+  function computeRenderSignature() {
+    return JSON.stringify({
+      route: state.route,
+      rides: (state.rides || []).slice(0, 60).map(function (ride) {
+        return String(ride.id || "") + ":" + String(ride.status || "") + ":" + String(ride.driver_id || "");
+      }).join("|"),
+      drivers: (state.drivers || []).slice(0, 40).map(function (driver) {
+        return String(driver.id || "") + ":" + String(driver.status || driver.availability || "");
+      }).join("|"),
+      assignments: (state.dispatchActiveAssignments || []).slice(0, 40).map(function (item) {
+        return String(item.ride_id || "") + ":" + String(item.assignment_state || "");
+      }).join("|"),
+      dispatchQueue: (state.dispatchQueue || []).length,
+      selectedRide: state.selectedRideId || "",
+      selectedDriver: state.selectedDriverId || "",
+    });
   }
 
   function getRealtimePayloadDetails(payload) {
@@ -4067,7 +4138,7 @@
       const normalizedType = String(message.eventType || "").toLowerCase().replace(/-/g, "_");
       const normalizedDispatchEvent = String(message.payload && message.payload.event_name ? message.payload.event_name : "").toLowerCase().replace(/-/g, "_");
       if (["ride_created", "ride_status_changed", "ride_assigned", "ride_reassigned", "ride_escalated", "ride_retry", "ride_completed", "pickup_completed", "driver_status_changed", "driver_active_ride_state", "ride_lifecycle_sync", "workflow_recovery_completed", "workflow_reassignment_executed", "workflow_escalated", "intelligence_recommendations", "intelligence_summary", "intelligence_risk", "orchestration_update", "autonomous_operations_snapshot", "dispatch_changed", "ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "ride_in_progress", "provider_request_created"].includes(normalizedType)
-        || ["ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "driver_location_updated", "ride_in_progress", "ride_completed", "provider_request_created"].includes(normalizedDispatchEvent)) {
+        || ["ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "ride_in_progress", "ride_completed", "provider_request_created"].includes(normalizedDispatchEvent)) {
         scheduleRealtimeRefresh();
       }
     });
@@ -4983,7 +5054,7 @@
     });
     const drivers = getDriverRows();
 
-    els.dispatchWorklist.innerHTML = rides.length
+    const worklistHtml = rides.length
       ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Status</th><th>Priority</th><th>Driver assignment</th><th>Actions</th></tr></thead><tbody>'
         + rides.slice(0, 30).map(function (ride) {
           return '<tr>'
@@ -5002,7 +5073,7 @@
         + '</tbody></table></div>'
       : '<p class="health-summary">No rides currently waiting in dispatch worklist.</p>';
 
-    els.dispatchWorkflow.innerHTML = renderTimelineList((state.dispatchTimeline || []).slice(0, 20).map(function (item) {
+    const workflowHtml = renderTimelineList((state.dispatchTimeline || []).slice(0, 20).map(function (item) {
       return {
         kind: item.kind || item.type || item.event_type || 'dispatch',
         summary: item.summary || item.message || 'Dispatch workflow event',
@@ -5012,7 +5083,7 @@
     }), 'Dispatch workflow timeline is waiting for live events.');
 
     const assignments = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
-    els.dispatchAssignments.innerHTML = assignments.length
+    const assignmentsHtml = assignments.length
       ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Driver</th><th>State</th><th>Offer expiry</th><th>Score</th></tr></thead><tbody>'
         + assignments.slice(0, 30).map(function (item) {
           return '<tr>'
@@ -5026,6 +5097,10 @@
         }).join('')
         + '</tbody></table></div>'
       : '<p class="health-summary">No active dispatch assignments.</p>';
+
+    setHtmlIfChanged(els.dispatchWorklist, worklistHtml);
+    setHtmlIfChanged(els.dispatchWorkflow, workflowHtml);
+    setHtmlIfChanged(els.dispatchAssignments, assignmentsHtml);
   }
 
   function renderBillingWorkspace() {
@@ -6783,28 +6858,54 @@
   }
 
   function renderAll() {
-    tracePickupRerender("renderAll:start", {
+    renderActiveRoute(true);
+  }
+
+  function renderActiveRoute(includeShared) {
+    tracePickupRerender("renderActiveRoute:start", {
       route: state.route,
       modalOpen: !!(getEls().modal && !getEls().modal.hidden),
     });
     applyRoleUiAccess();
-    // Hydrate the create-ride provider select early so unrelated view errors do not block options.
     hydrateProviderSelect();
     hydrateDispatchFilters();
-    renderDashboard();
-    renderRides();
-    renderDispatchWorkspace();
-    renderDrivers();
-    renderProviders();
-    renderCustomerWorkspace();
-    renderAdminWorkspace();
-    renderOnboarding();
-    renderGrantProof();
-    renderAIOperations();
-    renderAnalytics();
-    renderBillingWorkspace();
-    renderOperationsRail();
-    tracePickupRerender("renderAll:end", {
+    if (includeShared !== false) {
+      renderOperationsRail();
+    }
+
+    const route = VIEW_ROUTES.includes(state.route) ? state.route : PRIMARY_ROUTE;
+    if (route === "dashboard") {
+      renderDashboard();
+      renderAIOperations();
+    } else if (route === "rides") {
+      renderRides();
+    } else if (route === "dispatch") {
+      renderDispatchWorkspace();
+    } else if (route === "drivers") {
+      renderDrivers();
+    } else if (route === "providers") {
+      renderProviders();
+    } else if (route === "customer") {
+      renderCustomerWorkspace();
+    } else if (route === "admin") {
+      renderAdminWorkspace();
+    } else if (route === "analytics") {
+      renderAnalytics();
+      renderAIOperations();
+    } else if (route === "billing") {
+      renderBillingWorkspace();
+    } else if (route === "grant") {
+      renderGrantProof();
+    } else if (route === "onboarding") {
+      renderOnboarding();
+    } else {
+      renderDashboard();
+    }
+
+    if (getSessionProfile().active) {
+      showView(route);
+    }
+    tracePickupRerender("renderActiveRoute:end", {
       route: state.route,
       modalOpen: !!(getEls().modal && !getEls().modal.hidden),
     });
@@ -6817,7 +6918,7 @@
 
     if (activityEl) {
       const items = (state.operationalEventFeed || []).slice(0, 6);
-      activityEl.innerHTML = items.length ? items.map(function (event) {
+      const activityHtml = items.length ? items.map(function (event) {
         const title = firstDefined(event && event.title, event && event.event_type, event && event.message, "Operational event");
         const details = firstDefined(event && event.summary, event && event.reasoning, event && event.detail, "No additional details");
         const when = formatDateShort(event && (event.created_at || event.timestamp || event.generated_at));
@@ -6827,6 +6928,7 @@
           + '<small>' + escapeHtml(when) + '</small>'
           + '</article>';
       }).join("") : '<p class="health-summary">Live activity feed will appear as dispatch and workforce events are received.</p>';
+      setHtmlIfChanged(activityEl, activityHtml);
     }
 
     if (alertsEl) {
@@ -6842,41 +6944,42 @@
         const availability = String((driver && driver.availability) || (driver && driver.status) || "").toLowerCase();
         return availability === "offline" || availability === "unavailable";
       }).length;
-      alertsEl.innerHTML = '<div class="health-chart-list">'
+      const alertsHtml = '<div class="health-chart-list">'
         + card('Urgent rides', formatNumber(urgent))
         + card('Delayed/problem rides', formatNumber(delayed))
         + card('Offline/unavailable drivers', formatNumber(offlineDrivers))
         + '</div>';
+      setHtmlIfChanged(alertsEl, alertsHtml);
     }
 
     if (selectionEl) {
+      let selectionHtml = '<p class="health-summary">Route focus: ' + escapeHtml(state.route || PRIMARY_ROUTE) + '. Select an entity to inspect live operational details.</p>';
       if ((state.route === "rides" || state.route === "dispatch") && state.selectedRideId) {
         const ride = (state.rides || []).find(function (item) {
           return String(item && item.id) === String(state.selectedRideId);
         });
-        selectionEl.innerHTML = ride
+        selectionHtml = ride
           ? '<strong>Ride ' + escapeHtml(ride.id) + '</strong><p>' + escapeHtml(ride.passenger_name || 'Passenger') + ' · ' + escapeHtml(ride.status || 'pending') + '</p><p>' + escapeHtml(firstDefined(ride.pickup_address, 'Pickup not provided')) + ' -> ' + escapeHtml(firstDefined(ride.dropoff_address, 'Dropoff not provided')) + '</p>'
           : '<p class="health-summary">Selected ride is no longer available in the active queue.</p>';
       } else if (state.route === "drivers" && state.selectedDriverId) {
         const driver = (state.drivers || []).find(function (item) {
           return String(item && item.id) === String(state.selectedDriverId);
         });
-        selectionEl.innerHTML = driver
+        selectionHtml = driver
           ? '<strong>Driver ' + escapeHtml(driver.name || driver.id) + '</strong><p>Status: ' + escapeHtml(driver.status || driver.availability || 'unknown') + '</p><p>Phone: ' + escapeHtml(driver.phone || 'not provided') + '</p>'
           : '<p class="health-summary">Selected driver details are unavailable.</p>';
       } else if (state.route === "providers") {
         const provider = (state.providers || [])[0] || null;
-        selectionEl.innerHTML = provider
+        selectionHtml = provider
           ? '<strong>Provider ' + escapeHtml(provider.name || provider.id) + '</strong><p>Coverage: ' + escapeHtml(provider.coverage_area || provider.region || 'regional') + '</p><p>Capacity: ' + escapeHtml(String(provider.capacity || provider.available_capacity || 'n/a')) + '</p>'
           : '<p class="health-summary">Provider context will appear once network data is loaded.</p>';
       } else if (state.route === "customer") {
         const activeRide = state.customerWorkspace && state.customerWorkspace.activeRide ? state.customerWorkspace.activeRide : null;
-        selectionEl.innerHTML = activeRide
+        selectionHtml = activeRide
           ? '<strong>Active customer trip</strong><p>Ride: ' + escapeHtml(activeRide.id || 'unknown') + '</p><p>Status: ' + escapeHtml(activeRide.status || 'pending') + '</p>'
           : '<p class="health-summary">No active customer trip selected. Use customer workspace to load rider context.</p>';
-      } else {
-        selectionEl.innerHTML = '<p class="health-summary">Route focus: ' + escapeHtml(state.route || PRIMARY_ROUTE) + '. Select an entity to inspect live operational details.</p>';
       }
+      setHtmlIfChanged(selectionEl, selectionHtml);
     }
   }
 
@@ -7048,7 +7151,10 @@
       stopAutoRefresh();
     }
 
-    renderRuntimeShell(state.active ? "module_open" : (state.authGateVisible ? "auth_gate" : "module_closed"));
+    if (activeTransitionChanged || !state.shellRenderInitialized) {
+      state.shellRenderInitialized = true;
+      renderRuntimeShell(state.active ? "module_open" : (state.authGateVisible ? "auth_gate" : "module_closed"));
+    }
     persistRuntimeState(state.active ? "module_open" : "module_closed");
   }
 
@@ -7084,7 +7190,9 @@
       if (!profile.active) {
         state.hydration.lastRefreshError = "authentication required";
         state.websocketStatus = "auth_required";
-        renderRuntimeShell("refresh_blocked");
+        if (!profile.accessTokenPresent && !profile.refreshTokenPresent) {
+          renderRuntimeShell("refresh_blocked");
+        }
         return;
       }
 
@@ -7330,7 +7438,13 @@
     // Keep provider options current even if a later renderer throws.
     hydrateProviderSelect();
     persistRuntimeState("refresh_data");
-    renderAll();
+    const renderSignature = computeRenderSignature();
+    if (renderSignature === state.lastRenderSignature) {
+      logDiag("Render skipped", { reason: "signature_match", route: state.route });
+    } else {
+      state.lastRenderSignature = renderSignature;
+      renderAll();
+    }
       tracePickupRerender("refreshData:afterRenderAll", {
         route: state.route,
         modalOpen: !!(getEls().modal && !getEls().modal.hidden),
@@ -7752,9 +7866,10 @@
     connectRealtimeSocket();
     state.refreshTimer = setInterval(() => {
       if (!state.active) return;
+      if (document.hidden) return;
       monitorRealtimeHealth("refresh-interval");
       refreshData().catch(() => {});
-    }, 20000);
+    }, AUTO_REFRESH_INTERVAL_MS);
   }
 
   function readDriverForRide(rideId) {
@@ -8130,8 +8245,14 @@
     state.navSync.lastNavigateAtMs = now;
     state.navSync.lastNavigateRoute = target;
     state.navSync.lastNavigateSource = source;
-    setModuleVisibility(true);
-    showView(target);
+
+    if (state.active && !state.authGateVisible) {
+      showView(target);
+    } else {
+      setModuleVisibility(true);
+      showView(target);
+    }
+
     if (!skipHash) {
       state.navSync.suppressHashRoute = target;
       state.navSync.suppressHashRouteUntilMs = now + HASH_ROUTE_SUPPRESSION_MS;
@@ -8171,14 +8292,15 @@
       return;
     }
     if (!route) {
+      const pathRoute = routeFromPathname();
       const profile = getSessionProfile();
       if (!profile.active) {
-        state.pendingRoute = PRIMARY_ROUTE;
+        state.pendingRoute = pathRoute || PRIMARY_ROUTE;
         setModuleVisibility(false, { authGate: true });
         renderRuntimeShell("default_auth_gate");
         return;
       }
-      navigate(PRIMARY_ROUTE, true, { source: "hash-default" });
+      navigate(pathRoute || PRIMARY_ROUTE, true, { source: pathRoute ? "pathname" : "hash-default" });
       return;
     }
 
@@ -9094,8 +9216,11 @@
       triggerHydrationRefresh("session-storage-change");
     });
 
-    window.addEventListener("amicor:session-recovered", () => {
-      renderRuntimeShell("session_recovered");
+    window.addEventListener("amicor:session-recovered", (event) => {
+      const reason = event && event.detail ? String(event.detail.reason || "") : "";
+      if (reason === "session_replaced") {
+        return;
+      }
       if (state.pendingRoute) {
         const pendingRoute = state.pendingRoute;
         state.pendingRoute = null;
@@ -9103,17 +9228,32 @@
         return;
       }
       if (state.active) {
-        reconnectRealtime("session-recovered", { force: true, onlyIfStale: false, bypassCooldown: true });
+        showView(clampRouteForRole(state.route, getEffectiveShellRole(getSessionProfile().role)));
+        if (reason === "forced_refresh") {
+          reconnectRealtime("session-recovered", { force: true, onlyIfStale: true, bypassCooldown: true });
+        }
+      } else {
+        renderRuntimeShell("session_recovered");
       }
     });
 
+    let sessionInvalidTimer = null;
     window.addEventListener("amicor:session-invalid", () => {
-      disconnectRealtimeSocket();
-      state.websocketStatus = "auth_required";
-      state.active = false;
-      state.authGateVisible = true;
-      setModuleVisibility(false, { authGate: true });
-      renderRuntimeShell("session_invalid");
+      if (sessionInvalidTimer) {
+        window.clearTimeout(sessionInvalidTimer);
+      }
+      sessionInvalidTimer = window.setTimeout(function () {
+        sessionInvalidTimer = null;
+        if (window.AmiCorSession && typeof window.AmiCorSession.isActive === "function" && window.AmiCorSession.isActive()) {
+          return;
+        }
+        disconnectRealtimeSocket();
+        state.websocketStatus = "auth_required";
+        state.active = false;
+        state.authGateVisible = true;
+        setModuleVisibility(false, { authGate: true });
+        renderRuntimeShell("session_invalid");
+      }, 400);
     });
 
     window.addEventListener("hashchange", onHashRoute);

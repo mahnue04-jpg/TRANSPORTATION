@@ -1,0 +1,94 @@
+:root {
+  --bg: #0b1220;
+  --panel: #151f32;
+  --line: #2a3a55;
+  --text: #e8eef7;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --good: #22c55e;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+a { color: var(--accent); text-decoration: none; }
+header.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #060b14;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header.app-header h1 { margin: 0; font-size: 1.1rem; }
+main { padding: 16px; max-width: 960px; margin: 0 auto; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+button, .btn {
+  background: var(--accent);
+  color: #041018;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 4px 4px 4px 0;
+}
+button.secondary, .btn.secondary { background: #475569; color: #fff; }
+button.danger { background: var(--bad); color: #fff; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+input, select, textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0b1220;
+  color: var(--text);
+  margin: 6px 0 12px;
+}
+label { display: block; font-size: 0.9rem; color: var(--muted); }
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #334155;
+  font-size: 0.75rem;
+}
+.pill.good { background: #14532d; color: #bbf7d0; }
+.pill.warn { background: #78350f; color: #fde68a; }
+.pill.bad { background: #7f1d1d; color: #fecaca; }
+.metric strong { display: block; font-size: 1.4rem; }
+.metric span { color: var(--muted); font-size: 0.85rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
+#toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: #14532d; padding: 10px 16px; border-radius: 999px; display: none; z-index: 99;
+}
+.hidden { display: none !important; }
+#map { height: 360px; min-height: 360px; border-radius: 12px; border: 1px solid var(--line); }
+#tripsPanel, #driversPanel, #tripsTable, #metrics { min-height: 80px; }
+body.stable-boot main { opacity: 1; transition: none; }
+main.dispatch-main { max-width: 1200px; }
+.card { contain: layout style; }
+#toast { transition: opacity 0.2s ease; }
+.nav-links a { margin-right: 12px; font-size: 0.9rem; }
+@media (max-width: 640px) {
+  button, .btn { width: 100%; margin: 6px 0; }
+}

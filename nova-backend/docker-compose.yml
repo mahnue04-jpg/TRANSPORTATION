@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: amicor_nova
+      POSTGRES_USER: amicor
+      POSTGRES_PASSWORD: amicor_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - nova_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amicor -d amicor_nova"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - "8011:8011"
+    environment:
+      NODE_ENV: development
+      PORT: 8011
+      DATABASE_URL: postgresql://amicor:amicor_dev@db:5432/amicor_nova
+      JWT_SECRET: amicor-nova-secret-2026
+      FRONTEND_URL: http://localhost:8011
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  nova_pg:

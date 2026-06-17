@@ -316,6 +316,7 @@
       customerRequests: [],
       vehicles: []
     },
+    revenueWorkflow: null,
     dispatcherWorkspace: {
       messages: [],
       proof: {
@@ -393,6 +394,41 @@
   };
 
   var refreshHandle = null;
+  var driverUiRenderTimer = null;
+  var driverHydrateLockUntil = 0;
+  var DRIVER_UI_RENDER_MS = 300;
+
+  function isDriverMobileSurface() {
+    return state.role === "driver" && (state.route === "mobile" || state.route === "drivers");
+  }
+
+  function scheduleRenderPage(options) {
+    var opts = options || {};
+    if (opts.immediate) {
+      if (driverUiRenderTimer) {
+        clearTimeout(driverUiRenderTimer);
+        driverUiRenderTimer = null;
+      }
+      renderPage();
+      return;
+    }
+    if (driverUiRenderTimer) {
+      clearTimeout(driverUiRenderTimer);
+    }
+    var delay = isDriverMobileSurface() ? DRIVER_UI_RENDER_MS : 60;
+    driverUiRenderTimer = setTimeout(function () {
+      driverUiRenderTimer = null;
+      renderPage();
+    }, delay);
+  }
+
+  function lockDriverHydration(ms) {
+    driverHydrateLockUntil = Date.now() + Math.max(500, Number(ms) || 2500);
+  }
+
+  function isDriverHydrationLocked() {
+    return Date.now() < driverHydrateLockUntil;
+  }
   var refreshInFlight = false;
   var eventsBound = false;
   var windowEventBindings = [];
@@ -405,6 +441,7 @@
   var SESSION_STATE_KEY = "amicor_shell_session_v1";
   var USER_ACTIVITY_COOLDOWN_MS = 5000;
   var REFRESH_TRIGGER_COOLDOWN_MS = 2500;
+  var STABLE_POLL_INTERVAL_MS = 30000;
   var BACKEND_DOWN_PAUSE_MS = 60000;
   var MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE = 2;
 
@@ -428,6 +465,74 @@
       .replace(/>/g, "&gt;")
       .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function setHtmlIfChanged(el, html) {
+    if (!el) return false;
+    if (el.__stableHtml === html) return false;
+    el.__stableHtml = html;
+    el.innerHTML = html;
+    return true;
+  }
+
+  function formatIsoShort(ts) {
+    if (!ts) return "";
+    try {
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return String(ts);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch (_) {
+      return String(ts);
+    }
+  }
+
+  function computePageDataSignature() {
+    var lw = state.liveWorkflow || {};
+    var ops = state.ops || {};
+    var liveEvents = ops.orchestration && ops.orchestration.live_stream && Array.isArray(ops.orchestration.live_stream.events)
+      ? ops.orchestration.live_stream.events
+      : [];
+    var rideSig = (lw.rides || []).slice(0, 25).map(function (row) {
+      return safeText(row.id, "") + ":" + safeText(row.status, "");
+    }).join("|");
+    return [
+      safeText(state.route, "dashboard"),
+      safeText(state.role, "admin"),
+      state.loading ? "1" : "0",
+      safeText(state.error, ""),
+      String((state.fetchWarnings || []).length),
+      String((lw.dispatchQueue || []).length),
+      String((lw.activeAssignments || []).length),
+      String((lw.drivers || []).length),
+      String((lw.rides || []).length),
+      rideSig,
+      safeText((state.supervision || {}).supervision_status, ""),
+      safeText((state.health || {}).status, ""),
+      String(liveEvents.length),
+    ].join("§");
+  }
+
+  function updateLastUpdatedLabel() {
+    var lu = safeText((state.hydration || {}).lastUpdatedAt, "");
+    var routeMeta = ROUTES[state.route] || ROUTES.dashboard;
+    var subtitle = routeMeta.subtitle;
+    if (lu) {
+      subtitle += " · Last sync " + formatIsoShort(lu);
+    }
+    if (els.pageSubtitle) {
+      if (els.pageSubtitle.__stableText !== subtitle) {
+        els.pageSubtitle.__stableText = subtitle;
+        els.pageSubtitle.textContent = subtitle;
+      }
+    }
+    var lastUpdatedPill = document.getElementById("last-updated-pill");
+    if (lastUpdatedPill) {
+      var pillText = lu ? "updated " + formatIsoShort(lu) : "updated —";
+      if (lastUpdatedPill.__stableText !== pillText) {
+        lastUpdatedPill.__stableText = pillText;
+        lastUpdatedPill.textContent = pillText;
+      }
+    }
   }
 
   function safeNumber(value, fallback) {
@@ -505,7 +610,11 @@
       state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["backend_down_8011"]));
       return true;
     }
-    if (state.runtime.lastRefreshTriggerSource === triggerSource && (now - safeNumber(state.runtime.lastRefreshTriggerAt, 0)) < REFRESH_TRIGGER_COOLDOWN_MS) {
+    if (triggerSource === "interval" && (now - safeNumber(state.runtime.lastRefreshTriggerAt, 0)) < STABLE_POLL_INTERVAL_MS - 500) {
+      return true;
+    }
+    if (triggerSource !== "interval" && state.runtime.lastRefreshTriggerSource === triggerSource
+      && (now - safeNumber(state.runtime.lastRefreshTriggerAt, 0)) < REFRESH_TRIGGER_COOLDOWN_MS) {
       return true;
     }
     state.runtime.lastRefreshTriggerAt = now;
@@ -3799,6 +3908,9 @@
     var activeOffer = safeObject(offerEnvelope.offer);
     var workflowDriverId = safeText(driverWorkflow.driverId, "");
     if (workflowDriverId) {
+      if (isDriverHydrationLocked()) {
+        return;
+      }
       var liveQueue = [];
       if (safeText(activeRide.id, "")) {
         liveQueue.push({
@@ -4251,7 +4363,7 @@
             '<div class="command-actions">' +
               '<button class="preview-action driver-action" data-driver-action="accept_trip"' + ((!shiftOnline || !activeTrip || !["queued", "assigned"].includes(tripStatus)) ? ' disabled' : '') + '>Accept Trip</button>' +
               (riderPhone
-                ? '<a class="preview-action" href="tel:' + escapeHtml(riderPhone) + '">Call Rider</a>'
+                ? '<button class="preview-action driver-action" data-driver-action="call_rider"' + (!activeTrip ? ' disabled' : '') + '>Call Rider</button>'
                 : '<button class="preview-action" disabled>Call Rider</button>') +
               '<button class="preview-action driver-action" data-driver-action="arrive_pickup"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disablePickup ? ' disabled' : '') + '>Pickup / Rider Onboard</button>' +
@@ -6341,18 +6453,50 @@
   }
 
   function renderBilling() {
+    var revenue = state.revenueWorkflow && typeof state.revenueWorkflow === "object" ? state.revenueWorkflow : null;
+    var kpis = revenue && revenue.kpis ? revenue.kpis : {};
+    var pendingRides = kpis.dispatcher_load && kpis.dispatcher_load.pending_rides != null
+      ? String(kpis.dispatcher_load.pending_rides)
+      : "0";
+    var completedTrips = kpis.completed_trips != null ? String(kpis.completed_trips) : "0";
+    var slaAlerts = Array.isArray(kpis.operational_sla_alerts) ? kpis.operational_sla_alerts : [];
+    var pendingReview = String(slaAlerts.filter(function (a) {
+      return String((a && a.severity) || "").toLowerCase() === "medium";
+    }).length);
+    var rejected = String(slaAlerts.filter(function (a) {
+      return String((a && a.severity) || "").toLowerCase() === "high";
+    }).length);
+    var cancellationLoss = kpis.cancellation_loss != null ? ("$" + Number(kpis.cancellation_loss).toFixed(2)) : "$0.00";
+    var rides = Array.isArray(state.liveWorkflow && state.liveWorkflow.rides) ? state.liveWorkflow.rides : [];
+    var completedRows = rides.filter(function (ride) {
+      return String((ride && ride.status) || "").toLowerCase() === "completed";
+    }).slice(0, 8);
+
     return renderPanelBlock(
       "Billing & Claims",
-      "Trip settlement, reimbursement status, and invoice cycle visibility.",
+      "Live revenue workflow from completed trips, settlement queue, and operational SLA alerts.",
       '<div class="grid-4">' +
-        renderMetric("Open Claims", "26") +
-        renderMetric("Approved Today", "14") +
-        renderMetric("Pending Review", "9") +
-        renderMetric("Rejected", "3") +
+        renderMetric("Pending Dispatch", pendingRides) +
+        renderMetric("Completed Trips (24h)", completedTrips) +
+        renderMetric("SLA Review", pendingReview) +
+        renderMetric("High-Risk Alerts", rejected) +
+      '</div>' +
+      '<div class="grid-2" style="margin-top:12px">' +
+        renderMetric("Cancellation Loss", cancellationLoss) +
+        renderMetric("Data Source", revenue ? "Live API" : "Awaiting auth") +
       '</div>' +
       '<div class="divider"></div>' +
+      (completedRows.length
+        ? '<section class="panel"><h4>Recent completed trips (billable)</h4><table class="data-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Status</th></tr></thead><tbody>'
+          + completedRows.map(function (ride) {
+              return '<tr><td>' + escapeHtml(String((ride && ride.id) || "").slice(0, 10)) + '</td><td>'
+                + escapeHtml((ride && ride.passenger_name) || "Passenger") + '</td><td>completed</td></tr>';
+            }).join("")
+          + '</tbody></table></section>'
+        : '<p class="muted">No completed trips loaded yet. Open dispatch or trips to hydrate ride ledger.</p>') +
+      '<div class="divider"></div>' +
       renderQuickLinks([
-        { href: "/app/trips", title: "Trip Ledger", description: "Review completed trip records and fare evidence.", note: "read-only" },
+        { href: "/app/trips", title: "Trip Ledger", description: "Review completed trip records and fare evidence.", note: "live" },
         { href: "/app/alerts", title: "Billing Exceptions", description: "Investigate reimbursement and invoicing anomalies.", note: "supervised" },
         { href: "/app/analytics", title: "Revenue Analytics", description: "View reimbursement trend and service-line performance.", note: "analytics" }
       ]),
@@ -7428,7 +7572,34 @@
         '</section>';
     }
 
-    els.pageContent.innerHTML = pageHtml + warningBanner;
+    if (!pageHtml || !String(pageHtml).trim()) {
+      pageHtml =
+        '<section class="panel">' +
+          '<h3>Workspace temporarily unavailable</h3>' +
+          '<p class="muted">Live data could not be rendered. Your session is still active — try refreshing this view.</p>' +
+          '<button class="preview-action" type="button" id="ops-empty-reload">Reload workspace</button>' +
+        '</section>';
+    }
+
+    var fullHtml = pageHtml + warningBanner;
+    var dataSig = computePageDataSignature();
+    updateLastUpdatedLabel();
+    if (!state.loading && dataSig === state.runtime.lastPageDataSignature && els.pageContent.__stableHtml === fullHtml) {
+      traceDispatcherPickupRender("renderPage:skipped-stable");
+      return;
+    }
+    state.runtime.lastPageDataSignature = dataSig;
+    var domChanged = setHtmlIfChanged(els.pageContent, fullHtml);
+    if (!domChanged) {
+      traceDispatcherPickupRender("renderPage:skipped-html");
+      return;
+    }
+    var reloadButton = document.getElementById("ops-empty-reload");
+    if (reloadButton) {
+      reloadButton.addEventListener("click", function () {
+        loadBackendData({ silent: false }).catch(function () {});
+      });
+    }
     var healthActionButtons = document.querySelectorAll('[data-nova-action="system_health"]');
     healthActionButtons.forEach(function (button) {
       button.textContent = "Review operations status";
@@ -7534,10 +7705,23 @@
       if (runtime && typeof runtime.rejectTrip === "function") {
         runtime.rejectTrip(safeText(activeTrip.tripId, ""));
       }
-      activeTrip.status = "declined";
+      appState.tripQueue = (Array.isArray(appState.tripQueue) ? appState.tripQueue : []).filter(function (trip) {
+        return safeText(trip.tripId, "") !== safeText(activeTrip.tripId, "");
+      });
+      appState.activeTripId = appState.tripQueue.length > 0 ? safeText(appState.tripQueue[0].tripId, "") : "";
       appState.declinedCount = safeNumber(appState.declinedCount, 0) + 1;
-      appState.lastStatusUpdate = "Declined trip " + safeText(activeTrip.tripId, "");
-      addDriverNotification("medium", appState.lastStatusUpdate + ". Queue rebalanced.");
+      appState.lastStatusUpdate = "No-show recorded for " + safeText(activeTrip.tripId, "");
+      addDriverNotification("medium", appState.lastStatusUpdate + ". Trip returned to dispatch.");
+      updated = true;
+    } else if (action === "call_rider" && activeTrip) {
+      if (currentDriverId) {
+        var contactResult = await window._amiHandleDriverCallRider(safeText(activeTrip.tripId, ""));
+        if (!contactResult) {
+          return;
+        }
+      }
+      appState.lastStatusUpdate = "Rider contact initiated for " + safeText(activeTrip.tripId, "");
+      addDriverNotification("low", appState.lastStatusUpdate + ".");
       updated = true;
     } else if (action === "arrive_pickup" && activeTrip) {
       if (currentDriverId) {
@@ -7627,8 +7811,9 @@
 
     if (updated) {
       state.driverApp = appState;
+      lockDriverHydration(3000);
       persistSessionState();
-      renderPage();
+      scheduleRenderPage();
     }
   }
 
@@ -8478,6 +8663,42 @@
         return;
       }
 
+      if (state.route === "billing") {
+        try {
+          state.revenueWorkflow = await fetchJson("/api/health-isf/operations/revenue-workflow?window_hours=24", {}, token);
+        } catch (_) {
+          state.fetchWarnings.push("revenue_workflow_unavailable");
+          state.revenueWorkflow = null;
+        }
+        try {
+          var billingRideRows = await fetchJson("/api/health-isf/rides?limit=40", {}, token);
+          if (Array.isArray(billingRideRows)) {
+            state.liveWorkflow.rides = billingRideRows;
+          }
+        } catch (_) {
+          state.fetchWarnings.push("billing_rides_unavailable");
+        }
+        state.hydration = {
+          authTokenPresent: hasToken,
+          opsHydrated: true,
+          roleSlice: state.role,
+          lastUpdatedAt: new Date().toISOString(),
+          warningCount: state.fetchWarnings.length,
+          integrityState: computeHydrationIntegrity(
+            hasToken,
+            0,
+            state.fetchWarnings,
+            settled[0].status === "fulfilled",
+            settled[1].status === "fulfilled"
+          )
+        };
+        recomputeAssistantRuntimeState();
+        persistSessionState();
+        state.loading = false;
+        renderPage();
+        return;
+      }
+
       var opsSettled = await Promise.allSettled([
         fetchJson("/api/ops/dashboard-summary"),
         fetchJson("/api/ops/live-status"),
@@ -9134,7 +9355,7 @@
     }
     refreshHandle = setInterval(function () {
       requestSilentRefresh("interval");
-    }, 15000);
+    }, STABLE_POLL_INTERVAL_MS);
   }
 
   function cleanupLifecycleBindings() {
@@ -9179,6 +9400,16 @@
     var triggerSource = safeText(source, "unknown");
     if (refreshInFlight) return;
     if (document.hidden) return;
+    if (isDriverMobileSurface() && triggerSource === "interval") {
+      refreshInFlight = true;
+      refreshDriverWorkflowData({ lastAction: "Driver workspace synchronized" }).catch(function () {}).finally(function () {
+        refreshInFlight = false;
+        if (!isDriverHydrationLocked()) {
+          scheduleRenderPage();
+        }
+      });
+      return;
+    }
     if (shouldThrottleRefreshTrigger(triggerSource)) return;
     if (isDispatcherDraftFieldActive()) {
       console.info("[Dispatcher Pickup Trace]", {
@@ -9352,7 +9583,10 @@
 
     runtimeUpdateHandler = function () {
       persistSessionState();
-      renderPage();
+      if (isDriverMobileSurface()) {
+        return;
+      }
+      requestSilentRefresh("runtime-event");
     };
     window.addEventListener("ami:ops-runtime-updated", runtimeUpdateHandler);
 
@@ -9422,7 +9656,11 @@
       } catch (err) {
         return { ok: false, detail: (err && err.message) ? err.message : "refresh_failed" };
       }
-    }
+    },
+    sendJson: sendJson,
+    refreshDriverWorkflowData: refreshDriverWorkflowData,
+    scheduleRenderPage: scheduleRenderPage,
+    lockDriverHydration: lockDriverHydration
   };
 
   window.AmiOpsShellState = state;
@@ -10231,11 +10469,69 @@ window._amiHandleMedicalFacilityCoordination = async function(taskId) {
   window.alert("Facility coordination action submitted for supervised workflow.");
 };
 
+async function _amiSendJson(url, method, payload) {
+  if (!window.AmiOpsShellActions || typeof window.AmiOpsShellActions.sendJson !== "function") {
+    throw new Error("send_json_unavailable");
+  }
+  return window.AmiOpsShellActions.sendJson(url, method, payload);
+}
+
+async function _amiRefreshDriverWorkflow(lastAction) {
+  if (!window.AmiOpsShellActions || typeof window.AmiOpsShellActions.refreshDriverWorkflowData !== "function") {
+    return;
+  }
+  await window.AmiOpsShellActions.refreshDriverWorkflowData({ lastAction: safeText(lastAction, "Driver workspace synchronized") });
+}
+
+function _amiScheduleRenderPage() {
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.scheduleRenderPage === "function") {
+    window.AmiOpsShellActions.scheduleRenderPage();
+    return;
+  }
+  if (typeof window.AmiOpsShellRender === "function") {
+    window.AmiOpsShellRender();
+  }
+}
+
+function _amiLockDriverHydration(ms) {
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.lockDriverHydration === "function") {
+    window.AmiOpsShellActions.lockDriverHydration(ms);
+  }
+}
+
+function _amiDriverTripStatus(tripId) {
+  var appState = safeObject(state.driverApp);
+  var queue = Array.isArray(appState.tripQueue) ? appState.tripQueue : [];
+  var match = queue.find(function (trip) {
+    return safeText(trip.tripId, "") === safeText(tripId, "");
+  });
+  return safeText(match && match.status, "").toLowerCase();
+}
+
+function _amiDriverTripPhone(tripId) {
+  var appState = safeObject(state.driverApp);
+  var queue = Array.isArray(appState.tripQueue) ? appState.tripQueue : [];
+  var match = queue.find(function (trip) {
+    return safeText(trip.tripId, "") === safeText(tripId, "");
+  });
+  return safeText(match && match.riderPhone, "");
+}
+
+async function _amiAfterDriverWorkflowRefresh(lastAction) {
+  try {
+    await _amiRefreshDriverWorkflow(lastAction);
+    if (state.role !== "driver" && state.route === "dispatch") {
+      await _amiRefreshDispatcherWorkspace();
+    }
+  } catch (_) {}
+  _amiScheduleRenderPage();
+}
+
 window._amiHandleDriverAcceptTrip = async function(tripId) {
   var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   if (!driverId || !tripId) return false;
   try {
-    var payload = await sendJson(
+    var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
       { ride_id: tripId, target_state: "en_route_pickup" }
@@ -10264,8 +10560,7 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Accepted trip " + tripId });
-    await _amiRefreshDispatcherWorkspace();
+    await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
   } catch (_) {}
   return true;
 };
@@ -10274,7 +10569,7 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
   var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   if (!driverId || !tripId) return false;
   try {
-    var payload = await sendJson(
+    var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
       { ride_id: tripId, target_state: "arrived_pickup" }
@@ -10303,8 +10598,7 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Arrived at pickup for " + tripId });
-    await _amiRefreshDispatcherWorkspace();
+    await _amiAfterDriverWorkflowRefresh("Arrived at pickup for " + tripId);
   } catch (_) {}
   return true;
 };
@@ -10313,7 +10607,7 @@ window._amiHandleDriverStartTrip = async function(tripId) {
   var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   if (!driverId || !tripId) return false;
   try {
-    var payload = await sendJson(
+    var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
       { ride_id: tripId, target_state: "rider_loaded" }
@@ -10342,8 +10636,7 @@ window._amiHandleDriverStartTrip = async function(tripId) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Patient onboard for " + tripId });
-    await _amiRefreshDispatcherWorkspace();
+    await _amiAfterDriverWorkflowRefresh("Patient onboard for " + tripId);
   } catch (_) {}
   return true;
 };
@@ -10356,7 +10649,7 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
   var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   if (!driverId || !tripId) return false;
   try {
-    var payload = await sendJson(
+    var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
       { ride_id: tripId, target_state: "trip_in_progress" }
@@ -10385,8 +10678,7 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Transit progress updated for " + tripId });
-    await _amiRefreshDispatcherWorkspace();
+    await _amiAfterDriverWorkflowRefresh("Transit progress updated for " + tripId);
   } catch (_) {}
   return true;
 };
@@ -10396,18 +10688,17 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
   if (!driverId || !tripId) return false;
   var paymentId = "";
   try {
-    var payload = await sendJson(
+    var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
       { ride_id: tripId, target_state: "completed" }
     );
     try {
-      var payment = await sendJson(
+      var payment = await _amiSendJson(
         "/api/health-isf/payments/intents",
         "POST",
         {
           ride_id: tripId,
-          amount_usd: 45,
           currency: "USD",
           invoice_reference: "DRV-HANDOFF-" + String(Date.now()),
           capture_immediately: false
@@ -10450,26 +10741,90 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Completed trip " + tripId });
-    await _amiRefreshDispatcherWorkspace();
+    _amiLockDriverHydration(3500);
+    await _amiAfterDriverWorkflowRefresh("Completed trip " + tripId);
   } catch (_) {}
   return true;
 };
 
+window._amiHandleDriverCallRider = async function(tripId) {
+  var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
+  if (!driverId || !tripId) return false;
+  try {
+    var payload = await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/contact-rider",
+      "POST",
+      { ride_id: tripId, channel: "sms" }
+    );
+    var dialTarget = safeText((safeObject(payload)).dial_target, "");
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.lastActionResult = {
+      last_action: "Call Rider",
+      api_status: "ok",
+      db_record_id: safeText((safeObject(payload)).reference, tripId),
+      updated_table: "health_isf_dispatch_logs",
+      ui_refreshed: "yes",
+      current_ride_status: "rider_notified"
+    };
+    if (dialTarget && typeof window !== "undefined") {
+      var shouldDial = window.confirm("SMS sent to rider. Open phone dialer for " + dialTarget + "?");
+      if (shouldDial) {
+        window.location.href = "tel:" + dialTarget;
+      }
+    }
+    return true;
+  } catch (_) {
+    var fallbackPhone = _amiDriverTripPhone(tripId);
+    if (fallbackPhone) {
+      window.location.href = "tel:" + fallbackPhone;
+      return true;
+    }
+    window.alert("Unable to contact rider for " + tripId + ".");
+    return false;
+  }
+};
+
 window._amiHandleDriverDeclineTrip = async function(tripId) {
+  var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   var driverWorkflow = safeObject(state.driverWorkflow);
   var offerEnvelope = safeObject(driverWorkflow.activeOffer);
   var offer = safeObject(offerEnvelope.offer);
   var offerId = safeText(offer.id || offer.offer_id, "");
+  var tripStatus = _amiDriverTripStatus(tripId);
+
+  if (driverId && ["assigned", "driver_en_route", "arrived", "accepted", "en_route_pickup", "arrived_pickup"].indexOf(tripStatus) >= 0) {
+    try {
+      await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/no-show",
+        "POST",
+        { ride_id: tripId, note: "Rider no-show reported from driver mobile workspace" }
+      );
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.lastActionResult = {
+        last_action: "No Show",
+        api_status: "ok",
+        db_record_id: tripId,
+        updated_table: "health_isf_rides",
+        ui_refreshed: "yes",
+        current_ride_status: "no_show"
+      };
+      _amiLockDriverHydration(3500);
+      await _amiAfterDriverWorkflowRefresh("No-show recorded for " + tripId);
+      return true;
+    } catch (_) {
+      window.alert("Unable to record no-show for " + tripId + ".");
+      return false;
+    }
+  }
+
   if (!offerId) {
     window.alert("No active assignment offer is available to decline for " + tripId + ".");
     return false;
   }
   try {
-    await sendJson("/api/health-isf/dispatch/offers/" + encodeURIComponent(offerId) + "/reject?reason=" + encodeURIComponent("driver_declined_in_workspace"), "POST", {});
-    try {
-      await refreshDriverWorkflowData({ lastAction: "Declined trip " + tripId });
-    } catch (_) {}
+    await _amiSendJson("/api/health-isf/dispatch/offers/" + encodeURIComponent(offerId) + "/reject?reason=" + encodeURIComponent("driver_declined_in_workspace"), "POST", {});
+    _amiLockDriverHydration(3500);
+    await _amiAfterDriverWorkflowRefresh("Declined trip " + tripId);
     return true;
   } catch (_) {
     window.alert("Unable to decline the assignment for " + tripId + ".");
@@ -10501,7 +10856,7 @@ window._amiHandleDriverShiftReadiness = async function(driverId, status) {
     return false;
   }
   try {
-    await refreshDriverWorkflowData({ lastAction: "Shift readiness updated" });
+    await _amiRefreshDriverWorkflow("Shift readiness updated");
   } catch (_) {}
   return true;
 };
