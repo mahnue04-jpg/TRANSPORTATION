@@ -398,8 +398,18 @@
   var driverHydrateLockUntil = 0;
   var DRIVER_UI_RENDER_MS = 300;
 
+  var DRIVER_WORKSPACE_ROLES = ["driver", "admin", "dispatcher", "supervisor"];
+
+  function isDriverWorkspaceRoute() {
+    return state.route === "dashboard" || state.route === "mobile" || state.route === "drivers";
+  }
+
+  function canUseDriverWorkspaceActions() {
+    return isDriverWorkspaceRoute() && DRIVER_WORKSPACE_ROLES.indexOf(state.role) >= 0;
+  }
+
   function isDriverMobileSurface() {
-    return state.role === "driver" && (state.route === "mobile" || state.route === "drivers");
+    return canUseDriverWorkspaceActions() && (state.route === "mobile" || state.route === "drivers");
   }
 
   function scheduleRenderPage(options) {
@@ -4294,6 +4304,20 @@
       return ["pending", "assigned", "driver_en_route", "arrived", "rider_onboard", "in_progress"].indexOf(status) >= 0
         && (!currentDriverId || safeText(ride.driver_id, "") === currentDriverId);
     });
+    if (!assignedRides.length && queue.length) {
+      assignedRides = queue.filter(function (trip) {
+        var status = safeText(trip.status, "").toLowerCase();
+        return ["pending", "assigned", "queued", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit"].indexOf(status) >= 0;
+      }).map(function (trip) {
+        return {
+          id: safeText(trip.tripId, "ride"),
+          status: safeText(trip.status, "assigned"),
+          pickup_address: safeText(trip.pickup, "pickup"),
+          dropoff_address: safeText(trip.dropoff, "dropoff"),
+          driver_id: safeText(currentDriverId || trip.assignedDriver, "")
+        };
+      });
+    }
     var driverTimeline = Array.isArray((safeObject(state.driverWorkflow)).workspace && (safeObject(state.driverWorkflow)).workspace.timeline_states)
       ? (safeObject(state.driverWorkflow)).workspace.timeline_states
       : [];
@@ -7604,7 +7628,7 @@
     healthActionButtons.forEach(function (button) {
       button.textContent = "Review operations status";
     });
-    if ((state.route === "dashboard" || state.route === "mobile" || state.route === "drivers") && state.role === "driver") {
+    if (canUseDriverWorkspaceActions()) {
       bindDriverWorkspaceEvents();
     }
     if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && state.role === "rider") {
@@ -9162,7 +9186,7 @@
             customerRequests: workflowReferenceSettled[1].status === "fulfilled" && Array.isArray(workflowReferenceSettled[1].value) ? workflowReferenceSettled[1].value : [],
             vehicles: workflowReferenceSettled[2].status === "fulfilled" && Array.isArray(workflowReferenceSettled[2].value) ? workflowReferenceSettled[2].value : []
           };
-          if (state.role === "driver" || state.route === "drivers") {
+          if (canUseDriverWorkspaceActions()) {
             try {
               await refreshDriverWorkflowData({ token: token });
             } catch (_) {

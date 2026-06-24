@@ -329,3 +329,23 @@ Target: `overall_status` = `ready` or `staging_only` (not `not_ready`).
 |-------|------------------|-------------------|
 | **nova-stable** | Health OK on dedicated port | **Yes** — pilot deploy after Git push + Render env |
 | **Python 8010** | App runs; readiness blocked without Postgres | **Yes for staging** — set Render env block below first |
+
+### Quick local verification (after starting servers)
+
+```powershell
+.\scripts\start_both_local.ps1
+.\scripts\preflight_deploy.ps1
+```
+
+Target: all checks **PASS**. Python readiness may show `not_ready` locally until `DATABASE_URL` is set — that is expected; on Render with Postgres it should reach `staging_only` or `ready`.
+
+### Render deploy order (required — not automatic)
+
+1. Push latest branch to GitHub
+2. Deploy **nova-stable** Web Service (`rootDir: nova-stable`, health `/api/health`)
+3. Create **Render PostgreSQL** → set `DATABASE_URL` on Python service
+4. Deploy **Python backend** (`rootDir: backend`, health `/api/health`)
+5. Set env vars from blocks above; re-check `GET /api/health/readiness` on live URL
+6. Smoke test live URLs (drivers workflow, dispatch create/assign)
+
+**Code is deploy-ready; Render services must still be created manually.**
