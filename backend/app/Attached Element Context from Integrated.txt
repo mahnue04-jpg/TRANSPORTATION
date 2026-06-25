@@ -1,0 +1,90 @@
+Attached Element Context from Integrated Browser
+
+Element: aside.ops-sidebar
+
+URL: http://127.0.0.1:8010/app/dashboard
+
+HTML Path: div#ops-app.ops-app > aside.ops-sidebar
+
+Outer HTML:
+```html
+<aside class="ops-sidebar">
+      <div class="ops-brand">
+        <h1>Amicor Nova</h1>
+        <p>Operational Platform</p>
+      </div>
+      <nav class="ops-nav" aria-label="Primary navigation">
+        <a href="/dashboard" data-route="dashboard" style="display: block; order: 0;" class="active">Dashboard</a>
+        <a href="/dispatch" data-route="dispatch" class="role-emphasis" style="display: block; order: 1;">Dispatch Board</a>
+        <a href="/trips" data-route="trips" style="display: block; order: 2;">Trips</a>
+        <a href="/drivers" data-route="drivers" style="display: block; order: 3;" class="">Drivers</a>
+        <a href="/riders" data-route="riders" style="display: block; order: 4;">Riders / Patients</a>
+        <a href="/providers" data-route="providers" style="display: block; order: 5;">Providers</a>
+        <a href="/vehicles" data-route="vehicles" style="display: block; order: 6;">Vehicles</a>
+        <a href="/billing" data-route="billing" style="display: block; order: 7;">Billing</a>
+        <a href="/analytics" data-route="analytics" style="display: block; order: 8;">Reports &amp; Analytics</a>
+        <a href="/alerts" data-route="alerts" style="display: block; order: 9;">Alerts</a>
+        <a href="/mobile" data-route="mobile" style="display: block; order: 10;">Mobile Apps</a>
+        <a href="/ai-assistant" data-route="ai-assistant" style="display: block; order: 11;">AI Assistant</a>
+        <a href="/settings" data-route="settings" style="display: block; order: 12;">Settings</a>
+      </nav>
+      <section class="ops-role-box" aria-label="Role selector">
+        <label for="role-select">Role view</label>
+        <select id="role-select">
+          <option value="admin">admin</option>
+          <option value="dispatcher">dispatcher</option>
+          <option value="rider">rider</option>
+          <option value="driver">driver</option>
+          <option value="provider">provider</option>
+           <option value="compliance_officer">compliance_officer</option>
+           <option value="supervisor">supervisor</option>
+           <option value="driver_support">driver_support</option>
+           <option value="medical_coordinator">medical_coordinator</option>
+        </select>
+        <p id="role-context" class="ops-role-context">Owner command center with cross-surface visibility and supervision-first controls.</p>
+      </section>
+    </aside>
+```
+
+Dimensions:
+- top: -9606px
+- left: 0px
+- width: 270px
+- height: 10182px
+
+CSS:
+```css
+* { box-sizing: border-box; }
+.ops-sidebar { border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, #041223 0%, #071f39 50%, #0a2a4b 100%);
+  color: #f2f5ff;
+  padding: 20px 16px; }
+body[data-role="admin"] .ops-sidebar { background: linear-gradient(180deg, #041223 0%, #071f39 50%, #0a2a4b 100%); }
+
+/* Inherited */
+body { color: var(--text); font-family: "Segoe UI", "Aptos", "Trebuchet MS", sans-serif; line-height: 1.4 }
+
+/* Resolved values */
+padding: 20px 16px;
+background-attachment: scroll;
+background-clip: border-box;
+background-color: rgba(0, 0, 0, 0);
+background-image: linear-gradient(rgb(4, 18, 35) 0%, rgb(7, 31, 57) 50%, rgb(10, 42, 75) 100%);
+background-origin: padding-box;
+background-position-x: 0%;
+background-position-y: 0%;
+background-repeat: repeat;
+background-size: auto;
+box-sizing: border-box;
+color: rgb(242, 245, 255);
+display: block;
+font-family: "Segoe UI", Aptos, "Trebuchet MS", sans-serif;
+height: 10182px;
+line-height: 22.4px;
+unicode-bidi: isolate /*UA*/;
+width: 270px;
+
+/* CSS variables */
+--border: #19395f;
+--text: #e8f2ff;
+```
