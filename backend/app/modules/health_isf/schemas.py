@@ -475,6 +475,25 @@ class DispatchAutoAssignResponse(BaseModel):
     candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class DispatchRecommendationGenerateRequest(BaseModel):
+    ride_id: str = Field(..., min_length=1, max_length=36)
+
+
+class DispatchRecommendationApproveRequest(BaseModel):
+    ride_id: str = Field(..., min_length=1, max_length=36)
+    driver_id: Optional[str] = Field(None, min_length=1, max_length=36)
+    offer_timeout_seconds: int = Field(90, ge=10, le=600)
+
+
+class DispatchRecommendationResponse(BaseModel):
+    ride_id: str
+    assignment_state: str
+    recommended_driver_id: Optional[str] = None
+    recommended_score: Optional[float] = None
+    dispatcher_message: Optional[str] = None
+    offer: Optional[DispatchOfferResponse] = None
+
+
 class DispatchQueueItemResponse(BaseModel):
     ride_id: str
     passenger_name: str
@@ -484,6 +503,9 @@ class DispatchQueueItemResponse(BaseModel):
     dispatcher_message: Optional[str] = None
     attempt_index: int
     offered_driver_id: Optional[str] = None
+    recommended_driver_id: Optional[str] = None
+    recommended_driver_name: Optional[str] = None
+    recommendation: Optional[str] = None
     offer_expires_at: Optional[datetime] = None
     score: Optional[float] = None
     queued_at: Optional[datetime] = None

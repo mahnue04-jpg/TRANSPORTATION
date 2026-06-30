@@ -23,10 +23,17 @@ _REQUIRED_ENV = [
     "JWT_SECRET",
 ]
 
-_RECOMMENDED_ENV = [
+_PRODUCTION_REQUIRED_ENV = [
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "JWT_SECRET",
     "ALLOWED_ORIGINS",
-    "LOG_LEVEL",
+    "AMICOR_PUBLIC_URL",
     "APP_VERSION",
+]
+
+_RECOMMENDED_ENV = [
+    "LOG_LEVEL",
     "AMICOR_SEED_PASSWORD",
     "HEALTH_ISF_WS_MAX_ORG_CONNECTIONS",
 ]
@@ -41,7 +48,7 @@ _INSECURE_DEFAULTS = {
 # ─── Checker ─────────────────────────────────────────────────────────────────
 
 class DeploymentReadinessChecker:
-    """Static deployment readiness validation — no DB access required."""
+    """Static deployment readiness validation — optional DB connectivity probe."""
 
     @classmethod
     def run_env_validation(cls) -> dict[str, Any]:
@@ -74,6 +81,32 @@ class DeploymentReadinessChecker:
         }
 
     @classmethod
+    def run_production_env_validation(cls) -> dict[str, Any]:
+        """Validate all production/staging required variables."""
+        issues: list[str] = []
+        passed: list[str] = []
+
+        for var in _PRODUCTION_REQUIRED_ENV:
+            val = os.environ.get(var, "").strip()
+            if not val:
+                issues.append(f"Missing production env var: {var}")
+                continue
+            if var in _INSECURE_DEFAULTS and val.lower() in _INSECURE_DEFAULTS[var]:
+                issues.append(f"Insecure default value detected for {var}")
+                continue
+            if var == "APP_VERSION" and val.lower() in {"dev", "local", "test"}:
+                issues.append(f"APP_VERSION must be a release identifier, not '{val}'")
+                continue
+            passed.append(var)
+
+        return {
+            "required_present": len(issues) == 0,
+            "issues": issues,
+            "passed": passed,
+            "required_vars": list(_PRODUCTION_REQUIRED_ENV),
+        }
+
+    @classmethod
     def run_config_checks(cls) -> dict[str, Any]:
         """
         Validate production configuration patterns.
@@ -81,25 +114,26 @@ class DeploymentReadinessChecker:
         """
         checks: dict[str, dict[str, Any]] = {}
 
-        # CORS origins set to non-wildcard
         origins_raw = os.environ.get("ALLOWED_ORIGINS", "")
         checks["cors_not_wildcard"] = {
-            "passed": "*" not in origins_raw or not origins_raw,
+            "passed": bool(origins_raw) and "*" not in origins_raw,
             "detail": (
-                "ALLOWED_ORIGINS contains wildcard (*) — restrict before production"
-                if "*" in origins_raw
-                else "CORS origins appear restricted"
+                "ALLOWED_ORIGINS is missing"
+                if not origins_raw
+                else (
+                    "ALLOWED_ORIGINS contains wildcard (*) — restrict before production"
+                    if "*" in origins_raw
+                    else "CORS origins appear restricted"
+                )
             ),
         }
 
-        # Debug / reload flag not set
         debug_mode = os.environ.get("DEBUG", "").lower() in {"1", "true", "yes"}
         checks["debug_disabled"] = {
             "passed": not debug_mode,
             "detail": "DEBUG mode is enabled — disable in production" if debug_mode else "Debug mode off",
         }
 
-        # Log level not DEBUG in production
         log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
         checks["log_level_appropriate"] = {
             "passed": log_level in {"INFO", "WARNING", "ERROR", "CRITICAL"},
@@ -110,7 +144,6 @@ class DeploymentReadinessChecker:
             ),
         }
 
-        # App version set
         app_version = os.environ.get("APP_VERSION", "")
         checks["app_version_set"] = {
             "passed": bool(app_version and app_version not in {"dev", "local"}),
@@ -121,86 +154,149 @@ class DeploymentReadinessChecker:
             ),
         }
 
-        # Database URL points to non-SQLite source
         db_url = os.environ.get("DATABASE_URL", "")
         checks["production_database"] = {
             "passed": bool(db_url) and "sqlite" not in db_url.lower(),
             "detail": (
                 "DATABASE_URL uses SQLite — not suitable for production"
-                if "sqlite" in db_url.lower()
+                if db_url and "sqlite" in db_url.lower()
                 else "Database URL points to production-grade data store" if db_url
                 else "DATABASE_URL not configured"
+            ),
+        }
+
+        public_url = os.environ.get("AMICOR_PUBLIC_URL", "").strip()
+        checks["public_url_set"] = {
+            "passed": bool(public_url) and public_url.startswith("https://"),
+            "detail": (
+                "AMICOR_PUBLIC_URL not set"
+                if not public_url
+                else (
+                    "AMICOR_PUBLIC_URL must use https:// in production"
+                    if not public_url.startswith("https://")
+                    else f"Public URL configured: {public_url}"
+                )
             ),
         }
 
         return checks
 
     @classmethod
-    def build_readiness_report(cls) -> dict[str, Any]:
+    def _build_blocked_reasons(
+        cls,
+        env: dict[str, Any],
+        production_env: dict[str, Any],
+        config: dict[str, dict[str, Any]],
+        *,
+        db_ok: bool,
+    ) -> list[str]:
+        reasons: list[str] = []
+
+        for issue in production_env.get("issues", []):
+            if issue.startswith("Missing production env var:"):
+                var = issue.split(":", 1)[1].strip()
+                reasons.append(f"Set {var} before promoting to production (see STAGING_PRODUCTION_ENV_CHECKLIST.md).")
+            else:
+                reasons.append(issue)
+
+        for issue in env.get("issues", []):
+            if issue not in reasons:
+                reasons.append(issue)
+
+        for name, check in config.items():
+            if not check.get("passed"):
+                reasons.append(f"{name}: {check.get('detail', 'failed')}")
+
+        if not db_ok:
+            reasons.append(
+                "Database connectivity check failed — verify DATABASE_URL, network access, and credentials."
+            )
+
+        return reasons
+
+    @classmethod
+    def build_readiness_report(cls, *, db_ok: bool | None = None) -> dict[str, Any]:
         """
-        Produce a full deployment readiness report without DB access.
-        Suitable for /api/health/readiness endpoint.
+        Produce a full deployment readiness report.
+        Returns overall_status=ready only when production env, config, and DB checks pass.
         """
         env = cls.run_env_validation()
+        production_env = cls.run_production_env_validation()
         config = cls.run_config_checks()
 
-        # Score: env issues block, config failures deduct
-        blocking_issues = len(env["issues"])
-        config_failures = sum(1 for c in config.values() if not c["passed"])
-        config_warnings = sum(1 for c in config.values() if c.get("passed") is False)
+        if db_ok is None:
+            try:
+                from app.db.session import check_db_connection
+                db_ok = check_db_connection()
+            except Exception:
+                db_ok = False
 
-        if blocking_issues > 0:
-            overall_status = "not_ready"
-            score = max(0, 40 - blocking_issues * 15)
-        elif config_failures > 0:
+        blocked_reasons = cls._build_blocked_reasons(
+            env,
+            production_env,
+            config,
+            db_ok=bool(db_ok),
+        )
+
+        config_failures = sum(1 for c in config.values() if not c["passed"])
+        production_ready = (
+            production_env["required_present"]
+            and config_failures == 0
+            and bool(db_ok)
+        )
+
+        if production_ready:
+            overall_status = "ready"
+            score = 100 if not env.get("warnings") else 95
+        elif production_env["required_present"] and bool(db_ok):
             overall_status = "staging_only"
             score = max(40, 80 - config_failures * 10)
         else:
-            overall_status = "ready"
-            score = 100 if not env["warnings"] else 90
+            overall_status = "not_ready"
+            score = max(0, 40 - len(blocked_reasons) * 8)
 
         return {
             "overall_status": overall_status,
             "score": score,
             "environment": env,
+            "production_environment": production_env,
             "config_checks": config,
-            "summary": cls._compose_summary(overall_status, env, config_failures),
-            "recommendations": cls._build_recommendations(env, config),
+            "database": {
+                "connected": bool(db_ok),
+                "detail": "Database reachable" if db_ok else "Database unreachable",
+            },
+            "blocked_reasons": blocked_reasons,
+            "summary": cls._compose_summary(overall_status, blocked_reasons),
+            "recommendations": cls._build_recommendations(env, config, blocked_reasons),
         }
 
     @classmethod
-    def _compose_summary(
-        cls,
-        status: str,
-        env: dict[str, Any],
-        config_failures: int,
-    ) -> str:
+    def _compose_summary(cls, status: str, blocked_reasons: list[str]) -> str:
         if status == "ready":
             return "Deployment environment meets production readiness criteria."
         if status == "staging_only":
             return (
-                f"Environment passes required checks but {config_failures} "
-                "configuration item(s) should be addressed before production."
+                "Core environment variables are present and database is reachable, "
+                "but one or more production configuration checks still need attention."
             )
-        return (
-            f"Deployment blocked: {len(env['issues'])} critical environment issue(s) must be resolved."
-        )
+        if not blocked_reasons:
+            return "Deployment blocked: unknown readiness failure."
+        return "Deployment blocked: " + "; ".join(blocked_reasons[:4])
 
     @classmethod
     def _build_recommendations(
         cls,
         env: dict[str, Any],
         config: dict[str, dict[str, Any]],
+        blocked_reasons: list[str],
     ) -> list[str]:
-        recs: list[str] = []
-        for issue in env["issues"]:
-            recs.append(f"Fix: {issue}")
-        for name, check in config.items():
-            if not check["passed"]:
-                recs.append(f"Config: {check['detail']}")
+        recs = list(blocked_reasons[:8])
         for warning in env.get("warnings", []):
             recs.append(f"Recommended: {warning}")
-        return recs[:10]
+        for name, check in config.items():
+            if not check["passed"] and check.get("detail") not in recs:
+                recs.append(f"Config ({name}): {check['detail']}")
+        return recs[:12]
 
 
 # ─── Health monitoring hook ───────────────────────────────────────────────────

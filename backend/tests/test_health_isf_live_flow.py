@@ -108,6 +108,24 @@ def _ensure_available_driver(org_id: str) -> str:
         return new_driver.id
 
 
+def _isolate_driver_for_recommendation(org_id: str, driver_id: str) -> None:
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.rating = 5.0
+        dedicated.total_trips = 100
+        dedicated.status = DriverStatus.AVAILABLE
+        dedicated.is_active = True
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == org_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+        db.commit()
+
+
 def _ensure_vehicle(org_id: str, *, is_active: bool = True) -> str:
     with SessionLocal() as db:
         vehicle = HealthISFVehicle(
@@ -703,6 +721,101 @@ class TestDispatchStatusProgression:
                     driver.availability_state = availability_state_value
                     driver.is_online = is_online_value
                 db.commit()
+
+
+    def test_intake_creates_ai_recommendation_when_driver_available(self, client: TestClient):
+        org_id = _get_org_id()
+        provider_id = _ensure_provider(org_id)
+        driver_id = _ensure_available_driver(org_id)
+        _isolate_driver_for_recommendation(org_id, driver_id)
+
+        auth = _login(client, "dispatcher@amicor.local")
+        headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+        create_resp = client.post(
+            "/api/health-isf/rides",
+            headers=headers,
+            json={
+                "provider_id": provider_id,
+                "passenger_name": f"AI Recommend Patient {uuid4()[:6]}",
+                "passenger_phone": "917-555-4949",
+                "service_type": "medical_transport",
+                "pickup_address": "50 AI Recommend St",
+                "dropoff_address": "60 Approval Gate Ave",
+            },
+        )
+        assert create_resp.status_code in {200, 201}, create_resp.text
+        ride_id = create_resp.json()["id"]
+
+        queue_response = client.get("/api/health-isf/dispatch/queue", headers=headers)
+        assert queue_response.status_code == 200, queue_response.text
+        queue_row = next((row for row in queue_response.json() if row.get("ride_id") == ride_id), None)
+        assert queue_row is not None
+        assert queue_row.get("assignment_state") == "awaiting_approval"
+        assert queue_row.get("recommended_driver_id") == str(driver_id)
+        assert queue_row.get("dispatcher_message")
+
+        with SessionLocal() as db:
+            ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
+            assert ride is not None
+            assert ride.driver_id is None
+
+        approve_response = client.post(
+            "/api/health-isf/dispatch/recommendations/approve",
+            headers=headers,
+            json={"ride_id": ride_id, "offer_timeout_seconds": 90},
+        )
+        assert approve_response.status_code == 200, approve_response.text
+        approved = approve_response.json()
+        assert approved.get("recommended_driver_id") == str(driver_id)
+        assert approved.get("assignment_state") == "offered"
+
+        with SessionLocal() as db:
+            ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
+            assert ride is not None
+            assert str(ride.driver_id) == str(driver_id)
+
+    def test_customer_request_intake_creates_ai_recommendation(self, client: TestClient):
+        org_id = _get_org_id()
+        _ensure_provider(org_id)
+        driver_id = _ensure_available_driver(org_id)
+        _isolate_driver_for_recommendation(org_id, driver_id)
+
+        auth = _login(client, "dispatcher@amicor.local")
+        headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+        create_resp = client.post(
+            "/api/health-isf/customer-requests",
+            headers=headers,
+            json={
+                "rider_name": f"Customer AI Patient {uuid4()[:6]}",
+                "rider_phone": "917-555-5858",
+                "pickup_address": "70 Customer Intake St",
+                "dropoff_address": "80 Dispatch Queue Ave",
+                "ride_type": "healthcare",
+            },
+        )
+        assert create_resp.status_code in {200, 201}, create_resp.text
+        ride_id = create_resp.json()["ride_id"]
+
+        queue_response = client.get("/api/health-isf/dispatch/queue", headers=headers)
+        assert queue_response.status_code == 200, queue_response.text
+        queue_row = next((row for row in queue_response.json() if row.get("ride_id") == ride_id), None)
+        assert queue_row is not None
+        assert queue_row.get("assignment_state") == "awaiting_approval"
+        assert queue_row.get("recommended_driver_id") is not None
+        assert queue_row.get("dispatcher_message")
+
+        with SessionLocal() as db:
+            assignment = (
+                db.query(HealthISFDispatchAssignment)
+                .filter(HealthISFDispatchAssignment.ride_id == ride_id)
+                .order_by(HealthISFDispatchAssignment.created_at.desc())
+                .first()
+            )
+            assert assignment is not None
+            assert str(assignment.assignment_state) == "awaiting_approval"
+            assert str(assignment.driver_id) == str(driver_id)
 
 
 class TestDispatcherRideCompletion:

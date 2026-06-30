@@ -97,6 +97,7 @@ class DispatchAssignmentState(str, Enum):
     """Dispatch assignment lifecycle states for auto-assignment offers."""
     QUEUED = "queued"
     SEARCHING = "searching"
+    AWAITING_APPROVAL = "awaiting_approval"
     OFFERED = "offered"
     REJECTED = "rejected"
     EXPIRED = "expired"

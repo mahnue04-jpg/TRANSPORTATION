@@ -154,23 +154,15 @@ def seed_default_users() -> list[dict[str, str]]:
     """Ensure baseline test users exist and return seeded account metadata."""
     from app.db.models import User as UserModel
     from app.db.session import SessionLocal
-    from app.modules.health_isf.models import HealthISFOrganization
     from app.modules.health_isf.models import ensure_health_isf_schema
+    from app.modules.health_isf import service as health_isf_service
 
     ensure_auth_schema()
     ensure_health_isf_schema()
     db: Session = SessionLocal()
     created: list[dict[str, str]] = []
     try:
-        default_org = db.query(HealthISFOrganization).filter(HealthISFOrganization.code == "AMICOR-DEFAULT").first()
-        if default_org is None:
-            default_org = HealthISFOrganization(
-                name=DEFAULT_ORGANIZATION_NAME,
-                code="AMICOR-DEFAULT",
-                is_active=True,
-            )
-            db.add(default_org)
-            db.flush()
+        default_org = health_isf_service._get_or_create_default_org(db)
 
         for user_seed in SEED_USERS:
             email = user_seed["email"].strip().lower()
@@ -212,19 +204,11 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
         return str(current_org)
 
     try:
-        from app.modules.health_isf.models import HealthISFOrganization
         from app.modules.health_isf.models import ensure_health_isf_schema
+        from app.modules.health_isf import service as health_isf_service
 
         ensure_health_isf_schema()
-        default_org = db.query(HealthISFOrganization).filter(HealthISFOrganization.code == "AMICOR-DEFAULT").first()
-        if default_org is None:
-            default_org = HealthISFOrganization(
-                name=DEFAULT_ORGANIZATION_NAME,
-                code="AMICOR-DEFAULT",
-                is_active=True,
-            )
-            db.add(default_org)
-            db.flush()
+        default_org = health_isf_service._get_or_create_default_org(db)
 
         user.organization_id = default_org.id
         if not getattr(user, "organization_name", None):

@@ -208,7 +208,17 @@ class TestReadinessReportStructure:
     def test_report_has_all_required_keys(self):
         report = DeploymentReadinessChecker.build_readiness_report()
 
-        for key in ["overall_status", "score", "environment", "config_checks", "summary", "recommendations"]:
+        for key in [
+            "overall_status",
+            "score",
+            "environment",
+            "production_environment",
+            "config_checks",
+            "database",
+            "blocked_reasons",
+            "summary",
+            "recommendations",
+        ]:
             assert key in report, f"Missing key: {key}"
 
     def test_report_overall_status_is_valid(self):
@@ -244,3 +254,22 @@ class TestHealthMonitoringPayload:
     def test_includes_app_version(self):
         payload = build_health_monitoring_payload(db_ok=True, ws_stats={})
         assert "app_version" in payload["environment"]
+
+
+# ─── Runtime topology contract ────────────────────────────────────────────────
+
+class TestRuntimeTopologyContract:
+    def test_topology_uses_request_host_when_public_url_missing(self, client: TestClient):
+        response = client.get(
+            "/api/runtime/topology",
+            headers={
+                "host": "amicor-health-isf-py.onrender.com",
+                "x-forwarded-proto": "https",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["backend_url"] == "https://amicor-health-isf-py.onrender.com"
+        assert payload["frontend_url"] == "https://amicor-health-isf-py.onrender.com/app"
+        assert payload["websocket_url"].startswith("wss://")
+        assert "127.0.0.1" not in payload["backend_url"]

@@ -67,6 +67,9 @@ from app.modules.health_isf.schemas import (
     DispatchAutoAssignResponse,
     DispatchOfferResponse,
     DispatchQueueItemResponse,
+    DispatchRecommendationApproveRequest,
+    DispatchRecommendationGenerateRequest,
+    DispatchRecommendationResponse,
     DispatchReassignRequest,
     DispatcherCustomerRequestActionResponse,
     DispatcherCustomerRequestAssignDriverRequest,
@@ -5083,14 +5086,17 @@ async def create_customer_ride_request(
     try:
         from app.modules.health_isf import notifications as notify
 
-        base_url = os.getenv("AMICOR_PUBLIC_URL", "http://127.0.0.1:8010")
-        tracking_url = f"{base_url.rstrip('/')}/app/riders?track={ride.id}"
-        notify.send_sms(
-            db,
-            to_phone=payload.rider_phone,
-            message=notify.build_rider_tracking_message(ride_id=ride.id, tracking_url=tracking_url),
-            ride_id=ride.id,
-        )
+        base_url = (os.getenv("AMICOR_PUBLIC_URL") or "").strip().rstrip("/")
+        if base_url:
+            tracking_url = f"{base_url}/app/riders?track={ride.id}"
+            notify.send_sms(
+                db,
+                to_phone=payload.rider_phone,
+                message=notify.build_rider_tracking_message(ride_id=ride.id, tracking_url=tracking_url),
+                ride_id=ride.id,
+            )
+        else:
+            logger.warning("AMICOR_PUBLIC_URL not set; skipping rider tracking SMS link")
     except Exception:
         logger.warning("Rider confirmation SMS failed for ride_id=%s", ride.id, exc_info=True)
 
@@ -5147,10 +5153,39 @@ def get_customer_workspace_history(
         rider_phone=rider_phone,
         limit=limit,
     )
+    history = [_serialize_customer_request(row).model_dump() for row in rows]
+    seen_ride_ids = {str(item.get("ride_id") or "") for item in history if item.get("ride_id")}
+    for ride in service.list_rides_for_passenger_phone(
+        db,
+        organization_id=effective_org_id,
+        rider_phone=rider_phone,
+        limit=limit,
+    ):
+        if ride.id in seen_ride_ids:
+            continue
+        lifecycle = str(getattr(ride, "lifecycle_state", None) or ride.status or "pending")
+        history.append(
+            {
+                "id": f"ride-{ride.id}",
+                "organization_id": effective_org_id,
+                "ride_id": ride.id,
+                "rider_phone": rider_phone,
+                "rider_name": ride.passenger_name,
+                "pickup_address": ride.pickup_address,
+                "dropoff_address": ride.dropoff_address,
+                "ride_type": ride.service_type or "healthcare",
+                "dispatch_status": lifecycle.lower(),
+                "authorization_status": "approved",
+                "created_at": ride.created_at.isoformat() if ride.created_at else None,
+                "updated_at": ride.updated_at.isoformat() if ride.updated_at else None,
+            }
+        )
+    history.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    history = history[:limit]
     return {
         "organization_id": effective_org_id,
         "rider_phone": rider_phone,
-        "history": [_serialize_customer_request(row).model_dump() for row in rows],
+        "history": history,
     }
 
 
@@ -6577,6 +6612,44 @@ async def create_ride(
             has_appointment_time=bool(ride_create.appointment_time),
             idempotency_key_present=bool(idempotency_key),
         )
+
+        recommendation_result = service.recommend_driver_for_ride(
+            db,
+            ride_id=ride.id,
+            actor_user_id=_user.id,
+        )
+        recommendation = recommendation_result.get("recommendation")
+        if recommendation:
+            selected_driver = recommendation_result.get("selected_driver")
+            recommendation_payload = {
+                "ride_id": ride.id,
+                "assignment_state": str(recommendation.assignment_state),
+                "recommended_driver_id": recommendation.driver_id,
+                "recommended_driver_name": getattr(selected_driver, "name", None),
+                "recommended_score": float(recommendation.score) if recommendation.score is not None else None,
+                "organization_id": organization_id,
+            }
+            await _emit_with_retry_queue(
+                db=db,
+                organization_id=organization_id,
+                event_type="dispatch_recommendation_created",
+                event_payload=recommendation_payload,
+                emit_callable=lambda: emitter.emit_dispatch_changed(
+                    organization_id=organization_id,
+                    event_name="dispatch_recommendation_created",
+                    actor_user_id=_user.id,
+                    details=recommendation_payload,
+                ),
+                idempotency_key=_event_key("dispatch_recommendation_created", ride.id, str(recommendation.id)),
+                ride_id=ride.id,
+            )
+            log_operational_event(
+                "dispatch.recommendation.created",
+                organization_id=organization_id,
+                ride_id=ride.id,
+                recommended_driver_id=recommendation.driver_id,
+                recommended_score=recommendation.score,
+            )
 
         enforce_entity_tenant(user, ride.organization_id)
         return ride
@@ -8227,6 +8300,7 @@ async def dispatcher_reassign_driver(
             ride_id=ride_id,
             driver_id=payload.driver_id,
             actor_user_id=_user.id,
+            allow_reassignment=True,
         )
         
         if not ride:
@@ -8425,6 +8499,131 @@ async def dispatch_auto_assign(
             offer=_serialize_dispatch_offer(offer) if offer else None,
             candidate_count=len(result.get("candidates") or []),
             candidate_scores=list(result.get("candidate_snapshot") or result.get("candidates") or []),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        ConcurrentAssignmentService.release_assignment_lock(db, ride.id)
+
+
+@router.post("/dispatch/recommendations/generate", response_model=DispatchRecommendationResponse)
+async def dispatch_generate_recommendation(
+    payload: DispatchRecommendationGenerateRequest,
+    _user=Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Generate or refresh an AI dispatch recommendation for a queued ride."""
+    ride = service.get_ride_by_id(db, payload.ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+
+    result = service.recommend_driver_for_ride(
+        db,
+        ride_id=ride.id,
+        actor_user_id=_user.id,
+    )
+    recommendation = result.get("recommendation")
+    selected_driver = result.get("selected_driver")
+    if not recommendation:
+        return DispatchRecommendationResponse(
+            ride_id=ride.id,
+            assignment_state="pending_assignment",
+            recommended_driver_id=None,
+            recommended_score=None,
+            dispatcher_message="No dispatch-ready drivers available",
+            offer=None,
+        )
+    return DispatchRecommendationResponse(
+        ride_id=ride.id,
+        assignment_state=str(recommendation.assignment_state),
+        recommended_driver_id=str(recommendation.driver_id) if recommendation.driver_id else None,
+        recommended_score=float(recommendation.score) if recommendation.score is not None else None,
+        dispatcher_message=(
+            f"AI recommended {getattr(selected_driver, 'name', 'driver')} — awaiting dispatcher approval"
+            if selected_driver
+            else "AI dispatch recommendation awaiting dispatcher approval"
+        ),
+        offer=None,
+    )
+
+
+@router.post("/dispatch/recommendations/approve", response_model=DispatchRecommendationResponse)
+async def dispatch_approve_recommendation(
+    payload: DispatchRecommendationApproveRequest,
+    request: Request,
+    _user = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Approve an AI dispatch recommendation and issue the final driver assignment offer."""
+    ride = service.get_ride_by_id(db, payload.ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+
+    request_id = _resolve_request_id(request)
+    if ConcurrentAssignmentService.has_assignment_lock(db, ride.id):
+        raise HTTPException(status_code=409, detail="Ride is currently undergoing assignment mutation")
+    lock = ConcurrentAssignmentService.acquire_assignment_lock(db, ride.id, _user.id, 30)
+    if not lock:
+        raise HTTPException(status_code=409, detail="Could not acquire assignment lock")
+
+    try:
+        result = service.approve_dispatch_recommendation(
+            db,
+            ride_id=ride.id,
+            actor_user_id=_user.id,
+            driver_id=payload.driver_id,
+            offer_timeout_seconds=payload.offer_timeout_seconds,
+        )
+        offer = result.get("offer")
+        selected_driver_id = offer.driver_id if offer else None
+        assignment_state = str(offer.assignment_state) if offer else "offered"
+        details = {
+            "ride_id": ride.id,
+            "offer_id": offer.id if offer else None,
+            "driver_id": selected_driver_id,
+            "request_id": request_id,
+            "source": "dispatch_recommendation_approve",
+        }
+        if offer:
+            await _emit_dispatch_lifecycle_event(
+                db=db,
+                organization_id=ride.organization_id,
+                ride_id=ride.id,
+                event_name="driver-offer-issued",
+                actor_user_id=_user.id,
+                details=details,
+                request_id=request_id,
+                assignment_id=offer.id,
+                driver_id=selected_driver_id,
+                lifecycle_state=assignment_state,
+                transition_reason="recommendation_approved",
+                assignment_transition_source="dispatch_approve_recommendation",
+            )
+            await _emit_dispatch_lifecycle_event(
+                db=db,
+                organization_id=ride.organization_id,
+                ride_id=ride.id,
+                event_name="assignment-issued",
+                actor_user_id=_user.id,
+                details=details,
+                request_id=request_id,
+                assignment_id=offer.id,
+                driver_id=selected_driver_id,
+                lifecycle_state=assignment_state,
+                transition_reason="recommendation_approved",
+                assignment_transition_source="dispatch_approve_recommendation",
+            )
+        return DispatchRecommendationResponse(
+            ride_id=ride.id,
+            assignment_state=assignment_state,
+            recommended_driver_id=selected_driver_id,
+            recommended_score=float(offer.score) if offer and offer.score is not None else None,
+            dispatcher_message="AI recommendation approved and driver offer issued",
+            offer=_serialize_dispatch_offer(offer) if offer else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -9096,12 +9295,11 @@ async def dispatcher_cancel_ride(
     
     previous_state = RideLifecycleManager.normalize_state(getattr(ride, "lifecycle_state", None) or ride.status)
     try:
-        # Update status to cancelled
-        ride = service.update_ride_status(
+        ride = service.cancel_ride(
             db,
             ride_id=ride_id,
-            status=RideStatus.CANCELLED.value,
             actor_user_id=_user.id,
+            reason=reason,
         )
         
         if not ride:

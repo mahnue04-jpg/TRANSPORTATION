@@ -38,7 +38,7 @@
             <script src="/static/ux/runtimeDiagnostics.js?v=20260512.1"></script>
             <link rel="stylesheet" href="/static/modules/health_isf/health-isf.css?v=20260519.8" />
             <link rel="stylesheet" href="/static/modules/nova/nova.css?v=20260518.1" />
-            <script src="/static/modules/health_isf/health-isf.js?v=20260616.3"></script>
+            <script src="/static/modules/health_isf/health-isf.js?v=20260629.4"></script>
             <script src="/static/modules/nova/nova.js?v=20260519.9"></script>
             <script src="/static/monitoring/productionMonitor.js?v=20260512.1"></script>
             <script>
@@ -3398,11 +3398,19 @@
   });
   const BOOT_TS = Date.now();
   let lastRestoredHistorySignature = null;
-  const EXPECTED_LOCAL_RUNTIME_ORIGIN = "http://127.0.0.1:8010";
-  const ACCEPTED_LOCAL_RUNTIME_ORIGINS = [
-    EXPECTED_LOCAL_RUNTIME_ORIGIN,
-    "http://localhost:8010",
-  ];
+  const isLocalDevHost = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+  const EXPECTED_LOCAL_RUNTIME_ORIGIN = isLocalDevHost
+    ? (String(location.port || "") === "8011" ? "http://127.0.0.1:8011" : "http://127.0.0.1:8010")
+    : window.location.origin;
+  const ACCEPTED_LOCAL_RUNTIME_ORIGINS = isLocalDevHost
+    ? [
+        EXPECTED_LOCAL_RUNTIME_ORIGIN,
+        "http://127.0.0.1:8010",
+        "http://localhost:8010",
+        "http://127.0.0.1:8011",
+        "http://localhost:8011",
+      ]
+    : [window.location.origin];
   const startupTrace = [];
   let trustDiagnosticsResolved = false;
   let trustDiagnosticsTimerId = 0;
@@ -7069,6 +7077,9 @@
 
   if (btnOpenLocalhostVersion) {
     btnOpenLocalhostVersion.addEventListener("click", () => {
+      if (!isLocalDevHost) {
+        return;
+      }
       try {
         window.open(EXPECTED_LOCAL_RUNTIME_ORIGIN, "_self");
       } catch (_) {
@@ -7518,7 +7529,18 @@
   (function initAmicorDevRuntimeOverlay() {
     const FRONTEND_BUILD_VERSION = "__AMICOR_BUILD_VERSION__";
     const FRONTEND_HYDRATION_VERSION = "__AMICOR_HYDRATION_VERSION__";
-    const CANONICAL_FRONTEND_URL = "__AMICOR_FRONTEND_URL__";
+    const CANONICAL_FRONTEND_URL = (function resolveCanonicalFrontendUrl() {
+      const injected = "__AMICOR_FRONTEND_URL__";
+      try {
+        const parsed = new URL(injected);
+        const injectedIsLocal = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost";
+        const currentIsLocal = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+        if (injectedIsLocal && !currentIsLocal) {
+          return location.origin + "/app";
+        }
+      } catch (_err) {}
+      return injected;
+    })();
     const DEVELOPER_MODE_ALLOWED = "__AMICOR_DEVELOPER_MODE_ALLOWED__" === "1";
     const SESSION_RUNTIME_KEYS = [
       "amicor_session",
@@ -7578,14 +7600,20 @@
     try {
       const expected = new URL(CANONICAL_FRONTEND_URL);
       const current = location;
+      const expectedIsLocalhost = expected.hostname === "127.0.0.1" || expected.hostname === "localhost";
+      const currentIsLocalhost = current.hostname === "127.0.0.1" || current.hostname === "localhost";
       const shouldRedirect =
         current.protocol !== "file:" &&
+        !expectedIsLocalhost &&
         (current.hostname !== expected.hostname || String(current.port || "") !== String(expected.port || ""));
       if (shouldRedirect) {
         purgeRuntimeSession("non_canonical_runtime_redirect");
         const target = expected.origin + current.pathname + current.search + current.hash;
         location.replace(target);
         return;
+      }
+      if (expectedIsLocalhost && !currentIsLocalhost) {
+        writeRuntimeMarker();
       }
     } catch (_err) {}
 
@@ -7781,10 +7809,10 @@
 
     async function loadRuntimeTopology() {
       const fallbackTopology = {
-        frontend_url: CANONICAL_FRONTEND_URL,
+        frontend_url: location.origin + "/app",
         backend_url: location.origin,
         websocket_url: (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/health-isf/ws/live",
-        environment: "development",
+        environment: location.protocol === "https:" ? "production" : "development",
         build_version: FRONTEND_BUILD_VERSION,
         hydration_version: FRONTEND_HYDRATION_VERSION,
       };
@@ -7793,7 +7821,31 @@
         const response = await fetch("/api/runtime/topology", { cache: "no-store" });
         if (response.ok) {
           const topology = await response.json();
-          latestTopology = Object.assign({}, fallbackTopology, topology || {});
+          const merged = Object.assign({}, fallbackTopology, topology || {});
+          const sanitizeLocalTopologyUrl = function (value, fallback) {
+            const host = String(value || "").replace(/^https?:\/\//, "").replace(/^wss?:\/\//, "").split("/")[0];
+            if (host && (host.indexOf("127.0.0.1") === 0 || host.indexOf("localhost") === 0)) {
+              return fallback;
+            }
+            return value || fallback;
+          };
+          merged.backend_url = sanitizeLocalTopologyUrl(merged.backend_url, location.origin);
+          merged.frontend_url = sanitizeLocalTopologyUrl(merged.frontend_url, location.origin + "/app");
+          merged.websocket_url = sanitizeLocalTopologyUrl(
+            merged.websocket_url,
+            (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/health-isf/ws/live"
+          );
+          const topoHost = String(merged.backend_url || "").replace(/^https?:\/\//, "").split("/")[0];
+          const currentHost = String(location.host || "");
+          if (topoHost && topoHost !== currentHost && (topoHost.indexOf("127.0.0.1") === 0 || topoHost.indexOf("localhost") === 0)) {
+            merged.backend_url = location.origin;
+            merged.frontend_url = location.origin + "/app";
+            merged.websocket_url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/health-isf/ws/live";
+          }
+          if (location.protocol === "https:" && merged.environment === "development") {
+            merged.environment = "production";
+          }
+          latestTopology = merged;
         } else {
           latestTopology = fallbackTopology;
         }

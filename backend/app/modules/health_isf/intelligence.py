@@ -1230,7 +1230,7 @@ class OperationalIntelligenceService:
         return max(0.0, min(100.0, round(risk, 2)))
 
     @staticmethod
-    def _availability_score(status: str) -> float:
+    def _availability_score(status: str | DriverStatus) -> float:
         mapping = {
             DriverStatus.AVAILABLE: 1.0,
             DriverStatus.ASSIGNED: 0.7,
@@ -1241,10 +1241,16 @@ class OperationalIntelligenceService:
             DriverStatus.UNAVAILABLE: 0.1,
             DriverStatus.OFFLINE: 0.0,
         }
-        try:
-            normalized = DriverStatus(str(status))
-        except Exception:
-            return 0.25
+        if isinstance(status, DriverStatus):
+            normalized = status
+        else:
+            raw = str(status or "").strip().lower()
+            if raw.startswith("driverstatus."):
+                raw = raw.split(".", 1)[-1]
+            try:
+                normalized = DriverStatus(raw)
+            except Exception:
+                return 0.25
         return float(mapping.get(normalized, 0.25))
 
     @staticmethod

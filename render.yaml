@@ -21,7 +21,11 @@ services:
       - key: AMICOR_SEED_PASSWORD
         sync: false
       - key: AMICOR_PUBLIC_URL
-        sync: false
+        value: https://amicor-health-isf-py.onrender.com
+      - key: APP_VERSION
+        value: 2026.06.29-production.1
+      - key: AMICOR_ENVIRONMENT
+        value: production
       - key: DB_POOL_SIZE
         value: "10"
       - key: DB_MAX_OVERFLOW

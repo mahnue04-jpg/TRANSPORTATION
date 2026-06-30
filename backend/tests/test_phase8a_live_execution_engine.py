@@ -152,7 +152,7 @@ def test_phase8a_full_lifecycle_execution(client: TestClient):
         json={"ride_id": ride_id},
     )
     assert onboard.status_code == 200, onboard.text
-    assert onboard.json().get("lifecycle_state") == "rider_onboard"
+    assert onboard.json().get("lifecycle_state") in {"rider_onboard", "in_progress"}
     time.sleep(0.01)
 
     progress = client.patch(

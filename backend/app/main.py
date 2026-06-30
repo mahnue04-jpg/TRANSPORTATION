@@ -83,6 +83,7 @@ from app.runtime_contract import (
     HYDRATION_VERSION,
     RUNTIME_CONTRACT,
     RUNTIME_ENVIRONMENT,
+    build_runtime_contract,
     inject_runtime_contract,
 )
 from app.modules.health_isf.runtime_governor import (  # type: ignore
@@ -529,9 +530,9 @@ def health_live():
 
 
 @app.get("/api/runtime/topology", tags=["health"])
-def runtime_topology() -> dict[str, str]:
+def runtime_topology(request: Request) -> dict[str, str]:
     """Expose canonical runtime topology for frontend diagnostics and verification."""
-    topology = dict(RUNTIME_CONTRACT)
+    topology = dict(build_runtime_contract(request=request))
     topology["app_version"] = os.environ.get("APP_VERSION", "dev")
     return topology
 
@@ -556,13 +557,15 @@ def enterprise_dashboard(
 def health_readiness():
     """
     Readiness probe with structured environment and config checks.
-    Returns 200 when ready, 503 when deployment blockers are present.
+    Returns 200 only when overall_status is ready (production env + config + DB).
+    Returns 503 with blocked_reasons when deployment blockers are present.
     """
     from app.deployment.readiness import DeploymentReadinessChecker
+    from app.db.session import check_db_connection
     from fastapi.responses import JSONResponse
 
-    report = DeploymentReadinessChecker.build_readiness_report()
-    status_code = 200 if report["overall_status"] in {"ready", "staging_only"} else 503
+    report = DeploymentReadinessChecker.build_readiness_report(db_ok=check_db_connection())
+    status_code = 200 if report["overall_status"] == "ready" else 503
     return JSONResponse(content=report, status_code=status_code)
 
 
@@ -2734,9 +2737,9 @@ def _summarize_document_text(text: str | None, max_len: int = 420) -> str | None
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
 @app.get("/")
-def frontend() -> HTMLResponse:
+def frontend(request: Request) -> HTMLResponse:
     """Serve main application UI."""
-    return _build_app_shell_response()
+    return _build_app_shell_response(request)
 
 
 @app.get("/api/health")
@@ -2809,9 +2812,9 @@ def health_detail():
 
 # ── App shell ─────────────────────────────────────────────────────────────────
 @app.get("/app")
-def serve_app() -> HTMLResponse:
+def serve_app(request: Request) -> HTMLResponse:
     """Serve main platform UI (Nova operational shell)."""
-    return _build_ops_shell_response()
+    return _build_ops_shell_response(request)
 
 
 @app.get("/app/dashboard")
@@ -2830,9 +2833,9 @@ def serve_app() -> HTMLResponse:
 @app.get("/app/operations/alerts")
 @app.get("/app/system-health")
 @app.get("/app/ai-assistant")
-def serve_ops_shell() -> HTMLResponse:
+def serve_ops_shell(request: Request) -> HTMLResponse:
     """Serve Phase 8 operational shell routes with a shared frontend payload."""
-    return _build_ops_shell_response()
+    return _build_ops_shell_response(request)
 
 
 @app.get("/dashboard", include_in_schema=False)
@@ -2857,17 +2860,17 @@ def redirect_legacy_ops_aliases(request: Request) -> RedirectResponse:
 
 
 @app.get("/app/{full_path:path}", include_in_schema=False)
-def app_spa_fallback(full_path: str) -> HTMLResponse:
+def app_spa_fallback(full_path: str, request: Request) -> HTMLResponse:
     """Fallback for deep links under /app when the path is client-routed."""
-    return _build_ops_shell_response()
+    return _build_ops_shell_response(request)
 
 
-def _build_app_shell_response() -> HTMLResponse:
+def _build_app_shell_response(request: Request | None = None) -> HTMLResponse:
     """Serve app shell with runtime contract injected and cache disabled."""
     index = os.path.join(_static_dir, "index.html")
     with open(index, "r", encoding="utf-8") as f:
         html = f.read()
-    html = inject_runtime_contract(html)
+    html = inject_runtime_contract(html, request=request)
     response = HTMLResponse(content=html, media_type="text/html")
     response.headers["X-Amicor-Frontend-Build"] = FRONTEND_BUILD_VERSION
     response.headers["X-Amicor-Hydration-Version"] = HYDRATION_VERSION
@@ -2877,12 +2880,12 @@ def _build_app_shell_response() -> HTMLResponse:
     return response
 
 
-def _build_ops_shell_response() -> HTMLResponse:
+def _build_ops_shell_response(request: Request | None = None) -> HTMLResponse:
     """Serve Phase 8 operations shell with runtime contract injection and no cache."""
     shell_path = os.path.join(_static_dir, "ops-shell.html")
     with open(shell_path, "r", encoding="utf-8") as f:
         html = f.read()
-    html = inject_runtime_contract(html)
+    html = inject_runtime_contract(html, request=request)
     response = HTMLResponse(content=html, media_type="text/html")
     response.headers["X-Amicor-Frontend-Build"] = FRONTEND_BUILD_VERSION
     response.headers["X-Amicor-Hydration-Version"] = HYDRATION_VERSION
@@ -3452,7 +3455,7 @@ def serve_admin() -> Response:
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
-def spa_fallback(full_path: str) -> Response:
+def spa_fallback(full_path: str, request: Request) -> Response:
     """Global SPA fallback registered last to preserve /api and asset route priority."""
     normalized = (full_path or "").lstrip("/")
     if (
@@ -3467,4 +3470,4 @@ def spa_fallback(full_path: str) -> Response:
     if "." in normalized.rsplit("/", 1)[-1]:
         raise HTTPException(status_code=404, detail="Not Found")
 
-    return _build_app_shell_response()
+    return _build_app_shell_response(request)

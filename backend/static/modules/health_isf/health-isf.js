@@ -4,6 +4,10 @@
   const VIEW_ROUTES = ["dashboard", "rides", "dispatch", "drivers", "providers", "customer", "analytics", "billing", "grant", "admin", "onboarding"];
   const RUNTIME_STATE_STORAGE_KEY = "amicor_health_isf_runtime_state_v1";
   const SHELL_ROLE_OVERRIDE_STORAGE_KEY = "amicor_health_isf_shell_role_override_v1";
+  const CUSTOMER_RIDER_PHONE_STORAGE_KEY = "amicor_health_isf_customer_rider_phone_v1";
+  const SEED_RIDER_PHONE_BY_EMAIL = {
+    "rider@amicor.local": "646-555-8800",
+  };
   const API_REQUEST_TIMEOUT_MS = 45000;
   const REALTIME_RECONNECT_COOLDOWN_MS = 12000;
   const REALTIME_STALE_THRESHOLD_MS = 45000;
@@ -30,8 +34,9 @@
     admin: VIEW_ROUTES.slice(),
     dispatcher: VIEW_ROUTES.slice(),
     staff: VIEW_ROUTES.slice(),
-    customer: ["dashboard", "customer", "analytics"],
-    driver: ["dashboard", "rides", "analytics"],
+    customer: ["dashboard", "customer", "rides", "analytics"],
+    rider: ["dashboard", "customer", "rides", "analytics"],
+    driver: ["dashboard", "rides", "drivers", "analytics"],
     provider: ["dashboard", "providers", "analytics", "customer"],
     guest: ["dashboard"],
   };
@@ -267,13 +272,159 @@
     } catch (_err) {}
   }
 
+  function inferRoleFromSessionProfile(profile) {
+    const normalized = String(profile && profile.role || "guest").toLowerCase();
+    if (normalized && normalized !== "guest" && normalized !== "staff") {
+      return normalized;
+    }
+    const email = String(profile && profile.email || "").toLowerCase();
+    if (!email || !profile || !profile.active) {
+      return normalized || "guest";
+    }
+    const localPart = email.split("@")[0];
+    const seedRoles = {
+      admin: "admin",
+      dispatcher: "dispatcher",
+      driver: "driver",
+      rider: "rider",
+      provider: "provider",
+      supervisor: "admin",
+      compliance: "staff",
+    };
+    return seedRoles[localPart] || normalized || "guest";
+  }
+
   function getEffectiveShellRole(baseRole) {
-    const fallbackRole = String(baseRole || "guest").toLowerCase();
+    const profile = getSessionProfile();
+    const inferredRole = inferRoleFromSessionProfile(Object.assign({}, profile, {
+      role: baseRole || profile.role || "guest",
+    }));
     const override = String(state.shellRoleOverride || "").toLowerCase();
     if (override && ROLE_ROUTE_ACCESS[override]) {
       return override;
     }
-    return ROLE_ROUTE_ACCESS[fallbackRole] ? fallbackRole : "guest";
+    if (inferredRole === "customer") {
+      return "rider";
+    }
+    return ROLE_ROUTE_ACCESS[inferredRole] ? inferredRole : "guest";
+  }
+
+  function resolveCustomerRiderPhone() {
+    try {
+      const stored = String(window.localStorage.getItem(CUSTOMER_RIDER_PHONE_STORAGE_KEY) || "").trim();
+      if (stored) {
+        return stored;
+      }
+    } catch (_err) {}
+    const workspacePhone = String(state.customerWorkspace && state.customerWorkspace.riderPhone || "").trim();
+    if (workspacePhone) {
+      return workspacePhone;
+    }
+    const form = document.getElementById("health-customer-request-form");
+    if (form) {
+      const phoneInput = form.querySelector('[name="rider_phone"]');
+      const formPhone = phoneInput ? String(phoneInput.value || "").trim() : "";
+      if (formPhone) {
+        return formPhone;
+      }
+    }
+    const requestPhone = state.customerRequests[0] && state.customerRequests[0].rider_phone
+      ? String(state.customerRequests[0].rider_phone).trim()
+      : "";
+    if (requestPhone) {
+      return requestPhone;
+    }
+    const profile = getSessionProfile();
+    const email = String(profile.email || "").toLowerCase();
+    if (email && SEED_RIDER_PHONE_BY_EMAIL[email]) {
+      return SEED_RIDER_PHONE_BY_EMAIL[email];
+    }
+    return "";
+  }
+
+  function persistCustomerRiderPhone(phone) {
+    const normalized = String(phone || "").trim();
+    if (!normalized) {
+      return;
+    }
+    state.customerWorkspace.riderPhone = normalized;
+    try {
+      window.localStorage.setItem(CUSTOMER_RIDER_PHONE_STORAGE_KEY, normalized);
+    } catch (_err) {}
+  }
+
+  function buildAdminSummaryFallback() {
+    const dashboard = state.dashboard && typeof state.dashboard === "object" ? state.dashboard : {};
+    const dispatchQueue = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+    const assignments = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
+    const rides = Array.isArray(state.rides) ? state.rides : [];
+    const queueMetrics = state.customerQueueMetrics && typeof state.customerQueueMetrics === "object"
+      ? state.customerQueueMetrics
+      : {
+        pending: rides.filter(function (ride) { return String(ride.status || "").toLowerCase() === "pending"; }).length,
+        dispatchable: dispatchQueue.length,
+        approved: 0,
+        broadcasted: 0,
+        accepted: assignments.length,
+        assigned: assignments.filter(function (item) { return String(item.assignment_state || "").toLowerCase() === "accepted"; }).length,
+        in_progress: rides.filter(function (ride) {
+          return ["accepted", "in_transit", "driver_en_route", "in_progress"].includes(String(ride.status || "").toLowerCase());
+        }).length,
+        completed: rides.filter(function (ride) { return String(ride.status || "").toLowerCase() === "completed"; }).length,
+      };
+    return {
+      dispatch_queue_count: dispatchQueue.length || Number(dashboard.pending_rides || 0),
+      active_assignment_count: assignments.length || Number(dashboard.active_rides || 0),
+      rejected_offer_count: assignments.filter(function (item) {
+        return String(item.assignment_state || "").toLowerCase() === "rejected";
+      }).length,
+      reassignment_event_count: dispatchQueue.filter(function (item) {
+        return String(item.assignment_state || "").toLowerCase() === "reassignment_pending";
+      }).length,
+      queue_metrics: queueMetrics,
+      assignment_state_breakdown: assignments.reduce(function (acc, item) {
+        const key = String(item.assignment_state || "offered").toLowerCase();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {}),
+      recent_dispatch_actions: (state.dispatchTimeline || []).slice(0, 16).map(function (item) {
+        return {
+          action: item.kind || item.type || item.event_type || "dispatch",
+          note: item.summary || item.message || "Dispatch event",
+          ride_id: item.ride_id || "",
+          created_at: item.timestamp || item.created_at || stampNow(),
+        };
+      }),
+      websocket: state.websocketDiagnostics || {},
+      runtime_validation: {
+        queue_depth: { pending_count: 0 },
+        idempotency_integrity: "stable",
+        lifecycle_guardrails: "enabled",
+      },
+      fallback: true,
+    };
+  }
+
+  function buildCustomerHistoryFallback(riderPhone) {
+    const targetDigits = String(riderPhone || "").replace(/\D/g, "");
+    if (targetDigits.length < 7) {
+      return [];
+    }
+    return (Array.isArray(state.rides) ? state.rides : []).filter(function (ride) {
+      const rideDigits = String(ride.passenger_phone || ride.rider_phone || "").replace(/\D/g, "");
+      return rideDigits === targetDigits;
+    }).map(function (ride) {
+      return {
+        ride_id: ride.id,
+        rider_name: ride.passenger_name || ride.rider_name || "Rider",
+        rider_phone: riderPhone,
+        pickup_address: ride.pickup_address,
+        dropoff_address: ride.dropoff_address,
+        dispatch_status: String(ride.lifecycle_state || ride.status || "pending").toLowerCase(),
+        created_at: ride.created_at || ride.requested_at || stampNow(),
+        updated_at: ride.updated_at || ride.created_at || stampNow(),
+      };
+    });
   }
 
   function logDiag(topic, payload) {
@@ -1688,7 +1839,7 @@
   function pillClass(status) {
     const value = String(status || "").toLowerCase();
     if (value === "available" || value === "completed" || value === "healthy") return "ok";
-    if (value === "busy" || value === "assigned" || value === "accepted" || value === "pending" || value === "en_route_pickup" || value === "waiting_at_pickup" || value === "in_transit") return "warn";
+    if (value === "busy" || value === "assigned" || value === "accepted" || value === "pending" || value === "awaiting_approval" || value === "en_route_pickup" || value === "waiting_at_pickup" || value === "in_transit") return "warn";
     return "danger";
   }
 
@@ -2299,8 +2450,12 @@
   }
 
   function computeRenderSignature() {
+    const customerHistory = state.customerWorkspace && Array.isArray(state.customerWorkspace.history)
+      ? state.customerWorkspace.history
+      : [];
     return JSON.stringify({
       route: state.route,
+      refreshAt: state.hydration.lastRefreshAt || "",
       rides: (state.rides || []).slice(0, 60).map(function (ride) {
         return String(ride.id || "") + ":" + String(ride.status || "") + ":" + String(ride.driver_id || "");
       }).join("|"),
@@ -2313,6 +2468,10 @@
       dispatchQueue: (state.dispatchQueue || []).length,
       selectedRide: state.selectedRideId || "",
       selectedDriver: state.selectedDriverId || "",
+      adminReady: !!(state.adminSummary && typeof state.adminSummary === "object"),
+      customerHistoryCount: customerHistory.length,
+      riderPhone: state.customerWorkspace && state.customerWorkspace.riderPhone ? state.customerWorkspace.riderPhone : "",
+      dashboardReady: !!state.dashboard,
     });
   }
 
@@ -4137,7 +4296,7 @@
       applyRealtimeUpdate(message);
       const normalizedType = String(message.eventType || "").toLowerCase().replace(/-/g, "_");
       const normalizedDispatchEvent = String(message.payload && message.payload.event_name ? message.payload.event_name : "").toLowerCase().replace(/-/g, "_");
-      if (["ride_created", "ride_status_changed", "ride_assigned", "ride_reassigned", "ride_escalated", "ride_retry", "ride_completed", "pickup_completed", "driver_status_changed", "driver_active_ride_state", "ride_lifecycle_sync", "workflow_recovery_completed", "workflow_reassignment_executed", "workflow_escalated", "intelligence_recommendations", "intelligence_summary", "intelligence_risk", "orchestration_update", "autonomous_operations_snapshot", "dispatch_changed", "ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "ride_in_progress", "provider_request_created"].includes(normalizedType)
+      if (["ride_created", "ride_status_changed", "ride_assigned", "ride_reassigned", "ride_escalated", "ride_retry", "ride_completed", "pickup_completed", "driver_status_changed", "driver_active_ride_state", "ride_lifecycle_sync", "workflow_recovery_completed", "workflow_reassignment_executed", "workflow_escalated", "intelligence_recommendations", "intelligence_summary", "intelligence_risk", "orchestration_update", "autonomous_operations_snapshot", "dispatch_changed", "dispatch_recommendation_created", "ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "ride_in_progress", "provider_request_created"].includes(normalizedType)
         || ["ride_approved", "ride_dispatchable", "driver_offer_issued", "driver_offer_accepted", "ride_in_progress", "ride_completed", "provider_request_created"].includes(normalizedDispatchEvent)) {
         scheduleRealtimeRefresh();
       }
@@ -4807,7 +4966,33 @@
     }
     if (!snapshot) {
       if (els.aiOpsCenter) {
-        els.aiOpsCenter.innerHTML = op_empty_state('Dispatch intelligence is loading from live transportation activity.', '🧭');
+        const queueRows = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+        const assignments = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
+        const rides = Array.isArray(state.rides) ? state.rides : [];
+        els.aiOpsCenter.innerHTML = [
+          '<div class="enterprise-panel-grid">',
+          '<section class="enterprise-panel-block">',
+          '<h4>Dispatch insight brief</h4>',
+          '<div class="enterprise-inline-grid">'
+            + MetricCard('Queue depth', formatNumber(queueRows.length), 'Rides in dispatch intelligence queue', queueRows.length ? 'warn' : 'ok')
+            + MetricCard('Active offers', formatNumber(assignments.length), 'Assignments currently in lifecycle', assignments.length ? 'ok' : 'warn')
+            + MetricCard('Pending rides', formatNumber(rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'pending'; }).length), 'Trips waiting for dispatch action', 'warn')
+            + MetricCard('Completed rides', formatNumber(rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'completed'; }).length), 'Trips closed in current window', 'ok')
+          + '</div>',
+          '<p class="health-summary">Live dispatch metrics are rendered from operational APIs while AI snapshot enrichment is unavailable.</p>',
+          '</section>',
+          '<section class="enterprise-panel-block">',
+          '<h4>Active dispatch queue</h4>',
+          (queueRows.length
+            ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Passenger</th><th>Ride</th><th>State</th><th>Attempt</th></tr></thead><tbody>'
+              + queueRows.slice(0, 8).map(function (item) {
+                return '<tr><td><strong>' + escapeHtml(item.passenger_name || 'Passenger') + '</strong></td><td>' + escapeHtml(String(item.ride_id || '').slice(0, 8)) + '</td><td>' + StatusPill(item.assignment_state || 'queued') + '</td><td>' + escapeHtml(String(item.attempt_index || 0)) + '</td></tr>';
+              }).join('')
+              + '</tbody></table></div>'
+            : '<p class="health-summary">No queue items waiting for dispatch intelligence.</p>'),
+          '</section>',
+          '</div>',
+        ].join('');
       }
       return;
     }
@@ -4899,21 +5084,26 @@
       const queueRows = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
       const searching = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'searching'; }).length;
       const offered = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'offered'; }).length;
+      const awaitingApproval = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'awaiting_approval'; }).length;
       const reassignment = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'reassignment_pending'; }).length;
       const listHtml = queueRows.length
         ? '<div class="health-stack-list">' + queueRows.slice(0, 8).map(function (item) {
             const aging = item.requested_at ? formatRelativeTime(item.requested_at) : 'n/a';
-            const dispatcherMessage = String(item.dispatcher_message || '');
+            const dispatcherMessage = String(item.dispatcher_message || item.recommendation || '');
+            const recommendedLabel = item.recommended_driver_name
+              ? String(item.recommended_driver_name)
+              : (item.offered_driver_id ? String(item.offered_driver_id).slice(0, 8) : 'none');
             return '<article class="health-stack-item">'
               + '<div class="health-stack-title-row"><strong>' + escapeHtml(item.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(item.assignment_state || 'queued') + '">' + escapeHtml(item.assignment_state || 'queued') + '</span></div>'
               + '<p>Ride ' + escapeHtml(String(item.ride_id || '').slice(0, 8)) + ' · attempt ' + escapeHtml(String(item.attempt_index || 0)) + ' · age ' + escapeHtml(aging) + '</p>'
-              + '<small>Offered driver: ' + escapeHtml(item.offered_driver_id ? String(item.offered_driver_id).slice(0, 8) : 'none') + '</small>'
+              + '<small>Recommended driver: ' + escapeHtml(recommendedLabel) + '</small>'
               + (dispatcherMessage ? '<div class="health-summary">' + escapeHtml(dispatcherMessage) + '</div>' : '')
               + '</article>';
           }).join('') + '</div>'
         : '<p class="health-summary">Dispatch queue is clear.</p>';
       els.dispatchIntelQueue.innerHTML = '<div class="enterprise-inline-grid">'
         + MetricCard('Queue Depth', formatNumber(queueRows.length), 'Total rides in dispatch intelligence queue', queueRows.length ? 'warn' : 'ok')
+        + MetricCard('Awaiting approval', formatNumber(awaitingApproval), 'AI recommendations pending dispatcher approval', awaitingApproval ? 'warn' : 'ok')
         + MetricCard('Searching', formatNumber(searching), 'Rides currently in driver search stage', searching ? 'warn' : 'ok')
         + MetricCard('Offered', formatNumber(offered), 'Offers awaiting driver response', offered ? 'warn' : 'ok')
         + MetricCard('Reassignment', formatNumber(reassignment), 'Rides waiting reassignment', reassignment ? 'danger' : 'ok')
@@ -5046,11 +5236,25 @@
 
   function renderDispatchWorkspace() {
     const els = getEls();
-    if (!els.dispatchWorklist || !els.dispatchWorkflow || !els.dispatchAssignments) return;
+    if (!els.dispatchWorklist && !els.dispatchWorkflow && !els.dispatchAssignments) return;
 
+    const dispatchStatuses = ['pending', 'accepted', 'in_transit', 'assigned', 'queued', 'driver_en_route', 'arrived', 'in_progress', 'rider_onboard', 'offered', 'searching', 'awaiting_approval', 'dispatchable', 'reassignment_pending', 'broadcasted'];
     const rides = getRideRows(filteredRides()).filter(function (row) {
       const status = String(row.status || '').toLowerCase();
-      return ['pending', 'accepted', 'in_transit', 'assigned', 'queued', 'driver_en_route', 'arrived', 'in_progress', 'rider_onboard'].indexOf(status) !== -1;
+      return dispatchStatuses.indexOf(status) !== -1;
+    });
+    const queueRows = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+    queueRows.forEach(function (item) {
+      const rideId = String(item.ride_id || '');
+      if (!rideId || rides.some(function (row) { return String(row.id || '') === rideId; })) {
+        return;
+      }
+      rides.push({
+        id: rideId,
+        passengerName: item.passenger_name || 'Passenger',
+        status: item.assignment_state || 'queued',
+        raw: item,
+      });
     });
     const drivers = getDriverRows();
 
@@ -5305,6 +5509,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    persistCustomerRiderPhone(payload.rider_phone);
     await refreshData();
   }
 
@@ -5706,12 +5911,25 @@
       throw new Error('Select a ride before auto-assign');
     }
     state.selectedRideId = String(rideId);
-    await fetchJson('/api/health-isf/dispatch/auto-assign', {
-      method: 'POST',
-      actionName: 'dispatch_auto_assign',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
+    const queueRow = (Array.isArray(state.dispatchQueue) ? state.dispatchQueue : []).find(function (item) {
+      return String(item && item.ride_id || '') === String(rideId || '');
     });
+    const awaitingApproval = String(queueRow && queueRow.assignment_state || '').toLowerCase() === 'awaiting_approval';
+    if (awaitingApproval) {
+      await fetchJson('/api/health-isf/dispatch/recommendations/approve', {
+        method: 'POST',
+        actionName: 'dispatch_approve_recommendation',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
+      });
+    } else {
+      await fetchJson('/api/health-isf/dispatch/auto-assign', {
+        method: 'POST',
+        actionName: 'dispatch_auto_assign',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
+      });
+    }
     await Promise.all([
       refreshDispatchIntelligence().catch(function () { return null; }),
       refreshData(),
@@ -6320,7 +6538,11 @@
     if (!els.customerActiveRide || !els.customerRequestHistory || !els.customerAssignment || !els.customerTimeline || !els.customerBookingManagement || !els.customerSupport) return;
 
     const activeRide = state.customerWorkspace && state.customerWorkspace.activeRide ? state.customerWorkspace.activeRide : null;
-    const history = state.customerWorkspace && Array.isArray(state.customerWorkspace.history) ? state.customerWorkspace.history : [];
+    let history = state.customerWorkspace && Array.isArray(state.customerWorkspace.history) ? state.customerWorkspace.history : [];
+    const riderPhone = resolveCustomerRiderPhone();
+    if (!history.length && riderPhone) {
+      history = buildCustomerHistoryFallback(riderPhone);
+    }
     const liveTimeline = state.customerWorkspace && Array.isArray(state.customerWorkspace.timeline) ? state.customerWorkspace.timeline : [];
     const liveEta = state.customerWorkspace ? state.customerWorkspace.etaMinutes : null;
     const supportQueue = state.customerWorkspace && Array.isArray(state.customerWorkspace.supportQueue) ? state.customerWorkspace.supportQueue : [];
@@ -6433,7 +6655,9 @@
     const els = getEls();
     if (!els.adminSummary || !els.adminRoleSessions || !els.adminWebsocket || !els.adminRuntimeValidation || !els.adminLifecycleAudit) return;
 
-    const summary = state.adminSummary && typeof state.adminSummary === 'object' ? state.adminSummary : null;
+    const summary = state.adminSummary && typeof state.adminSummary === 'object'
+      ? state.adminSummary
+      : buildAdminSummaryFallback();
     if (!summary) {
       els.adminSummary.innerHTML = '<p class="health-summary">Admin operations data is loading.</p>';
       els.adminRoleSessions.innerHTML = '<p class="health-summary">Escalation queue is not available yet.</p>';
@@ -6873,6 +7097,12 @@
       renderOperationsRail();
     }
 
+    // Hydrate all workspace panels so static "Loading..." placeholders are replaced even when hidden.
+    renderDispatchWorkspace();
+    renderBillingWorkspace();
+    renderAdminWorkspace();
+    renderCustomerWorkspace();
+
     const route = VIEW_ROUTES.includes(state.route) ? state.route : PRIMARY_ROUTE;
     if (route === "dashboard") {
       renderDashboard();
@@ -7203,24 +7433,33 @@
 
       state.lastActionAt = stampNow();
       const activeRoute = VIEW_ROUTES.includes(state.route) ? state.route : PRIMARY_ROUTE;
-      const wantsCustomer = activeRoute === "customer";
+      const effectiveRole = getEffectiveShellRole(getSessionProfile().role);
+      const wantsStaffOps = effectiveRole === "admin" || effectiveRole === "dispatcher" || effectiveRole === "staff";
+      const wantsDriverOps = effectiveRole === "driver";
+      const wantsProviderOps = effectiveRole === "provider";
+      const wantsOperationalRefresh = wantsStaffOps || wantsDriverOps || wantsProviderOps;
+      const wantsCustomer = activeRoute === "customer"
+        || activeRoute === "rides"
+        || effectiveRole === "rider"
+        || effectiveRole === "customer";
       const wantsAdmin = activeRoute === "admin";
-      const wantsDashboardIntelligence = activeRoute === "dashboard" || activeRoute === "analytics";
+      const wantsBilling = activeRoute === "billing";
+      const wantsDashboardIntelligence = (activeRoute === "dashboard" || activeRoute === "analytics") && wantsOperationalRefresh;
       const wantsOnboarding = activeRoute === "onboarding";
       const wantsGrant = activeRoute === "grant";
       const wantsProviderQueue = activeRoute === "providers";
       let aiSnapshot = null;
       let aiSnapshotError = null;
       const [dashboard, rides, drivers, providers, customerRequests, customerQueueMetrics, dispatchQueue, dispatchActiveAssignments, driverPoolMetrics, driverApplications, recurringTemplates, grantSnapshot, operationalStatus, governanceStatus, governanceApprovals, novaContinuityBrief, novaAssistanceRecommendations, novaLiveEvents, novaMemoryFabric, runtimeDiagnostics, adminSummary, adminLiveOperations, adminDispatchAlerts, runtimeState, runtimeReplay, serviceCategories, previewRuntimeStatus] = await Promise.all([
-      fetchJson("/api/health-isf/dashboard", { actionName: "refresh_dashboard" }),
-      fetchJson("/api/health-isf/rides", { actionName: "refresh_rides" }),
-      fetchJson("/api/health-isf/drivers", { actionName: "refresh_drivers" }),
-      fetchJson("/api/health-isf/providers", { actionName: "refresh_providers" }),
+      wantsOperationalRefresh ? fetchJson("/api/health-isf/dashboard", { actionName: "refresh_dashboard" }).catch(() => null) : Promise.resolve(null),
+      wantsOperationalRefresh ? fetchJson("/api/health-isf/rides", { actionName: "refresh_rides" }).catch(() => []) : Promise.resolve([]),
+      (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers", { actionName: "refresh_drivers" }).catch(() => []) : Promise.resolve([]),
+      (wantsStaffOps || wantsProviderOps) ? fetchJson("/api/health-isf/providers", { actionName: "refresh_providers" }).catch(() => []) : Promise.resolve([]),
       wantsCustomer ? fetchJson("/api/health-isf/customer-requests", { actionName: "refresh_customer_requests" }).catch(() => []) : Promise.resolve([]),
-      wantsCustomer ? fetchJson("/api/health-isf/customer-requests/metrics", { actionName: "refresh_customer_queue_metrics" }).catch(() => null) : Promise.resolve(null),
-      fetchJson("/api/health-isf/dispatch/queue", { actionName: "refresh_dispatch_queue" }).catch(() => []),
-      fetchJson("/api/health-isf/dispatch/active-assignments", { actionName: "refresh_dispatch_active_assignments" }).catch(() => []),
-      fetchJson("/api/health-isf/drivers/active/metrics", { actionName: "refresh_driver_pool_metrics" }).catch(() => null),
+      (wantsCustomer || activeRoute === "rides") ? fetchJson("/api/health-isf/customer-requests/metrics", { actionName: "refresh_customer_queue_metrics" }).catch(() => null) : Promise.resolve(null),
+      wantsStaffOps ? fetchJson("/api/health-isf/dispatch/queue", { actionName: "refresh_dispatch_queue" }).catch(() => []) : Promise.resolve([]),
+      wantsStaffOps ? fetchJson("/api/health-isf/dispatch/active-assignments", { actionName: "refresh_dispatch_active_assignments" }).catch(() => []) : Promise.resolve([]),
+      (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers/active/metrics", { actionName: "refresh_driver_pool_metrics" }).catch(() => null) : Promise.resolve(null),
       wantsOnboarding ? fetchJson("/api/health-isf/driver-applications", { actionName: "refresh_driver_applications" }).catch(() => []) : Promise.resolve([]),
       wantsOnboarding ? fetchJson("/api/health-isf/recurring/templates", { actionName: "refresh_recurring_templates" }).catch(() => []) : Promise.resolve([]),
       wantsGrant ? fetchJson("/api/health-isf/grant-proof/snapshot", { actionName: "refresh_grant_snapshot" }).catch(() => null) : Promise.resolve(null),
@@ -7235,9 +7474,9 @@
       wantsAdmin ? fetchJson("/api/health-isf/admin/command-center/summary", { actionName: "refresh_admin_summary" }).catch(() => null) : Promise.resolve(null),
       wantsAdmin ? fetchJson("/api/health-isf/admin/live-operations", { actionName: "refresh_admin_live_ops" }).catch(() => null) : Promise.resolve(null),
       wantsAdmin ? fetchJson("/api/health-isf/admin/dispatch-alerts", { actionName: "refresh_admin_dispatch_alerts" }).catch(() => null) : Promise.resolve(null),
-      wantsDashboardIntelligence ? fetchJson("/api/health-isf/operations/runtime-state?include_timeline=true&limit=120", { actionName: "refresh_runtime_state" }).catch(() => null) : Promise.resolve(null),
-      wantsDashboardIntelligence ? fetchJson("/api/health-isf/operations/runtime-replay?after_sequence=0&limit=120", { actionName: "refresh_runtime_replay" }).catch(() => null) : Promise.resolve(null),
-      fetchJson("/api/health-isf/operations/service-categories", { actionName: "refresh_service_categories" }).catch(() => null),
+      (wantsDashboardIntelligence || wantsAdmin) ? fetchJson("/api/health-isf/operations/runtime-state?include_timeline=true&limit=120", { actionName: "refresh_runtime_state" }).catch(() => null) : Promise.resolve(null),
+      (wantsDashboardIntelligence || wantsAdmin) ? fetchJson("/api/health-isf/operations/runtime-replay?after_sequence=0&limit=120", { actionName: "refresh_runtime_replay" }).catch(() => null) : Promise.resolve(null),
+      (wantsCustomer || wantsOperationalRefresh) ? fetchJson("/api/health-isf/operations/service-categories", { actionName: "refresh_service_categories" }).catch(() => null) : Promise.resolve(null),
       wantsDashboardIntelligence ? fetchJson("/api/health-isf/operations/preview-runtime-status", { actionName: "refresh_preview_runtime_status" }).catch(() => null) : Promise.resolve(null),
     ]);
 
@@ -7298,6 +7537,9 @@
       state.adminSummary = adminSummary && typeof adminSummary === "object" ? adminSummary : null;
       state.adminLiveOperations = adminLiveOperations && typeof adminLiveOperations === "object" ? adminLiveOperations : null;
       state.adminDispatchAlerts = adminDispatchAlerts && typeof adminDispatchAlerts === "object" ? adminDispatchAlerts : null;
+      if (!state.adminSummary && (wantsAdmin || wantsBilling)) {
+        state.adminSummary = buildAdminSummaryFallback();
+      }
       state.runtimeState = runtimeState && typeof runtimeState === "object" ? runtimeState : null;
       state.runtimeReplay = runtimeReplay && typeof runtimeReplay === "object" ? runtimeReplay : null;
       state.serviceCategories = serviceCategories && Array.isArray(serviceCategories.categories) ? serviceCategories.categories : [];
@@ -7318,9 +7560,7 @@
         state.providerTransportQueue = [];
       }
 
-      const riderPhone = state.customerWorkspace.riderPhone
-        || (state.customerRequests[0] && state.customerRequests[0].rider_phone)
-        || "";
+      const riderPhone = resolveCustomerRiderPhone();
       state.customerWorkspace.riderPhone = riderPhone;
       if (wantsCustomer && riderPhone) {
         const customerHistory = await fetchJson(
@@ -7339,6 +7579,14 @@
         state.customerWorkspace.activeRide = customerActiveRide && customerActiveRide.active_ride ? customerActiveRide.active_ride : null;
         state.customerWorkspace.timeline = customerTracking && Array.isArray(customerTracking.timeline) ? customerTracking.timeline : [];
         state.customerWorkspace.etaMinutes = customerTracking && Number.isFinite(Number(customerTracking.eta_minutes)) ? Number(customerTracking.eta_minutes) : null;
+        if (!state.customerWorkspace.history.length) {
+          state.customerWorkspace.history = buildCustomerHistoryFallback(riderPhone);
+        }
+      } else if (wantsCustomer) {
+        state.customerWorkspace.history = riderPhone ? buildCustomerHistoryFallback(riderPhone) : [];
+        state.customerWorkspace.activeRide = null;
+        state.customerWorkspace.timeline = [];
+        state.customerWorkspace.etaMinutes = null;
       } else {
         state.customerWorkspace.history = [];
         state.customerWorkspace.activeRide = null;
@@ -7438,13 +7686,8 @@
     // Keep provider options current even if a later renderer throws.
     hydrateProviderSelect();
     persistRuntimeState("refresh_data");
-    const renderSignature = computeRenderSignature();
-    if (renderSignature === state.lastRenderSignature) {
-      logDiag("Render skipped", { reason: "signature_match", route: state.route });
-    } else {
-      state.lastRenderSignature = renderSignature;
-      renderAll();
-    }
+    state.lastRenderSignature = computeRenderSignature();
+    renderAll();
       tracePickupRerender("refreshData:afterRenderAll", {
         route: state.route,
         modalOpen: !!(getEls().modal && !getEls().modal.hidden),
@@ -7466,10 +7709,63 @@
     }
   }
 
+  function onCreateRideSubmitSuccess(createdRide) {
+    const rideId = createdRide && createdRide.id ? String(createdRide.id).slice(0, 12) : "Unknown";
+    const passengerName = createdRide && createdRide.passenger_name ? String(createdRide.passenger_name) : "Passenger";
+    const pickup = createdRide && createdRide.pickup_address ? String(createdRide.pickup_address) : "Pickup address";
+    const dropoff = createdRide && createdRide.dropoff_address ? String(createdRide.dropoff_address) : "Dropoff address";
+    const providerName = createdRide && createdRide.provider_id ? lookupProviderName(createdRide.provider_id) : "Provider";
+    const scheduledTime = createdRide && createdRide.appointment_time ? formatDateShort(createdRide.appointment_time) : "immediately";
+
+    showToastSafe("✓ Ride created successfully. ID: " + rideId, "success");
+    console.log("[Health ISF] Ride created:", { rideId: rideId, passenger: passengerName, provider: providerName, pickup: pickup, dropoff: dropoff, scheduledTime: scheduledTime });
+
+    refreshData().then(function () {
+      const modalEls = getEls();
+      const messageDiv = document.createElement("div");
+      messageDiv.className = "health-create-ride-success";
+      messageDiv.style.cssText = "padding:12px;margin-bottom:12px;border-radius:8px;background:rgba(100,220,180,0.15);border-left:4px solid #61DCAD;color:#97ffd9;font-size:0.9rem;line-height:1.5;";
+      messageDiv.innerHTML = "<strong>✓ Ride Created</strong><br>"
+        + "ID: <code style=\"background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;\">" + escapeHtml(rideId) + "</code><br>"
+        + "" + escapeHtml(passengerName) + " → " + escapeHtml(providerName) + "<br>"
+        + "From: " + escapeHtml(pickup) + "<br>"
+        + "To: " + escapeHtml(dropoff);
+
+      if (modalEls.modal && modalEls.modal.querySelector(".health-modal-body")) {
+        const body = modalEls.modal.querySelector(".health-modal-body");
+        body.insertBefore(messageDiv, body.firstChild);
+      }
+
+      setTimeout(function () {
+        closeModal();
+      }, 2000);
+    }).catch(function () {
+      setTimeout(function () {
+        closeModal();
+      }, 2500);
+    });
+  }
+
+  function wireCreateRideFormSubmit() {
+    const els = getEls();
+    if (!els.form || els.form.dataset.healthSubmitBound === "1") return;
+    els.form.dataset.healthSubmitBound = "1";
+    els.form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      handleCreateRideSubmit(event)
+        .then(onCreateRideSubmitSuccess)
+        .catch(function (error) {
+          showToastSafe("Ride creation failed: " + (error && error.message ? error.message : "Unknown error"), "error");
+          renderCreateRideErrors({}, (error && error.message ? error.message : "Failed to create ride. Please try again."));
+        });
+    });
+  }
+
   async function openModal() {
     const els = getEls();
     if (!els.modal) return;
     clearCreateRideErrors();
+    wireCreateRideFormSubmit();
     els.modal.hidden = false;
     els.modal.style.display = "grid";
     attachPickupTracing();
@@ -7775,7 +8071,7 @@
     let recurringPattern = null;
     const recurringFrequency = sanitizeInput(formData.get("recurring_frequency"));
     if (recurringFrequency && recurringFrequency !== "custom") {
-      const selectedDays = Array.from(els.form.querySelectorAll('input[name="recurring_days"]:checked')).map((el) => el.value);
+      const selectedDays = Array.from(form.querySelectorAll('input[name="recurring_days"]:checked')).map((el) => el.value);
       recurringPattern = {
         frequency: recurringFrequency,
         days: selectedDays.length > 0 ? selectedDays : undefined,
@@ -7807,17 +8103,20 @@
 
     const validationErrors = Object.assign(errors, validateCreateRidePayload(payload));
     if (Object.keys(validationErrors).length > 0) {
+      setCreateRideSubmitting(false);
+      state.lastFailedAction = "create_ride";
+      state.lastApiError = "Ride intake validation failed";
       renderCreateRideErrors(validationErrors, "Please fix the highlighted fields.");
       showToastSafe("Ride intake validation failed.", "error");
       return;
     }
 
     const idempotencyKey = ["ride", Date.now(), Math.random().toString(36).slice(2, 10)].join(":");
-    setCreateRideSubmitting(true);
     clearCreateRideErrors();
+    setCreateRideSubmitting(true);
     try {
       state.lastActionAt = stampNow();
-      await fetchJson("/api/health-isf/rides", {
+      const createdRide = await fetchJson("/api/health-isf/rides", {
         method: "POST",
         actionName: "create_ride",
         headers: {
@@ -7834,6 +8133,7 @@
       state.lastFailedAction = null;
       await refreshData();
       navigate("rides", true);
+      return createdRide;
     } catch (error) {
       state.lastFailedAction = "create_ride";
       state.lastApiError = String(error && error.message ? error.message : error);
@@ -7972,6 +8272,7 @@
     if (els.form.elements.is_emergency && String(entities.is_emergency || '').toLowerCase() === 'true') {
       els.form.elements.is_emergency.checked = true;
     }
+    updateAutoDistance();
   }
 
   function applyTranscriptToIntake(transcript) {
@@ -8008,6 +8309,7 @@
       els.form.elements.notes.value = current ? current + '\n' + text : text;
     }
     updateTranscriptUi(text, 'intake');
+    updateAutoDistance();
   }
 
   async function runIntakeAssist() {
@@ -8252,13 +8554,14 @@
       setModuleVisibility(true);
       showView(target);
     }
+    renderActiveRoute(false);
 
     if (!skipHash) {
       state.navSync.suppressHashRoute = target;
       state.navSync.suppressHashRouteUntilMs = now + HASH_ROUTE_SUPPRESSION_MS;
       setHash(target);
     }
-    const refreshRun = triggerRefresh("navigate:" + source, { bypassCooldown: !!opts.bypassRefreshCooldown });
+    const refreshRun = triggerRefresh("navigate:" + source, { bypassCooldown: true });
     if (refreshRun && typeof refreshRun.catch === "function") {
       refreshRun.catch((error) => {
       const els = getEls();
@@ -8629,61 +8932,20 @@
       }
     });
 
-    if (els.form) {
-      els.form.addEventListener("submit", (event) => {
-        handleCreateRideSubmit(event)
-          .then((createdRide) => {
-            // Success: Show confirmation with ride details
-            const rideId = createdRide && createdRide.id ? String(createdRide.id).slice(0, 12) : "Unknown";
-            const passengerName = createdRide && createdRide.passenger_name ? String(createdRide.passenger_name) : "Passenger";
-            const pickup = createdRide && createdRide.pickup_address ? String(createdRide.pickup_address) : "Pickup address";
-            const dropoff = createdRide && createdRide.dropoff_address ? String(createdRide.dropoff_address) : "Dropoff address";
-            const providerName = createdRide && createdRide.provider_id ? lookupProviderName(createdRide.provider_id) : "Provider";
-            const scheduledTime = createdRide && createdRide.appointment_time ? formatDateShort(createdRide.appointment_time) : "immediately";
-            
-            // Show success toast with ID
-            showToastSafe("✓ Ride created successfully. ID: " + rideId, "success");
-            
-            // Show detailed confirmation
-            const detailsMsg = "Passenger: " + passengerName + " | Provider: " + providerName + " | From: " + pickup + " | To: " + dropoff + " | When: " + scheduledTime;
-            console.log("[Health ISF] Ride created:", { rideId: rideId, passenger: passengerName, provider: providerName, pickup: pickup, dropoff: dropoff, scheduledTime: scheduledTime });
-            
-            // Refresh ride list immediately to show new ride
-            refreshData().then(() => {
-              // After refresh, display modal with confirmation before closing
-              const messageDiv = document.createElement('div');
-              messageDiv.className = 'health-create-ride-success';
-              messageDiv.style.cssText = 'padding:12px;margin-bottom:12px;border-radius:8px;background:rgba(100,220,180,0.15);border-left:4px solid #61DCAD;color:#97ffd9;font-size:0.9rem;line-height:1.5;';
-              messageDiv.innerHTML = '<strong>✓ Ride Created</strong><br>'
-                + 'ID: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;">' + escapeHtml(rideId) + '</code><br>'
-                + '' + escapeHtml(passengerName) + ' → ' + escapeHtml(providerName) + '<br>'
-                + 'From: ' + escapeHtml(pickup) + '<br>'
-                + 'To: ' + escapeHtml(dropoff);
-              
-              const modal = els.modal;
-              if (modal && modal.querySelector('.health-modal-body')) {
-                const body = modal.querySelector('.health-modal-body');
-                body.insertBefore(messageDiv, body.firstChild);
-              }
-              
-              // Keep modal open for 2 seconds so user sees confirmation
-              setTimeout(() => {
-                closeModal();
-              }, 2000);
-            }).catch(() => {
-              // If refresh fails, still show success and close modal
-              setTimeout(() => {
-                closeModal();
-              }, 2500);
-            });
-          })
+    document.addEventListener("submit", (event) => {
+      const form = event && event.target ? event.target : null;
+      if (!form || form.id !== "health-create-ride-form") return;
+      if (form.dataset.healthSubmitBound === "1") return;
+      event.preventDefault();
+      handleCreateRideSubmit(event)
+          .then(onCreateRideSubmitSuccess)
           .catch((error) => {
-            // Error: Keep modal open and show error message
             showToastSafe("Ride creation failed: " + (error && error.message ? error.message : "Unknown error"), "error");
             renderCreateRideErrors({}, (error && error.message ? error.message : "Failed to create ride. Please try again."));
           });
-      });
-    }
+    });
+
+    wireCreateRideFormSubmit();
 
     if (els.customerRequestForm) {
       els.customerRequestForm.addEventListener('submit', function (event) {
