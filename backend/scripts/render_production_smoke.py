@@ -58,6 +58,22 @@ def sign_in(page, email: str, route: str = "dashboard") -> None:
         lifecycle.wait_authenticated(page)
         wait_refresh(page)
         return
+
+    page.evaluate(
+        """async () => {
+          if (!window.AmiCorSession || typeof window.AmiCorSession.isActive !== 'function') return;
+          if (!window.AmiCorSession.isActive()) return;
+          if (typeof window.AmiCorSession.logout === 'function') {
+            await window.AmiCorSession.logout();
+            return;
+          }
+          if (typeof window.AmiCorSession.clear === 'function') {
+            window.AmiCorSession.clear('smoke_switch_user');
+          }
+        }"""
+    )
+    page.wait_for_timeout(1500)
+
     page.locator('[data-health-action="shell-login"]').first.wait_for(state="visible", timeout=30000)
     page.locator('[data-health-action="shell-login"]').first.click(force=True)
     page.locator("#amicor-auth-overlay").wait_for(state="visible", timeout=30000)
@@ -164,10 +180,15 @@ def main() -> int:
 
     try:
         app = httpx.get(f"{BASE}/", timeout=90)
+        canonical_target = f"{BASE.rstrip('/')}/app"
+        canonical_ok = canonical_target in app.text or (
+            "resolveCanonicalFrontendUrl" in app.text and 'injected = "https://' in app.text
+        )
         report["app_shell"] = {
             "status": app.status_code,
-            "pass": app.status_code == 200 and len(app.text) > 1000,
+            "pass": app.status_code == 200 and len(app.text) > 1000 and canonical_ok,
             "localhost_in_html": "127.0.0.1:8010" in app.text,
+            "canonical_production_url_in_html": canonical_ok,
         }
     except Exception as exc:
         report["app_shell"] = {"pass": False, "error": str(exc)}
@@ -244,11 +265,18 @@ def main() -> int:
                 hydrated = len(text.strip()) > 10 and not any(t in text.lower() for t in waiting_tokens)
                 report["feeds"].append({"label": label, "pass": hydrated, "snippet": text[:140]})
 
-            sign_in(page, "dispatcher@amicor.local")
-            report["auth"]["dispatcher_browser"] = {"pass": True}
         except Exception as exc:
             report["auth"]["browser_error"] = str(exc)
+
+        dispatcher_page = browser.new_page(viewport={"width": 1440, "height": 960})
+        dispatcher_page.add_init_script("try { localStorage.setItem('amicor_onboarded', '1'); } catch (_) {}")
+        try:
+            sign_in(dispatcher_page, "dispatcher@amicor.local")
+            report["auth"]["dispatcher_browser"] = {"pass": True}
+        except Exception as exc:
+            report["auth"]["dispatcher_browser"] = {"pass": False, "error": str(exc)}
         finally:
+            dispatcher_page.close()
             browser.close()
 
     report["console_errors"] = list(dict.fromkeys(console_errors))[:30]

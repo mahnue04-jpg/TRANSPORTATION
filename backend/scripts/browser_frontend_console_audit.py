@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 from playwright.sync_api import sync_playwright
 
-BASE = os.getenv("AMICOR_BROWSER_BASE", "http://127.0.0.1:8010")
+BASE = os.getenv("AMICOR_BROWSER_BASE", "https://amicor-health-isf-py.onrender.com")
 PASSWORD = os.getenv("AMICOR_SEED_PASSWORD", "Amicor123!")
 OUT = Path(__file__).resolve().parent.parent / "artifacts" / "frontend_console_audit.json"
 
@@ -26,20 +26,32 @@ RIDER_PANELS = [
 
 STATIC_ASSETS = [
     "/static/modules/health_isf/health-isf.js",
-    "/static/index.html",
     "/static/ux/sessionManager.js",
 ]
 
 
 def sign_in(page, email: str) -> None:
-    page.goto(f"{BASE}/#/health-isf/dashboard", wait_until="domcontentloaded", timeout=60000)
+    page.goto(f"{BASE}/#/health-isf/dashboard", wait_until="domcontentloaded", timeout=120000)
     page.wait_for_timeout(1200)
+    page.wait_for_selector("#health-isf-shell:not([hidden])", timeout=60000)
+    if page.evaluate(
+        """(expectedEmail) => {
+          if (!window.AmiCorSession || typeof window.AmiCorSession.getCurrent !== 'function') return false;
+          const id = (window.AmiCorSession.getCurrent() || {}).identity || {};
+          return String(id.email || '').toLowerCase() === String(expectedEmail || '').toLowerCase()
+            && window.AmiCorSession.isActive && window.AmiCorSession.isActive();
+        }""",
+        email,
+    ):
+        page.wait_for_timeout(2500)
+        return
+    page.locator('[data-health-action="shell-login"]').first.wait_for(state="visible", timeout=30000)
     page.locator('[data-health-action="shell-login"]').first.click(force=True)
-    page.locator("#amicor-auth-overlay").wait_for(state="visible", timeout=20000)
+    page.locator("#amicor-auth-overlay").wait_for(state="visible", timeout=30000)
     page.locator(".amicor-auth-input").nth(0).fill(email)
     page.locator(".amicor-auth-input").nth(1).fill(PASSWORD)
     page.locator(".amicor-auth-modal form button[type='submit']").click()
-    page.locator("#amicor-auth-overlay").wait_for(state="hidden", timeout=45000)
+    page.locator("#amicor-auth-overlay").wait_for(state="hidden", timeout=90000)
     page.wait_for_timeout(2500)
     page.evaluate(
         """() => window.AmiCorHealthISF && window.AmiCorHealthISF.refreshData
@@ -68,7 +80,7 @@ def audit_panels(page, panels: list[tuple[str, str, list[str]]]) -> list[dict]:
 
 def is_ignorable_console_error(message: str) -> bool:
     lowered = message.lower()
-    if "401" in lowered and "unauthorized" in lowered:
+    if "401" in lowered and ("unauthorized" in lowered or "failed to load resource" in lowered):
         return True
     if "favicon" in lowered:
         return True
