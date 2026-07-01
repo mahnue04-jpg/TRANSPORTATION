@@ -12,6 +12,7 @@ from app.db.session import SessionLocal
 from app.helpers import uuid4
 from app.main import app
 from app.modules.health_isf.models import HealthISFDriver, HealthISFProvider, DriverStatus
+from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
 
 
 @pytest.fixture(scope="module")
@@ -36,6 +37,14 @@ def _org_id(email: str = "dispatcher@amicor.local") -> str:
         assert user is not None
         assert user.organization_id is not None
         return user.organization_id
+
+
+def _require_intake_dispatcher_approval(org_id: str) -> None:
+    with SessionLocal() as db:
+        policy = WorkflowOrchestrationService.ensure_policy(db, org_id)
+        policy.approval_required = True
+        policy.is_enabled = True
+        db.commit()
 
 
 def _provider(org_id: str) -> str:
@@ -191,6 +200,7 @@ def test_phase8a_websocket_sync_replay(client: TestClient):
     auth = _login(client, "dispatcher@amicor.local")
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     org_id = _org_id()
+    _require_intake_dispatcher_approval(org_id)
     provider_id = _provider(org_id)
 
     with client.websocket_connect(
@@ -210,9 +220,15 @@ def test_phase8a_websocket_sync_replay(client: TestClient):
         assert event["type"] == "event"
         assert event["payload"]["ride_id"] == created["id"]
 
-        websocket.send_json({"type": "sync", "last_sequence": 0})
-        sync = websocket.receive_json()
-        assert sync["type"] == "sync"
+        sync = None
+        for _ in range(5):
+            websocket.send_json({"type": "sync", "last_sequence": 0})
+            message = websocket.receive_json()
+            if message["type"] == "sync":
+                sync = message
+                break
+            assert message["type"] == "event"
+        assert sync is not None
         assert isinstance(sync.get("events"), list)
         assert len(sync["events"]) >= 1
 

@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, Request, Body
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from app.auth import (
     ROLE_ADMIN,
@@ -41,7 +42,7 @@ from app.modules.health_isf.intake import (
 )
 from app.modules.health_isf.models import HealthISFRide, HealthISFRecurringRideSchedule, EventType, ActivityAction, RideStatus, DriverStatus
 from app.modules.health_isf.models import HealthISFDispatchLog, HealthISFRideStatusHistory, HealthISFDriver
-from app.modules.health_isf.models import HealthISFWorkflowEscalation
+from app.modules.health_isf.models import HealthISFWorkflowEscalation, HealthISFDispatchAssignment, DispatchAssignmentState
 from app.modules.health_isf.schemas import (
     AdminDispatchAlertsResponse,
     AdminDispatchInterventionResponse,
@@ -6613,20 +6614,82 @@ async def create_ride(
             idempotency_key_present=bool(idempotency_key),
         )
 
-        recommendation_result = service.recommend_driver_for_ride(
-            db,
-            ride_id=ride.id,
-            actor_user_id=_user.id,
+        db.refresh(ride)
+        latest_assignment = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(HealthISFDispatchAssignment.ride_id == ride.id)
+            .order_by(desc(HealthISFDispatchAssignment.created_at))
+            .first()
         )
-        recommendation = recommendation_result.get("recommendation")
-        if recommendation:
-            selected_driver = recommendation_result.get("selected_driver")
+        if ride.driver_id and latest_assignment and str(latest_assignment.assignment_state) == DispatchAssignmentState.OFFERED.value:
+            selected_driver = service.get_driver_by_id(db, ride.driver_id)
+            auto_assign_payload = {
+                "ride_id": ride.id,
+                "assignment_state": str(latest_assignment.assignment_state),
+                "selected_driver_id": ride.driver_id,
+                "selected_driver_name": getattr(selected_driver, "name", None),
+                "selected_score": float(latest_assignment.score) if latest_assignment.score is not None else None,
+                "organization_id": organization_id,
+                "source": "intake_auto_dispatch",
+            }
+            await _emit_with_retry_queue(
+                db=db,
+                organization_id=organization_id,
+                event_type="dispatch_intake_auto_assigned",
+                event_payload=auto_assign_payload,
+                emit_callable=lambda: emitter.emit_dispatch_changed(
+                    organization_id=organization_id,
+                    event_name="dispatch_intake_auto_assigned",
+                    actor_user_id=_user.id,
+                    details=auto_assign_payload,
+                ),
+                idempotency_key=_event_key("dispatch_intake_auto_assigned", ride.id, str(latest_assignment.id)),
+                ride_id=ride.id,
+            )
+            await _emit_with_retry_queue(
+                db=db,
+                organization_id=organization_id,
+                event_type="ride_assigned",
+                event_payload={
+                    "ride_id": ride.id,
+                    "driver_id": ride.driver_id,
+                    "driver_name": getattr(selected_driver, "name", None),
+                    "organization_id": organization_id,
+                    "source": "intake_auto_dispatch",
+                },
+                emit_callable=lambda: emitter.emit_ride_assigned(
+                    organization_id=organization_id,
+                    ride_id=ride.id,
+                    driver_id=str(ride.driver_id),
+                    driver_name=getattr(selected_driver, "name", None),
+                    actor_user_id=_user.id,
+                    details={"source": "intake_auto_dispatch"},
+                ),
+                idempotency_key=_event_key("ride_assigned", ride.id, str(ride.driver_id), "intake_auto_dispatch"),
+                ride_id=ride.id,
+            )
+            log_operational_event(
+                "dispatch.intake.auto_assigned",
+                organization_id=organization_id,
+                ride_id=ride.id,
+                selected_driver_id=ride.driver_id,
+                selected_score=latest_assignment.score,
+            )
+        elif (
+            latest_assignment
+            and str(latest_assignment.assignment_state) == DispatchAssignmentState.AWAITING_APPROVAL.value
+        ):
+            selected_driver = (
+                service.get_driver_by_id(db, latest_assignment.driver_id)
+                if latest_assignment.driver_id
+                else None
+            )
             recommendation_payload = {
                 "ride_id": ride.id,
-                "assignment_state": str(recommendation.assignment_state),
-                "recommended_driver_id": recommendation.driver_id,
+                "assignment_state": str(latest_assignment.assignment_state),
+                "recommended_driver_id": latest_assignment.driver_id,
                 "recommended_driver_name": getattr(selected_driver, "name", None),
-                "recommended_score": float(recommendation.score) if recommendation.score is not None else None,
+                "recommended_score": float(latest_assignment.score) if latest_assignment.score is not None else None,
                 "organization_id": organization_id,
             }
             await _emit_with_retry_queue(
@@ -6640,15 +6703,15 @@ async def create_ride(
                     actor_user_id=_user.id,
                     details=recommendation_payload,
                 ),
-                idempotency_key=_event_key("dispatch_recommendation_created", ride.id, str(recommendation.id)),
+                idempotency_key=_event_key("dispatch_recommendation_created", ride.id, str(latest_assignment.id)),
                 ride_id=ride.id,
             )
             log_operational_event(
                 "dispatch.recommendation.created",
                 organization_id=organization_id,
                 ride_id=ride.id,
-                recommended_driver_id=recommendation.driver_id,
-                recommended_score=recommendation.score,
+                recommended_driver_id=latest_assignment.driver_id,
+                recommended_score=latest_assignment.score,
             )
 
         enforce_entity_tenant(user, ride.organization_id)
@@ -7211,8 +7274,13 @@ def list_drivers(
     """Retrieve all active drivers (paginated)."""
     logger.info("Listing drivers: skip=%d, limit=%d", skip, limit)
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    drivers = service.get_all_drivers(db, skip=skip, limit=limit)
-    return [driver for driver in drivers if driver.organization_id == effective_org_id]
+    drivers = service.get_drivers_for_organization(
+        db,
+        organization_id=effective_org_id,
+        skip=skip,
+        limit=limit,
+    )
+    return drivers
 
 
 @router.post("/drivers", response_model=DriverResponse, status_code=201)

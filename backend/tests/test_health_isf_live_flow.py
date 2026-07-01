@@ -38,6 +38,7 @@ from app.modules.health_isf.models import (
     DriverStatus,
     RideStatus,
 )
+from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -123,6 +124,24 @@ def _isolate_driver_for_recommendation(org_id: str, driver_id: str) -> None:
         ):
             row.status = DriverStatus.OFFLINE
             row.availability_state = "offline"
+        db.commit()
+
+
+def _require_intake_dispatcher_approval(org_id: str) -> None:
+    """Force recommendation-only intake so tests can exercise manual approval."""
+    with SessionLocal() as db:
+        policy = WorkflowOrchestrationService.ensure_policy(db, org_id)
+        policy.approval_required = True
+        policy.is_enabled = True
+        db.commit()
+
+
+def _ensure_intake_auto_dispatch(org_id: str) -> None:
+    """Ensure intake auto-assign is enabled for the organization."""
+    with SessionLocal() as db:
+        policy = WorkflowOrchestrationService.ensure_policy(db, org_id)
+        policy.approval_required = False
+        policy.is_enabled = True
         db.commit()
 
 
@@ -238,6 +257,7 @@ class TestRideCreation:
 
 class TestRideAssignment:
     def _create_ride(self, client: TestClient, org_id: str, provider_id: str) -> str:
+        _require_intake_dispatcher_approval(org_id)
         auth = _login(client, "dispatcher@amicor.local")
         headers = {"Authorization": f"Bearer {auth['access_token']}"}
         response = client.post(
@@ -291,6 +311,7 @@ class TestRideAssignment:
 
 class TestRideVehicleAssignment:
     def _create_ride(self, client: TestClient, org_id: str, provider_id: str) -> str:
+        _require_intake_dispatcher_approval(org_id)
         auth = _login(client, "dispatcher@amicor.local")
         headers = {"Authorization": f"Bearer {auth['access_token']}"}
         response = client.post(
@@ -425,6 +446,7 @@ class TestDispatchStatusProgression:
     def _create_assigned_ride(self, client: TestClient) -> tuple[str, dict[str, str], str]:
         """Returns (ride_id, headers)."""
         org_id = _get_org_id()
+        _require_intake_dispatcher_approval(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id)
 
@@ -574,10 +596,67 @@ class TestDispatchStatusProgression:
         assert refreshed_queue.status_code == 200, refreshed_queue.text
         assert all(row.get("id") != ride_id for row in refreshed_queue.json())
 
+    def test_seeded_sample_driver_login_accepts_canonical_phone(self, client: TestClient):
+        org_id = _get_org_id()
+        auth = _login(client, "dispatcher@amicor.local")
+        headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+        with SessionLocal() as db:
+            from sqlalchemy import func
+
+            driver = (
+                db.query(HealthISFDriver)
+                .filter(
+                    HealthISFDriver.organization_id == org_id,
+                    func.lower(HealthISFDriver.name) == "james smith",
+                )
+                .first()
+            )
+            assert driver is not None, "James Smith seed driver must exist in tenant org"
+            driver_id = str(driver.id)
+
+        for phone in ("917-555-1001", "9175551001"):
+            login_response = client.post(
+                "/api/health-isf/drivers/login",
+                headers=headers,
+                json={"driver_id": driver_id, "phone": phone},
+            )
+            assert login_response.status_code == 200, login_response.text
+            payload = login_response.json()
+            assert payload["session_token"].startswith("drv_")
+            assert payload["auth_state"] == "active"
+            assert payload["is_online"] is True
+            assert payload["availability_state"] == "available"
+
+            status_response = client.get(
+                f"/api/health-isf/drivers/{driver_id}/status",
+                headers=headers,
+                params={"session_token": payload["session_token"]},
+            )
+            assert status_response.status_code == 200, status_response.text
+            status_payload = status_response.json()
+            assert status_payload["active_session"] is True
+            assert status_payload["auth_state"] == "active"
+            assert status_payload["is_online"] is True
+
+            logout_response = client.post(
+                "/api/health-isf/drivers/logout",
+                headers=headers,
+                json={"driver_id": driver_id, "session_token": payload["session_token"]},
+            )
+            assert logout_response.status_code == 200, logout_response.text
+
+        list_response = client.get("/api/health-isf/drivers", headers=headers, params={"limit": 5})
+        assert list_response.status_code == 200, list_response.text
+        names = [row.get("name") for row in list_response.json()]
+        assert names[0] == "James Smith"
+
     def test_auto_assign_persists_driver_assignment_for_driver_queue(self, client: TestClient):
         org_id = _get_org_id()
+        _ensure_intake_auto_dispatch(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id)
+        _isolate_driver_for_recommendation(org_id, driver_id)
 
         auth = _login(client, "dispatcher@amicor.local")
         headers = {"Authorization": f"Bearer {auth['access_token']}"}
@@ -617,6 +696,18 @@ class TestDispatchStatusProgression:
         assert create_resp.status_code in {200, 201}, create_resp.text
         ride_id = create_resp.json()["id"]
 
+        with SessionLocal() as db:
+            ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
+            assert ride is not None
+            assert str(ride.driver_id) == str(driver_id)
+
+        queue_response = client.get(
+            f"/api/health-isf/drivers/{driver_id}/assigned-rides",
+            headers=headers,
+        )
+        assert queue_response.status_code == 200, queue_response.text
+        assert any(row.get("id") == ride_id for row in queue_response.json())
+
         auto_assign_response = client.post(
             "/api/health-isf/dispatch/auto-assign",
             headers=headers,
@@ -625,15 +716,15 @@ class TestDispatchStatusProgression:
         assert auto_assign_response.status_code == 200, auto_assign_response.text
         auto_assigned = auto_assign_response.json()
         selected_driver_id = auto_assigned.get("selected_driver_id")
-        assert selected_driver_id
+        assert selected_driver_id == str(driver_id)
         assert auto_assigned.get("assignment_state") == "offered"
 
-        queue_response = client.get(
+        refreshed_queue = client.get(
             f"/api/health-isf/drivers/{selected_driver_id}/assigned-rides",
             headers=headers,
         )
-        assert queue_response.status_code == 200, queue_response.text
-        assert any(row.get("id") == ride_id for row in queue_response.json())
+        assert refreshed_queue.status_code == 200, refreshed_queue.text
+        assert any(row.get("id") == ride_id for row in refreshed_queue.json())
 
         with SessionLocal() as db:
             ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
@@ -725,6 +816,7 @@ class TestDispatchStatusProgression:
 
     def test_intake_creates_ai_recommendation_when_driver_available(self, client: TestClient):
         org_id = _get_org_id()
+        _require_intake_dispatcher_approval(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id)
         _isolate_driver_for_recommendation(org_id, driver_id)
@@ -777,6 +869,7 @@ class TestDispatchStatusProgression:
 
     def test_customer_request_intake_creates_ai_recommendation(self, client: TestClient):
         org_id = _get_org_id()
+        _require_intake_dispatcher_approval(org_id)
         _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id)
         _isolate_driver_for_recommendation(org_id, driver_id)
@@ -817,10 +910,48 @@ class TestDispatchStatusProgression:
             assert str(assignment.assignment_state) == "awaiting_approval"
             assert str(assignment.driver_id) == str(driver_id)
 
+    def test_intake_auto_assigns_eligible_driver_when_auto_dispatch_enabled(self, client: TestClient):
+        org_id = _get_org_id()
+        _ensure_intake_auto_dispatch(org_id)
+        provider_id = _ensure_provider(org_id)
+        driver_id = _ensure_available_driver(org_id)
+        _isolate_driver_for_recommendation(org_id, driver_id)
+
+        auth = _login(client, "dispatcher@amicor.local")
+        headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+        create_resp = client.post(
+            "/api/health-isf/rides",
+            headers=headers,
+            json={
+                "provider_id": provider_id,
+                "passenger_name": f"Auto Dispatch Patient {uuid4()[:6]}",
+                "passenger_phone": "917-555-6969",
+                "service_type": "medical_transport",
+                "pickup_address": "90 Auto Dispatch St",
+                "dropoff_address": "100 Assigned Ave",
+            },
+        )
+        assert create_resp.status_code in {200, 201}, create_resp.text
+        ride_id = create_resp.json()["id"]
+
+        with SessionLocal() as db:
+            ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
+            assert ride is not None
+            assert str(ride.driver_id) == str(driver_id)
+
+        queue_response = client.get("/api/health-isf/dispatch/queue", headers=headers)
+        assert queue_response.status_code == 200, queue_response.text
+        queue_row = next((row for row in queue_response.json() if row.get("ride_id") == ride_id), None)
+        assert queue_row is not None
+        assert queue_row.get("assignment_state") == "offered"
+        assert queue_row.get("recommended_driver_id") == str(driver_id)
+
 
 class TestDispatcherRideCompletion:
     def _create_ready_for_completion_ride(self, client: TestClient) -> tuple[str, dict[str, str]]:
         org_id = _get_org_id()
+        _require_intake_dispatcher_approval(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id)
 

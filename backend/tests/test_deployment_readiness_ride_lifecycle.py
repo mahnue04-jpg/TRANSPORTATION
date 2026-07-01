@@ -26,6 +26,7 @@ from app.modules.health_isf.models import (
     HealthISFTrip,
     RideStatus,
 )
+from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
 
 
 @pytest.fixture(scope="module")
@@ -96,6 +97,32 @@ def _ensure_available_driver(org_id: str, *, suffix: str = "") -> str:
         return driver.id
 
 
+def _require_intake_dispatcher_approval(org_id: str) -> None:
+    with SessionLocal() as db:
+        policy = WorkflowOrchestrationService.ensure_policy(db, org_id)
+        policy.approval_required = True
+        policy.is_enabled = True
+        db.commit()
+
+
+def _isolate_driver_for_recommendation(org_id: str, driver_id: str) -> None:
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.rating = 5.0
+        dedicated.total_trips = 100
+        dedicated.status = DriverStatus.AVAILABLE
+        dedicated.is_active = True
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == org_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+        db.commit()
+
+
 def _queue_row(client: TestClient, headers: dict[str, str], ride_id: str) -> dict:
     response = client.get("/api/health-isf/dispatch/queue", headers=headers)
     assert response.status_code == 200, response.text
@@ -132,8 +159,10 @@ class TestDeploymentReadinessRideLifecycle:
     def test_full_ai_first_lifecycle_with_metrics_and_billing(self, client: TestClient):
         headers = _headers(client)
         org_id = _org_id()
+        _require_intake_dispatcher_approval(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id, suffix="MAIN")
+        _isolate_driver_for_recommendation(org_id, driver_id)
 
         dashboard_before = client.get("/api/health-isf/dashboard", headers=headers)
         assert dashboard_before.status_code == 200, dashboard_before.text

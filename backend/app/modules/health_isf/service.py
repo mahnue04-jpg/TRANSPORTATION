@@ -6,11 +6,12 @@ Persists provider/driver/ride operations with audit timeline entries.
 import logging
 import json
 import hashlib
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
-from sqlalchemy import and_, desc, func, or_, text
+from sqlalchemy import and_, case, desc, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.helpers import now, uuid4
@@ -496,6 +497,22 @@ def list_generated_rides_for_schedule(
         .limit(limit)
         .all()
     )
+
+
+def _normalize_phone_digits(value: str | None) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _phones_match_for_driver_login(stored_phone: str | None, provided_phone: str | None) -> bool:
+    stored_digits = _normalize_phone_digits(stored_phone)
+    provided_digits = _normalize_phone_digits(provided_phone)
+    if not stored_digits or not provided_digits:
+        return False
+    if stored_digits == provided_digits:
+        return True
+    if len(stored_digits) >= 10 and len(provided_digits) >= 10:
+        return stored_digits[-10:] == provided_digits[-10:]
+    return False
 
 
 def _normalize_driver_availability_state(state: str) -> str:
@@ -1303,6 +1320,71 @@ def auto_assign_request(
     }
 
 
+def _is_intake_auto_dispatch_enabled(db: Session, organization_id: str) -> bool:
+    """Return True when intake should auto-assign instead of awaiting dispatcher approval."""
+    env_override = os.getenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED")
+    if env_override is not None:
+        normalized = str(env_override).strip().lower()
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+
+    from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
+
+    policy = WorkflowOrchestrationService.ensure_policy(db, organization_id)
+    return bool(policy.is_enabled) and not bool(policy.approval_required)
+
+
+def run_intake_dispatch_automation(
+    db: Session,
+    *,
+    ride_id: str,
+    organization_id: str,
+    actor_user_id: Optional[str] = None,
+    offer_timeout_seconds: int = 90,
+) -> dict[str, Any]:
+    """Auto-assign on intake when enabled; otherwise persist an AI recommendation for approval."""
+    ride = get_ride_by_id(db, ride_id)
+    if not ride:
+        raise ValueError("Ride not found")
+
+    if ride.driver_id:
+        selected_driver = get_driver_by_id(db, ride.driver_id)
+        return {
+            "ride": ride,
+            "mode": "already_assigned",
+            "recommendation": None,
+            "offer": _latest_assignment_for_ride(db, ride.id),
+            "selected_driver": selected_driver,
+            "candidates": [],
+        }
+
+    if _is_intake_auto_dispatch_enabled(db, organization_id):
+        auto_result = auto_assign_request(
+            db,
+            ride_id=ride_id,
+            actor_user_id=actor_user_id,
+            offer_timeout_seconds=offer_timeout_seconds,
+        )
+        if auto_result.get("offer"):
+            db.refresh(ride)
+            return {
+                **auto_result,
+                "mode": "auto_assigned",
+                "recommendation": None,
+            }
+
+    recommendation_result = recommend_driver_for_ride(
+        db,
+        ride_id=ride_id,
+        actor_user_id=actor_user_id,
+    )
+    recommendation_result["mode"] = "recommendation"
+    recommendation_result["offer"] = None
+    return recommendation_result
+
+
 def reassign_expired_request(
     db: Session,
     *,
@@ -1725,7 +1807,7 @@ def driver_login(
         raise ValueError("Driver not found")
     if not driver.is_active:
         raise ValueError("Driver is inactive")
-    if str(driver.phone or "").strip() != str(phone or "").strip():
+    if not _phones_match_for_driver_login(driver.phone, phone):
         raise ValueError("Driver credentials invalid")
 
     existing_sessions = (
@@ -4116,6 +4198,126 @@ def set_driver_operational_status(
     return driver
 
 
+def _resolve_unique_vehicle_plate(db: Session, base_plate: str, organization_id: str) -> str:
+    base = str(base_plate or "VEH").strip() or "VEH"
+    candidates = [
+        base,
+        f"{base}-{organization_id.replace('-', '')[:6].upper()}",
+        f"{base}-{uuid4()[:6].upper()}",
+    ]
+    for candidate in candidates:
+        exists = (
+            db.query(HealthISFVehicle.id)
+            .filter(HealthISFVehicle.vehicle_plate == candidate)
+            .first()
+        )
+        if not exists:
+            return candidate
+    return f"{base}-{uuid4()[:8].upper()}"
+
+
+def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, item: dict[str, Any]) -> HealthISFDriver:
+    """Create a baseline seed driver with vehicle for check-in and dispatch testing."""
+    vehicle_plate = _resolve_unique_vehicle_plate(db, str(item["vehicle_plate"]), str(org.id))
+    vehicle = HealthISFVehicle(
+        id=uuid4(),
+        organization_id=org.id,
+        vehicle_type=item["vehicle_type"],
+        vehicle_plate=vehicle_plate,
+        capacity=4,
+        is_active=True,
+        created_at=now(),
+        updated_at=now(),
+    )
+    db.add(vehicle)
+    db.flush()
+
+    driver = HealthISFDriver(
+        id=uuid4(),
+        organization_id=org.id,
+        vehicle_id=vehicle.id,
+        name=item["name"],
+        phone=item["phone"],
+        vehicle_type=item["vehicle_type"],
+        vehicle_plate=vehicle_plate,
+        status=item["status"],
+        availability_state=(
+            "available"
+            if item["status"] == DriverStatus.AVAILABLE
+            else "offline"
+        ),
+        auth_state="inactive",
+        is_online=False,
+        is_active=True,
+        total_trips=0,
+        rating=item["rating"],
+        created_at=now(),
+        updated_at=now(),
+    )
+    db.add(driver)
+    db.flush()
+    return driver
+
+
+def ensure_sample_driver_credentials(db: Session, organization_id: str | None = None) -> dict[str, str]:
+    """Ensure baseline seed drivers exist with canonical phone numbers for check-in testing."""
+    org = _get_organization_by_id(db, organization_id) if organization_id else _get_or_create_default_org(db)
+    if not org:
+        return {}
+    ensured: dict[str, str] = {}
+    for item in SAMPLE_DRIVERS:
+        canonical_phone = str(item["phone"]).strip()
+        canonical_name = str(item["name"]).strip()
+        row = (
+            db.query(HealthISFDriver)
+            .filter(
+                HealthISFDriver.organization_id == org.id,
+                func.lower(HealthISFDriver.name) == canonical_name.lower(),
+            )
+            .order_by(HealthISFDriver.created_at.asc())
+            .first()
+        )
+        if not row:
+            row = (
+                db.query(HealthISFDriver)
+                .filter(HealthISFDriver.phone == canonical_phone)
+                .order_by(HealthISFDriver.created_at.asc())
+                .first()
+            )
+            if row and str(row.organization_id) != str(org.id):
+                row.organization_id = org.id
+                row.name = canonical_name
+                row.is_active = True
+                row.updated_at = now()
+                if row.vehicle_id:
+                    vehicle = (
+                        db.query(HealthISFVehicle)
+                        .filter(HealthISFVehicle.id == row.vehicle_id)
+                        .first()
+                    )
+                    if vehicle:
+                        vehicle.organization_id = org.id
+                        vehicle.updated_at = now()
+                ensured[str(row.id)] = canonical_phone
+                continue
+        if not row:
+            row = _create_canonical_sample_driver(db, org, item)
+            ensured[str(row.id)] = canonical_phone
+            continue
+        current_phone = str(row.phone or "").strip()
+        if not _phones_match_for_driver_login(canonical_phone, current_phone):
+            row.phone = canonical_phone
+            row.updated_at = now()
+            ensured[str(row.id)] = canonical_phone
+        if not row.is_active:
+            row.is_active = True
+            row.updated_at = now()
+            ensured[str(row.id)] = canonical_phone
+    if ensured:
+        _commit_or_rollback(db)
+    return ensured
+
+
 def init_sample_data(db: Session) -> dict:
     summary = {
         "organizations": 0,
@@ -4347,6 +4549,32 @@ def get_all_drivers(db: Session, skip: int = 0, limit: int = 100) -> list[Health
     return db.query(HealthISFDriver).filter(
         HealthISFDriver.is_active == True
     ).offset(skip).limit(limit).all()
+
+
+def get_drivers_for_organization(
+    db: Session,
+    *,
+    organization_id: str,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[HealthISFDriver]:
+    _normalize_legacy_driver_status_rows(db)
+    canonical_names = [str(item["name"]).strip().lower() for item in SAMPLE_DRIVERS]
+    sample_priority = case(
+        (func.lower(HealthISFDriver.name).in_(canonical_names), 0),
+        else_=1,
+    )
+    return (
+        db.query(HealthISFDriver)
+        .filter(
+            HealthISFDriver.organization_id == organization_id,
+            HealthISFDriver.is_active == True,
+        )
+        .order_by(sample_priority, desc(HealthISFDriver.updated_at), HealthISFDriver.name.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_available_drivers(db: Session) -> list[HealthISFDriver]:
@@ -5213,11 +5441,13 @@ def create_ride(
         source="create_ride",
     )
     if not ride.driver_id:
-        recommend_driver_for_ride(
+        run_intake_dispatch_automation(
             db,
             ride_id=ride.id,
+            organization_id=organization_id,
             actor_user_id=actor_user_id,
         )
+        db.refresh(ride)
     return ride
 
 

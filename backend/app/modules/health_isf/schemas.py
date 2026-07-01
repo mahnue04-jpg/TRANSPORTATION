@@ -107,6 +107,10 @@ class DriverResponse(DriverBase):
     is_active: bool
     total_trips: int
     rating: float
+    auth_state: str = "inactive"
+    availability_state: str = "offline"
+    is_online: bool = False
+    last_seen_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

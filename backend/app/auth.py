@@ -163,6 +163,7 @@ def seed_default_users() -> list[dict[str, str]]:
     created: list[dict[str, str]] = []
     try:
         default_org = health_isf_service._get_or_create_default_org(db)
+        health_isf_service.ensure_sample_driver_credentials(db, organization_id=default_org.id)
 
         for user_seed in SEED_USERS:
             email = user_seed["email"].strip().lower()

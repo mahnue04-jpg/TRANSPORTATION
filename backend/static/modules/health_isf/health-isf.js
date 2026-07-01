@@ -1791,6 +1791,7 @@
       driverRuntimePhone: document.getElementById("health-driver-runtime-phone"),
       driverRuntimeAvailability: document.getElementById("health-driver-runtime-availability"),
       driverRuntimeToken: document.getElementById("health-driver-runtime-token"),
+      driverRuntimeActionStatus: document.getElementById("health-driver-runtime-action-status"),
       driverLogin: document.getElementById("health-driver-login"),
       driverLogout: document.getElementById("health-driver-logout"),
       driverSetAvailability: document.getElementById("health-driver-set-availability"),
@@ -1993,10 +1994,14 @@
   }
 
   function summarizeDriverAvailability(driver, activeAssignments) {
+    const availability = String(driver && driver.availability_state || "").toLowerCase();
     const status = String(driver && driver.status || "").toLowerCase();
-    if (["offline", "unavailable"].includes(status)) return "offline";
-    if (activeAssignments >= 2 || ["busy", "in_transit", "en_route_pickup", "waiting_at_pickup"].includes(status)) return "limited";
-    return "available";
+    const online = Boolean(driver && driver.is_online);
+    if (availability === "offline" || (!online && ["offline", "unavailable"].includes(status))) return "offline";
+    if (activeAssignments >= 2 || ["busy", "in_transit", "en_route_pickup", "waiting_at_pickup", "on_trip"].includes(status) || availability === "on_trip") return "limited";
+    if (availability === "available" || status === "available") return "available";
+    if (availability === "unavailable" || status === "unavailable") return "offline";
+    return online ? "available" : "offline";
   }
 
   function summarizeDriverShiftState(driver, activeAssignments) {
@@ -2110,6 +2115,7 @@
       return {
         id: driverId,
         name: driver.name || "Driver",
+        phone: driver.phone || "",
         status: String(driver.status || "unknown"),
         assignedRides: activeAssignments,
         idleMinutes: idleMinutes,
@@ -4612,8 +4618,10 @@
 
   function isDriverAssignableForRide(driver, rideId) {
     if (!driver || !driver.id || driver.is_active === false) return false;
+    const availability = String(driver.availability_state || '').toLowerCase();
     const status = String(driver.status || '').toLowerCase();
-    if (status !== 'available') return false;
+    const dispatchReady = availability === 'available' || status === 'available';
+    if (!dispatchReady) return false;
     return getDriverActiveAssignmentCount(driver.id, rideId) === 0;
   }
 
@@ -5534,22 +5542,146 @@
     };
   }
 
+  function setDriverRuntimeActionMessage(message, tone) {
+    const els = getEls();
+    if (!els.driverRuntimeActionStatus) return;
+    if (!message) {
+      els.driverRuntimeActionStatus.innerHTML = '';
+      return;
+    }
+    const toneClass = tone === 'error' ? 'danger' : (tone === 'success' ? 'ok' : 'warn');
+    els.driverRuntimeActionStatus.innerHTML = '<p class="health-summary"><span class="health-pill ' + toneClass + '">' + escapeHtml(String(message)) + '</span></p>';
+  }
+
+  function normalizeDriverRuntimeStatus(data) {
+    if (!data || typeof data !== 'object') return null;
+    return {
+      driver_id: data.driver_id,
+      auth_state: data.auth_state,
+      availability_state: data.availability_state,
+      is_online: Boolean(data.is_online),
+      last_seen_at: data.last_seen_at || data.issued_at || null,
+      active_session: Boolean(data.active_session === true || data.session_token),
+      active_ride_id: data.active_ride_id || null,
+    };
+  }
+
+  function syncDriverRecordFromRuntime(driverId, patch) {
+    if (!driverId || !patch || !Array.isArray(state.drivers)) return;
+    const idx = state.drivers.findIndex(function (driver) {
+      return String(driver && driver.id || '') === String(driverId);
+    });
+    if (idx === -1) return;
+    const current = state.drivers[idx];
+    const availability = String(patch.availability_state || current.availability_state || '').toLowerCase();
+    let legacyStatus = current.status;
+    if (availability === 'available') legacyStatus = 'available';
+    else if (availability === 'offline') legacyStatus = 'offline';
+    else if (availability === 'on_trip') legacyStatus = 'assigned';
+    else if (availability === 'unavailable') legacyStatus = 'unavailable';
+    state.drivers[idx] = Object.assign({}, current, patch, { status: legacyStatus });
+  }
+
+  function lookupDriverPhone(driverId) {
+    const driver = (Array.isArray(state.drivers) ? state.drivers : []).find(function (row) {
+      return String(row && row.id || '') === String(driverId || '');
+    });
+    return driver && driver.phone ? String(driver.phone) : '';
+  }
+
+  function hydrateDriverRuntimePhone(driverId) {
+    const els = getEls();
+    if (!els.driverRuntimePhone || !driverId) return;
+    const phone = lookupDriverPhone(driverId);
+    if (phone) {
+      els.driverRuntimePhone.value = phone;
+    }
+  }
+
+  async function resolveDriverPhoneForLogin(driverId) {
+    const localPhone = lookupDriverPhone(driverId);
+    if (localPhone) {
+      return localPhone;
+    }
+    const driver = await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(driverId), {
+      actionName: 'driver_lookup_for_login',
+    });
+    const phone = driver && driver.phone ? String(driver.phone).trim() : '';
+    if (phone && Array.isArray(state.drivers)) {
+      const idx = state.drivers.findIndex(function (row) {
+        return String(row && row.id || '') === String(driverId || '');
+      });
+      if (idx >= 0) {
+        state.drivers[idx] = Object.assign({}, state.drivers[idx], { phone: phone });
+      }
+    }
+    const els = getEls();
+    if (phone && els.driverRuntimePhone) {
+      els.driverRuntimePhone.value = phone;
+    }
+    return phone;
+  }
+
+  function applyDriverRuntimeStatus(data) {
+    const normalized = normalizeDriverRuntimeStatus(data);
+    if (!normalized) return null;
+    state.driverRuntimeStatus = normalized;
+    if (normalized.driver_id) {
+      syncDriverRecordFromRuntime(normalized.driver_id, {
+        auth_state: normalized.auth_state,
+        availability_state: normalized.availability_state,
+        is_online: normalized.is_online,
+        last_seen_at: normalized.last_seen_at,
+      });
+    }
+    return normalized;
+  }
+
+  async function completeDriverRuntimePanelRefresh(options) {
+    const opts = options || {};
+    if (opts.refreshStatus !== false) {
+      await refreshDriverRuntimeStatus();
+    }
+    if (opts.refreshWorkspace !== false) {
+      await refreshDriverLiveWorkspace().catch(function () { return null; });
+    }
+    if (opts.refreshFleet !== false) {
+      await refreshData();
+    } else {
+      renderDrivers();
+    }
+  }
+
   async function loginDriverRuntime() {
     const inputs = getDriverRuntimeInputs();
-    if (!inputs.driverId || !inputs.phone) {
-      throw new Error('Driver and phone are required');
+    if (!inputs.driverId) {
+      throw new Error('Select a driver before login');
+    }
+    const resolvedPhone = await resolveDriverPhoneForLogin(inputs.driverId);
+    const phone = String(resolvedPhone || getDriverRuntimeInputs().phone || '').trim();
+    if (!phone) {
+      throw new Error('Enter the driver phone number used for check-in');
     }
     const response = await fetchJson('/api/health-isf/drivers/login', {
       method: 'POST',
       actionName: 'driver_login',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ driver_id: inputs.driverId, phone: inputs.phone }),
+      body: JSON.stringify({ driver_id: inputs.driverId, phone: phone }),
     });
     state.driverRuntimeToken = String((response && response.session_token) || '');
+    state.selectedDriverId = inputs.driverId;
     const els = getEls();
     if (els.driverRuntimeToken) {
       els.driverRuntimeToken.value = state.driverRuntimeToken;
     }
+    if (els.driverRuntimePhone) {
+      els.driverRuntimePhone.value = phone;
+    }
+    applyDriverRuntimeStatus(Object.assign({}, response, {
+      driver_id: response.driver_id || inputs.driverId,
+      active_session: true,
+      last_seen_at: response.issued_at,
+    }));
     return response;
   }
 
@@ -5558,17 +5690,25 @@
     if (!inputs.driverId || !inputs.token) {
       throw new Error('Driver and session token are required');
     }
-    await fetchJson('/api/health-isf/drivers/logout', {
+    const response = await fetchJson('/api/health-isf/drivers/logout', {
       method: 'POST',
       actionName: 'driver_logout',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ driver_id: inputs.driverId, session_token: inputs.token }),
     });
     state.driverRuntimeToken = null;
+    state.driverRuntimeStatus = null;
     const els = getEls();
     if (els.driverRuntimeToken) {
       els.driverRuntimeToken.value = '';
     }
+    syncDriverRecordFromRuntime(inputs.driverId, {
+      auth_state: 'inactive',
+      availability_state: 'offline',
+      is_online: false,
+      last_seen_at: null,
+    });
+    return response;
   }
 
   async function setDriverRuntimeAvailability() {
@@ -5576,16 +5716,21 @@
     if (!inputs.driverId) {
       throw new Error('Driver is required');
     }
-    await fetchJson('/api/health-isf/drivers/availability', {
+    if (!inputs.token) {
+      throw new Error('Driver session token required. Log in first.');
+    }
+    const response = await fetchJson('/api/health-isf/drivers/availability', {
       method: 'POST',
       actionName: 'driver_set_availability',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         driver_id: inputs.driverId,
         availability_state: inputs.availability,
-        session_token: inputs.token || null,
+        session_token: inputs.token,
       }),
     });
+    applyDriverRuntimeStatus(response);
+    return response;
   }
 
   async function heartbeatDriverRuntime() {
@@ -5593,12 +5738,14 @@
     if (!inputs.driverId || !inputs.token) {
       throw new Error('Driver and session token are required');
     }
-    await fetchJson('/api/health-isf/drivers/heartbeat', {
+    const response = await fetchJson('/api/health-isf/drivers/heartbeat', {
       method: 'POST',
       actionName: 'driver_heartbeat',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ driver_id: inputs.driverId, session_token: inputs.token }),
     });
+    applyDriverRuntimeStatus(response);
+    return response;
   }
 
   async function refreshDriverRuntimeStatus() {
@@ -5610,7 +5757,7 @@
     const runtime = await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(inputs.driverId) + '/status' + query, {
       actionName: 'driver_runtime_status',
     });
-    state.driverRuntimeStatus = runtime;
+    applyDriverRuntimeStatus(runtime);
     return runtime;
   }
 
@@ -6212,7 +6359,8 @@
     if (els.driverRuntimeId) {
       const selected = String(els.driverRuntimeId.value || state.selectedDriverId || '');
       els.driverRuntimeId.innerHTML = '<option value="">Select driver</option>' + rows.map(function (row) {
-        return '<option value="' + escapeHtml(row.id) + '">' + escapeHtml(row.name) + ' (' + escapeHtml(row.status) + ')</option>';
+        const phoneLabel = row.phone ? (' · ' + row.phone) : '';
+        return '<option value="' + escapeHtml(row.id) + '">' + escapeHtml(row.name) + ' (' + escapeHtml(row.status) + ')' + escapeHtml(phoneLabel) + '</option>';
       }).join('');
       if (selected) {
         els.driverRuntimeId.value = selected;
@@ -7595,6 +7743,9 @@
       }
 
       if (state.selectedDriverId) {
+        if (state.driverRuntimeToken) {
+          await refreshDriverRuntimeStatus().catch(function () { return null; });
+        }
         await refreshDriverLiveWorkspace().catch(function () { return null; });
       } else {
         state.driverLiveWorkspace = null;
@@ -9192,6 +9343,7 @@
           if (runtimeEls.driverRuntimeId) {
             runtimeEls.driverRuntimeId.value = driverId;
           }
+          hydrateDriverRuntimePhone(driverId);
           Promise.all([
             fetchDriverAssignedRides(driverId),
             refreshDriverRuntimeStatus().catch(function () { return null; }),
@@ -9223,30 +9375,33 @@
           state.selectedDriverAssignedRides = [];
           state.driverRuntimeStatus = null;
           state.driverLiveWorkspace = null;
+          setDriverRuntimeActionMessage('', '');
           renderDrivers();
           return;
         }
+        hydrateDriverRuntimePhone(selected);
         Promise.all([
           fetchDriverAssignedRides(selected).catch(function () { return []; }),
           refreshDriverRuntimeStatus().catch(function () { return null; }),
           refreshDriverLiveWorkspace().catch(function () { return null; }),
         ]).then(function () {
           renderDrivers();
+        }).catch(function (error) {
+          setDriverRuntimeActionMessage('Driver status refresh failed: ' + error.message, 'error');
         });
       });
     }
 
     if (els.driverLogin) {
       els.driverLogin.addEventListener('click', function () {
+        setDriverRuntimeActionMessage('Signing in driver...', 'info');
         loginDriverRuntime().then(function () {
-          return Promise.all([
-            refreshDriverRuntimeStatus().catch(function () { return null; }),
-            refreshDriverLiveWorkspace().catch(function () { return null; }),
-            refreshData(),
-          ]);
+          return completeDriverRuntimePanelRefresh({ refreshFleet: true });
         }).then(function () {
+          setDriverRuntimeActionMessage('Driver logged in. Session token saved and status refreshed.', 'success');
           showToastSafe('Driver session activated.', 'success');
         }).catch(function (error) {
+          setDriverRuntimeActionMessage('Driver login failed: ' + error.message, 'error');
           showToastSafe('Driver login failed: ' + error.message, 'error');
         });
       });
@@ -9254,12 +9409,14 @@
 
     if (els.driverLogout) {
       els.driverLogout.addEventListener('click', function () {
+        setDriverRuntimeActionMessage('Signing out driver...', 'info');
         logoutDriverRuntime().then(function () {
-          state.driverRuntimeStatus = null;
-          return refreshData();
+          return completeDriverRuntimePanelRefresh({ refreshFleet: true });
         }).then(function () {
+          setDriverRuntimeActionMessage('Driver logged out. Session token cleared.', 'success');
           showToastSafe('Driver session closed.', 'success');
         }).catch(function (error) {
+          setDriverRuntimeActionMessage('Driver logout failed: ' + error.message, 'error');
           showToastSafe('Driver logout failed: ' + error.message, 'error');
         });
       });
@@ -9267,15 +9424,14 @@
 
     if (els.driverSetAvailability) {
       els.driverSetAvailability.addEventListener('click', function () {
+        setDriverRuntimeActionMessage('Updating driver availability...', 'info');
         setDriverRuntimeAvailability().then(function () {
-          return Promise.all([
-            refreshDriverRuntimeStatus().catch(function () { return null; }),
-            refreshDriverLiveWorkspace().catch(function () { return null; }),
-            refreshData(),
-          ]);
+          return completeDriverRuntimePanelRefresh({ refreshFleet: true });
         }).then(function () {
+          setDriverRuntimeActionMessage('Driver availability updated.', 'success');
           showToastSafe('Driver availability updated.', 'success');
         }).catch(function (error) {
+          setDriverRuntimeActionMessage('Availability update failed: ' + error.message, 'error');
           showToastSafe('Availability update failed: ' + error.message, 'error');
         });
       });
@@ -9283,15 +9439,14 @@
 
     if (els.driverHeartbeat) {
       els.driverHeartbeat.addEventListener('click', function () {
+        setDriverRuntimeActionMessage('Sending driver heartbeat...', 'info');
         heartbeatDriverRuntime().then(function () {
-          return Promise.all([
-            refreshDriverRuntimeStatus().catch(function () { return null; }),
-            refreshDriverLiveWorkspace().catch(function () { return null; }),
-          ]);
+          return completeDriverRuntimePanelRefresh({ refreshFleet: false });
         }).then(function () {
+          setDriverRuntimeActionMessage('Driver heartbeat recorded.', 'success');
           showToastSafe('Driver heartbeat recorded.', 'success');
-          renderDrivers();
         }).catch(function (error) {
+          setDriverRuntimeActionMessage('Heartbeat failed: ' + error.message, 'error');
           showToastSafe('Heartbeat failed: ' + error.message, 'error');
         });
       });
@@ -9299,12 +9454,15 @@
 
     if (els.driverRefreshStatus) {
       els.driverRefreshStatus.addEventListener('click', function () {
+        setDriverRuntimeActionMessage('Refreshing driver status...', 'info');
         refreshDriverRuntimeStatus().then(function () {
           return refreshDriverLiveWorkspace().catch(function () { return null; });
         }).then(function () {
           renderDrivers();
+          setDriverRuntimeActionMessage('Driver status refreshed.', 'success');
           showToastSafe('Driver status refreshed.', 'info');
         }).catch(function (error) {
+          setDriverRuntimeActionMessage('Status refresh failed: ' + error.message, 'error');
           showToastSafe('Status refresh failed: ' + error.message, 'error');
         });
       });
