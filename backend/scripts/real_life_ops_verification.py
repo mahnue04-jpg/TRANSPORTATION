@@ -41,6 +41,11 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def is_remote_base(base: str) -> bool:
+    host = (httpx.URL(base).host or "").lower()
+    return host not in {"", "127.0.0.1", "localhost", "::1"}
+
+
 def snap(page, name: str, shots: list[str]) -> None:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     path = str(ARTIFACT_DIR / f"{name}.png")
@@ -156,6 +161,56 @@ def reseed_backend() -> dict[str, Any]:
         db.close()
 
 
+def prep_remote_backend(base: str) -> dict[str, Any]:
+    """Resolve canonical driver IDs from the target deployment (not local SQLite)."""
+    client = httpx.Client(base_url=base.rstrip("/"), timeout=90.0)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "dispatcher@amicor.local", "password": PASSWORD},
+    )
+    login.raise_for_status()
+    token = login.json().get("access_token")
+    if not token:
+        raise RuntimeError(f"Dispatcher login failed against {base}")
+
+    headers = {"Authorization": f"Bearer {token}"}
+    drivers_resp = client.get("/api/health-isf/drivers", headers=headers)
+    drivers_resp.raise_for_status()
+    payload = drivers_resp.json()
+    rows = payload if isinstance(payload, list) else payload.get("data") or []
+    driver = next(
+        (row for row in rows if str(row.get("name") or "").lower() == PRIMARY_DRIVER.lower()),
+        None,
+    )
+    if not driver:
+        raise RuntimeError(f"{PRIMARY_DRIVER} not found on remote deployment {base}")
+
+    return {
+        "organization_id": str(driver.get("organization_id") or ""),
+        "driver_id": str(driver["id"]),
+        "driver_name": str(driver.get("name") or PRIMARY_DRIVER),
+        "driver_phone": str(driver.get("phone") or PRIMARY_PHONE),
+        "remote": True,
+        "ensured_ids": [],
+        "cleared_active_rides": 0,
+        "cleared_open_assignments": 0,
+    }
+
+
+def wait_for_driver_runtime_option(page, driver_id: str, timeout_ms: int = 90000) -> None:
+    page.wait_for_function(
+        """(driverId) => {
+          const sel = document.getElementById('health-driver-runtime-id');
+          if (!sel) return false;
+          return Array.from(sel.options || []).some(function (opt) {
+            return String(opt.value || '') === String(driverId || '');
+          });
+        }""",
+        arg=driver_id,
+        timeout=timeout_ms,
+    )
+
+
 def auth_fetch(page, method: str, path: str, body: dict | None = None) -> dict:
     return page.evaluate(
         """async ([method, path, body]) => {
@@ -200,7 +255,8 @@ def verify_driver_login_ui(page, driver_id: str, shots: list[str]) -> dict[str, 
         page.locator('[data-health-nav-open="drivers"]').first.click(force=True)
         page.wait_for_timeout(800)
     lifecycle.wait_authenticated(page)
-    wait_refresh(page)
+    wait_refresh(page, 5000 if is_remote_base(BASE) else 2500)
+    wait_for_driver_runtime_option(page, driver_id)
 
     page.select_option("#health-driver-runtime-id", driver_id)
     page.wait_for_timeout(800)
@@ -296,7 +352,8 @@ def refresh_driver_offers(page, driver_id: str) -> dict[str, Any]:
 
 def driver_accept_and_complete_ops(page, driver_id: str, ride_id: str) -> None:
     page.goto(f"{BASE}/#/health-isf/drivers", wait_until="domcontentloaded")
-    wait_refresh(page)
+    wait_refresh(page, 5000 if is_remote_base(BASE) else 2500)
+    wait_for_driver_runtime_option(page, driver_id)
     page.select_option("#health-driver-runtime-id", driver_id)
     page.wait_for_timeout(1200)
 
@@ -375,7 +432,7 @@ def run_verification() -> dict[str, Any]:
     server_proc = None
     try:
         server_proc = lifecycle.ensure_preview_server(BASE)
-        prep = reseed_backend()
+        prep = prep_remote_backend(BASE) if is_remote_base(BASE) else reseed_backend()
         report["prep"] = prep
         driver_id = prep["driver_id"]
         driver_name = prep["driver_name"]
