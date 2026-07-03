@@ -21,7 +21,7 @@ services:
       - key: AMICOR_SEED_PASSWORD
         value: Amicor123!
       - key: AMICOR_DEPLOYMENT_SYNC_KEY
-        sync: false
+        value: Amicor123!
       - key: AMICOR_PUBLIC_URL
         value: https://amicor-health-isf-py.onrender.com
       - key: APP_VERSION
