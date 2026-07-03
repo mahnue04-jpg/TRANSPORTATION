@@ -17,19 +17,29 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://amicor-health-isf-py.onrender.com
       - key: AMICOR_SEED_PASSWORD
-        sync: false
+        value: Amicor123!
       - key: AMICOR_PUBLIC_URL
         value: https://amicor-health-isf-py.onrender.com
       - key: APP_VERSION
         value: 2026.06.29-production.1
       - key: AMICOR_ENVIRONMENT
         value: production
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
       - key: DB_POOL_SIZE
         value: "10"
       - key: DB_MAX_OVERFLOW
         value: "20"
+      - key: HEALTH_ISF_WS_MAX_ORG_CONNECTIONS
+        value: "500"
+      - key: HEALTH_ISF_WS_MAX_USER_CONNECTIONS
+        value: "5"
+      - key: SUPERVISION_LOG_RETENTION_DAYS
+        value: "5"
       - key: HEALTH_ISF_STRIPE_ENABLED
         sync: false
       - key: STRIPE_SECRET_KEY

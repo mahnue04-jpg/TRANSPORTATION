@@ -30,7 +30,7 @@ from app.auth import (
     decode_access_token,
     UserContext,
 )
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.helpers import now, uuid4
 from app.modules.health_isf import service
 from app.modules.health_isf.intake import (
@@ -2643,9 +2643,9 @@ async def websocket_live_updates(
     restore_subscriptions: str | None = Query(None),
     restore_ride_ids: str | None = Query(None),
     client_session_id: str | None = Query(None),
-    db: Session = Depends(get_db),
 ):
     """WebSocket endpoint for live dispatch updates."""
+    db = SessionLocal()
     token_payload: dict = {}
     token_user_id: str | None = None
     token_role: str | None = None
@@ -2731,11 +2731,18 @@ async def websocket_live_updates(
             role=str(connection.role or role or ROLE_DISPATCHER),
         )
         metrics.record_event_ts("websocket.connects")
-        cognitive_snapshot = OperationalCognitionEngine.build_snapshot(
-            db,
-            organization_id=organization_id,
-            role=str(connection.role or role or ROLE_DISPATCHER),
-        )
+        try:
+            cognitive_snapshot = OperationalCognitionEngine.build_snapshot(
+                db,
+                organization_id=organization_id,
+                role=str(connection.role or role or ROLE_DISPATCHER),
+            )
+        except Exception as cognitive_exc:
+            logger.warning(
+                "WebSocket cognitive snapshot degraded",
+                extra={"organization_id": organization_id, "error": str(cognitive_exc)},
+            )
+            cognitive_snapshot = {"cognitive_diagnostics": {}}
         log_operational_event(
             "websocket.connected",
             connection_id=connection_id,
@@ -3318,6 +3325,10 @@ async def websocket_live_updates(
             details={"error": str(e)},
         )
         logger.error(f"WebSocket error during setup: {e}")
+        try:
+            await websocket.close(code=1011, reason="WebSocket setup failed")
+        except Exception:
+            pass
     finally:
         try:
             await broadcaster.unregister_connection(connection_id)
@@ -3327,6 +3338,7 @@ async def websocket_live_updates(
             )
         except Exception:
             logger.exception("Failed to unregister websocket connection", extra={"connection_id": connection_id})
+        db.close()
 
 
 # ── Activity Feed Endpoint ────────────────────────────────────────────────────
@@ -9895,9 +9907,34 @@ def get_dispatcher_audit_log(
         skip=skip,
         ride_id=ride_id,
     )
-    
+
+    serialized: list[DispatcherActivityResponse] = []
+    for activity in activities:
+        raw_details = getattr(activity, "details", None)
+        details = raw_details
+        if isinstance(raw_details, str):
+            try:
+                details = json.loads(raw_details)
+            except json.JSONDecodeError:
+                details = {"raw": raw_details}
+        serialized.append(
+            DispatcherActivityResponse.model_validate(
+                {
+                    "id": str(activity.id),
+                    "organization_id": str(activity.organization_id),
+                    "action": str(activity.action),
+                    "ride_id": activity.ride_id,
+                    "driver_id": activity.driver_id,
+                    "description": str(activity.description or ""),
+                    "details": details,
+                    "actor_user_id": activity.actor_user_id,
+                    "created_at": activity.created_at,
+                }
+            )
+        )
+
     return ActivityFeedResponse(
-        activities=[DispatcherActivityResponse.model_validate(a) for a in activities],
+        activities=serialized,
         total=total,
         skip=skip,
         limit=limit,
