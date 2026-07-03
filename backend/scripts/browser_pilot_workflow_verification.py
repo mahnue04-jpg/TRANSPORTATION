@@ -54,7 +54,6 @@ def preflight_target(base: str, proof: dict) -> None:
         proof["seed_warning"] = "Fewer than 5 seed accounts present before login"
 
     login = client.post("/api/auth/login", json={"email": "admin@amicor.local", "password": PASSWORD})
-    proof["preflight_login"] = {"status": login.status_code, "ok": login.status_code == 200}
     if login.status_code != 200:
         sync_key = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", PASSWORD).strip()
         if sync_key:
@@ -65,7 +64,12 @@ def preflight_target(base: str, proof: dict) -> None:
             proof["deployment_sync"] = {"status": sync.status_code, "ok": sync.status_code == 200}
             if sync.status_code == 200:
                 login = client.post("/api/auth/login", json={"email": "admin@amicor.local", "password": PASSWORD})
-                proof["preflight_login"] = {"status": login.status_code, "ok": login.status_code == 200}
+    for attempt in range(6):
+        if login.status_code == 200:
+            break
+        time.sleep(10)
+        login = client.post("/api/auth/login", json={"email": "admin@amicor.local", "password": PASSWORD})
+    proof["preflight_login"] = {"status": login.status_code, "ok": login.status_code == 200}
     if login.status_code != 200:
         raise RuntimeError(
             "Production authentication failed for admin@amicor.local — "
