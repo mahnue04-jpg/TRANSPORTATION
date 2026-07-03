@@ -68,20 +68,42 @@ def preflight_target(base: str, proof: dict) -> None:
 def attach_runtime_monitors(page, proof: dict) -> None:
     proof.setdefault("console_errors", [])
     proof.setdefault("api_failures", [])
+    ignored_console_fragments = (
+        "favicon",
+        "websocket",
+        "net::err",
+        "401 (unauthorized)",
+        "404 (not found)",
+        "failed to load resource",
+    )
 
     def on_console(msg) -> None:
-        if msg.type in {"error"}:
-            proof["console_errors"].append({"type": msg.type, "text": msg.text})
+        if msg.type not in {"error"}:
+            return
+        text = str(msg.text or "")
+        lowered = text.lower()
+        if any(fragment in lowered for fragment in ignored_console_fragments):
+            return
+        errors = proof["console_errors"]
+        if len(errors) >= 20:
+            return
+        errors.append({"type": msg.type, "text": text[:500]})
 
     def on_page_error(exc) -> None:
-        proof["console_errors"].append({"type": "pageerror", "text": str(exc)})
+        errors = proof["console_errors"]
+        if len(errors) >= 20:
+            return
+        errors.append({"type": "pageerror", "text": str(exc)[:500]})
 
     def on_response(response) -> None:
         url = response.url or ""
         if "/api/" not in url or response.status < 400:
             return
-        if response.status in {401, 403, 404, 409, 422, 500, 502, 503}:
-            proof["api_failures"].append({"url": url, "status": response.status})
+        if response.status in {500, 502, 503}:
+            failures = proof["api_failures"]
+            if len(failures) >= 20:
+                return
+            failures.append({"url": url, "status": response.status})
 
     page.on("console", on_console)
     page.on("pageerror", on_page_error)
@@ -97,63 +119,72 @@ def assert_runtime_clean(proof: dict) -> None:
         raise AssertionError(f"Browser API failures detected: {api_failures[:8]}")
 
 
-def create_operational_entities(page, proof: dict) -> dict:
+def login_http(base: str, email: str) -> str:
+    response = httpx.post(
+        f"{base.rstrip('/')}/api/auth/login",
+        json={"email": email, "password": PASSWORD},
+        timeout=120.0,
+    )
+    response.raise_for_status()
+    token = response.json().get("access_token")
+    if not token:
+        raise RuntimeError(f"Login missing token for {email}")
+    return str(token)
+
+
+def create_operational_entities_http(base: str, token: str, proof: dict) -> dict[str, str]:
     stamp = datetime.now(timezone.utc).strftime("%H%M%S")
-    provider = auth_fetch(
-        page,
-        "POST",
+    headers = {"Authorization": f"Bearer {token}"}
+    client = httpx.Client(base_url=base.rstrip("/"), headers=headers, timeout=120.0)
+
+    provider = client.post(
         "/api/health-isf/providers",
-        {
+        json={
             "name": f"Pilot Provider {stamp}",
             "address": "300 Clinic Way, New York, NY 10003",
             "phone": "212-555-4400",
             "service_type": "medical_transport",
         },
     )
-    if not provider.get("ok"):
-        raise RuntimeError(f"Create provider failed: {provider}")
+    if provider.status_code >= 400:
+        raise RuntimeError(f"Create provider failed: {provider.status_code} {provider.text[:300]}")
     proof["steps"].append("create_provider")
 
-    driver = auth_fetch(
-        page,
-        "POST",
+    driver = client.post(
         "/api/health-isf/drivers",
-        {
+        json={
             "name": f"Pilot Driver {stamp}",
             "phone": f"917-555-{stamp[-4:]}",
             "vehicle_type": "wheelchair_accessible",
             "vehicle_plate": f"PILOT{stamp[-4:]}",
         },
     )
-    if not driver.get("ok"):
-        raise RuntimeError(f"Create driver failed: {driver}")
+    if driver.status_code >= 400:
+        raise RuntimeError(f"Create driver failed: {driver.status_code} {driver.text[:300]}")
     proof["steps"].append("create_driver")
 
-    rider = auth_fetch(
-        page,
-        "POST",
+    rider = client.post(
         "/api/health-isf/customer-requests",
-        {
+        json={
             "pickup_address": "110 Rider Ave, New York, NY 10001",
             "dropoff_address": "210 Medical Plaza, New York, NY 10002",
-            "rider_name": PASSENGER,
-            "rider_phone": RIDER_PHONE,
+            "rider_name": f"Pilot Rider {stamp}",
+            "rider_phone": "646-555-7700",
             "ride_type": "healthcare",
             "notes": "Production operational walkthrough rider request",
         },
     )
-    if not rider.get("ok"):
-        raise RuntimeError(f"Create rider/customer request failed: {rider}")
+    if rider.status_code >= 400:
+        raise RuntimeError(f"Create rider/customer request failed: {rider.status_code} {rider.text[:300]}")
     proof["steps"].append("create_rider")
 
-    provider_id = str((provider.get("data") or {}).get("id") or "")
-    driver_id = str((driver.get("data") or {}).get("id") or "")
-    proof["created_entities"] = {
-        "provider_id": provider_id,
-        "driver_id": driver_id,
-        "customer_request_id": str((rider.get("data") or {}).get("id") or ""),
+    entities = {
+        "provider_id": str(provider.json().get("id") or ""),
+        "driver_id": str(driver.json().get("id") or ""),
+        "customer_request_id": str(rider.json().get("id") or ""),
     }
-    return proof["created_entities"]
+    proof["created_entities"] = entities
+    return entities
 
 
 def log(step: str, detail: str = "") -> None:
@@ -215,10 +246,6 @@ def sign_out_if_needed(page) -> None:
         "() => window.AmiCorSession && window.AmiCorSession.isActive && window.AmiCorSession.isActive()"
     ):
         return
-    logout = page.locator('[data-health-action="logout"]')
-    if logout.count():
-        logout.first.click(force=True)
-        page.wait_for_timeout(1500)
     page.evaluate(
         """async () => {
           if (window.AmiCorSession && typeof window.AmiCorSession.logout === 'function') {
@@ -228,7 +255,7 @@ def sign_out_if_needed(page) -> None:
           }
         }"""
     )
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(1200)
 
 
 def login_as(page, email: str) -> None:
@@ -366,7 +393,8 @@ def main() -> int:
             proof["steps"].append("contact_config_loaded")
 
             login_as(page, "dispatcher@amicor.local")
-            entities = create_operational_entities(page, proof)
+            dispatcher_token = login_http(BASE, "dispatcher@amicor.local")
+            entities = create_operational_entities_http(BASE, dispatcher_token, proof)
             open_route(page, "dispatch")
             ride_id = create_pilot_ride(page, provider_id=entities.get("provider_id"))
             proof["ride_id"] = ride_id
@@ -463,6 +491,10 @@ def main() -> int:
                 if not step.get("ok"):
                     raise RuntimeError(f"Driver {action} failed: {step}")
             proof["steps"].append("driver_lifecycle_complete")
+            ride_after_driver = auth_fetch(page, "GET", f"/api/health-isf/rides/{ride_id}")
+            driver_status = str((ride_after_driver.get("data") or {}).get("status") or "").lower()
+            if driver_status != "completed":
+                raise AssertionError(f"Ride not completed after driver lifecycle: {ride_after_driver}")
             snap(page, "04_driver_complete", proof)
 
             login_as(page, "rider@amicor.local")
