@@ -577,7 +577,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/deployment/sync-seed-users")
 def deployment_sync_seed_users(request: Request):
     """Re-sync pilot seed accounts after deploy. Requires X-Amicor-Deployment-Key header."""
-    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()
+    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
     if not expected:
         raise HTTPException(status_code=503, detail="Deployment sync not configured")
     provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
@@ -604,7 +604,9 @@ def deployment_seed_status(db: Session = Depends(get_db)):
         "expected_accounts": len(emails),
         "present_accounts": len(present),
         "missing_accounts": [email for email in emails if email not in present],
-        "deployment_sync_configured": bool(os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()),
+        "deployment_sync_configured": bool(
+            os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
+        ),
     }
 
 
