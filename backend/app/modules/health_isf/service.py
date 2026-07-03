@@ -4391,6 +4391,15 @@ def init_sample_data(db: Session) -> dict:
         summary["drivers"] += 1
 
     providers = list(providers_map.values())
+    seed_demo_rides = os.environ.get("AMICOR_SEED_SAMPLE_RIDES", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not seed_demo_rides:
+        db.commit()
+        return summary
+
     for idx, ride_item in enumerate(SAMPLE_RIDES):
         assigned_driver = drivers[idx % len(drivers)] if ride_item["status"] != RideStatus.PENDING else None
         ride = HealthISFRide(
@@ -4463,6 +4472,123 @@ def init_sample_data(db: Session) -> dict:
     db.commit()
     logger.info("Health ISF seed complete: %s", summary)
     return summary
+
+
+PILOT_RESET_PASSENGER_MARKERS = (
+    "cert audit",
+    "prod verify",
+    "patricia johnson",
+    "robert williams",
+    "jennifer brown",
+    "audit patient",
+    "audit rider",
+    "browser e2e",
+    "pilot e2e",
+)
+
+DEMO_SEED_PASSENGER_NAMES = {
+    str(item["passenger_name"]).strip().lower()
+    for item in SAMPLE_RIDES
+}
+
+
+def reset_pilot_environment(db: Session, organization_id: str) -> dict[str, Any]:
+    """Cancel all ride records for the org and restore canonical drivers for pilot operations."""
+    org = _get_organization_by_id(db, organization_id) or _get_or_create_default_org(db)
+    if str(org.id) != str(organization_id):
+        raise ValueError("Organization scope mismatch")
+
+    now_ts = now()
+    active_ride_rows = (
+        db.query(HealthISFRide.id, HealthISFRide.passenger_name)
+        .filter(
+            HealthISFRide.organization_id == org.id,
+            HealthISFRide.status != RideStatus.CANCELLED.value,
+        )
+        .all()
+    )
+    cleared_rides = len(active_ride_rows)
+    archived_demo_rides = 0
+    for _, passenger_name in active_ride_rows:
+        passenger = str(passenger_name or "").strip().lower()
+        if passenger in DEMO_SEED_PASSENGER_NAMES or any(
+            marker in passenger for marker in PILOT_RESET_PASSENGER_MARKERS
+        ):
+            archived_demo_rides += 1
+
+    if cleared_rides:
+        db.query(HealthISFRide).filter(
+            HealthISFRide.organization_id == org.id,
+            HealthISFRide.status != RideStatus.CANCELLED.value,
+        ).update(
+            {
+                "status": RideStatus.CANCELLED.value,
+                "lifecycle_state": RideStatus.CANCELLED.value,
+                "driver_id": None,
+                "updated_at": now_ts,
+            },
+            synchronize_session=False,
+        )
+
+    open_assignments = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.organization_id == org.id,
+            HealthISFDispatchAssignment.assignment_state.in_(list(ACTIVE_DISPATCH_ASSIGNMENT_STATES)),
+        )
+        .all()
+    )
+    for assignment in open_assignments:
+        assignment.assignment_state = DispatchAssignmentState.REASSIGNMENT_PENDING.value
+        assignment.closed_reason = "pilot_reset"
+        assignment.updated_at = now_ts
+
+    canonical_names = [str(item["name"]).strip().lower() for item in SAMPLE_DRIVERS]
+    drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).all()
+    reset_drivers = 0
+    for driver in drivers:
+        name = str(driver.name or "").strip().lower()
+        if name == canonical_names[0]:
+            driver.status = DriverStatus.AVAILABLE
+            driver.availability_state = "available"
+            driver.is_active = True
+            driver.is_online = False
+            driver.auth_state = "inactive"
+            driver.last_seen_at = None
+            reset_drivers += 1
+        elif name in canonical_names[1:]:
+            driver.status = DriverStatus.OFFLINE
+            driver.availability_state = "offline"
+            driver.is_online = False
+        else:
+            driver.status = DriverStatus.OFFLINE
+            driver.availability_state = "offline"
+            driver.is_online = False
+        driver.updated_at = now_ts
+
+    db.commit()
+    terminal_values = {
+        RideStatus.COMPLETED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    }
+    remaining_open = (
+        db.query(HealthISFRide)
+        .filter(
+            HealthISFRide.organization_id == org.id,
+            HealthISFRide.status.notin_(list(terminal_values)),
+        )
+        .count()
+    )
+    return {
+        "organization_id": str(org.id),
+        "cleared_rides": cleared_rides,
+        "cancelled_open_rides": cleared_rides,
+        "archived_demo_rides": archived_demo_rides,
+        "closed_assignments": len(open_assignments),
+        "drivers_reset": reset_drivers,
+        "remaining_open_rides": remaining_open,
+    }
 
 
 def get_all_providers(db: Session, skip: int = 0, limit: int = 100) -> list[HealthISFProvider]:
@@ -5029,6 +5155,9 @@ def driver_contact_rider(
 
     if not rider_phone:
         raise ValueError("Rider phone number is unavailable for this ride")
+
+    if not notify.sms_provider_configured():
+        raise ValueError("SMS/contact provider not configured yet")
 
     default_message = (
         f"Amicor driver {driver.name} is en route for your transport to "

@@ -8,14 +8,17 @@
   const SEED_RIDER_PHONE_BY_EMAIL = {
     "rider@amicor.local": "646-555-8800",
   };
+  const SEED_DRIVER_PHONE_BY_EMAIL = {
+    "driver@amicor.local": "917-555-1001",
+  };
   const API_REQUEST_TIMEOUT_MS = 45000;
   const REALTIME_RECONNECT_COOLDOWN_MS = 12000;
   const REALTIME_STALE_THRESHOLD_MS = 45000;
   const NAVIGATION_COOLDOWN_MS = 650;
   const REFRESH_TRIGGER_COOLDOWN_MS = 1800;
-  const REALTIME_EVENT_REFRESH_COOLDOWN_MS = 12000;
+  const REALTIME_EVENT_REFRESH_COOLDOWN_MS = 1500;
   const AUTO_REFRESH_INTERVAL_MS = 60000;
-  const REALTIME_SCHEDULE_DEBOUNCE_MS = 5000;
+  const REALTIME_SCHEDULE_DEBOUNCE_MS = 400;
   const HYDRATION_EVENT_COOLDOWN_MS = 5000;
   const PATH_ROUTE_ALIASES = {
     dispatcher: "dispatch",
@@ -403,6 +406,102 @@
       },
       fallback: true,
     };
+  }
+
+  function resolveSessionProviderId() {
+    const providers = Array.isArray(state.providers) ? state.providers : [];
+    if (!providers.length) return null;
+    const profile = getSessionProfile();
+    const email = String(profile.email || "").toLowerCase();
+    if (email === "provider@amicor.local") {
+      const lincoln = providers.find(function (provider) {
+        return String(provider.name || "").toLowerCase().indexOf("lincoln") >= 0;
+      });
+      if (lincoln && lincoln.id) return lincoln.id;
+    }
+    const display = String(profile.displayName || profile.display_name || "").toLowerCase();
+    if (display) {
+      const matched = providers.find(function (provider) {
+        const name = String(provider.name || "").toLowerCase();
+        return name && display.indexOf(name.split(" ")[0]) >= 0;
+      });
+      if (matched && matched.id) return matched.id;
+    }
+    return providers[0] && providers[0].id ? providers[0].id : null;
+  }
+
+  function ensureDriverWorkspaceSelection() {
+    const role = getEffectiveShellRole(getSessionProfile().role);
+    if (role !== "driver") return;
+    const drivers = Array.isArray(state.drivers) ? state.drivers : [];
+    if (!drivers.length) return;
+    const profile = getSessionProfile();
+    const email = String(profile.email || "").toLowerCase();
+    const targetPhone = SEED_DRIVER_PHONE_BY_EMAIL[email] || "";
+    let match = null;
+    if (targetPhone) {
+      const targetDigits = targetPhone.replace(/\D/g, "");
+      match = drivers.find(function (driver) {
+        return String(driver.phone || "").replace(/\D/g, "") === targetDigits;
+      }) || null;
+    }
+    if (!match) {
+      match = drivers.find(function (driver) {
+        return String(driver.status || driver.availability_state || "").toLowerCase() === "available";
+      }) || drivers[0];
+    }
+    if (!match || !match.id) return;
+    state.selectedDriverId = String(match.id);
+    const els = getEls();
+    if (els.driverRuntimeId) {
+      els.driverRuntimeId.value = String(match.id);
+    }
+    hydrateDriverRuntimePhone(match.id);
+  }
+
+  function renderRouteMapPanel(pickup, dropoff) {
+    const pickupText = String(pickup || "-");
+    const dropoffText = String(dropoff || "-");
+    return '<div class="enterprise-map-panel">'
+      + '<div class="health-summary"><strong>Map provider not configured yet</strong><p>Interactive maps require a map provider API key. Live pickup, destination, and route details are shown below.</p></div>'
+      + '<div class="enterprise-inline-grid">'
+      + MetricCard("Pickup", escapeHtml(pickupText), "Trip pickup location", "ok")
+      + MetricCard("Destination", escapeHtml(dropoffText), "Trip dropoff location", "ok")
+      + "</div>"
+      + '<div class="health-summary"><strong>Route</strong><br>' + escapeHtml(pickupText) + " → " + escapeHtml(dropoffText) + "</div>"
+      + "</div>";
+  }
+
+  function smsContactConfigured() {
+    const preview = state.previewRuntimeStatus && typeof state.previewRuntimeStatus === "object" ? state.previewRuntimeStatus : null;
+    const contact = preview && preview.contact && typeof preview.contact === "object" ? preview.contact : null;
+    if (contact && typeof contact.sms_configured === "boolean") {
+      return contact.sms_configured;
+    }
+    return false;
+  }
+
+  function renderContactConfigNotice() {
+    if (smsContactConfigured()) {
+      return "";
+    }
+    return '<p class="health-summary"><span class="health-pill warn">SMS/contact provider not configured yet</span> Contact buttons stay disabled until Twilio credentials are configured.</p>';
+  }
+
+  async function submitGovernanceApproval(approvalId, approvalToken, approved) {
+    const organizationId = getOrganizationId() || null;
+    await fetchJson("/api/ai/governance/approvals", {
+      method: "POST",
+      actionName: approved ? "governance_approve" : "governance_reject",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        approval_id: approvalId,
+        approval_token: approvalToken,
+        approved: !!approved,
+      }),
+    });
+    await refreshData();
   }
 
   function buildCustomerHistoryFallback(riderPhone) {
@@ -1242,6 +1341,15 @@
       const tone = approval.approved_by ? 'live' : 'warn';
       const payload = approval.action_payload && typeof approval.action_payload === "object" ? approval.action_payload : {};
       const payloadSummary = firstDefined(payload.summary, payload.reasoning, payload.message, approval.tenant_scope, 'Governance approval review');
+      const approvalId = String(firstDefined(approval.id, approval.approval_id, "") || "");
+      const approvalToken = String(approval.approval_token || "");
+      const isPending = !approval.approved_by && String(approval.status || "").toLowerCase() !== "approved";
+      const actionButtons = isPending && approvalId && approvalToken
+        ? '<div class="health-row-actions">'
+          + '<button type="button" class="health-row-btn ok" data-governance-approval="approve" data-governance-id="' + escapeHtml(approvalId) + '" data-governance-token="' + escapeHtml(approvalToken) + '">Approve</button>'
+          + '<button type="button" class="health-row-btn warn" data-governance-approval="reject" data-governance-id="' + escapeHtml(approvalId) + '" data-governance-token="' + escapeHtml(approvalToken) + '">Reject</button>'
+          + '</div>'
+        : '';
       return [
         '<article class="health-stack-item">',
         '<div class="health-stack-title-row"><strong>' + escapeHtml(approval.action_type || 'Approval') + '</strong><span class="health-op-badge ' + tone + '">' + escapeHtml(approval.status || (approval.approved_by ? 'approved' : 'pending')) + '</span></div>',
@@ -1251,6 +1359,7 @@
         '<span class="health-op-badge live">' + escapeHtml(approval.tenant_scope || 'tenant-scoped') + '</span>',
         '<span class="health-op-badge live">' + escapeHtml(Number(approval.confidence_score || 0).toFixed(2)) + '</span>',
         '</div>',
+        actionButtons,
         '<small>' + escapeHtml(formatDateShort(approval.created_at || approval.updated_at || approval.approval_timestamp)) + '</small>',
         '</article>',
       ].join('');
@@ -2168,6 +2277,9 @@
       return {
         id: ride.id,
         passenger: ride.passenger_name || "Passenger",
+        passengerName: ride.passenger_name || "Passenger",
+        pickup: ride.pickup_address || "-",
+        dropoff: ride.dropoff_address || "-",
         provider: lookupProviderName(ride.provider_id),
         driver: lookupDriverName(ride.driver_id),
         status: String(ride.status || "unknown"),
@@ -2179,6 +2291,7 @@
         queueName: queueName,
         recommendation: recommendation ? String(recommendation.summary || recommendation.explanation_summary || recommendation.action_type || "AI recommendation ready") : "Monitoring live dispatch signals",
         updatedAt: ride.accepted_at || ride.requested_at,
+        raw: ride,
       };
     });
   }
@@ -2441,11 +2554,14 @@
   }
 
   function scheduleRealtimeRefresh() {
-    if (state.realtimeRefreshTimer) return;
-    state.realtimeRefreshTimer = setTimeout(() => {
+    if (state.realtimeRefreshTimer) {
+      clearTimeout(state.realtimeRefreshTimer);
+      state.realtimeRefreshTimer = null;
+    }
+    state.realtimeRefreshTimer = setTimeout(function () {
       state.realtimeRefreshTimer = null;
       if (document.hidden) return;
-      triggerRefresh("realtime-event");
+      triggerRefresh("realtime-event", { bypassCooldown: true });
     }, REALTIME_SCHEDULE_DEBOUNCE_MS);
   }
 
@@ -4089,10 +4205,20 @@
       + '</div>';
   }
 
+  function pilotOperationalRides(rides) {
+    const rows = Array.isArray(rides) ? rides : [];
+    return rows.filter(function (ride) {
+      return String(ride && ride.status || "").toLowerCase() !== "cancelled";
+    });
+  }
+
   function filteredRides() {
     const q = String(state.filters.query || "").toLowerCase();
     return state.rides.filter((ride) => {
       const rideStatus = String(ride.status || "").toLowerCase();
+      if (rideStatus === "cancelled" && state.filters.status === "all") {
+        return false;
+      }
       const priority = getPriorityTag(ride);
       const providerMatch = state.filters.provider === "all" || String(ride.provider_id || "") === state.filters.provider;
       const driverMatch = state.filters.driver === "all" || String(ride.driver_id || "") === state.filters.driver;
@@ -4609,18 +4735,30 @@
     const targetDriverId = String(driverId || "");
     const excludedId = String(excludedRideId || "");
     if (!targetDriverId) return 0;
-    return (Array.isArray(state.rides) ? state.rides : []).filter(function (ride) {
+    const activeStatuses = [
+      "pending", "accepted", "in_transit", "assigned", "offered", "queued",
+      "driver_en_route", "arrived", "in_progress", "rider_onboard", "awaiting_approval",
+      "searching", "dispatchable", "broadcasted",
+    ];
+    const rideCount = (Array.isArray(state.rides) ? state.rides : []).filter(function (ride) {
       if (String(ride && ride.id || "") === excludedId) return false;
       if (String(ride && ride.driver_id || "") !== targetDriverId) return false;
-      return ['pending', 'accepted', 'in_transit', 'assigned'].indexOf(String(ride && ride.status || '').toLowerCase()) !== -1;
+      return activeStatuses.indexOf(String(ride && ride.status || "").toLowerCase()) !== -1;
     }).length;
+    const assignmentCount = (Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : []).filter(function (item) {
+      if (String(item && item.ride_id || "") === excludedId) return false;
+      if (String(item && item.driver_id || "") !== targetDriverId) return false;
+      const stateName = String(item && item.assignment_state || "").toLowerCase();
+      return ["offered", "assigned", "accepted", "en_route_pickup", "pickup_complete"].indexOf(stateName) !== -1;
+    }).length;
+    return Math.max(rideCount, assignmentCount);
   }
 
   function isDriverAssignableForRide(driver, rideId) {
     if (!driver || !driver.id || driver.is_active === false) return false;
-    const availability = String(driver.availability_state || '').toLowerCase();
-    const status = String(driver.status || '').toLowerCase();
-    const dispatchReady = availability === 'available' || status === 'available';
+    const availability = String(driver.availability_state || "").toLowerCase();
+    const status = String(driver.status || "").toLowerCase();
+    const dispatchReady = availability === "available" || status === "available" || status === "unavailable";
     if (!dispatchReady) return false;
     return getDriverActiveAssignmentCount(driver.id, rideId) === 0;
   }
@@ -4889,7 +5027,12 @@
       dashboardEls.dashboardMemory.innerHTML = recurringTransportPanel();
     }
     if (dashboardEls.dashboardGovernance) {
-      dashboardEls.dashboardGovernance.innerHTML = renderNotificationList(openAlerts.slice(0, 8), 'No urgent service alerts.');
+      dashboardEls.dashboardGovernance.innerHTML = operational_approval_queue(
+        (state.governanceApprovals || []).filter(function (item) {
+          return !item.approved_by && String(item.status || "").toLowerCase() !== "approved";
+        }).slice(0, 8),
+        'No supervisor approvals waiting. AI recommendations will appear here when approval is required.'
+      );
     }
     if (dashboardEls.dashboardWebsocket) {
       dashboardEls.dashboardWebsocket.innerHTML = '<div class="enterprise-inline-grid">'
@@ -4937,11 +5080,21 @@
     }
     return '<div class="health-stack-list">' + items.map((item) => {
       const message = item.summary || item.explanation_summary || item.message || item.action_type || 'Recommendation available';
+      const rideId = item.ride_id || (item.action_payload && item.action_payload.ride_id) || "";
+      const needsApproval = item.approval_required !== false && String(item.execution_mode || "").toLowerCase() !== "recommendation_only";
+      const actionButtons = rideId && canMutateRides()
+        ? '<div class="health-row-actions">'
+          + (needsApproval
+            ? '<button type="button" class="health-row-btn ok" data-dispatch-select-ride="' + escapeHtml(String(rideId)) + '">Review ride</button>'
+            : '<button type="button" class="health-row-btn" data-dispatch-select-ride="' + escapeHtml(String(rideId)) + '">Open in dispatch</button>')
+          + '</div>'
+        : '';
       return [
         '<article class="health-stack-item accent">',
         '<div class="health-stack-title-row"><strong>' + escapeHtml(item.action_type || item.entity_type || 'AI recommendation') + '</strong><span class="health-op-badge live">AI</span></div>',
         '<p>' + escapeHtml(message) + '</p>',
-        (item.ride_id ? '<small>Ride ' + escapeHtml(String(item.ride_id).slice(0, 8)) + '</small>' : '<small>Generated from live operations</small>'),
+        (rideId ? '<small>Ride ' + escapeHtml(String(rideId).slice(0, 8)) + (needsApproval ? ' · approval may be required' : '') + '</small>' : '<small>Generated from live operations</small>'),
+        actionButtons,
         '</article>',
       ].join('');
     }).join('') + '</div>';
@@ -4988,6 +5141,13 @@
             + MetricCard('Completed rides', formatNumber(rides.filter(function (ride) { return String(ride.status || '').toLowerCase() === 'completed'; }).length), 'Trips closed in current window', 'ok')
           + '</div>',
           '<p class="health-summary">Live dispatch metrics are rendered from operational APIs while AI snapshot enrichment is unavailable.</p>',
+          renderContactConfigNotice(),
+          operational_approval_queue(
+            (state.governanceApprovals || []).filter(function (item) {
+              return !item.approved_by && String(item.status || "").toLowerCase() !== "approved";
+            }).slice(0, 6),
+            'No pending AI or supervisor approvals.'
+          ),
           '</section>',
           '<section class="enterprise-panel-block">',
           '<h4>Active dispatch queue</h4>',
@@ -5022,6 +5182,16 @@
           + MetricCard('Urgent alerts', formatNumber(alerts.filter(function (a) { return String(a.severity || '').toLowerCase() === 'high' || String(a.severity || '').toLowerCase() === 'critical'; }).length), 'Immediate intervention signals', alerts.length ? 'warn' : 'ok')
         + '</div>',
         '<p class="health-summary">' + escapeHtml(summary.summary || assistant.operational_status || 'Monitoring live transportation operations and preparing interventions.') + '</p>',
+        renderContactConfigNotice(),
+        '</section>',
+        '<section class="enterprise-panel-block">',
+        '<h4>Supervisor approvals</h4>',
+        operational_approval_queue(
+          (state.governanceApprovals || []).filter(function (item) {
+            return !item.approved_by && String(item.status || "").toLowerCase() !== "approved";
+          }).slice(0, 8),
+          'No pending approvals. AI may queue approval requests when dispatch actions require supervisor sign-off.'
+        ),
         '</section>',
         '<section class="enterprise-panel-block">',
         '<h4>Active dispatch queue</h4>',
@@ -5259,7 +5429,10 @@
       }
       rides.push({
         id: rideId,
+        passenger: item.passenger_name || 'Passenger',
         passengerName: item.passenger_name || 'Passenger',
+        pickup: item.pickup_address || item.pickup || '-',
+        dropoff: item.dropoff_address || item.dropoff || '-',
         status: item.assignment_state || 'queued',
         raw: item,
       });
@@ -5267,14 +5440,17 @@
     const drivers = getDriverRows();
 
     const worklistHtml = rides.length
-      ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Status</th><th>Priority</th><th>Driver assignment</th><th>Actions</th></tr></thead><tbody>'
+      ? '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Ride</th><th>Passenger</th><th>Pickup</th><th>Destination</th><th>Provider</th><th>Status</th><th>Driver assignment</th><th>Actions</th></tr></thead><tbody>'
         + rides.slice(0, 30).map(function (ride) {
+          const raw = ride.raw || ride;
           return '<tr>'
             + '<td><strong>' + escapeHtml(String(ride.id || '').slice(0, 10)) + '</strong></td>'
-            + '<td>' + escapeHtml(ride.passengerName || 'Passenger') + '</td>'
+            + '<td>' + escapeHtml(ride.passengerName || ride.passenger || 'Passenger') + '</td>'
+            + '<td><small>' + escapeHtml(ride.pickup || raw.pickup_address || '-') + '</small></td>'
+            + '<td><small>' + escapeHtml(ride.dropoff || raw.dropoff_address || '-') + '</small></td>'
+            + '<td><small>' + escapeHtml(lookupProviderName(raw.provider_id)) + '</small></td>'
             + '<td><span class="health-pill ' + pillClass(ride.status || 'pending') + '">' + escapeHtml(ride.status || 'pending') + '</span></td>'
-            + '<td>' + escapeHtml(getPriorityTag(ride.raw || {}) || 'normal') + '</td>'
-            + '<td><select data-dispatch-driver-select="' + escapeHtml(ride.id) + '">' + buildAssignableDriverOptions(ride.raw || ride) + '</select></td>'
+            + '<td><select data-dispatch-driver-select="' + escapeHtml(ride.id) + '">' + buildAssignableDriverOptions(raw) + '</select></td>'
             + '<td><div class="health-row-actions health-row-actions-inline">'
             + '<button class="health-row-btn" data-dispatch-assign="' + escapeHtml(ride.id) + '">Assign</button>'
             + '<button class="health-row-btn secondary" data-dispatch-select-ride="' + escapeHtml(ride.id) + '">Focus</button>'
@@ -5319,7 +5495,7 @@
     const els = getEls();
     if (!els.billingKpis || !els.billingClaims || !els.billingAging) return;
 
-    const rides = Array.isArray(state.rides) ? state.rides : [];
+    const rides = pilotOperationalRides(state.rides);
     const completed = rides.filter(function (ride) {
       return String(ride.status || '').toLowerCase() === 'completed';
     });
@@ -5360,7 +5536,9 @@
         + '</tbody></table></div>'
       : '<p class="health-summary">No completed rides available for claim generation yet.</p>';
 
-    const agingRows = rides.slice(0, 30).map(function (ride) {
+    const agingRows = rides.filter(function (ride) {
+      return String(ride.status || '').toLowerCase() !== 'cancelled';
+    }).slice(0, 30).map(function (ride) {
       const requestedAt = ride.requested_at || ride.created_at || null;
       const ageHours = requestedAt ? Math.max(0, (Date.now() - new Date(requestedAt).getTime()) / 3600000) : 0;
       const status = String(ride.status || '').toLowerCase();
@@ -5412,7 +5590,14 @@
     const selectedDriver = (Array.isArray(state.drivers) ? state.drivers : []).find(function (driver) {
       return String(driver && driver.id || '') === String(driverId || '');
     });
-    if (!isDriverAssignableForRide(selectedDriver, rideId)) {
+    if (!selectedDriver) {
+      throw new Error('Selected driver was not found. Refresh and choose an available driver.');
+    }
+    const availability = String(selectedDriver.availability_state || '').toLowerCase();
+    const status = String(selectedDriver.status || '').toLowerCase();
+    if (status === 'offline' || availability === 'offline') {
+      await setDriverStatus(driverId, 'available');
+    } else if (!isDriverAssignableForRide(selectedDriver, rideId)) {
       throw new Error('Selected driver is no longer assignable. Choose a currently available driver and try again.');
     }
     await fetchJson("/api/health-isf/rides/" + encodeURIComponent(rideId) + "/assign-driver", {
@@ -5422,6 +5607,15 @@
     });
     state.selectedRideId = rideId;
     await refreshData();
+  }
+
+  async function resetPilotEnvironment() {
+    const organizationId = getOrganizationId() || null;
+    const query = organizationId ? ("?organization_id=" + encodeURIComponent(organizationId)) : "";
+    return fetchJson("/api/health-isf/ops/reset-pilot-environment" + query, {
+      method: "POST",
+      actionName: "reset_pilot_environment",
+    });
   }
 
   async function fetchRideHistory(rideId) {
@@ -6376,13 +6570,14 @@
         + MetricCard('Assigned', formatNumber(pool.assigned || 0), 'Drivers currently assigned/on_trip', (pool.assigned || 0) ? 'warn' : 'ok')
         + MetricCard('Unavailable', formatNumber(pool.unavailable || 0), 'Temporarily not dispatchable', (pool.unavailable || 0) ? 'warn' : 'ok')
         + MetricCard('Offline', formatNumber(pool.offline || 0), 'Offline/inactive runtime state', (pool.offline || 0) ? 'danger' : 'ok')
-        + '</div>';
+        + '</div>'
+        + renderContactConfigNotice();
     }
 
     const runtime = state.driverRuntimeStatus;
     if (els.driverRuntimeStatus) {
       if (!runtime) {
-        els.driverRuntimeStatus.innerHTML = '<p class="health-summary">Driver status not loaded.</p>';
+        els.driverRuntimeStatus.innerHTML = '<p class="health-summary">Driver status not loaded.</p>' + renderContactConfigNotice();
       } else {
         els.driverRuntimeStatus.innerHTML = '<div class="enterprise-inline-grid">'
           + MetricCard('Auth State', escapeHtml(runtime.auth_state || 'inactive'), 'Driver auth session state', runtime.auth_state === 'active' ? 'ok' : 'warn')
@@ -6391,7 +6586,8 @@
           + MetricCard('Heartbeat', runtime.last_seen_at ? formatRelativeTime(runtime.last_seen_at) : 'never', 'Most recent driver heartbeat', runtime.last_seen_at ? 'ok' : 'warn')
           + MetricCard('Session Valid', runtime.active_session ? 'Yes' : 'No', 'Driver session validation status', runtime.active_session ? 'ok' : 'danger')
           + MetricCard('Active Ride', runtime.active_ride_id ? String(runtime.active_ride_id).slice(0, 8) : 'none', 'Current active assignment', runtime.active_ride_id ? 'warn' : 'ok')
-          + '</div>';
+          + '</div>'
+          + renderContactConfigNotice();
       }
     }
 
@@ -6717,10 +6913,14 @@
         ];
 
     if (!activeRide) {
+      const historyRide = customerRequestRow || null;
+      const mapPanel = historyRide
+        ? renderRouteMapPanel(historyRide.pickup_address, historyRide.dropoff_address)
+        : renderRouteMapPanel(null, null);
       els.customerActiveRide.innerHTML = '<div class="enterprise-inline-grid">'
         + MetricCard('Booking status', customerRequestRow ? escapeHtml(customerRequestRow.dispatch_status || 'pending') : 'idle', 'Latest request state for this rider', customerRequestRow ? statusTone(customerRequestRow.dispatch_status) : 'warn')
         + MetricCard('Next trip', customerRequestRow && customerRequestRow.scheduled_time ? formatDateShort(customerRequestRow.scheduled_time) : 'not scheduled', 'Upcoming scheduled transportation time', customerRequestRow && customerRequestRow.scheduled_time ? 'ok' : 'warn')
-      + '</div><p class="health-summary">No active ride yet. Submit a request or wait for dispatch assignment.</p>';
+      + '</div><p class="health-summary">No active ride yet. Submit a request or wait for dispatch assignment.</p>' + mapPanel;
       els.customerAssignment.innerHTML = '<p class="health-summary">Driver details, pickup countdown, and support controls will appear when dispatch confirms the trip.</p>';
     } else {
       const driverName = lookupDriverName(activeRide.driver_id);
@@ -6740,7 +6940,16 @@
         + '<button class="health-row-btn warn" data-phase52-customer-action="ride_cancelled" data-phase52-ride-id="' + escapeHtml(String(activeRide.id || '')) + '">Cancel Ride</button>'
         + '<button class="health-row-btn" data-phase52-customer-action="escalation_requested" data-phase52-ride-id="' + escapeHtml(String(activeRide.id || '')) + '">Request Help</button>'
         + '<button class="health-row-btn ok" data-phase52-customer-action="ride_completed" data-phase52-ride-id="' + escapeHtml(String(activeRide.id || '')) + '">Confirm Dropoff</button>'
-        + '</div>';
+        + '</div>'
+        + renderRouteMapPanel(activeRide.pickup_address, activeRide.dropoff_address);
+    }
+
+    const elsMap = document.getElementById("health-customer-map");
+    if (elsMap) {
+      const mapRide = activeRide || customerRequestRow || null;
+      elsMap.innerHTML = mapRide
+        ? renderRouteMapPanel(mapRide.pickup_address || mapRide.pickup, mapRide.dropoff_address || mapRide.dropoff)
+        : renderRouteMapPanel(null, null);
     }
 
     const bookingRows = bookingManagementItems.map(function (item) {
@@ -6876,6 +7085,9 @@
       + MetricCard('Audit sequence', formatNumber((runtimeState && runtimeState.sequence) || 0), 'Ordered event index for compliance review', 'ok')
       + MetricCard('Audit subscribers', formatNumber(runtimeState && Array.isArray(runtimeState.websocket_subscriber_registry) ? runtimeState.websocket_subscriber_registry.length : 0), 'Active audit and supervisor subscribers', 'ok')
       + MetricCard('Reconnect events', formatNumber((runtimeState && runtimeState.runtime_reconnect_count) || 0), 'Reconnect actions captured in audit queue', ((runtimeState && runtimeState.runtime_reconnect_count) || 0) > 0 ? 'warn' : 'ok')
+      + '</div>'
+      + '<div class="health-row-actions">'
+      + '<button type="button" class="health-row-btn warn" id="health-admin-reset-pilot">Reset pilot environment</button>'
       + '</div>'
       + (futureCategories.length ? '<div class="health-summary">Policy-held categories: ' + escapeHtml(futureCategories.map(function (item) { return item.label || item.key || 'future'; }).join(', ')) + '</div>' : '')
       + renderTimelineList((summary.recent_dispatch_actions || []).concat(alertsRows.map(function (item) {
@@ -7625,7 +7837,7 @@
       (wantsDashboardIntelligence || wantsAdmin) ? fetchJson("/api/health-isf/operations/runtime-state?include_timeline=true&limit=120", { actionName: "refresh_runtime_state" }).catch(() => null) : Promise.resolve(null),
       (wantsDashboardIntelligence || wantsAdmin) ? fetchJson("/api/health-isf/operations/runtime-replay?after_sequence=0&limit=120", { actionName: "refresh_runtime_replay" }).catch(() => null) : Promise.resolve(null),
       (wantsCustomer || wantsOperationalRefresh) ? fetchJson("/api/health-isf/operations/service-categories", { actionName: "refresh_service_categories" }).catch(() => null) : Promise.resolve(null),
-      wantsDashboardIntelligence ? fetchJson("/api/health-isf/operations/preview-runtime-status", { actionName: "refresh_preview_runtime_status" }).catch(() => null) : Promise.resolve(null),
+      (wantsDashboardIntelligence || wantsOperationalRefresh) ? fetchJson("/api/health-isf/operations/preview-runtime-status", { actionName: "refresh_preview_runtime_status" }).catch(() => null) : Promise.resolve(null),
     ]);
 
       let enterpriseDashboard = null;
@@ -7654,7 +7866,7 @@
       state.rides = Array.isArray(rides) ? rides : [];
       state.drivers = Array.isArray(drivers) ? drivers : [];
       const normalizedProviders = normalizeProvidersList(providers);
-      state.providers = normalizedProviders.length > 0 ? normalizedProviders : state.providers;
+      state.providers = normalizedProviders;
       state.customerRequests = Array.isArray(customerRequests) ? customerRequests : [];
       state.customerQueueMetrics = customerQueueMetrics && typeof customerQueueMetrics === "object" ? customerQueueMetrics : null;
       state.dispatchQueue = Array.isArray(dispatchQueue) ? dispatchQueue : [];
@@ -7697,10 +7909,10 @@
         ? state.adminSummary.websocket
         : null;
 
-      const firstProvider = state.providers.length ? state.providers[0] : null;
-      if (wantsProviderQueue && firstProvider && firstProvider.id) {
+      const providerId = resolveSessionProviderId();
+      if (wantsProviderQueue && providerId) {
         const providerQueue = await fetchJson(
-          "/api/health-isf/providers/" + encodeURIComponent(firstProvider.id) + "/transport-queue?include_completed=false&limit=120",
+          "/api/health-isf/providers/" + encodeURIComponent(providerId) + "/transport-queue?include_completed=false&limit=120",
           { actionName: "refresh_provider_transport_queue" }
         ).catch(function () { return null; });
         state.providerTransportQueue = providerQueue && Array.isArray(providerQueue.items) ? providerQueue.items : [];
@@ -7742,11 +7954,15 @@
         state.customerWorkspace.etaMinutes = null;
       }
 
+      ensureDriverWorkspaceSelection();
       if (state.selectedDriverId) {
         if (state.driverRuntimeToken) {
           await refreshDriverRuntimeStatus().catch(function () { return null; });
         }
-        await refreshDriverLiveWorkspace().catch(function () { return null; });
+        await Promise.all([
+          fetchDriverAssignedRides(state.selectedDriverId).catch(function () { return []; }),
+          refreshDriverLiveWorkspace().catch(function () { return null; }),
+        ]);
       } else {
         state.driverLiveWorkspace = null;
       }
@@ -8028,7 +8244,7 @@
         });
       }
 
-      state.providers = providers.length > 0 ? providers : state.providers;
+      state.providers = providers.length > 0 ? providers : [];
       hydrateProviderSelect(providers.length > 0 ? providers : state.providers);
       if (!providers.length && (!Array.isArray(state.providers) || state.providers.length <= 0) && lastError) {
         throw lastError;
@@ -8282,8 +8498,26 @@
       showToastSafe("Ride created and dispatched to operations.", "success");
       state.lastCompletedAction = "create_ride";
       state.lastFailedAction = null;
+      if (createdRide && createdRide.id) {
+        const rides = Array.isArray(state.rides) ? state.rides.slice() : [];
+        const existingIndex = rides.findIndex(function (ride) {
+          return String(ride && ride.id || "") === String(createdRide.id || "");
+        });
+        if (existingIndex >= 0) {
+          rides[existingIndex] = createdRide;
+        } else {
+          rides.unshift(createdRide);
+        }
+        state.rides = rides;
+        state.selectedRideId = createdRide.id;
+        if (createdRide.passenger_phone) {
+          persistCustomerRiderPhone(createdRide.passenger_phone);
+        }
+        renderDispatchWorkspace();
+        renderRides();
+      }
       await refreshData();
-      navigate("rides", true);
+      navigate("dispatch", true, { force: true, source: "ride-created" });
       return createdRide;
     } catch (error) {
       state.lastFailedAction = "create_ride";
@@ -9125,6 +9359,7 @@
     }
 
     if (els.onboardingSeed) {
+      els.onboardingSeed.hidden = !isDevelopmentPreviewMode();
       els.onboardingSeed.addEventListener('click', function () {
         seedPhase43Data().then(function () {
           showToastSafe('Phase 43 seed data applied.', 'success');
@@ -9137,6 +9372,36 @@
         });
       });
     }
+
+    document.addEventListener('click', function (event) {
+      const governanceButton = event.target.closest('[data-governance-approval]');
+      if (governanceButton) {
+        const decision = governanceButton.getAttribute('data-governance-approval');
+        const approvalId = governanceButton.getAttribute('data-governance-id') || '';
+        const approvalToken = governanceButton.getAttribute('data-governance-token') || '';
+        if (!approvalId || !approvalToken) {
+          showToastSafe('Approval token unavailable for this request.', 'error');
+          return;
+        }
+        submitGovernanceApproval(approvalId, approvalToken, decision === 'approve').then(function () {
+          showToastSafe(decision === 'approve' ? 'Approval recorded.' : 'Approval rejected.', decision === 'approve' ? 'success' : 'warn');
+        }).catch(function (error) {
+          showToastSafe('Governance action failed: ' + error.message, 'error');
+        });
+        return;
+      }
+
+      const resetPilotButton = event.target.closest('#health-admin-reset-pilot');
+      if (!resetPilotButton) return;
+      if (!window.confirm('Cancel all open rides and reset driver availability for pilot testing?')) return;
+      resetPilotEnvironment().then(function (result) {
+        const cleared = result && (result.cleared_rides != null ? result.cleared_rides : result.cancelled_open_rides);
+        showToastSafe('Pilot environment reset: ' + formatNumber(cleared || 0) + ' ride records cleared.', 'success');
+        return refreshData();
+      }).catch(function (error) {
+        showToastSafe('Pilot reset failed: ' + error.message, 'error');
+      });
+    });
 
     if (els.onboardingList) {
       els.onboardingList.addEventListener('click', function (event) {

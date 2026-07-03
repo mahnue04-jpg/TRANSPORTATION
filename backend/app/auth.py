@@ -161,9 +161,21 @@ def seed_default_users() -> list[dict[str, str]]:
     ensure_health_isf_schema()
     db: Session = SessionLocal()
     created: list[dict[str, str]] = []
+    synced = 0
     try:
-        default_org = health_isf_service._get_or_create_default_org(db)
-        health_isf_service.ensure_sample_driver_credentials(db, organization_id=default_org.id)
+        default_org = None
+        try:
+            default_org = health_isf_service._get_or_create_default_org(db)
+            try:
+                health_isf_service.ensure_sample_driver_credentials(db, organization_id=default_org.id)
+            except Exception as driver_exc:
+                logger.warning(
+                    "Driver credential seed skipped during auth bootstrap: %s",
+                    driver_exc,
+                    exc_info=True,
+                )
+        except Exception as org_exc:
+            logger.warning("Default org lookup failed during auth seed: %s", org_exc, exc_info=True)
 
         for user_seed in SEED_USERS:
             email = user_seed["email"].strip().lower()
@@ -171,9 +183,11 @@ def seed_default_users() -> list[dict[str, str]]:
             if existing:
                 existing.role = normalize_role(user_seed.get("role"))
                 existing.organization_name = DEFAULT_ORGANIZATION_NAME
-                existing.organization_id = default_org.id
+                if default_org is not None:
+                    existing.organization_id = default_org.id
                 existing.hashed_password = hash_password(SEED_PASSWORD)
                 existing.is_active = True
+                synced += 1
                 continue
 
             user = UserModel(
@@ -182,7 +196,7 @@ def seed_default_users() -> list[dict[str, str]]:
                 display_name=user_seed.get("display_name"),
                 role=normalize_role(user_seed.get("role")),
                 organization_name=DEFAULT_ORGANIZATION_NAME,
-                organization_id=default_org.id,
+                organization_id=default_org.id if default_org is not None else None,
                 is_active=True,
                 is_verified=True,
             )
@@ -193,6 +207,11 @@ def seed_default_users() -> list[dict[str, str]]:
             })
 
         db.commit()
+        logger.info(
+            "Auth seed complete: created=%s synced=%s password_source=AMICOR_SEED_PASSWORD",
+            len(created),
+            synced,
+        )
         return created
     finally:
         db.close()
@@ -553,6 +572,40 @@ class UserContext(BaseModel):
 
 # ── Router ─────────────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.post("/deployment/sync-seed-users")
+def deployment_sync_seed_users(request: Request):
+    """Re-sync pilot seed accounts after deploy. Requires X-Amicor-Deployment-Key header."""
+    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Deployment sync not configured")
+    provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Invalid deployment sync key")
+    created = seed_default_users()
+    return {
+        "status": "ok",
+        "created": created,
+        "seed_users_total": len(SEED_USERS),
+        "password_env": "AMICOR_SEED_PASSWORD",
+    }
+
+
+@router.get("/deployment/seed-status")
+def deployment_seed_status(db: Session = Depends(get_db)):
+    """Report whether baseline pilot accounts exist (no secrets exposed)."""
+    from app.db.models import User as UserModel
+
+    emails = [item["email"] for item in SEED_USERS]
+    rows = db.query(UserModel.email).filter(UserModel.email.in_(emails)).all()
+    present = sorted({str(row[0]).lower() for row in rows})
+    return {
+        "expected_accounts": len(emails),
+        "present_accounts": len(present),
+        "missing_accounts": [email for email in emails if email not in present],
+        "deployment_sync_configured": bool(os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()),
+    }
 
 
 @router.post("/register", status_code=201)

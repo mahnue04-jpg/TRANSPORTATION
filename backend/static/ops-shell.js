@@ -1154,6 +1154,14 @@
         persistent: Boolean(collapsible.persistent)
       };
     }
+
+    var riderAppState = parsed.riderApp || {};
+    if (riderAppState && typeof riderAppState === "object") {
+      state.riderApp = safeObject(state.riderApp);
+      state.riderApp.profile = safeObject(riderAppState.profile);
+      state.riderApp.activeRequestId = safeText(riderAppState.activeRequestId, "");
+      state.riderApp.lastSubmit = safeObject(riderAppState.lastSubmit);
+    }
   }
 
   function persistSessionState() {
@@ -1184,6 +1192,11 @@
           collapsible: state.assistant.collapsible,
           messages: state.assistant.messages.slice(-24),
           toolEvents: state.assistant.toolEvents.slice(-24)
+        },
+        riderApp: {
+          profile: safeObject((state.riderApp || {}).profile),
+          activeRequestId: safeText((state.riderApp || {}).activeRequestId, ""),
+          lastSubmit: safeObject((state.riderApp || {}).lastSubmit)
         }
       };
       sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
@@ -3650,16 +3663,18 @@
     );
   }
 
-  function renderRoleMapPlaceholder(title, description) {
+  function renderRoleMapPlaceholder(title, description, routeContext) {
+    var context = routeContext && typeof routeContext === "object" ? routeContext : {};
+    var pickup = safeText(context.pickup || context.pickup_address, "Pickup not set");
+    var dropoff = safeText(context.dropoff || context.dropoff_address, "Destination not set");
     return renderPanelBlock(
       title,
       description,
       '<div class="command-map">' +
-        '<div class="map-grid"></div>' +
-        '<div class="map-overlay map-overlay-zone">Coverage</div>' +
-        '<div class="map-overlay map-overlay-route">Route</div>' +
-        '<div class="map-overlay map-overlay-vehicle">Vehicle</div>' +
-        '<div class="map-stage-copy"><strong>Placeholder map panel</strong><p>Map visuals are read-only placeholders and never dispatch or alter state.</p></div>' +
+        '<div class="map-stage-copy"><strong>Map provider not configured</strong><p>Interactive maps require a map provider API key. Live pickup, destination, and route details are shown below.</p></div>' +
+        '<div class="health-summary"><strong>Pickup:</strong> ' + escapeHtml(pickup) + '</div>' +
+        '<div class="health-summary"><strong>Destination:</strong> ' + escapeHtml(dropoff) + '</div>' +
+        '<div class="health-summary"><strong>Route:</strong> ' + escapeHtml(pickup) + ' → ' + escapeHtml(dropoff) + '</div>' +
       '</div>',
       'map'
     );
@@ -3680,80 +3695,46 @@
   }
 
   function ensureRiderAppState(slice) {
-    var existing = safeObject(state.riderApp);
     var profile = riderProfileDefaults();
-
-    if (Array.isArray(existing.tripHistory) && existing.profile) {
-      state.riderApp.profile = profile;
-      return;
-    }
-
-    if (window.AmiMobileRuntime && typeof window.AmiMobileRuntime.riderWorkspace === "function") {
-      var runtimeRider = window.AmiMobileRuntime.riderWorkspace("");
-      var active = safeObject(runtimeRider.active);
-      var activeStatus = safeText(active.state, "requested");
-      var assignedName = safeText(active.assignedDriverName, "matching...");
-      var eta = String(safeNumber(active.etaMin, safeNumber(slice.eta, 12)));
-      var historyRows = (Array.isArray(runtimeRider.history) ? runtimeRider.history : []).slice(0, 8).map(function (trip) {
-        return {
-          tripId: safeText(trip.id, "TRIP"),
-          date: safeText(trip.requestedAt, ""),
-          route: safeText(trip.pickup, "Pickup") + " -> " + safeText(trip.dropoff, "Dropoff"),
-          status: safeText(trip.state, "completed")
-        };
-      });
+    if (!state.riderApp || typeof state.riderApp !== "object") {
       state.riderApp = {
         profile: profile,
         activeRequestId: "",
-        activeTrip: {
-          tripId: safeText(active.id, "RD-9007"),
-          status: activeStatus,
-          pickup: safeText(active.pickup, safeText(slice.pickup, "Northside Entrance")),
-          dropoff: safeText(active.dropoff, safeText(slice.dropoff, "Downtown Specialty Clinic")),
-          etaMin: eta,
-          driverName: assignedName || "matching...",
-          vehicle: assignedName ? "Assigned Vehicle" : "pending",
-          supportContact: "24/7 Rider Care"
-        },
-        recurringSchedule: [
-          { id: "RC-101", day: "Mon/Wed/Fri", time: "07:15", destination: "Dialysis Unit B" },
-          { id: "RC-102", day: "Tue/Thu", time: "09:30", destination: "Physical Therapy Center" }
-        ],
-        notifications: notificationsForRole("rider", 16),
-        tripHistory: historyRows,
-        lastAction: "Rider workspace synchronized"
+        activeTrip: emptyRiderActiveTrip(),
+        recurringSchedule: [],
+        notifications: [],
+        tripHistory: [],
+        lastAction: "Enter your details and request a ride",
+        lastSubmit: null
       };
       return;
     }
 
-    state.riderApp = {
-      profile: profile,
-      activeRequestId: "",
-      activeTrip: {
-        tripId: "RD-9007",
-        status: "driver_arriving",
-        pickup: safeText(slice.pickup, "Northside Entrance"),
-        dropoff: safeText(slice.dropoff, "Downtown Specialty Clinic"),
-        etaMin: safeText(slice.eta, "8"),
-        driverName: safeText(slice.assignedDriver, "Chris Martinez"),
-        vehicle: "Toyota Sienna - TX 47M3",
-        supportContact: "24/7 Rider Care"
-      },
-      recurringSchedule: [
-        { id: "RC-101", day: "Mon/Wed/Fri", time: "07:15", destination: "Dialysis Unit B" },
-        { id: "RC-102", day: "Tue/Thu", time: "09:30", destination: "Physical Therapy Center" }
-      ],
-      notifications: [
-        { id: "rnote-1", text: "Driver is 8 minutes away.", level: "low", ts: "now" },
-        { id: "rnote-2", text: "Recurring ride RC-101 confirmed for tomorrow.", level: "low", ts: "today" },
-        { id: "rnote-3", text: "Medical appointment synced with trip RD-9007.", level: "medium", ts: "today" }
-      ],
-      tripHistory: [
-        { tripId: "RD-8988", date: "2026-05-24", route: "Home -> Mercy Lab", status: "completed" },
-        { tripId: "RD-8934", date: "2026-05-22", route: "Home -> Oncology Center", status: "completed" },
-        { tripId: "RD-8891", date: "2026-05-20", route: "Home -> Cardiac Follow-up", status: "completed" }
-      ],
-      lastAction: "Rider workspace hydrated"
+    state.riderApp.profile = profile;
+    if (!state.riderApp.activeTrip || typeof state.riderApp.activeTrip !== "object") {
+      state.riderApp.activeTrip = emptyRiderActiveTrip();
+    }
+    if (!Array.isArray(state.riderApp.tripHistory)) {
+      state.riderApp.tripHistory = [];
+    }
+    if (!Array.isArray(state.riderApp.recurringSchedule)) {
+      state.riderApp.recurringSchedule = [];
+    }
+    if (!Array.isArray(state.riderApp.notifications)) {
+      state.riderApp.notifications = [];
+    }
+  }
+
+  function emptyRiderActiveTrip() {
+    return {
+      tripId: "",
+      status: "none",
+      pickup: "",
+      dropoff: "",
+      etaMin: "",
+      driverName: "Awaiting assignment",
+      vehicle: "",
+      supportContact: "24/7 Rider Care"
     };
   }
 
@@ -3806,21 +3787,42 @@
     var recurring = Array.isArray(riderState.recurringSchedule) ? riderState.recurringSchedule : [];
     var history = Array.isArray(riderState.tripHistory) ? riderState.tripHistory : [];
     var activeRequestId = safeText(riderState.activeRequestId, "");
+    var lastSubmit = safeObject(riderState.lastSubmit);
+    var submitBanner = "";
+    if (lastSubmit.rideId) {
+      submitBanner =
+        '<div class="rider-submit-success" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #86efac;color:#065f46">' +
+          '<strong>Ride request submitted.</strong><br>' +
+          'Ride ID: <code>' + escapeHtml(safeText(lastSubmit.rideId, "")) + '</code><br>' +
+          'Request ID: <code>' + escapeHtml(safeText(lastSubmit.requestId, "")) + '</code><br>' +
+          'Status: ' + escapeHtml(titleizeWords(safeText(lastSubmit.status, "pending"))) +
+        '</div>';
+    }
+
+    var authBanner = "";
+    if (!getAccessToken()) {
+      authBanner =
+        '<div class="rider-auth-required" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
+          '<strong>Sign in required.</strong> Log in as a rider to submit ride requests. ' +
+          '<button type="button" class="preview-action rider-action" data-rider-action="sign_in">Sign In</button>' +
+        '</div>';
+    }
 
     return renderPanelBlock(
       "Rider and Patient App",
       "Request rides, schedule recurring transportation, track live trip ETA, and manage support from a healthcare-first rider surface.",
+      submitBanner + authBanner +
       '<div class="rider-app-grid">' +
         '<section class="rider-card">' +
           '<h4>Ride Request</h4>' +
           '<p class="muted">Create immediate or recurring transportation requests with appointment context.</p>' +
           '<div class="grid-2">' +
-            '<label class="muted">Rider Name<input id="rider-name-input" type="text" value="' + escapeHtml(safeText(profile.name, "Amicor Rider")) + '" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
-            '<label class="muted">Rider Phone<input id="rider-phone-input" type="text" value="' + escapeHtml(safeText(profile.phone, "+15550001111")) + '" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
-            '<label class="muted">Pickup<input id="rider-pickup-input" type="text" value="' + escapeHtml(safeText(profile.pickup, "Northside Entrance")) + '" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
-            '<label class="muted">Dropoff<input id="rider-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.dropoff, "Downtown Specialty Clinic")) + '" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
-            '<label class="muted">Ride Type<select id="rider-ride-type-input" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="healthcare"' + (safeText(profile.rideType, "healthcare") === "healthcare" ? ' selected' : '') + '>Healthcare</option><option value="work"' + (safeText(profile.rideType, "healthcare") === "work" ? ' selected' : '') + '>Work</option><option value="grocery"' + (safeText(profile.rideType, "healthcare") === "grocery" ? ' selected' : '') + '>Grocery</option><option value="church"' + (safeText(profile.rideType, "healthcare") === "church" ? ' selected' : '') + '>Church</option><option value="personal"' + (safeText(profile.rideType, "healthcare") === "personal" ? ' selected' : '') + '>Personal</option></select></label>' +
-            '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
+            '<label class="muted">Rider Name<input id="rider-name-input" type="text" value="' + escapeHtml(safeText(profile.name, "")) + '" placeholder="Your full name" oninput="window._amiUpdateRiderProfileDraft(\'name\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Rider Phone<input id="rider-phone-input" type="text" value="' + escapeHtml(safeText(profile.phone, "")) + '" placeholder="+1 555 123 4567" oninput="window._amiUpdateRiderProfileDraft(\'phone\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Pickup<input id="rider-pickup-input" type="text" value="' + escapeHtml(safeText(profile.pickup, "")) + '" placeholder="Pickup address" oninput="window._amiUpdateRiderProfileDraft(\'pickup\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Dropoff<input id="rider-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.dropoff, "")) + '" placeholder="Dropoff address" oninput="window._amiUpdateRiderProfileDraft(\'dropoff\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Ride Type<select id="rider-ride-type-input" onchange="window._amiUpdateRiderProfileDraft(\'rideType\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="healthcare"' + (safeText(profile.rideType, "healthcare") === "healthcare" ? ' selected' : '') + '>Healthcare</option><option value="work"' + (safeText(profile.rideType, "healthcare") === "work" ? ' selected' : '') + '>Work</option><option value="grocery"' + (safeText(profile.rideType, "healthcare") === "grocery" ? ' selected' : '') + '>Grocery</option><option value="church"' + (safeText(profile.rideType, "healthcare") === "church" ? ' selected' : '') + '>Church</option><option value="personal"' + (safeText(profile.rideType, "healthcare") === "personal" ? ' selected' : '') + '>Personal</option></select></label>' +
+            '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
           '<div class="command-actions">' +
             '<button class="preview-action rider-action" data-rider-action="request_now">Request Ride Now</button>' +
@@ -3832,14 +3834,16 @@
         '<section class="rider-card">' +
           '<h4>Live Trip Tracking</h4>' +
           '<div class="grid-2">' +
-            renderMetric("Trip", safeText(activeTrip.tripId, "No active ride")) +
-            renderMetric("Status", titleizeWords(safeText(activeTrip.status, history.length > 0 ? history[0].status : "pending"))) +
-            renderMetric("ETA", safeText(activeTrip.etaMin, "pending") + (safeText(activeTrip.etaMin, "") ? " min" : "")) +
-            renderMetric("Driver", safeText(activeTrip.driverName, "Awaiting assignment")) +
-            renderMetric("Vehicle", safeText(activeTrip.vehicle, "vehicle pending")) +
+            renderMetric("Trip", activeRequestId ? safeText(activeTrip.tripId, "Active ride") : "No active ride") +
+            renderMetric("Status", activeRequestId ? titleizeWords(safeText(activeTrip.status, "pending")) : "None") +
+            renderMetric("ETA", activeRequestId && safeText(activeTrip.etaMin, "") ? safeText(activeTrip.etaMin, "") + " min" : "pending") +
+            renderMetric("Driver", activeRequestId ? safeText(activeTrip.driverName, "Awaiting assignment") : "Not assigned") +
+            renderMetric("Vehicle", activeRequestId ? safeText(activeTrip.vehicle, "vehicle pending") : "—") +
             renderMetric("Support", safeText(activeTrip.supportContact, "Rider Care")) +
           '</div>' +
-          '<p class="muted">Pickup: ' + escapeHtml(safeText(activeTrip.pickup, "pickup")) + ' → Dropoff: ' + escapeHtml(safeText(activeTrip.dropoff, "dropoff")) + '</p>' +
+          '<p class="muted">' + (activeRequestId
+            ? ('Pickup: ' + escapeHtml(safeText(activeTrip.pickup, "pickup")) + ' → Dropoff: ' + escapeHtml(safeText(activeTrip.dropoff, "dropoff")))
+            : 'Submit a ride request to begin live trip tracking.') + '</p>' +
         '</section>' +
         '<section class="rider-card">' +
           '<h4>Recurring Schedule</h4>' +
@@ -3862,50 +3866,36 @@
     );
   }
 
+  function normalizeDriverTripStatus(raw) {
+    var value = safeText(raw, "queued").toLowerCase();
+    var mapped = {
+      offered: "queued",
+      pending: "queued",
+      dispatchable: "queued",
+      assigned: "assigned",
+      accepted: "driver_en_route",
+      en_route_pickup: "driver_en_route",
+      driver_en_route: "driver_en_route",
+      arrived_pickup: "arrived",
+      waiting_at_pickup: "arrived",
+      at_pickup: "arrived",
+      arrived: "arrived",
+      rider_loaded: "rider_onboard",
+      rider_onboard: "rider_onboard",
+      trip_in_progress: "in_progress",
+      in_progress: "in_progress",
+      in_transit: "in_progress",
+      arrived_destination: "in_progress",
+      completed: "completed",
+      no_show: "declined",
+      cancelled: "cancelled",
+      declined: "declined"
+    };
+    return mapped[value] || value;
+  }
+
   function buildDriverQueue(slice) {
-    var opportunityCount = safeNumber(slice.opportunities, 0);
-    var baseFare = 18 + Math.min(opportunityCount, 12);
-    return [
-      {
-        tripId: "TRIP-4102",
-        patient: "Maya Collins",
-        pickup: "Northside Medical Center",
-        dropoff: "Dialysis Unit B",
-        etaMin: 6,
-        priority: "high",
-        fare: baseFare + 9,
-        status: "queued",
-        type: "recurring",
-        scheduledWindow: "08:30 - 09:00",
-        coordinationStatus: "dispatch_confirmed"
-      },
-      {
-        tripId: "TRIP-4127",
-        patient: "Ethan Wells",
-        pickup: "Sunrise Rehab",
-        dropoff: "Lakeview Clinic",
-        etaMin: 11,
-        priority: "medium",
-        fare: baseFare + 4,
-        status: "accepted",
-        type: "appointment",
-        scheduledWindow: "09:10 - 09:40",
-        coordinationStatus: "driver_en_route"
-      },
-      {
-        tripId: "TRIP-4154",
-        patient: "Olivia Harris",
-        pickup: "Amicor Hub East",
-        dropoff: "St. Anne Hospital",
-        etaMin: 17,
-        priority: "low",
-        fare: baseFare,
-        status: "in_progress",
-        type: "pickup",
-        scheduledWindow: "10:00 - 10:30",
-        coordinationStatus: "patient_onboard"
-      }
-    ];
+    return [];
   }
 
   function ensureDriverMobileState(slice) {
@@ -3926,12 +3916,13 @@
         liveQueue.push({
           tripId: safeText(activeRide.id, "TRIP"),
           patient: safeText(activeRide.passenger_name, "Rider"),
+          riderPhone: safeText(activeRide.passenger_phone || activeRide.rider_phone, ""),
           pickup: safeText(activeRide.pickup_address || activeRide.pickup, "Pickup"),
           dropoff: safeText(activeRide.dropoff_address || activeRide.dropoff, "Dropoff"),
           etaMin: safeNumber(liveWorkspace.eta_minutes, 0),
           priority: safeText(activeRide.priority_tag, "standard"),
-          fare: 24 + safeNumber(liveWorkspace.eta_minutes, 0),
-          status: safeText(activeRide.lifecycle_state || activeRide.status, "assigned").toLowerCase(),
+          fare: safeNumber(activeRide.estimated_fare_usd, 0),
+          status: normalizeDriverTripStatus(activeRide.lifecycle_state || activeRide.status),
           type: safeText(activeRide.service_type, "transport"),
           scheduledWindow: safeText(activeRide.appointment_time || activeRide.requested_at, "Window pending"),
           coordinationStatus: safeText((Array.isArray(liveWorkspace.timeline_states) ? liveWorkspace.timeline_states.slice(-1)[0] : "dispatch_confirmed"), "dispatch_confirmed"),
@@ -3942,12 +3933,13 @@
         liveQueue.push({
           tripId: safeText(activeAssignment.ride_id, "TRIP"),
           patient: safeText(activeAssignment.passenger_name, "Rider"),
-          pickup: "Pickup pending",
-          dropoff: "Dropoff pending",
+          riderPhone: safeText(activeAssignment.passenger_phone || activeAssignment.rider_phone, ""),
+          pickup: safeText(activeAssignment.pickup_address, "Pickup pending"),
+          dropoff: safeText(activeAssignment.dropoff_address, "Dropoff pending"),
           etaMin: safeNumber(liveWorkspace.eta_minutes, 0),
           priority: "standard",
-          fare: 24 + safeNumber(liveWorkspace.eta_minutes, 0),
-          status: safeText(activeAssignment.ride_status || activeAssignment.assignment_state, "assigned").toLowerCase(),
+          fare: 0,
+          status: normalizeDriverTripStatus(activeAssignment.ride_status || activeAssignment.assignment_state),
           type: "transport",
           scheduledWindow: safeText(activeAssignment.offered_at, "Window pending"),
           coordinationStatus: safeText(activeAssignment.assignment_state, "assignment_issued"),
@@ -3958,12 +3950,13 @@
         liveQueue.push({
           tripId: safeText(activeOffer.ride_id, "TRIP"),
           patient: safeText(activeOffer.passenger_name, "Rider"),
-          pickup: "Pickup pending",
-          dropoff: "Dropoff pending",
+          riderPhone: safeText(activeOffer.passenger_phone || activeOffer.rider_phone, ""),
+          pickup: safeText(activeOffer.pickup_address, "Pickup pending"),
+          dropoff: safeText(activeOffer.dropoff_address, "Dropoff pending"),
           etaMin: 0,
           priority: "standard",
-          fare: 24,
-          status: "queued",
+          fare: 0,
+          status: normalizeDriverTripStatus(activeOffer.assignment_state || "offered"),
           type: "transport",
           scheduledWindow: safeText(activeOffer.offer_expires_at, "Offer pending"),
           coordinationStatus: safeText(activeOffer.assignment_state, "assignment_offered"),
@@ -3972,9 +3965,14 @@
         });
       }
 
+      var allRidesFromLive = Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : [];
       var liveDriver = (Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : []).find(function (driver) {
         return safeText(driver.id || driver.driver_id, "") === workflowDriverId;
       }) || {};
+      var completedCount = allRidesFromLive.filter(function (ride) {
+        return safeText(ride.status, "").toLowerCase() === "completed"
+          && safeText(ride.driver_id, "") === workflowDriverId;
+      }).length;
 
       state.driverApp = {
         seedAssignedRide: safeText(slice.assignedRide, ""),
@@ -3986,12 +3984,10 @@
           return ["accepted", "driver_en_route", "arrived", "rider_onboard", "in_progress", "completed"].indexOf(safeText(trip.status, "")) >= 0;
         }).length,
         declinedCount: 0,
-        completedTrips: liveQueue.filter(function (trip) {
-          return safeText(trip.status, "") === "completed";
-        }).length,
-        earningsToday: 48 + (liveQueue.length * 12),
+        completedTrips: completedCount,
+        earningsToday: 0,
         tripQueue: liveQueue,
-        notifications: notificationsForRole("driver", 16),
+        notifications: [],
         documents: [
           { name: "Driver License", status: "valid", expiresIn: "245 days" },
           { name: "Medical Transport Clearance", status: "renewal_required", expiresIn: "12 days" },
@@ -4003,87 +3999,26 @@
       return;
     }
 
-    if (window.AmiMobileRuntime && typeof window.AmiMobileRuntime.driverWorkspace === "function") {
-      var runtimeDriver = window.AmiMobileRuntime.driverWorkspace("");
-      var driver = safeObject(runtimeDriver.driver);
-      var queue = (Array.isArray(runtimeDriver.queue) ? runtimeDriver.queue : []).map(function (trip) {
-        var eta = safeNumber(trip.etaMin, 0);
-        var scheduleStart = new Date(Date.now() + (Math.max(eta, 5) * 60000));
-        var scheduleEnd = new Date(scheduleStart.getTime() + (30 * 60000));
-        return {
-          tripId: safeText(trip.id, "TRIP"),
-          patient: safeText(trip.riderName, "Rider"),
-          riderPhone: safeText(trip.riderPhone || trip.patient_phone || trip.rider_phone || trip.phone || "", ""),
-          pickup: safeText(trip.pickup, "Pickup"),
-          dropoff: safeText(trip.dropoff, "Dropoff"),
-          etaMin: eta,
-          priority: safeText(trip.priority, "standard"),
-          fare: 24 + eta,
-          status: safeText(trip.state, "requested"),
-          type: "transport",
-          scheduledWindow: safeText(trip.scheduled_window, formatOperationalTime(scheduleStart.toISOString()) + " - " + formatOperationalTime(scheduleEnd.toISOString())),
-          coordinationStatus: safeText(trip.coordination_status || trip.dispatch_status, "dispatch_confirmed")
-        };
-      });
-      var activeTripId = queue.length > 0 ? queue[0].tripId : "";
-      state.driverApp = {
-        seedAssignedRide: safeText(slice.assignedRide, ""),
-        currentDriverId: "",
-        shiftOnline: safeText(driver.status, "available") !== "offline",
-        activeTripId: activeTripId,
-        activeStage: queue.length > 0 ? safeText(queue[0].status, "requested") : "queued",
-        secondaryTab: "earnings",
-        acceptedCount: queue.filter(function (trip) { return trip.status === "assigned"; }).length,
-        declinedCount: 0,
-        completedTrips: queue.filter(function (trip) { return trip.status === "completed"; }).length,
-        earningsToday: 48 + queue.length * 12,
-        tripQueue: queue,
-        notifications: notificationsForRole("driver", 16),
-        documents: [
-          { name: "Driver License", status: "valid", expiresIn: "245 days" },
-          { name: "Medical Transport Clearance", status: "renewal_required", expiresIn: "12 days" },
-          { name: "Vehicle Inspection", status: "valid", expiresIn: "88 days" },
-          { name: "Background Verification", status: "valid", expiresIn: "154 days" }
-        ],
-        lastStatusUpdate: "Driver workspace synchronized"
-      };
-      return;
-    }
-
     var existing = safeObject(state.driverApp);
     if (existing.seedAssignedRide === safeText(slice.assignedRide, "") && Array.isArray(existing.tripQueue) && existing.tripQueue.length > 0) {
       return;
     }
 
-    var queue = buildDriverQueue(slice);
-    var completedTrips = Math.max(0, safeNumber(slice.pickupQueue, 0) - 1);
-    var earningsToday = (completedTrips * 24.5) + 48;
-    var activeTripId = queue.length > 0 ? queue[0].tripId : "";
-
     state.driverApp = {
       seedAssignedRide: safeText(slice.assignedRide, ""),
       currentDriverId: "",
-      shiftOnline: true,
-      activeTripId: activeTripId,
+      shiftOnline: false,
+      activeTripId: "",
       activeStage: "queued",
       secondaryTab: "earnings",
       acceptedCount: 0,
       declinedCount: 0,
-      completedTrips: completedTrips,
-      earningsToday: Math.round(earningsToday * 100) / 100,
-      tripQueue: queue,
-      notifications: [
-        { id: "note-1", level: "high", text: "Priority dialysis pickup waiting for acceptance.", ts: "now" },
-        { id: "note-2", level: "medium", text: "Credential badge expires in 7 days.", ts: "today" },
-        { id: "note-3", level: "low", text: "Route optimization advisory available for Zone 4.", ts: "today" }
-      ],
-      documents: [
-        { name: "Driver License", status: "valid", expiresIn: "245 days" },
-        { name: "Medical Transport Clearance", status: "renewal_required", expiresIn: "12 days" },
-        { name: "Vehicle Inspection", status: "valid", expiresIn: "88 days" },
-        { name: "Background Verification", status: "valid", expiresIn: "154 days" }
-      ],
-      lastStatusUpdate: "Shift initialized"
+      completedTrips: 0,
+      earningsToday: 0,
+      tripQueue: [],
+      notifications: [],
+      documents: [],
+      lastStatusUpdate: "Awaiting live assignment from dispatch"
     };
   }
 
@@ -4278,17 +4213,21 @@
     var routeDropoff = activeTrip ? safeText(activeTrip.dropoff, "Destination pending") : "Destination pending";
     var providerName = "Unassigned Provider";
     var assignedDriverLabel = "Unassigned Driver";
-    var riderPhone = activeTrip ? safeText(activeTrip.riderPhone || activeTrip.phone, "+15550001111") : "";
-    var tripStatus = activeTrip ? safeText(activeTrip.status, "queued").toLowerCase() : "none";
+    var riderPhone = activeTrip ? safeText(activeTrip.riderPhone || activeTrip.phone, "") : "";
+    var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
     var shiftOnline = asBoolean(appState.shiftOnline, false);
     var isTerminal = ["completed", "cancelled", "declined"].indexOf(tripStatus) >= 0;
+    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0;
     var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
-    var canPickup = ["arrived", "at_pickup", "accepted", "en_route_pickup", "driver_en_route"].indexOf(tripStatus) >= 0;
-    var canComplete = ["rider_onboard", "in_progress", "in_transit"].indexOf(tripStatus) >= 0;
-    var disableArrive = !shiftOnline || !activeTrip || !canArrive;
+    var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
+    var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
+    var canComplete = ["in_progress", "in_transit", "trip_in_progress", "arrived_destination"].indexOf(tripStatus) >= 0;
+    var disableAccept = !shiftOnline || !activeTrip || !canAccept || isTerminal;
+    var disableArrive = !shiftOnline || !activeTrip || !canArrive || isTerminal;
     var disableNoShow = !shiftOnline || !activeTrip || isTerminal;
-    var disablePickup = !shiftOnline || !activeTrip || !canPickup;
-    var disableComplete = !shiftOnline || !activeTrip || !canComplete;
+    var disablePickup = !shiftOnline || !activeTrip || !canPickup || isTerminal;
+    var disableStartTransport = !shiftOnline || !activeTrip || !canStartTransport || isTerminal;
+    var disableComplete = !shiftOnline || !activeTrip || !canComplete || isTerminal;
     var secondaryTab = safeText(appState.secondaryTab, "earnings").toLowerCase();
     var etaText = String(activeTrip ? safeNumber(activeTrip.etaMin, 0) : 0) + " min";
     var notifications = Array.isArray(appState.notifications) ? appState.notifications : [];
@@ -4385,13 +4324,13 @@
               '<tr><th>ETA</th><td>' + escapeHtml(etaText) + '</td></tr>' +
             '</tbody></table></div>' +
             '<div class="command-actions">' +
-              '<button class="preview-action driver-action" data-driver-action="accept_trip"' + ((!shiftOnline || !activeTrip || !["queued", "assigned"].includes(tripStatus)) ? ' disabled' : '') + '>Accept Trip</button>' +
+              '<button class="preview-action driver-action" data-driver-action="accept_trip"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
               (riderPhone
                 ? '<button class="preview-action driver-action" data-driver-action="call_rider"' + (!activeTrip ? ' disabled' : '') + '>Call Rider</button>'
                 : '<button class="preview-action" disabled>Call Rider</button>') +
               '<button class="preview-action driver-action" data-driver-action="arrive_pickup"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disablePickup ? ' disabled' : '') + '>Pickup / Rider Onboard</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_transport"' + ((!shiftOnline || !activeTrip || !["rider_onboard", "in_progress", "in_transit"].includes(tripStatus)) ? ' disabled' : '') + '>Start Transport</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_transport"' + (disableStartTransport ? ' disabled' : '') + '>Start Transport</button>' +
               '<button class="preview-action driver-action" data-driver-action="complete_trip"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
               '<button class="preview-action driver-action" data-driver-action="decline_trip"' + (disableNoShow ? ' disabled' : '') + '>No Show</button>' +
             '</div>' +
@@ -4793,13 +4732,13 @@
         var escalationSignals = Array.isArray(modules.trip_escalation_indicators) ? modules.trip_escalation_indicators : [];
         var resolutionTimeline = Array.isArray(modules.trip_resolution_timeline) ? modules.trip_resolution_timeline : [];
         if (supervisorQueue.length === 0) {
-          supervisorQueue = buildDemoSupervisorRecoveryQueue();
+          supervisorQueue = [];
         }
         if (escalationSignals.length === 0) {
-          escalationSignals = buildDemoEscalationSignals();
+          escalationSignals = [];
         }
         if (resolutionTimeline.length === 0) {
-          resolutionTimeline = buildDemoSupervisorResolutionTimeline();
+          resolutionTimeline = [];
         }
         var approvalItems = supervisorQueue.slice(0, 16).map(function (item, idx) {
           var urgency = safeText(item.urgency || item.priority || "medium", "medium").toLowerCase();
@@ -4836,24 +4775,7 @@
           });
         }
         if (approvalItems.length === 0) {
-          approvalItems = buildDemoSupervisorApprovals().map(function (item, idx) {
-            var demoTimeRaw = safeText(item.created_at || item.timestamp, "");
-            var demoTypeRaw = safeText(item.action_type || item.event_type, "supervised_request");
-            var demoTypeMap = {
-              supervised_request: "Supervisor Review Request",
-              escalation_override: "Escalation Override",
-              manual_assignment_approval: "Manual Assignment Approval",
-              rural_route_exception: "Rural Route Exception"
-            };
-            return {
-              id: safeText(item.id || item.event_id, "APV-" + String(idx + 1)),
-              type: safeText(demoTypeMap[demoTypeRaw], titleizeWords(demoTypeRaw)),
-              requestor: safeText(item.actor_role || item.requested_by, "operations"),
-              urgency: safeText(item.priority || item.urgency, "medium").toLowerCase(),
-              timeRaw: demoTimeRaw,
-              time: formatOperationalTime(demoTimeRaw)
-            };
-          });
+          approvalItems = [];
         }
         approvalItems.sort(function (a, b) {
           return operationalTimeValue(b.timeRaw) - operationalTimeValue(a.timeRaw);
@@ -5130,7 +5052,6 @@
         var liveAssignments = Array.isArray(liveWorkflow.activeAssignments) ? liveWorkflow.activeAssignments : [];
         var liveDrivers = Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : [];
         var liveActivityFeed = Array.isArray(liveWorkflow.activityFeed) ? liveWorkflow.activityFeed : [];
-        var demoTransportRecords = buildDemoTransportRecords();
 
         function normalizeTrip(item, fallbackState) {
           var normalized = safeObject(item);
@@ -5167,16 +5088,12 @@
           }));
         }
 
-        if (workflowTrips.length < 8) {
-          var supplementalTrips = liveQueue.length > 0
-            ? liveQueue.map(function (item) {
-                return normalizeTrip(item, "requested");
-              }).concat(liveAssignments.map(function (item) {
-                return normalizeTrip(item, "assigned");
-              }))
-            : demoTransportRecords.map(function (item) {
-                return normalizeTrip(item, safeText(item.trip_state, "requested"));
-              });
+        if (workflowTrips.length < 8 && (liveQueue.length > 0 || liveAssignments.length > 0)) {
+          var supplementalTrips = liveQueue.map(function (item) {
+            return normalizeTrip(item, "requested");
+          }).concat(liveAssignments.map(function (item) {
+            return normalizeTrip(item, "assigned");
+          }));
           var seenTripIds = {};
           workflowTrips.forEach(function (trip) {
             seenTripIds[safeText(trip.id, "")] = true;
@@ -5222,28 +5139,6 @@
               };
             })
           : (Array.isArray(runtime.drivers) ? runtime.drivers : []));
-        if (!Array.isArray(drivers) || drivers.length < 4) {
-          var demoDrivers = buildDemoDriverAvailability().map(function (driver) {
-            return {
-              id: safeText(driver.driver_id || driver.id, ""),
-              name: safeText(driver.driver_name || driver.name, "Driver"),
-              vehicle: safeText(driver.vehicle || driver.vehicle_type || "Vehicle", "Vehicle"),
-              status: safeText(driver.status || driver.availability || "available", "available").toLowerCase(),
-              etaMin: safeNumber(driver.next_eta_minutes || driver.eta_minutes || 0, 0)
-            };
-          });
-          var knownDrivers = {};
-          (Array.isArray(drivers) ? drivers : []).forEach(function (driver) {
-            knownDrivers[safeText(driver.id, "")] = true;
-          });
-          demoDrivers.forEach(function (driver) {
-            var driverId = safeText(driver.id, "");
-            if (driverId && !knownDrivers[driverId]) {
-              drivers.push(driver);
-              knownDrivers[driverId] = true;
-            }
-          });
-        }
         var selectedDriverId = safeText(runtime.selectedDriverId, "");
         var queueTrips = trips.filter(function (trip) {
           return ["requested", "scheduled", "assigned", "delayed", "pending", "new", "queued", "pending_review"].indexOf(safeText(trip.state, "")) >= 0;
@@ -5264,24 +5159,6 @@
         var availableDrivers = drivers.filter(function (driver) {
           return ["available", "assigned", "busy"].indexOf(safeText(driver.status, "")) >= 0;
         });
-
-        if (delayedRideModule.length === 0) {
-          delayedRideModule = demoTransportRecords.filter(function (trip) {
-            return safeText(trip.trip_state, "") === "escalated";
-          });
-        }
-        if (escalationModule.length === 0) {
-          escalationModule = buildDemoEscalationSignals();
-        }
-        if (reassignmentModule.length === 0) {
-          reassignmentModule = buildDemoReassignmentQueue();
-        }
-        if (noDriverRecoveryModule.length === 0) {
-          noDriverRecoveryModule = buildDemoNoDriverRecovery();
-        }
-        if (resolutionTimelineModule.length === 0) {
-          resolutionTimelineModule = buildDemoSupervisorResolutionTimeline();
-        }
 
         function tripWaitText(trip) {
           var requestedAt = Date.parse(safeText(trip.requestedAt, ""));
@@ -7505,7 +7382,7 @@
   }
 
   function renderPage() {
-    if (!state.loading && isDispatcherDraftFieldActive()) {
+    if (!state.loading && (isDispatcherDraftFieldActive() || isRiderDraftFieldActive())) {
       window.__amiDispatcherDraftRenderDeferred = true;
       console.info("[Dispatcher Pickup Render]", {
         stage: "renderPage:deferred",
@@ -7631,7 +7508,7 @@
     if (canUseDriverWorkspaceActions()) {
       bindDriverWorkspaceEvents();
     }
-    if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && state.role === "rider") {
+    if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && (state.role === "rider" || state.route === "riders")) {
       bindRiderWorkspaceEvents();
     }
     traceDispatcherPickupRender("renderPage:end");
@@ -7679,22 +7556,16 @@
     var currentDriverId = safeText(appState.currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
 
     if (action === "toggle_shift") {
-      if (currentDriverId) {
-        var nextShiftStatus = appState.shiftOnline ? "offline" : "available";
-        var shiftResult = await window._amiHandleDriverShiftReadiness(currentDriverId, nextShiftStatus);
-        if (!shiftResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet. Refresh the workspace after dispatch assignment.");
+        return;
       }
-      appState.shiftOnline = !asBoolean(appState.shiftOnline, false);
-      if (runtime && typeof runtime.setDriverStatus === "function") {
-        var statusResult = runtime.setDriverStatus("DRV-A22", appState.shiftOnline ? "available" : "offline");
-        if (!statusResult || statusResult.ok === false) {
-          appState.shiftOnline = !appState.shiftOnline;
-          window.alert("Unable to update driver shift status in runtime.");
-          return;
-        }
+      var nextShiftStatus = appState.shiftOnline ? "offline" : "available";
+      var shiftResult = await window._amiHandleDriverShiftReadiness(currentDriverId, nextShiftStatus);
+      if (!shiftResult) {
+        return;
       }
+      appState.shiftOnline = nextShiftStatus === "available";
       appState.lastStatusUpdate = appState.shiftOnline ? "Shift started and available for dispatch" : "Shift ended";
       addDriverNotification("medium", appState.lastStatusUpdate + ".");
       updated = true;
@@ -7703,108 +7574,67 @@
       appState.lastStatusUpdate = "Opened trip " + safeText(appState.activeTripId, "");
       updated = true;
     } else if (action === "accept_trip" && activeTrip) {
-      if (currentDriverId) {
-        var acceptResult = await window._amiHandleDriverAcceptTrip(safeText(activeTrip.tripId, ""));
-        if (!acceptResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      if (runtime && typeof runtime.acceptTrip === "function") {
-        runtime.acceptTrip(safeText(activeTrip.tripId, ""));
+      if (!(await window._amiHandleDriverAcceptTrip(safeText(activeTrip.tripId, "")))) {
+        return;
       }
-      activeTrip.status = "driver_en_route";
-      appState.activeTripId = safeText(activeTrip.tripId, appState.activeTripId);
-      appState.activeStage = "accepted";
-      appState.acceptedCount = safeNumber(appState.acceptedCount, 0) + 1;
-      appState.lastStatusUpdate = "Accepted trip " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ".");
       updated = true;
     } else if (action === "decline_trip" && activeTrip) {
-      if (currentDriverId) {
-        var declineResult = await window._amiHandleDriverDeclineTrip(safeText(activeTrip.tripId, ""));
-        if (!declineResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      if (runtime && typeof runtime.rejectTrip === "function") {
-        runtime.rejectTrip(safeText(activeTrip.tripId, ""));
+      if (!(await window._amiHandleDriverDeclineTrip(safeText(activeTrip.tripId, "")))) {
+        return;
       }
-      appState.tripQueue = (Array.isArray(appState.tripQueue) ? appState.tripQueue : []).filter(function (trip) {
-        return safeText(trip.tripId, "") !== safeText(activeTrip.tripId, "");
-      });
-      appState.activeTripId = appState.tripQueue.length > 0 ? safeText(appState.tripQueue[0].tripId, "") : "";
-      appState.declinedCount = safeNumber(appState.declinedCount, 0) + 1;
-      appState.lastStatusUpdate = "No-show recorded for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("medium", appState.lastStatusUpdate + ". Trip returned to dispatch.");
       updated = true;
     } else if (action === "call_rider" && activeTrip) {
-      if (currentDriverId) {
-        var contactResult = await window._amiHandleDriverCallRider(safeText(activeTrip.tripId, ""));
-        if (!contactResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      appState.lastStatusUpdate = "Rider contact initiated for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ".");
+      if (!(await window._amiHandleDriverCallRider(safeText(activeTrip.tripId, "")))) {
+        return;
+      }
       updated = true;
     } else if (action === "arrive_pickup" && activeTrip) {
-      if (currentDriverId) {
-        var arriveResult = await window._amiHandleDriverArriveTrip(safeText(activeTrip.tripId, ""));
-        if (!arriveResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      if (runtime && typeof runtime.markArrived === "function") {
-        runtime.markArrived(safeText(activeTrip.tripId, ""));
+      if (!(await window._amiHandleDriverArriveTrip(safeText(activeTrip.tripId, "")))) {
+        return;
       }
-      activeTrip.status = "arrived";
-      appState.activeStage = "arrived";
-      appState.lastStatusUpdate = "Arrived at pickup for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ".");
       updated = true;
     } else if (action === "start_trip" && activeTrip) {
-      if (currentDriverId) {
-        var startResult = await window._amiHandleDriverStartTrip(safeText(activeTrip.tripId, ""));
-        if (!startResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      if (runtime && typeof runtime.onboardRider === "function") {
-        runtime.onboardRider(safeText(activeTrip.tripId, ""));
+      if (!(await window._amiHandleDriverStartTrip(safeText(activeTrip.tripId, "")))) {
+        return;
       }
-      activeTrip.status = "rider_onboard";
-      appState.activeStage = "rider_onboard";
-      appState.lastStatusUpdate = "Rider onboard for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ".");
       updated = true;
     } else if (action === "start_transport" && activeTrip) {
-      if (currentDriverId) {
-        var progressResult = await window._amiHandleDriverProgressTrip(safeText(activeTrip.tripId, ""));
-        if (!progressResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      activeTrip.status = "in_progress";
-      appState.activeStage = "in_progress";
-      appState.lastStatusUpdate = "Transport started for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ".");
+      if (!(await window._amiHandleDriverProgressTrip(safeText(activeTrip.tripId, "")))) {
+        return;
+      }
       updated = true;
     } else if (action === "complete_trip" && activeTrip) {
-      if (currentDriverId) {
-        var completeResult = await window._amiHandleDriverCompleteTrip(safeText(activeTrip.tripId, ""));
-        if (!completeResult) {
-          return;
-        }
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
       }
-      if (runtime && typeof runtime.completeTrip === "function") {
-        runtime.completeTrip(safeText(activeTrip.tripId, ""));
+      if (!(await window._amiHandleDriverCompleteTrip(safeText(activeTrip.tripId, "")))) {
+        return;
       }
-      activeTrip.status = "completed";
-      appState.activeStage = "completed";
-      appState.completedTrips = safeNumber(appState.completedTrips, 0) + 1;
-      appState.earningsToday = Math.round((safeNumber(appState.earningsToday, 0) + safeNumber(activeTrip.fare, 0)) * 100) / 100;
-      appState.lastStatusUpdate = "Completed dropoff for " + safeText(activeTrip.tripId, "");
-      addDriverNotification("low", appState.lastStatusUpdate + ". Earnings updated.");
       updated = true;
     } else if (action === "dismiss_notification" && noteId) {
       appState.notifications = (Array.isArray(appState.notifications) ? appState.notifications : []).filter(function (item) {
@@ -7852,6 +7682,24 @@
         await handleRiderWorkspaceAction(action, noteId);
       });
     });
+    [
+      "rider-name-input",
+      "rider-phone-input",
+      "rider-pickup-input",
+      "rider-dropoff-input",
+      "rider-ride-type-input",
+      "rider-notes-input"
+    ].forEach(function (fieldId) {
+      var field = document.getElementById(fieldId);
+      if (!field) return;
+      field.addEventListener("blur", function () {
+        setTimeout(function () {
+          if (typeof flushDeferredDispatcherDraftRender === "function") {
+            flushDeferredDispatcherDraftRender();
+          }
+        }, 0);
+      });
+    });
   }
 
   function addRiderNotification(level, text) {
@@ -7874,12 +7722,22 @@
     var updated = false;
     var runtime = window.AmiRiderRuntime;
 
-    if (action === "request_now") {
+    if (action === "sign_in") {
+      var signedIn = await ensureAuthenticatedSession("Sign in as a rider before requesting a ride.");
+      if (signedIn) {
+        riderState.lastAction = "Signed in — ready to request a ride";
+        state.riderApp = riderState;
+        persistSessionState();
+        renderPage();
+      }
+      return;
+    } else if (action === "request_now") {
       try {
         await submitRiderRideRequest(false);
         return;
-      } catch (_) {
-        window.alert("Unable to submit rider request.");
+      } catch (err) {
+        var detail = err && err.message ? err.message : "unknown error";
+        window.alert("Unable to submit rider request: " + detail);
         return;
       }
     } else if (action === "schedule_recurring") {
@@ -8026,21 +7884,114 @@
     } catch (_) {}
   }
 
-  async function postJson(url, payload) {
-    var scopedUrl = withOrganizationScope(url);
+  function bootstrapAppSession() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.restore === "function") {
+        window.AmiCorSession.restore();
+      }
+    } catch (_) {}
+  }
+
+  function applyLoginIdentity(identity) {
+    if (!identity || typeof identity !== "object") {
+      return;
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.start === "function") {
+      window.AmiCorSession.start(identity);
+    }
+    var nextRole = safeText(identity.role, "").toLowerCase();
+    if (nextRole && ROLE_ACCESS[nextRole]) {
+      state.role = nextRole;
+      saveRole(nextRole);
+      if (els.roleSelect) {
+        els.roleSelect.value = nextRole;
+      }
+    }
+    state.hydration = safeObject(state.hydration);
+    state.hydration.authTokenPresent = !!getAccessToken();
+  }
+
+  function ensureAuthenticatedSession(message) {
+    bootstrapAppSession();
+    if (getAccessToken()) {
+      return Promise.resolve(true);
+    }
+    if (!(window.AmiCorAuthUI && typeof window.AmiCorAuthUI.showLogin === "function")) {
+      window.alert(message || "Sign in required to continue.");
+      return Promise.resolve(false);
+    }
+    return new Promise(function (resolve) {
+      var settled = false;
+      function finish(ok) {
+        if (settled) return;
+        settled = true;
+        resolve(!!ok && !!getAccessToken());
+      }
+      function openLogin() {
+        window.AmiCorAuthUI.showLogin(function (identity) {
+          applyLoginIdentity(identity);
+          loadBackendData({ silent: true }).finally(function () {
+            renderPage();
+            finish(true);
+          });
+        }, openSignup);
+        var dismissWatch = setInterval(function () {
+          if (getAccessToken()) {
+            clearInterval(dismissWatch);
+            finish(true);
+            return;
+          }
+          if (!document.getElementById("amicor-auth-overlay")) {
+            clearInterval(dismissWatch);
+            finish(false);
+          }
+        }, 400);
+      }
+      function openSignup() {
+        if (!(window.AmiCorAuthUI && typeof window.AmiCorAuthUI.showSignup === "function")) {
+          openLogin();
+          return;
+        }
+        window.AmiCorAuthUI.showSignup(function (identity) {
+          applyLoginIdentity(identity);
+          loadBackendData({ silent: true }).finally(function () {
+            renderPage();
+            finish(true);
+          });
+        }, openLogin);
+      }
+      openLogin();
+    });
+  }
+
+  async function authorizedFetch(scopedUrl, requestInit, timeoutMs) {
+    bootstrapAppSession();
+    var init = Object.assign({}, requestInit || {});
+    if (!init.credentials) {
+      init.credentials = "same-origin";
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+      return await withTimeout(window.AmiCorSession.authFetch(scopedUrl, init), timeoutMs || 12000);
+    }
     var token = getAccessToken();
-    var headers = {
-      "Accept": "application/json",
-      "Content-Type": "application/json"
-    };
-    if (token) {
+    var headers = Object.assign({}, init.headers || {});
+    if (token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
-    var response = await withTimeout(fetch(scopedUrl, {
+    init.headers = headers;
+    return await withTimeout(fetch(scopedUrl, init), timeoutMs || 12000);
+  }
+
+  async function postJson(url, payload) {
+    var scopedUrl = withOrganizationScope(url);
+    var response = await authorizedFetch(scopedUrl, {
       method: "POST",
-      headers: headers,
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify(payload || {})
-    }), 12000);
+    }, 12000);
 
     if (!response.ok) {
       throw new Error(scopedUrl + ":http_" + response.status);
@@ -8050,20 +8001,14 @@
 
   async function sendJson(url, method, payload) {
     var scopedUrl = withOrganizationScope(url);
-    var token = getAccessToken();
-    var headers = {
-      "Accept": "application/json",
-      "Content-Type": "application/json"
-    };
-    if (token) {
-      headers.Authorization = "Bearer " + token;
-    }
-    var response = await withTimeout(fetch(scopedUrl, {
+    var response = await authorizedFetch(scopedUrl, {
       method: safeText(method, "POST").toUpperCase(),
-      headers: headers,
-      body: payload == null ? null : JSON.stringify(payload),
-      credentials: "same-origin"
-    }), 12000);
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: payload == null ? null : JSON.stringify(payload)
+    }, 12000);
 
     if (!response.ok) {
       throw new Error(scopedUrl + ":http_" + response.status);
@@ -8082,11 +8027,11 @@
     var existing = safeObject(state.riderApp);
     var profile = safeObject(existing.profile);
     return {
-      name: safeText(profile.name, "Amicor Rider"),
-      phone: normalizeRiderPhone(profile.phone || "+15550001111"),
-      pickup: safeText(profile.pickup, "Northside Entrance"),
-      dropoff: safeText(profile.dropoff, "Downtown Specialty Clinic"),
-      notes: safeText(profile.notes, "Wheelchair assist if needed"),
+      name: safeText(profile.name, ""),
+      phone: normalizeRiderPhone(profile.phone || ""),
+      pickup: safeText(profile.pickup, ""),
+      dropoff: safeText(profile.dropoff, ""),
+      notes: safeText(profile.notes, ""),
       rideType: safeText(profile.rideType, "healthcare")
     };
   }
@@ -8126,24 +8071,31 @@
       notifications = Array.isArray(riderState.notifications) ? riderState.notifications : [];
     }
 
+    var hasActiveRide = !!(
+      safeText(activeRequest.requestId || activeRequest.id, "") ||
+      safeText(activeRide.id, "") ||
+      safeText(riderState.activeRequestId, "")
+    );
+
     state.riderApp = {
       profile: profile,
-      activeRequestId: safeText(activeRequest.requestId, ""),
-      activeTrip: {
-        tripId: safeText(activeRide.id, safeText(activeRequest.tripId, "No active ride")),
-        status: safeText(activeRide.status || activeRequest.status, history.length > 0 ? history[0].status : "pending"),
+      activeRequestId: safeText(activeRequest.requestId || activeRequest.id, safeText(riderState.activeRequestId, "")),
+      activeTrip: hasActiveRide ? {
+        tripId: safeText(activeRide.id || activeRequest.tripId, safeText(activeRequest.ride_id, "")),
+        status: safeText(activeRide.status || activeRequest.status, "pending"),
         pickup: safeText(activeRide.pickup_address || activeRide.pickup || activeRequest.pickup, profile.pickup),
         dropoff: safeText(activeRide.dropoff_address || activeRide.dropoff || activeRequest.dropoff, profile.dropoff),
         etaMin: safeText(payload.etaMinutes, activeRide.estimated_duration_minutes || "pending"),
         driverName: safeText(activeRide.driver_name || activeRide.assigned_driver_name, "Awaiting assignment"),
         vehicle: safeText(activeRide.vehicle_id || activeRide.vehicle, "Vehicle pending"),
         supportContact: "24/7 Rider Care"
-      },
+      } : emptyRiderActiveTrip(),
       recurringSchedule: Array.isArray(riderState.recurringSchedule) ? riderState.recurringSchedule : [],
       notifications: notifications,
       tripHistory: history,
       timeline: timeline,
-      lastAction: safeText(payload.lastAction, history.length > 0 ? "Rider workspace synchronized" : "Ready to request a ride")
+      lastAction: safeText(payload.lastAction, history.length > 0 ? "Rider workspace synchronized" : "Ready to request a ride"),
+      lastSubmit: riderState.lastSubmit || null
     };
   }
 
@@ -8209,8 +8161,20 @@
     }
 
     var driverCandidates = [];
+    var roleView = safeText(state.role, "").toLowerCase();
     pushDriverCandidate(driverCandidates, existingDriverId);
     pushDriverCandidate(driverCandidates, safeText((safeObject(state.driverApp)).currentDriverId, ""));
+    if (roleView === "driver") {
+      try {
+        var driverRows = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
+        var canonical = (Array.isArray(driverRows) ? driverRows : []).find(function (row) {
+          return safeText(row.name, "").toLowerCase() === "james smith";
+        });
+        if (canonical) {
+          pushDriverCandidate(driverCandidates, safeText(canonical.id, ""));
+        }
+      } catch (_) {}
+    }
     if (activeAssignments.length > 0) {
       pushDriverCandidate(driverCandidates, safeText(activeAssignments[0].driver_id, ""));
     }
@@ -8226,7 +8190,6 @@
       pushDriverCandidate(driverCandidates, safeText(driver.id || driver.driver_id, ""));
     });
 
-    var roleView = safeText(state.role, "").toLowerCase();
     var resolvedDriverId = "";
     var settled = null;
 
@@ -8297,9 +8260,18 @@
   }
 
   async function submitRiderRideRequest(recurring) {
+    var authed = await ensureAuthenticatedSession("Sign in as a rider before requesting a ride.");
+    if (!authed) {
+      return { ok: false, error: "auth_required" };
+    }
+
     var formValues = readRiderFormValues();
     if (!formValues.name || !formValues.phone || !formValues.pickup || !formValues.dropoff) {
       window.alert("Enter rider name, phone, pickup, and dropoff before submitting the request.");
+      return { ok: false };
+    }
+    if (formValues.pickup.trim().toLowerCase() === formValues.dropoff.trim().toLowerCase()) {
+      window.alert("Pickup and dropoff must be different addresses.");
       return { ok: false };
     }
 
@@ -8315,15 +8287,52 @@
     };
 
     var created = await postJson("/api/health-isf/customer-requests", payload);
+    var rideId = safeText(created.ride_id, "");
+    var requestId = safeText(created.id, "");
+    var dispatchStatus = safeText(created.dispatch_status, "pending");
+
     state.riderApp = safeObject(state.riderApp);
     state.riderApp.profile = formValues;
+    state.riderApp.activeRequestId = requestId;
+    state.riderApp.lastSubmit = {
+      rideId: rideId,
+      requestId: requestId,
+      status: dispatchStatus,
+      submittedAt: new Date().toISOString()
+    };
+    state.riderApp.activeTrip = {
+      tripId: rideId,
+      status: dispatchStatus,
+      pickup: formValues.pickup,
+      dropoff: formValues.dropoff,
+      etaMin: "",
+      driverName: "Awaiting assignment",
+      vehicle: "Vehicle pending",
+      supportContact: "24/7 Rider Care"
+    };
+
     await refreshRiderWorkspaceData({
-      lastAction: recurring === true ? "Recurring ride scheduled" : "Ride request submitted"
+      lastAction: recurring === true
+        ? ("Recurring ride scheduled. Ride ID: " + rideId)
+        : ("Ride request submitted. Ride ID: " + rideId)
     });
-    addRiderNotification(recurring === true ? "low" : "medium", recurring === true ? "Recurring ride request submitted." : "Ride request submitted. Dispatch can now assign a driver.");
+
+    addRiderNotification(
+      recurring === true ? "low" : "medium",
+      recurring === true
+        ? ("Recurring ride request submitted. Ride ID: " + rideId)
+        : ("Ride request submitted. Ride ID: " + rideId + " is now in the dispatcher queue.")
+    );
     persistSessionState();
     renderPage();
-    return { ok: true, request: created };
+    window.alert(
+      (recurring === true ? "Recurring ride scheduled successfully." : "Ride request submitted successfully.") +
+      "\n\nRide ID: " + rideId +
+      "\nRequest ID: " + requestId +
+      "\nStatus: " + dispatchStatus +
+      "\n\nDispatch can now review and assign a driver."
+    );
+    return { ok: true, request: created, rideId: rideId, requestId: requestId };
   }
 
   async function cancelActiveRiderRequest() {
@@ -9137,7 +9146,7 @@
         };
       }
 
-      if (state.role === "rider") {
+      if (state.role === "rider" || state.route === "riders") {
         try {
           await refreshRiderWorkspaceData();
         } catch (_) {
@@ -9624,6 +9633,7 @@
   function initialize() {
     state.assistant = buildDefaultAssistantState();
     state.runtime.operatorMode = isOperatorModeEnabled();
+    bootstrapAppSession();
     state.role = roleFromStorage();
     hydrateSessionState();
     recomputeAssistantRuntimeState();
@@ -9883,12 +9893,51 @@ function isDispatcherDraftFieldActive() {
   ].indexOf(String(activeElement.id)) >= 0;
 }
 
+function isRiderDraftFieldActive() {
+  var activeElement = document.activeElement || null;
+  if (!activeElement || !activeElement.id) return false;
+  return [
+    "rider-name-input",
+    "rider-phone-input",
+    "rider-pickup-input",
+    "rider-dropoff-input",
+    "rider-ride-type-input",
+    "rider-notes-input"
+  ].indexOf(String(activeElement.id)) >= 0;
+}
+
 function flushDeferredDispatcherDraftRender() {
   if (!window.__amiDispatcherDraftRenderDeferred) return;
-  if (isDispatcherDraftFieldActive()) return;
+  if (isDispatcherDraftFieldActive() || isRiderDraftFieldActive()) return;
   window.__amiDispatcherDraftRenderDeferred = false;
   renderPage();
 }
+
+window._amiUpdateRiderProfileDraft = function(field, value) {
+  var shellState = window.AmiOpsShellState || state || {};
+  shellState.riderApp = shellState.riderApp && typeof shellState.riderApp === "object" ? shellState.riderApp : {};
+  shellState.riderApp.profile = shellState.riderApp.profile && typeof shellState.riderApp.profile === "object"
+    ? shellState.riderApp.profile
+    : {};
+  var key = safeText(field, "");
+  if (!key) return;
+  if (key === "phone") {
+    shellState.riderApp.profile.phone = safeText(value, "").replace(/[^\d+]/g, "").slice(0, 20);
+  } else {
+    shellState.riderApp.profile[key] = safeText(value, "");
+  }
+  try {
+    var raw = sessionStorage.getItem("amicor_shell_session_v1");
+    var parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") parsed = {};
+    parsed.riderApp = {
+      profile: shellState.riderApp.profile,
+      activeRequestId: safeText(shellState.riderApp.activeRequestId, ""),
+      lastSubmit: shellState.riderApp.lastSubmit || null
+    };
+    sessionStorage.setItem("amicor_shell_session_v1", JSON.stringify(parsed));
+  } catch (_) {}
+};
 
 window._amiHandleDispatcherCreatePatient = async function() {
   var riderName = _amiValue("dispatcher-patient-name");
@@ -10543,9 +10592,10 @@ function _amiDriverTripPhone(tripId) {
 
 async function _amiAfterDriverWorkflowRefresh(lastAction) {
   try {
-    await _amiRefreshDriverWorkflow(lastAction);
-    if (state.role !== "driver" && state.route === "dispatch") {
-      await _amiRefreshDispatcherWorkspace();
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshData === "function") {
+      await window.AmiOpsShellActions.refreshData();
+    } else {
+      await _amiRefreshDriverWorkflow(lastAction);
     }
   } catch (_) {}
   _amiScheduleRenderPage();
@@ -10554,36 +10604,46 @@ async function _amiAfterDriverWorkflowRefresh(lastAction) {
 window._amiHandleDriverAcceptTrip = async function(tripId) {
   var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
   if (!driverId || !tripId) return false;
+  var payload = null;
   try {
-    var payload = await _amiSendJson(
-      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+    payload = await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-ride",
       "POST",
-      { ride_id: tripId, target_state: "en_route_pickup" }
+      { ride_id: tripId }
     );
-    var activeRide = safeObject(payload.active_ride);
-    state.driverApp = safeObject(state.driverApp);
-    state.driverApp.lastActionResult = {
-      last_action: "Accept Trip",
-      api_status: "ok",
-      db_record_id: safeText(activeRide.id, tripId),
-      updated_table: "health_isf_rides",
-      ui_refreshed: "yes",
-      current_ride_status: safeText(activeRide.status, "driver_en_route")
-    };
   } catch (_) {
-    window.alert("Unable to submit driver accept action for " + tripId + ".");
-    state.driverApp = safeObject(state.driverApp);
-    state.driverApp.lastActionResult = {
-      last_action: "Accept Trip",
-      api_status: "error",
-      db_record_id: safeText(tripId, "n/a"),
-      updated_table: "health_isf_rides",
-      ui_refreshed: "no",
-      current_ride_status: "unchanged"
-    };
-    return false;
+    try {
+      payload = await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+        "POST",
+        { ride_id: tripId, target_state: "en_route_pickup" }
+      );
+    } catch (err2) {
+      window.alert("Unable to submit driver accept action for " + tripId + ".");
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.lastActionResult = {
+        last_action: "Accept Trip",
+        api_status: "error",
+        db_record_id: safeText(tripId, "n/a"),
+        updated_table: "health_isf_rides",
+        ui_refreshed: "no",
+        current_ride_status: "unchanged"
+      };
+      return false;
+    }
   }
+  var activeRide = safeObject(payload.active_ride || payload);
+  state.driverApp = safeObject(state.driverApp);
+  state.driverApp.lastActionResult = {
+    last_action: "Accept Trip",
+    api_status: "ok",
+    db_record_id: safeText(activeRide.id, tripId),
+    updated_table: "health_isf_rides",
+    ui_refreshed: "yes",
+    current_ride_status: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route")
+  };
   try {
+    _amiLockDriverHydration(3500);
     await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
   } catch (_) {}
   return true;
@@ -10797,13 +10857,13 @@ window._amiHandleDriverCallRider = async function(tripId) {
       }
     }
     return true;
-  } catch (_) {
-    var fallbackPhone = _amiDriverTripPhone(tripId);
-    if (fallbackPhone) {
-      window.location.href = "tel:" + fallbackPhone;
-      return true;
+  } catch (error) {
+    var message = safeText(error && error.message, "SMS/contact provider not configured yet");
+    if (message.toLowerCase().indexOf("not configured") >= 0 || message.toLowerCase().indexOf("sms") >= 0) {
+      window.alert("SMS/contact provider not configured yet");
+      return false;
     }
-    window.alert("Unable to contact rider for " + tripId + ".");
+    window.alert("Unable to contact rider for " + tripId + ": " + message);
     return false;
   }
 };
@@ -11243,22 +11303,32 @@ window._amiHandleWorkflowCreateBilling = async function() {
 };
 
 window._amiHandleDispatchContactRider = async function(tripId) {
-  await _amiSubmitWorkspaceAction(
-    "dispatch.contact_rider",
-    { trip_id: tripId },
-    "dispatcher"
-  );
+  try {
+    await _amiSubmitWorkspaceAction(
+      "dispatch.contact_rider",
+      { trip_id: tripId },
+      "dispatcher"
+    );
+  } catch (error) {
+    window.alert(safeText(error && error.message, "SMS/contact provider not configured yet"));
+    return;
+  }
   if (window.AmiDispatchRuntime && typeof window.AmiDispatchRuntime.contactRider === "function") {
     window.AmiDispatchRuntime.contactRider(tripId);
   }
 };
 
 window._amiHandleDispatchContactDriver = async function(tripId) {
-  await _amiSubmitWorkspaceAction(
-    "dispatch.contact_driver",
-    { trip_id: tripId },
-    "dispatcher"
-  );
+  try {
+    await _amiSubmitWorkspaceAction(
+      "dispatch.contact_driver",
+      { trip_id: tripId },
+      "dispatcher"
+    );
+  } catch (error) {
+    window.alert(safeText(error && error.message, "SMS/contact provider not configured yet"));
+    return;
+  }
   if (window.AmiDispatchRuntime && typeof window.AmiDispatchRuntime.contactDriver === "function") {
     window.AmiDispatchRuntime.contactDriver(tripId);
   }

@@ -98,15 +98,26 @@ def driver_session_valid(page) -> bool:
 
 def ensure_preview_server(base: str, timeout_sec: int = 180) -> subprocess.Popen | None:
     health_url = base.rstrip("/") + "/health"
-    try:
-        if httpx.get(health_url, timeout=5).status_code == 200:
-            log("SERVER", f"Preview already running at {base}")
-            return None
-    except Exception:
-        pass
-
     parsed = urlparse(base)
     host = parsed.hostname or "127.0.0.1"
+    is_remote = host not in {"127.0.0.1", "localhost", "::1"}
+
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            if httpx.get(health_url, timeout=15).status_code == 200:
+                log("SERVER", f"Target reachable at {base}")
+                return None
+        except Exception:
+            pass
+        if is_remote:
+            time.sleep(3)
+            continue
+        break
+
+    if is_remote:
+        raise RuntimeError(f"Remote target not healthy within {timeout_sec}s: {base}")
+
     port = parsed.port or 8010
     backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     python_exe = sys.executable

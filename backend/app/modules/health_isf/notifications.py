@@ -31,6 +31,10 @@ def _twilio_enabled() -> bool:
     )
 
 
+def sms_provider_configured() -> bool:
+    return _twilio_enabled()
+
+
 def _smtp_enabled() -> bool:
     return bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM"))
 

@@ -328,8 +328,16 @@ async def lifespan(app: FastAPI):
         
         db = SessionLocal()
         try:
-            health_isf_service.init_sample_data(db) # type: ignore
-            logger.info("Health ISF MVP module initialized with sample data.")
+            seed_sample_data = os.environ.get("AMICOR_SEED_SAMPLE_DATA", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            if seed_sample_data or RUNTIME_ENVIRONMENT not in {"production", "prod"}:
+                health_isf_service.init_sample_data(db)  # type: ignore
+                logger.info("Health ISF MVP module initialized with sample data.")
+            else:
+                logger.info("Health ISF sample seed skipped (production mode; set AMICOR_SEED_SAMPLE_DATA=1 to enable).")
         finally:
             db.close()
     except Exception as exc:

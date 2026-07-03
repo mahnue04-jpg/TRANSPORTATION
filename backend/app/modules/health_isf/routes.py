@@ -2337,6 +2337,9 @@ def get_phase54_preview_runtime_status(
     ]
     reconnect_pressure = int(websocket.get("disconnects_last_5m", 0) or 0) + int(websocket.get("reconnects_last_5m", 0) or 0)
     replay_safe = bool(replay_probe.get("replay_safe", True)) and bool(runtime_state.get("deterministic_event_ordering", True))
+    from app.modules.health_isf import notifications as notify
+
+    sms_ready = notify.sms_provider_configured()
     health_score = max(
         0,
         100
@@ -2390,6 +2393,10 @@ def get_phase54_preview_runtime_status(
             "no_medication_delivery": True,
             "deterministic_runtime": True,
             "replay_consistent": replay_safe,
+        },
+        "contact": {
+            "sms_configured": sms_ready,
+            "sms_status_message": "SMS ready" if sms_ready else "SMS/contact provider not configured yet",
         },
     }
 
@@ -10309,6 +10316,21 @@ def seed_production_demo_data(
     """Seed 50+ drivers, 100+ patients, and 200+ trips for pilot/demo operations."""
     effective_org_id = enforce_tenant_scope(user, organization_id)
     return service.seed_production_demo_data(db, organization_id=effective_org_id, force=force)
+
+
+@router.post("/ops/reset-pilot-environment")
+def reset_pilot_environment(
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Clear ride/trip history and restore canonical driver availability for pilot operations."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    try:
+        return service.reset_pilot_environment(db, organization_id=effective_org_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Dashboard Endpoint ────────────────────────────────────────────────────────

@@ -2655,7 +2655,7 @@
             </div>
           </div>
           <div id="health-driver-runtime-action-status" class="health-summary" aria-live="polite"></div>
-          <div id="health-driver-runtime-status" class="health-summary">Driver status not loaded.</div>
+          <div id="health-driver-runtime-status" class="health-summary"><p class="health-summary"><span class="health-pill warn">SMS/contact provider not configured yet</span> Contact buttons stay disabled until Twilio credentials are configured.</p>Driver status not loaded.</div>
           <div id="health-driver-incoming-offer" class="health-summary">No incoming assignment offer for selected driver.</div>
           <div class="health-row-actions health-row-actions-inline">
             <button type="button" class="health-row-btn ok" id="health-driver-offer-accept">Accept Ride</button>
@@ -2672,7 +2672,7 @@
         </article>
         <article class="health-panel health-panel-wide">
           <h3>Fleet Capacity Snapshot</h3>
-          <div id="health-driver-pool-metrics" class="health-summary">Loading driver pool visualization...</div>
+          <div id="health-driver-pool-metrics" class="health-summary"><p class="health-summary"><span class="health-pill warn">SMS/contact provider not configured yet</span> Contact buttons stay disabled until Twilio credentials are configured.</p>Loading driver pool visualization...</div>
         </article>
         <article class="health-panel health-panel-wide health-runtime-shell">
           <h3>Driver Performance Desk <span class="health-live-dot" aria-hidden="true"></span></h3>
@@ -2765,6 +2765,10 @@
           <section class="health-panel-block">
             <h4>Rider Trip History</h4>
             <div id="health-customer-request-history" class="health-summary">Customer request history will appear here.</div>
+          </section>
+          <section class="health-panel-block">
+            <h4>Trip map and route</h4>
+            <div id="health-customer-map" class="health-summary">Trip map and route details will appear here.</div>
           </section>
           <section class="health-panel-block">
             <h4>Trip Timeline</h4>
