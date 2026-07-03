@@ -55,6 +55,14 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _as_naive_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def _safe_avg(values: list[float]) -> float:
     return round(sum(values) / len(values), 2) if values else 0.0
 
@@ -300,7 +308,7 @@ class NovaIntelligenceEngine:
                 default=None,
             )
             wait_minutes = (
-                int((now_dt - oldest.requested_at).total_seconds() / 60)
+                int((_utc_now() - _as_naive_utc(oldest.requested_at)).total_seconds() / 60)
                 if oldest and oldest.requested_at
                 else "?"
             )
@@ -367,9 +375,10 @@ class NovaIntelligenceEngine:
 
         result = []
         for ride in stale_rides:
+            updated_at = _as_naive_utc(ride.updated_at)
             age_minutes = (
-                int((_utc_now() - ride.updated_at).total_seconds() / 60)
-                if ride.updated_at
+                int((_utc_now() - updated_at).total_seconds() / 60)
+                if updated_at
                 else "?"
             )
             result.append({
@@ -377,7 +386,7 @@ class NovaIntelligenceEngine:
                 "status": str(ride.status),
                 "driver_id": ride.driver_id,
                 "age_minutes": age_minutes,
-                "last_updated": ride.updated_at.isoformat() if ride.updated_at else None,
+                "last_updated": updated_at.isoformat() if updated_at else None,
                 "action": "Verify driver status; escalate if driver unreachable.",
             })
         return result

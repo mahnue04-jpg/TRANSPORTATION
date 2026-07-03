@@ -900,7 +900,10 @@ def _verify_confirmation_token(token: str) -> dict[str, Any]:
 
     message = f"{header_b64}.{claims_b64}".encode("utf-8")
     expected = hmac.new(ASSISTANT_CONFIRMATION_SECRET.encode("utf-8"), message, hashlib.sha256).digest()
-    provided = _b64url_decode(signature_b64)
+    try:
+        provided = _b64url_decode(signature_b64)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Confirmation token signature invalid") from exc
     if not hmac.compare_digest(expected, provided):
         raise HTTPException(status_code=401, detail="Confirmation token signature invalid")
 
