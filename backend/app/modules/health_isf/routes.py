@@ -881,6 +881,154 @@ async def _emit_dispatch_lifecycle_event(
     db.commit()
 
 
+async def _emit_intake_dispatch_outcome(
+    *,
+    db: Session,
+    organization_id: str,
+    ride: Any,
+    actor_user_id: str | None,
+    request_id: str | None = None,
+) -> None:
+    """Emit realtime dispatch events after intake automation completes."""
+    db.refresh(ride)
+    latest_assignment = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(HealthISFDispatchAssignment.ride_id == ride.id)
+        .order_by(desc(HealthISFDispatchAssignment.created_at))
+        .first()
+    )
+    emitter = get_emitter()
+    if ride.driver_id and latest_assignment and str(latest_assignment.assignment_state) == DispatchAssignmentState.OFFERED.value:
+        selected_driver = service.get_driver_by_id(db, ride.driver_id)
+        auto_assign_payload = {
+            "ride_id": ride.id,
+            "assignment_state": str(latest_assignment.assignment_state),
+            "selected_driver_id": ride.driver_id,
+            "selected_driver_name": getattr(selected_driver, "name", None),
+            "selected_score": float(latest_assignment.score) if latest_assignment.score is not None else None,
+            "organization_id": organization_id,
+            "source": "intake_auto_dispatch",
+            "request_id": request_id,
+        }
+        await _emit_with_retry_queue(
+            db=db,
+            organization_id=organization_id,
+            event_type="dispatch_intake_auto_assigned",
+            event_payload=auto_assign_payload,
+            emit_callable=lambda: emitter.emit_dispatch_changed(
+                organization_id=organization_id,
+                event_name="dispatch_intake_auto_assigned",
+                actor_user_id=actor_user_id,
+                details=auto_assign_payload,
+            ),
+            idempotency_key=_event_key("dispatch_intake_auto_assigned", ride.id, str(latest_assignment.id)),
+            ride_id=ride.id,
+        )
+        await _emit_with_retry_queue(
+            db=db,
+            organization_id=organization_id,
+            event_type="ride_assigned",
+            event_payload={
+                "ride_id": ride.id,
+                "driver_id": ride.driver_id,
+                "driver_name": getattr(selected_driver, "name", None),
+                "organization_id": organization_id,
+                "source": "intake_auto_dispatch",
+                "request_id": request_id,
+            },
+            emit_callable=lambda: emitter.emit_ride_assigned(
+                organization_id=organization_id,
+                ride_id=ride.id,
+                driver_id=str(ride.driver_id),
+                driver_name=getattr(selected_driver, "name", None),
+                actor_user_id=actor_user_id,
+                details={"source": "intake_auto_dispatch", "request_id": request_id},
+            ),
+            idempotency_key=_event_key("ride_assigned", ride.id, str(ride.driver_id), "intake_auto_dispatch"),
+            ride_id=ride.id,
+        )
+        await _emit_dispatch_lifecycle_event(
+            db=db,
+            organization_id=organization_id,
+            ride_id=ride.id,
+            event_name="driver-offer-issued",
+            actor_user_id=actor_user_id,
+            details={
+                "request_id": request_id,
+                "ride_id": ride.id,
+                "offer_id": latest_assignment.id,
+                "driver_id": ride.driver_id,
+                "source": "intake_auto_dispatch",
+            },
+            request_id=request_id or f"intake_offer_{ride.id}",
+            assignment_id=latest_assignment.id,
+            driver_id=str(ride.driver_id),
+            lifecycle_state=str(latest_assignment.assignment_state),
+            transition_reason="intake_auto_dispatch",
+            assignment_transition_source="customer_request_intake",
+        )
+        log_operational_event(
+            "dispatch.intake.auto_assigned",
+            organization_id=organization_id,
+            ride_id=ride.id,
+            selected_driver_id=ride.driver_id,
+            selected_score=latest_assignment.score,
+        )
+    elif (
+        latest_assignment
+        and str(latest_assignment.assignment_state) == DispatchAssignmentState.AWAITING_APPROVAL.value
+    ):
+        selected_driver = (
+            service.get_driver_by_id(db, latest_assignment.driver_id)
+            if latest_assignment.driver_id
+            else None
+        )
+        recommendation_payload = {
+            "ride_id": ride.id,
+            "assignment_state": str(latest_assignment.assignment_state),
+            "recommended_driver_id": latest_assignment.driver_id,
+            "recommended_driver_name": getattr(selected_driver, "name", None),
+            "recommended_score": float(latest_assignment.score) if latest_assignment.score is not None else None,
+            "organization_id": organization_id,
+            "request_id": request_id,
+        }
+        await _emit_with_retry_queue(
+            db=db,
+            organization_id=organization_id,
+            event_type="dispatch_recommendation_created",
+            event_payload=recommendation_payload,
+            emit_callable=lambda: emitter.emit_dispatch_changed(
+                organization_id=organization_id,
+                event_name="dispatch_recommendation_created",
+                actor_user_id=actor_user_id,
+                details=recommendation_payload,
+            ),
+            idempotency_key=_event_key("dispatch_recommendation_created", ride.id, str(latest_assignment.id)),
+            ride_id=ride.id,
+        )
+        await _emit_dispatch_lifecycle_event(
+            db=db,
+            organization_id=organization_id,
+            ride_id=ride.id,
+            event_name="dispatch-recommendation-created",
+            actor_user_id=actor_user_id,
+            details=recommendation_payload,
+            request_id=request_id or f"intake_recommendation_{ride.id}",
+            assignment_id=latest_assignment.id,
+            driver_id=str(latest_assignment.driver_id) if latest_assignment.driver_id else None,
+            lifecycle_state=str(latest_assignment.assignment_state),
+            transition_reason="intake_ai_recommendation",
+            assignment_transition_source="customer_request_intake",
+        )
+        log_operational_event(
+            "dispatch.recommendation.created",
+            organization_id=organization_id,
+            ride_id=ride.id,
+            recommended_driver_id=latest_assignment.driver_id,
+            recommended_score=latest_assignment.score,
+        )
+
+
 def _build_enterprise_dashboard_payload(db: Session, organization_id: str) -> dict[str, Any]:
     snapshot = AIDispatchOrchestrationService.build_operations_snapshot(
         db,
@@ -5095,6 +5243,16 @@ async def create_customer_ride_request(
             transition_reason="provider_request_created",
             assignment_transition_source="customer_workspace",
         )
+
+        db.refresh(ride)
+        db.refresh(request_row)
+        await _emit_intake_dispatch_outcome(
+            db=db,
+            organization_id=organization_id,
+            ride=ride,
+            actor_user_id=user.user_id,
+            request_id=request_row.id,
+        )
     except Exception:
         logger.warning(
             "Non-critical customer request side effects failed for request_id=%s ride_id=%s",
@@ -5120,6 +5278,7 @@ async def create_customer_ride_request(
     except Exception:
         logger.warning("Rider confirmation SMS failed for ride_id=%s", ride.id, exc_info=True)
 
+    db.refresh(request_row)
     return _serialize_customer_request(request_row)
 
 

@@ -5056,10 +5056,15 @@
         function normalizeTrip(item, fallbackState) {
           var normalized = safeObject(item);
           var tripId = safeText(normalized.trip_id || normalized.ride_id || normalized.id, "");
+          var stateValue = safeText(
+            normalized.trip_state || normalized.state || normalized.workflow_state
+            || normalized.assignment_state || normalized.ride_status || fallbackState || "requested",
+            "requested"
+          ).toLowerCase();
           return {
             id: tripId,
-            state: safeText(normalized.trip_state || normalized.state || normalized.workflow_state || fallbackState || "requested").toLowerCase(),
-            riderName: safeText(normalized.patient_name || normalized.rider_name || normalized.rider || normalized.rider_id, "Rider"),
+            state: stateValue,
+            riderName: safeText(normalized.patient_name || normalized.rider_name || normalized.passenger_name || normalized.rider || normalized.rider_id, "Rider"),
             pickup: safeText(normalized.pickup || normalized.pickup_address || normalized.pickup_location || normalized.pickup_name, "Pickup"),
             dropoff: safeText(normalized.dropoff || normalized.dropoff_address || normalized.dropoff_location || normalized.destination, "Dropoff"),
             priority: safeText(normalized.priority, "standard").toLowerCase(),
@@ -5141,7 +5146,7 @@
           : (Array.isArray(runtime.drivers) ? runtime.drivers : []));
         var selectedDriverId = safeText(runtime.selectedDriverId, "");
         var queueTrips = trips.filter(function (trip) {
-          return ["requested", "scheduled", "assigned", "delayed", "pending", "new", "queued", "pending_review"].indexOf(safeText(trip.state, "")) >= 0;
+          return ["requested", "scheduled", "assigned", "delayed", "pending", "new", "queued", "pending_review", "awaiting_approval", "pending_assignment", "offered", "searching", "dispatchable", "reassignment_pending"].indexOf(safeText(trip.state, "")) >= 0;
         });
         var activeTrips = trips.filter(function (trip) {
           return ["accepted", "arrived", "onboard", "in_transit", "pickup_enroute", "dropoff_enroute"].indexOf(safeText(trip.state, "")) >= 0;

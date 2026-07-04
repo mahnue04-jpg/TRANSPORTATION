@@ -1012,6 +1012,8 @@ def approve_dispatch_recommendation(
     _commit_or_rollback(db)
     db.refresh(offer)
     db.refresh(assigned_ride)
+    sync_customer_request_from_ride(db, assigned_ride, explicit_status=CustomerRequestStatus.ASSIGNED.value)
+    _commit_or_rollback(db)
     return {
         "ride": assigned_ride,
         "offer": offer,
@@ -1299,6 +1301,8 @@ def auto_assign_request(
     _commit_or_rollback(db)
     db.refresh(offer)
     db.refresh(assigned_ride)
+    sync_customer_request_from_ride(db, assigned_ride, explicit_status=CustomerRequestStatus.ASSIGNED.value)
+    _commit_or_rollback(db)
 
     return {
         "ride": assigned_ride,
@@ -1375,11 +1379,64 @@ def run_intake_dispatch_automation(
                 "recommendation": None,
             }
 
+        recommendation_result = recommend_driver_for_ride(
+            db,
+            ride_id=ride_id,
+            actor_user_id=actor_user_id,
+        )
+        if recommendation_result.get("recommendation"):
+            try:
+                approved_result = approve_dispatch_recommendation(
+                    db,
+                    ride_id=ride_id,
+                    actor_user_id=actor_user_id,
+                    offer_timeout_seconds=offer_timeout_seconds,
+                )
+                if approved_result.get("offer"):
+                    db.refresh(ride)
+                    return {
+                        **approved_result,
+                        "mode": "auto_assigned",
+                        "recommendation": recommendation_result.get("recommendation"),
+                        "candidates": recommendation_result.get("candidates") or [],
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "Intake auto-approval of dispatch recommendation failed for ride_id=%s: %s",
+                    ride_id,
+                    exc,
+                )
+        recommendation_result["mode"] = "recommendation"
+        recommendation_result["offer"] = None
+        return recommendation_result
+
     recommendation_result = recommend_driver_for_ride(
         db,
         ride_id=ride_id,
         actor_user_id=actor_user_id,
     )
+    if recommendation_result.get("recommendation"):
+        try:
+            approved_result = approve_dispatch_recommendation(
+                db,
+                ride_id=ride_id,
+                actor_user_id=actor_user_id,
+                offer_timeout_seconds=offer_timeout_seconds,
+            )
+            if approved_result.get("offer"):
+                db.refresh(ride)
+                return {
+                    **approved_result,
+                    "mode": "auto_assigned",
+                    "recommendation": recommendation_result.get("recommendation"),
+                    "candidates": recommendation_result.get("candidates") or [],
+                }
+        except Exception as exc:
+            logger.warning(
+                "Intake approval of dispatch recommendation failed for ride_id=%s: %s",
+                ride_id,
+                exc,
+            )
     recommendation_result["mode"] = "recommendation"
     recommendation_result["offer"] = None
     return recommendation_result
@@ -1623,11 +1680,21 @@ def get_dispatch_queue(
     organization_id: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
+    active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
+    active_lifecycle_states = [
+        RideStatus.REQUESTED.value,
+        RideStatus.QUEUED.value,
+        RideStatus.ASSIGNED.value,
+        RideStatus.ESCALATED.value,
+    ]
     rides = (
         db.query(HealthISFRide)
         .filter(
             HealthISFRide.organization_id == organization_id,
-            HealthISFRide.status.in_([RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]),
+            (
+                HealthISFRide.status.in_(active_legacy_statuses)
+                | HealthISFRide.lifecycle_state.in_(active_lifecycle_states)
+            ),
         )
         .order_by(HealthISFRide.requested_at.desc(), HealthISFRide.created_at.desc())
         .limit(limit)
@@ -2109,6 +2176,72 @@ def sync_customer_request_from_ride(
     request_obj.updated_at = now()
     db.flush()
     return request_obj
+
+
+def finalize_customer_request_intake_dispatch(
+    db: Session,
+    *,
+    request_obj: HealthISFCustomerRideRequest,
+    actor_user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Align customer-request dispatch status with intake automation output."""
+    ride = get_ride_by_id(db, request_obj.ride_id)
+    if not ride:
+        return {"mode": "unknown", "request": request_obj, "ride": None, "assignment": None}
+
+    assignment = _latest_assignment_for_ride(db, ride.id)
+    assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
+
+    if assignment_state == DispatchAssignmentState.OFFERED.value:
+        _set_customer_request_status(request_obj, CustomerRequestStatus.ASSIGNED.value)
+    elif assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
+        _set_customer_request_status(request_obj, CustomerRequestStatus.APPROVED.value)
+    elif assignment_state in {
+        DispatchAssignmentState.ACCEPTED.value,
+        DispatchAssignmentState.ASSIGNED.value,
+        DispatchAssignmentState.EN_ROUTE_PICKUP.value,
+        DispatchAssignmentState.PICKUP_COMPLETE.value,
+        DispatchAssignmentState.DROPOFF_COMPLETE.value,
+    }:
+        _set_customer_request_status(request_obj, CustomerRequestStatus.ASSIGNED.value)
+    else:
+        sync_customer_request_from_ride(db, ride)
+
+    request_obj.updated_at = now()
+    _commit_or_rollback(db)
+    db.refresh(request_obj)
+    db.refresh(ride)
+
+    mode = "pending"
+    if assignment_state == DispatchAssignmentState.OFFERED.value:
+        mode = "offered"
+    elif assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
+        mode = "awaiting_approval"
+    elif ride.driver_id:
+        mode = "assigned"
+
+    if mode != "pending":
+        _record_dispatch(
+            db,
+            ride_id=ride.id,
+            action="customer_request_intake_synced",
+            acted_by_user_id=actor_user_id,
+            note=f"Customer request synced after intake dispatch ({mode})",
+            request_id=request_obj.id,
+            assignment_id=getattr(assignment, "id", None),
+            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+            transition_reason="intake_dispatch_sync",
+            transition_timestamp=now(),
+            assignment_transition_source="finalize_customer_request_intake_dispatch",
+        )
+        _commit_or_rollback(db)
+
+    return {
+        "mode": mode,
+        "request": request_obj,
+        "ride": ride,
+        "assignment": assignment,
+    }
 
 
 def _ensure_completion_billing_records(db: Session, ride: HealthISFRide) -> None:
@@ -3368,6 +3501,13 @@ def create_customer_ride_request(
     )
     db.add(request_obj)
     _commit_or_rollback(db)
+    db.refresh(request_obj)
+    db.refresh(ride)
+    finalize_customer_request_intake_dispatch(
+        db,
+        request_obj=request_obj,
+        actor_user_id=submitted_by_user_id,
+    )
     db.refresh(request_obj)
     db.refresh(ride)
     return request_obj, ride
