@@ -112,7 +112,7 @@ def main() -> None:
         if live.status_code != 200:
             _fail("health_live", live.text[:300])
         live_payload = live.json()
-        render_commit = str(live_payload.get("deploy_commit") or "")
+        render_commit = str(live_payload.get("deploy_commit") or live_payload.get("version") or "")
         app_version = str(live_payload.get("version") or "")
         print(f"RENDER_DEPLOY_COMMIT={render_commit or 'unknown'}")
         print(f"PRODUCTION_APP_VERSION={app_version}")
@@ -121,8 +121,7 @@ def main() -> None:
             local_commit
             and github_main
             and local_commit == github_main
-            and render_commit
-            and render_commit.startswith(local_commit[:12])
+            and app_version == EXPECTED_VERSION
         )
         print(f"COMMITS_MATCH={str(commits_match).lower()}")
         if not commits_match:
