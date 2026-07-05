@@ -582,7 +582,13 @@ def deployment_sync_seed_users(request: Request):
         raise HTTPException(status_code=503, detail="Deployment sync not configured")
     provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
     if not provided or not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=403, detail="Invalid deployment sync key")
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Invalid deployment sync key. Set Render env AMICOR_DEPLOYMENT_SYNC_KEY to match "
+                "X-Amicor-Deployment-Key, or unset it to fall back to AMICOR_SEED_PASSWORD."
+            ),
+        )
     created = seed_default_users()
     return {
         "status": "ok",
@@ -600,12 +606,25 @@ def deployment_seed_status(db: Session = Depends(get_db)):
     emails = [item["email"] for item in SEED_USERS]
     rows = db.query(UserModel.email).filter(UserModel.email.in_(emails)).all()
     present = sorted({str(row[0]).lower() for row in rows})
+    present_set = set(present)
+    seed_password_env = os.getenv("AMICOR_SEED_PASSWORD", "").strip()
+    sync_key_env = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()
     return {
         "expected_accounts": len(emails),
         "present_accounts": len(present),
         "missing_accounts": [email for email in emails if email not in present],
-        "deployment_sync_configured": bool(
-            os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
+        "deployment_sync_configured": bool(sync_key_env or seed_password_env or SEED_PASSWORD),
+        "pilot_accounts": [
+            {"email": item["email"], "role": item["role"], "present": item["email"].lower() in present_set}
+            for item in SEED_USERS
+        ],
+        "login_note": (
+            "Pilot account passwords are reset to the runtime AMICOR_SEED_PASSWORD on every "
+            "deploy startup and after a successful POST /api/auth/deployment/sync-seed-users call."
+        ),
+        "sync_note": (
+            "Send header X-Amicor-Deployment-Key matching runtime AMICOR_DEPLOYMENT_SYNC_KEY "
+            "(or AMICOR_SEED_PASSWORD when the sync key env var is unset)."
         ),
     }
 
