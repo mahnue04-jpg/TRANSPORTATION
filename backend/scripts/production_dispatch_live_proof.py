@@ -120,8 +120,9 @@ def main() -> None:
         commits_match = bool(
             local_commit
             and github_main
+            and render_commit
             and local_commit == github_main
-            and app_version == EXPECTED_VERSION
+            and render_commit == local_commit
         )
         print(f"COMMITS_MATCH={str(commits_match).lower()}")
         if not commits_match:
@@ -131,7 +132,10 @@ def main() -> None:
             )
 
         if app_version != EXPECTED_VERSION:
-            _fail("app_version_mismatch", f"expected={EXPECTED_VERSION} actual={app_version}")
+            print(
+                f"WARN=app_version_label_mismatch expected={EXPECTED_VERSION} actual={app_version} "
+                "(Render dashboard APP_VERSION may lag render.yaml; deploy_commit is authoritative)"
+            )
 
         rider_auth = _login(client, "rider@amicor.local")
         rider_headers = _headers(rider_auth["access_token"])
