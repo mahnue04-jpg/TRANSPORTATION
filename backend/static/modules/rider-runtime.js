@@ -28,31 +28,43 @@
    * Orchestrates the complete backend integration for a rider request
    */
   async function callBackendCreateRequest(payload) {
-    var config = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-      },
-      body: JSON.stringify(payload)
-    };
-
     try {
       var controller = new AbortController();
       var timeoutId = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
 
-        // Add Bearer token to headers BEFORE fetch
+      var config = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+        credentials: "same-origin"
+      };
+
+      var response;
+      if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+        if (typeof window.AmiCorSession.restore === "function") {
+          window.AmiCorSession.restore();
+        }
+        response = await window.AmiCorSession.authFetch(API_BASE + "/customer-requests", config);
+      } else {
         var authToken = localStorage.getItem("amicor_access_token") || sessionStorage.getItem("amicor_access_token") || "";
+        if (!authToken) {
+          try {
+            var identRaw = localStorage.getItem("amicor_identity");
+            if (identRaw) {
+              var ident = JSON.parse(identRaw);
+              authToken = ident.accessToken || ident.access_token || "";
+            }
+          } catch (_) {}
+        }
         if (authToken) {
           config.headers["Authorization"] = "Bearer " + authToken;
         }
-
-      var response = await fetch(API_BASE + "/customer-requests", {
-        method: config.method,
-        headers: config.headers,
-        body: config.body,
-        signal: controller.signal
-      });
+        response = await fetch(API_BASE + "/customer-requests", config);
+      }
       
       clearTimeout(timeoutId);
 
@@ -189,11 +201,6 @@
       pattern: payload.recurring_pattern,
       timestamp: new Date().toISOString()
     });
-      // Add Bearer token to headers
-      var authToken = localStorage.getItem("amicor_access_token") || sessionStorage.getItem("amicor_access_token") || "";
-      if (authToken) {
-        config.headers["Authorization"] = "Bearer " + authToken;
-      }
 
     // STAGE 5: UI Refresh
     if (lifecycle()) {
@@ -202,6 +209,11 @@
       } catch (_) {}
     }
 
+    emitUpdate();
+    return { ok: true, trip: apiResult.data };
+  }
+
+  /**
    * STAGE 1: User action handler for "Cancel Ride"
    * Implements full 5-stage workflow for ride cancellation
    */

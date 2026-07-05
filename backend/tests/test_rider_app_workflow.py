@@ -69,6 +69,8 @@ def _ensure_available_driver(organization_id: str) -> str:
             status=DriverStatus.AVAILABLE,
             availability_state="available",
             is_active=True,
+            is_online=True,
+            auth_state="active",
             rating=4.9,
         )
         db.add(driver)

@@ -337,6 +337,7 @@
       workspace: null,
       activeOffer: null
     },
+    healthIsfAiSnapshot: null,
     assistant: {
       runtimeState: "monitoring",
       isResponding: false,
@@ -3912,7 +3913,26 @@
         return;
       }
       var liveQueue = [];
-      if (safeText(activeRide.id, "")) {
+      var offerRideId = safeText(activeOffer.ride_id, "");
+      var offerState = safeText(activeOffer.assignment_state || "offered", "offered").toLowerCase();
+      if (offerRideId && (offerState === "offered" || offerState === "assigned" || offerState === "awaiting_approval")) {
+        liveQueue.push({
+          tripId: offerRideId,
+          patient: safeText(activeOffer.passenger_name, "Rider"),
+          riderPhone: safeText(activeOffer.passenger_phone || activeOffer.rider_phone, ""),
+          pickup: safeText(activeOffer.pickup_address, "Pickup pending"),
+          dropoff: safeText(activeOffer.dropoff_address, "Dropoff pending"),
+          etaMin: 0,
+          priority: "standard",
+          fare: 0,
+          status: normalizeDriverTripStatus(activeOffer.assignment_state || "offered"),
+          type: "transport",
+          scheduledWindow: safeText(activeOffer.offer_expires_at, "Offer pending"),
+          coordinationStatus: safeText(activeOffer.assignment_state, "assignment_offered"),
+          assignedDriver: workflowDriverId,
+          offerId: safeText(activeOffer.id || activeOffer.offer_id, "")
+        });
+      } else if (safeText(activeRide.id, "")) {
         liveQueue.push({
           tripId: safeText(activeRide.id, "TRIP"),
           patient: safeText(activeRide.passenger_name, "Rider"),
@@ -3945,23 +3965,6 @@
           coordinationStatus: safeText(activeAssignment.assignment_state, "assignment_issued"),
           assignedDriver: workflowDriverId,
           offerId: safeText(activeAssignment.offer_id, "")
-        });
-      } else if (safeText(activeOffer.ride_id, "")) {
-        liveQueue.push({
-          tripId: safeText(activeOffer.ride_id, "TRIP"),
-          patient: safeText(activeOffer.passenger_name, "Rider"),
-          riderPhone: safeText(activeOffer.passenger_phone || activeOffer.rider_phone, ""),
-          pickup: safeText(activeOffer.pickup_address, "Pickup pending"),
-          dropoff: safeText(activeOffer.dropoff_address, "Dropoff pending"),
-          etaMin: 0,
-          priority: "standard",
-          fare: 0,
-          status: normalizeDriverTripStatus(activeOffer.assignment_state || "offered"),
-          type: "transport",
-          scheduledWindow: safeText(activeOffer.offer_expires_at, "Offer pending"),
-          coordinationStatus: safeText(activeOffer.assignment_state, "assignment_offered"),
-          assignedDriver: workflowDriverId,
-          offerId: safeText(activeOffer.id || activeOffer.offer_id, "")
         });
       }
 
@@ -3996,11 +3999,6 @@
         ],
         lastStatusUpdate: safeText((safeObject(state.driverApp)).lastStatusUpdate, "Driver workspace synchronized")
       };
-      return;
-    }
-
-    var existing = safeObject(state.driverApp);
-    if (existing.seedAssignedRide === safeText(slice.assignedRide, "") && Array.isArray(existing.tripQueue) && existing.tripQueue.length > 0) {
       return;
     }
 
@@ -5053,14 +5051,25 @@
         var liveDrivers = Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : [];
         var liveActivityFeed = Array.isArray(liveWorkflow.activityFeed) ? liveWorkflow.activityFeed : [];
 
+        function sanitizeDispatchState(raw) {
+          var stateText = safeText(raw, "requested").toLowerCase();
+          if (stateText.indexOf("ridestatus.") === 0) {
+            stateText = stateText.slice("ridestatus.".length);
+          }
+          if (stateText.indexOf("driverstatus.") === 0) {
+            stateText = stateText.slice("driverstatus.".length);
+          }
+          return stateText;
+        }
+
         function normalizeTrip(item, fallbackState) {
           var normalized = safeObject(item);
           var tripId = safeText(normalized.trip_id || normalized.ride_id || normalized.id, "");
-          var stateValue = safeText(
-            normalized.trip_state || normalized.state || normalized.workflow_state
-            || normalized.assignment_state || normalized.ride_status || fallbackState || "requested",
-            "requested"
-          ).toLowerCase();
+          var stateValue = sanitizeDispatchState(
+            normalized.assignment_state
+            || normalized.trip_state || normalized.state || normalized.workflow_state
+            || normalized.ride_status || fallbackState || "requested"
+          );
           return {
             id: tripId,
             state: stateValue,
@@ -5071,54 +5080,40 @@
             routeStatus: safeText(normalized.route_status || normalized.scheduling_status || normalized.status, "pending").toLowerCase(),
             requestedAt: safeText(normalized.requested_at || normalized.created_at || normalized.updated_at, ""),
             slaTargetMin: safeNumber(normalized.sla_target_minutes || normalized.sla_minutes || normalized.sla_target_min, 20),
-            assignedDriverName: safeText(normalized.assigned_driver_name || normalized.assigned_driver_id || normalized.driver_name || normalized.driver_id, "unassigned"),
+            assignedDriverName: safeText(normalized.assigned_driver_name || normalized.recommended_driver_name || normalized.assigned_driver_id || normalized.driver_name || normalized.driver_id, "unassigned"),
             etaMin: safeNumber(normalized.eta_minutes || normalized.estimated_arrival_minutes || normalized.eta_min, 0),
             completedAt: safeText(normalized.completed_at || normalized.closed_at || "", ""),
             appointmentWindow: safeText(normalized.appointment_window || normalized.scheduled_window || normalized.window, "window pending"),
-            coordinationNote: safeText(normalized.coordination_note || normalized.dispatcher_note || normalized.notes, "coordination pending")
+            coordinationNote: safeText(normalized.coordination_note || normalized.dispatcher_message || normalized.dispatcher_note || normalized.notes, "coordination pending")
           };
         }
 
-        var workflowTrips = tripEntities.map(function (item) {
-          return normalizeTrip(item, "requested");
-        }).filter(function (trip) {
-          return Boolean(safeText(trip.id, ""));
-        });
-
-        if (workflowTrips.length === 0 && (liveQueue.length > 0 || liveAssignments.length > 0)) {
-          workflowTrips = liveQueue.map(function (item) {
-            return normalizeTrip(item, "requested");
-          }).concat(liveAssignments.map(function (item) {
-            return normalizeTrip(item, "assigned");
-          }));
-        }
-
-        if (workflowTrips.length < 8 && (liveQueue.length > 0 || liveAssignments.length > 0)) {
-          var supplementalTrips = liveQueue.map(function (item) {
-            return normalizeTrip(item, "requested");
-          }).concat(liveAssignments.map(function (item) {
-            return normalizeTrip(item, "assigned");
-          }));
+        function buildDispatchTripsMerged() {
+          var mergedSources = []
+            .concat(liveQueue)
+            .concat(liveAssignments)
+            .concat(queueModule)
+            .concat(tripEntities.filter(function (item) {
+              return !item.driver_id && ["requested", "pending_review", "scheduled", "assigned", "pending", "queued"].indexOf(safeText(item.trip_state || item.state, "").toLowerCase()) >= 0;
+            }));
           var seenTripIds = {};
-          workflowTrips.forEach(function (trip) {
-            seenTripIds[safeText(trip.id, "")] = true;
-          });
-          supplementalTrips.forEach(function (trip) {
+          var deduped = [];
+          mergedSources.forEach(function (item) {
+            var trip = normalizeTrip(item, "requested");
             var tripId = safeText(trip.id, "");
-            if (tripId && !seenTripIds[tripId]) {
-              workflowTrips.push(trip);
-              seenTripIds[tripId] = true;
+            if (!tripId || seenTripIds[tripId]) {
+              return;
             }
+            seenTripIds[tripId] = true;
+            deduped.push(trip);
           });
+          deduped.sort(function (a, b) {
+            return operationalTimeValue(safeText(b.requestedAt, "")) - operationalTimeValue(safeText(a.requestedAt, ""));
+          });
+          return deduped;
         }
 
-        if (workflowTrips.length === 0) {
-          workflowTrips = queueModule.map(function (item) {
-            return normalizeTrip(item, "requested");
-          }).concat(activeRouteModule.map(function (item) {
-            return normalizeTrip(item, "in_progress");
-          }));
-        }
+        var workflowTrips = buildDispatchTripsMerged();
 
         var trips = workflowTrips.length > 0
           ? workflowTrips
@@ -5156,7 +5151,7 @@
           var pA = priorityOrder[safeText(a.priority, "standard")] || 5;
           var pB = priorityOrder[safeText(b.priority, "standard")] || 5;
           if (pA !== pB) return pA - pB;
-          return operationalTimeValue(safeText(a.requestedAt, "")) - operationalTimeValue(safeText(b.requestedAt, ""));
+          return operationalTimeValue(safeText(b.requestedAt, "")) - operationalTimeValue(safeText(a.requestedAt, ""));
         });
         activeTrips.sort(function (a, b) {
           return safeNumber(a.etaMin, 0) - safeNumber(b.etaMin, 0);
@@ -5897,6 +5892,37 @@
       }).join("") + '</ul>' +
       '<p class="muted">Recommendations are advisory only. This panel cannot dispatch, execute, or alter operational state.</p>',
       "assistant-recommendations"
+    );
+  }
+
+  function renderLiveDispatchAssistantPanel() {
+    var snapshot = safeObject(state.healthIsfAiSnapshot);
+    var liveDispatch = safeObject(snapshot.live_dispatch);
+    var focused = safeObject(liveDispatch.focused_ride);
+    var queueIds = Array.isArray(liveDispatch.queue_ride_ids) ? liveDispatch.queue_ride_ids : [];
+    var dispatchQueue = Array.isArray((safeObject(state.liveWorkflow)).dispatchQueue) ? state.liveWorkflow.dispatchQueue : [];
+    var newestRideId = safeText(focused.ride_id, queueIds.length > 0 ? safeText(queueIds[0], "") : (dispatchQueue[0] ? safeText(dispatchQueue[0].ride_id, "") : ""));
+    var queueHtml = dispatchQueue.slice(0, 8).map(function (item) {
+      var rideId = safeText(item.ride_id, "");
+      var selected = rideId && rideId === newestRideId ? " badge-good" : " badge-soft";
+      return '<li><strong>' + escapeHtml(safeText(item.passenger_name, "Passenger")) + '</strong>'
+        + ' <span class="badge' + selected + '">' + escapeHtml(safeText(item.assignment_state, "queued")) + '</span>'
+        + '<br><span class="muted">Ride ' + escapeHtml(rideId) + '</span></li>';
+    }).join("");
+    if (!queueHtml) {
+      queueHtml = '<li class="muted">No live dispatch queue rows available. Refresh dispatch workspace.</li>';
+    }
+    return renderPanelBlock(
+      "Live Dispatch Assignment Queue",
+      "Same authoritative dispatch queue used by the dashboard assignment board.",
+      '<div class="grid-3">' +
+        renderMetric("Queue Depth", String(safeNumber(liveDispatch.queue_count, dispatchQueue.length))) +
+        renderMetric("Focused Ride", newestRideId ? newestRideId.slice(0, 8) + "…" : "none") +
+        renderMetric("Assignment State", escapeHtml(safeText(focused.assignment_state, "pending"))) +
+      '</div>' +
+      (newestRideId ? '<p class="muted">Focused ride ' + escapeHtml(newestRideId) + (focused.driver_name ? " · driver " + escapeHtml(safeText(focused.driver_name, "")) : "") + '</p>' : "") +
+      '<ul class="list">' + queueHtml + '</ul>',
+      "assistant-live-dispatch"
     );
   }
 
@@ -7035,6 +7061,8 @@
         '</div>' +
       '</section>',
 
+      renderLiveDispatchAssistantPanel(),
+
       '<section class="panel assistant-workspace-head">' +
         '<div class="assistant-head-row">' +
           '<div><h3>Durable Governance and Operational Foundation</h3><p class="section-subtitle">User-confirmed intents now persist signed governance proofs and safe operational action records with replay protection.</p></div>' +
@@ -8167,6 +8195,16 @@
 
     var driverCandidates = [];
     var roleView = safeText(state.role, "").toLowerCase();
+    var liveDispatchQueue = Array.isArray(liveWorkflow.dispatchQueue) ? liveWorkflow.dispatchQueue : [];
+    var offeredAssignments = activeAssignments.filter(function (item) {
+      return safeText(item.assignment_state, "").toLowerCase() === "offered";
+    });
+    offeredAssignments.forEach(function (item) {
+      pushDriverCandidate(driverCandidates, safeText(item.driver_id, ""));
+    });
+    liveDispatchQueue.forEach(function (item) {
+      pushDriverCandidate(driverCandidates, safeText(item.offered_driver_id || item.recommended_driver_id, ""));
+    });
     pushDriverCandidate(driverCandidates, existingDriverId);
     pushDriverCandidate(driverCandidates, safeText((safeObject(state.driverApp)).currentDriverId, ""));
     if (roleView === "driver") {
@@ -8175,7 +8213,7 @@
         var canonical = (Array.isArray(driverRows) ? driverRows : []).find(function (row) {
           return safeText(row.name, "").toLowerCase() === "james smith";
         });
-        if (canonical) {
+        if (canonical && offeredAssignments.length === 0) {
           pushDriverCandidate(driverCandidates, safeText(canonical.id, ""));
         }
       } catch (_) {}
@@ -9206,6 +9244,18 @@
             } catch (_) {
               state.fetchWarnings.push("driver_workspace_unavailable");
             }
+          }
+          try {
+            var focusRideId = "";
+            if (Array.isArray(liveWorkflow.dispatchQueue) && liveWorkflow.dispatchQueue.length > 0) {
+              focusRideId = safeText(liveWorkflow.dispatchQueue[0].ride_id, "");
+            }
+            var aiSnapshotUrl = "/api/health-isf/ai-dispatch/snapshot?publish=false"
+              + (focusRideId ? "&ride_id=" + encodeURIComponent(focusRideId) : "");
+            state.healthIsfAiSnapshot = await fetchJson(aiSnapshotUrl, {}, token);
+          } catch (_) {
+            state.healthIsfAiSnapshot = null;
+            state.fetchWarnings.push("ai_dispatch_snapshot_unavailable");
           }
         } catch (_) {
           state.fetchWarnings.push("live_workflow_feed_unavailable");

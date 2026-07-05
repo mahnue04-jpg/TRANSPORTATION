@@ -85,6 +85,7 @@
     driverRuntimeStatus: null,
     driverRuntimeToken: null,
     driverIncomingOffer: null,
+    driverActiveOfferPayload: null,
     driverLiveWorkspace: null,
     selectedRideId: null,
     selectedRideHistory: [],
@@ -5259,21 +5260,26 @@
     }
 
     if (els.dispatchIntelQueue) {
-      const queueRows = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+      const queueRows = (Array.isArray(state.dispatchQueue) ? state.dispatchQueue : []).slice().sort(function (a, b) {
+        const aTime = Date.parse(String((a && a.requested_at) || '')) || 0;
+        const bTime = Date.parse(String((b && b.requested_at) || '')) || 0;
+        return bTime - aTime;
+      });
       const searching = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'searching'; }).length;
       const offered = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'offered'; }).length;
       const awaitingApproval = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'awaiting_approval'; }).length;
       const reassignment = queueRows.filter(function (item) { return String(item.assignment_state || '').toLowerCase() === 'reassignment_pending'; }).length;
       const listHtml = queueRows.length
-        ? '<div class="health-stack-list">' + queueRows.slice(0, 8).map(function (item) {
+        ? '<div class="health-stack-list">' + queueRows.slice(0, 25).map(function (item) {
             const aging = item.requested_at ? formatRelativeTime(item.requested_at) : 'n/a';
             const dispatcherMessage = String(item.dispatcher_message || item.recommendation || '');
             const recommendedLabel = item.recommended_driver_name
               ? String(item.recommended_driver_name)
               : (item.offered_driver_id ? String(item.offered_driver_id).slice(0, 8) : 'none');
-            return '<article class="health-stack-item">'
+            return '<article class="health-stack-item" data-dispatch-queue-ride-id="' + escapeHtml(String(item.ride_id || '')) + '">'
               + '<div class="health-stack-title-row"><strong>' + escapeHtml(item.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(item.assignment_state || 'queued') + '">' + escapeHtml(item.assignment_state || 'queued') + '</span></div>'
-              + '<p>Ride ' + escapeHtml(String(item.ride_id || '').slice(0, 8)) + ' · attempt ' + escapeHtml(String(item.attempt_index || 0)) + ' · age ' + escapeHtml(aging) + '</p>'
+              + '<p>Ride ' + escapeHtml(String(item.ride_id || '')) + ' · attempt ' + escapeHtml(String(item.attempt_index || 0)) + ' · age ' + escapeHtml(aging) + '</p>'
+              + '<small>Pickup: ' + escapeHtml(item.pickup_address || '-') + ' · Dropoff: ' + escapeHtml(item.dropoff_address || '-') + '</small>'
               + '<small>Recommended driver: ' + escapeHtml(recommendedLabel) + '</small>'
               + (dispatcherMessage ? '<div class="health-summary">' + escapeHtml(dispatcherMessage) + '</div>' : '')
               + '</article>';
@@ -6131,11 +6137,21 @@
     if (state.selectedRideId) {
       return String(state.selectedRideId);
     }
-    // Only fall back to queue scanning if no workflow is active
+    const queue = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+    if (queue.length > 0) {
+      const sorted = queue.slice().sort(function (a, b) {
+        const aTime = Date.parse(String((a && a.requested_at) || '')) || 0;
+        const bTime = Date.parse(String((b && b.requested_at) || '')) || 0;
+        return bTime - aTime;
+      });
+      const rideId = String((sorted[0] && sorted[0].ride_id) || '');
+      if (rideId) {
+        return rideId;
+      }
+    }
     const pending = (state.rides || []).find(function (ride) {
       const status = String((ride && ride.status) || '').toLowerCase();
-      // Do not auto-select rides that are in active driver workflow stages
-      return status === 'pending';
+      return status === 'pending' || status === 'queued' || status === 'requested';
     });
     return pending ? String(pending.id) : '';
   }
@@ -6157,6 +6173,22 @@
     var existing = String(state.selectedRideId || '');
     if (existing && byId[existing]) {
       return existing;
+    }
+
+    var dispatchQueue = Array.isArray(state.dispatchQueue) ? state.dispatchQueue : [];
+    if (dispatchQueue.length > 0) {
+      var sortedQueue = dispatchQueue.slice().sort(function (a, b) {
+        var aTime = Date.parse(String((a && a.requested_at) || '')) || 0;
+        var bTime = Date.parse(String((b && b.requested_at) || '')) || 0;
+        return bTime - aTime;
+      });
+      var queueRideId = String((sortedQueue[0] && sortedQueue[0].ride_id) || '');
+      if (queueRideId && byId[queueRideId]) {
+        return queueRideId;
+      }
+      if (queueRideId) {
+        return queueRideId;
+      }
     }
 
     var liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
@@ -6225,6 +6257,19 @@
     }).slice(0, 20);
   }
 
+  async function fetchDriverActiveOffer(driverId) {
+    const resolvedId = String(driverId || state.selectedDriverId || '').trim();
+    if (!resolvedId) {
+      state.driverActiveOfferPayload = null;
+      return null;
+    }
+    const payload = await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(resolvedId) + '/active-offer', {
+      actionName: 'driver_active_offer',
+    }).catch(function () { return null; });
+    state.driverActiveOfferPayload = payload && typeof payload === 'object' ? payload : null;
+    return state.driverActiveOfferPayload;
+  }
+
   function hydrateDriverIncomingOffer() {
     const selectedDriverId = String(state.selectedDriverId || '');
     if (!selectedDriverId) {
@@ -6232,9 +6277,43 @@
       return;
     }
     const rows = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
-    state.driverIncomingOffer = rows.find(function (item) {
+    let offer = rows.find(function (item) {
       return String(item.driver_id || '') === selectedDriverId && String(item.assignment_state || '').toLowerCase() === 'offered';
     }) || null;
+    if (!offer) {
+      const liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
+      const activeAssignment = liveWorkspace && liveWorkspace.active_assignment ? liveWorkspace.active_assignment : null;
+      if (
+        activeAssignment
+        && String(activeAssignment.driver_id || '') === selectedDriverId
+        && String(activeAssignment.assignment_state || '').toLowerCase() === 'offered'
+      ) {
+        offer = {
+          offer_id: activeAssignment.offer_id || activeAssignment.id,
+          ride_id: activeAssignment.ride_id,
+          driver_id: activeAssignment.driver_id,
+          assignment_state: activeAssignment.assignment_state,
+          attempt_index: activeAssignment.attempt_index,
+          score: activeAssignment.score,
+          offer_expires_at: activeAssignment.offer_expires_at,
+        };
+      }
+    }
+    if (!offer && state.driverActiveOfferPayload && state.driverActiveOfferPayload.offer) {
+      const active = state.driverActiveOfferPayload.offer;
+      if (String(active.driver_id || state.driverActiveOfferPayload.driver_id || '') === selectedDriverId) {
+        offer = {
+          offer_id: active.offer_id || active.id,
+          ride_id: active.ride_id,
+          driver_id: active.driver_id || state.driverActiveOfferPayload.driver_id,
+          assignment_state: active.assignment_state || 'offered',
+          attempt_index: active.attempt_index,
+          score: active.score,
+          offer_expires_at: active.offer_expires_at,
+        };
+      }
+    }
+    state.driverIncomingOffer = offer;
   }
 
   async function refreshDispatchIntelligence() {
@@ -6600,7 +6679,7 @@
         const expires = offer.offer_expires_at ? formatRelativeTime(offer.offer_expires_at) : 'n/a';
         els.driverIncomingOffer.innerHTML = '<div class="enterprise-inline-grid">'
           + MetricCard('Offer State', escapeHtml(offer.assignment_state || 'offered'), 'Current driver offer lifecycle state', 'warn')
-          + MetricCard('Ride', escapeHtml(String(offer.ride_id || '').slice(0, 8)), 'Incoming ride identifier', 'ok')
+          + MetricCard('Ride', escapeHtml(String(offer.ride_id || '')), 'Incoming ride identifier', 'ok')
           + MetricCard('Attempt', formatNumber(offer.attempt_index || 0), 'Deterministic offer attempt index', 'ok')
           + MetricCard('Score', escapeHtml(String(offer.score != null ? Number(offer.score).toFixed(3) : '-')), 'Dispatch scoring model output', 'ok')
           + MetricCard('Countdown', escapeHtml(expires), 'Offer expiry countdown', 'warn')
@@ -7804,7 +7883,8 @@
         || effectiveRole === "customer";
       const wantsAdmin = activeRoute === "admin";
       const wantsBilling = activeRoute === "billing";
-      const wantsDashboardIntelligence = (activeRoute === "dashboard" || activeRoute === "analytics") && wantsOperationalRefresh;
+      const wantsDispatchBoard = wantsStaffOps || activeRoute === "dispatch" || (wantsOperationalRefresh && wantsStaffOps);
+      const wantsDashboardIntelligence = (activeRoute === "dashboard" || activeRoute === "analytics" || activeRoute === "dispatch") && wantsOperationalRefresh;
       const wantsOnboarding = activeRoute === "onboarding";
       const wantsGrant = activeRoute === "grant";
       const wantsProviderQueue = activeRoute === "providers";
@@ -7817,8 +7897,8 @@
       (wantsStaffOps || wantsProviderOps) ? fetchJson("/api/health-isf/providers", { actionName: "refresh_providers" }).catch(() => []) : Promise.resolve([]),
       wantsCustomer ? fetchJson("/api/health-isf/customer-requests", { actionName: "refresh_customer_requests" }).catch(() => []) : Promise.resolve([]),
       (wantsCustomer || activeRoute === "rides") ? fetchJson("/api/health-isf/customer-requests/metrics", { actionName: "refresh_customer_queue_metrics" }).catch(() => null) : Promise.resolve(null),
-      wantsStaffOps ? fetchJson("/api/health-isf/dispatch/queue", { actionName: "refresh_dispatch_queue" }).catch(() => []) : Promise.resolve([]),
-      wantsStaffOps ? fetchJson("/api/health-isf/dispatch/active-assignments", { actionName: "refresh_dispatch_active_assignments" }).catch(() => []) : Promise.resolve([]),
+      (wantsDispatchBoard || wantsDriverOps) ? fetchJson("/api/health-isf/dispatch/queue", { actionName: "refresh_dispatch_queue" }).catch(() => []) : Promise.resolve([]),
+      (wantsDispatchBoard || wantsDriverOps) ? fetchJson("/api/health-isf/dispatch/active-assignments", { actionName: "refresh_dispatch_active_assignments" }).catch(() => []) : Promise.resolve([]),
       (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers/active/metrics", { actionName: "refresh_driver_pool_metrics" }).catch(() => null) : Promise.resolve(null),
       wantsOnboarding ? fetchJson("/api/health-isf/driver-applications", { actionName: "refresh_driver_applications" }).catch(() => []) : Promise.resolve([]),
       wantsOnboarding ? fetchJson("/api/health-isf/recurring/templates", { actionName: "refresh_recurring_templates" }).catch(() => []) : Promise.resolve([]),
@@ -7853,7 +7933,11 @@
 
       if (wantsDashboardIntelligence) {
         try {
-          aiSnapshot = await fetchJson("/api/health-isf/ai-dispatch/snapshot?publish=false", { actionName: "refresh_ai_snapshot" });
+          const focusRideId = String(state.selectedRideId || '').trim()
+            || (Array.isArray(dispatchQueue) && dispatchQueue[0] && dispatchQueue[0].ride_id ? String(dispatchQueue[0].ride_id) : '');
+          const aiSnapshotUrl = '/api/health-isf/ai-dispatch/snapshot?publish=false'
+            + (focusRideId ? '&ride_id=' + encodeURIComponent(focusRideId) : '');
+          aiSnapshot = await fetchJson(aiSnapshotUrl, { actionName: 'refresh_ai_snapshot' });
         } catch (error) {
           aiSnapshot = null;
           aiSnapshotError = error && error.message ? error.message : "snapshot fetch failed";
@@ -7955,16 +8039,19 @@
       }
 
       ensureDriverWorkspaceSelection();
-      if (state.selectedDriverId) {
+      if (state.selectedDriverId || wantsDriverOps) {
+        const driverIdForOffer = String(state.selectedDriverId || '').trim();
         if (state.driverRuntimeToken) {
           await refreshDriverRuntimeStatus().catch(function () { return null; });
         }
         await Promise.all([
-          fetchDriverAssignedRides(state.selectedDriverId).catch(function () { return []; }),
+          fetchDriverAssignedRides(driverIdForOffer).catch(function () { return []; }),
           refreshDriverLiveWorkspace().catch(function () { return null; }),
+          fetchDriverActiveOffer(driverIdForOffer).catch(function () { return null; }),
         ]);
       } else {
         state.driverLiveWorkspace = null;
+        state.driverActiveOfferPayload = null;
       }
       state.operationalMemorySnapshot = getOperationalMemorySnapshot();
       state.operationalMemoryReferences = state.operationalMemorySnapshot ? [

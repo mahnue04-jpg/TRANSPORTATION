@@ -500,7 +500,10 @@ class DispatchRecommendationResponse(BaseModel):
 
 class DispatchQueueItemResponse(BaseModel):
     ride_id: str
+    organization_id: Optional[str] = None
     passenger_name: str
+    pickup_address: Optional[str] = None
+    dropoff_address: Optional[str] = None
     requested_at: datetime
     ride_status: str
     assignment_state: str
@@ -1438,3 +1441,4 @@ class AutonomousOperationsSnapshotResponse(BaseModel):
     operational_correlations: Optional[dict[str, Any]] = None
     operational_anomaly_surface: Optional[dict[str, Any]] = None
     backend_state_verification: Optional[dict[str, Any]] = None
+    live_dispatch: Optional[dict[str, Any]] = None

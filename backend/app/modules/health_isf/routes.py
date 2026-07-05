@@ -9147,12 +9147,16 @@ async def dispatch_reject_offer(
 @router.get("/dispatch/queue", response_model=list[DispatchQueueItemResponse])
 def dispatch_queue(
     organization_id: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     effective_org_id = enforce_tenant_scope(user, organization_id)
     service.expire_stale_dispatch_offers(db, organization_id=effective_org_id)
-    return [DispatchQueueItemResponse(**row) for row in service.get_dispatch_queue(db, organization_id=effective_org_id)]
+    return [
+        DispatchQueueItemResponse(**row)
+        for row in service.get_dispatch_queue(db, organization_id=effective_org_id, limit=limit)
+    ]
 
 
 @router.get("/dispatch/active-assignments", response_model=list[DispatchActiveAssignmentItemResponse])

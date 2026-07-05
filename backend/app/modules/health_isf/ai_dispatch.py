@@ -161,6 +161,12 @@ class AIDispatchOrchestrationService:
             ride_id=ride_id,
         )
 
+        live_dispatch = cls.build_live_dispatch_context(
+            db,
+            organization_id=organization_id,
+            ride_id=ride_id,
+        )
+
         logger.info("Reached memory snapshot persistence step")
         memory_snapshot = cls.persist_memory_snapshot(
             db,
@@ -224,6 +230,49 @@ class AIDispatchOrchestrationService:
             "operational_correlations": operational_correlations,
             "operational_anomaly_surface": operational_anomaly_surface,
             "backend_state_verification": backend_state_verification,
+            "live_dispatch": live_dispatch,
+        }
+
+    @classmethod
+    def build_live_dispatch_context(
+        cls,
+        db: Session,
+        *,
+        organization_id: str,
+        ride_id: str | None = None,
+    ) -> dict[str, Any]:
+        queue = service.get_dispatch_queue(db, organization_id=organization_id, limit=50)
+        focused_ride: dict[str, Any] | None = None
+        target_ride_id = str(ride_id or "").strip()
+        if not target_ride_id and queue:
+            target_ride_id = str(queue[0].get("ride_id") or "")
+
+        if target_ride_id:
+            ride = service.get_ride_by_id(db, target_ride_id)
+            if ride and ride.organization_id == organization_id:
+                queue_row = next((row for row in queue if str(row.get("ride_id")) == target_ride_id), None)
+                driver = service.get_driver_by_id(db, ride.driver_id) if ride.driver_id else None
+                active_assignment = service._active_assignment_for_ride(db, ride.id)
+                focused_ride = {
+                    "ride_id": ride.id,
+                    "passenger_name": ride.passenger_name,
+                    "pickup_address": ride.pickup_address,
+                    "dropoff_address": ride.dropoff_address,
+                    "ride_status": service._normalize_status_token(ride.lifecycle_state or ride.status),
+                    "assignment_state": (
+                        str(queue_row.get("assignment_state"))
+                        if queue_row
+                        else (str(active_assignment.assignment_state) if active_assignment else None)
+                    ),
+                    "driver_id": str(ride.driver_id) if ride.driver_id else None,
+                    "driver_name": driver.name if driver else None,
+                }
+
+        return {
+            "queue_count": len(queue),
+            "queue_ride_ids": [str(row.get("ride_id") or "") for row in queue[:25]],
+            "queue": queue[:25],
+            "focused_ride": focused_ride,
         }
 
     @classmethod
