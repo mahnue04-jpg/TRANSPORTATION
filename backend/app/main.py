@@ -534,6 +534,8 @@ def health_live():
         "environment": RUNTIME_ENVIRONMENT,
         "frontend_build_version": FRONTEND_BUILD_VERSION,
         "hydration_version": HYDRATION_VERSION,
+        "deploy_commit": os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT"),
+        "deploy_branch": os.environ.get("RENDER_GIT_BRANCH") or os.environ.get("GIT_BRANCH"),
     }
 
 
@@ -542,6 +544,8 @@ def runtime_topology(request: Request) -> dict[str, str]:
     """Expose canonical runtime topology for frontend diagnostics and verification."""
     topology = dict(build_runtime_contract(request=request))
     topology["app_version"] = os.environ.get("APP_VERSION", "dev")
+    topology["deploy_commit"] = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or ""
+    topology["deploy_branch"] = os.environ.get("RENDER_GIT_BRANCH") or os.environ.get("GIT_BRANCH") or ""
     return topology
 
 
