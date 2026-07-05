@@ -6343,11 +6343,9 @@
         body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
       });
     } else {
-      await fetchJson('/api/health-isf/dispatch/auto-assign', {
+      await fetchJson('/api/health-isf/dispatch/assign-newest-queue?offer_timeout_seconds=90', {
         method: 'POST',
-        actionName: 'dispatch_auto_assign',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ride_id: rideId, offer_timeout_seconds: 90 }),
+        actionName: 'dispatch_assign_newest_queue',
       });
     }
     await Promise.all([

@@ -5699,10 +5699,19 @@ def get_driver_active_offer(
         organization_id=effective_org_id,
         driver_id=driver_id,
     )
+    offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None
+    if offer and offer_payload:
+        ride = service.get_ride_by_id(db, offer.ride_id)
+        if ride:
+            offer_payload["passenger_name"] = ride.passenger_name
+            offer_payload["passenger_phone"] = ride.passenger_phone
+            offer_payload["pickup_address"] = ride.pickup_address
+            offer_payload["dropoff_address"] = ride.dropoff_address
+            offer_payload["ride_status"] = service._normalize_status_token(ride.lifecycle_state or ride.status)
     return {
         "organization_id": effective_org_id,
         "driver_id": driver_id,
-        "offer": _serialize_dispatch_offer(offer) if offer else None,
+        "offer": offer_payload,
     }
 
 
@@ -8741,6 +8750,77 @@ async def dispatch_auto_assign(
             ride_id=ride.id,
             assignment_state=assignment_state,
             selected_driver_id=selected_driver_id,
+            selected_score=selected_score,
+            offer=_serialize_dispatch_offer(offer) if offer else None,
+            candidate_count=len(result.get("candidates") or []),
+            candidate_scores=list(result.get("candidate_snapshot") or result.get("candidates") or []),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        ConcurrentAssignmentService.release_assignment_lock(db, ride.id)
+
+
+@router.post("/dispatch/assign-newest-queue", response_model=DispatchAutoAssignResponse)
+async def dispatch_assign_newest_queue(
+    offer_timeout_seconds: int = Query(90, ge=10, le=600),
+    request: Request = cast(Request, None),
+    _user=Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Assign the newest unassigned dispatch-queue ride to the best eligible driver."""
+    effective_org_id = enforce_tenant_scope(user, user.organization_id)
+    request_id = _resolve_request_id(request)
+    resolved = service.get_newest_unassigned_queue_ride(db, organization_id=effective_org_id)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="No assignable rides in dispatch queue")
+    ride, _queue_row = resolved
+
+    if ConcurrentAssignmentService.has_assignment_lock(db, ride.id):
+        raise HTTPException(status_code=409, detail="Ride is currently undergoing assignment mutation")
+    lock = ConcurrentAssignmentService.acquire_assignment_lock(db, ride.id, _user.id, 30)
+    if not lock:
+        raise HTTPException(status_code=409, detail="Could not acquire assignment lock")
+
+    try:
+        result = service.assign_newest_queue_ride(
+            db,
+            organization_id=effective_org_id,
+            actor_user_id=_user.id,
+            offer_timeout_seconds=offer_timeout_seconds,
+        )
+        offer = result.get("offer")
+        selected_driver = result.get("selected_driver")
+        selected_driver_id = str(getattr(selected_driver, "id", None) or getattr(offer, "driver_id", None) or "")
+        selected_score = float(getattr(offer, "score", None)) if offer and offer.score is not None else None
+        assignment_state = str(getattr(offer, "assignment_state", None) or "pending_assignment")
+        if offer:
+            details = {
+                "ride_id": ride.id,
+                "offer_id": offer.id,
+                "driver_id": offer.driver_id,
+                "offer_expires_at": offer.offer_expires_at.isoformat() if offer.offer_expires_at else None,
+                "request_id": request_id,
+            }
+            await _emit_dispatch_lifecycle_event(
+                db=db,
+                organization_id=ride.organization_id,
+                ride_id=ride.id,
+                event_name="driver-offer-issued",
+                actor_user_id=_user.id,
+                details=details,
+                request_id=request_id,
+                assignment_id=offer.id,
+                driver_id=offer.driver_id,
+                lifecycle_state=str(offer.assignment_state),
+                transition_reason="offer_issued",
+                assignment_transition_source="dispatch_assign_newest_queue",
+            )
+        return DispatchAutoAssignResponse(
+            ride_id=ride.id,
+            assignment_state=assignment_state,
+            selected_driver_id=selected_driver_id or None,
             selected_score=selected_score,
             offer=_serialize_dispatch_offer(offer) if offer else None,
             candidate_count=len(result.get("candidates") or []),

@@ -129,6 +129,8 @@ CLOSED_DISPATCH_ASSIGNMENT_STATES = {
     "expired",
 }
 
+AI_PROOF_RIDE_NAME_MARKERS = ("driver ai proof", "production proof")
+
 
 def _normalize_status_token(value: Any) -> str:
     raw = str(value or "").strip().lower()
@@ -137,6 +139,24 @@ def _normalize_status_token(value: Any) -> str:
     if raw.startswith("driverstatus."):
         raw = raw.split(".", 1)[1]
     return raw
+
+
+def _is_ai_proof_ride(ride: Optional[HealthISFRide]) -> bool:
+    if not ride:
+        return False
+    passenger_name = str(ride.passenger_name or "").strip().lower()
+    return any(marker in passenger_name for marker in AI_PROOF_RIDE_NAME_MARKERS)
+
+
+def _ride_is_terminal(ride: Optional[HealthISFRide]) -> bool:
+    if not ride:
+        return True
+    lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    return lifecycle in {
+        RideStatus.COMPLETED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    }
 
 
 def _active_assignment_for_ride(db: Session, ride_id: str) -> Optional[HealthISFDispatchAssignment]:
@@ -611,15 +631,22 @@ def _active_ride_for_driver(db: Session, driver_id: str) -> Optional[HealthISFRi
 
 
 def _driver_active_workload_count(db: Session, driver_id: str) -> int:
-    """Count only open dispatch assignments; stale ride rows must not block drivers."""
-    return int(
+    """Count only open dispatch assignments on active, non-demo rides."""
+    rows = (
         db.query(HealthISFDispatchAssignment)
         .filter(
             HealthISFDispatchAssignment.driver_id == driver_id,
             HealthISFDispatchAssignment.assignment_state.in_(list(ACTIVE_DISPATCH_ASSIGNMENT_STATES)),
         )
-        .count()
+        .all()
     )
+    count = 0
+    for row in rows:
+        ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
+        if _ride_is_terminal(ride) or _is_ai_proof_ride(ride):
+            continue
+        count += 1
+    return count
 
 
 def _seconds_since(ts: Optional[datetime], now_ts: datetime) -> int:
@@ -1483,28 +1510,6 @@ def run_intake_dispatch_automation(
         ride_id=ride_id,
         actor_user_id=actor_user_id,
     )
-    if recommendation_result.get("recommendation"):
-        try:
-            approved_result = approve_dispatch_recommendation(
-                db,
-                ride_id=ride_id,
-                actor_user_id=actor_user_id,
-                offer_timeout_seconds=offer_timeout_seconds,
-            )
-            if approved_result.get("offer"):
-                db.refresh(ride)
-                return {
-                    **approved_result,
-                    "mode": "auto_assigned",
-                    "recommendation": recommendation_result.get("recommendation"),
-                    "candidates": recommendation_result.get("candidates") or [],
-                }
-        except Exception as exc:
-            logger.warning(
-                "Intake approval of dispatch recommendation failed for ride_id=%s: %s",
-                ride_id,
-                exc,
-            )
     recommendation_result["mode"] = "recommendation"
     recommendation_result["offer"] = None
     return recommendation_result
@@ -1834,6 +1839,92 @@ def get_dispatch_queue(
             }
         )
     return rows
+
+
+def get_newest_unassigned_queue_ride(
+    db: Session,
+    *,
+    organization_id: str,
+) -> Optional[tuple[HealthISFRide, dict[str, Any]]]:
+    """Return the newest dispatch-queue ride that still needs a driver offer."""
+    queue = get_dispatch_queue(db, organization_id=organization_id, limit=100)
+    assignable_states = {
+        "pending_assignment",
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
+        DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+        DispatchAssignmentState.QUEUED.value,
+    }
+    candidates: list[tuple[HealthISFRide, dict[str, Any]]] = []
+    for row in queue:
+        ride_id = str(row.get("ride_id") or "")
+        if not ride_id:
+            continue
+        assignment_state = str(row.get("assignment_state") or "")
+        if assignment_state not in assignable_states:
+            continue
+        ride = get_ride_by_id(db, ride_id)
+        if not ride or _ride_is_terminal(ride) or ride.driver_id:
+            continue
+        candidates.append((ride, row))
+    if not candidates:
+        return None
+    non_proof = [item for item in candidates if not _is_ai_proof_ride(item[0])]
+    picked = (non_proof or candidates)[0]
+    return picked
+
+
+def assign_newest_queue_ride(
+    db: Session,
+    *,
+    organization_id: str,
+    actor_user_id: Optional[str] = None,
+    offer_timeout_seconds: int = 90,
+) -> dict[str, Any]:
+    """Assign the newest real queue ride to the best eligible driver."""
+    resolved = get_newest_unassigned_queue_ride(db, organization_id=organization_id)
+    if not resolved:
+        raise ValueError("No assignable rides in dispatch queue")
+
+    ride, queue_row = resolved
+    assignment_state = str(queue_row.get("assignment_state") or "")
+    if assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
+        return approve_dispatch_recommendation(
+            db,
+            ride_id=ride.id,
+            actor_user_id=actor_user_id,
+            offer_timeout_seconds=offer_timeout_seconds,
+        )
+
+    result = auto_assign_request(
+        db,
+        ride_id=ride.id,
+        actor_user_id=actor_user_id,
+        offer_timeout_seconds=offer_timeout_seconds,
+    )
+    if result.get("offer"):
+        result["ride"] = ride
+        return result
+
+    recommendation_result = recommend_driver_for_ride(
+        db,
+        ride_id=ride.id,
+        actor_user_id=actor_user_id,
+    )
+    if recommendation_result.get("recommendation"):
+        approved_result = approve_dispatch_recommendation(
+            db,
+            ride_id=ride.id,
+            actor_user_id=actor_user_id,
+            offer_timeout_seconds=offer_timeout_seconds,
+        )
+        if approved_result.get("offer"):
+            approved_result["candidates"] = recommendation_result.get("candidates") or []
+            return approved_result
+
+    result["mode"] = "recommendation"
+    result["recommendation"] = recommendation_result.get("recommendation")
+    result["candidates"] = recommendation_result.get("candidates") or []
+    return result
 
 
 def get_dispatch_active_assignments(
@@ -2734,13 +2825,28 @@ def get_driver_live_workspace_data(
         .all()
     )
     assignment: Optional[HealthISFDispatchAssignment] = None
-    offered_assignment = next(
-        (row for row in assignment_rows if str(row.assignment_state) == DispatchAssignmentState.OFFERED.value),
-        None,
-    )
-    if offered_assignment:
-        assignment = offered_assignment
-    else:
+    ride: Optional[HealthISFRide] = None
+    offered_rows = [
+        row for row in assignment_rows if str(row.assignment_state) == DispatchAssignmentState.OFFERED.value
+    ]
+    if offered_rows:
+        ranked_offers: list[tuple[HealthISFDispatchAssignment, HealthISFRide]] = []
+        for row in offered_rows:
+            candidate_ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
+            if not candidate_ride or _ride_is_terminal(candidate_ride):
+                continue
+            ranked_offers.append((row, candidate_ride))
+        non_proof_offers = [item for item in ranked_offers if not _is_ai_proof_ride(item[1])]
+        picked_offer = (non_proof_offers or ranked_offers)
+        if picked_offer:
+            picked_offer.sort(
+                key=lambda item: _normalized_timestamp_token(item[1].requested_at),
+                reverse=True,
+            )
+            assignment, ride = picked_offer[0]
+    if not assignment:
+        non_proof: list[tuple[HealthISFDispatchAssignment, HealthISFRide]] = []
+        proof: list[tuple[HealthISFDispatchAssignment, HealthISFRide]] = []
         for row in assignment_rows:
             candidate_ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
             if not candidate_ride:
@@ -2748,9 +2854,11 @@ def get_driver_live_workspace_data(
             ride_state = RideLifecycleManager.normalize_state(candidate_ride.lifecycle_state or candidate_ride.status)
             if ride_state in terminal_ride_states:
                 continue
-            assignment = row
-            break
-    ride = get_ride_by_id(db, assignment.ride_id) if assignment and assignment.ride_id else None
+            bucket = proof if _is_ai_proof_ride(candidate_ride) else non_proof
+            bucket.append((row, candidate_ride))
+        picked = (non_proof or proof)
+        if picked:
+            assignment, ride = picked[0]
     if ride:
         ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
         if ride_state in terminal_ride_states:
@@ -3635,16 +3743,28 @@ def list_driver_assigned_rides(
     driver_id: str,
     limit: int = 100,
 ) -> list[HealthISFRide]:
-    return (
+    rows = (
         db.query(HealthISFRide)
         .filter(
             HealthISFRide.organization_id == organization_id,
             HealthISFRide.driver_id == driver_id,
         )
-        .order_by(desc(HealthISFRide.updated_at))
+        .order_by(desc(HealthISFRide.requested_at), desc(HealthISFRide.updated_at))
         .limit(limit)
         .all()
     )
+    active_rows = [row for row in rows if not _ride_is_terminal(row)]
+    live_offer = get_driver_active_offer(db, organization_id=organization_id, driver_id=driver_id)
+    if live_offer and live_offer.ride_id:
+        prioritized = [
+            row
+            for row in active_rows
+            if not _is_ai_proof_ride(row) or str(row.id) == str(live_offer.ride_id)
+        ]
+        if prioritized:
+            return prioritized
+    non_proof = [row for row in active_rows if not _is_ai_proof_ride(row)]
+    return non_proof or active_rows
 
 DEFAULT_ORGANIZATION = {
     "name": "Amicor Health ISF",

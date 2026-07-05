@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Optional
 
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.helpers import now
@@ -838,16 +839,22 @@ class OperationalIntelligenceService:
         thresholds: IntelligenceThresholds | None = None,
     ) -> dict[str, Any]:
         thresholds = thresholds or IntelligenceThresholds()
+        from app.modules.health_isf import service as health_service
+
         if ride_id:
             rides = [db.query(HealthISFRide).filter(
                 HealthISFRide.organization_id == organization_id,
                 HealthISFRide.id == ride_id,
             ).first()]
         else:
-            rides = db.query(HealthISFRide).filter(
-                HealthISFRide.organization_id == organization_id,
-                HealthISFRide.status.in_([RideStatus.PENDING, RideStatus.ACCEPTED]),
-            ).order_by(HealthISFRide.requested_at.asc()).limit(10).all()
+            newest = health_service.get_newest_unassigned_queue_ride(db, organization_id=organization_id)
+            if newest:
+                rides = [newest[0]]
+            else:
+                rides = db.query(HealthISFRide).filter(
+                    HealthISFRide.organization_id == organization_id,
+                    HealthISFRide.status.in_([RideStatus.PENDING, RideStatus.ACCEPTED]),
+                ).order_by(desc(HealthISFRide.requested_at), desc(HealthISFRide.created_at)).limit(10).all()
 
         rides = [ride for ride in rides if ride is not None]
         recommendations: list[dict[str, Any]] = []
@@ -1070,11 +1077,17 @@ class OperationalIntelligenceService:
         ride: HealthISFRide,
         thresholds: IntelligenceThresholds,
     ) -> list[dict[str, Any]]:
+        from app.modules.health_isf import service as health_service
+
         driver_candidates = db.query(HealthISFDriver).filter(
             HealthISFDriver.organization_id == ride.organization_id,
             HealthISFDriver.is_active.is_(True),
         ).all()
-        scored = [cls._score_driver(driver, ride, thresholds) for driver in driver_candidates]
+        scored: list[dict[str, Any]] = []
+        for driver in driver_candidates:
+            if not health_service._driver_is_dispatch_candidate(db, driver):
+                continue
+            scored.append(cls._score_driver(driver, ride, thresholds))
         return sorted(scored, key=lambda item: item["score"], reverse=True)
 
     @classmethod

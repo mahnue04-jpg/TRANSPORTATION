@@ -3895,6 +3895,11 @@
     return mapped[value] || value;
   }
 
+  function isAiProofRideName(name) {
+    var normalized = safeText(name, "").toLowerCase();
+    return normalized.indexOf("driver ai proof") >= 0 || normalized.indexOf("production proof") >= 0;
+  }
+
   function buildDriverQueue(slice) {
     return [];
   }
@@ -3932,7 +3937,7 @@
           assignedDriver: workflowDriverId,
           offerId: safeText(activeOffer.id || activeOffer.offer_id, "")
         });
-      } else if (safeText(activeRide.id, "")) {
+      } else if (safeText(activeRide.id, "") && !isAiProofRideName(activeRide.passenger_name)) {
         liveQueue.push({
           tripId: safeText(activeRide.id, "TRIP"),
           patient: safeText(activeRide.passenger_name, "Rider"),
@@ -8210,12 +8215,14 @@
     if (roleView === "driver") {
       try {
         var driverRows = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
-        var canonical = (Array.isArray(driverRows) ? driverRows : []).find(function (row) {
-          return safeText(row.name, "").toLowerCase() === "james smith";
+        var offeredDriverIds = offeredAssignments.map(function (item) {
+          return safeText(item.driver_id, "");
+        }).filter(Boolean);
+        (Array.isArray(driverRows) ? driverRows : []).forEach(function (row) {
+          if (offeredDriverIds.indexOf(safeText(row.id, "")) >= 0) {
+            pushDriverCandidate(driverCandidates, safeText(row.id, ""));
+          }
         });
-        if (canonical && offeredAssignments.length === 0) {
-          pushDriverCandidate(driverCandidates, safeText(canonical.id, ""));
-        }
       } catch (_) {}
     }
     if (activeAssignments.length > 0) {
