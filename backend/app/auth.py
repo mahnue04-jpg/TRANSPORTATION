@@ -167,6 +167,14 @@ def seed_default_users() -> list[dict[str, str]]:
         try:
             default_org = health_isf_service._get_or_create_default_org(db)
             try:
+                health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
+            except Exception as provider_exc:
+                logger.warning(
+                    "Provider seed skipped during auth bootstrap: %s",
+                    provider_exc,
+                    exc_info=True,
+                )
+            try:
                 health_isf_service.ensure_sample_driver_credentials(db, organization_id=default_org.id)
             except Exception as driver_exc:
                 logger.warning(
@@ -220,25 +228,34 @@ def seed_default_users() -> list[dict[str, str]]:
 def ensure_user_organization(db: Session, user: Any) -> str | None:
     """Backfill organization scope for legacy accounts missing tenant assignment."""
     current_org = getattr(user, "organization_id", None)
-    if current_org:
-        return str(current_org)
-
     try:
-        from app.modules.health_isf.models import ensure_health_isf_schema
+        from app.modules.health_isf.models import ensure_health_isf_schema, HealthISFProvider
         from app.modules.health_isf import service as health_isf_service
 
         ensure_health_isf_schema()
         default_org = health_isf_service._get_or_create_default_org(db)
+        health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
 
-        user.organization_id = default_org.id
+        current_org_str = str(current_org).strip() if current_org else ""
+        if not current_org_str:
+            user.organization_id = default_org.id
+        elif current_org_str != str(default_org.id):
+            provider_count = (
+                db.query(HealthISFProvider)
+                .filter(HealthISFProvider.organization_id == current_org_str)
+                .count()
+            )
+            if provider_count == 0:
+                user.organization_id = default_org.id
+
         if not getattr(user, "organization_name", None):
             user.organization_name = DEFAULT_ORGANIZATION_NAME
         db.commit()
         db.refresh(user)
-        return str(default_org.id)
+        return str(getattr(user, "organization_id", None) or default_org.id)
     except Exception as exc:
         logger.warning("Failed to ensure user organization for %s: %s", getattr(user, "id", "unknown"), exc)
-        return None
+        return str(current_org) if current_org else None
 
 
 def _build_org_code_base(name: str) -> str:
@@ -590,11 +607,21 @@ def deployment_sync_seed_users(request: Request):
             ),
         )
     created = seed_default_users()
+    from app.db.session import SessionLocal
+    from app.modules.health_isf import service as health_isf_service
+
+    db = SessionLocal()
+    try:
+        default_org = health_isf_service._get_or_create_default_org(db)
+        provider_summary = health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
+    finally:
+        db.close()
     return {
         "status": "ok",
         "created": created,
         "seed_users_total": len(SEED_USERS),
         "password_env": "AMICOR_SEED_PASSWORD",
+        "provider_seed": provider_summary,
     }
 
 

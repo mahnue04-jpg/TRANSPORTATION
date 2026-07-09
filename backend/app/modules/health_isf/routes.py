@@ -8713,8 +8713,26 @@ def list_providers(
     """Retrieve all active providers (paginated)."""
     logger.info("Listing providers: skip=%d, limit=%d", skip, limit)
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    providers = service.get_all_providers(db, skip=skip, limit=limit)
-    return [provider for provider in providers if provider.organization_id == effective_org_id]
+    providers = service.list_providers_for_organization(
+        db,
+        organization_id=effective_org_id,
+        skip=skip,
+        limit=limit,
+    )
+    if not providers:
+        seed_summary = service.ensure_sample_providers(db, organization_id=effective_org_id)
+        logger.warning(
+            "Provider list empty for org=%s; repair seed attempted: %s",
+            effective_org_id,
+            seed_summary,
+        )
+        providers = service.list_providers_for_organization(
+            db,
+            organization_id=effective_org_id,
+            skip=skip,
+            limit=limit,
+        )
+    return providers
 
 
 @router.post("/providers", response_model=ProviderResponse, status_code=201)

@@ -5204,6 +5204,90 @@ def ensure_sample_driver_credentials(db: Session, organization_id: str | None = 
     return ensured
 
 
+def ensure_sample_providers(db: Session, organization_id: str | None = None) -> dict[str, Any]:
+    """Idempotently ensure baseline partner providers exist for ride creation and dispatch."""
+    org = _get_organization_by_id(db, organization_id) if organization_id else _get_or_create_default_org(db)
+    if not org:
+        return {"organization_id": None, "created": 0, "updated": 0, "total": 0, "provider_ids": []}
+
+    created = 0
+    updated = 0
+    provider_ids: list[str] = []
+    for item in SAMPLE_PROVIDERS:
+        name = str(item["name"]).strip()
+        row = (
+            db.query(HealthISFProvider)
+            .filter(
+                HealthISFProvider.organization_id == org.id,
+                func.lower(HealthISFProvider.name) == name.lower(),
+            )
+            .order_by(HealthISFProvider.created_at.asc())
+            .first()
+        )
+        if not row:
+            row = HealthISFProvider(
+                id=uuid4(),
+                organization_id=org.id,
+                name=name,
+                address=item["address"],
+                phone=item["phone"],
+                service_type=item["service_type"],
+                is_active=True,
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(row)
+            db.flush()
+            created += 1
+        else:
+            row.address = item["address"]
+            row.phone = item["phone"]
+            row.service_type = item["service_type"]
+            row.is_active = True
+            row.updated_at = now()
+            updated += 1
+        provider_ids.append(str(row.id))
+
+    if created or updated:
+        _commit_or_rollback(db)
+
+    total = (
+        db.query(HealthISFProvider)
+        .filter(
+            HealthISFProvider.organization_id == org.id,
+            HealthISFProvider.is_active == True,
+        )
+        .count()
+    )
+    return {
+        "organization_id": str(org.id),
+        "organization_name": org.name,
+        "created": created,
+        "updated": updated,
+        "total": total,
+        "provider_ids": provider_ids,
+    }
+
+
+def list_providers_for_organization(
+    db: Session,
+    organization_id: str,
+    skip: int = 0,
+    limit: int = 50,
+) -> list[HealthISFProvider]:
+    return (
+        db.query(HealthISFProvider)
+        .filter(
+            HealthISFProvider.organization_id == organization_id,
+            HealthISFProvider.is_active == True,
+        )
+        .order_by(HealthISFProvider.name.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
 def init_sample_data(db: Session) -> dict:
     summary = {
         "organizations": 0,
@@ -5215,32 +5299,45 @@ def init_sample_data(db: Session) -> dict:
     }
 
     org = _get_or_create_default_org(db)
+    provider_seed = ensure_sample_providers(db, organization_id=org.id)
+    summary["providers"] = int(provider_seed.get("total") or 0)
+
     existing_rides = db.query(HealthISFRide).filter(HealthISFRide.organization_id == org.id).count()
     existing_drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).count()
     if existing_rides > 0 or existing_drivers > 0:
         summary["already_exists"] = True
         summary["drivers"] = existing_drivers
+        summary["organizations"] = 1
         return summary
 
     summary["organizations"] = 1
 
     providers_map = {}
     for item in SAMPLE_PROVIDERS:
-        provider = HealthISFProvider(
-            id=uuid4(),
-            organization_id=org.id,
-            name=item["name"],
-            address=item["address"],
-            phone=item["phone"],
-            service_type=item["service_type"],
-            is_active=True,
-            created_at=now(),
-            updated_at=now(),
+        provider = (
+            db.query(HealthISFProvider)
+            .filter(
+                HealthISFProvider.organization_id == org.id,
+                func.lower(HealthISFProvider.name) == str(item["name"]).strip().lower(),
+            )
+            .first()
         )
-        db.add(provider)
-        db.flush()
+        if not provider:
+            provider = HealthISFProvider(
+                id=uuid4(),
+                organization_id=org.id,
+                name=item["name"],
+                address=item["address"],
+                phone=item["phone"],
+                service_type=item["service_type"],
+                is_active=True,
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(provider)
+            db.flush()
+            summary["providers"] += 1
         providers_map[provider.name] = provider
-        summary["providers"] += 1
 
     drivers: list[HealthISFDriver] = []
     for item in SAMPLE_DRIVERS:

@@ -328,6 +328,14 @@ async def lifespan(app: FastAPI):
         
         db = SessionLocal()
         try:
+            default_org = health_isf_service._get_or_create_default_org(db)  # type: ignore
+            provider_summary = health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)  # type: ignore
+            logger.info(
+                "Operational provider seed ensured: org=%s total=%s created=%s",
+                provider_summary.get("organization_id"),
+                provider_summary.get("total"),
+                provider_summary.get("created"),
+            )
             seed_sample_data = os.environ.get("AMICOR_SEED_SAMPLE_DATA", "").strip().lower() in {
                 "1",
                 "true",
