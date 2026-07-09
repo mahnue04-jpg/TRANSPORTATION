@@ -99,30 +99,46 @@ def main() -> None:
             body = seed_status.json()
             print(f"PILOT_ACCOUNTS_PRESENT={body.get('present_accounts')}/{body.get('expected_accounts')}")
 
-        if SYNC_KEY:
+        try:
+            rider_auth = _login(client, "rider@amicor.local")
+            dispatcher_auth = _login(client, "dispatcher@amicor.local")
+            driver_auth = _login(client, "driver@amicor.local")
+        except httpx.HTTPStatusError:
+            rider_auth = dispatcher_auth = driver_auth = None
+
+        if not rider_auth and SYNC_KEY:
             sync = client.post(
                 f"{BASE}/api/auth/deployment/sync-seed-users",
                 headers={"X-Amicor-Deployment-Key": SYNC_KEY},
             )
             print(f"SEED_SYNC_HTTP={sync.status_code}")
-            if sync.status_code == 403:
-                _fail(
-                    "auth_sync",
-                    "Deployment sync key rejected. Align Render AMICOR_DEPLOYMENT_SYNC_KEY with "
-                    "AMICOR_DEPLOYMENT_SYNC_KEY env var passed to this script.",
-                )
+            if sync.status_code == 200:
+                try:
+                    rider_auth = _login(client, "rider@amicor.local")
+                    dispatcher_auth = _login(client, "dispatcher@amicor.local")
+                    driver_auth = _login(client, "driver@amicor.local")
+                except httpx.HTTPStatusError as exc:
+                    _fail(
+                        "auth_login",
+                        f"{exc}. Sync succeeded but login still failed.",
+                    )
+            elif sync.status_code == 403:
+                print("SEED_SYNC_SKIPPED=sync_key_mismatch_try_login_with_runtime_password")
+            else:
+                print(f"SEED_SYNC_DETAIL={sync.text[:200]}")
 
-        try:
-            rider_auth = _login(client, "rider@amicor.local")
-            dispatcher_auth = _login(client, "dispatcher@amicor.local")
-            driver_auth = _login(client, "driver@amicor.local")
-        except httpx.HTTPStatusError as exc:
-            _fail(
-                "auth_login",
-                f"{exc}. Render pilot passwords must match AMICOR_SEED_PASSWORD at runtime. "
-                f"Fix: Render dashboard -> amicor-health-isf -> Environment -> set "
-                f"AMICOR_SEED_PASSWORD and AMICOR_DEPLOYMENT_SYNC_KEY to the same known value -> Manual Deploy.",
-            )
+        if not rider_auth:
+            try:
+                rider_auth = _login(client, "rider@amicor.local")
+                dispatcher_auth = _login(client, "dispatcher@amicor.local")
+                driver_auth = _login(client, "driver@amicor.local")
+            except httpx.HTTPStatusError as exc:
+                _fail(
+                    "auth_login",
+                    f"{exc}. Render pilot passwords must match AMICOR_SEED_PASSWORD at runtime. "
+                    f"Fix: Render dashboard -> amicor-health-isf -> Environment -> set "
+                    f"AMICOR_SEED_PASSWORD and AMICOR_DEPLOYMENT_SYNC_KEY to the same known value -> Manual Deploy.",
+                )
 
         rider_headers = _headers(rider_auth["access_token"])
         dispatcher_headers = _headers(dispatcher_auth["access_token"])

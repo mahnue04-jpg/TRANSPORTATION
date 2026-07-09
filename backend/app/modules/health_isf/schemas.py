@@ -583,6 +583,18 @@ class DriverLiveWorkspaceResponse(BaseModel):
     timeline_states: list[str] = Field(default_factory=list)
 
 
+class DriverActiveRideResponse(BaseModel):
+    driver_id: str
+    organization_id: str
+    has_active_ride: bool = False
+    assignment_state: str = ""
+    driver_name: str = ""
+    provider_name: str = ""
+    eta_minutes: Optional[int] = None
+    active_assignment: Optional[DispatchActiveAssignmentItemResponse] = None
+    ride: Optional["RideResponse"] = None
+
+
 class RiderEventFeedItem(BaseModel):
     event_name: str
     timestamp: datetime
@@ -795,6 +807,11 @@ class RideResponse(RideBase):
     transporting_at: Optional[datetime]
     accepted_at: Optional[datetime]
     completed_at: Optional[datetime]
+    fare_amount: Optional[float] = None
+    total_amount: Optional[float] = None
+    driver_pay_usd: Optional[float] = None
+    platform_revenue_usd: Optional[float] = None
+    financial_record_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -844,6 +861,111 @@ class RideCompletionHandoffResponse(BaseModel):
     payout_id: Optional[str] = None
     provider_queue_ready: bool
     billing_queue_ready: bool
+    financial_record_id: Optional[str] = None
+    ride_price_usd: Optional[float] = None
+    driver_pay_usd: Optional[float] = None
+    platform_revenue_usd: Optional[float] = None
+    provider_share_usd: Optional[float] = None
+    payment_transaction_id: Optional[str] = None
+    claim_id: Optional[str] = None
+    claim_reference: Optional[str] = None
+    billing_handoff_id: Optional[str] = None
+    billing_handoff_status: Optional[str] = None
+    fare_amount: Optional[float] = None
+
+
+class TripFinancialSummaryResponse(BaseModel):
+    ride_id: str
+    organization_id: str
+    trip_id: Optional[str] = None
+    financial_record_id: str
+    ride_price_usd: float
+    driver_pay_usd: float
+    platform_revenue_usd: float
+    provider_share_usd: float = 0.0
+    processing_fee_usd: float = 0.0
+    is_healthcare: bool = False
+    service_type: Optional[str] = None
+    payment_transaction_id: Optional[str] = None
+    payout_id: Optional[str] = None
+    claim_id: Optional[str] = None
+    claim_reference: Optional[str] = None
+    claim_status: Optional[str] = None
+    billing_handoff_id: Optional[str] = None
+    billing_handoff_status: Optional[str] = None
+    fare_amount: float
+    total_amount: float
+    payout_amount: float
+    created_at: Optional[str] = None
+
+
+class DriverEarningsSummaryResponse(BaseModel):
+    driver_id: str
+    organization_id: Optional[str] = None
+    earnings_today_usd: float
+    earnings_lifetime_usd: float
+    trip_count: int
+    trip_count_today: int = 0
+    recent_trips: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BillingHandoffQueueItemResponse(BaseModel):
+    handoff_id: str
+    ride_id: str
+    rider_id: Optional[str] = None
+    passenger_name: Optional[str] = None
+    driver_id: Optional[str] = None
+    provider_id: Optional[str] = None
+    pickup_address: Optional[str] = None
+    dropoff_address: Optional[str] = None
+    completed_at: Optional[str] = None
+    fare_amount: float = 0.0
+    driver_pay: float = 0.0
+    platform_revenue: float = 0.0
+    billing_status: str = "pending"
+    payment_transaction_id: Optional[str] = None
+    payout_id: Optional[str] = None
+    claim_id: Optional[str] = None
+    financial_record_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class TripDocumentResponse(BaseModel):
+    id: str
+    ride_id: str
+    driver_id: Optional[str] = None
+    document_type: str
+    title: str
+    name: Optional[str] = None
+    reference: str
+    status: str = "issued"
+    amount_usd: float = 0.0
+    financial_record_id: Optional[str] = None
+    payment_transaction_id: Optional[str] = None
+    payout_id: Optional[str] = None
+    expiresIn: Optional[str] = "n/a"
+    created_at: Optional[str] = None
+
+
+class DriverCompletionSnapshotResponse(BaseModel):
+    driver_id: str
+    organization_id: str
+    earnings: DriverEarningsSummaryResponse
+    completed_ride_count: int
+    completed_rides: list[RideResponse] = Field(default_factory=list)
+    billing_handoffs: list[BillingHandoffQueueItemResponse] = Field(default_factory=list)
+    documents: list[TripDocumentResponse] = Field(default_factory=list)
+
+
+class AdminRevenueSummaryResponse(BaseModel):
+    organization_id: str
+    ride_revenue_total_usd: float
+    platform_revenue_total_usd: float
+    driver_payout_total_usd: float
+    revenue_today_usd: float
+    platform_revenue_today_usd: float
+    completed_trip_count: int
+    claims_count: int
 
 
 class RideHistoryEventResponse(BaseModel):

@@ -350,32 +350,42 @@ def refresh_driver_offers(page, driver_id: str) -> dict[str, Any]:
     )
 
 
-def driver_accept_and_complete_ops(page, driver_id: str, ride_id: str) -> None:
-    page.goto(f"{BASE}/#/health-isf/drivers", wait_until="domcontentloaded")
-    wait_refresh(page, 5000 if is_remote_base(BASE) else 2500)
-    wait_for_driver_runtime_option(page, driver_id)
-    page.select_option("#health-driver-runtime-id", driver_id)
-    page.wait_for_timeout(1200)
+def driver_accept_and_complete_ops(page, driver_id: str, ride_id: str, *, api_only: bool = False) -> None:
+    if not api_only:
+        page.goto(f"{BASE}/#/health-isf/drivers", wait_until="domcontentloaded")
+        wait_refresh(page, 5000 if is_remote_base(BASE) else 2500)
+        wait_for_driver_runtime_option(page, driver_id)
+        page.select_option("#health-driver-runtime-id", driver_id)
+        page.wait_for_timeout(1200)
 
-    offer_info = refresh_driver_offers(page, driver_id)
-    if not offer_info.get("offered"):
-        page.locator("#health-driver-offer-refresh").click()
-        page.wait_for_timeout(2500)
         offer_info = refresh_driver_offers(page, driver_id)
-    if not offer_info.get("offered"):
-        assigned = auth_fetch(page, "GET", f"/api/health-isf/drivers/{driver_id}/assigned-rides")
-        rows = assigned.get("data") if isinstance(assigned.get("data"), list) else []
-        if not any(str(row.get("id")) == ride_id for row in rows):
-            raise RuntimeError(f"Driver has no offered assignment for ride {ride_id[:8]}")
-
-    accept_clicked = False
-    if page.locator("#health-driver-offer-accept").count():
-        offer_text = page.locator("#health-driver-incoming-offer").inner_text()
-        if "offered" in offer_text.lower():
-            page.locator("#health-driver-offer-accept").click()
+        if not offer_info.get("offered"):
+            page.locator("#health-driver-offer-refresh").click()
             page.wait_for_timeout(2500)
-            accept_clicked = True
-    if not accept_clicked:
+            offer_info = refresh_driver_offers(page, driver_id)
+        if not offer_info.get("offered"):
+            assigned = auth_fetch(page, "GET", f"/api/health-isf/drivers/{driver_id}/assigned-rides")
+            rows = assigned.get("data") if isinstance(assigned.get("data"), list) else []
+            if not any(str(row.get("id")) == ride_id for row in rows):
+                raise RuntimeError(f"Driver has no offered assignment for ride {ride_id[:8]}")
+
+        accept_clicked = False
+        if page.locator("#health-driver-offer-accept").count():
+            offer_text = page.locator("#health-driver-incoming-offer").inner_text()
+            if "offered" in offer_text.lower():
+                page.locator("#health-driver-offer-accept").click()
+                page.wait_for_timeout(2500)
+                accept_clicked = True
+        if not accept_clicked:
+            accept = auth_fetch(
+                page,
+                "POST",
+                f"/api/health-isf/drivers/{driver_id}/accept-ride",
+                {"ride_id": ride_id},
+            )
+            if not accept.get("ok"):
+                raise RuntimeError(f"Driver accept failed: {accept}")
+    else:
         accept = auth_fetch(
             page,
             "POST",

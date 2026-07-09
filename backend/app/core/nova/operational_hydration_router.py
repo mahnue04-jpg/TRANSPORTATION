@@ -767,24 +767,39 @@ def _build_trip_workflow_snapshot(db: Session, organization_id: str) -> dict[str
     )
 
     trip_entities.sort(key=lambda item: str(item.get("requested_at") or ""), reverse=True)
-    unassigned_queue = [
+    _TERMINAL_TRIP_STATES = {"completed", "cancelled", "failed", "dropoff_complete", "closed", "resolved"}
+    live_trip_entities = [
         item
         for item in trip_entities
+        if str(item.get("trip_state") or "").lower() not in _TERMINAL_TRIP_STATES
+    ]
+    unassigned_queue = [
+        item
+        for item in live_trip_entities
         if item.get("trip_state") in {"requested", "pending_review", "scheduled", "assigned"} and not item.get("driver_id")
     ]
     active_routes = [
-        item for item in trip_entities if item.get("trip_state") in {"assigned", "accepted", "arrived", "onboard", "in_transit"}
+        item
+        for item in live_trip_entities
+        if item.get("trip_state") in {"assigned", "accepted", "arrived", "onboard", "in_transit"}
     ]
-    delayed_rides = [item for item in trip_entities if item.get("trip_state") in {"failed", "escalated", "cancelled"}]
+    # Escalated/delayed live rides only — cancelled/failed belong in archived history.
+    delayed_rides = [
+        item for item in live_trip_entities if item.get("trip_state") in {"escalated", "delayed"}
+    ]
     reassignment_queue = [
-        item for item in trip_entities if str(item.get("assignment_status") or "") in {
+        item
+        for item in live_trip_entities
+        if str(item.get("assignment_status") or "")
+        in {
             DispatchAssignmentState.REASSIGNMENT_PENDING.value,
             DispatchAssignmentState.REJECTED.value,
             DispatchAssignmentState.EXPIRED.value,
         }
     ]
     no_driver_recovery = [
-        item for item in trip_entities
+        item
+        for item in live_trip_entities
         if not item.get("driver_id") and item.get("trip_state") in {"scheduled", "assigned", "escalated"}
     ]
     recurring_rides = [item for item in trip_entities if bool(item.get("recurring"))]

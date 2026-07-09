@@ -33,6 +33,7 @@ from app.auth import (
 from app.db.session import SessionLocal, get_db
 from app.helpers import now, uuid4
 from app.modules.health_isf import service
+from app.modules.health_isf.financial_engine import TripFinancialEngine
 from app.modules.health_isf.intake import (
     build_ai_dispatch_context,
     build_intake_fingerprint,
@@ -62,6 +63,7 @@ from app.modules.health_isf.schemas import (
     DriverRuntimeStatusResponse,
     DriverSessionValidationResponse,
     DriverLiveWorkspaceResponse,
+    DriverActiveRideResponse,
     DriverRouteProgressRequest,
     DispatchActiveAssignmentItemResponse,
     DispatchAutoAssignRequest,
@@ -91,6 +93,12 @@ from app.modules.health_isf.schemas import (
     RideCreate, RideHistoryEventResponse, RideResponse, RideStatusUpdateRequest,
     RideArrivalStatusResponse,
     RideCompletionHandoffResponse,
+    TripFinancialSummaryResponse,
+    DriverEarningsSummaryResponse,
+    DriverCompletionSnapshotResponse,
+    BillingHandoffQueueItemResponse,
+    TripDocumentResponse,
+    AdminRevenueSummaryResponse,
     RidePickupStatusResponse,
     VehicleCreate,
     VehicleResponse,
@@ -190,6 +198,19 @@ from app.modules.health_isf.authorization_adapter import evaluate_customer_reque
 from app.observability import increment as increment_metric
 
 logger = logging.getLogger("amicor.health_isf.routes")
+
+
+def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResponse:
+    payload = RideResponse.model_validate(ride).model_dump()
+    financial = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride.id)
+    if financial:
+        payload["fare_amount"] = financial.get("fare_amount")
+        payload["total_amount"] = financial.get("total_amount")
+        payload["driver_pay_usd"] = financial.get("driver_pay_usd")
+        payload["platform_revenue_usd"] = financial.get("platform_revenue_usd")
+        payload["financial_record_id"] = financial.get("financial_record_id")
+    return RideResponse(**payload)
+
 
 require_health_isf_access = require_any_role(
     ROLE_ADMIN,
@@ -879,6 +900,67 @@ async def _emit_dispatch_lifecycle_event(
         },
     )
     db.commit()
+
+
+async def _emit_driver_trip_completion_events(
+    *,
+    db: Session,
+    ride: Any,
+    driver_id: str,
+    actor_user_id: str | None,
+    previous_driver_status: str | None = None,
+    source: str = "driver_dropoff_complete",
+) -> None:
+    emitter = get_emitter()
+    organization_id = str(ride.organization_id)
+    ride_id = str(ride.id)
+    await emitter.emit_ride_completed(
+        organization_id=organization_id,
+        ride_id=ride_id,
+        driver_id=driver_id,
+        actor_user_id=actor_user_id,
+    )
+    await emitter.emit_driver_active_ride_state(
+        organization_id=organization_id,
+        driver_id=driver_id,
+        active_ride_id=None,
+        state=RideStatus.COMPLETED.value,
+        actor_user_id=actor_user_id,
+        details={"source": source},
+    )
+    await emitter.emit_driver_status_changed(
+        organization_id=organization_id,
+        driver_id=driver_id,
+        from_status=previous_driver_status,
+        to_status=DriverStatus.AVAILABLE.value,
+        actor_user_id=actor_user_id,
+        details={"source": source, "ride_id": ride_id},
+    )
+    await _emit_dispatch_lifecycle_event(
+        db=db,
+        organization_id=organization_id,
+        ride_id=ride_id,
+        event_name="assignment-completed",
+        actor_user_id=actor_user_id,
+        details={"ride_id": ride_id, "driver_id": driver_id, "source": source},
+        request_id=f"driver_complete_{ride_id}",
+        driver_id=driver_id,
+        lifecycle_state=RideStatus.COMPLETED.value,
+        transition_reason="dropoff_complete",
+        assignment_transition_source=source,
+    )
+    await emitter.emit_dispatch_changed(
+        organization_id=organization_id,
+        event_name="ride-completed",
+        actor_user_id=actor_user_id,
+        details={"ride_id": ride_id, "driver_id": driver_id, "source": source},
+    )
+    await emitter.emit_dispatch_changed(
+        organization_id=organization_id,
+        event_name="trip-completed",
+        actor_user_id=actor_user_id,
+        details={"ride_id": ride_id, "driver_id": driver_id, "source": source},
+    )
 
 
 async def _emit_intake_dispatch_outcome(
@@ -2302,6 +2384,12 @@ def get_operational_revenue_workflow(
         ride_id=ride_id,
         window_hours=window_hours,
     )
+    financial_summary = TripFinancialEngine.get_admin_revenue_summary(db, organization_id=effective_org_id)
+    kpis["financial_engine"] = financial_summary
+    if ride_id:
+        ride_financial = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride_id)
+        if ride_financial:
+            kpis["ride_financial"] = ride_financial
 
     role_streams = {
         "dispatcher": [event for event in timeline if "dispatcher" in list(event.get("role_scope") or [])],
@@ -5332,7 +5420,17 @@ def get_customer_workspace_history(
         rider_phone=rider_phone,
         limit=limit,
     )
-    history = [_serialize_customer_request(row).model_dump() for row in rows]
+    history = []
+    for row in rows:
+        item = _serialize_customer_request(row).model_dump()
+        ride_id = str(item.get("ride_id") or "")
+        if ride_id:
+            ride = service.get_ride_by_id(db, ride_id)
+            if ride:
+                lifecycle = str(getattr(ride, "lifecycle_state", None) or ride.status or "")
+                if lifecycle:
+                    item["dispatch_status"] = lifecycle.lower()
+        history.append(item)
     seen_ride_ids = {str(item.get("ride_id") or "") for item in history if item.get("ride_id")}
     for ride in service.list_rides_for_passenger_phone(
         db,
@@ -5699,6 +5797,21 @@ def get_driver_active_offer(
         organization_id=effective_org_id,
         driver_id=driver_id,
     )
+    if not offer:
+        workspace = service.get_driver_live_workspace_data(
+            db,
+            organization_id=effective_org_id,
+            driver_id=driver_id,
+        )
+        assignment = workspace.get("assignment")
+        if assignment and str(getattr(assignment, "assignment_state", "") or "").lower() in {
+            DispatchAssignmentState.OFFERED.value,
+            DispatchAssignmentState.ASSIGNED.value,
+            DispatchAssignmentState.AWAITING_APPROVAL.value,
+        }:
+            ride = workspace.get("ride")
+            if ride and not service._is_ai_proof_ride(ride):
+                offer = assignment
     offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None
     if offer and offer_payload:
         ride = service.get_ride_by_id(db, offer.ride_id)
@@ -5708,11 +5821,50 @@ def get_driver_active_offer(
             offer_payload["pickup_address"] = ride.pickup_address
             offer_payload["dropoff_address"] = ride.dropoff_address
             offer_payload["ride_status"] = service._normalize_status_token(ride.lifecycle_state or ride.status)
+            offer_payload["requested_at"] = ride.requested_at.isoformat() if ride.requested_at else None
     return {
         "organization_id": effective_org_id,
         "driver_id": driver_id,
         "offer": offer_payload,
     }
+
+
+@router.get("/drivers/{driver_id}/active-ride", response_model=DriverActiveRideResponse)
+def get_driver_active_ride(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Authoritative active assigned ride for the driver mobile app."""
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    try:
+        snapshot = service.get_driver_active_ride_data(
+            db,
+            organization_id=effective_org_id,
+            driver_id=driver_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    assignment = snapshot.get("assignment")
+    ride = snapshot.get("ride")
+    return DriverActiveRideResponse(
+        driver_id=driver_id,
+        organization_id=effective_org_id,
+        has_active_ride=bool(snapshot.get("has_active_ride")),
+        assignment_state=str(snapshot.get("assignment_state") or ""),
+        driver_name=str(snapshot.get("driver_name") or ""),
+        provider_name=str(snapshot.get("provider_name") or ""),
+        eta_minutes=snapshot.get("eta_minutes"),
+        active_assignment=_serialize_active_assignment(assignment) if assignment else None,
+        ride=_ride_response_with_financials(db, ride) if ride else None,
+    )
 
 
 @router.get("/drivers/{driver_id}/live-workspace", response_model=DriverLiveWorkspaceResponse)
@@ -5875,15 +6027,21 @@ async def progress_driver_route(
             details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "completed":
+        pre_driver = service.get_driver_by_id(db, driver_id)
+        previous_driver_status = str(getattr(pre_driver, "status", "") or "") if pre_driver else None
         try:
             ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
-            organization_id=effective_org_id,
-            event_name="trip-completed",
+        if not ride:
+            raise HTTPException(status_code=404, detail="Ride not found")
+        await _emit_driver_trip_completion_events(
+            db=db,
+            ride=ride,
+            driver_id=driver_id,
             actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            previous_driver_status=previous_driver_status,
+            source="driver_route_progress_complete",
         )
     else:
         ride = service.get_ride_by_id(db, ride_id)
@@ -6597,14 +6755,36 @@ def list_rides(
     skip: int = 0,
     limit: int = 50,
     organization_id: str | None = Query(None),
+    active_only: bool = Query(False, description="Exclude completed/cancelled/failed rides"),
+    history_only: bool = Query(False, description="Return only completed/cancelled/failed rides"),
+    exclude_test: bool = Query(False, description="Exclude proof/demo/test marker rides"),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Retrieve all rides (paginated, newest first)."""
-    logger.info("Listing rides: skip=%d, limit=%d", skip, limit)
+    """Retrieve rides (paginated, newest first).
+
+    Operational dashboards should call with active_only=true&exclude_test=true.
+    History/Reports should call with history_only=true.
+    """
+    logger.info(
+        "Listing rides: skip=%d, limit=%d active_only=%s history_only=%s exclude_test=%s",
+        skip,
+        limit,
+        active_only,
+        history_only,
+        exclude_test,
+    )
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    rides = service.get_all_rides(db, skip=skip, limit=limit)
-    return [ride for ride in rides if ride.organization_id == effective_org_id]
+    rides = service.get_all_rides(
+        db,
+        skip=skip,
+        limit=limit,
+        organization_id=effective_org_id,
+        active_only=active_only,
+        history_only=history_only,
+        exclude_test=exclude_test,
+    )
+    return [_ride_response_with_financials(db, ride) for ride in rides]
 
 
 @router.post("/rides", response_model=RideResponse, status_code=201)
@@ -7320,6 +7500,7 @@ def get_ride_completion_handoff(
 
     provider_queue_ready = bool(ride.provider_id and request_row and completed)
     billing_queue_ready = bool(trip and payout and str(getattr(payout, "status", "")).lower() == "pending")
+    financial = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride.id) or {}
 
     return RideCompletionHandoffResponse(
         ride_id=ride.id,
@@ -7330,10 +7511,194 @@ def get_ride_completion_handoff(
         completion_artifact_source=getattr(completion_artifact, "source", None),
         completion_artifact_created_at=getattr(completion_artifact, "created_at", None),
         trip_id=getattr(trip, "id", None),
-        payout_id=getattr(payout, "id", None),
+        payout_id=getattr(payout, "id", None) or financial.get("payout_id"),
         provider_queue_ready=provider_queue_ready,
-        billing_queue_ready=billing_queue_ready,
+        billing_queue_ready=billing_queue_ready or bool(financial.get("billing_handoff_id")),
+        financial_record_id=financial.get("financial_record_id"),
+        ride_price_usd=financial.get("ride_price_usd"),
+        driver_pay_usd=financial.get("driver_pay_usd"),
+        platform_revenue_usd=financial.get("platform_revenue_usd"),
+        provider_share_usd=financial.get("provider_share_usd"),
+        payment_transaction_id=financial.get("payment_transaction_id"),
+        claim_id=financial.get("claim_id"),
+        claim_reference=financial.get("claim_reference"),
+        billing_handoff_id=financial.get("billing_handoff_id"),
+        billing_handoff_status=financial.get("billing_handoff_status"),
+        fare_amount=financial.get("fare_amount"),
     )
+
+
+@router.get("/rides/{ride_id}/financial-summary", response_model=TripFinancialSummaryResponse)
+def get_ride_financial_summary(
+    ride_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ride = service.get_ride_by_id(db, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    enforce_entity_tenant(user, ride.organization_id)
+    summary = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride.id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Financial summary not available for this ride")
+    return TripFinancialSummaryResponse(**summary)
+
+
+@router.get("/drivers/{driver_id}/earnings", response_model=DriverEarningsSummaryResponse)
+def get_driver_earnings_summary(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    enforce_entity_tenant(user, driver.organization_id)
+    payload = TripFinancialEngine.get_driver_earnings_summary(
+        db,
+        driver_id=driver_id,
+        organization_id=effective_org_id,
+    )
+    return DriverEarningsSummaryResponse(**payload)
+
+
+@router.get("/drivers/{driver_id}/completion-snapshot", response_model=DriverCompletionSnapshotResponse)
+def get_driver_completion_snapshot(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Authoritative completed-trip view for driver earnings, history, and billing."""
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    enforce_entity_tenant(user, driver.organization_id)
+    snapshot = service.get_driver_completion_snapshot(
+        db,
+        organization_id=effective_org_id,
+        driver_id=driver_id,
+        limit=limit,
+    )
+    return DriverCompletionSnapshotResponse(
+        driver_id=driver_id,
+        organization_id=effective_org_id,
+        earnings=DriverEarningsSummaryResponse(**snapshot["earnings"]),
+        completed_ride_count=int(snapshot.get("completed_ride_count") or 0),
+        completed_rides=[_ride_response_with_financials(db, ride) for ride in snapshot["completed_rides"]],
+        billing_handoffs=[BillingHandoffQueueItemResponse(**row) for row in snapshot["billing_handoffs"]],
+        documents=[TripDocumentResponse(**row) for row in snapshot.get("documents", [])],
+    )
+
+
+@router.get("/drivers/{driver_id}/completed-rides", response_model=list[RideResponse])
+def get_driver_completed_rides(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    enforce_entity_tenant(user, driver.organization_id)
+    rides = service.list_driver_completed_rides(
+        db,
+        organization_id=effective_org_id,
+        driver_id=driver_id,
+        limit=limit,
+    )
+    return [_ride_response_with_financials(db, ride) for ride in rides]
+
+
+@router.get("/operations/billing-handoffs", response_model=list[BillingHandoffQueueItemResponse])
+def get_billing_handoff_queue(
+    organization_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    rows = service.list_billing_handoff_queue(db, organization_id=effective_org_id, limit=limit)
+    return [BillingHandoffQueueItemResponse(**row) for row in rows]
+
+
+@router.get("/operations/admin-revenue", response_model=AdminRevenueSummaryResponse)
+def get_admin_revenue_summary(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    payload = TripFinancialEngine.get_admin_revenue_summary(db, organization_id=effective_org_id)
+    return AdminRevenueSummaryResponse(**payload)
+
+
+@router.get("/operations/trip-documents", response_model=list[TripDocumentResponse])
+def list_organization_trip_documents(
+    organization_id: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Trip receipts and billing documents generated on ride completion."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    rows = TripFinancialEngine.list_trip_documents_for_organization(
+        db, organization_id=effective_org_id, limit=limit
+    )
+    return [TripDocumentResponse(**row) for row in rows]
+
+
+@router.get("/drivers/{driver_id}/trip-documents", response_model=list[TripDocumentResponse])
+def list_driver_trip_documents(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=300),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    driver = service.get_driver_by_id(db, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    enforce_entity_tenant(user, driver.organization_id)
+    rows = TripFinancialEngine.list_trip_documents_for_driver(
+        db,
+        driver_id=driver_id,
+        organization_id=effective_org_id,
+        limit=limit,
+    )
+    return [TripDocumentResponse(**row) for row in rows]
+
+
+@router.get("/rides/{ride_id}/trip-documents", response_model=list[TripDocumentResponse])
+def list_ride_trip_documents(
+    ride_id: str,
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ride = service.get_ride_by_id(db, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    effective_org_id = enforce_tenant_scope(user, organization_id or ride.organization_id)
+    enforce_entity_tenant(user, ride.organization_id)
+    rows = TripFinancialEngine.list_trip_documents_for_ride(
+        db, ride_id=ride_id, organization_id=effective_org_id
+    )
+    return [TripDocumentResponse(**row) for row in rows]
 
 
 # ── Drivers Endpoints ─────────────────────────────────────────────────────────
@@ -7881,7 +8246,8 @@ def get_driver_assigned_rides(
         raise HTTPException(status_code=404, detail="Driver not found")
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
     enforce_entity_tenant(user, driver.organization_id)
-    return service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=driver_id)
+    rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=driver_id)
+    return [_ride_response_with_financials(db, ride) for ride in rides]
 
 
 @router.patch("/drivers/{driver_id}", response_model=DriverResponse)
@@ -8229,6 +8595,7 @@ async def driver_dropoff_complete(
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
+    previous_driver_status = str(getattr(driver, "status", "") or "")
     try:
         ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=payload.ride_id, actor_user_id=_user.id)
     except ValueError as exc:
@@ -8236,39 +8603,13 @@ async def driver_dropoff_complete(
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
 
-    emitter = get_emitter()
-    await emitter.emit_ride_completed(
-        organization_id=ride.organization_id,
-        ride_id=ride.id,
-        driver_id=driver_id,
-        actor_user_id=_user.id,
-    )
-    await emitter.emit_driver_active_ride_state(
-        organization_id=ride.organization_id,
-        driver_id=driver_id,
-        active_ride_id=None,
-        state=RideStatus.COMPLETED.value,
-        actor_user_id=_user.id,
-        details={"source": "driver_dropoff_route"},
-    )
-    await _emit_dispatch_lifecycle_event(
+    await _emit_driver_trip_completion_events(
         db=db,
-        organization_id=ride.organization_id,
-        ride_id=ride.id,
-        event_name="assignment-completed",
-        actor_user_id=_user.id,
-        details={"ride_id": ride.id, "driver_id": driver_id, "source": "driver_dropoff_route"},
-        request_id=f"driver_complete_{ride.id}",
+        ride=ride,
         driver_id=driver_id,
-        lifecycle_state=RideStatus.COMPLETED.value,
-        transition_reason="dropoff_complete",
-        assignment_transition_source="driver_dropoff_complete",
-    )
-    await emitter.emit_dispatch_changed(
-        organization_id=ride.organization_id,
-        event_name="ride-completed",
         actor_user_id=_user.id,
-        details={"ride_id": ride.id, "driver_id": driver_id},
+        previous_driver_status=previous_driver_status,
+        source="driver_dropoff_route",
     )
     return ride
 
@@ -10576,6 +10917,32 @@ def reset_pilot_environment(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/ops/purge-test-artifacts")
+def purge_test_operational_artifacts(
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Safe cleanup: remove test/proof rides and billing artifacts only.
+
+    Keeps seeded drivers, providers, vehicles, and users.
+    """
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    return service.purge_test_operational_artifacts(db, organization_id=effective_org_id)
+
+
+@router.get("/ops/platform-reset-status")
+def get_platform_reset_status(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Expose live platform emptiness and reset epoch for browser cache invalidation."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    return service.get_platform_reset_status(db, organization_id=effective_org_id)
+
+
 # ── Dashboard Endpoint ────────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=DashboardMetrics)
@@ -10586,9 +10953,8 @@ def get_dashboard(
 ):
     """Retrieve dashboard metrics and KPIs."""
     logger.info("Fetching dashboard metrics")
-    # Legacy dashboard endpoint preserved; tenant-aware clients should use /ops/dashboard.
-    enforce_tenant_scope(user, organization_id)
-    metrics = service.get_dashboard_metrics(db)
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    metrics = service.get_dashboard_metrics(db, organization_id=effective_org_id)
     return metrics
 
 

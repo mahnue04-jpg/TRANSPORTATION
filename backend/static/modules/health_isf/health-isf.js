@@ -11,6 +11,22 @@
   const SEED_DRIVER_PHONE_BY_EMAIL = {
     "driver@amicor.local": "917-555-1001",
   };
+  const DRIVER_PROOF_MARKERS = [
+    "driver ai proof",
+    "production proof",
+    "proof driver",
+    "live dispatch driver",
+  ];
+  const DRIVER_SCRIPT_MARKERS = [
+    "live pickup",
+    "live dropoff",
+    "rider browser pickup",
+    "rider browser dropoff",
+    "rider app verify",
+    "ops verify",
+    "flow pickup",
+    "flow dropoff",
+  ];
   const API_REQUEST_TIMEOUT_MS = 45000;
   const REALTIME_RECONNECT_COOLDOWN_MS = 12000;
   const REALTIME_STALE_THRESHOLD_MS = 45000;
@@ -431,6 +447,17 @@
     return providers[0] && providers[0].id ? providers[0].id : null;
   }
 
+  function isProofOrDemoTripMeta(name, pickup, dropoff, notes) {
+    const blob = [name, pickup, dropoff, notes].map(function (value) {
+      return String(value || "");
+    }).join(" ").toLowerCase();
+    return DRIVER_PROOF_MARKERS.some(function (marker) {
+      return blob.indexOf(marker) >= 0;
+    }) || DRIVER_SCRIPT_MARKERS.some(function (marker) {
+      return blob.indexOf(marker) >= 0;
+    });
+  }
+
   function ensureDriverWorkspaceSelection() {
     const role = getEffectiveShellRole(getSessionProfile().role);
     if (role !== "driver") return;
@@ -448,8 +475,8 @@
     }
     if (!match) {
       match = drivers.find(function (driver) {
-        return String(driver.status || driver.availability_state || "").toLowerCase() === "available";
-      }) || drivers[0];
+        return String(driver.name || "").toLowerCase() === "james smith";
+      }) || null;
     }
     if (!match || !match.id) return;
     state.selectedDriverId = String(match.id);
@@ -5513,14 +5540,26 @@
       return String(ride.status || '').toLowerCase() === 'cancelled';
     });
 
-    const totalBilled = completed.reduce(function (sum, ride) {
-      const fare = Number(firstDefined(ride.fare_amount, ride.total_amount, ride.total_fare, ride.payout_amount, ride.estimated_distance_miles ? Number(ride.estimated_distance_miles) * 2.4 : 0) || 0);
-      return sum + (Number.isFinite(fare) ? fare : 0);
-    }, 0);
-    const pendingPayout = Number((state.dashboard && state.dashboard.pending_payouts_usd) || 0);
+    const revenue = (state.adminRevenue && typeof state.adminRevenue === 'object') ? state.adminRevenue : {};
+    const financialEngine = (((state.revenueWorkflow || {}).kpis || {}).financial_engine && typeof (state.revenueWorkflow || {}).kpis.financial_engine === 'object')
+      ? (state.revenueWorkflow || {}).kpis.financial_engine
+      : {};
+    const totalBilled = Number(
+      firstDefined(
+        revenue.ride_revenue_total_usd,
+        financialEngine.ride_revenue_total_usd,
+        completed.reduce(function (sum, ride) {
+          const fare = Number(firstDefined(ride.fare_amount, ride.total_amount, ride.total_fare, ride.payout_amount, ride.estimated_distance_miles ? Number(ride.estimated_distance_miles) * 2.4 : 0) || 0);
+          return sum + (Number.isFinite(fare) ? fare : 0);
+        }, 0)
+      ) || 0
+    );
+    const platformRevenue = Number(firstDefined(revenue.platform_revenue_total_usd, financialEngine.platform_revenue_total_usd, 0) || 0);
+    const pendingPayout = Number(firstDefined((state.dashboard && state.dashboard.pending_payouts_usd), revenue.driver_payout_total_usd, financialEngine.driver_payout_total_usd, 0) || 0);
 
     els.billingKpis.innerHTML = '<div class="enterprise-table-wrap"><table class="health-table"><thead><tr><th>Metric</th><th>Value</th><th>Operational meaning</th></tr></thead><tbody>'
-      + '<tr><td><strong>Total billed today</strong></td><td>$' + totalBilled.toFixed(2) + '</td><td>Completed ride revenue captured in current operating window</td></tr>'
+      + '<tr><td><strong>Total billed</strong></td><td>$' + totalBilled.toFixed(2) + '</td><td>Completed ride revenue from financial engine</td></tr>'
+      + '<tr><td><strong>Platform revenue</strong></td><td>$' + platformRevenue.toFixed(2) + '</td><td>Amicor platform take after driver and provider shares</td></tr>'
       + '<tr><td><strong>Pending payout</strong></td><td>$' + pendingPayout.toFixed(2) + '</td><td>Outstanding settlement value waiting reconciliation</td></tr>'
       + '<tr><td><strong>Completed trips</strong></td><td>' + formatNumber(completed.length) + '</td><td>Trips eligible for final claim processing</td></tr>'
       + '<tr><td><strong>Trips in progress</strong></td><td>' + formatNumber(inProgress.length) + '</td><td>Trips likely to enter billing queue soon</td></tr>'
@@ -5729,7 +5768,14 @@
     const rows = await fetchJson('/api/health-isf/drivers/' + encodeURIComponent(driverId) + '/assigned-rides', {
       actionName: 'driver_assigned_rides',
     }).catch(function () { return []; });
-    state.selectedDriverAssignedRides = Array.isArray(rows) ? rows : [];
+    state.selectedDriverAssignedRides = (Array.isArray(rows) ? rows : []).filter(function (ride) {
+      return !isProofOrDemoTripMeta(
+        ride && ride.passenger_name,
+        ride && ride.pickup_address,
+        ride && ride.dropoff_address,
+        ride && ride.notes
+      );
+    });
   }
 
   function getDriverRuntimeInputs() {
@@ -6278,16 +6324,16 @@
     }
     const rows = Array.isArray(state.dispatchActiveAssignments) ? state.dispatchActiveAssignments : [];
     let offer = rows.find(function (item) {
-      return String(item.driver_id || '') === selectedDriverId && String(item.assignment_state || '').toLowerCase() === 'offered';
+      const stateValue = String(item.assignment_state || '').toLowerCase();
+      return String(item.driver_id || '') === selectedDriverId
+        && (stateValue === 'offered' || stateValue === 'assigned' || stateValue === 'awaiting_approval');
     }) || null;
-    if (!offer) {
-      const liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
-      const activeAssignment = liveWorkspace && liveWorkspace.active_assignment ? liveWorkspace.active_assignment : null;
-      if (
-        activeAssignment
-        && String(activeAssignment.driver_id || '') === selectedDriverId
-        && String(activeAssignment.assignment_state || '').toLowerCase() === 'offered'
-      ) {
+    const liveWorkspace = state.driverLiveWorkspace && typeof state.driverLiveWorkspace === 'object' ? state.driverLiveWorkspace : null;
+    const activeAssignment = liveWorkspace && liveWorkspace.active_assignment ? liveWorkspace.active_assignment : null;
+    const activeRide = liveWorkspace && liveWorkspace.active_ride ? liveWorkspace.active_ride : null;
+    if (!offer && activeAssignment && String(activeAssignment.driver_id || '') === selectedDriverId) {
+      const assignmentState = String(activeAssignment.assignment_state || '').toLowerCase();
+      if (assignmentState === 'offered' || assignmentState === 'assigned' || assignmentState === 'awaiting_approval') {
         offer = {
           offer_id: activeAssignment.offer_id || activeAssignment.id,
           ride_id: activeAssignment.ride_id,
@@ -6296,6 +6342,9 @@
           attempt_index: activeAssignment.attempt_index,
           score: activeAssignment.score,
           offer_expires_at: activeAssignment.offer_expires_at,
+          passenger_name: activeAssignment.passenger_name || (activeRide && activeRide.passenger_name) || '',
+          pickup_address: (activeRide && activeRide.pickup_address) || '',
+          dropoff_address: (activeRide && activeRide.dropoff_address) || '',
         };
       }
     }
@@ -6310,8 +6359,36 @@
           attempt_index: active.attempt_index,
           score: active.score,
           offer_expires_at: active.offer_expires_at,
+          passenger_name: active.passenger_name,
+          pickup_address: active.pickup_address,
+          dropoff_address: active.dropoff_address,
         };
       }
+    }
+    if (!offer && Array.isArray(state.selectedDriverAssignedRides) && state.selectedDriverAssignedRides.length) {
+      const assignedRide = state.selectedDriverAssignedRides.find(function (ride) {
+        const rideStatus = String((ride && ride.status) || '').toLowerCase().replace(/^ridestatus\./, '');
+        return ['assigned', 'queued', 'offered', 'pending', 'accepted', 'driver_en_route'].indexOf(rideStatus) >= 0;
+      }) || state.selectedDriverAssignedRides[0];
+      if (assignedRide && assignedRide.id) {
+        offer = {
+          offer_id: activeAssignment && (activeAssignment.offer_id || activeAssignment.id) || '',
+          ride_id: assignedRide.id,
+          driver_id: selectedDriverId,
+          assignment_state: (activeAssignment && activeAssignment.assignment_state) || assignedRide.status || 'assigned',
+          passenger_name: assignedRide.passenger_name || '',
+          pickup_address: assignedRide.pickup_address || '',
+          dropoff_address: assignedRide.dropoff_address || '',
+        };
+      }
+    }
+    if (offer && isProofOrDemoTripMeta(
+      offer.passenger_name,
+      offer.pickup_address,
+      offer.dropoff_address,
+      offer.notes
+    )) {
+      offer = null;
     }
     state.driverIncomingOffer = offer;
   }
@@ -6423,13 +6500,21 @@
 
   async function acceptDriverIncomingOffer() {
     hydrateDriverIncomingOffer();
-    if (!state.driverIncomingOffer || !state.driverIncomingOffer.offer_id) {
+    if (!state.driverIncomingOffer) {
       throw new Error('No incoming offer for selected driver');
     }
-    await fetchJson('/api/health-isf/dispatch/offers/' + encodeURIComponent(state.driverIncomingOffer.offer_id) + '/accept', {
-      method: 'POST',
-      actionName: 'driver_offer_accept',
-    });
+    if (state.driverIncomingOffer.offer_id) {
+      await fetchJson('/api/health-isf/dispatch/offers/' + encodeURIComponent(state.driverIncomingOffer.offer_id) + '/accept', {
+        method: 'POST',
+        actionName: 'driver_offer_accept',
+      });
+      return;
+    }
+    if (state.driverIncomingOffer.ride_id) {
+      await acceptDriverAssignedRide(state.driverIncomingOffer.ride_id);
+      return;
+    }
+    throw new Error('No incoming offer for selected driver');
   }
 
   async function rejectDriverIncomingOffer() {
@@ -6678,11 +6763,27 @@
         els.driverIncomingOffer.innerHTML = '<div class="enterprise-inline-grid">'
           + MetricCard('Offer State', escapeHtml(offer.assignment_state || 'offered'), 'Current driver offer lifecycle state', 'warn')
           + MetricCard('Ride', escapeHtml(String(offer.ride_id || '')), 'Incoming ride identifier', 'ok')
+          + MetricCard('Rider', escapeHtml(String(offer.passenger_name || 'Rider')), 'Passenger on this offer', 'ok')
           + MetricCard('Attempt', formatNumber(offer.attempt_index || 0), 'Deterministic offer attempt index', 'ok')
           + MetricCard('Score', escapeHtml(String(offer.score != null ? Number(offer.score).toFixed(3) : '-')), 'Dispatch scoring model output', 'ok')
           + MetricCard('Countdown', escapeHtml(expires), 'Offer expiry countdown', 'warn')
           + '</div>';
       }
+    }
+    if (els.driverOfferAccept) {
+      const offerState = String((state.driverIncomingOffer && state.driverIncomingOffer.assignment_state) || 'offered').toLowerCase();
+      const acceptEnabled = Boolean(
+        state.driverIncomingOffer
+        && (state.driverIncomingOffer.offer_id || state.driverIncomingOffer.ride_id)
+        && ['offered', 'assigned', 'awaiting_approval'].indexOf(offerState) >= 0
+      );
+      els.driverOfferAccept.disabled = !acceptEnabled;
+      els.driverOfferAccept.setAttribute('aria-disabled', acceptEnabled ? 'false' : 'true');
+    }
+    if (els.driverOfferReject) {
+      const rejectEnabled = Boolean(state.driverIncomingOffer && state.driverIncomingOffer.offer_id);
+      els.driverOfferReject.disabled = !rejectEnabled;
+      els.driverOfferReject.setAttribute('aria-disabled', rejectEnabled ? 'false' : 'true');
     }
 
     if (els.driverOfferStream) {
@@ -7945,6 +8046,18 @@
 
       state.dashboard = dashboard;
       state.enterpriseDashboard = enterpriseDashboard;
+      if (activeRoute === "billing") {
+        try {
+          state.revenueWorkflow = await fetchJson("/api/health-isf/operations/revenue-workflow?window_hours=24", { actionName: "refresh_revenue_workflow" });
+        } catch (_) {
+          state.revenueWorkflow = null;
+        }
+        try {
+          state.adminRevenue = await fetchJson("/api/health-isf/operations/admin-revenue", { actionName: "refresh_admin_revenue" });
+        } catch (_) {
+          state.adminRevenue = null;
+        }
+      }
       state.rides = Array.isArray(rides) ? rides : [];
       state.drivers = Array.isArray(drivers) ? drivers : [];
       const normalizedProviders = normalizeProvidersList(providers);

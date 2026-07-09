@@ -1192,11 +1192,18 @@ body {
   border-radius: 999px;
   padding: 8px 12px;
   font-weight: 600;
-  cursor: not-allowed;
+  cursor: pointer;
 }
 
 .preview-action:disabled {
   opacity: 0.82;
+  cursor: not-allowed;
+}
+
+.driver-action.active {
+  border-style: solid;
+  background: #13466f;
+  color: #ffffff;
 }
 
 .protected-endpoint-list {

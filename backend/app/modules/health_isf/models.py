@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from sqlalchemy import (
     DateTime, Enum as SQLEnum, Float, ForeignKey,
-    Integer, String, Text, Boolean, Index, inspect, text
+    Integer, String, Text, Boolean, Index, UniqueConstraint, inspect, text
 )
 from sqlalchemy import TypeDecorator, String as SAString
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -1504,6 +1504,18 @@ def ensure_health_isf_schema() -> None:
             if "escalated_at" not in alert_columns:
                 conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN escalated_at DATETIME"))
 
+        # Idempotency: one document type per completed ride.
+        if "health_isf_trip_documents" in table_names:
+            try:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_trip_docs_ride_type "
+                        "ON health_isf_trip_documents (ride_id, document_type)"
+                    )
+                )
+            except Exception:
+                pass
+
 
 # ── AI governance approvals ──────────────────────────────────────────────────
 
@@ -1541,4 +1553,128 @@ class HealthISFGovernanceApproval(Base):
     audit_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+# ── Financial engine records ─────────────────────────────────────────────────
+
+class HealthISFTripFinancialRecord(Base):
+    """Canonical financial breakdown for a completed trip."""
+    __tablename__ = "health_isf_trip_financial_records"
+    __table_args__ = (
+        Index("idx_trip_financial_org_created", "organization_id", "created_at"),
+        Index("idx_trip_financial_org_ride", "organization_id", "ride_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ride_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_rides.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True,
+    )
+    trip_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    ride_price_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    driver_pay_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    platform_revenue_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    provider_share_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    processing_fee_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    payment_transaction_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    payout_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    billing_handoff_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    is_healthcare: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    service_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class HealthISFClaim(Base):
+    """Healthcare reimbursement claim generated from completed trips."""
+    __tablename__ = "health_isf_claims"
+    __table_args__ = (
+        Index("idx_claims_org_status", "organization_id", "status"),
+        Index("idx_claims_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ride_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_rides.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    financial_record_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    provider_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    claim_reference: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="submitted", index=True)
+    billed_amount_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    service_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    passenger_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class HealthISFBillingHandoff(Base):
+    """Billing handoff linking trip completion to downstream billing queues."""
+    __tablename__ = "health_isf_billing_handoffs"
+    __table_args__ = (
+        Index("idx_billing_handoff_org_ride", "organization_id", "ride_id"),
+        Index("idx_billing_handoff_org_status", "organization_id", "handoff_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ride_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_rides.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True,
+    )
+    financial_record_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    handoff_status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready", index=True)
+    payment_transaction_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    payout_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    ride_price_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    driver_pay_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    platform_revenue_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class HealthISFTripDocument(Base):
+    """Trip receipt / payout / billing documents generated on ride completion."""
+    __tablename__ = "health_isf_trip_documents"
+    __table_args__ = (
+        UniqueConstraint("ride_id", "document_type", name="uq_trip_docs_ride_type"),
+        Index("idx_trip_docs_org_ride", "organization_id", "ride_id"),
+        Index("idx_trip_docs_org_driver", "organization_id", "driver_id"),
+        Index("idx_trip_docs_org_type", "organization_id", "document_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ride_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("health_isf_rides.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    driver_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    financial_record_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    payment_transaction_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    payout_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    document_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    reference: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="issued", index=True)
+    amount_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    content_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 

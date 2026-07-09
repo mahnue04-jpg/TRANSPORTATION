@@ -270,6 +270,19 @@ class EventBroadcaster:
             events = events[:limit]
         return events
 
+    def clear_organization_runtime_state(self, organization_id: str) -> None:
+        """Drop in-memory websocket replay buffers and recovery counters for an org."""
+        org_id = str(organization_id or "")
+        if not org_id:
+            return
+        self.event_replay_buffers.pop(org_id, None)
+        self.sequence_by_org.pop(org_id, None)
+        self.recovery_attempts_by_org.pop(org_id, None)
+        self.recovery_failures_by_org.pop(org_id, None)
+        self.last_recovery_status_by_org.pop(org_id, None)
+        self.degraded_reasons_by_org.pop(org_id, None)
+        self.event_replay_buffers[org_id] = deque(maxlen=500)
+
     def clear_degraded_state(self, organization_id: str) -> None:
         org_id = str(organization_id or "")
         if not org_id:

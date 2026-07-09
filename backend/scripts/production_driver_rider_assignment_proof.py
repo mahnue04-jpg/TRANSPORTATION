@@ -12,6 +12,7 @@ import httpx
 
 BASE = os.getenv("AMICOR_RENDER_BASE", "https://amicor-health-isf-py.onrender.com").rstrip("/")
 PASSWORD = os.getenv("AMICOR_SEED_PASSWORD", "Amicor123!")
+SYNC_KEY = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", PASSWORD)
 RIDER_NAME = os.getenv("AMICOR_PROOF_RIDER_NAME", "saye monibah")
 TIMEOUT = float(os.getenv("AMICOR_HTTP_TIMEOUT", "120"))
 
@@ -76,6 +77,13 @@ def main() -> None:
         print(f"COMMITS_MATCH={str(commits_match).lower()}")
         if not commits_match:
             _fail("deployment_not_updated", f"local={local_commit} github={github_main} render={render_commit}")
+
+        sync = client.post(
+            f"{BASE}/api/auth/deployment/sync-seed-users",
+            headers={"X-Amicor-Deployment-Key": SYNC_KEY},
+        )
+        if sync.status_code not in {200, 403}:
+            _fail("seed_sync", sync.text[:300])
 
         rider_auth = _login(client, "rider@amicor.local")
         rider_headers = _headers(rider_auth["access_token"])
