@@ -7826,6 +7826,7 @@ def list_drivers(
     """Retrieve all active drivers (paginated)."""
     logger.info("Listing drivers: skip=%d, limit=%d", skip, limit)
     effective_org_id = enforce_tenant_scope(user, organization_id)
+    seed_summary = service.ensure_sample_drivers(db, organization_id=effective_org_id)
     drivers = service.get_drivers_for_organization(
         db,
         organization_id=effective_org_id,
@@ -7833,12 +7834,12 @@ def list_drivers(
         limit=limit,
     )
     if not drivers:
-        seed_summary = service.ensure_sample_drivers(db, organization_id=effective_org_id)
         logger.warning(
-            "Driver list empty for org=%s; repair seed attempted: %s",
+            "Driver list empty for org=%s after seed attempt: %s",
             effective_org_id,
             seed_summary,
         )
+        db.expire_all()
         drivers = service.get_drivers_for_organization(
             db,
             organization_id=effective_org_id,

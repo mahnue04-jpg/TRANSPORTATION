@@ -4438,13 +4438,23 @@ def _normalize_legacy_driver_status_rows(db: Session) -> None:
                 "WHERE status IS NOT NULL AND status <> lower(status)"
             )
         )
-        db.execute(
-            text(
-                "UPDATE health_isf_drivers "
-                "SET status = substr(status, instr(status, '.') + 1) "
-                "WHERE status LIKE 'driverstatus.%'"
+        dialect = db.bind.dialect.name if db.bind is not None else ""
+        if dialect == "postgresql":
+            db.execute(
+                text(
+                    "UPDATE health_isf_drivers "
+                    "SET status = substring(status from position('.' in status) + 1) "
+                    "WHERE status LIKE 'driverstatus.%'"
+                )
             )
-        )
+        else:
+            db.execute(
+                text(
+                    "UPDATE health_isf_drivers "
+                    "SET status = substr(status, instr(status, '.') + 1) "
+                    "WHERE status LIKE 'driverstatus.%'"
+                )
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -5084,6 +5094,22 @@ def set_driver_operational_status(
     return driver
 
 
+def _vehicle_plate_taken(db: Session, candidate: str) -> bool:
+    if (
+        db.query(HealthISFVehicle.id)
+        .filter(HealthISFVehicle.vehicle_plate == candidate)
+        .first()
+    ):
+        return True
+    if (
+        db.query(HealthISFDriver.id)
+        .filter(HealthISFDriver.vehicle_plate == candidate)
+        .first()
+    ):
+        return True
+    return False
+
+
 def _resolve_unique_vehicle_plate(db: Session, base_plate: str, organization_id: str) -> str:
     base = str(base_plate or "VEH").strip() or "VEH"
     candidates = [
@@ -5092,14 +5118,61 @@ def _resolve_unique_vehicle_plate(db: Session, base_plate: str, organization_id:
         f"{base}-{uuid4()[:6].upper()}",
     ]
     for candidate in candidates:
-        exists = (
-            db.query(HealthISFVehicle.id)
-            .filter(HealthISFVehicle.vehicle_plate == candidate)
-            .first()
-        )
-        if not exists:
+        if not _vehicle_plate_taken(db, candidate):
             return candidate
     return f"{base}-{uuid4()[:8].upper()}"
+
+
+def _release_canonical_phone(
+    db: Session,
+    canonical_phone: str,
+    *,
+    keep_driver_id: str | None = None,
+) -> None:
+    """Archive duplicate rows that hold a canonical sample-driver phone."""
+    rows = (
+        db.query(HealthISFDriver)
+        .filter(HealthISFDriver.phone == canonical_phone)
+        .order_by(HealthISFDriver.created_at.asc())
+        .all()
+    )
+    for other in rows:
+        if keep_driver_id and str(other.id) == str(keep_driver_id):
+            continue
+        other.phone = f"archived-{str(other.id)[:8]}"
+        other.is_active = False
+        other.updated_at = now()
+
+
+def _operational_organization_ids(db: Session) -> set[str]:
+    """Collect tenant ids that currently have providers, rides, or active users."""
+    org_ids: set[str] = set()
+    default_org = _get_or_create_default_org(db)
+    org_ids.add(str(default_org.id))
+
+    for model in (HealthISFProvider, HealthISFRide, HealthISFDriver):
+        rows = db.query(model.organization_id).distinct().all()
+        for row in rows:
+            value = row[0] if isinstance(row, tuple) else row
+            if value:
+                org_ids.add(str(value))
+
+    try:
+        from app.db.models import User as PlatformUser
+
+        user_rows = (
+            db.query(PlatformUser.organization_id)
+            .filter(PlatformUser.organization_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        for row in user_rows:
+            if row[0]:
+                org_ids.add(str(row[0]))
+    except Exception:
+        pass
+
+    return org_ids
 
 
 def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, item: dict[str, Any]) -> HealthISFDriver:
@@ -5189,22 +5262,53 @@ def ensure_sample_drivers(db: Session, organization_id: str | None = None) -> di
                 updated += 1
                 changed = True
         if not row:
-            row = _create_canonical_sample_driver(db, org, item)
-            created += 1
-            changed = True
+            try:
+                row = _create_canonical_sample_driver(db, org, item)
+                created += 1
+                changed = True
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    "Canonical driver create failed for org=%s name=%s: %s",
+                    org.id,
+                    canonical_name,
+                    exc,
+                )
+                row = (
+                    db.query(HealthISFDriver)
+                    .filter(HealthISFDriver.phone == canonical_phone)
+                    .order_by(HealthISFDriver.created_at.asc())
+                    .first()
+                )
+                if not row:
+                    raise
+                if str(row.organization_id) != str(org.id):
+                    row.organization_id = org.id
+                row.name = canonical_name
+                row.is_active = True
+                row.updated_at = now()
+                updated += 1
+                changed = True
         else:
             row.name = canonical_name
+            _release_canonical_phone(db, canonical_phone, keep_driver_id=str(row.id))
             row.phone = canonical_phone
             row.vehicle_type = item["vehicle_type"]
             row.status = item["status"]
             row.rating = item["rating"]
             row.is_active = True
+            row.organization_id = org.id
             row.availability_state = (
                 "available"
                 if item["status"] == DriverStatus.AVAILABLE
                 else "offline"
             )
             row.updated_at = now()
+            if row.vehicle_id:
+                vehicle = db.query(HealthISFVehicle).filter(HealthISFVehicle.id == row.vehicle_id).first()
+                if vehicle and str(vehicle.organization_id) != str(org.id):
+                    vehicle.organization_id = org.id
+                    vehicle.updated_at = now()
             updated += 1
             changed = True
 
@@ -5230,6 +5334,20 @@ def ensure_sample_drivers(db: Session, organization_id: str | None = None) -> di
         "total": total,
         "driver_ids": driver_ids,
         "driver_names": driver_names,
+    }
+
+
+def sync_operational_driver_fleet(db: Session) -> dict[str, Any]:
+    """Ensure baseline drivers exist for every tenant with operational activity."""
+    summaries: list[dict[str, Any]] = []
+    for org_id in sorted(_operational_organization_ids(db)):
+        try:
+            summaries.append(ensure_sample_drivers(db, organization_id=org_id))
+        except Exception as exc:
+            logger.warning("Operational driver fleet sync failed for org=%s: %s", org_id, exc)
+    return {
+        "organizations_synced": len(summaries),
+        "summaries": summaries,
     }
 
 

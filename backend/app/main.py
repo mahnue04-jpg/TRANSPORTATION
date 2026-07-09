@@ -331,6 +331,7 @@ async def lifespan(app: FastAPI):
             default_org = health_isf_service._get_or_create_default_org(db)  # type: ignore
             provider_summary = health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)  # type: ignore
             driver_summary = health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)  # type: ignore
+            fleet_summary = health_isf_service.sync_operational_driver_fleet(db)  # type: ignore
             logger.info(
                 "Operational provider seed ensured: org=%s total=%s created=%s",
                 provider_summary.get("organization_id"),
@@ -343,6 +344,10 @@ async def lifespan(app: FastAPI):
                 driver_summary.get("total"),
                 driver_summary.get("created"),
                 driver_summary.get("driver_names"),
+            )
+            logger.info(
+                "Operational driver fleet sync complete: orgs=%s",
+                fleet_summary.get("organizations_synced"),
             )
             seed_sample_data = os.environ.get("AMICOR_SEED_SAMPLE_DATA", "").strip().lower() in {
                 "1",

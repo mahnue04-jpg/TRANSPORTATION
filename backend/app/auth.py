@@ -248,11 +248,29 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
             )
             driver_count = (
                 db.query(HealthISFDriver)
-                .filter(HealthISFDriver.organization_id == current_org_str)
+                .filter(
+                    HealthISFDriver.organization_id == current_org_str,
+                    HealthISFDriver.is_active == True,
+                )
+                .count()
+            )
+            canonical_names = [str(item["name"]).strip().lower() for item in health_isf_service.SAMPLE_DRIVERS]
+            canonical_driver_count = (
+                db.query(HealthISFDriver)
+                .filter(
+                    HealthISFDriver.organization_id == current_org_str,
+                    HealthISFDriver.is_active == True,
+                    func.lower(HealthISFDriver.name).in_(canonical_names),
+                )
                 .count()
             )
             if provider_count == 0 or driver_count == 0:
                 user.organization_id = default_org.id
+            elif canonical_driver_count < len(health_isf_service.SAMPLE_DRIVERS):
+                health_isf_service.ensure_sample_drivers(db, organization_id=current_org_str)
+
+        final_org_id = str(getattr(user, "organization_id", None) or default_org.id)
+        health_isf_service.ensure_sample_drivers(db, organization_id=final_org_id)
 
         if not getattr(user, "organization_name", None):
             user.organization_name = DEFAULT_ORGANIZATION_NAME
@@ -621,6 +639,7 @@ def deployment_sync_seed_users(request: Request):
         default_org = health_isf_service._get_or_create_default_org(db)
         provider_summary = health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
         driver_summary = health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)
+        fleet_summary = health_isf_service.sync_operational_driver_fleet(db)
     finally:
         db.close()
     return {
@@ -630,6 +649,7 @@ def deployment_sync_seed_users(request: Request):
         "password_env": "AMICOR_SEED_PASSWORD",
         "provider_seed": provider_summary,
         "driver_seed": driver_summary,
+        "driver_fleet_sync": fleet_summary,
     }
 
 
