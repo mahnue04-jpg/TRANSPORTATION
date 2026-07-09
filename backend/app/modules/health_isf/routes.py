@@ -7832,6 +7832,19 @@ def list_drivers(
         skip=skip,
         limit=limit,
     )
+    if not drivers:
+        seed_summary = service.ensure_sample_drivers(db, organization_id=effective_org_id)
+        logger.warning(
+            "Driver list empty for org=%s; repair seed attempted: %s",
+            effective_org_id,
+            seed_summary,
+        )
+        drivers = service.get_drivers_for_organization(
+            db,
+            organization_id=effective_org_id,
+            skip=skip,
+            limit=limit,
+        )
     return drivers
 
 

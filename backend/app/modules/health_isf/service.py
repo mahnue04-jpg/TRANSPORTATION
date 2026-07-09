@@ -5145,12 +5145,18 @@ def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, ite
     return driver
 
 
-def ensure_sample_driver_credentials(db: Session, organization_id: str | None = None) -> dict[str, str]:
-    """Ensure baseline seed drivers exist with canonical phone numbers for check-in testing."""
+def ensure_sample_drivers(db: Session, organization_id: str | None = None) -> dict[str, Any]:
+    """Idempotently ensure baseline fleet drivers exist for dispatch and driver login."""
     org = _get_organization_by_id(db, organization_id) if organization_id else _get_or_create_default_org(db)
     if not org:
-        return {}
-    ensured: dict[str, str] = {}
+        return {"organization_id": None, "created": 0, "updated": 0, "total": 0, "driver_ids": [], "driver_names": []}
+
+    created = 0
+    updated = 0
+    driver_ids: list[str] = []
+    driver_names: list[str] = []
+    changed = False
+
     for item in SAMPLE_DRIVERS:
         canonical_phone = str(item["phone"]).strip()
         canonical_name = str(item["name"]).strip()
@@ -5176,32 +5182,61 @@ def ensure_sample_driver_credentials(db: Session, organization_id: str | None = 
                 row.is_active = True
                 row.updated_at = now()
                 if row.vehicle_id:
-                    vehicle = (
-                        db.query(HealthISFVehicle)
-                        .filter(HealthISFVehicle.id == row.vehicle_id)
-                        .first()
-                    )
+                    vehicle = db.query(HealthISFVehicle).filter(HealthISFVehicle.id == row.vehicle_id).first()
                     if vehicle:
                         vehicle.organization_id = org.id
                         vehicle.updated_at = now()
-                ensured[str(row.id)] = canonical_phone
-                continue
+                updated += 1
+                changed = True
         if not row:
             row = _create_canonical_sample_driver(db, org, item)
-            ensured[str(row.id)] = canonical_phone
-            continue
-        current_phone = str(row.phone or "").strip()
-        if not _phones_match_for_driver_login(canonical_phone, current_phone):
+            created += 1
+            changed = True
+        else:
+            row.name = canonical_name
             row.phone = canonical_phone
-            row.updated_at = now()
-            ensured[str(row.id)] = canonical_phone
-        if not row.is_active:
+            row.vehicle_type = item["vehicle_type"]
+            row.status = item["status"]
+            row.rating = item["rating"]
             row.is_active = True
+            row.availability_state = (
+                "available"
+                if item["status"] == DriverStatus.AVAILABLE
+                else "offline"
+            )
             row.updated_at = now()
-            ensured[str(row.id)] = canonical_phone
-    if ensured:
+            updated += 1
+            changed = True
+
+        driver_ids.append(str(row.id))
+        driver_names.append(str(row.name))
+
+    if changed:
         _commit_or_rollback(db)
-    return ensured
+
+    total = (
+        db.query(HealthISFDriver)
+        .filter(
+            HealthISFDriver.organization_id == org.id,
+            HealthISFDriver.is_active == True,
+        )
+        .count()
+    )
+    return {
+        "organization_id": str(org.id),
+        "organization_name": org.name,
+        "created": created,
+        "updated": updated,
+        "total": total,
+        "driver_ids": driver_ids,
+        "driver_names": driver_names,
+    }
+
+
+def ensure_sample_driver_credentials(db: Session, organization_id: str | None = None) -> dict[str, str]:
+    """Backward-compatible wrapper returning driver_id -> phone map."""
+    summary = ensure_sample_drivers(db, organization_id=organization_id)
+    return {driver_id: "" for driver_id in summary.get("driver_ids", [])}
 
 
 def ensure_sample_providers(db: Session, organization_id: str | None = None) -> dict[str, Any]:
@@ -5301,12 +5336,13 @@ def init_sample_data(db: Session) -> dict:
     org = _get_or_create_default_org(db)
     provider_seed = ensure_sample_providers(db, organization_id=org.id)
     summary["providers"] = int(provider_seed.get("total") or 0)
+    driver_seed = ensure_sample_drivers(db, organization_id=org.id)
+    summary["drivers"] = int(driver_seed.get("total") or 0)
 
     existing_rides = db.query(HealthISFRide).filter(HealthISFRide.organization_id == org.id).count()
     existing_drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).count()
     if existing_rides > 0 or existing_drivers > 0:
         summary["already_exists"] = True
-        summary["drivers"] = existing_drivers
         summary["organizations"] = 1
         return summary
 
