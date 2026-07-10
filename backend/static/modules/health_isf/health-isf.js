@@ -147,6 +147,8 @@
     },
     pendingRequests: 0,
     lastApiError: null,
+    driversLoadError: null,
+    providersLoadError: null,
     lastCompletedAction: null,
     lastFailedAction: null,
     lastActionAt: null,
@@ -2344,7 +2346,13 @@
   }
 
   function DriverTable(rows) {
-    if (!rows.length) return '<p class="health-summary">Driver operations feed unavailable.</p>';
+    if (!rows.length) {
+      const errorText = state.driversLoadError || state.lastApiError;
+      if (errorText) {
+        return '<p class="health-summary health-error">' + escapeHtml(String(errorText)) + '</p>';
+      }
+      return '<p class="health-summary">Driver operations feed unavailable.</p>';
+    }
     const body = rows.map(function (row) {
       return [
         '<tr>',
@@ -4786,7 +4794,8 @@
     if (!driver || !driver.id || driver.is_active === false) return false;
     const availability = String(driver.availability_state || "").toLowerCase();
     const status = String(driver.status || "").toLowerCase();
-    const dispatchReady = availability === "available" || status === "available" || status === "unavailable";
+    const isOnline = driver.is_online === true;
+    const dispatchReady = isOnline && availability === "available" && status === "available";
     if (!dispatchReady) return false;
     return getDriverActiveAssignmentCount(driver.id, rideId) === 0;
   }
@@ -6698,7 +6707,7 @@
         footer: 'Utilization by driver across current assignments',
       }),
       '<h4>Shift watchlist</h4>',
-      AlertPanel(driverAlerts.slice(0, 6), 'Driver availability is stable.'),
+      AlertPanel(driverAlerts.slice(0, 6), state.driversLoadError || state.lastApiError || 'No driver alerts right now.'),
       '</section>',
       '<section class="enterprise-panel-block">',
       '<h4>Dispatch commitments</h4>',
@@ -7990,10 +7999,16 @@
       let aiSnapshot = null;
       let aiSnapshotError = null;
       const [dashboard, rides, drivers, providers, customerRequests, customerQueueMetrics, dispatchQueue, dispatchActiveAssignments, driverPoolMetrics, driverApplications, recurringTemplates, grantSnapshot, operationalStatus, governanceStatus, governanceApprovals, novaContinuityBrief, novaAssistanceRecommendations, novaLiveEvents, novaMemoryFabric, runtimeDiagnostics, adminSummary, adminLiveOperations, adminDispatchAlerts, runtimeState, runtimeReplay, serviceCategories, previewRuntimeStatus] = await Promise.all([
-      wantsOperationalRefresh ? fetchJson("/api/health-isf/dashboard", { actionName: "refresh_dashboard" }).catch(() => null) : Promise.resolve(null),
-      wantsOperationalRefresh ? fetchJson("/api/health-isf/rides", { actionName: "refresh_rides" }).catch(() => []) : Promise.resolve([]),
-      (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers", { actionName: "refresh_drivers" }).catch(() => []) : Promise.resolve([]),
-      (wantsStaffOps || wantsProviderOps) ? fetchJson("/api/health-isf/providers", { actionName: "refresh_providers" }).catch(() => []) : Promise.resolve([]),
+      wantsOperationalRefresh ? fetchJson("/api/health-isf/dashboard", { actionName: "refresh_dashboard" }).catch(function (error) { return null; }) : Promise.resolve(null),
+      wantsOperationalRefresh ? fetchJson("/api/health-isf/rides", { actionName: "refresh_rides" }).catch(function () { return []; }) : Promise.resolve([]),
+      (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers", { actionName: "refresh_drivers" }).catch(function (error) {
+        state.driversLoadError = error && error.message ? error.message : "Driver API request failed";
+        return [];
+      }) : Promise.resolve([]),
+      (wantsStaffOps || wantsProviderOps) ? fetchJson("/api/health-isf/providers", { actionName: "refresh_providers" }).catch(function (error) {
+        state.providersLoadError = error && error.message ? error.message : "Provider API request failed";
+        return [];
+      }) : Promise.resolve([]),
       wantsCustomer ? fetchJson("/api/health-isf/customer-requests", { actionName: "refresh_customer_requests" }).catch(() => []) : Promise.resolve([]),
       (wantsCustomer || activeRoute === "rides") ? fetchJson("/api/health-isf/customer-requests/metrics", { actionName: "refresh_customer_queue_metrics" }).catch(() => null) : Promise.resolve(null),
       (wantsDispatchBoard || wantsDriverOps) ? fetchJson("/api/health-isf/dispatch/queue", { actionName: "refresh_dispatch_queue" }).catch(() => []) : Promise.resolve([]),
@@ -8060,8 +8075,14 @@
       }
       state.rides = Array.isArray(rides) ? rides : [];
       state.drivers = Array.isArray(drivers) ? drivers : [];
+      if (Array.isArray(drivers) && drivers.length > 0) {
+        state.driversLoadError = null;
+      }
       const normalizedProviders = normalizeProvidersList(providers);
       state.providers = normalizedProviders;
+      if (normalizedProviders.length > 0) {
+        state.providersLoadError = null;
+      }
       state.customerRequests = Array.isArray(customerRequests) ? customerRequests : [];
       state.customerQueueMetrics = customerQueueMetrics && typeof customerQueueMetrics === "object" ? customerQueueMetrics : null;
       state.dispatchQueue = Array.isArray(dispatchQueue) ? dispatchQueue : [];
@@ -8356,18 +8377,26 @@
       }
       if (!response || !response.ok) {
         const statusText = response ? " (HTTP " + response.status + ")" : " (no response)";
-        throw new Error("Providers failed to load — cannot create ride." + statusText);
+        let detail = "";
+        try {
+          const errBody = response ? await response.clone().json() : null;
+          detail = errBody && errBody.detail ? (": " + String(errBody.detail)) : "";
+        } catch (_parseErr) {}
+        throw new Error("Providers failed to load — cannot create ride." + statusText + detail);
       }
       const data = await response.json().catch(function () { return []; });
       const providers = normalizeProvidersList(data);
       if (providers.length > 0) {
         state.providers = providers;
+        state.providersLoadError = null;
         hydrateProviderSelect();
       } else {
-        renderCreateRideErrors({}, "Providers failed to load — cannot create ride.");
+        renderCreateRideErrors({}, "Providers failed to load — cannot create ride. The provider list is empty for this organization.");
       }
     } catch (error) {
-      renderCreateRideErrors({}, "Providers failed to load — cannot create ride.");
+      const message = error && error.message ? error.message : "Providers failed to load — cannot create ride.";
+      state.providersLoadError = message;
+      renderCreateRideErrors({}, message);
     }
   }
 

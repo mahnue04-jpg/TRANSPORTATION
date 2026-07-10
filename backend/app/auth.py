@@ -167,19 +167,11 @@ def seed_default_users() -> list[dict[str, str]]:
         try:
             default_org = health_isf_service._get_or_create_default_org(db)
             try:
-                health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
-            except Exception as provider_exc:
+                health_isf_service.ensure_operational_bootstrap(db, organization_id=default_org.id)
+            except Exception as bootstrap_exc:
                 logger.warning(
-                    "Provider seed skipped during auth bootstrap: %s",
-                    provider_exc,
-                    exc_info=True,
-                )
-            try:
-                health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)
-            except Exception as driver_exc:
-                logger.warning(
-                    "Driver seed skipped during auth bootstrap: %s",
-                    driver_exc,
+                    "Operational bootstrap skipped during auth seed: %s",
+                    bootstrap_exc,
                     exc_info=True,
                 )
         except Exception as org_exc:
@@ -270,7 +262,7 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
                 health_isf_service.ensure_sample_drivers(db, organization_id=current_org_str)
 
         final_org_id = str(getattr(user, "organization_id", None) or default_org.id)
-        health_isf_service.ensure_sample_drivers(db, organization_id=final_org_id)
+        health_isf_service.ensure_operational_bootstrap(db, organization_id=final_org_id)
 
         if not getattr(user, "organization_name", None):
             user.organization_name = DEFAULT_ORGANIZATION_NAME
@@ -637,9 +629,13 @@ def deployment_sync_seed_users(request: Request):
     db = SessionLocal()
     try:
         default_org = health_isf_service._get_or_create_default_org(db)
-        provider_summary = health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
-        driver_summary = health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)
-        fleet_summary = health_isf_service.sync_operational_driver_fleet(db)
+        bootstrap_summary = health_isf_service.sync_operational_bootstrap(db)
+        provider_summary = {}
+        driver_summary = {}
+        for item in bootstrap_summary.get("summaries") or []:
+            if isinstance(item, dict):
+                provider_summary = item.get("providers") or provider_summary
+                driver_summary = item.get("drivers") or driver_summary
     finally:
         db.close()
     return {
@@ -649,7 +645,7 @@ def deployment_sync_seed_users(request: Request):
         "password_env": "AMICOR_SEED_PASSWORD",
         "provider_seed": provider_summary,
         "driver_seed": driver_summary,
-        "driver_fleet_sync": fleet_summary,
+        "operational_bootstrap": bootstrap_summary,
     }
 
 

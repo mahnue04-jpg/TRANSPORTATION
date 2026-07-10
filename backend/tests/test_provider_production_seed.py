@@ -35,9 +35,9 @@ def test_list_providers_self_heals_when_missing(client: TestClient | None = None
     assert response.status_code == 200, response.text
     providers = response.json()
     assert isinstance(providers, list)
-    assert len(providers) >= 3
+    assert len(providers) >= 4
     names = {item["name"] for item in providers}
-    assert "Lincoln Medical Center" in names
+    assert "Fairview Hospital" in names
 
     with SessionLocal() as db:
         summary = health_isf_service.ensure_sample_providers(db, organization_id=org_id)

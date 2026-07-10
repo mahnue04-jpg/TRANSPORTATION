@@ -36,13 +36,20 @@ def test_list_drivers_self_heals_when_missing() -> None:
     assert response.status_code == 200, response.text
     drivers = response.json()
     assert isinstance(drivers, list)
-    assert len(drivers) >= 3
+    assert len(drivers) >= 6
     names = {item["name"] for item in drivers}
-    assert {"James Smith", "Maria Garcia", "David Chen"}.issubset(names)
+    assert {
+        "James Smith",
+        "Maria Garcia",
+        "David Chen",
+        "Test Driver Four",
+        "Test Driver Five",
+        "Test Driver Six",
+    }.issubset(names)
 
     with SessionLocal() as db:
         summary = health_isf_service.ensure_sample_drivers(db, organization_id=org_id)
-        assert summary["total"] >= 3
+        assert summary["total"] >= 6
 
 
 def test_list_drivers_self_heals_from_peer_org_fleet() -> None:
@@ -90,9 +97,16 @@ def test_list_drivers_self_heals_from_peer_org_fleet() -> None:
     assert response.status_code == 200, response.text
     drivers = response.json()
     assert isinstance(drivers, list)
-    assert len(drivers) >= 3
+    assert len(drivers) >= 6
     names = {item["name"] for item in drivers}
-    assert {"James Smith", "Maria Garcia", "David Chen"}.issubset(names)
+    assert {
+        "James Smith",
+        "Maria Garcia",
+        "David Chen",
+        "Test Driver Four",
+        "Test Driver Five",
+        "Test Driver Six",
+    }.issubset(names)
 
     with SessionLocal() as db:
         scoped = (
@@ -103,4 +117,4 @@ def test_list_drivers_self_heals_from_peer_org_fleet() -> None:
             )
             .count()
         )
-        assert scoped >= 3
+        assert scoped >= 6

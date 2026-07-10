@@ -7849,6 +7849,101 @@ def list_drivers(
     return drivers
 
 
+@router.get("/driver-operations")
+def driver_operations(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Return driver roster and pool metrics for the operations feed."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    bootstrap = service.ensure_operational_bootstrap(db, organization_id=effective_org_id)
+    drivers = service.get_drivers_for_organization(db, organization_id=effective_org_id, limit=100)
+    metrics = service.get_active_driver_pool_metrics(db, organization_id=effective_org_id)
+    return {
+        "organization_id": effective_org_id,
+        "bootstrap": bootstrap,
+        "drivers": drivers,
+        "metrics": metrics,
+        "driver_count": len(drivers),
+        "available_driver_count": sum(
+            1
+            for driver in drivers
+            if str(getattr(driver, "availability_state", "")).lower() == "available"
+            and str(getattr(driver, "status", "")).lower() == "available"
+            and bool(getattr(driver, "is_online", False))
+        ),
+    }
+
+
+@router.get("/dispatch/workspace")
+def dispatch_workspace(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Return dispatch workspace payload with providers, drivers, and queue state."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    bootstrap = service.ensure_operational_bootstrap(db, organization_id=effective_org_id)
+    providers = service.list_providers_for_organization(db, organization_id=effective_org_id, limit=100)
+    drivers = service.get_drivers_for_organization(db, organization_id=effective_org_id, limit=100)
+    queue = service.get_dispatch_queue(db, organization_id=effective_org_id, limit=200)
+    active_assignments = service.get_dispatch_active_assignments(db, organization_id=effective_org_id, limit=200)
+    return {
+        "organization_id": effective_org_id,
+        "bootstrap": bootstrap,
+        "providers": providers,
+        "drivers": drivers,
+        "dispatch_queue": queue,
+        "active_assignments": active_assignments,
+        "provider_count": len(providers),
+        "driver_count": len(drivers),
+    }
+
+
+@router.get("/operations/production-bootstrap-status")
+def production_bootstrap_status(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Report canonical provider/driver bootstrap state for the active tenant."""
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    bootstrap = service.ensure_operational_bootstrap(db, organization_id=effective_org_id)
+    providers = service.list_providers_for_organization(db, organization_id=effective_org_id, limit=100)
+    drivers = service.get_drivers_for_organization(db, organization_id=effective_org_id, limit=100)
+    dialect = db.bind.dialect.name if db.bind is not None else "unknown"
+    database_url = os.getenv("DATABASE_URL", "")
+    database_type = "postgresql" if database_url.startswith("postgres") else dialect
+    return {
+        "organization_id": effective_org_id,
+        "database_type": database_type,
+        "bootstrap": bootstrap,
+        "providers": [{"id": p.id, "name": p.name, "phone": p.phone, "service_type": p.service_type} for p in providers],
+        "drivers": [
+            {
+                "id": d.id,
+                "name": d.name,
+                "phone": d.phone,
+                "status": str(d.status),
+                "availability_state": d.availability_state,
+                "is_online": d.is_online,
+                "vehicle_plate": d.vehicle_plate,
+            }
+            for d in drivers
+        ],
+        "provider_count": len(providers),
+        "driver_count": len(drivers),
+        "available_driver_count": sum(
+            1
+            for driver in drivers
+            if str(getattr(driver, "availability_state", "")).lower() == "available"
+            and str(getattr(driver, "status", "")).lower() == "available"
+            and bool(getattr(driver, "is_online", False))
+        ),
+    }
+
+
 @router.post("/drivers", response_model=DriverResponse, status_code=201)
 async def create_driver(
     payload: DriverCreate,
@@ -8727,6 +8822,7 @@ def list_providers(
     """Retrieve all active providers (paginated)."""
     logger.info("Listing providers: skip=%d, limit=%d", skip, limit)
     effective_org_id = enforce_tenant_scope(user, organization_id)
+    seed_summary = service.ensure_sample_providers(db, organization_id=effective_org_id)
     providers = service.list_providers_for_organization(
         db,
         organization_id=effective_org_id,
@@ -8734,12 +8830,12 @@ def list_providers(
         limit=limit,
     )
     if not providers:
-        seed_summary = service.ensure_sample_providers(db, organization_id=effective_org_id)
         logger.warning(
-            "Provider list empty for org=%s; repair seed attempted: %s",
+            "Provider list empty for org=%s after seed attempt: %s",
             effective_org_id,
             seed_summary,
         )
+        db.expire_all()
         providers = service.list_providers_for_organization(
             db,
             organization_id=effective_org_id,

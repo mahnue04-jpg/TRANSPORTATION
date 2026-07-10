@@ -4200,21 +4200,27 @@ LEGACY_ORG_CODES = ("AMICOR-DEFAULT", "AMICOR-ISF")
 
 SAMPLE_PROVIDERS = [
     {
-        "name": "Lincoln Medical Center",
-        "address": "123 Health St, Brooklyn, NY 11201",
-        "phone": "718-555-0100",
-        "service_type": "clinic",
+        "name": "Fairview Hospital",
+        "address": "2450 Riverside Ave, Minneapolis, MN 55454",
+        "phone": "612-555-0100",
+        "service_type": "hospital",
     },
     {
-        "name": "Queens Dialysis Facility",
-        "address": "456 Care Ave, Queens, NY 11375",
-        "phone": "718-555-0200",
-        "service_type": "facility",
+        "name": "HCMC",
+        "address": "730 S 8th St, Minneapolis, MN 55415",
+        "phone": "612-555-0200",
+        "service_type": "hospital",
     },
     {
-        "name": "Manhattan Health Hub",
-        "address": "789 Medical Pkwy, New York, NY 10001",
-        "phone": "212-555-0300",
+        "name": "North Memorial Health",
+        "address": "3300 Oakdale Ave N, Robbinsdale, MN 55422",
+        "phone": "612-555-0300",
+        "service_type": "hospital",
+    },
+    {
+        "name": "Amicor Test Clinic",
+        "address": "100 Operations Ave, New York, NY 10001",
+        "phone": "212-555-0400",
         "service_type": "clinic",
     },
 ]
@@ -4226,6 +4232,7 @@ SAMPLE_DRIVERS = [
         "vehicle_type": "sedan",
         "vehicle_plate": "NYC-1001",
         "status": DriverStatus.AVAILABLE,
+        "is_online": True,
         "rating": 4.8,
     },
     {
@@ -4233,7 +4240,8 @@ SAMPLE_DRIVERS = [
         "phone": "917-555-1002",
         "vehicle_type": "van",
         "vehicle_plate": "NYC-1002",
-        "status": DriverStatus.BUSY,
+        "status": DriverStatus.AVAILABLE,
+        "is_online": True,
         "rating": 4.9,
     },
     {
@@ -4242,7 +4250,35 @@ SAMPLE_DRIVERS = [
         "vehicle_type": "sedan",
         "vehicle_plate": "NYC-1003",
         "status": DriverStatus.OFFLINE,
+        "is_online": False,
         "rating": 4.7,
+    },
+    {
+        "name": "Test Driver Four",
+        "phone": "917-555-1004",
+        "vehicle_type": "sedan",
+        "vehicle_plate": "NYC-1004",
+        "status": DriverStatus.AVAILABLE,
+        "is_online": True,
+        "rating": 4.6,
+    },
+    {
+        "name": "Test Driver Five",
+        "phone": "917-555-1005",
+        "vehicle_type": "van",
+        "vehicle_plate": "NYC-1005",
+        "status": DriverStatus.OFFLINE,
+        "is_online": False,
+        "rating": 4.5,
+    },
+    {
+        "name": "Test Driver Six",
+        "phone": "917-555-1006",
+        "vehicle_type": "medical_van",
+        "vehicle_plate": "NYC-1006",
+        "status": DriverStatus.AVAILABLE,
+        "is_online": True,
+        "rating": 4.8,
     },
 ]
 
@@ -5175,6 +5211,20 @@ def _operational_organization_ids(db: Session) -> set[str]:
     return org_ids
 
 
+def _apply_canonical_driver_runtime(row: HealthISFDriver, item: dict[str, Any]) -> None:
+    """Apply canonical availability/online posture for seeded production drivers."""
+    status = _coerce_driver_status(item["status"])
+    is_online = bool(item.get("is_online", status == DriverStatus.AVAILABLE))
+    row.status = status
+    row.is_online = is_online
+    if status == DriverStatus.AVAILABLE and is_online:
+        row.availability_state = "available"
+        row.auth_state = "active"
+    else:
+        row.availability_state = "offline"
+        row.auth_state = "inactive"
+
+
 def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, item: dict[str, Any]) -> HealthISFDriver:
     """Create a baseline seed driver with vehicle for check-in and dispatch testing."""
     vehicle_plate = _resolve_unique_vehicle_plate(db, str(item["vehicle_plate"]), str(org.id))
@@ -5200,11 +5250,7 @@ def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, ite
         vehicle_type=item["vehicle_type"],
         vehicle_plate=vehicle_plate,
         status=item["status"],
-        availability_state=(
-            "available"
-            if item["status"] == DriverStatus.AVAILABLE
-            else "offline"
-        ),
+        availability_state="offline",
         auth_state="inactive",
         is_online=False,
         is_active=True,
@@ -5213,6 +5259,7 @@ def _create_canonical_sample_driver(db: Session, org: HealthISFOrganization, ite
         created_at=now(),
         updated_at=now(),
     )
+    _apply_canonical_driver_runtime(driver, item)
     db.add(driver)
     db.flush()
     return driver
@@ -5298,11 +5345,7 @@ def ensure_sample_drivers(db: Session, organization_id: str | None = None) -> di
             row.rating = item["rating"]
             row.is_active = True
             row.organization_id = org.id
-            row.availability_state = (
-                "available"
-                if item["status"] == DriverStatus.AVAILABLE
-                else "offline"
-            )
+            _apply_canonical_driver_runtime(row, item)
             row.updated_at = now()
             if row.vehicle_id:
                 vehicle = db.query(HealthISFVehicle).filter(HealthISFVehicle.id == row.vehicle_id).first()
@@ -5345,6 +5388,47 @@ def sync_operational_driver_fleet(db: Session) -> dict[str, Any]:
             summaries.append(ensure_sample_drivers(db, organization_id=org_id))
         except Exception as exc:
             logger.warning("Operational driver fleet sync failed for org=%s: %s", org_id, exc)
+    return {
+        "organizations_synced": len(summaries),
+        "summaries": summaries,
+    }
+
+
+def sync_operational_provider_fleet(db: Session) -> dict[str, Any]:
+    """Ensure baseline providers exist for every tenant with operational activity."""
+    summaries: list[dict[str, Any]] = []
+    for org_id in sorted(_operational_organization_ids(db)):
+        try:
+            summaries.append(ensure_sample_providers(db, organization_id=org_id))
+        except Exception as exc:
+            logger.warning("Operational provider fleet sync failed for org=%s: %s", org_id, exc)
+    return {
+        "organizations_synced": len(summaries),
+        "summaries": summaries,
+    }
+
+
+def ensure_operational_bootstrap(db: Session, organization_id: str | None = None) -> dict[str, Any]:
+    """Idempotently ensure canonical providers and drivers exist for one tenant."""
+    provider_summary = ensure_sample_providers(db, organization_id=organization_id)
+    driver_summary = ensure_sample_drivers(db, organization_id=organization_id)
+    return {
+        "organization_id": provider_summary.get("organization_id") or driver_summary.get("organization_id"),
+        "provider_total": int(provider_summary.get("total") or 0),
+        "driver_total": int(driver_summary.get("total") or 0),
+        "providers": provider_summary,
+        "drivers": driver_summary,
+    }
+
+
+def sync_operational_bootstrap(db: Session) -> dict[str, Any]:
+    """Ensure canonical providers and drivers for every active production tenant."""
+    summaries: list[dict[str, Any]] = []
+    for org_id in sorted(_operational_organization_ids(db)):
+        try:
+            summaries.append(ensure_operational_bootstrap(db, organization_id=org_id))
+        except Exception as exc:
+            logger.warning("Operational bootstrap failed for org=%s: %s", org_id, exc)
     return {
         "organizations_synced": len(summaries),
         "summaries": summaries,
@@ -6027,18 +6111,10 @@ def complete_operational_reset(db: Session, organization_id: str) -> dict[str, A
     purge_counts = _purge_organization_operational_state(db, organization_id=str(org.id))
 
     revoked_sessions = 0
-    reset_drivers = 0
-    drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).all()
-    for driver in drivers:
-        driver.status = DriverStatus.AVAILABLE
-        driver.availability_state = "available"
-        driver.is_active = True
-        driver.is_online = True
-        driver.auth_state = "active"
-        driver.last_seen_at = now_ts
-        driver.updated_at = now_ts
-        reset_drivers += 1
+    bootstrap_summary = ensure_operational_bootstrap(db, organization_id=str(org.id))
+    reset_drivers = int(bootstrap_summary.get("driver_total") or 0)
 
+    drivers = db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org.id).all()
     sessions: list[HealthISFDriverSession] = []
     if drivers:
         sessions = (
@@ -6083,6 +6159,7 @@ def complete_operational_reset(db: Session, organization_id: str) -> dict[str, A
         "deleted_assignments": purge_counts.get("deleted_health_isf_dispatch_assignments", 0),
         "deleted_customer_requests": purge_counts.get("deleted_health_isf_customer_ride_requests", 0),
         "drivers_reset": reset_drivers,
+        "bootstrap": bootstrap_summary,
         "revoked_driver_sessions": revoked_sessions,
         "remaining_open_rides": remaining_open,
         "dispatch_queue_count": len(get_dispatch_queue(db, organization_id=org.id, limit=500)),
