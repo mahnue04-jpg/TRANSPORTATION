@@ -262,6 +262,8 @@ def apply_operator_role_grants() -> list[dict[str, str]]:
                 current_session = normalize_role(getattr(user, "session_role", None))
                 if current_session not in authorized:
                     user.session_role = primary_role
+                if email_hint and str(user.email or "").strip().lower() == email_hint:
+                    user.hashed_password = hash_password(SEED_PASSWORD)
                 updated.append(
                     {
                         "email": user.email,
@@ -851,6 +853,23 @@ def deployment_sync_seed_users(request: Request):
         "provider_seed": provider_summary,
         "driver_seed": driver_summary,
         "operational_bootstrap": bootstrap_summary,
+    }
+
+
+@router.get("/deployment/operator-grants")
+def deployment_operator_grants():
+    """Report operator role grants applied at startup (no secrets)."""
+    updated = apply_operator_role_grants()
+    return {
+        "status": "ok",
+        "operator_role_grants": updated,
+        "grant_targets": [
+            {
+                "display_name": item.get("display_name"),
+                "email": item.get("email"),
+            }
+            for item in OPERATOR_ACCOUNT_GRANTS
+        ],
     }
 
 

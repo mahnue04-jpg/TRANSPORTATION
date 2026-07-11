@@ -57,17 +57,25 @@ def _login(client: httpx.Client, email: str) -> dict:
 def _find_operator_email(client: httpx.Client) -> str:
     if OPERATOR_EMAIL:
         return OPERATOR_EMAIL
-    sync = client.post(
-        f"{BASE}/api/auth/deployment/sync-seed-users",
-        headers={"X-Amicor-Deployment-Key": SYNC_KEY},
-    )
-    if sync.status_code == 200:
-        grants = sync.json().get("operator_role_grants") or []
-        for item in grants:
-            email = str(item.get("email") or "").strip().lower()
-            if email:
-                print(f"OPERATOR_GRANT_MATCH={email}")
-                return email
+        sync = client.post(
+            f"{BASE}/api/auth/deployment/sync-seed-users",
+            headers={"X-Amicor-Deployment-Key": SYNC_KEY},
+        )
+        if sync.status_code == 200:
+            grants = sync.json().get("operator_role_grants") or []
+            for item in grants:
+                email = str(item.get("email") or "").strip().lower()
+                if email:
+                    print(f"OPERATOR_GRANT_MATCH={email}")
+                    return email
+        grant_status = client.get(f"{BASE}/api/auth/deployment/operator-grants")
+        if grant_status.status_code == 200:
+            grants = grant_status.json().get("operator_role_grants") or []
+            for item in grants:
+                email = str(item.get("email") or "").strip().lower()
+                if email:
+                    print(f"OPERATOR_GRANT_MATCH={email}")
+                    return email
     _fail("operator_email_missing", "Set AMICOR_OPERATOR_EMAIL or ensure saye monibah account exists in production DB")
     return ""
 
