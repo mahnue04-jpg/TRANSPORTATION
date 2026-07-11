@@ -248,6 +248,29 @@ const AmiCorSession = {
     return _identity ? normalizeRole(_identity.role) : null;
   },
 
+  /**
+   * Persist a workspace role selection for the active session.
+   * This updates client-side session identity only; JWT role claims are unchanged.
+   */
+  updateWorkspaceRole(role) {
+    const normalized = normalizeRole(role);
+    if (!_identity) {
+      const restored = loadFromStorage();
+      if (!restored || !restored.identity) {
+        return false;
+      }
+    }
+    if (!_identity) {
+      return false;
+    }
+    _identity.role = normalized;
+    saveToStorage();
+    emitSessionEvent("amicor:workspace-role-updated", {
+      role: normalized,
+    });
+    return true;
+  },
+
   getOrganizationId() {
     if (_identity && _identity.organizationId) {
       return String(_identity.organizationId);

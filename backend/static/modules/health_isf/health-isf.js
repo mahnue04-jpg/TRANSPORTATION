@@ -331,6 +331,29 @@
     return ROLE_ROUTE_ACCESS[inferredRole] ? inferredRole : "guest";
   }
 
+  function commitWorkspaceSessionRole(role, reason) {
+    const value = String(role || "").toLowerCase();
+    if (!ROLE_ROUTE_ACCESS[value] || value === "guest") {
+      return false;
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.restore === "function") {
+      window.AmiCorSession.restore();
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.updateWorkspaceRole === "function") {
+      window.AmiCorSession.updateWorkspaceRole(value);
+    }
+    state.shellRoleOverride = null;
+    persistRuntimeState(reason || "commit_workspace_role");
+    const nextRoute = clampRouteForRole(state.route, value);
+    renderRuntimeShell(reason || "commit_workspace_role");
+    if (nextRoute !== state.route) {
+      navigate(nextRoute, true, { source: "commit-workspace-role" });
+    } else {
+      renderAll();
+    }
+    return true;
+  }
+
   function resolveCustomerRiderPhone() {
     try {
       const stored = String(window.localStorage.getItem(CUSTOMER_RIDER_PHONE_STORAGE_KEY) || "").trim();
@@ -9269,14 +9292,9 @@
         }
       }
       if (action === "clear-role-override") {
-        state.shellRoleOverride = null;
-        persistRuntimeState("clear_role_override");
-        const currentProfile = getSessionProfile();
-        const next = clampRouteForRole(state.route, getEffectiveShellRole(currentProfile.role));
-        renderRuntimeShell("clear_role_override");
-        if (next !== state.route) {
-          navigate(next, true, { source: "clear-role-override" });
-        }
+        const roleSwitch = document.getElementById("health-shell-role-switch");
+        const selectedRole = roleSwitch ? String(roleSwitch.value || "").toLowerCase() : "";
+        commitWorkspaceSessionRole(selectedRole, "apply_session_role");
       }
       if (action === "dismiss-modal") closeModal();
     });
@@ -9286,15 +9304,7 @@
       if (!target || target.id !== "health-shell-role-switch") return;
       const value = String(target.value || "").toLowerCase();
       if (!ROLE_ROUTE_ACCESS[value]) return;
-      state.shellRoleOverride = value;
-      persistRuntimeState("switch_role_override");
-      const nextRoute = clampRouteForRole(state.route, value);
-      renderRuntimeShell("switch_role_override");
-      if (nextRoute !== state.route) {
-        navigate(nextRoute, true, { source: "role-switch" });
-      } else {
-        renderAll();
-      }
+      commitWorkspaceSessionRole(value, "switch_role_override");
     });
 
     if (els.voicePtt) {
@@ -10174,6 +10184,9 @@
   function init() {
     const els = getEls();
     if (!els.shell) return;
+    if (window.AmiCorSession && typeof window.AmiCorSession.restore === "function") {
+      window.AmiCorSession.restore();
+    }
     attachPickupTracing();
     restoreRuntimeState();
     ensureShellChrome();
