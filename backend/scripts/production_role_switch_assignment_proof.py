@@ -13,7 +13,7 @@ import httpx
 BASE = os.getenv("AMICOR_RENDER_BASE", "https://amicor-health-isf-py.onrender.com").rstrip("/")
 PASSWORD = os.getenv("AMICOR_OPERATOR_PASSWORD", os.getenv("AMICOR_SEED_PASSWORD", ""))
 SYNC_KEY = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", PASSWORD)
-OPERATOR_EMAIL = os.getenv("AMICOR_OPERATOR_EMAIL", "").strip().lower()
+OPERATOR_EMAIL = os.getenv("AMICOR_OPERATOR_EMAIL", "mahnue04@gmail.com").strip().lower()
 STAFF_EMAIL = os.getenv("AMICOR_STAFF_EMAIL", "staff@amicor.local").strip().lower()
 TIMEOUT = float(os.getenv("AMICOR_HTTP_TIMEOUT", "120"))
 

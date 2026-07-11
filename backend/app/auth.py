@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
-from sqlalchemy import func, inspect, text
+from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -118,6 +118,7 @@ SEED_USERS: tuple[dict[str, str], ...] = (
 OPERATOR_ACCOUNT_GRANTS: tuple[dict[str, Any], ...] = (
     {
         "display_name": "saye monibah",
+        "email": "mahnue04@gmail.com",
         "primary_role": ROLE_ADMIN,
         "authorized_roles": (ROLE_ADMIN, ROLE_DISPATCHER, ROLE_STAFF),
     },
@@ -237,13 +238,17 @@ def apply_operator_role_grants() -> list[dict[str, str]]:
     try:
         for grant in OPERATOR_ACCOUNT_GRANTS:
             display_name = str(grant.get("display_name") or "").strip().lower()
-            if not display_name:
+            email_hint = str(grant.get("email") or "").strip().lower()
+            query = db.query(UserModel)
+            filters = []
+            if display_name:
+                filters.append(func.lower(UserModel.display_name) == display_name)
+                filters.append(func.lower(UserModel.display_name).like(f"%{display_name}%"))
+            if email_hint:
+                filters.append(func.lower(UserModel.email) == email_hint)
+            if not filters:
                 continue
-            rows = (
-                db.query(UserModel)
-                .filter(func.lower(UserModel.display_name) == display_name)
-                .all()
-            )
+            rows = query.filter(or_(*filters)).all()
             for user in rows:
                 primary_role = normalize_role(grant.get("primary_role") or getattr(user, "role", None))
                 authorized = {
