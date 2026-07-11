@@ -239,5 +239,115 @@ class AuthRbacTests(unittest.TestCase):
         self.assertEqual(history[-1]["to_status"], "completed")
 
 
+    def test_staff_cannot_switch_to_dispatcher_or_assign(self) -> None:
+        login_payload = self._login("staff@amicor.local")
+        headers = {"Authorization": "Bearer " + login_payload["access_token"]}
+
+        switch_response = self.client.post(
+            "/api/auth/switch-role",
+            headers=headers,
+            json={"role": "dispatcher"},
+        )
+        self.assertEqual(switch_response.status_code, 403, switch_response.text)
+
+        org_id = self._dispatcher_org_id()
+        provider_id = self._ensure_provider(org_id)
+        driver_id = self._ensure_driver(org_id)
+        create_response = self.client.post(
+            "/api/health-isf/rides",
+            headers=headers,
+            json={
+                "passenger_name": "Staff RBAC Patient",
+                "passenger_phone": "212-555-4411",
+                "pickup_address": "10 Main St, New York, NY 10001",
+                "dropoff_address": "20 Park Ave, New York, NY 10002",
+                "service_type": "medical_appointment",
+                "provider_id": provider_id,
+                "notes": "staff rbac test",
+            },
+        )
+        self.assertEqual(create_response.status_code, 403, create_response.text)
+
+        dispatcher_login = self._login("dispatcher@amicor.local")
+        dispatcher_headers = {"Authorization": "Bearer " + dispatcher_login["access_token"]}
+        create_response = self.client.post(
+            "/api/health-isf/rides",
+            headers=dispatcher_headers,
+            json={
+                "passenger_name": "Staff RBAC Patient",
+                "passenger_phone": "212-555-4412",
+                "pickup_address": "10 Main St, New York, NY 10001",
+                "dropoff_address": "20 Park Ave, New York, NY 10002",
+                "service_type": "medical_appointment",
+                "provider_id": provider_id,
+                "notes": "staff rbac test",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.text)
+        ride_id = create_response.json()["id"]
+        assign_response = self.client.patch(
+            f"/api/health-isf/rides/{ride_id}/assign-driver",
+            headers=headers,
+            json={"driver_id": driver_id},
+        )
+        self.assertEqual(assign_response.status_code, 403, assign_response.text)
+
+    def test_admin_can_switch_role_and_assign_driver(self) -> None:
+        login_payload = self._login("admin@amicor.local")
+        headers = {"Authorization": "Bearer " + login_payload["access_token"]}
+
+        switch_response = self.client.post(
+            "/api/auth/switch-role",
+            headers=headers,
+            json={"role": "dispatcher"},
+        )
+        self.assertEqual(switch_response.status_code, 200, switch_response.text)
+        switch_json = switch_response.json()
+        self.assertEqual(switch_json.get("role"), "dispatcher")
+        self.assertEqual(switch_json.get("token_role"), "dispatcher")
+        dispatcher_headers = {"Authorization": "Bearer " + switch_json["access_token"]}
+
+        session_response = self.client.get("/api/auth/session", headers=dispatcher_headers)
+        self.assertEqual(session_response.status_code, 200, session_response.text)
+        session_json = session_response.json()
+        self.assertEqual(session_json.get("token_role"), "dispatcher")
+
+        org_id = self._dispatcher_org_id()
+        provider_id = self._ensure_provider(org_id)
+        driver_id = self._ensure_driver(org_id)
+        create_response = self.client.post(
+            "/api/health-isf/rides",
+            headers=dispatcher_headers,
+            json={
+                "passenger_name": "Switch RBAC Patient",
+                "passenger_phone": "212-555-4422",
+                "pickup_address": "10 Main St, New York, NY 10001",
+                "dropoff_address": "20 Park Ave, New York, NY 10002",
+                "service_type": "medical_appointment",
+                "provider_id": provider_id,
+                "notes": "switch rbac test",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.text)
+        ride_id = create_response.json()["id"]
+        ride_lookup = self.client.get(
+            f"/api/health-isf/rides/{ride_id}",
+            headers=dispatcher_headers,
+        )
+        self.assertEqual(ride_lookup.status_code, 200, ride_lookup.text)
+        ride_row = ride_lookup.json()
+        if not ride_row.get("driver_id"):
+            assign_response = self.client.patch(
+                f"/api/health-isf/rides/{ride_id}/assign-driver",
+                headers=dispatcher_headers,
+                json={"driver_id": driver_id},
+            )
+            self.assertEqual(assign_response.status_code, 200, assign_response.text)
+            assigned = assign_response.json()
+            self.assertEqual(str(assigned.get("driver_id")), str(driver_id))
+        else:
+            self.assertTrue(str(ride_row.get("driver_id")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -334,24 +334,30 @@
   function commitWorkspaceSessionRole(role, reason) {
     const value = String(role || "").toLowerCase();
     if (!ROLE_ROUTE_ACCESS[value] || value === "guest") {
-      return false;
+      return Promise.resolve(false);
     }
+    const finalize = function () {
+      state.shellRoleOverride = null;
+      persistRuntimeState(reason || "commit_workspace_role");
+      const nextRoute = clampRouteForRole(state.route, value);
+      renderRuntimeShell(reason || "commit_workspace_role");
+      if (nextRoute !== state.route) {
+        navigate(nextRoute, true, { source: "commit-workspace-role" });
+      } else {
+        renderAll();
+      }
+      return true;
+    };
     if (window.AmiCorSession && typeof window.AmiCorSession.restore === "function") {
       window.AmiCorSession.restore();
     }
-    if (window.AmiCorSession && typeof window.AmiCorSession.updateWorkspaceRole === "function") {
-      window.AmiCorSession.updateWorkspaceRole(value);
+    if (window.AmiCorSession && typeof window.AmiCorSession.switchWorkspaceRole === "function") {
+      return window.AmiCorSession.switchWorkspaceRole(value).then(finalize).catch(function (error) {
+        showToastSafe("Role switch failed: " + String(error && error.message ? error.message : error), "error");
+        return false;
+      });
     }
-    state.shellRoleOverride = null;
-    persistRuntimeState(reason || "commit_workspace_role");
-    const nextRoute = clampRouteForRole(state.route, value);
-    renderRuntimeShell(reason || "commit_workspace_role");
-    if (nextRoute !== state.route) {
-      navigate(nextRoute, true, { source: "commit-workspace-role" });
-    } else {
-      renderAll();
-    }
-    return true;
+    return Promise.resolve(finalize());
   }
 
   function resolveCustomerRiderPhone() {

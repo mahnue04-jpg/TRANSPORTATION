@@ -26,6 +26,8 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="staff", index=True)
+    authorized_roles: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    session_role: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     organization_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     organization_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

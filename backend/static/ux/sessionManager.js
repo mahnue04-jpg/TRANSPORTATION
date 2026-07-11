@@ -137,6 +137,9 @@ function hydrateIdentity(identity) {
     email,
     name: String(identity.name || identity.display_name || email.split("@")[0] || "User"),
     role: normalizeRole(identity.role),
+    authorizedRoles: Array.isArray(identity.authorizedRoles || identity.authorized_roles)
+      ? (identity.authorizedRoles || identity.authorized_roles).map(normalizeRole)
+      : [],
     organizationId: identity.organizationId || identity.organization_id || null,
     organizationName: identity.organization_name ? String(identity.organization_name) : null,
     accessToken,
@@ -249,11 +252,12 @@ const AmiCorSession = {
   },
 
   /**
-   * Persist a workspace role selection for the active session.
-   * This updates client-side session identity only; JWT role claims are unchanged.
+   * Apply server-issued auth tokens and session role to the active identity.
    */
-  updateWorkspaceRole(role) {
-    const normalized = normalizeRole(role);
+  applyAuthTokens(payload) {
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
     if (!_identity) {
       const restored = loadFromStorage();
       if (!restored || !restored.identity) {
@@ -263,12 +267,71 @@ const AmiCorSession = {
     if (!_identity) {
       return false;
     }
-    _identity.role = normalized;
+    const accessToken = payload.accessToken || payload.access_token || null;
+    if (accessToken) {
+      _identity.accessToken = accessToken;
+    }
+    if (payload.refresh_token) {
+      _identity.refreshToken = payload.refresh_token;
+    }
+    const role = payload.role || payload.session_role || null;
+    if (role) {
+      _identity.role = normalizeRole(role);
+    }
+    if (Array.isArray(payload.authorized_roles)) {
+      _identity.authorizedRoles = payload.authorized_roles.map(normalizeRole);
+    }
+    const expiresIn = Number(payload.expires_in || payload.expiresIn || 0);
+    if (expiresIn > 0) {
+      _identity.tokenExpiresAt = Date.now() + (expiresIn * 1000);
+    } else if (accessToken) {
+      const inferredExpiry = inferTokenExpiryMs(accessToken);
+      if (inferredExpiry) {
+        _identity.tokenExpiresAt = inferredExpiry;
+      }
+    }
     saveToStorage();
     emitSessionEvent("amicor:workspace-role-updated", {
-      role: normalized,
+      role: _identity.role,
     });
     return true;
+  },
+
+  /**
+   * Request a server-validated workspace role switch and persist refreshed JWT claims.
+   */
+  async switchWorkspaceRole(role) {
+    const normalized = normalizeRole(role);
+    if ((!_identity || !_identity.accessToken) && typeof this.restore === "function") {
+      this.restore();
+    }
+    const headers = Object.assign(
+      { "Content-Type": "application/json" },
+      this.getAuthHeaders()
+    );
+    const response = await fetch("/api/auth/switch-role", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ role: normalized }),
+    });
+    if (!response.ok) {
+      let detail = "Role switch failed";
+      try {
+        const errorPayload = await response.json();
+        detail = errorPayload.detail || detail;
+      } catch (_) {}
+      throw new Error(detail);
+    }
+    const payload = await response.json();
+    this.applyAuthTokens(payload);
+    return payload;
+  },
+
+  /**
+   * @deprecated Use switchWorkspaceRole() for server-validated role changes.
+   */
+  updateWorkspaceRole(role) {
+    return this.applyAuthTokens({ role: normalizeRole(role) });
   },
 
   getOrganizationId() {
@@ -411,6 +474,9 @@ const AmiCorSession = {
       _identity.accessToken = payload.access_token || null;
       if (payload.refresh_token) {
         _identity.refreshToken = payload.refresh_token;
+      }
+      if (payload.role) {
+        _identity.role = normalizeRole(payload.role);
       }
       const expiresIn = Number(payload.expires_in || 3600);
       _identity.tokenExpiresAt = Date.now() + (expiresIn * 1000);

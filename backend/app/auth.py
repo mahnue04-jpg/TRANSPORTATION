@@ -6,9 +6,12 @@ Endpoints (all under /api/auth):
   POST /login      — password login → {access_token, refresh_token}
   POST /refresh    — exchange refresh token → new access token
   POST /logout     — revoke refresh token
+  POST /switch-role — validate and issue JWT for an authorized workspace role
   GET  /me         — return current user info (requires Bearer token)
+  GET  /session    — return active JWT session role claims (requires Bearer token)
 """
 import hashlib
+import json
 import logging
 import os
 import re
@@ -104,7 +107,52 @@ SEED_USERS: tuple[dict[str, str], ...] = (
         "display_name": "Amicor Medical Coordinator",
         "role": ROLE_MEDICAL_COORDINATOR,
     },
+    {
+        "email": "staff@amicor.local",
+        "display_name": "Amicor Staff",
+        "role": ROLE_STAFF,
+        "authorized_roles": (ROLE_STAFF,),
+    },
 )
+
+OPERATOR_ACCOUNT_GRANTS: tuple[dict[str, Any], ...] = (
+    {
+        "display_name": "saye monibah",
+        "primary_role": ROLE_ADMIN,
+        "authorized_roles": (ROLE_ADMIN, ROLE_DISPATCHER, ROLE_STAFF),
+    },
+)
+
+WORKSPACE_SWITCHABLE_ROLES = frozenset(
+    {
+        ROLE_ADMIN,
+        ROLE_DISPATCHER,
+        ROLE_STAFF,
+        ROLE_SUPERVISOR,
+        ROLE_DRIVER,
+        ROLE_PROVIDER,
+        ROLE_RIDER,
+        ROLE_COMPLIANCE_OFFICER,
+        ROLE_DRIVER_SUPPORT,
+        ROLE_MEDICAL_COORDINATOR,
+        ROLE_ANALYTICS_READONLY,
+    }
+)
+
+ROLE_DEFAULT_AUTHORIZED: dict[str, tuple[str, ...]] = {
+    ROLE_ADMIN: (ROLE_ADMIN, ROLE_DISPATCHER, ROLE_STAFF, ROLE_SUPERVISOR, ROLE_ANALYTICS_READONLY),
+    ROLE_SUPER_ADMIN_SUPPORT: (ROLE_ADMIN, ROLE_DISPATCHER, ROLE_STAFF, ROLE_SUPERVISOR, ROLE_ANALYTICS_READONLY),
+    ROLE_DISPATCHER: (ROLE_DISPATCHER, ROLE_STAFF),
+    ROLE_SUPERVISOR: (ROLE_SUPERVISOR, ROLE_DISPATCHER, ROLE_STAFF),
+    ROLE_STAFF: (ROLE_STAFF,),
+    ROLE_DRIVER: (ROLE_DRIVER,),
+    ROLE_PROVIDER: (ROLE_PROVIDER,),
+    ROLE_RIDER: (ROLE_RIDER,),
+    ROLE_COMPLIANCE_OFFICER: (ROLE_COMPLIANCE_OFFICER, ROLE_STAFF),
+    ROLE_DRIVER_SUPPORT: (ROLE_DRIVER_SUPPORT, ROLE_STAFF),
+    ROLE_MEDICAL_COORDINATOR: (ROLE_MEDICAL_COORDINATOR, ROLE_STAFF),
+    ROLE_ANALYTICS_READONLY: (ROLE_ANALYTICS_READONLY,),
+}
 
 
 def normalize_role(role: str | None) -> str:
@@ -124,6 +172,104 @@ def get_effective_role(role: str | None) -> str:
 
     forced_role = normalize_role(os.getenv("AMICOR_FORCE_TEST_ROLE", ""))
     return forced_role if forced_role in VALID_ROLES else base_role
+
+
+def _serialize_authorized_roles(roles: set[str] | list[str] | tuple[str, ...]) -> str:
+    normalized = sorted({normalize_role(role) for role in roles if normalize_role(role) in VALID_ROLES})
+    return json.dumps(normalized)
+
+
+def _deserialize_authorized_roles(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return sorted({normalize_role(item) for item in parsed if normalize_role(item) in VALID_ROLES})
+
+
+def get_user_authorized_roles(user: Any) -> set[str]:
+    stored = _deserialize_authorized_roles(getattr(user, "authorized_roles", None))
+    if stored:
+        return set(stored)
+    primary = normalize_role(getattr(user, "role", None))
+    return {primary}
+
+
+def resolve_session_role(user: Any, token_payload: dict[str, Any] | None = None) -> str:
+    authorized = get_user_authorized_roles(user)
+    token_role = normalize_role((token_payload or {}).get("role"))
+    if token_role in authorized:
+        return token_role
+    persisted = normalize_role(getattr(user, "session_role", None))
+    if persisted in authorized:
+        return persisted
+    primary = normalize_role(getattr(user, "role", None))
+    if primary in authorized:
+        return primary
+    return DEFAULT_ROLE
+
+
+def _access_token_payload(user: Any, session_role: str | None = None) -> dict[str, Any]:
+    role = normalize_role(session_role or getattr(user, "session_role", None) or getattr(user, "role", None))
+    authorized = get_user_authorized_roles(user)
+    if role not in authorized:
+        role = normalize_role(getattr(user, "role", None))
+    return {
+        "sub": user.id,
+        "email": user.email,
+        "role": role,
+        "organization_id": getattr(user, "organization_id", None),
+    }
+
+
+def apply_operator_role_grants() -> list[dict[str, str]]:
+    """Grant authorized workspace roles to existing production operator accounts."""
+    from app.db.models import User as UserModel
+    from app.db.session import SessionLocal
+
+    ensure_auth_schema()
+    db: Session = SessionLocal()
+    updated: list[dict[str, str]] = []
+    try:
+        for grant in OPERATOR_ACCOUNT_GRANTS:
+            display_name = str(grant.get("display_name") or "").strip().lower()
+            if not display_name:
+                continue
+            rows = (
+                db.query(UserModel)
+                .filter(func.lower(UserModel.display_name) == display_name)
+                .all()
+            )
+            for user in rows:
+                primary_role = normalize_role(grant.get("primary_role") or getattr(user, "role", None))
+                authorized = {
+                    normalize_role(item)
+                    for item in (grant.get("authorized_roles") or ())
+                    if normalize_role(item) in VALID_ROLES
+                }
+                authorized.add(primary_role)
+                user.role = primary_role
+                user.authorized_roles = _serialize_authorized_roles(authorized)
+                current_session = normalize_role(getattr(user, "session_role", None))
+                if current_session not in authorized:
+                    user.session_role = primary_role
+                updated.append(
+                    {
+                        "email": user.email,
+                        "display_name": user.display_name or "",
+                        "primary_role": primary_role,
+                        "authorized_roles": ",".join(sorted(authorized)),
+                    }
+                )
+        if updated:
+            db.commit()
+        return updated
+    finally:
+        db.close()
 
 
 def ensure_auth_schema() -> None:
@@ -147,6 +293,14 @@ def ensure_auth_schema() -> None:
         if "organization_id" not in columns:
             conn.execute(
                 text("ALTER TABLE platform_users ADD COLUMN organization_id VARCHAR(36)")
+            )
+        if "authorized_roles" not in columns:
+            conn.execute(
+                text("ALTER TABLE platform_users ADD COLUMN authorized_roles VARCHAR(512)")
+            )
+        if "session_role" not in columns:
+            conn.execute(
+                text("ALTER TABLE platform_users ADD COLUMN session_role VARCHAR(32)")
             )
 
 
@@ -182,6 +336,10 @@ def seed_default_users() -> list[dict[str, str]]:
             existing = db.query(UserModel).filter(UserModel.email == email).first()
             if existing:
                 existing.role = normalize_role(user_seed.get("role"))
+                seed_role = normalize_role(user_seed.get("role"))
+                seed_authorized = user_seed.get("authorized_roles") or ROLE_DEFAULT_AUTHORIZED.get(seed_role, (seed_role,))
+                existing.authorized_roles = _serialize_authorized_roles(seed_authorized)
+                existing.session_role = normalize_role(existing.session_role or seed_role)
                 existing.organization_name = DEFAULT_ORGANIZATION_NAME
                 if default_org is not None:
                     existing.organization_id = default_org.id
@@ -195,6 +353,11 @@ def seed_default_users() -> list[dict[str, str]]:
                 hashed_password=hash_password(SEED_PASSWORD),
                 display_name=user_seed.get("display_name"),
                 role=normalize_role(user_seed.get("role")),
+                authorized_roles=_serialize_authorized_roles(
+                    user_seed.get("authorized_roles")
+                    or ROLE_DEFAULT_AUTHORIZED.get(normalize_role(user_seed.get("role")), (normalize_role(user_seed.get("role")),))
+                ),
+                session_role=normalize_role(user_seed.get("role")),
                 organization_name=DEFAULT_ORGANIZATION_NAME,
                 organization_id=default_org.id if default_org is not None else None,
                 is_active=True,
@@ -212,6 +375,9 @@ def seed_default_users() -> list[dict[str, str]]:
             len(created),
             synced,
         )
+        operator_updates = apply_operator_role_grants()
+        if operator_updates:
+            logger.info("Operator role grants applied: %s", operator_updates)
         return created
     finally:
         db.close()
@@ -499,8 +665,18 @@ def require_auth(user = Depends(get_current_user)) -> str: # type: ignore
 def require_any_role(*allowed_roles: str):
     expected = {normalize_role(role) for role in allowed_roles} or {DEFAULT_ROLE}
 
-    def _dependency(user = Depends(get_current_user)): # type: ignore
-        current_role = get_effective_role(getattr(user, "role", None))
+    def _dependency(
+        user = Depends(get_current_user),  # type: ignore
+        creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    ):
+        if not creds:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        payload = _jwt_verify(creds.credentials)
+        current_role = resolve_session_role(user, payload)
+        authorized = get_user_authorized_roles(user)
+        token_role = normalize_role(payload.get("role"))
+        if token_role not in authorized or current_role not in authorized:
+            raise HTTPException(status_code=403, detail="Invalid session role")
         if current_role not in expected:
             raise HTTPException(status_code=403, detail="Insufficient role permissions")
         return user
@@ -583,6 +759,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    role: str | None = None
 
 
 class LoginResponse(TokenResponse):
@@ -591,8 +768,29 @@ class LoginResponse(TokenResponse):
     email: str
     display_name: str | None
     role: str
+    session_role: str
+    authorized_roles: list[str]
     organization_name: str | None
     organization_id: str | None
+
+
+class SwitchRoleRequest(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def role_valid(cls, v: str) -> str:
+        role = normalize_role(v)
+        if role not in WORKSPACE_SWITCHABLE_ROLES:
+            raise ValueError("Invalid workspace role")
+        return role
+
+
+class SwitchRoleResponse(TokenResponse):
+    role: str
+    session_role: str
+    authorized_roles: list[str]
+    token_role: str
 
 
 class UserContext(BaseModel):
@@ -623,6 +821,7 @@ def deployment_sync_seed_users(request: Request):
             ),
         )
     created = seed_default_users()
+    operator_updates = apply_operator_role_grants()
     from app.db.session import SessionLocal
     from app.modules.health_isf import service as health_isf_service
 
@@ -641,6 +840,7 @@ def deployment_sync_seed_users(request: Request):
     return {
         "status": "ok",
         "created": created,
+        "operator_role_grants": operator_updates,
         "seed_users_total": len(SEED_USERS),
         "password_env": "AMICOR_SEED_PASSWORD",
         "provider_seed": provider_summary,
@@ -699,12 +899,15 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
         raise HTTPException(status_code=403, detail="Privileged roles cannot self-register")
 
     organization_id, organization_name = _resolve_registration_organization(db, req.organization_name)
+    authorized_roles = ROLE_DEFAULT_AUTHORIZED.get(role, (role,))
 
     user = UserModel(
         email=req.email,
         hashed_password=hash_password(req.password),
         display_name=req.display_name,
         role=role,
+        authorized_roles=_serialize_authorized_roles(authorized_roles),
+        session_role=role,
         organization_name=organization_name,
         organization_id=organization_id,
     )
@@ -735,15 +938,14 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
     ensure_user_organization(db, user)
 
-    # Access token
-    access = create_access_token(
-        {
-            "sub": user.id,
-            "email": user.email,
-            "role": normalize_role(getattr(user, "role", None)),
-            "organization_id": getattr(user, "organization_id", None),
-        }
-    )
+    session_role = normalize_role(getattr(user, "session_role", None) or getattr(user, "role", None))
+    authorized = get_user_authorized_roles(user)
+    if session_role not in authorized:
+        session_role = normalize_role(getattr(user, "role", None))
+    user.session_role = session_role
+    db.add(user)
+
+    access = create_access_token(_access_token_payload(user, session_role))
     # Refresh token
     raw_refresh = create_refresh_token()
     hashed = _hash_token(raw_refresh)
@@ -759,7 +961,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
         log_operational_event(
             user_id=str(user.id),
-            role=normalize_role(getattr(user, "role", None)),
+            role=session_role,
             event_type="auth",
             event_name="login",
             status="success",
@@ -777,7 +979,9 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         user_id=user.id,
         email=user.email,
         display_name=user.display_name,
-        role=normalize_role(getattr(user, "role", None)),
+        role=session_role,
+        session_role=session_role,
+        authorized_roles=sorted(authorized),
         organization_name=getattr(user, "organization_name", None),
         organization_id=getattr(user, "organization_id", None),
     )
@@ -804,15 +1008,41 @@ def refresh_token(req: RefreshRequest, request: Request, db: Session = Depends(g
 
     ensure_user_organization(db, user)
 
-    access = create_access_token(
-        {
-            "sub": user.id,
-            "email": user.email,
-            "role": normalize_role(getattr(user, "role", None)),
-            "organization_id": getattr(user, "organization_id", None),
-        }
+    session_role = resolve_session_role(user, None)
+    access = create_access_token(_access_token_payload(user, session_role))
+    return TokenResponse(access_token=access, role=session_role)
+
+
+@router.post("/switch-role", response_model=SwitchRoleResponse)
+def switch_role(
+    req: SwitchRoleRequest,
+    user = Depends(get_current_user),  # type: ignore
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    """Validate and issue a new access token for an authorized workspace role."""
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    requested = normalize_role(req.role)
+    authorized = get_user_authorized_roles(user)
+    if requested not in authorized:
+        raise HTTPException(status_code=403, detail="Role not authorized for this account")
+
+    user.session_role = requested
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    access = create_access_token(_access_token_payload(user, requested))
+    payload = _jwt_verify(access)
+    return SwitchRoleResponse(
+        access_token=access,
+        role=requested,
+        session_role=requested,
+        authorized_roles=sorted(authorized),
+        token_role=normalize_role(payload.get("role")),
     )
-    return TokenResponse(access_token=access)
 
 
 @router.post("/logout")
@@ -829,24 +1059,53 @@ def logout(req: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me")
-def me(user_id: str = Depends(require_auth), db: Session = Depends(get_db)): # type: ignore
+def me(
+    user = Depends(get_current_user),  # type: ignore
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+):
     """Return the current authenticated user's profile."""
-    from app.db.models import User as UserModel
-
-    user = db.query(UserModel).filter(UserModel.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    payload = _jwt_verify(creds.credentials) if creds else {}
+    session_role = resolve_session_role(user, payload)
+    authorized = sorted(get_user_authorized_roles(user))
     return {
         "user_id": user.id,
         "email": user.email,
         "display_name": user.display_name,
-        "role": normalize_role(getattr(user, "role", None)),
+        "role": session_role,
+        "primary_role": normalize_role(getattr(user, "role", None)),
+        "session_role": session_role,
+        "authorized_roles": authorized,
+        "token_role": normalize_role(payload.get("role")),
         "organization_name": getattr(user, "organization_name", None),
         "organization_id": getattr(user, "organization_id", None),
         "is_verified": user.is_verified,
         "created_at": user.created_at.isoformat(),
         "last_login": user.last_login.isoformat() if user.last_login else None,
-    } # type: ignore
+    }
+
+
+@router.get("/session")
+def session_info(
+    user = Depends(get_current_user),  # type: ignore
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+):
+    """Return active JWT session role claims for workspace verification."""
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    payload = _jwt_verify(creds.credentials)
+    session_role = resolve_session_role(user, payload)
+    return {
+        "session_valid": True,
+        "user_id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": session_role,
+        "token_role": normalize_role(payload.get("role")),
+        "primary_role": normalize_role(getattr(user, "role", None)),
+        "session_role": normalize_role(getattr(user, "session_role", None) or getattr(user, "role", None)),
+        "authorized_roles": sorted(get_user_authorized_roles(user)),
+        "token_expires_at": payload.get("exp"),
+    }
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
@@ -855,12 +1114,15 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 
 def get_current_user_context(
-    user = Depends(get_current_user), # type: ignore
+    user = Depends(get_current_user),  # type: ignore
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> UserContext:
+    payload = _jwt_verify(creds.credentials) if creds else {}
+    session_role = resolve_session_role(user, payload)
     return UserContext(
         user_id=user.id,
         email=user.email,
-        role=get_effective_role(getattr(user, "role", None)),
+        role=session_role,
         organization_name=getattr(user, "organization_name", None),
         organization_id=getattr(user, "organization_id", None),
     )
