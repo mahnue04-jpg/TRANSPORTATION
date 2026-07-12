@@ -5939,7 +5939,9 @@ async def progress_driver_route(
 
     if payload.target_state == "en_route_pickup":
         try:
-            ride = service.accept_driver_ride(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+            ride = service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
@@ -5951,6 +5953,8 @@ async def progress_driver_route(
     elif payload.target_state == "arrived_pickup":
         try:
             ride = service.driver_arrived_pickup(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
@@ -5962,6 +5966,8 @@ async def progress_driver_route(
     elif payload.target_state == "rider_loaded":
         try:
             ride = service.driver_pickup_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
@@ -5977,24 +5983,12 @@ async def progress_driver_route(
             details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "trip_in_progress":
-        if lifecycle_state not in {RideStatus.RIDER_ONBOARD.value, RideStatus.IN_PROGRESS.value}:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Illegal route progression to trip_in_progress from '{lifecycle_state}'",
-            )
-        ride = ride_for_guard
-        if lifecycle_state == RideStatus.RIDER_ONBOARD.value:
-            try:
-                ride = service.update_ride_status(
-                    db,
-                    ride_id=ride_id,
-                    status=RideStatus.IN_PROGRESS.value,
-                    actor_user_id=user.user_id,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            if not ride:
-                raise HTTPException(status_code=404, detail="Ride not found")
+        try:
+            ride = service.driver_start_trip(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
@@ -6008,12 +6002,12 @@ async def progress_driver_route(
             details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "arrived_destination":
-        if lifecycle_state not in {RideStatus.IN_PROGRESS.value}:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Illegal route progression to arrived_destination from '{lifecycle_state}'",
-            )
-        ride = ride_for_guard
+        try:
+            ride = service.driver_arrived_destination(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
@@ -6031,6 +6025,8 @@ async def progress_driver_route(
         previous_driver_status = str(getattr(pre_driver, "status", "") or "") if pre_driver else None
         try:
             ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+        except service.RideLifecycleConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not ride:
@@ -8392,6 +8388,8 @@ async def driver_accept_ride(
     enforce_entity_tenant(user, driver.organization_id)
     try:
         ride = service.accept_driver_ride(db, driver_id=driver_id, ride_id=payload.ride_id, actor_user_id=_user.id)
+    except service.RideLifecycleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:
@@ -8402,14 +8400,14 @@ async def driver_accept_ride(
         organization_id=ride.organization_id,
         ride_id=ride.id,
         from_status=RideStatus.ASSIGNED.value,
-        to_status=RideStatus.DRIVER_EN_ROUTE.value,
+        to_status=RideStatus.ASSIGNED.value,
         actor_user_id=_user.id,
     )
     await emitter.emit_driver_active_ride_state(
         organization_id=ride.organization_id,
         driver_id=driver_id,
         active_ride_id=ride.id,
-        state=RideStatus.DRIVER_EN_ROUTE.value,
+        state=RideStatus.ASSIGNED.value,
         actor_user_id=_user.id,
         details={"source": "driver_accept_route"},
     )

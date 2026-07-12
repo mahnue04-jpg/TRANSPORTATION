@@ -57,6 +57,7 @@ class RideStatus(str, Enum):
     ARRIVED = "arrived"
     RIDER_ONBOARD = "rider_onboard"
     IN_PROGRESS = "in_progress"
+    ARRIVED_DESTINATION = "arrived_destination"
     FAILED = "failed"
     ESCALATED = "escalated"
 
@@ -105,6 +106,7 @@ class DispatchAssignmentState(str, Enum):
     ACCEPTED = "accepted"
     EN_ROUTE_PICKUP = "en_route_pickup"
     PICKUP_COMPLETE = "pickup_complete"
+    ARRIVED_DESTINATION = "arrived_destination"
     DROPOFF_COMPLETE = "dropoff_complete"
     REASSIGNMENT_PENDING = "reassignment_pending"
 

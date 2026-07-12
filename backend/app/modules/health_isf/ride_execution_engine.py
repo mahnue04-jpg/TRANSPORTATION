@@ -30,6 +30,7 @@ CANONICAL_RIDE_STATES: tuple[str, ...] = (
     RideStatus.ARRIVED.value,
     RideStatus.RIDER_ONBOARD.value,
     RideStatus.IN_PROGRESS.value,
+    RideStatus.ARRIVED_DESTINATION.value,
     RideStatus.COMPLETED.value,
     RideStatus.CANCELLED.value,
     RideStatus.FAILED.value,
@@ -62,6 +63,7 @@ CANONICAL_TO_LEGACY: dict[str, str] = {
     RideStatus.ARRIVED.value: RideStatus.ACCEPTED.value,
     RideStatus.RIDER_ONBOARD.value: RideStatus.IN_TRANSIT.value,
     RideStatus.IN_PROGRESS.value: RideStatus.IN_TRANSIT.value,
+    RideStatus.ARRIVED_DESTINATION.value: RideStatus.IN_TRANSIT.value,
     RideStatus.COMPLETED.value: RideStatus.COMPLETED.value,
     RideStatus.CANCELLED.value: RideStatus.CANCELLED.value,
     RideStatus.FAILED.value: RideStatus.CANCELLED.value,
@@ -82,7 +84,8 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     RideStatus.DRIVER_EN_ROUTE.value: {RideStatus.ARRIVED.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
     RideStatus.ARRIVED.value: {RideStatus.RIDER_ONBOARD.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
     RideStatus.RIDER_ONBOARD.value: {RideStatus.IN_PROGRESS.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
-    RideStatus.IN_PROGRESS.value: {RideStatus.COMPLETED.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
+    RideStatus.IN_PROGRESS.value: {RideStatus.ARRIVED_DESTINATION.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
+    RideStatus.ARRIVED_DESTINATION.value: {RideStatus.COMPLETED.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
     RideStatus.ESCALATED.value: {RideStatus.QUEUED.value, RideStatus.ASSIGNED.value, RideStatus.CANCELLED.value, RideStatus.FAILED.value},
     RideStatus.COMPLETED.value: {RideStatus.COMPLETED.value},
     RideStatus.CANCELLED.value: {RideStatus.CANCELLED.value},
@@ -233,6 +236,7 @@ class RideLifecycleManager:
             RideStatus.ARRIVED.value,
             RideStatus.RIDER_ONBOARD.value,
             RideStatus.IN_PROGRESS.value,
+            RideStatus.ARRIVED_DESTINATION.value,
         } and not ride.accepted_at:
             ride.accepted_at = now()
 

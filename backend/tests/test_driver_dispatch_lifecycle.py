@@ -205,9 +205,11 @@ def test_full_driver_dispatch_lifecycle_all_actions(client: TestClient) -> None:
     assert contact.status_code in {200, 400}, contact.text
 
     for target_state in (
+        "en_route_pickup",
         "arrived_pickup",
         "rider_loaded",
         "trip_in_progress",
+        "arrived_destination",
         "completed",
     ):
         step = client.post(

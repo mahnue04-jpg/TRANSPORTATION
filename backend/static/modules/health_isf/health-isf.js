@@ -4819,13 +4819,72 @@
     return Math.max(rideCount, assignmentCount);
   }
 
+  function resolveRideLifecycle(ride) {
+    return String((ride && (ride.lifecycle_state || ride.status)) || '').toLowerCase();
+  }
+
+  function buildDriverLifecycleAction(ride, assignmentState) {
+    const lifecycle = resolveRideLifecycle(ride);
+    const assignment = String(assignmentState || '').toLowerCase();
+    if (assignment === 'offered' && (lifecycle === 'assigned' || lifecycle === 'queued')) {
+      return {
+        label: 'Accept Ride',
+        action: 'accept',
+        secondary: { label: 'Reject Ride', action: 'reject', tone: 'danger' },
+      };
+    }
+    if (lifecycle === 'assigned' && ['accepted', 'assigned'].indexOf(assignment) >= 0) {
+      return { label: 'En Route to Pickup', action: 'route', targetState: 'en_route_pickup' };
+    }
+    if (lifecycle === 'driver_en_route') {
+      return { label: 'Arrived at Pickup', action: 'route', targetState: 'arrived_pickup' };
+    }
+    if (lifecycle === 'arrived') {
+      return { label: 'Rider Loaded', action: 'route', targetState: 'rider_loaded' };
+    }
+    if (lifecycle === 'rider_onboard') {
+      return { label: 'Start Trip', action: 'route', targetState: 'trip_in_progress' };
+    }
+    if (lifecycle === 'in_progress') {
+      return { label: 'Arrived at Destination', action: 'route', targetState: 'arrived_destination' };
+    }
+    if (lifecycle === 'arrived_destination') {
+      return { label: 'Complete Trip', action: 'route', targetState: 'completed' };
+    }
+    if (lifecycle === 'completed') {
+      return { label: 'Trip complete', action: 'none' };
+    }
+    return null;
+  }
+
+  function renderDriverLifecycleButtons(ride, assignmentState) {
+    const rideId = String(ride && ride.id || '');
+    const nextAction = buildDriverLifecycleAction(ride, assignmentState);
+    if (!nextAction) return '';
+    if (nextAction.action === 'none') {
+      return '<div class="health-row-actions"><span class="health-pill ok">' + escapeHtml(nextAction.label) + '</span></div>';
+    }
+    if (nextAction.action === 'accept') {
+      return '<div class="health-row-actions">'
+        + '<button type="button" class="health-row-btn ok" data-driver-ride-action="accept" data-driver-ride-id="' + escapeHtml(rideId) + '">' + escapeHtml(nextAction.label) + '</button>'
+        + '<button type="button" class="health-row-btn danger" data-driver-ride-action="reject" data-driver-ride-id="' + escapeHtml(rideId) + '">' + escapeHtml(nextAction.secondary.label) + '</button>'
+        + '</div>';
+    }
+    if (nextAction.action === 'route') {
+      return '<div class="health-row-actions">'
+        + '<button type="button" class="health-row-btn ok" data-driver-route-progress="' + escapeHtml(nextAction.targetState) + '" data-driver-route-ride="' + escapeHtml(rideId) + '">' + escapeHtml(nextAction.label) + '</button>'
+        + '</div>';
+    }
+    return '';
+  }
+
   function isDriverAssignableForRide(driver, rideId) {
     if (!driver || !driver.id || driver.is_active === false) return false;
     const availability = String(driver.availability_state || "").toLowerCase();
     const status = String(driver.status || "").toLowerCase();
     const isOnline = driver.is_online === true;
     const dispatchReady = isOnline && availability === "available" && status === "available";
-    if (!dispatchReady) return false;
+    if (!dispatchReady || availability === "offer_pending" || availability === "on_trip") return false;
     return getDriverActiveAssignmentCount(driver.id, rideId) === 0;
   }
 
@@ -5709,14 +5768,22 @@
   }
 
   async function runDriverWorkflow(rideId, driverId, action) {
+    const routeMap = {
+      arrived: "arrived_pickup",
+      pickup: "rider_loaded",
+      onboard: "rider_loaded",
+      start: "trip_in_progress",
+      destination: "arrived_destination",
+      complete: "completed",
+    };
+    if (routeMap[action]) {
+      await progressDriverRoute(routeMap[action], rideId);
+      return;
+    }
     const pathMap = {
       accept: "/accept-ride",
       decline: "/decline-ride",
-      arrived: "/arrived-pickup",
-      pickup: "/pickup-complete",
-      onboard: "/pickup-complete",
       dropoff: "/dropoff-complete",
-      complete: "/dropoff-complete",
     };
     const endpoint = pathMap[action];
     if (!endpoint) return;
@@ -6850,9 +6917,14 @@
         ? formatNumber(liveWorkspace.assignment_countdown_seconds) + 's'
         : '-';
       const routeRideId = String((activeRide && activeRide.id) || (liveWorkspace && liveWorkspace.active_assignment && liveWorkspace.active_assignment.ride_id) || '');
-      const routeButtons = ['en_route_pickup', 'arrived_pickup', 'rider_loaded', 'trip_in_progress', 'arrived_destination', 'completed'].map(function (stateName) {
-        return '<button class="health-row-btn" data-driver-route-progress="' + escapeHtml(stateName) + '" data-driver-route-ride="' + escapeHtml(routeRideId) + '">' + escapeHtml(stateName.replace(/_/g, ' ')) + '</button>';
-      }).join('');
+      const routeLifecycle = resolveRideLifecycle(activeRide);
+      const routeAssignmentState = String((liveWorkspace && liveWorkspace.active_assignment && liveWorkspace.active_assignment.assignment_state) || '').toLowerCase();
+      const routeNextAction = buildDriverLifecycleAction(activeRide || {}, routeAssignmentState);
+      const routeButtons = routeNextAction && routeNextAction.action === 'route'
+        ? '<button class="health-row-btn" data-driver-route-progress="' + escapeHtml(routeNextAction.targetState) + '" data-driver-route-ride="' + escapeHtml(routeRideId) + '">' + escapeHtml(routeNextAction.label) + '</button>'
+        : (routeLifecycle === 'completed'
+          ? '<span class="health-pill ok">Trip complete</span>'
+          : '<span class="health-summary">No route action for current lifecycle state.</span>');
 
       els.driverAuthAssignment.innerHTML = '<div class="enterprise-inline-grid">'
         + MetricCard('Safety', escapeHtml((liveWorkspace && liveWorkspace.safety_status) || 'ok'), 'Driver safety and heartbeat health', statusTone((liveWorkspace && liveWorkspace.safety_status) || 'ok'))
@@ -6939,40 +7011,11 @@
       } else {
         driverEls.driverAssignedRides.innerHTML = items.map(function (ride) {
           const rideId = String(ride.id || '');
-          const rideStatus = String(ride.status || '').toLowerCase();
-          const isThisActiveRide = rideId === activeAssignmentRideId || rideId === String(state.selectedRideId || '');
-
-          // Determine which action buttons to show based on ride status
-          var actionButtons = '';
-          if (['assigned', 'pending', 'accepted', 'queued'].includes(rideStatus)
-              && (['offered', 'assigned'].includes(activeAssignmentState) || isThisActiveRide)) {
-            // Stage: Requested/Assigned — Accept or Reject
-            actionButtons = '<div class="health-row-actions">'
-              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="accept" data-driver-ride-id="' + escapeHtml(rideId) + '">Accept Ride</button>'
-              + '<button type="button" class="health-row-btn danger" data-driver-ride-action="reject" data-driver-ride-id="' + escapeHtml(rideId) + '">Reject Ride</button>'
-              + '</div>';
-          } else if (['driver_en_route', 'accepted'].includes(rideStatus)) {
-            // Stage: Driver en route — Arrived at pickup
-            actionButtons = '<div class="health-row-actions">'
-              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="arrived" data-driver-ride-id="' + escapeHtml(rideId) + '">Arrived at Pickup</button>'
-              + '</div>';
-          } else if (rideStatus === 'arrived') {
-            // Stage: Arrived — Pickup rider
-            actionButtons = '<div class="health-row-actions">'
-              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="pickup" data-driver-ride-id="' + escapeHtml(rideId) + '">Pickup Rider</button>'
-              + '</div>';
-          } else if (['in_progress', 'rider_onboard'].includes(rideStatus)) {
-            // Stage: In progress — Complete trip
-            actionButtons = '<div class="health-row-actions">'
-              + '<button type="button" class="health-row-btn ok" data-driver-ride-action="complete" data-driver-ride-id="' + escapeHtml(rideId) + '">Complete Trip</button>'
-              + '</div>';
-          } else if (rideStatus === 'completed') {
-            // Stage: Completed — Billing handoff
-            actionButtons = '<div class="health-row-actions"><span class="health-pill ok">Trip complete · Billing handoff ready</span></div>';
-          }
+          const rideStatus = resolveRideLifecycle(ride);
+          const actionButtons = renderDriverLifecycleButtons(ride, activeAssignmentState);
 
           return '<article class="health-item-card">'
-            + '<div class="health-row"><strong>' + escapeHtml(ride.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(ride.status) + '">' + escapeHtml(ride.status || 'pending') + '</span></div>'
+            + '<div class="health-row"><strong>' + escapeHtml(ride.passenger_name || 'Passenger') + '</strong><span class="health-pill ' + pillClass(ride.status) + '">' + escapeHtml(rideStatus || ride.status || 'pending') + '</span></div>'
             + '<div class="health-summary">Ride ID: ' + escapeHtml(rideId.slice(0, 8)) + ' · Category: ' + escapeHtml(formatServiceCategoryLabel(ride.service_type || 'medical_transport')) + '</div>'
             + '<div class="health-summary">Pickup: ' + escapeHtml(ride.pickup_address || '-') + '</div>'
             + '<div class="health-summary">Dropoff: ' + escapeHtml(ride.dropoff_address || '-') + '</div>'

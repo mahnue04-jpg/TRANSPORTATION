@@ -62,6 +62,10 @@ from app.modules.health_isf.service_categories import serialize_service_category
 
 logger = logging.getLogger("amicor.health_isf.service")
 
+
+class RideLifecycleConflictError(ValueError):
+    """Raised when a duplicate or out-of-order lifecycle action is attempted."""
+
 WEEKDAY_INDEX = {
     "mon": 0,
     "monday": 0,
@@ -135,6 +139,7 @@ ACTIVE_DISPATCH_ASSIGNMENT_STATES = {
     DispatchAssignmentState.ACCEPTED.value,
     DispatchAssignmentState.EN_ROUTE_PICKUP.value,
     DispatchAssignmentState.PICKUP_COMPLETE.value,
+    DispatchAssignmentState.ARRIVED_DESTINATION.value,
 }
 
 CLOSED_DISPATCH_ASSIGNMENT_STATES = {
@@ -2549,10 +2554,10 @@ def _ensure_completion_billing_records(
     ride: HealthISFRide,
     *,
     actor_user_id: Optional[str] = None,
-) -> None:
+) -> dict[str, Any] | None:
     from app.modules.health_isf.financial_engine import TripFinancialEngine
 
-    TripFinancialEngine.process_trip_completion(db, ride, actor_user_id=actor_user_id)
+    return TripFinancialEngine.process_trip_completion(db, ride, actor_user_id=actor_user_id)
 
 
 def list_customer_ride_requests(
@@ -4705,11 +4710,39 @@ def accept_driver_ride(
     if RideStatus(ride.status) in (RideStatus.COMPLETED, RideStatus.CANCELLED):
         raise ValueError("Cannot accept a terminal ride")
 
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    assignment = _latest_assignment_for_ride(db, ride.id)
+    assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
+    post_accept_states = {
+        RideStatus.DRIVER_EN_ROUTE.value,
+        RideStatus.ARRIVED.value,
+        RideStatus.RIDER_ONBOARD.value,
+        RideStatus.IN_PROGRESS.value,
+        RideStatus.ARRIVED_DESTINATION.value,
+        RideStatus.COMPLETED.value,
+    }
+    post_accept_assignment_states = {
+        DispatchAssignmentState.ACCEPTED.value,
+        DispatchAssignmentState.EN_ROUTE_PICKUP.value,
+        DispatchAssignmentState.PICKUP_COMPLETE.value,
+        DispatchAssignmentState.ARRIVED_DESTINATION.value,
+        DispatchAssignmentState.DROPOFF_COMPLETE.value,
+    }
+    if lifecycle_state in post_accept_states:
+        raise RideLifecycleConflictError("Ride has already been accepted")
+    if assignment_state in post_accept_assignment_states:
+        raise RideLifecycleConflictError("Ride offer has already been accepted")
+    if assignment_state and assignment_state not in {
+        DispatchAssignmentState.OFFERED.value,
+        DispatchAssignmentState.ASSIGNED.value,
+    }:
+        raise RideLifecycleConflictError(f"Cannot accept ride from assignment state '{assignment_state}'")
+
     import time
     monotonic_ts = time.monotonic()
     event_id = str(uuid4())
     sequence_number = int(monotonic_ts * 1000)
-    if RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) == RideStatus.QUEUED.value:
+    if lifecycle_state == RideStatus.QUEUED.value:
         accepted = RideLifecycleManager.transition_ride(
             db,
             ride,
@@ -4723,24 +4756,11 @@ def accept_driver_ride(
             monotonic_ts=monotonic_ts,
             source="accept_driver_ride",
         )
-        if not accepted:
-            logger.info({"event": "duplicate_or_stale_assignment_rejected", "ride_id": ride.id, "driver_id": driver.id})
-    accepted2 = RideLifecycleManager.transition_ride(
-        db,
-        ride,
-        target_state=RideStatus.DRIVER_EN_ROUTE.value,
-        action_type="driver_accepted_ride",
-        actor_user_id=actor_user_id,
-        note="Driver accepted assignment",
-        payload={"driver_id": driver.id},
-        event_id=str(uuid4()),
-        sequence_number=sequence_number+1,
-        monotonic_ts=monotonic_ts+0.0001,
-        source="accept_driver_ride",
-    )
-    if not accepted2:
-        logger.info({"event": "duplicate_or_stale_accept_rejected", "ride_id": ride.id, "driver_id": driver.id})
-    _advance_driver_status_for_active_ride(db, driver, DriverStatus.EN_ROUTE_PICKUP, ride=ride)
+        if not accepted and RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.ASSIGNED.value:
+            raise RideLifecycleConflictError("Ride is not in an offerable state for acceptance")
+
+    ride.accepted_at = ride.accepted_at or now()
+    _set_driver_status(db, driver, DriverStatus.ASSIGNED)
     driver.availability_state = "on_trip"
     driver.is_online = True
     driver.auth_state = "active"
@@ -4751,11 +4771,13 @@ def accept_driver_ride(
         assignment_state=DispatchAssignmentState.ACCEPTED.value,
         note="Driver accepted assignment",
     )
-    _mark_dispatch_assignment_state(
+    _record_dispatch(
         db,
         ride_id=ride.id,
-        assignment_state=DispatchAssignmentState.EN_ROUTE_PICKUP.value,
-        note="Driver en route to pickup",
+        action="driver_accepted_ride",
+        acted_by_user_id=actor_user_id,
+        driver_id=driver.id,
+        note="Driver accepted assignment",
     )
     _commit_or_rollback(db)
     db.refresh(ride)
@@ -4767,6 +4789,69 @@ def accept_driver_ride(
         ride=ride,
         state=RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status),
         source="driver_accept_ride",
+        driver_id=driver.id,
+    )
+    return ride
+
+
+def driver_en_route_pickup(
+    db: Session,
+    driver_id: str,
+    ride_id: str,
+    actor_user_id: Optional[str] = None,
+) -> Optional[HealthISFRide]:
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        return None
+    if ride.driver_id != driver.id:
+        raise ValueError("Ride is not assigned to this driver")
+
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle_state == RideStatus.DRIVER_EN_ROUTE.value:
+        return ride
+    if lifecycle_state != RideStatus.ASSIGNED.value:
+        raise RideLifecycleConflictError(
+            f"Cannot mark en route to pickup from lifecycle state '{lifecycle_state}'"
+        )
+
+    import time
+    monotonic_ts = time.monotonic()
+    event_id = str(uuid4())
+    sequence_number = int(monotonic_ts * 1000)
+    accepted = RideLifecycleManager.transition_ride(
+        db,
+        ride,
+        target_state=RideStatus.DRIVER_EN_ROUTE.value,
+        action_type="driver_en_route_pickup",
+        actor_user_id=actor_user_id,
+        note="Driver en route to pickup",
+        payload={"driver_id": driver.id},
+        event_id=event_id,
+        sequence_number=sequence_number,
+        monotonic_ts=monotonic_ts,
+        source="driver_en_route_pickup",
+    )
+    if not accepted and RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.DRIVER_EN_ROUTE.value:
+        raise RideLifecycleConflictError("Unable to transition ride to en route pickup")
+
+    _advance_driver_status_for_active_ride(db, driver, DriverStatus.EN_ROUTE_PICKUP, ride=ride)
+    driver.availability_state = "on_trip"
+    driver.is_online = True
+    driver.auth_state = "active"
+    driver.last_seen_at = now()
+    _mark_dispatch_assignment_state(
+        db,
+        ride_id=ride.id,
+        assignment_state=DispatchAssignmentState.EN_ROUTE_PICKUP.value,
+        note="Driver en route to pickup",
+    )
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    _safe_runtime_update(
+        ride=ride,
+        state=RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status),
+        source="driver_en_route_pickup",
         driver_id=driver.id,
     )
     return ride
@@ -4903,8 +4988,12 @@ def driver_arrived_pickup(
     if ride.driver_id != driver.id:
         raise ValueError("Ride is not assigned to this driver")
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-    if lifecycle_state not in (RideStatus.ASSIGNED.value, RideStatus.DRIVER_EN_ROUTE.value):
-        raise ValueError("Driver cannot arrive before assignment and en-route state")
+    if lifecycle_state == RideStatus.ARRIVED.value:
+        return ride
+    if lifecycle_state != RideStatus.DRIVER_EN_ROUTE.value:
+        raise RideLifecycleConflictError(
+            f"Driver cannot arrive at pickup from lifecycle state '{lifecycle_state}'"
+        )
 
     _advance_driver_status_for_active_ride(db, driver, DriverStatus.WAITING_AT_PICKUP, ride=ride)
     driver.availability_state = "on_trip"
@@ -4954,8 +5043,12 @@ def driver_pickup_complete(
     if ride.driver_id != driver.id:
         raise ValueError("Ride is not assigned to this driver")
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-    if lifecycle_state not in (RideStatus.ARRIVED.value, RideStatus.RIDER_ONBOARD.value):
-        raise ValueError("Pickup can only be completed once driver has arrived")
+    if lifecycle_state == RideStatus.RIDER_ONBOARD.value:
+        return ride
+    if lifecycle_state != RideStatus.ARRIVED.value:
+        raise RideLifecycleConflictError(
+            f"Pickup can only be completed after driver arrives from lifecycle state '{lifecycle_state}'"
+        )
 
     _advance_driver_status_for_active_ride(db, driver, DriverStatus.IN_TRANSIT, ride=ride)
     driver.availability_state = "on_trip"
@@ -4980,28 +5073,9 @@ def driver_pickup_complete(
         source="driver_pickup_complete",
     )
     if not accepted:
-        logger.info({"event": "duplicate_or_stale_pickup_rejected", "ride_id": ride.id, "driver_id": driver.id})
-
-    # Move into active transport immediately after confirmed pickup so dropoff completion
-    # can follow the strict lifecycle chain without an extra hidden transition call.
-    progress_monotonic_ts = time.monotonic()
-    progress_event_id = str(uuid4())
-    progress_sequence_number = int(progress_monotonic_ts * 1000)
-    progressed = RideLifecycleManager.transition_ride(
-        db,
-        ride,
-        target_state=RideStatus.IN_PROGRESS.value,
-        action_type="transport_started",
-        actor_user_id=actor_user_id,
-        note="Transport started after pickup completed",
-        payload={"driver_id": driver.id},
-        event_id=progress_event_id,
-        sequence_number=progress_sequence_number,
-        monotonic_ts=progress_monotonic_ts,
-        source="driver_pickup_complete",
-    )
-    if not progressed:
-        logger.info({"event": "duplicate_or_stale_transport_start_rejected", "ride_id": ride.id, "driver_id": driver.id})
+        db.refresh(ride)
+        if RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.RIDER_ONBOARD.value:
+            raise RideLifecycleConflictError("Unable to mark rider loaded for ride")
 
     _mark_dispatch_assignment_state(
         db,
@@ -5012,6 +5086,116 @@ def driver_pickup_complete(
     _commit_or_rollback(db)
     db.refresh(ride)
     sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.IN_PROGRESS.value)
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    return ride
+
+
+def driver_start_trip(
+    db: Session,
+    driver_id: str,
+    ride_id: str,
+    actor_user_id: Optional[str] = None,
+) -> Optional[HealthISFRide]:
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        return None
+    if ride.driver_id != driver.id:
+        raise ValueError("Ride is not assigned to this driver")
+
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle_state == RideStatus.IN_PROGRESS.value:
+        return ride
+    if lifecycle_state != RideStatus.RIDER_ONBOARD.value:
+        raise RideLifecycleConflictError(
+            f"Cannot start trip from lifecycle state '{lifecycle_state}'"
+        )
+
+    import time
+    monotonic_ts = time.monotonic()
+    event_id = str(uuid4())
+    sequence_number = int(monotonic_ts * 1000)
+    progressed = RideLifecycleManager.transition_ride(
+        db,
+        ride,
+        target_state=RideStatus.IN_PROGRESS.value,
+        action_type="transport_started",
+        actor_user_id=actor_user_id,
+        note="Transport started",
+        payload={"driver_id": driver.id},
+        event_id=event_id,
+        sequence_number=sequence_number,
+        monotonic_ts=monotonic_ts,
+        source="driver_start_trip",
+    )
+    if not progressed and RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.IN_PROGRESS.value:
+        raise RideLifecycleConflictError("Unable to start trip for ride")
+
+    _advance_driver_status_for_active_ride(db, driver, DriverStatus.IN_TRANSIT, ride=ride)
+    driver.availability_state = "on_trip"
+    driver.is_online = True
+    driver.auth_state = "active"
+    driver.last_seen_at = now()
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.IN_PROGRESS.value)
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    return ride
+
+
+def driver_arrived_destination(
+    db: Session,
+    driver_id: str,
+    ride_id: str,
+    actor_user_id: Optional[str] = None,
+) -> Optional[HealthISFRide]:
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        return None
+    if ride.driver_id != driver.id:
+        raise ValueError("Ride is not assigned to this driver")
+
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle_state == RideStatus.ARRIVED_DESTINATION.value:
+        return ride
+    if lifecycle_state != RideStatus.IN_PROGRESS.value:
+        raise RideLifecycleConflictError(
+            f"Cannot mark arrived at destination from lifecycle state '{lifecycle_state}'"
+        )
+
+    import time
+    monotonic_ts = time.monotonic()
+    event_id = str(uuid4())
+    sequence_number = int(monotonic_ts * 1000)
+    accepted = RideLifecycleManager.transition_ride(
+        db,
+        ride,
+        target_state=RideStatus.ARRIVED_DESTINATION.value,
+        action_type="driver_arrived_destination",
+        actor_user_id=actor_user_id,
+        note="Driver arrived at destination",
+        payload={"driver_id": driver.id},
+        event_id=event_id,
+        sequence_number=sequence_number,
+        monotonic_ts=monotonic_ts,
+        source="driver_arrived_destination",
+    )
+    if not accepted and RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.ARRIVED_DESTINATION.value:
+        raise RideLifecycleConflictError("Unable to mark arrived at destination for ride")
+
+    driver.availability_state = "on_trip"
+    driver.is_online = True
+    driver.auth_state = "active"
+    driver.last_seen_at = now()
+    _mark_dispatch_assignment_state(
+        db,
+        ride_id=ride.id,
+        assignment_state=DispatchAssignmentState.ARRIVED_DESTINATION.value,
+        note="Driver arrived at destination",
+    )
     _commit_or_rollback(db)
     db.refresh(ride)
     return ride
@@ -5029,9 +5213,12 @@ def driver_dropoff_complete(
         return None
     if ride.driver_id != driver.id:
         raise ValueError("Ride is not assigned to this driver")
+
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
     if lifecycle_state == RideStatus.COMPLETED.value:
-        _ensure_completion_billing_records(db, ride, actor_user_id=actor_user_id)
+        financial = _ensure_completion_billing_records(db, ride, actor_user_id=actor_user_id)
+        if not financial:
+            raise ValueError("Completed ride is missing financial settlement records")
         _mark_dispatch_assignment_state(
             db,
             ride_id=ride.id,
@@ -5039,7 +5226,8 @@ def driver_dropoff_complete(
             note="Dropoff completed",
         )
         sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.COMPLETED.value)
-        _release_driver_after_trip_completion(db, driver, increment_trip_count=False)
+        if _coerce_driver_status(driver.status) != DriverStatus.AVAILABLE:
+            _release_driver_after_trip_completion(db, driver, increment_trip_count=False)
         _commit_or_rollback(db)
         db.refresh(ride)
         db.refresh(driver)
@@ -5051,41 +5239,69 @@ def driver_dropoff_complete(
             actor_user_id=actor_user_id,
         )
         return ride
-    if lifecycle_state not in (RideStatus.RIDER_ONBOARD.value, RideStatus.IN_PROGRESS.value):
-        raise ValueError("Dropoff can only be completed after rider is onboard")
+
+    if lifecycle_state != RideStatus.ARRIVED_DESTINATION.value:
+        raise RideLifecycleConflictError(
+            "Dropoff can only be completed after the driver arrives at destination"
+        )
 
     import time
+    from app.modules.health_isf.financial_engine import TripFinancialEngine
+
     monotonic_ts = time.monotonic()
     event_id = str(uuid4())
     sequence_number = int(monotonic_ts * 1000)
-    accepted = RideLifecycleManager.transition_ride(
-        db,
-        ride,
-        target_state=RideStatus.COMPLETED.value,
-        action_type="dropoff_completed",
-        actor_user_id=actor_user_id,
-        note="Dropoff completed",
-        payload={"driver_id": driver.id},
-        event_id=event_id,
-        sequence_number=sequence_number,
-        monotonic_ts=monotonic_ts,
-        source="driver_dropoff_complete",
-    )
-    if not accepted:
-        db.refresh(ride)
-        if not _ride_is_terminal(ride):
-            logger.info({"event": "duplicate_or_stale_dropoff_rejected", "ride_id": ride.id, "driver_id": driver.id})
-            raise ValueError("Unable to complete dropoff for ride")
-    _ensure_completion_billing_records(db, ride, actor_user_id=actor_user_id)
-    _mark_dispatch_assignment_state(
-        db,
-        ride_id=ride.id,
-        assignment_state=DispatchAssignmentState.DROPOFF_COMPLETE.value,
-        note="Dropoff completed",
-    )
-    sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.COMPLETED.value)
-    _release_driver_after_trip_completion(db, driver)
-    _commit_or_rollback(db)
+    try:
+        accepted = RideLifecycleManager.transition_ride(
+            db,
+            ride,
+            target_state=RideStatus.COMPLETED.value,
+            action_type="dropoff_completed",
+            actor_user_id=actor_user_id,
+            note="Dropoff completed",
+            payload={"driver_id": driver.id},
+            event_id=event_id,
+            sequence_number=sequence_number,
+            monotonic_ts=monotonic_ts,
+            source="driver_dropoff_complete",
+        )
+        if not accepted and RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) != RideStatus.COMPLETED.value:
+            raise RideLifecycleConflictError("Unable to complete dropoff for ride")
+
+        financial = TripFinancialEngine.process_trip_completion(db, ride, actor_user_id=actor_user_id)
+        if not financial or float(financial.get("ride_price_usd") or 0.0) <= 0.0:
+            raise ValueError("Financial settlement did not produce a billable trip record")
+
+        _mark_dispatch_assignment_state(
+            db,
+            ride_id=ride.id,
+            assignment_state=DispatchAssignmentState.DROPOFF_COMPLETE.value,
+            note="Dropoff completed",
+        )
+        sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.COMPLETED.value)
+        _release_driver_after_trip_completion(db, driver)
+        _commit_or_rollback(db)
+    except Exception as exc:
+        db.rollback()
+        ride = get_ride_by_id(db, ride_id)
+        driver = get_driver_by_id(db, driver_id)
+        if ride:
+            marker = "financial_exception"
+            existing_notes = str(ride.notes or "")
+            if marker not in existing_notes.lower():
+                ride.notes = (existing_notes + f"\n{marker}: {exc}").strip()
+                ride.updated_at = now()
+            _record_dispatch(
+                db,
+                ride_id=ride.id,
+                action="financial_exception",
+                acted_by_user_id=actor_user_id,
+                driver_id=driver.id if driver else None,
+                note=str(exc),
+            )
+            _commit_or_rollback(db)
+        raise ValueError(f"Trip completion failed: {exc}") from exc
+
     db.refresh(ride)
     db.refresh(driver)
     _safe_runtime_unregister(ride_id=ride.id, reason="driver_dropoff_complete")
@@ -6285,12 +6501,19 @@ def get_drivers_for_organization(
 
 def get_available_drivers(db: Session) -> list[HealthISFDriver]:
     _normalize_legacy_driver_status_rows(db)
-    return db.query(HealthISFDriver).filter(
-        and_(
-            HealthISFDriver.is_active == True,
-            HealthISFDriver.status == DriverStatus.AVAILABLE,
+    rows = (
+        db.query(HealthISFDriver)
+        .filter(
+            and_(
+                HealthISFDriver.is_active == True,
+                HealthISFDriver.status == DriverStatus.AVAILABLE,
+                HealthISFDriver.availability_state == "available",
+                HealthISFDriver.is_online == True,
+            )
         )
-    ).all()
+        .all()
+    )
+    return [driver for driver in rows if _driver_active_workload_count(db, driver.id) == 0]
 
 
 def get_driver_by_id(db: Session, driver_id: str) -> Optional[HealthISFDriver]:
@@ -7442,6 +7665,23 @@ def assign_driver_to_ride(
         })
         raise ValueError("Cannot assign inactive driver")
 
+    if _driver_active_workload_count(db, driver.id) > 0:
+        raise ValueError("Driver already has an active ride assignment")
+
+    if str(driver.availability_state or "").lower() not in {"available"}:
+        raise ValueError("Driver is not available for assignment")
+
+    if _coerce_driver_status(driver.status) != DriverStatus.AVAILABLE:
+        if not (allow_assigned_driver and _coerce_driver_status(driver.status) == DriverStatus.ASSIGNED):
+            logger.warning({
+                "event": "assignment_rejected",
+                "ride_id": ride_id,
+                "driver_id": driver_id,
+                "driver_status": driver.status,
+                "reason": "Driver unavailable"
+            })
+            raise ValueError("Cannot assign unavailable driver")
+
     if ride.organization_id != driver.organization_id:
         logger.warning({
             "event": "assignment_rejected",
@@ -7461,18 +7701,6 @@ def assign_driver_to_ride(
             "reason": "Ride is terminal"
         })
         raise ValueError("Cannot assign driver to completed or cancelled ride")
-
-    if driver.status not in {DriverStatus.AVAILABLE, DriverStatus.UNAVAILABLE} and not (
-        allow_assigned_driver and driver.status == DriverStatus.ASSIGNED
-    ):
-        logger.warning({
-            "event": "assignment_rejected",
-            "ride_id": ride_id,
-            "driver_id": driver_id,
-            "driver_status": driver.status,
-            "reason": "Driver unavailable"
-        })
-        raise ValueError("Cannot assign unavailable driver")
 
     if ride.driver_id is not None and str(ride.driver_id) != str(driver.id):
         if not allow_reassignment:
@@ -7514,7 +7742,7 @@ def assign_driver_to_ride(
     ride.driver_id = driver.id
     ride.assigned_by_user_id = actor_user_id
     _set_driver_status(db, driver, DriverStatus.ASSIGNED)
-    driver.availability_state = "on_trip"
+    driver.availability_state = "offer_pending"
     driver.is_online = True
     driver.auth_state = "active"
     driver.last_seen_at = now()
