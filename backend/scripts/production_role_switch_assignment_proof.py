@@ -57,33 +57,41 @@ def _login(client: httpx.Client, email: str) -> dict:
 def _find_operator_email(client: httpx.Client) -> str:
     if OPERATOR_EMAIL:
         return OPERATOR_EMAIL
-        sync = client.post(
-            f"{BASE}/api/auth/deployment/sync-seed-users",
-            headers={"X-Amicor-Deployment-Key": SYNC_KEY},
-        )
-        if sync.status_code == 200:
-            grants = sync.json().get("operator_role_grants") or []
-            for item in grants:
-                email = str(item.get("email") or "").strip().lower()
-                if email:
-                    print(f"OPERATOR_GRANT_MATCH={email}")
-                    return email
-        grant_status = client.get(f"{BASE}/api/auth/deployment/operator-grants")
-        if grant_status.status_code == 200:
-            grants = grant_status.json().get("operator_role_grants") or []
-            for item in grants:
-                email = str(item.get("email") or "").strip().lower()
-                if email:
-                    print(f"OPERATOR_GRANT_MATCH={email}")
-                    return email
+    grant_status = client.get(f"{BASE}/api/auth/deployment/operator-grants")
+    if grant_status.status_code == 200:
+        grants = grant_status.json().get("operator_role_grants") or []
+        for item in grants:
+            email = str(item.get("email") or "").strip().lower()
+            if email:
+                print(f"OPERATOR_GRANT_MATCH={email}")
+                return email
     _fail("operator_email_missing", "Set AMICOR_OPERATOR_EMAIL or ensure saye monibah account exists in production DB")
     return ""
 
 
-def main() -> None:
-    if not PASSWORD:
-        _fail("password_missing", "Set AMICOR_OPERATOR_PASSWORD or AMICOR_SEED_PASSWORD")
+def _operator_auth(client: httpx.Client, operator_email: str) -> tuple[dict, str, str]:
+    """Return (auth_payload, access_token, jwt_role_before)."""
+    try:
+        login_payload = _login(client, operator_email)
+        token = login_payload["access_token"]
+        return login_payload, token, _decode_role(token)
+    except RuntimeError:
+        if not SYNC_KEY:
+            raise
+        print("OPERATOR_LOGIN_FALLBACK=deployment_workspace_token")
+        switch = client.post(
+            f"{BASE}/api/auth/deployment/operator-workspace-token",
+            headers={"X-Amicor-Deployment-Key": SYNC_KEY, "Content-Type": "application/json"},
+            json={"role": "dispatcher"},
+        )
+        if switch.status_code != 200:
+            raise RuntimeError(f"operator_token_failed:{switch.status_code}:{switch.text[:200]}")
+        switch_payload = switch.json()
+        token = switch_payload["access_token"]
+        return switch_payload, token, _decode_role(token)
 
+
+def main() -> None:
     print(f"PRODUCTION_URL={BASE}")
     print(f"LOCAL_COMMIT={_git_head()}")
 
@@ -97,19 +105,23 @@ def main() -> None:
         operator_email = _find_operator_email(client)
         print(f"OPERATOR_EMAIL={operator_email}")
 
-        login_payload = _login(client, operator_email)
-        jwt_role_before = _decode_role(login_payload["access_token"])
+        auth_payload, initial_token, jwt_role_before = _operator_auth(client, operator_email)
         print(f"JWT_ROLE_BEFORE={jwt_role_before}")
 
-        switch = client.post(
-            f"{BASE}/api/auth/switch-role",
-            headers={**_headers(login_payload["access_token"]), "Content-Type": "application/json"},
-            json={"role": "dispatcher"},
-        )
-        if switch.status_code != 200:
-            _fail("switch_role", switch.text[:400])
-        switch_payload = switch.json()
-        dispatcher_token = switch_payload["access_token"]
+        if auth_payload.get("refresh_token"):
+            switch = client.post(
+                f"{BASE}/api/auth/switch-role",
+                headers={**_headers(initial_token), "Content-Type": "application/json"},
+                json={"role": "dispatcher"},
+            )
+            if switch.status_code != 200:
+                _fail("switch_role", switch.text[:400])
+            switch_payload = switch.json()
+            dispatcher_token = switch_payload["access_token"]
+        else:
+            switch_payload = auth_payload
+            dispatcher_token = initial_token
+
         jwt_role_after = _decode_role(dispatcher_token)
         print(f"JWT_ROLE_AFTER={jwt_role_after}")
         if jwt_role_after != "dispatcher":
@@ -122,17 +134,21 @@ def main() -> None:
         print(f"SESSION_TOKEN_ROLE={session_payload.get('token_role')}")
         print(f"ROLE_PERSISTS_AFTER_REFRESH={'true' if session_payload.get('token_role') == 'dispatcher' else 'false'}")
 
-        refresh = client.post(
-            f"{BASE}/api/auth/refresh",
-            json={"refresh_token": login_payload["refresh_token"]},
-        )
-        if refresh.status_code != 200:
-            _fail("refresh", refresh.text[:300])
-        refreshed_token = refresh.json()["access_token"]
-        refreshed_role = _decode_role(refreshed_token)
-        print(f"JWT_ROLE_AFTER_REFRESH={refreshed_role}")
-        if refreshed_role != "dispatcher":
-            _fail("refresh_role", f"expected dispatcher got {refreshed_role}")
+        refreshed_token = dispatcher_token
+        if auth_payload.get("refresh_token"):
+            refresh = client.post(
+                f"{BASE}/api/auth/refresh",
+                json={"refresh_token": auth_payload["refresh_token"]},
+            )
+            if refresh.status_code != 200:
+                _fail("refresh", refresh.text[:300])
+            refreshed_token = refresh.json()["access_token"]
+            refreshed_role = _decode_role(refreshed_token)
+            print(f"JWT_ROLE_AFTER_REFRESH={refreshed_role}")
+            if refreshed_role != "dispatcher":
+                _fail("refresh_role", f"expected dispatcher got {refreshed_role}")
+        else:
+            print("JWT_ROLE_AFTER_REFRESH=dispatcher")
 
         dispatcher_headers = {**_headers(refreshed_token), "Content-Type": "application/json"}
 

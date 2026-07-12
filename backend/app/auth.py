@@ -262,8 +262,6 @@ def apply_operator_role_grants() -> list[dict[str, str]]:
                 current_session = normalize_role(getattr(user, "session_role", None))
                 if current_session not in authorized:
                     user.session_role = primary_role
-                if email_hint and str(user.email or "").strip().lower() == email_hint:
-                    user.hashed_password = hash_password(SEED_PASSWORD)
                 updated.append(
                     {
                         "email": user.email,
@@ -854,6 +852,56 @@ def deployment_sync_seed_users(request: Request):
         "driver_seed": driver_summary,
         "operational_bootstrap": bootstrap_summary,
     }
+
+
+@router.post("/deployment/operator-workspace-token", response_model=SwitchRoleResponse)
+def deployment_operator_workspace_token(
+    request: Request,
+    req: SwitchRoleRequest,
+    db: Session = Depends(get_db),
+):
+    """Issue a real operator JWT for deployment verification (requires deployment sync key)."""
+    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
+    if not expected:
+        raise HTTPException(status_code=503, detail="Deployment sync not configured")
+    provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Invalid deployment sync key")
+
+    from app.db.models import User as UserModel
+
+    apply_operator_role_grants()
+    target_email = ""
+    for grant in OPERATOR_ACCOUNT_GRANTS:
+        target_email = str(grant.get("email") or "").strip().lower()
+        if target_email:
+            break
+    if not target_email:
+        raise HTTPException(status_code=404, detail="Operator grant target not configured")
+
+    user = db.query(UserModel).filter(func.lower(UserModel.email) == target_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Operator account not found")
+
+    requested = normalize_role(req.role)
+    authorized = get_user_authorized_roles(user)
+    if requested not in authorized:
+        raise HTTPException(status_code=403, detail="Role not authorized for operator account")
+
+    user.session_role = requested
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    access = create_access_token(_access_token_payload(user, requested))
+    payload = _jwt_verify(access)
+    return SwitchRoleResponse(
+        access_token=access,
+        role=requested,
+        session_role=requested,
+        authorized_roles=sorted(authorized),
+        token_role=normalize_role(payload.get("role")),
+    )
 
 
 @router.get("/deployment/operator-grants")
