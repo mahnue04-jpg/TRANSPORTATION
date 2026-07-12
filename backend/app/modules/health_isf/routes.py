@@ -2810,18 +2810,16 @@ async def execute_phase52_lifecycle_action(
                 driver_id = str(getattr(resulting_ride, "driver_id", "") or "")
             resulting_ride = service.driver_pickup_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
         elif action == "ride_in_progress":
-            resulting_ride = service.update_ride_status(db, ride_id=ride_id, status=RideStatus.IN_PROGRESS.value, actor_user_id=user.user_id)
+            if not driver_id:
+                driver_id = str(getattr(resulting_ride, "driver_id", "") or "")
+            resulting_ride = service.driver_start_trip(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
         elif action == "ride_completed":
             if not driver_id:
                 driver_id = str(getattr(resulting_ride, "driver_id", "") or "")
             current_state = RideLifecycleManager.normalize_state(getattr(resulting_ride, "lifecycle_state", None) or getattr(resulting_ride, "status", None))
-            if current_state == "rider_onboard":
-                resulting_ride = service.update_ride_status(db, ride_id=ride_id, status=RideStatus.IN_PROGRESS.value, actor_user_id=user.user_id)
-            try:
-                resulting_ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-            except ValueError:
-                # Keep lifecycle controls non-dead in live runtime simulation even if strict transition guards reject direct drop-off completion.
-                resulting_ride = service.update_ride_status(db, ride_id=ride_id, status=RideStatus.COMPLETED.value, actor_user_id=user.user_id)
+            if current_state == RideStatus.IN_PROGRESS.value:
+                resulting_ride = service.driver_arrived_destination(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+            resulting_ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
         elif action == "ride_cancelled":
             resulting_ride = service.update_ride_status(db, ride_id=ride_id, status=RideStatus.CANCELLED.value, actor_user_id=user.user_id)
         elif action == "escalation_requested":
