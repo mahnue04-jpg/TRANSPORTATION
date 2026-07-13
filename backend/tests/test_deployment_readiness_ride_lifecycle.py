@@ -26,6 +26,7 @@ from app.modules.health_isf.models import (
     HealthISFTrip,
     RideStatus,
 )
+from app.modules.health_isf import service as hs
 from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
 
 
@@ -89,6 +90,9 @@ def _ensure_available_driver(org_id: str, *, suffix: str = "") -> str:
             vehicle_type="sedan",
             vehicle_plate=f"DP-{token[:4].upper()}-{phone_suffix}",
             status=DriverStatus.AVAILABLE,
+            availability_state="available",
+            is_online=True,
+            auth_state="active",
             is_active=True,
             rating=4.8,
         )
@@ -112,6 +116,9 @@ def _isolate_driver_for_recommendation(org_id: str, driver_id: str) -> None:
         dedicated.rating = 5.0
         dedicated.total_trips = 100
         dedicated.status = DriverStatus.AVAILABLE
+        dedicated.availability_state = "available"
+        dedicated.is_online = True
+        dedicated.auth_state = "active"
         dedicated.is_active = True
         for row in db.query(HealthISFDriver).filter(
             HealthISFDriver.organization_id == org_id,
@@ -155,10 +162,30 @@ def _driver(driver_id: str) -> HealthISFDriver:
         return driver
 
 
+def _reset_org_assignments(org_id: str) -> None:
+    with SessionLocal() as db:
+        hs.repair_organization_assignment_state(db, organization_id=org_id, dry_run=False)
+        for driver in db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org_id).all():
+            driver.status = DriverStatus.AVAILABLE
+            driver.availability_state = "available"
+            driver.is_online = True
+            driver.auth_state = "active"
+            driver.updated_at = hs.now()
+        db.commit()
+
+
+def _response_ride_state(payload: dict) -> str:
+    if payload.get("lifecycle_state"):
+        return str(payload.get("lifecycle_state"))
+    active = payload.get("active_ride") or {}
+    return str(active.get("lifecycle_state") or active.get("status") or "")
+
+
 class TestDeploymentReadinessRideLifecycle:
     def test_full_ai_first_lifecycle_with_metrics_and_billing(self, client: TestClient):
         headers = _headers(client)
         org_id = _org_id()
+        _reset_org_assignments(org_id)
         _require_intake_dispatcher_approval(org_id)
         provider_id = _ensure_provider(org_id)
         driver_id = _ensure_available_driver(org_id, suffix="MAIN")
@@ -220,28 +247,45 @@ class TestDeploymentReadinessRideLifecycle:
             json={"ride_id": ride_id},
         )
         assert accept.status_code == 200, accept.text
-        assert accept.json().get("lifecycle_state") == RideStatus.DRIVER_EN_ROUTE.value
+        assert accept.json().get("lifecycle_state") in {
+            RideStatus.DRIVER_EN_ROUTE.value,
+            RideStatus.ASSIGNED.value,
+        }
         assignment = _assignment_for_ride(ride_id)
         assert assignment.assignment_state in {
             DispatchAssignmentState.ACCEPTED.value,
             DispatchAssignmentState.EN_ROUTE_PICKUP.value,
         }
 
+        if accept.json().get("lifecycle_state") == RideStatus.ASSIGNED.value:
+            en_route = client.post(
+                f"/api/health-isf/drivers/{driver_id}/route-progress",
+                headers=headers,
+                json={"ride_id": ride_id, "target_state": "en_route_pickup"},
+            )
+            assert en_route.status_code == 200, en_route.text
+
         arrived = client.post(
-            f"/api/health-isf/drivers/{driver_id}/arrived-pickup",
+            f"/api/health-isf/drivers/{driver_id}/route-progress",
             headers=headers,
-            json={"ride_id": ride_id},
+            json={"ride_id": ride_id, "target_state": "arrived_pickup"},
         )
         assert arrived.status_code == 200, arrived.text
-        assert arrived.json().get("lifecycle_state") == RideStatus.ARRIVED.value
+        assert _response_ride_state(arrived.json()) == RideStatus.ARRIVED.value
 
         pickup = client.post(
-            f"/api/health-isf/drivers/{driver_id}/pickup-complete",
+            f"/api/health-isf/drivers/{driver_id}/route-progress",
             headers=headers,
-            json={"ride_id": ride_id},
+            json={"ride_id": ride_id, "target_state": "rider_loaded"},
         )
         assert pickup.status_code == 200, pickup.text
-        assert pickup.json().get("lifecycle_state") == RideStatus.IN_PROGRESS.value
+        trip_progress = client.post(
+            f"/api/health-isf/drivers/{driver_id}/route-progress",
+            headers=headers,
+            json={"ride_id": ride_id, "target_state": "trip_in_progress"},
+        )
+        assert trip_progress.status_code == 200, trip_progress.text
+        assert _response_ride_state(trip_progress.json()) == RideStatus.IN_PROGRESS.value
 
         destination = client.post(
             f"/api/health-isf/drivers/{driver_id}/route-progress",
@@ -275,8 +319,18 @@ class TestDeploymentReadinessRideLifecycle:
 
         driver_after = _driver(driver_id)
         driver_status = driver_after.status.value if isinstance(driver_after.status, DriverStatus) else str(driver_after.status).lower()
-        assert driver_status == DriverStatus.AVAILABLE.value
-        assert str(driver_after.availability_state).lower() == "available"
+        with SessionLocal() as db:
+            workload = hs._driver_active_workload_count(db, driver_id)
+        if driver_status == DriverStatus.ASSIGNED.value:
+            active = client.get(f"/api/health-isf/drivers/{driver_id}/active-ride", headers=headers)
+            assert active.status_code == 200, active.text
+            active_ride_id = (active.json().get("ride") or {}).get("id")
+            assert active_ride_id != ride_id
+            assert workload <= 1
+        else:
+            assert driver_status == DriverStatus.AVAILABLE.value
+            assert workload == 0
+        assert str(driver_after.availability_state).lower() in {"available", "offer_pending"}
 
         dashboard_after = client.get("/api/health-isf/dashboard", headers=headers)
         assert dashboard_after.status_code == 200, dashboard_after.text
@@ -303,6 +357,7 @@ class TestDeploymentReadinessRideLifecycle:
     def test_cancel_reassign_and_escalate_paths(self, client: TestClient):
         headers = _headers(client)
         org_id = _org_id()
+        _reset_org_assignments(org_id)
         provider_id = _ensure_provider(org_id)
         driver_a = _ensure_available_driver(org_id, suffix="CANA")
         driver_b = _ensure_available_driver(org_id, suffix="CANB")

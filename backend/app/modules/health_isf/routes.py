@@ -2854,6 +2854,40 @@ def reconcile_phase52_runtime(
     )
 
 
+@router.get("/operations/assignment-state-audit")
+def assignment_state_audit(
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Report stale active rides and assignments without mutating records."""
+    ensure_admin_action(user)
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    return service.audit_organization_assignment_state(db, organization_id=effective_org_id)
+
+
+@router.post("/operations/assignment-state-reconcile")
+def assignment_state_reconcile(
+    organization_id: str | None = Query(None),
+    dry_run: bool = Query(True),
+    ride_id: list[str] | None = Query(None),
+    _: None = Depends(require_health_isf_write_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Repair inconsistent ride/assignment rows. Defaults to report-only dry_run=true."""
+    ensure_admin_action(user)
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    return service.repair_organization_assignment_state(
+        db,
+        organization_id=effective_org_id,
+        dry_run=dry_run,
+        ride_ids=ride_id,
+        actor_user_id=user.user_id,
+    )
+
+
 @router.post("/operations/dispatch-recovery")
 async def execute_phase52_dispatch_recovery(
     ride_id: str = Query(..., min_length=1),

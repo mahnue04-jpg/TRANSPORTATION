@@ -92,7 +92,8 @@ def _reseed_james(organization_id: str) -> str:
         for assignment in db.query(HealthISFDispatchAssignment).filter(
             HealthISFDispatchAssignment.driver_id == james.id
         ).all():
-            assignment.assignment_state = DispatchAssignmentState.REASSIGNMENT_PENDING.value
+            assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
+            assignment.closed_reason = "test_reseed_cleanup"
             assignment.updated_at = now_ts
         james.status = DriverStatus.AVAILABLE
         james.availability_state = "available"
