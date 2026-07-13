@@ -418,3 +418,101 @@ def test_reassignment_pending_coherence_surfaces_active_ride(client: TestClient)
         DispatchAssignmentState.ACCEPTED.value,
         DispatchAssignmentState.ASSIGNED.value,
     }
+
+
+def test_driver_dropoff_complete_from_in_progress_matches_ui(client: TestClient) -> None:
+    """UI Complete Trip uses dropoff-complete after in_progress; backend must finish billing and release driver."""
+    org_id = _org_id_for("dispatcher@amicor.local")
+    _ensure_provider(org_id)
+    driver_id = _reseed_james(org_id)
+
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_headers = _headers(rider_auth["access_token"])
+    dispatcher_auth = _login(client, "dispatcher@amicor.local")
+    dispatcher_headers = _headers(dispatcher_auth["access_token"])
+
+    suffix = uuid4()[:8]
+    phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
+    rider_phone = f"646-555-{phone_digits}"
+
+    create = client.post(
+        "/api/health-isf/customer-requests",
+        headers=rider_headers,
+        json={
+            "rider_name": f"UI Complete Rider {suffix}",
+            "rider_phone": rider_phone,
+            "pickup_address": f"300 UI Lane {suffix}, New York, NY 10001",
+            "dropoff_address": f"400 Clinic Rd {suffix}, New York, NY 10002",
+            "ride_type": "healthcare",
+            "recurring": False,
+        },
+    )
+    assert create.status_code == 201, create.text
+    request_id = create.json()["id"]
+    ride_id = create.json()["ride_id"]
+
+    approve = client.post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
+        headers=dispatcher_headers,
+    )
+    assert approve.status_code == 200, approve.text
+
+    ride_before_assign = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
+    assert ride_before_assign.status_code == 200, ride_before_assign.text
+    if str(ride_before_assign.json().get("driver_id") or "") != driver_id:
+        assign = client.post(
+            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+            headers=dispatcher_headers,
+            json={"driver_id": driver_id},
+        )
+        assert assign.status_code == 200, assign.text
+
+    accept = client.post(
+        f"/api/health-isf/drivers/{driver_id}/accept-ride",
+        headers=dispatcher_headers,
+        json={"ride_id": ride_id},
+    )
+    assert accept.status_code == 200, accept.text
+
+    for target_state in ("en_route_pickup", "arrived_pickup", "rider_loaded", "trip_in_progress"):
+        step = client.post(
+            f"/api/health-isf/drivers/{driver_id}/route-progress",
+            headers=dispatcher_headers,
+            json={"ride_id": ride_id, "target_state": target_state},
+        )
+        assert step.status_code == 200, f"{target_state}: {step.text}"
+
+    dropoff = client.post(
+        f"/api/health-isf/drivers/{driver_id}/dropoff-complete",
+        headers=dispatcher_headers,
+        json={"ride_id": ride_id},
+    )
+    assert dropoff.status_code == 200, dropoff.text
+    completed_payload = dropoff.json()
+    assert str(completed_payload.get("lifecycle_state") or completed_payload.get("status")).lower() == "completed"
+
+    handoff = client.get(
+        f"/api/health-isf/rides/{ride_id}/completion-handoff",
+        headers=dispatcher_headers,
+    )
+    assert handoff.status_code == 200, handoff.text
+    assert handoff.json().get("billing_handoff_id")
+    assert float(handoff.json().get("driver_pay_usd") or 0) > 0
+
+    active_assignments = client.get(
+        "/api/health-isf/dispatch/active-assignments",
+        headers=dispatcher_headers,
+        params={"limit": 200},
+    )
+    assert active_assignments.status_code == 200
+    assert not any(row.get("ride_id") == ride_id for row in active_assignments.json())
+
+    earnings = client.get(f"/api/health-isf/drivers/{driver_id}/earnings", headers=dispatcher_headers)
+    assert earnings.status_code == 200, earnings.text
+    assert earnings.json()["trip_count"] >= 1
+
+    with SessionLocal() as db:
+        driver = hs.get_driver_by_id(db, driver_id)
+        assert driver is not None
+        assert hs._coerce_driver_status(driver.status) == DriverStatus.AVAILABLE
+        assert db.query(HealthISFBillingHandoff).filter(HealthISFBillingHandoff.ride_id == ride_id).count() == 1

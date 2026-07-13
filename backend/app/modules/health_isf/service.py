@@ -5551,9 +5551,23 @@ def driver_dropoff_complete(
         return ride
 
     if lifecycle_state != RideStatus.ARRIVED_DESTINATION.value:
-        raise RideLifecycleConflictError(
-            "Dropoff can only be completed after the driver arrives at destination"
-        )
+        if lifecycle_state in {
+            RideStatus.IN_PROGRESS.value,
+            RideStatus.IN_TRANSIT.value,
+            RideStatus.RIDER_ONBOARD.value,
+        }:
+            driver_arrived_destination(
+                db,
+                driver_id=driver_id,
+                ride_id=ride_id,
+                actor_user_id=actor_user_id,
+            )
+            db.refresh(ride)
+            lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+        if lifecycle_state != RideStatus.ARRIVED_DESTINATION.value:
+            raise RideLifecycleConflictError(
+                "Dropoff can only be completed after the driver arrives at destination"
+            )
 
     import time
     from app.modules.health_isf.financial_engine import TripFinancialEngine
