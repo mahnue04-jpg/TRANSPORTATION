@@ -1115,6 +1115,185 @@ async def _emit_intake_dispatch_outcome(
         )
 
 
+async def _run_customer_request_side_effects(
+    *,
+    organization_id: str,
+    request_id: str,
+    ride_id: str,
+    rider_phone: str,
+    actor_user_id: str | None,
+    idempotency_key: str,
+    auth_decision_status: str,
+    auth_decision_reason: str,
+    auth_decision_source: str,
+    ride_type: str,
+    scheduled_time_iso: str | None,
+    dispatch_status: str,
+    passenger_name: str,
+    priority_score: float,
+    priority_tag: str,
+    provider_id: str | None,
+) -> None:
+    """Emit intake events and optional SMS without blocking the create response."""
+    db = SessionLocal()
+    try:
+        request_row = service.get_customer_ride_request_by_id(db, request_id)
+        ride = service.get_ride_by_id(db, ride_id)
+        if not request_row or not ride:
+            logger.warning(
+                "Customer request side effects skipped: missing rows request_id=%s ride_id=%s",
+                request_id,
+                ride_id,
+            )
+            return
+        try:
+            service.run_intake_dispatch_automation(
+                db,
+                ride_id=str(ride.id),
+                organization_id=organization_id,
+                actor_user_id=actor_user_id,
+            )
+            db.refresh(ride)
+            db.refresh(request_row)
+            service.finalize_customer_request_intake_dispatch(
+                db,
+                request_obj=request_row,
+                actor_user_id=actor_user_id,
+            )
+            db.refresh(ride)
+            db.refresh(request_row)
+        except Exception:
+            logger.warning(
+                "Deferred intake dispatch automation failed for request_id=%s ride_id=%s",
+                request_id,
+                ride_id,
+                exc_info=True,
+            )
+        try:
+            emitter = get_emitter()
+            await _emit_with_retry_queue(
+                db=db,
+                organization_id=organization_id,
+                event_type="customer_ride_requested",
+                event_payload={
+                    "request_id": request_row.id,
+                    "ride_id": ride.id,
+                    "ride_type": ride_type,
+                    "scheduled_time": scheduled_time_iso,
+                    "dispatch_status": dispatch_status,
+                    "authorization_status": auth_decision_status,
+                    "authorization_reason": auth_decision_reason,
+                    "authorization_source": auth_decision_source,
+                },
+                emit_callable=lambda: emitter.emit_ride_created(
+                    organization_id=organization_id,
+                    ride_id=ride.id,
+                    passenger_name=passenger_name,
+                    priority_score=priority_score,
+                    priority_tag=priority_tag,
+                    actor_user_id=actor_user_id,
+                    details={
+                        "source": "customer_request",
+                        "request_id": request_row.id,
+                        "ride_type": ride_type,
+                        "authorization_status": auth_decision_status,
+                        "authorization_source": auth_decision_source,
+                    },
+                ),
+                idempotency_key=_event_key("customer_request_created", request_row.id, ride.id),
+                ride_id=ride.id,
+            )
+
+            await _emit_dispatch_lifecycle_event(
+                db=db,
+                organization_id=organization_id,
+                ride_id=ride.id,
+                event_name="ride-created",
+                actor_user_id=actor_user_id,
+                details={
+                    "request_id": request_row.id,
+                    "ride_id": ride.id,
+                    "rider_name": request_row.rider_name,
+                    "ride_type": ride_type,
+                },
+                request_id=idempotency_key or f"customer_request_{request_row.id}",
+                lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+                transition_reason="customer_request_created",
+                assignment_transition_source="customer_workspace",
+            )
+
+            await _emit_dispatch_lifecycle_event(
+                db=db,
+                organization_id=organization_id,
+                ride_id=ride.id,
+                event_name="provider-request-created",
+                actor_user_id=actor_user_id,
+                details={
+                    "provider_id": provider_id,
+                    "request_id": request_row.id,
+                    "ride_id": ride.id,
+                },
+                request_id=idempotency_key or f"provider_request_{request_row.id}",
+                lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+                transition_reason="provider_request_created",
+                assignment_transition_source="customer_workspace",
+            )
+
+            db.refresh(ride)
+            db.refresh(request_row)
+            await _emit_intake_dispatch_outcome(
+                db=db,
+                organization_id=organization_id,
+                ride=ride,
+                actor_user_id=actor_user_id,
+                request_id=request_row.id,
+            )
+        except Exception:
+            logger.warning(
+                "Non-critical customer request side effects failed for request_id=%s ride_id=%s",
+                request_row.id,
+                ride.id,
+                exc_info=True,
+            )
+
+        try:
+            from app.modules.health_isf import notifications as notify
+
+            base_url = (os.getenv("AMICOR_PUBLIC_URL") or "").strip().rstrip("/")
+            if base_url:
+                tracking_url = f"{base_url}/app/riders?track={ride.id}"
+                notify.send_sms(
+                    db,
+                    to_phone=rider_phone,
+                    message=notify.build_rider_tracking_message(ride_id=ride.id, tracking_url=tracking_url),
+                    ride_id=ride.id,
+                )
+            else:
+                logger.warning("AMICOR_PUBLIC_URL not set; skipping rider tracking SMS link")
+        except Exception:
+            logger.warning("Rider confirmation SMS failed for ride_id=%s", ride.id, exc_info=True)
+    finally:
+        db.close()
+
+
+def _schedule_customer_request_side_effects(**kwargs: Any) -> None:
+    async def _runner() -> None:
+        try:
+            await _run_customer_request_side_effects(**kwargs)
+        except Exception:
+            logger.error(
+                "Customer request background side effects failed for request_id=%s ride_id=%s",
+                kwargs.get("request_id"),
+                kwargs.get("ride_id"),
+                exc_info=True,
+            )
+
+    try:
+        asyncio.create_task(_runner())
+    except RuntimeError:
+        logger.warning("Unable to schedule customer request side effects (no event loop)")
+
+
 def _build_enterprise_dashboard_payload(db: Session, organization_id: str) -> dict[str, Any]:
     snapshot = AIDispatchOrchestrationService.build_operations_snapshot(
         db,
@@ -5264,109 +5443,24 @@ async def create_customer_ride_request(
             resource_id=request_row.id,
         )
 
-    try:
-        emitter = get_emitter()
-        await _emit_with_retry_queue(
-            db=db,
-            organization_id=organization_id,
-            event_type="customer_ride_requested",
-            event_payload={
-                "request_id": request_row.id,
-                "ride_id": ride.id,
-                "ride_type": request_row.ride_type,
-                "scheduled_time": request_row.scheduled_time.isoformat() if request_row.scheduled_time else None,
-                "dispatch_status": request_row.dispatch_status,
-                "authorization_status": auth_decision.status,
-                "authorization_reason": auth_decision.reason,
-                "authorization_source": auth_decision.decision_source,
-            },
-            emit_callable=lambda: emitter.emit_ride_created(
-                organization_id=organization_id,
-                ride_id=ride.id,
-                passenger_name=ride.passenger_name,
-                priority_score=float(ride.priority_score or 0.0),
-                priority_tag=str(ride.priority_tag or "normal"),
-                actor_user_id=user.user_id,
-                details={
-                    "source": "customer_request",
-                    "request_id": request_row.id,
-                    "ride_type": request_row.ride_type,
-                    "authorization_status": auth_decision.status,
-                    "authorization_source": auth_decision.decision_source,
-                },
-            ),
-            idempotency_key=_event_key("customer_request_created", request_row.id, ride.id),
-            ride_id=ride.id,
-        )
-
-        await _emit_dispatch_lifecycle_event(
-            db=db,
-            organization_id=organization_id,
-            ride_id=ride.id,
-            event_name="ride-created",
-            actor_user_id=user.user_id,
-            details={
-                "request_id": request_row.id,
-                "ride_id": ride.id,
-                "rider_name": request_row.rider_name,
-                "ride_type": request_row.ride_type,
-            },
-            request_id=idempotency_key or f"customer_request_{request_row.id}",
-            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
-            transition_reason="customer_request_created",
-            assignment_transition_source="customer_workspace",
-        )
-
-        await _emit_dispatch_lifecycle_event(
-            db=db,
-            organization_id=organization_id,
-            ride_id=ride.id,
-            event_name="provider-request-created",
-            actor_user_id=user.user_id,
-            details={
-                "provider_id": ride.provider_id,
-                "request_id": request_row.id,
-                "ride_id": ride.id,
-            },
-            request_id=idempotency_key or f"provider_request_{request_row.id}",
-            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
-            transition_reason="provider_request_created",
-            assignment_transition_source="customer_workspace",
-        )
-
-        db.refresh(ride)
-        db.refresh(request_row)
-        await _emit_intake_dispatch_outcome(
-            db=db,
-            organization_id=organization_id,
-            ride=ride,
-            actor_user_id=user.user_id,
-            request_id=request_row.id,
-        )
-    except Exception:
-        logger.warning(
-            "Non-critical customer request side effects failed for request_id=%s ride_id=%s",
-            request_row.id,
-            ride.id,
-            exc_info=True,
-        )
-
-    try:
-        from app.modules.health_isf import notifications as notify
-
-        base_url = (os.getenv("AMICOR_PUBLIC_URL") or "").strip().rstrip("/")
-        if base_url:
-            tracking_url = f"{base_url}/app/riders?track={ride.id}"
-            notify.send_sms(
-                db,
-                to_phone=payload.rider_phone,
-                message=notify.build_rider_tracking_message(ride_id=ride.id, tracking_url=tracking_url),
-                ride_id=ride.id,
-            )
-        else:
-            logger.warning("AMICOR_PUBLIC_URL not set; skipping rider tracking SMS link")
-    except Exception:
-        logger.warning("Rider confirmation SMS failed for ride_id=%s", ride.id, exc_info=True)
+    _schedule_customer_request_side_effects(
+        organization_id=organization_id,
+        request_id=str(request_row.id),
+        ride_id=str(ride.id),
+        rider_phone=payload.rider_phone,
+        actor_user_id=user.user_id,
+        idempotency_key=idempotency_key,
+        auth_decision_status=auth_decision.status,
+        auth_decision_reason=auth_decision.reason,
+        auth_decision_source=auth_decision.decision_source,
+        ride_type=request_row.ride_type,
+        scheduled_time_iso=request_row.scheduled_time.isoformat() if request_row.scheduled_time else None,
+        dispatch_status=request_row.dispatch_status,
+        passenger_name=ride.passenger_name,
+        priority_score=float(ride.priority_score or 0.0),
+        priority_tag=str(ride.priority_tag or "normal"),
+        provider_id=str(ride.provider_id) if ride.provider_id else None,
+    )
 
     db.refresh(request_row)
     return _serialize_customer_request(request_row)

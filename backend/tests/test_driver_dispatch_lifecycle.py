@@ -403,3 +403,18 @@ def test_reassignment_pending_coherence_surfaces_active_ride(client: TestClient)
         DispatchAssignmentState.REASSIGNMENT_PENDING.value,
         "pending_assignment",
     }
+
+    active_assignments = client.get(
+        "/api/health-isf/dispatch/active-assignments",
+        headers=dispatcher_headers,
+        params={"limit": 200},
+    )
+    assert active_assignments.status_code == 200
+    active_row = next((row for row in active_assignments.json() if row.get("ride_id") == ride_id), None)
+    assert active_row is not None
+    assert active_row.get("driver_id") == driver_id
+    assert active_row.get("assignment_state") in {
+        DispatchAssignmentState.OFFERED.value,
+        DispatchAssignmentState.ACCEPTED.value,
+        DispatchAssignmentState.ASSIGNED.value,
+    }

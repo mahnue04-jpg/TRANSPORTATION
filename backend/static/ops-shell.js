@@ -5674,6 +5674,27 @@
           var mergedSources = []
             .concat(liveQueue)
             .concat(liveAssignments)
+            .concat(filterActiveOperationalRides(Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : []).map(function (ride) {
+              var lifecycle = normalizeRideStatusToken(ride.lifecycle_state || ride.status);
+              var assignmentState = ride.accepted_at
+                ? "accepted"
+                : (ride.driver_id ? (lifecycle === "assigned" ? "assigned" : "offered") : "pending_assignment");
+              return {
+                ride_id: ride.id,
+                assignment_state: assignmentState,
+                ride_status: lifecycle,
+                passenger_name: ride.passenger_name,
+                pickup_address: ride.pickup_address,
+                dropoff_address: ride.dropoff_address,
+                driver_id: ride.driver_id,
+                driver_name: ride.driver_name,
+                assigned_driver_name: ride.driver_name || ride.driver_id,
+                requested_at: ride.requested_at || ride.created_at,
+                created_at: ride.created_at,
+                updated_at: ride.updated_at
+              };
+            }))
+            .concat(activeRouteModule)
             .concat(queueModule)
             .concat(tripEntities.filter(function (item) {
               return !item.driver_id && ["requested", "pending_review", "scheduled", "assigned", "pending", "queued"].indexOf(safeText(item.trip_state || item.state, "").toLowerCase()) >= 0;
@@ -5737,8 +5758,16 @@
         });
         var activeTrips = trips.filter(function (trip) {
           var stateText = safeText(trip.state, "");
-          if (["completed", "cancelled", "failed", "dropoff_complete", "reassignment_pending"].indexOf(stateText) >= 0) {
+          if (["completed", "cancelled", "failed", "dropoff_complete"].indexOf(stateText) >= 0) {
             return false;
+          }
+          var hasDriver = safeText(trip.assignedDriverName, "").toLowerCase() !== "unassigned"
+            && !!safeText(trip.assignedDriverName, "");
+          if (["assigned", "accepted", "offered"].indexOf(stateText) >= 0 && hasDriver) {
+            return true;
+          }
+          if (stateText === "reassignment_pending" && hasDriver) {
+            return true;
           }
           return ["accepted", "arrived", "onboard", "in_transit", "pickup_enroute", "dropoff_enroute", "driver_en_route", "rider_onboard", "in_progress", "en_route_pickup", "pickup_complete"].indexOf(stateText) >= 0;
         });
@@ -7034,6 +7063,9 @@
     var paymentCount = completedRows.filter(function (row) {
       return !!safeText(row.payment_transaction_id, "");
     }).length;
+    var activePipeline = filterActiveOperationalRides(rides).filter(function (ride) {
+      return !!safeText(ride.driver_id, "");
+    });
 
     return renderPanelBlock(
       "Billing & Claims",
@@ -7049,6 +7081,18 @@
         renderMetric("Payment Records", String(paymentCount)) +
         renderMetric("Trip Documents", String(tripDocuments.length)) +
       '</div>' +
+      '<div class="divider"></div>' +
+      (activePipeline.length
+        ? '<section class="panel"><h4>Active trips (awaiting completion)</h4><table class="data-table"><thead><tr><th>Passenger</th><th>Ride</th><th>Driver</th><th>Status</th><th>Pickup</th></tr></thead><tbody>'
+          + activePipeline.slice(0, 20).map(function (ride) {
+              return '<tr><td>' + escapeHtml(safeText(ride.passenger_name, "Passenger")) + '</td><td>'
+                + escapeHtml(String(ride.id || "").slice(0, 10)) + '</td><td>'
+                + escapeHtml(safeText(ride.driver_name || ride.driver_id, "assigned").slice(0, 12)) + '</td><td>'
+                + escapeHtml(safeText(ride.lifecycle_state || ride.status, "active")) + '</td><td>'
+                + escapeHtml(safeText(ride.pickup_address, "pickup")) + '</td></tr>';
+            }).join("")
+          + '</tbody></table></section>'
+        : '<p class="muted">No active assigned trips in billing pipeline. Assigned rides appear here until trip completion creates a billing handoff.</p>') +
       '<div class="divider"></div>' +
       (completedRows.length
         ? '<section class="panel"><h4>Completed trips (billing ledger)</h4><table class="data-table"><thead><tr><th>Passenger</th><th>Ride</th><th>Fare</th><th>Driver Pay</th><th>Platform</th><th>Payment</th><th>Status</th></tr></thead><tbody>'
@@ -8710,7 +8754,7 @@
     return await withTimeout(fetch(scopedUrl, init), timeoutMs || 12000);
   }
 
-  async function postJson(url, payload) {
+  async function postJson(url, payload, timeoutMs) {
     var scopedUrl = withOrganizationScope(url);
     var response = await authorizedFetch(scopedUrl, {
       method: "POST",
@@ -8719,7 +8763,7 @@
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload || {})
-    }, 12000);
+    }, timeoutMs || 12000);
 
     if (!response.ok) {
       throw new Error(scopedUrl + ":http_" + response.status);
@@ -8970,6 +9014,12 @@
         driverCandidates.push(sessionDriverId);
       }
     }
+    filterActiveOperationalRides(Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : []).forEach(function (ride) {
+      pushDriverCandidate(driverCandidates, safeText(ride.driver_id, ""));
+    });
+    activeAssignments.forEach(function (item) {
+      pushDriverCandidate(driverCandidates, safeText(item.driver_id, ""));
+    });
     var liveDispatchQueue = Array.isArray(liveWorkflow.dispatchQueue) ? liveWorkflow.dispatchQueue : [];
     var offeredAssignments = activeAssignments.filter(function (item) {
       return safeText(item.assignment_state, "").toLowerCase() === "offered";
@@ -9005,9 +9055,9 @@
     if (activeAssignments.length > 0 && roleView !== "driver") {
       pushDriverCandidate(driverCandidates, safeText(activeAssignments[0].driver_id, ""));
     }
-    if (Array.isArray(liveWorkflow.rides) && roleView !== "driver") {
+    if (Array.isArray(liveWorkflow.rides)) {
       liveWorkflow.rides.forEach(function (ride) {
-        var status = safeText(ride.status, "").toLowerCase();
+        var status = normalizeRideStatusToken(ride.lifecycle_state || ride.status);
         if (["assigned", "accepted", "driver_en_route", "arrived", "rider_onboard", "in_progress", "arrived_destination"].indexOf(status) >= 0) {
           pushDriverCandidate(driverCandidates, safeText(ride.driver_id, ""));
         }
@@ -9145,7 +9195,7 @@
       notes: formValues.notes || null
     };
 
-    var created = await postJson("/api/health-isf/customer-requests", payload);
+    var created = await postJson("/api/health-isf/customer-requests", payload, 45000);
     var rideId = safeText(created.ride_id, "");
     var requestId = safeText(created.id, "");
     var dispatchStatus = safeText(created.dispatch_status, "pending");
@@ -9170,11 +9220,16 @@
       supportContact: "24/7 Rider Care"
     };
 
-    await refreshRiderWorkspaceData({
+    void refreshRiderWorkspaceData({
       lastAction: recurring === true
         ? ("Recurring ride scheduled. Ride ID: " + rideId)
         : ("Ride request submitted. Ride ID: " + rideId)
-    });
+    }).catch(function () {});
+
+    window.dispatchEvent(new CustomEvent("ami:ops-runtime-updated", {
+      detail: { source: "rider-ride-created", rideId: rideId, requestId: requestId }
+    }));
+    requestSilentRefresh("rider-ride-created");
 
     addRiderNotification(
       recurring === true ? "low" : "medium",
@@ -9583,9 +9638,17 @@
         }
         try {
           var billingRideRows = await fetchJson("/api/health-isf/rides?limit=40&history_only=true", {}, token);
-          if (Array.isArray(billingRideRows)) {
-            state.liveWorkflow.rides = billingRideRows;
-          }
+          var billingActiveRows = await fetchJson("/api/health-isf/rides?limit=40&active_only=true&exclude_test=true", {}, token);
+          var billingRideMap = {};
+          (Array.isArray(billingRideRows) ? billingRideRows : []).forEach(function (row) {
+            billingRideMap[safeText(row.id, "")] = row;
+          });
+          (Array.isArray(billingActiveRows) ? billingActiveRows : []).forEach(function (row) {
+            billingRideMap[safeText(row.id, "")] = row;
+          });
+          state.liveWorkflow.rides = Object.keys(billingRideMap).map(function (key) {
+            return billingRideMap[key];
+          });
         } catch (_) {
           state.fetchWarnings.push("billing_rides_unavailable");
         }
