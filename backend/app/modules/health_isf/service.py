@@ -1143,6 +1143,23 @@ def repair_organization_assignment_state(
             target_state=DispatchAssignmentState.DROPOFF_COMPLETE.value,
             reason="assignment_state_reconcile_terminal_ride",
         )
+        pending_rows = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(
+                HealthISFDispatchAssignment.ride_id == ride_id,
+                HealthISFDispatchAssignment.assignment_state
+                == DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+            )
+            .all()
+        )
+        for row in pending_rows:
+            _close_dispatch_assignment_record(
+                db,
+                row,
+                target_state=DispatchAssignmentState.DROPOFF_COMPLETE.value,
+                reason="assignment_state_reconcile_terminal_ride",
+            )
+            closed += 1
         if closed:
             repairs.append({"ride_id": ride_id, "action": "closed_terminal_assignments", "count": closed})
 

@@ -4796,9 +4796,9 @@
     var workflowHandoffs = Array.isArray((safeObject(state.driverWorkflow)).billingHandoffs)
       ? state.driverWorkflow.billingHandoffs
       : [];
-    if (workflowHandoffs.length) {
-      billingHandoffs = workflowHandoffs.concat(billingHandoffs).slice(0, 30);
-    }
+    billingHandoffs = dedupeBillingHandoffsByRideId(
+      workflowHandoffs.length ? workflowHandoffs.concat(billingHandoffs) : billingHandoffs
+    ).slice(0, 30);
 
     if (activeTrip) {
       var activeRide = allRides.find(function (ride) {
