@@ -131,6 +131,7 @@ ACTIVE_RIDE_STATUSES_FOR_ASSIGNMENT = {
     RideStatus.ESCALATED.value,
     RideStatus.IN_PROGRESS.value,
     RideStatus.IN_TRANSIT.value,
+    RideStatus.ARRIVED_DESTINATION.value,
 }
 
 ACTIVE_DISPATCH_ASSIGNMENT_STATES = {
@@ -141,6 +142,10 @@ ACTIVE_DISPATCH_ASSIGNMENT_STATES = {
     DispatchAssignmentState.PICKUP_COMPLETE.value,
     DispatchAssignmentState.ARRIVED_DESTINATION.value,
 }
+
+DRIVER_APP_ASSIGNMENT_STATES = tuple(ACTIVE_DISPATCH_ASSIGNMENT_STATES) + (
+    DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+)
 
 CLOSED_DISPATCH_ASSIGNMENT_STATES = {
     DispatchAssignmentState.REJECTED.value,
@@ -220,27 +225,32 @@ def _resolve_dispatch_queue_assignment_state(
     ride: HealthISFRide,
 ) -> str:
     """Return the dispatcher-visible queue state for a ride."""
-    active = _active_assignment_for_ride(db, ride.id)
-    if active:
+    reconcile_ride_assignment_coherence(db, ride)
+    db.refresh(ride)
+    active = _authoritative_assignment_for_ride(db, ride)
+    if active and str(active.assignment_state or "") in ACTIVE_DISPATCH_ASSIGNMENT_STATES:
         return str(active.assignment_state)
+
+    if ride.driver_id:
+        lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+        if lifecycle in {RideStatus.DRIVER_EN_ROUTE.value, RideStatus.ARRIVED.value}:
+            return DispatchAssignmentState.EN_ROUTE_PICKUP.value
+        if lifecycle in {RideStatus.RIDER_ONBOARD.value, RideStatus.IN_PROGRESS.value, RideStatus.ARRIVED_DESTINATION.value}:
+            return DispatchAssignmentState.PICKUP_COMPLETE.value
+        if lifecycle in {RideStatus.ACCEPTED.value, RideStatus.ASSIGNED.value}:
+            return DispatchAssignmentState.ACCEPTED.value if ride.accepted_at else DispatchAssignmentState.OFFERED.value
+        if lifecycle in {RideStatus.QUEUED.value, RideStatus.REQUESTED.value}:
+            return DispatchAssignmentState.OFFERED.value
 
     latest = _latest_assignment_for_ride(db, ride.id)
     if latest:
         latest_state = str(latest.assignment_state or "")
         if latest_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
             return latest_state
-        if latest_state == DispatchAssignmentState.REASSIGNMENT_PENDING.value:
+        if latest_state == DispatchAssignmentState.REASSIGNMENT_PENDING.value and not ride.driver_id:
             return latest_state
         if latest_state in {DispatchAssignmentState.REJECTED.value, "expired"}:
             return "pending_assignment"
-
-    if ride.driver_id:
-        lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-        if lifecycle in {RideStatus.ACCEPTED.value, RideStatus.DRIVER_EN_ROUTE.value}:
-            return "accepted"
-        if lifecycle in {RideStatus.ASSIGNED.value, RideStatus.QUEUED.value}:
-            return "assigned"
-        return DispatchAssignmentState.QUEUED.value
 
     return "pending_assignment"
 
@@ -687,7 +697,9 @@ def _driver_active_workload_count(db: Session, driver_id: str) -> int:
     count = 0
     for row in rows:
         ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
-        if _ride_is_terminal(ride) or _is_ai_proof_ride(ride):
+        if not ride or _ride_is_terminal(ride) or _is_ai_proof_ride(ride):
+            continue
+        if str(ride.driver_id or "") != str(driver_id):
             continue
         count += 1
     return count
@@ -785,14 +797,128 @@ def _latest_assignment_for_ride(db: Session, ride_id: str) -> Optional[HealthISF
     )
 
 
+def _authoritative_assignment_for_ride(
+    db: Session,
+    ride: HealthISFRide,
+    *,
+    driver_id: Optional[str] = None,
+) -> Optional[HealthISFDispatchAssignment]:
+    """Prefer the active/open assignment for the ride's assigned driver."""
+    target_driver = str(driver_id or ride.driver_id or "")
+    active = _active_assignment_for_ride(db, ride.id)
+    if active and (not target_driver or str(active.driver_id or "") == target_driver):
+        return active
+    if target_driver:
+        latest_for_driver = _latest_driver_assignment_for_ride(
+            db,
+            ride_id=str(ride.id),
+            driver_id=target_driver,
+        )
+        if latest_for_driver:
+            state = str(latest_for_driver.assignment_state or "")
+            if state in DRIVER_APP_ASSIGNMENT_STATES:
+                return latest_for_driver
+    return _latest_assignment_for_ride(db, ride.id)
+
+
+def reconcile_ride_assignment_coherence(
+    db: Session,
+    ride: HealthISFRide,
+    *,
+    actor_user_id: Optional[str] = None,
+) -> Optional[HealthISFDispatchAssignment]:
+    """Repair split-brain between ride.driver_id, assignment rows, driver availability, and customer request."""
+    if not ride or _ride_is_terminal(ride):
+        return None
+
+    lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    driver_id = str(ride.driver_id or "")
+    if not driver_id:
+        sync_customer_request_from_ride(db, ride)
+        _commit_or_rollback(db)
+        return _authoritative_assignment_for_ride(db, ride)
+
+    assignment = _latest_driver_assignment_for_ride(db, ride_id=str(ride.id), driver_id=driver_id)
+    if not assignment:
+        sync_customer_request_from_ride(db, ride)
+        _commit_or_rollback(db)
+        return None
+
+    assignment_state = str(assignment.assignment_state or "")
+    post_accept_lifecycle = {
+        RideStatus.DRIVER_EN_ROUTE.value,
+        RideStatus.ARRIVED.value,
+        RideStatus.RIDER_ONBOARD.value,
+        RideStatus.IN_PROGRESS.value,
+        RideStatus.ARRIVED_DESTINATION.value,
+    }
+
+    if assignment_state == DispatchAssignmentState.REASSIGNMENT_PENDING.value:
+        if lifecycle in post_accept_lifecycle or (ride.accepted_at and lifecycle != RideStatus.ASSIGNED.value):
+            assignment.assignment_state = DispatchAssignmentState.ACCEPTED.value
+            assignment.accepted_at = assignment.accepted_at or ride.accepted_at or now()
+        else:
+            assignment.assignment_state = DispatchAssignmentState.OFFERED.value
+            assignment.offered_at = assignment.offered_at or now()
+        assignment.reassignment_pending_at = None
+        assignment.closed_reason = None
+        assignment.updated_at = now()
+    elif assignment_state == DispatchAssignmentState.OFFERED.value and lifecycle in post_accept_lifecycle:
+        assignment.assignment_state = DispatchAssignmentState.ACCEPTED.value
+        assignment.accepted_at = assignment.accepted_at or ride.accepted_at or now()
+        assignment.updated_at = now()
+    elif assignment_state == DispatchAssignmentState.ACCEPTED.value and lifecycle == RideStatus.DRIVER_EN_ROUTE.value:
+        assignment.assignment_state = DispatchAssignmentState.EN_ROUTE_PICKUP.value
+        assignment.en_route_pickup_at = assignment.en_route_pickup_at or now()
+        assignment.updated_at = now()
+
+    driver = get_driver_by_id(db, driver_id)
+    if driver:
+        current_assignment_state = str(assignment.assignment_state or "")
+        if lifecycle in post_accept_lifecycle or current_assignment_state in ACTIVE_DISPATCH_ASSIGNMENT_STATES:
+            driver.availability_state = "on_trip"
+            if lifecycle == RideStatus.DRIVER_EN_ROUTE.value:
+                _set_driver_status(db, driver, DriverStatus.EN_ROUTE_PICKUP)
+            elif lifecycle in {
+                RideStatus.ARRIVED.value,
+                RideStatus.RIDER_ONBOARD.value,
+                RideStatus.IN_PROGRESS.value,
+                RideStatus.ARRIVED_DESTINATION.value,
+            }:
+                _set_driver_status(db, driver, DriverStatus.IN_TRANSIT)
+            elif current_assignment_state != DispatchAssignmentState.OFFERED.value:
+                _set_driver_status(db, driver, DriverStatus.ASSIGNED)
+            else:
+                _set_driver_status(db, driver, DriverStatus.ASSIGNED)
+                driver.availability_state = "offer_pending"
+            driver.is_online = True
+            driver.auth_state = "active"
+            driver.last_seen_at = now()
+
+    sync_customer_request_from_ride(db, ride)
+    _commit_or_rollback(db)
+    db.refresh(ride)
+    db.refresh(assignment)
+    return assignment
+
+
 def _mark_dispatch_assignment_state(
     db: Session,
     *,
     ride_id: str,
     assignment_state: str,
     note: Optional[str] = None,
+    driver_id: Optional[str] = None,
 ) -> Optional[HealthISFDispatchAssignment]:
-    row = _latest_assignment_for_ride(db, ride_id)
+    ride = get_ride_by_id(db, ride_id)
+    row = None
+    target_driver = str(driver_id or (ride.driver_id if ride else "") or "")
+    if target_driver:
+        row = _latest_driver_assignment_for_ride(db, ride_id=ride_id, driver_id=target_driver)
+    if not row and ride:
+        row = _authoritative_assignment_for_ride(db, ride)
+    if not row:
+        row = _latest_assignment_for_ride(db, ride_id)
     if not row:
         return None
     now_ts = now()
@@ -1186,12 +1312,20 @@ def expire_stale_dispatch_offers(
         row.updated_at = now_ts
         if row.driver_id:
             driver = get_driver_by_id(db, row.driver_id)
-            if driver and _driver_active_workload_count(db, driver.id) == 0:
+            ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
+            still_assigned = (
+                ride
+                and str(ride.driver_id or "") == str(row.driver_id)
+                and not _ride_is_terminal(ride)
+            )
+            if driver and not still_assigned and _driver_active_workload_count(db, driver.id) == 0:
                 driver.availability_state = "available"
                 driver.is_online = True
                 driver.auth_state = "active"
                 driver.last_seen_at = now_ts
                 _set_driver_status(db, driver, DriverStatus.AVAILABLE)
+            elif driver and still_assigned:
+                reconcile_ride_assignment_coherence(db, ride)
         _record_dispatch(
             db,
             ride_id=row.ride_id,
@@ -2784,7 +2918,12 @@ def get_driver_active_offer(
         .filter(
             HealthISFDispatchAssignment.organization_id == organization_id,
             HealthISFDispatchAssignment.driver_id == driver_id,
-            HealthISFDispatchAssignment.assignment_state == DispatchAssignmentState.OFFERED.value,
+            HealthISFDispatchAssignment.assignment_state.in_(
+                [
+                    DispatchAssignmentState.OFFERED.value,
+                    DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+                ]
+            ),
         )
         .order_by(desc(HealthISFDispatchAssignment.updated_at), desc(HealthISFDispatchAssignment.created_at))
         .all()
@@ -2796,6 +2935,16 @@ def get_driver_active_offer(
         ride = get_ride_by_id(db, offer.ride_id) if offer.ride_id else None
         if not ride or _ride_is_terminal(ride) or _is_ai_proof_ride(ride):
             continue
+        if str(offer.assignment_state or "") == DispatchAssignmentState.REASSIGNMENT_PENDING.value:
+            if str(ride.driver_id or "") != str(driver_id):
+                continue
+            reconcile_ride_assignment_coherence(db, ride)
+            db.refresh(offer)
+            if str(offer.assignment_state or "") not in {
+                DispatchAssignmentState.OFFERED.value,
+                DispatchAssignmentState.ASSIGNED.value,
+            }:
+                continue
         valid_offers.append((offer, ride))
     if not valid_offers:
         return None
@@ -2891,19 +3040,12 @@ def get_driver_live_workspace_data(
         RideStatus.CANCELLED.value,
         RideStatus.FAILED.value,
     }
-    active_assignment_states = [
-        DispatchAssignmentState.OFFERED.value,
-        DispatchAssignmentState.ASSIGNED.value,
-        DispatchAssignmentState.ACCEPTED.value,
-        DispatchAssignmentState.EN_ROUTE_PICKUP.value,
-        DispatchAssignmentState.PICKUP_COMPLETE.value,
-    ]
     assignment_rows = (
         db.query(HealthISFDispatchAssignment)
         .filter(
             HealthISFDispatchAssignment.organization_id == organization_id,
             HealthISFDispatchAssignment.driver_id == driver_id,
-            HealthISFDispatchAssignment.assignment_state.in_(active_assignment_states),
+            HealthISFDispatchAssignment.assignment_state.in_(list(DRIVER_APP_ASSIGNMENT_STATES)),
         )
         .order_by(desc(HealthISFDispatchAssignment.updated_at), desc(HealthISFDispatchAssignment.created_at))
         .all()
@@ -2958,13 +3100,14 @@ def get_driver_live_workspace_data(
         )
         fallback_ride = fallback_rows[0] if fallback_rows else _active_ride_for_driver(db, driver_id)
         if fallback_ride and not _ride_is_terminal(fallback_ride):
+            reconcile_ride_assignment_coherence(db, fallback_ride)
+            db.refresh(fallback_ride)
             ride = fallback_ride
-            assignment = _latest_driver_assignment_for_ride(
-                db,
-                ride_id=str(ride.id),
-                driver_id=driver_id,
-            )
+            assignment = _authoritative_assignment_for_ride(db, fallback_ride, driver_id=driver_id)
     if ride:
+        reconcile_ride_assignment_coherence(db, ride)
+        db.refresh(ride)
+        assignment = assignment or _authoritative_assignment_for_ride(db, ride, driver_id=driver_id)
         ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
         if ride_state in terminal_ride_states:
             ride = None
@@ -3035,11 +3178,9 @@ def get_driver_active_ride_data(
         )
         ride = assigned_rows[0] if assigned_rows else None
         if ride:
-            assignment = _latest_driver_assignment_for_ride(
-                db,
-                ride_id=str(ride.id),
-                driver_id=driver_id,
-            )
+            reconcile_ride_assignment_coherence(db, ride)
+            db.refresh(ride)
+            assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver_id)
 
     provider_name = ""
     if ride and ride.provider_id:
@@ -3969,7 +4110,7 @@ def list_driver_assigned_rides(
         .filter(
             HealthISFDispatchAssignment.organization_id == organization_id,
             HealthISFDispatchAssignment.driver_id == driver_id,
-            HealthISFDispatchAssignment.assignment_state.in_(list(ACTIVE_DISPATCH_ASSIGNMENT_STATES)),
+            HealthISFDispatchAssignment.assignment_state.in_(list(DRIVER_APP_ASSIGNMENT_STATES)),
         )
         .order_by(desc(HealthISFDispatchAssignment.updated_at), desc(HealthISFDispatchAssignment.created_at))
         .all()
@@ -4710,8 +4851,11 @@ def accept_driver_ride(
     if RideStatus(ride.status) in (RideStatus.COMPLETED, RideStatus.CANCELLED):
         raise ValueError("Cannot accept a terminal ride")
 
+    reconcile_ride_assignment_coherence(db, ride)
+    db.refresh(ride)
+
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-    assignment = _latest_assignment_for_ride(db, ride.id)
+    assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
     assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
     post_accept_states = {
         RideStatus.DRIVER_EN_ROUTE.value,
@@ -4730,11 +4874,14 @@ def accept_driver_ride(
     }
     if lifecycle_state in post_accept_states:
         raise RideLifecycleConflictError("Ride has already been accepted")
+    if ride.accepted_at and lifecycle_state != RideStatus.ASSIGNED.value:
+        raise RideLifecycleConflictError("Ride has already been accepted")
     if assignment_state in post_accept_assignment_states:
         raise RideLifecycleConflictError("Ride offer has already been accepted")
     if assignment_state and assignment_state not in {
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.ASSIGNED.value,
+        DispatchAssignmentState.REASSIGNMENT_PENDING.value,
     }:
         raise RideLifecycleConflictError(f"Cannot accept ride from assignment state '{assignment_state}'")
 
@@ -4770,6 +4917,7 @@ def accept_driver_ride(
         ride_id=ride.id,
         assignment_state=DispatchAssignmentState.ACCEPTED.value,
         note="Driver accepted assignment",
+        driver_id=driver.id,
     )
     _record_dispatch(
         db,
@@ -4784,6 +4932,8 @@ def accept_driver_ride(
     sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.ACCEPTED.value)
     sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.ASSIGNED.value)
     _commit_or_rollback(db)
+    db.refresh(ride)
+    reconcile_ride_assignment_coherence(db, ride)
     db.refresh(ride)
     _safe_runtime_update(
         ride=ride,
@@ -7800,6 +7950,7 @@ def assign_driver_to_ride(
             updated_at=now_ts,
         )
         db.add(active_assignment)
+        db.flush()
     else:
         active_assignment.assignment_state = DispatchAssignmentState.OFFERED.value
         active_assignment.assigned_at = active_assignment.assigned_at or now_ts
@@ -7864,6 +8015,8 @@ def assign_driver_to_ride(
         source="assign_driver_to_ride",
         driver_id=driver.id,
     )
+    reconcile_ride_assignment_coherence(db, ride)
+    db.refresh(ride)
     logger.info({
         "event": "assignment_success",
         "ride_id": ride_id,

@@ -812,6 +812,7 @@ class RideResponse(RideBase):
     driver_pay_usd: Optional[float] = None
     platform_revenue_usd: Optional[float] = None
     financial_record_id: Optional[str] = None
+    driver_name: Optional[str] = None
 
     class Config:
         from_attributes = True

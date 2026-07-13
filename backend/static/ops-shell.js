@@ -8984,10 +8984,10 @@
     pushDriverCandidate(driverCandidates, safeText((safeObject(state.driverApp)).currentDriverId, ""));
     if (roleView === "driver" && driverCandidates.length === 0) {
       try {
-        var driverRows = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
-        (Array.isArray(driverRows) ? driverRows : []).forEach(function (row) {
-          pushDriverCandidate(driverCandidates, safeText(row.id, ""));
-        });
+        var sessionDriverIdFallback = await resolveSessionDriverId(token);
+        if (sessionDriverIdFallback) {
+          pushDriverCandidate(driverCandidates, sessionDriverIdFallback);
+        }
       } catch (_) {}
     } else if (roleView === "driver") {
       try {
@@ -9008,7 +9008,7 @@
     if (Array.isArray(liveWorkflow.rides) && roleView !== "driver") {
       liveWorkflow.rides.forEach(function (ride) {
         var status = safeText(ride.status, "").toLowerCase();
-        if (["assigned", "driver_en_route", "arrived", "rider_onboard", "in_progress"].indexOf(status) >= 0) {
+        if (["assigned", "accepted", "driver_en_route", "arrived", "rider_onboard", "in_progress", "arrived_destination"].indexOf(status) >= 0) {
           pushDriverCandidate(driverCandidates, safeText(ride.driver_id, ""));
         }
       });
@@ -9019,22 +9019,32 @@
       });
     }
 
-    var resolvedDriverId = driverCandidates.length > 0 ? driverCandidates[0] : "";
-    var settled = null;
-
-    if (resolvedDriverId) {
-      settled = await Promise.allSettled([
-        fetchJson("/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/active-ride", {}, token),
-        fetchJson("/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/live-workspace", {}, token),
-        fetchJson("/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/active-offer", {}, token),
-        fetchJson("/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/assigned-rides", {}, token),
-        fetchJson("/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/completion-snapshot?limit=50", {}, token)
-      ]);
-      if (settled[0].status !== "fulfilled" && roleView !== "driver") {
-        resolvedDriverId = "";
-        settled = null;
+    async function resolveDriverWithActiveRide(candidates) {
+      if (!candidates.length) return { driverId: "", settled: null };
+      for (var i = 0; i < candidates.length; i += 1) {
+        var candidateId = safeText(candidates[i], "");
+        if (!candidateId) continue;
+        var probe = await Promise.allSettled([
+          fetchJson("/api/health-isf/drivers/" + encodeURIComponent(candidateId) + "/active-ride", {}, token),
+          fetchJson("/api/health-isf/drivers/" + encodeURIComponent(candidateId) + "/live-workspace", {}, token),
+          fetchJson("/api/health-isf/drivers/" + encodeURIComponent(candidateId) + "/active-offer", {}, token),
+          fetchJson("/api/health-isf/drivers/" + encodeURIComponent(candidateId) + "/assigned-rides", {}, token),
+          fetchJson("/api/health-isf/drivers/" + encodeURIComponent(candidateId) + "/completion-snapshot?limit=50", {}, token)
+        ]);
+        var activeRidePayload = probe[0].status === "fulfilled" ? safeObject(probe[0].value) : null;
+        var hasActiveRide = !!(activeRidePayload && activeRidePayload.has_active_ride);
+        var hasOffer = probe[2].status === "fulfilled" && !!(safeObject(probe[2].value).offer);
+        var assignedRows = probe[3].status === "fulfilled" && Array.isArray(probe[3].value) ? probe[3].value : [];
+        if (hasActiveRide || hasOffer || assignedRows.length > 0 || roleView === "driver" || i === candidates.length - 1) {
+          return { driverId: candidateId, settled: probe };
+        }
       }
+      return { driverId: safeText(candidates[0], ""), settled: null };
     }
+
+    var resolved = await resolveDriverWithActiveRide(driverCandidates);
+    var resolvedDriverId = resolved.driverId;
+    var settled = resolved.settled;
 
     if (!resolvedDriverId) {
       clearDriverLiveTripState();

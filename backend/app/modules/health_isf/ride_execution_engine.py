@@ -231,7 +231,6 @@ class RideLifecycleManager:
             ride.transporting_at = now()
 
         if next_state in {
-            RideStatus.ASSIGNED.value,
             RideStatus.DRIVER_EN_ROUTE.value,
             RideStatus.ARRIVED.value,
             RideStatus.RIDER_ONBOARD.value,

@@ -202,6 +202,10 @@ logger = logging.getLogger("amicor.health_isf.routes")
 
 def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResponse:
     payload = RideResponse.model_validate(ride).model_dump()
+    if ride.driver_id:
+        driver = service.get_driver_by_id(db, str(ride.driver_id))
+        if driver:
+            payload["driver_name"] = str(getattr(driver, "name", None) or "")
     financial = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride.id)
     if financial:
         payload["fare_amount"] = financial.get("fare_amount")
@@ -5481,7 +5485,7 @@ def get_customer_workspace_active_ride(
     return {
         "organization_id": effective_org_id,
         "rider_phone": rider_phone,
-        "active_ride": RideResponse.model_validate(ride).model_dump() if ride else None,
+        "active_ride": _ride_response_with_financials(db, ride).model_dump() if ride else None,
     }
 
 
@@ -5509,7 +5513,7 @@ def get_customer_workspace_live_tracking(
     return RiderLiveTrackingResponse(
         organization_id=effective_org_id,
         rider_phone=rider_phone,
-        active_ride=RideResponse.model_validate(ride) if ride else None,
+        active_ride=_ride_response_with_financials(db, ride) if ride else None,
         timeline=[RiderEventFeedItem.model_validate(item) for item in feed_rows],
         eta_minutes=int(ride.estimated_duration_minutes) if ride and ride.estimated_duration_minutes else None,
     )
@@ -5806,6 +5810,8 @@ def get_driver_active_offer(
             DispatchAssignmentState.OFFERED.value,
             DispatchAssignmentState.ASSIGNED.value,
             DispatchAssignmentState.AWAITING_APPROVAL.value,
+            DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+            DispatchAssignmentState.ACCEPTED.value,
         }:
             ride = workspace.get("ride")
             if ride and not service._is_ai_proof_ride(ride):

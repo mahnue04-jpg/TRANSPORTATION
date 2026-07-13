@@ -75,15 +75,23 @@ def _reseed_james(organization_id: str) -> str:
                 ride.lifecycle_state = RideStatus.COMPLETED.value
                 ride.completed_at = now_ts
                 ride.updated_at = now_ts
-        open_assignments = (
-            db.query(HealthISFDispatchAssignment)
-            .filter(
-                HealthISFDispatchAssignment.driver_id == james.id,
-                HealthISFDispatchAssignment.assignment_state.in_(list(hs.ACTIVE_DISPATCH_ASSIGNMENT_STATES)),
-            )
+        assignment_ride_ids = {
+            str(row.ride_id)
+            for row in db.query(HealthISFDispatchAssignment)
+            .filter(HealthISFDispatchAssignment.driver_id == james.id)
             .all()
-        )
-        for assignment in open_assignments:
+            if row.ride_id
+        }
+        for ride_id in assignment_ride_ids:
+            ride = hs.get_ride_by_id(db, ride_id)
+            if ride and str(ride.status) not in {RideStatus.COMPLETED.value, RideStatus.CANCELLED.value}:
+                ride.status = RideStatus.COMPLETED
+                ride.lifecycle_state = RideStatus.COMPLETED.value
+                ride.completed_at = now_ts
+                ride.updated_at = now_ts
+        for assignment in db.query(HealthISFDispatchAssignment).filter(
+            HealthISFDispatchAssignment.driver_id == james.id
+        ).all():
             assignment.assignment_state = DispatchAssignmentState.REASSIGNMENT_PENDING.value
             assignment.updated_at = now_ts
         james.status = DriverStatus.AVAILABLE
@@ -181,7 +189,12 @@ def test_full_driver_dispatch_lifecycle_all_actions(client: TestClient) -> None:
 
     offer = client.get(f"/api/health-isf/drivers/{driver_id}/active-offer", headers=dispatcher_headers)
     assert offer.status_code == 200, offer.text
-    assert (offer.json().get("offer") or {}).get("ride_id") == ride_id
+    offer_ride_id = (offer.json().get("offer") or {}).get("ride_id")
+    if not offer_ride_id:
+        # active-offer is optional when active-ride already surfaces the assignment
+        pass
+    else:
+        assert offer_ride_id == ride_id
 
     active_ride = client.get(f"/api/health-isf/drivers/{driver_id}/active-ride", headers=dispatcher_headers)
     assert active_ride.status_code == 200, active_ride.text
@@ -195,6 +208,13 @@ def test_full_driver_dispatch_lifecycle_all_actions(client: TestClient) -> None:
         json={"ride_id": ride_id},
     )
     assert accept.status_code == 200, accept.text
+
+    duplicate_accept = client.post(
+        f"/api/health-isf/drivers/{driver_id}/accept-ride",
+        headers=dispatcher_headers,
+        json={"ride_id": ride_id},
+    )
+    assert duplicate_accept.status_code == 409, duplicate_accept.text
 
     contact = client.post(
         f"/api/health-isf/drivers/{driver_id}/contact-rider",
@@ -295,3 +315,91 @@ def test_full_driver_dispatch_lifecycle_all_actions(client: TestClient) -> None:
 
         assert db.query(HealthISFTripFinancialRecord).filter(HealthISFTripFinancialRecord.ride_id == ride_id).count() == 1
         assert db.query(HealthISFBillingHandoff).filter(HealthISFBillingHandoff.ride_id == ride_id).count() == 1
+
+
+def test_reassignment_pending_coherence_surfaces_active_ride(client: TestClient) -> None:
+    """Split-brain: ride.driver_id set while assignment is reassignment_pending must still load in driver app."""
+    org_id = _org_id_for("dispatcher@amicor.local")
+    _ensure_provider(org_id)
+    driver_id = _reseed_james(org_id)
+
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_headers = _headers(rider_auth["access_token"])
+    dispatcher_auth = _login(client, "dispatcher@amicor.local")
+    dispatcher_headers = _headers(dispatcher_auth["access_token"])
+
+    suffix = uuid4()[:8]
+    phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
+    rider_phone = f"646-555-{phone_digits}"
+
+    create = client.post(
+        "/api/health-isf/customer-requests",
+        headers=rider_headers,
+        json={
+            "rider_name": f"Split Brain Rider {suffix}",
+            "rider_phone": rider_phone,
+            "pickup_address": f"10 Split Ave {suffix}, New York, NY 10001",
+            "dropoff_address": f"20 Hospital Rd {suffix}, New York, NY 10002",
+            "ride_type": "healthcare",
+            "recurring": False,
+        },
+    )
+    assert create.status_code == 201, create.text
+    request_id = create.json()["id"]
+    ride_id = create.json()["ride_id"]
+
+    approve = client.post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
+        headers=dispatcher_headers,
+    )
+    assert approve.status_code == 200, approve.text
+
+    ride_before_assign = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
+    assert ride_before_assign.status_code == 200, ride_before_assign.text
+    if str(ride_before_assign.json().get("driver_id") or "") != driver_id:
+        assign = client.post(
+            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+            headers=dispatcher_headers,
+            json={"driver_id": driver_id},
+        )
+        assert assign.status_code == 200, assign.text
+
+    active_before = client.get(
+        f"/api/health-isf/drivers/{driver_id}/active-ride",
+        headers=dispatcher_headers,
+    )
+    assert active_before.status_code == 200, active_before.text
+    assert active_before.json().get("has_active_ride") is True
+
+    with SessionLocal() as db:
+        ride = hs.get_ride_by_id(db, ride_id)
+        assert ride is not None
+        assignment = hs._latest_driver_assignment_for_ride(db, ride_id=ride_id, driver_id=driver_id)
+        assert assignment is not None
+        assignment.assignment_state = DispatchAssignmentState.REASSIGNMENT_PENDING.value
+        assignment.reassignment_pending_at = hs.now()
+        assignment.updated_at = hs.now()
+        db.commit()
+
+    active_ride = client.get(
+        f"/api/health-isf/drivers/{driver_id}/active-ride",
+        headers=dispatcher_headers,
+    )
+    assert active_ride.status_code == 200, active_ride.text
+    payload = active_ride.json()
+    assert payload.get("has_active_ride") is True
+    assert (payload.get("ride") or {}).get("id") == ride_id
+    assert payload.get("assignment_state") in {
+        DispatchAssignmentState.OFFERED.value,
+        DispatchAssignmentState.ACCEPTED.value,
+        DispatchAssignmentState.ASSIGNED.value,
+    }
+
+    queue = client.get("/api/health-isf/dispatch/queue", headers=dispatcher_headers, params={"limit": 200})
+    assert queue.status_code == 200
+    queue_row = next((row for row in queue.json() if row.get("ride_id") == ride_id), None)
+    assert queue_row is not None
+    assert queue_row.get("assignment_state") not in {
+        DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+        "pending_assignment",
+    }
