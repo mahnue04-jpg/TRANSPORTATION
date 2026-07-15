@@ -517,3 +517,119 @@ def test_driver_dropoff_complete_from_in_progress_matches_ui(client: TestClient)
         assert driver is not None
         assert hs._coerce_driver_status(driver.status) == DriverStatus.AVAILABLE
         assert db.query(HealthISFBillingHandoff).filter(HealthISFBillingHandoff.ride_id == ride_id).count() == 1
+
+
+def _create_assign_ride(
+    client: TestClient,
+    dispatcher_headers: dict[str, str],
+    rider_headers: dict[str, str],
+    driver_id: str,
+    label: str,
+) -> str:
+    suffix = uuid4()[:8]
+    phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
+    create = client.post(
+        "/api/health-isf/customer-requests",
+        headers=rider_headers,
+        json={
+            "rider_name": f"{label} {suffix}",
+            "rider_phone": f"646-555-{phone_digits}",
+            "pickup_address": f"100 Clinic Ave {suffix}, New York, NY 10001",
+            "dropoff_address": f"200 Hospital Rd {suffix}, New York, NY 10002",
+            "ride_type": "healthcare",
+            "recurring": False,
+        },
+    )
+    assert create.status_code == 201, create.text
+    request_id = create.json()["id"]
+    ride_id = create.json()["ride_id"]
+    approve = client.post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
+        headers=dispatcher_headers,
+    )
+    assert approve.status_code == 200, approve.text
+    ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
+    assert ride_before.status_code == 200, ride_before.text
+    if str(ride_before.json().get("driver_id") or "") != driver_id:
+        assign = client.post(
+            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+            headers=dispatcher_headers,
+            json={"driver_id": driver_id},
+        )
+        assert assign.status_code == 200, assign.text
+    return ride_id
+
+
+def test_en_route_pickup_with_second_open_assignment_returns_200(client: TestClient) -> None:
+    """Regression: workspace reconcile must not downgrade driver status during route-progress."""
+    org_id = _org_id_for("dispatcher@amicor.local")
+    _ensure_provider(org_id)
+    driver_id = _reseed_james(org_id)
+    dispatcher_headers = _headers(_login(client, "dispatcher@amicor.local")["access_token"])
+    rider_headers = _headers(_login(client, "rider@amicor.local")["access_token"])
+
+    ride_one = _create_assign_ride(client, dispatcher_headers, rider_headers, driver_id, "Route Progress One")
+
+    suffix = uuid4()[:8]
+    phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
+    create_two = client.post(
+        "/api/health-isf/customer-requests",
+        headers=rider_headers,
+        json={
+            "rider_name": f"Route Progress Two {suffix}",
+            "rider_phone": f"646-555-{phone_digits}",
+            "pickup_address": f"300 Second Ave {suffix}, New York, NY 10001",
+            "dropoff_address": f"400 Second Rd {suffix}, New York, NY 10002",
+            "ride_type": "healthcare",
+            "recurring": False,
+        },
+    )
+    assert create_two.status_code == 201, create_two.text
+    ride_two = create_two.json()["ride_id"]
+    approve_two = client.post(
+        f"/api/health-isf/dispatcher/customer-requests/{create_two.json()['id']}/approve",
+        headers=dispatcher_headers,
+    )
+    assert approve_two.status_code == 200, approve_two.text
+    now_ts = hs.now()
+    with SessionLocal() as db:
+        ride_two_row = hs.get_ride_by_id(db, ride_two)
+        assert ride_two_row is not None
+        ride_two_row.driver_id = driver_id
+        ride_two_row.lifecycle_state = RideStatus.ASSIGNED.value
+        ride_two_row.status = RideStatus.ASSIGNED.value
+        ride_two_row.assigned_at = now_ts
+        ride_two_row.updated_at = now_ts
+        db.add(
+            HealthISFDispatchAssignment(
+                id=uuid4(),
+                organization_id=org_id,
+                ride_id=ride_two,
+                driver_id=driver_id,
+                assignment_state=DispatchAssignmentState.ASSIGNED.value,
+                attempt_index=1,
+                assigned_at=now_ts,
+                created_at=now_ts,
+                updated_at=now_ts,
+            )
+        )
+        db.commit()
+
+    accept = client.post(
+        f"/api/health-isf/drivers/{driver_id}/accept-ride",
+        headers=dispatcher_headers,
+        json={"ride_id": ride_one},
+    )
+    assert accept.status_code == 200, accept.text
+
+    en_route = client.post(
+        f"/api/health-isf/drivers/{driver_id}/route-progress",
+        headers=dispatcher_headers,
+        json={"ride_id": ride_one, "target_state": "en_route_pickup"},
+    )
+    assert en_route.status_code == 200, en_route.text
+
+    assigned = client.get(f"/api/health-isf/drivers/{driver_id}/assigned-rides", headers=dispatcher_headers)
+    assert assigned.status_code == 200, assigned.text
+    assigned_ids = {str(row.get("id")) for row in assigned.json()}
+    assert ride_two in assigned_ids

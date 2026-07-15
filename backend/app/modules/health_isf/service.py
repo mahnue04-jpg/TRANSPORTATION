@@ -5321,6 +5321,21 @@ def _validate_driver_transition(current: DriverStatus, target: DriverStatus) -> 
         raise ValueError(f"Cannot change driver from '{current.value}' to '{target.value}'")
 
 
+def _driver_status_rank(status: DriverStatus) -> int:
+    order = {
+        DriverStatus.OFFLINE: 0,
+        DriverStatus.UNAVAILABLE: 0,
+        DriverStatus.AVAILABLE: 1,
+        DriverStatus.ASSIGNED: 2,
+        DriverStatus.BUSY: 2,
+        DriverStatus.EN_ROUTE_PICKUP: 3,
+        DriverStatus.WAITING_AT_PICKUP: 4,
+        DriverStatus.IN_TRANSIT: 5,
+        DriverStatus.COMPLETED: 6,
+    }
+    return order.get(status, 0)
+
+
 def _advance_driver_status_for_active_ride(
     db: Session,
     driver: HealthISFDriver,
@@ -5332,6 +5347,8 @@ def _advance_driver_status_for_active_ride(
     desired = _coerce_driver_status(target)
     current = _coerce_driver_status(driver.status)
     if current == desired:
+        return
+    if _driver_status_rank(current) >= _driver_status_rank(desired):
         return
 
     if (
