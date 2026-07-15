@@ -6033,6 +6033,15 @@
       active_session: true,
       last_seen_at: response.issued_at,
     }));
+    const resolvedDriverId = String(response.driver_id || inputs.driverId || '').trim();
+    if (typeof window._amiPersistDriverSession === 'function' && resolvedDriverId) {
+      window._amiPersistDriverSession({
+        driver_id: resolvedDriverId,
+        driver_name: lookupDriverName(resolvedDriverId),
+        session_token: state.driverRuntimeToken,
+        organization_id: String((response && response.organization_id) || '').trim(),
+      });
+    }
     return response;
   }
 
@@ -6049,6 +6058,14 @@
     });
     state.driverRuntimeToken = null;
     state.driverRuntimeStatus = null;
+    if (typeof window._amiClearDriverSession === 'function') {
+      window._amiClearDriverSession();
+    } else {
+      try {
+        localStorage.removeItem('amicor_driver_session');
+        localStorage.removeItem('amicor_driver_workflow_id');
+      } catch (_) {}
+    }
     const els = getEls();
     if (els.driverRuntimeToken) {
       els.driverRuntimeToken.value = '';
@@ -9890,6 +9907,14 @@
           const driverId = inspectButton.getAttribute("data-driver-inspect");
           if (!driverId) return;
           state.selectedDriverId = driverId;
+          if (typeof window._amiPersistDriverSession === 'function') {
+            window._amiPersistDriverSession({
+              driver_id: driverId,
+              driver_name: lookupDriverName(driverId),
+              session_token: String(state.driverRuntimeToken || '').trim(),
+              organization_id: '',
+            });
+          }
           const runtimeEls = getEls();
           if (runtimeEls.driverRuntimeId) {
             runtimeEls.driverRuntimeId.value = driverId;
@@ -9927,8 +9952,19 @@
           state.driverRuntimeStatus = null;
           state.driverLiveWorkspace = null;
           setDriverRuntimeActionMessage('', '');
+          if (typeof window._amiClearDriverSession === 'function') {
+            window._amiClearDriverSession();
+          }
           renderDrivers();
           return;
+        }
+        if (typeof window._amiPersistDriverSession === 'function') {
+          window._amiPersistDriverSession({
+            driver_id: selected,
+            driver_name: lookupDriverName(selected),
+            session_token: String(state.driverRuntimeToken || '').trim(),
+            organization_id: '',
+          });
         }
         hydrateDriverRuntimePhone(selected);
         Promise.all([

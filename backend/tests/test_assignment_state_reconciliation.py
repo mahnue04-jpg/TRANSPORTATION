@@ -110,7 +110,15 @@ def _create_and_assign(client: TestClient, dispatcher_headers: dict[str, str], r
             headers=dispatcher_headers,
             json={"driver_id": driver_id},
         )
-        assert assign.status_code == 200, assign.text
+        if assign.status_code == 400 and "already has an assigned driver" in assign.text:
+            reassign = client.patch(
+                f"/api/health-isf/dispatcher/rides/{ride_id}/reassign-driver",
+                headers=dispatcher_headers,
+                json={"driver_id": driver_id},
+            )
+            assert reassign.status_code == 200, reassign.text
+        else:
+            assert assign.status_code == 200, assign.text
     return request_id, ride_id
 
 
