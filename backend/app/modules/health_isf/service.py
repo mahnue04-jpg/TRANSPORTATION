@@ -2935,6 +2935,27 @@ def validate_driver_session_token(
     return session
 
 
+def _normalize_driver_auth_state_on_login(db: Session, driver: HealthISFDriver) -> None:
+    """Clear stale trip/assignment posture left by failed login or interrupted sessions."""
+    workload = _driver_active_workload_count(db, driver.id)
+    active_rides = _current_active_rides_for_driver(db, driver.id)
+    if workload > 0 or active_rides:
+        return
+    availability = str(driver.availability_state or "offline").lower()
+    if availability in {"on_trip", "offer_pending", "assigned"}:
+        driver.availability_state = "available"
+    busy_statuses = {
+        DriverStatus.ASSIGNED,
+        DriverStatus.BUSY,
+        DriverStatus.EN_ROUTE_PICKUP,
+        DriverStatus.WAITING_AT_PICKUP,
+        DriverStatus.IN_TRANSIT,
+    }
+    current = _coerce_driver_status(driver.status)
+    if current in busy_statuses and current != DriverStatus.AVAILABLE:
+        _set_driver_status(db, driver, DriverStatus.AVAILABLE, force=True)
+
+
 def driver_login(
     db: Session,
     *,
@@ -2949,6 +2970,8 @@ def driver_login(
         raise ValueError("Driver is inactive")
     if not _phones_match_for_driver_login(driver.phone, phone):
         raise ValueError("Driver credentials invalid")
+
+    _normalize_driver_auth_state_on_login(db, driver)
 
     existing_sessions = (
         db.query(HealthISFDriverSession)
@@ -2986,7 +3009,15 @@ def driver_login(
     driver.last_seen_at = issued_at
     if str(driver.availability_state or "offline").lower() == "offline":
         driver.availability_state = "available"
-    _set_driver_status(db, driver, _driver_status_from_availability(driver.availability_state))
+    target_status = _driver_status_from_availability(driver.availability_state)
+    if (
+        _driver_active_workload_count(db, driver.id) == 0
+        and target_status == DriverStatus.AVAILABLE
+        and _coerce_driver_status(driver.status) != DriverStatus.AVAILABLE
+    ):
+        _set_driver_status(db, driver, DriverStatus.AVAILABLE, force=True)
+    else:
+        _set_driver_status(db, driver, target_status)
 
     _commit_or_rollback(db)
     db.refresh(driver)
@@ -5406,11 +5437,18 @@ def _advance_driver_status_for_active_ride(
         _set_driver_status(db, driver, step)
 
 
-def _set_driver_status(db: Session, driver: HealthISFDriver, target_status: str | DriverStatus) -> HealthISFDriver:
+def _set_driver_status(
+    db: Session,
+    driver: HealthISFDriver,
+    target_status: str | DriverStatus,
+    *,
+    force: bool = False,
+) -> HealthISFDriver:
     next_status = _coerce_driver_status(target_status)
     current_status = _coerce_driver_status(driver.status)
     if current_status != next_status:
-        _validate_driver_transition(current_status, next_status)
+        if not force:
+            _validate_driver_transition(current_status, next_status)
         driver.status = next_status
         driver.updated_at = now()
     return driver

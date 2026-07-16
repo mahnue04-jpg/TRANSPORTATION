@@ -569,11 +569,32 @@ const AmiCorSession = {
   },
 
   /**
+   * Restore persisted session and refresh access token when needed.
+   * All surfaces should await this once during boot before gated API calls.
+   */
+  async ensureReady() {
+    this.restore();
+    if (!this.getRefreshToken()) {
+      return !!this.getAccessToken();
+    }
+    if (!this.getAccessToken() || hasTokenExpired()) {
+      return !!(await this.refreshAccessToken(true));
+    }
+    return !!(await this.refreshAccessToken(false));
+  },
+
+  /**
    * Check if session is active.
    */
   isActive() {
     const token = this.getAccessToken(); // Uses fallback
-    return !!(_isValidated && _sessionId && _identity && token);
+    if (!(_isValidated && _sessionId && _identity && token)) {
+      return false;
+    }
+    if (hasTokenExpired() && !(_identity && _identity.refreshToken)) {
+      return false;
+    }
+    return true;
   },
 };
 

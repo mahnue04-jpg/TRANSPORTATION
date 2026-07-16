@@ -31,15 +31,26 @@ def main() -> None:
         page.goto(f"{BASE}/app/mobile", wait_until="domcontentloaded")
         page.evaluate(
             """(payload) => {
+              var expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+              var runtimeHost = 'local-dev:8010';
               localStorage.setItem('amicor_onboarded', '1');
               localStorage.setItem('amicor_session', JSON.stringify({
-                access_token: payload.token,
-                token_type: 'bearer'
+                id: 'browser_driver_check',
+                expiresAt: expiresAt,
+                runtimeHost: runtimeHost
               }));
               localStorage.setItem('amicor_identity', JSON.stringify({
-                email: 'dispatcher@amicor.local',
-                display_name: 'Dispatcher',
-                role: 'dispatcher'
+                email: payload.email,
+                display_name: payload.name,
+                role: payload.role,
+                accessToken: payload.token,
+                organizationId: payload.orgId,
+                tokenExpiresAt: expiresAt,
+                runtimeHost: runtimeHost
+              }));
+              localStorage.setItem('amicor_runtime_marker', JSON.stringify({
+                runtimeHost: runtimeHost,
+                updatedAt: new Date().toISOString()
               }));
               localStorage.setItem('amicor_driver_workflow_id', payload.driverId);
               localStorage.setItem('amicor_driver_session', JSON.stringify({
@@ -52,8 +63,25 @@ def main() -> None:
                 route: 'mobile',
                 roleRoutes: { driver: 'mobile' }
               }));
+              if (window.AmiCorSession && typeof window.AmiCorSession.start === 'function') {
+                window.AmiCorSession.start({
+                  email: payload.email,
+                  name: payload.name,
+                  role: payload.role,
+                  accessToken: payload.token,
+                  organizationId: payload.orgId,
+                  tokenExpiresAt: expiresAt
+                });
+              }
             }""",
-            {"token": token, "driverId": MARIA},
+            {
+                "token": token,
+                "driverId": MARIA,
+                "email": "dispatcher@amicor.local",
+                "name": "Dispatcher",
+                "role": "dispatcher",
+                "orgId": auth.get("organization_id") or "ca8d0c7c-1fff-4465-99d7-75a1fc51543e",
+            },
         )
         page.reload(wait_until="domcontentloaded")
         page.wait_for_timeout(10000)

@@ -75,7 +75,9 @@
   };
 
   var SEED_DRIVER_PHONE_BY_EMAIL = {
-    "driver@amicor.local": "917-555-1001"
+    "driver@amicor.local": "917-555-1001",
+    "maria.garcia@amicor.local": "917-555-1002",
+    "dispatcher@amicor.local": "917-555-1000"
   };
   var DRIVER_PROOF_MARKERS = [
     "driver ai proof",
@@ -542,6 +544,39 @@
         source: "persisted_driver_session"
       };
       bindDriverIdentity(persisted.driver_id);
+      return driverMobileAuthCache;
+    }
+    var supervisedRoles = ["dispatcher", "admin", "supervisor", "driver_support"];
+    var candidateDriverId = "";
+    try {
+      var query = new URLSearchParams(String(window.location.search || ""));
+      candidateDriverId = safeText(query.get("driver_id") || query.get("driverId") || "", "");
+    } catch (_) {}
+    if (!candidateDriverId) {
+      candidateDriverId = safeText(localStorage.getItem("amicor_driver_workflow_id") || "", "");
+    }
+    if (token && candidateDriverId && supervisedRoles.indexOf(authRole) >= 0) {
+      var supervisedName = "";
+      try {
+        var supervisedDrivers = await fetchJson("/api/health-isf/drivers?limit=200", {}, token);
+        var supervisedRows = Array.isArray(supervisedDrivers) ? supervisedDrivers : [];
+        var supervisedMatch = supervisedRows.find(function (row) {
+          return safeText(row.id, "") === candidateDriverId;
+        });
+        supervisedName = safeText(supervisedMatch && (supervisedMatch.name || supervisedMatch.driver_name), "");
+      } catch (_) {}
+      driverMobileAuthCache = {
+        valid: true,
+        requires_login: false,
+        driver_id: candidateDriverId,
+        driver_name: supervisedName,
+        session_role: authRole,
+        auth_role: authRole,
+        organization_id: organizationId,
+        session_token: "",
+        source: "supervised_driver_view"
+      };
+      bindDriverIdentity(candidateDriverId);
       return driverMobileAuthCache;
     }
     if (authRole === "driver") {
@@ -9056,12 +9091,47 @@
     } catch (_) {}
   }
 
+  async function ensurePlatformSessionReady() {
+    bootstrapAppSession();
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+        await window.AmiCorSession.ensureReady();
+      }
+    } catch (_) {}
+    state.hydration = safeObject(state.hydration);
+    state.hydration.authTokenPresent = !!getAccessToken();
+  }
+
   function applyLoginIdentity(identity) {
     if (!identity || typeof identity !== "object") {
       return;
     }
+    var normalized = {
+      userId: identity.userId || identity.user_id,
+      email: identity.email,
+      name: identity.name || identity.display_name,
+      role: identity.role,
+      authorizedRoles: identity.authorizedRoles || identity.authorized_roles,
+      organizationId: identity.organizationId || identity.organization_id,
+      organizationName: identity.organizationName || identity.organization_name,
+      accessToken: identity.accessToken || identity.access_token,
+      refreshToken: identity.refreshToken || identity.refresh_token,
+      tokenExpiresAt: identity.tokenExpiresAt,
+      createdAt: identity.createdAt
+    };
     if (window.AmiCorSession && typeof window.AmiCorSession.start === "function") {
-      window.AmiCorSession.start(identity);
+      window.AmiCorSession.start(normalized);
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.applyAuthTokens === "function") {
+      window.AmiCorSession.applyAuthTokens({
+        access_token: normalized.accessToken,
+        refresh_token: normalized.refreshToken,
+        role: normalized.role,
+        authorized_roles: normalized.authorizedRoles,
+        expires_in: normalized.tokenExpiresAt
+          ? Math.max(60, Math.round((Number(normalized.tokenExpiresAt) - Date.now()) / 1000))
+          : undefined
+      });
     }
     var nextRole = safeText(identity.role, "").toLowerCase();
     if (nextRole && ROLE_ACCESS[nextRole]) {
@@ -9945,61 +10015,17 @@
   }
 
   function getAccessToken() {
-    function decodeJwtPayload(token) {
-      try {
-        var parts = String(token || "").split(".");
-        if (parts.length < 2) return null;
-        var base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-        var padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-        var json = atob(padded);
-        return JSON.parse(json);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    function isExpiredToken(token) {
-      var payload = decodeJwtPayload(token);
-      if (!payload || typeof payload !== "object") return false;
-      var exp = Number(payload.exp);
-      if (!Number.isFinite(exp)) return false;
-      var nowSeconds = Math.floor(Date.now() / 1000);
-      return nowSeconds >= (exp - 30);
-    }
-
     try {
       if (window.AmiCorSession && typeof window.AmiCorSession.getAccessToken === "function") {
-        var runtimeToken = window.AmiCorSession.getAccessToken();
-        if (!runtimeToken && typeof window.AmiCorSession.restore === "function") {
+        if (!window.AmiCorSession.getAccessToken() && typeof window.AmiCorSession.restore === "function") {
           window.AmiCorSession.restore();
-          runtimeToken = window.AmiCorSession.getAccessToken();
         }
-        if (runtimeToken && !isExpiredToken(runtimeToken)) return String(runtimeToken);
-      }
-    } catch (_) {}
-
-    try {
-      var sessionRaw = localStorage.getItem("amicor_session");
-      if (sessionRaw) {
-        var session = JSON.parse(sessionRaw);
-        if (session && typeof session === "object") {
-          if (session.accessToken && !isExpiredToken(session.accessToken)) return String(session.accessToken);
-          if (session.access_token && !isExpiredToken(session.access_token)) return String(session.access_token);
+        var runtimeToken = window.AmiCorSession.getAccessToken();
+        if (runtimeToken) {
+          return String(runtimeToken);
         }
       }
     } catch (_) {}
-
-    try {
-      var identityRaw = localStorage.getItem("amicor_identity");
-      if (identityRaw) {
-        var identity = JSON.parse(identityRaw);
-        if (identity && typeof identity === "object") {
-          if (identity.accessToken && !isExpiredToken(identity.accessToken)) return String(identity.accessToken);
-          if (identity.access_token && !isExpiredToken(identity.access_token)) return String(identity.access_token);
-        }
-      }
-    } catch (_) {}
-
     return "";
   }
 
@@ -10088,6 +10114,10 @@
       state.error = null;
       state.fetchWarnings = [];
       renderPage();
+    }
+
+    if (!getAccessToken()) {
+      await ensurePlatformSessionReady();
     }
 
     var settled = await Promise.allSettled([
@@ -11133,6 +11163,25 @@
     windowEventBindings.push({ eventName: "storage", handler: onStorage });
     window.addEventListener("storage", onStorage);
 
+    var onPlatformSessionRecovered = function () {
+      state.hydration = safeObject(state.hydration);
+      state.hydration.authTokenPresent = !!getAccessToken();
+      requestSilentRefresh("session-recovered");
+      scheduleRenderPage();
+    };
+    ["amicor:session-recovered", "amicor:workspace-role-updated"].forEach(function (eventName) {
+      windowEventBindings.push({ eventName: eventName, handler: onPlatformSessionRecovered });
+      window.addEventListener(eventName, onPlatformSessionRecovered);
+    });
+    var onPlatformSessionInvalid = function () {
+      state.hydration = safeObject(state.hydration);
+      state.hydration.authTokenPresent = false;
+      state.hydration.integrityState = "AUTH_REQUIRED";
+      scheduleRenderPage();
+    };
+    windowEventBindings.push({ eventName: "amicor:session-invalid", handler: onPlatformSessionInvalid });
+    window.addEventListener("amicor:session-invalid", onPlatformSessionInvalid);
+
     var onDriverSessionUpdated = function () {
       driverMobileAuthCache = null;
       void resolveDriverMobileAuth(getAccessToken()).then(function () {
@@ -11219,11 +11268,11 @@
     } catch (_) {}
   }
 
-  function initialize() {
+  async function initialize() {
     applyPlatformResetFromUrl();
     state.assistant = buildDefaultAssistantState();
     state.runtime.operatorMode = isOperatorModeEnabled();
-    bootstrapAppSession();
+    await ensurePlatformSessionReady();
     state.role = roleFromStorage();
     hydrateSessionState();
     recomputeAssistantRuntimeState();

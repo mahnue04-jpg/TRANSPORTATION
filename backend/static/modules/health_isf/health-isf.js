@@ -8052,11 +8052,22 @@
 
     state.refreshQueued = false;
     state.refreshPromise = (async function runRefreshData() {
+      if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+        try {
+          await window.AmiCorSession.ensureReady();
+        } catch (_) {}
+      }
       const profile = getSessionProfile();
-      if (!profile.active) {
+      if (!profile.active && profile.refreshTokenPresent && window.AmiCorSession && typeof window.AmiCorSession.refreshAccessToken === "function") {
+        try {
+          await window.AmiCorSession.refreshAccessToken(true);
+        } catch (_) {}
+      }
+      const refreshedProfile = getSessionProfile();
+      if (!refreshedProfile.active) {
         state.hydration.lastRefreshError = "authentication required";
         state.websocketStatus = "auth_required";
-        if (!profile.accessTokenPresent && !profile.refreshTokenPresent) {
+        if (!refreshedProfile.accessTokenPresent && !refreshedProfile.refreshTokenPresent) {
           renderRuntimeShell("refresh_blocked");
         }
         return;
@@ -10266,20 +10277,31 @@
     window.addEventListener("hashchange", onHashRoute);
   }
 
-  function init() {
-    const els = getEls();
-    if (!els.shell) return;
+  async function ensureHealthIsfSessionReady() {
+    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+      try {
+        await window.AmiCorSession.ensureReady();
+      } catch (_) {}
+      return;
+    }
     if (window.AmiCorSession && typeof window.AmiCorSession.restore === "function") {
       window.AmiCorSession.restore();
     }
-    attachPickupTracing();
-    restoreRuntimeState();
-    ensureShellChrome();
-    renderRuntimeShell("init");
-    bindEvents();
-    closeModal();
-    setModuleVisibility(false);
-    onHashRoute();
+  }
+
+  function init() {
+    const els = getEls();
+    if (!els.shell) return;
+    ensureHealthIsfSessionReady().finally(function () {
+      attachPickupTracing();
+      restoreRuntimeState();
+      ensureShellChrome();
+      renderRuntimeShell("init");
+      bindEvents();
+      closeModal();
+      setModuleVisibility(false);
+      onHashRoute();
+    });
   }
 
   if (document.readyState === "loading") {
