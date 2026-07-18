@@ -710,6 +710,17 @@ class IdempotencyService:
         return True
 
     @staticmethod
+    def delete_key(db: Session, idempotency_key: str) -> bool:
+        key = db.query(DispatchIdempotencyKey).filter(
+            DispatchIdempotencyKey.idempotency_key == idempotency_key
+        ).first()
+        if not key:
+            return False
+        db.delete(key)
+        db.commit()
+        return True
+
+    @staticmethod
     def cleanup_expired_keys(db: Session) -> int:
         result = db.execute(
             delete(DispatchIdempotencyKey).where(

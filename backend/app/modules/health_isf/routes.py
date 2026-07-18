@@ -12,6 +12,7 @@ import hashlib
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, Request, Body
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -29,10 +30,32 @@ from app.auth import (
     get_current_user_context,
     decode_access_token,
     UserContext,
+    _bearer,
+    _jwt_verify,
+    get_current_user,
+    resolve_session_role,
+    get_user_authorized_roles,
+    normalize_role,
 )
 from app.db.session import SessionLocal, get_db
 from app.helpers import now, uuid4
 from app.modules.health_isf import service
+from app.modules.health_isf.driver_mobile_auth import (
+    DriverEndpointAuth,
+    require_driver_accept_auth,
+    require_driver_mobile_or_platform,
+    require_driver_workflow_auth,
+    require_ride_mobile_or_platform,
+    _platform_user_context,
+    _driver_session_context,
+    HEALTH_ISF_PLATFORM_ROLES,
+)
+from app.modules.health_isf.driver_mobile_sync_log import (
+    record_backend_assignment_sync,
+    record_driver_mobile_assignment_sync,
+    resolve_driver_session_id,
+    safe_text as _sync_safe_text,
+)
 from app.modules.health_isf.financial_engine import TripFinancialEngine
 from app.modules.health_isf.intake import (
     build_ai_dispatch_context,
@@ -58,7 +81,9 @@ from app.modules.health_isf.schemas import (
     DriverAvailabilityRequest,
     DriverHeartbeatRequest,
     DriverLoginRequest,
+    DriverMobileLoginRequest,
     DriverLoginResponse,
+    DriverMobileAssignmentSyncLogRequest,
     DriverLogoutRequest,
     DriverRuntimeStatusResponse,
     DriverSessionValidationResponse,
@@ -227,6 +252,64 @@ require_health_isf_access = require_any_role(
     ROLE_RIDER,
     ROLE_ANALYTICS_READONLY,
 )
+
+_DRIVER_SESSION_ROUTE_PREFIXES = (
+    "/api/health-isf/drivers/",
+    "/api/health-isf/rides/",
+)
+
+_HEALTH_ISF_ACCESS_ROLES = {
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_DISPATCHER,
+    ROLE_STAFF,
+    ROLE_SUPERVISOR,
+    ROLE_DRIVER,
+    ROLE_PROVIDER,
+    ROLE_RIDER,
+    ROLE_ANALYTICS_READONLY,
+}
+
+
+def require_health_isf_or_driver_session(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    """Allow driver mobile session header on driver/ride handoff paths without platform JWT."""
+    driver_session = (
+        request.headers.get("X-Driver-Session-Token")
+        or request.headers.get("x-driver-session-token")
+        or ""
+    ).strip()
+    path = request.url.path
+    if driver_session:
+        if path.startswith("/api/health-isf/drivers/"):
+            return None
+        if path.startswith("/api/health-isf/rides/") and path.endswith("/completion-handoff"):
+            return None
+
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    from app.db.models import User as UserModel
+
+    payload = _jwt_verify(creds.credentials)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing subject")
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid or inactive user")
+    session_role = resolve_session_role(user, payload)
+    authorized = get_user_authorized_roles(user)
+    token_role = normalize_role(payload.get("role"))
+    if token_role not in authorized or session_role not in authorized:
+        raise HTTPException(status_code=403, detail="Invalid session role")
+    if session_role not in _HEALTH_ISF_ACCESS_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role permissions")
+    return user
+
 require_health_isf_write_access = require_any_role(
     ROLE_ADMIN,
     ROLE_SUPER_ADMIN_SUPPORT,
@@ -906,6 +989,37 @@ async def _emit_dispatch_lifecycle_event(
     db.commit()
 
 
+def _sync_driver_progress_action(db: Session, ride_id: str, action):
+    """Run a driver lifecycle mutation; surface conflicts instead of silent no-ops."""
+    ride_before = service.get_ride_by_id(db, ride_id)
+    before_state = ""
+    if ride_before:
+        before_state = RideLifecycleManager.normalize_state(
+            getattr(ride_before, "lifecycle_state", None) or ride_before.status
+        )
+    try:
+        ride = action()
+    except service.RideLifecycleConflictError as exc:
+        ride_after = service.get_ride_by_id(db, ride_id)
+        after_state = ""
+        if ride_after:
+            after_state = RideLifecycleManager.normalize_state(
+                getattr(ride_after, "lifecycle_state", None) or ride_after.status
+            )
+        if not ride_after or after_state == before_state:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return ride_after
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    return ride
+
+
+def _effective_driver_id_from_auth(driver_id: str, auth: DriverEndpointAuth) -> str:
+    if auth.actor_user_id is None:
+        return str(auth.user.user_id)
+    return driver_id
+
+
 async def _emit_driver_trip_completion_events(
     *,
     db: Session,
@@ -1135,6 +1249,28 @@ async def _run_customer_request_side_effects(
     provider_id: str | None,
 ) -> None:
     """Emit intake events and optional SMS without blocking the create response."""
+    import time
+
+    from app.modules.health_isf.rider_request_timing_log import record_rider_request_timing
+
+    intake_started = time.perf_counter()
+    await asyncio.to_thread(
+        _run_customer_request_intake_dispatch_sync,
+        organization_id=organization_id,
+        request_id=request_id,
+        ride_id=ride_id,
+        actor_user_id=actor_user_id,
+        idempotency_key=idempotency_key,
+    )
+    record_rider_request_timing(
+        stage="background_intake_dispatch_total",
+        duration_ms=int((time.perf_counter() - intake_started) * 1000),
+        idempotency_key=idempotency_key or None,
+        ride_id=ride_id,
+        request_id=request_id,
+        organization_id=organization_id,
+    )
+
     db = SessionLocal()
     try:
         request_row = service.get_customer_ride_request_by_id(db, request_id)
@@ -1146,29 +1282,6 @@ async def _run_customer_request_side_effects(
                 ride_id,
             )
             return
-        try:
-            service.run_intake_dispatch_automation(
-                db,
-                ride_id=str(ride.id),
-                organization_id=organization_id,
-                actor_user_id=actor_user_id,
-            )
-            db.refresh(ride)
-            db.refresh(request_row)
-            service.finalize_customer_request_intake_dispatch(
-                db,
-                request_obj=request_row,
-                actor_user_id=actor_user_id,
-            )
-            db.refresh(ride)
-            db.refresh(request_row)
-        except Exception:
-            logger.warning(
-                "Deferred intake dispatch automation failed for request_id=%s ride_id=%s",
-                request_id,
-                ride_id,
-                exc_info=True,
-            )
         try:
             emitter = get_emitter()
             await _emit_with_retry_queue(
@@ -1276,7 +1389,106 @@ async def _run_customer_request_side_effects(
         db.close()
 
 
+def _run_customer_request_intake_dispatch_sync(
+    *,
+    organization_id: str,
+    request_id: str,
+    ride_id: str,
+    actor_user_id: str | None,
+    idempotency_key: str,
+) -> None:
+    """Run intake automation in a worker thread so the HTTP event loop stays responsive."""
+    import time
+
+    from app.modules.health_isf.rider_request_timing_log import record_rider_request_timing
+
+    db = SessionLocal()
+    try:
+        request_row = service.get_customer_ride_request_by_id(db, request_id)
+        ride = service.get_ride_by_id(db, ride_id)
+        if not request_row or not ride:
+            record_rider_request_timing(
+                stage="background_intake_skipped",
+                idempotency_key=idempotency_key or None,
+                ride_id=ride_id,
+                request_id=request_id,
+                organization_id=organization_id,
+                error="missing_rows",
+            )
+            return
+        try:
+            automation_started = time.perf_counter()
+            service.run_intake_dispatch_automation(
+                db,
+                ride_id=str(ride.id),
+                organization_id=organization_id,
+                actor_user_id=actor_user_id,
+            )
+            record_rider_request_timing(
+                stage="background_intake_automation",
+                duration_ms=int((time.perf_counter() - automation_started) * 1000),
+                idempotency_key=idempotency_key or None,
+                ride_id=ride_id,
+                request_id=request_id,
+                organization_id=organization_id,
+            )
+            db.refresh(ride)
+            db.refresh(request_row)
+            finalize_started = time.perf_counter()
+            service.finalize_customer_request_intake_dispatch(
+                db,
+                request_obj=request_row,
+                actor_user_id=actor_user_id,
+            )
+            record_rider_request_timing(
+                stage="background_finalize_dispatch",
+                duration_ms=int((time.perf_counter() - finalize_started) * 1000),
+                idempotency_key=idempotency_key or None,
+                ride_id=ride_id,
+                request_id=request_id,
+                organization_id=organization_id,
+            )
+            db.refresh(ride)
+            db.refresh(request_row)
+        except Exception as exc:
+            record_rider_request_timing(
+                stage="background_intake_failed",
+                idempotency_key=idempotency_key or None,
+                ride_id=ride_id,
+                request_id=request_id,
+                organization_id=organization_id,
+                error=str(exc),
+            )
+            logger.warning(
+                "Deferred intake dispatch automation failed for request_id=%s ride_id=%s",
+                request_id,
+                ride_id,
+                exc_info=True,
+            )
+    finally:
+        db.close()
+
+
 def _schedule_customer_request_side_effects(**kwargs: Any) -> None:
+    def _launch() -> None:
+        try:
+            asyncio.run(_run_customer_request_side_effects(**kwargs))
+        except Exception:
+            logger.error(
+                "Customer request background side effects failed for request_id=%s ride_id=%s",
+                kwargs.get("request_id"),
+                kwargs.get("ride_id"),
+                exc_info=True,
+            )
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        import threading
+
+        threading.Thread(target=_launch, daemon=True, name="customer-request-side-effects").start()
+        return
+
     async def _runner() -> None:
         try:
             await _run_customer_request_side_effects(**kwargs)
@@ -1289,9 +1501,11 @@ def _schedule_customer_request_side_effects(**kwargs: Any) -> None:
             )
 
     try:
-        asyncio.create_task(_runner())
+        loop.create_task(_runner())
     except RuntimeError:
-        logger.warning("Unable to schedule customer request side effects (no event loop)")
+        import threading
+
+        threading.Thread(target=_launch, daemon=True, name="customer-request-side-effects").start()
 
 
 def _build_enterprise_dashboard_payload(db: Session, organization_id: str) -> dict[str, Any]:
@@ -1596,7 +1810,12 @@ def _build_enterprise_dashboard_payload(db: Session, organization_id: str) -> di
 router = APIRouter(
     prefix="/api/health-isf",
     tags=["health-isf"],
-    dependencies=[Depends(require_health_isf_access)],
+    dependencies=[Depends(require_health_isf_or_driver_session)],
+)
+
+public_router = APIRouter(
+    prefix="/api/health-isf",
+    tags=["health-isf-public"],
 )
 
 websocket_router = APIRouter(
@@ -5424,14 +5643,20 @@ async def run_operational_cleanup(
 # ── Rides Endpoints ───────────────────────────────────────────────────────────
 
 @router.post("/customer-requests", response_model=CustomerRideRequestResponse, status_code=201)
-async def create_customer_ride_request(
+def create_customer_ride_request(
     payload: CustomerRideRequestCreateRequest,
     request: Request,
     _: None = Depends(require_health_isf_access),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
+    import time
+
+    from app.modules.health_isf.rider_request_timing_log import record_rider_request_timing
+
+    route_started = time.perf_counter()
     organization_id = enforce_tenant_scope(user, user.organization_id)
+    auth_started = time.perf_counter()
     auth_decision = evaluate_customer_request_authorization(
         organization_id=organization_id,
         rider_name=payload.rider_name,
@@ -5439,18 +5664,62 @@ async def create_customer_ride_request(
         scheduled_time=payload.scheduled_time,
         recurring=payload.recurring,
     )
+    record_rider_request_timing(
+        stage="authorization_adapter",
+        duration_ms=int((time.perf_counter() - auth_started) * 1000),
+        organization_id=organization_id,
+    )
     if auth_decision.hard_block:
         raise HTTPException(status_code=403, detail=auth_decision.reason)
 
     idempotency_key = (request.headers.get("X-Idempotency-Key") or "").strip()
+    if not idempotency_key:
+        client_key = str(payload.client_request_key or "").strip()
+        if client_key:
+            idempotency_key = client_key[:128]
+
     if idempotency_key:
+        idem_started = time.perf_counter()
         existing_key = IdempotencyService.get_key(db, idempotency_key)
         if existing_key and existing_key.resource_id:
             existing = service.get_customer_ride_request_by_id(db, existing_key.resource_id)
             if existing:
                 enforce_entity_tenant(user, existing.organization_id)
+                record_rider_request_timing(
+                    stage="idempotency_cache_hit",
+                    duration_ms=int((time.perf_counter() - idem_started) * 1000),
+                    idempotency_key=idempotency_key,
+                    ride_id=str(existing.ride_id),
+                    request_id=str(existing.id),
+                    organization_id=organization_id,
+                    http_status=201,
+                )
                 return _serialize_customer_request(existing)
+        if not existing_key:
+            reserved = IdempotencyService.reserve_key(
+                db,
+                idempotency_key=idempotency_key,
+                scope="customer_ride_request",
+            )
+            if not reserved:
+                raced_key = IdempotencyService.get_key(db, idempotency_key)
+                if raced_key and raced_key.resource_id:
+                    existing = service.get_customer_ride_request_by_id(db, raced_key.resource_id)
+                    if existing:
+                        enforce_entity_tenant(user, existing.organization_id)
+                        return _serialize_customer_request(existing)
+                raise HTTPException(
+                    status_code=409,
+                    detail="Identical rider request is already being processed; retry with the same idempotency key shortly",
+                )
+        record_rider_request_timing(
+            stage="idempotency_reserve",
+            duration_ms=int((time.perf_counter() - idem_started) * 1000),
+            idempotency_key=idempotency_key,
+            organization_id=organization_id,
+        )
 
+    create_started = time.perf_counter()
     try:
         request_row, ride = service.create_customer_ride_request(
             db,
@@ -5467,15 +5736,29 @@ async def create_customer_ride_request(
             submitted_by_user_id=user.user_id,
         )
     except ValueError as exc:
+        if idempotency_key:
+            IdempotencyService.delete_key(db, idempotency_key)
+        record_rider_request_timing(
+            stage="create_ride_transaction_failed",
+            duration_ms=int((time.perf_counter() - create_started) * 1000),
+            idempotency_key=idempotency_key or None,
+            organization_id=organization_id,
+            error=str(exc),
+            http_status=400,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    record_rider_request_timing(
+        stage="create_ride_transaction",
+        duration_ms=int((time.perf_counter() - create_started) * 1000),
+        idempotency_key=idempotency_key or None,
+        ride_id=str(ride.id),
+        request_id=str(request_row.id),
+        organization_id=organization_id,
+    )
+
     if idempotency_key:
-        IdempotencyService.reserve_key(
-            db,
-            idempotency_key=idempotency_key,
-            scope="customer_ride_request",
-            resource_id=request_row.id,
-        )
+        IdempotencyService.bind_resource(db, idempotency_key, str(request_row.id))
 
     _schedule_customer_request_side_effects(
         organization_id=organization_id,
@@ -5497,7 +5780,39 @@ async def create_customer_ride_request(
     )
 
     db.refresh(request_row)
+    record_rider_request_timing(
+        stage="http_response_ready",
+        duration_ms=int((time.perf_counter() - route_started) * 1000),
+        idempotency_key=idempotency_key or None,
+        ride_id=str(ride.id),
+        request_id=str(request_row.id),
+        organization_id=organization_id,
+        http_status=201,
+    )
     return _serialize_customer_request(request_row)
+
+
+@router.get("/customer-requests/idempotency/{idempotency_key}", response_model=CustomerRideRequestResponse)
+def get_customer_ride_request_by_idempotency(
+    idempotency_key: str,
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Recover a submitted rider request after client timeout using the idempotency key."""
+    key = (idempotency_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="idempotency_key is required")
+    row = IdempotencyService.get_key(db, key)
+    if not row:
+        raise HTTPException(status_code=404, detail="No rider request found for idempotency key")
+    if not row.resource_id:
+        raise HTTPException(status_code=202, detail="Rider request is still being processed")
+    existing = service.get_customer_ride_request_by_id(db, row.resource_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Rider request record missing for idempotency key")
+    enforce_entity_tenant(user, existing.organization_id)
+    return _serialize_customer_request(existing)
 
 
 @router.get("/customer-requests", response_model=list[CustomerRideRequestResponse])
@@ -5913,10 +6228,10 @@ async def provider_mark_request_delay(
 def get_driver_active_offer(
     driver_id: str,
     organization_id: str | None = Query(None),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -5954,6 +6269,14 @@ def get_driver_active_offer(
             offer_payload["dropoff_address"] = ride.dropoff_address
             offer_payload["ride_status"] = service._normalize_status_token(ride.lifecycle_state or ride.status)
             offer_payload["requested_at"] = ride.requested_at.isoformat() if ride.requested_at else None
+    logger.info(
+        "driver_active_offer driver_id=%s offer_ride_id=%s assignment_driver_id=%s assignment_state=%s has_offer=%s",
+        driver_id,
+        (offer_payload or {}).get("ride_id") if offer_payload else None,
+        (offer_payload or {}).get("driver_id") if offer_payload else driver_id,
+        (offer_payload or {}).get("assignment_state") if offer_payload else None,
+        bool(offer_payload),
+    )
     return {
         "organization_id": effective_org_id,
         "driver_id": driver_id,
@@ -5964,12 +6287,13 @@ def get_driver_active_offer(
 @router.get("/drivers/{driver_id}/active-ride", response_model=DriverActiveRideResponse)
 def get_driver_active_ride(
     driver_id: str,
+    request: Request,
     organization_id: str | None = Query(None),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
     """Authoritative active assigned ride for the driver mobile app."""
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -5986,7 +6310,7 @@ def get_driver_active_ride(
 
     assignment = snapshot.get("assignment")
     ride = snapshot.get("ride")
-    return DriverActiveRideResponse(
+    response = DriverActiveRideResponse(
         driver_id=driver_id,
         organization_id=effective_org_id,
         has_active_ride=bool(snapshot.get("has_active_ride")),
@@ -5997,16 +6321,31 @@ def get_driver_active_ride(
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
         ride=_ride_response_with_financials(db, ride) if ride else None,
     )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="active_ride_fetch",
+        driver_id=driver_id,
+        ride_id=str(ride.id) if ride else None,
+        assignment_state=response.assignment_state,
+        api_response={
+            "has_active_ride": response.has_active_ride,
+            "assignment_state": response.assignment_state,
+            "ride_id": str(ride.id) if ride else None,
+        },
+    )
+    return response
 
 
 @router.get("/drivers/{driver_id}/live-workspace", response_model=DriverLiveWorkspaceResponse)
 def get_driver_live_workspace(
     driver_id: str,
+    request: Request,
     organization_id: str | None = Query(None),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -6023,7 +6362,7 @@ def get_driver_live_workspace(
 
     assignment = snapshot.get("assignment")
     ride = snapshot.get("ride")
-    return DriverLiveWorkspaceResponse(
+    response = DriverLiveWorkspaceResponse(
         driver_id=driver_id,
         organization_id=effective_org_id,
         safety_status=str(snapshot.get("safety_status") or "ok"),
@@ -6034,18 +6373,35 @@ def get_driver_live_workspace(
         eta_minutes=snapshot.get("eta_minutes"),
         timeline_states=list(snapshot.get("timeline_states") or []),
     )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="live_workspace_fetch",
+        driver_id=driver_id,
+        ride_id=str(ride.id) if ride else None,
+        assignment_state=str(getattr(assignment, "assignment_state", None) or getattr(assignment, "state", None) or ""),
+        api_response={
+            "has_active_ride": bool(ride),
+            "ride_id": str(ride.id) if ride else None,
+            "timeline_states": list(snapshot.get("timeline_states") or [])[:8],
+        },
+    )
+    return response
 
 
 @router.post("/drivers/{driver_id}/route-progress", response_model=DriverLiveWorkspaceResponse)
 async def progress_driver_route(
     driver_id: str,
     payload: DriverRouteProgressRequest,
+    request: Request,
     organization_id: str | None = Query(None),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_workflow_auth()),
     db: Session = Depends(get_db),
 ):
-    driver = service.get_driver_by_id(db, driver_id)
+    user = auth.user
+    actor_user_id = auth.actor_user_id
+    effective_driver_id = _effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
@@ -6054,7 +6410,7 @@ async def progress_driver_route(
     workspace = service.get_driver_live_workspace_data(
         db,
         organization_id=effective_org_id,
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
     )
     assignment = workspace.get("assignment")
     ride = workspace.get("ride")
@@ -6071,94 +6427,106 @@ async def progress_driver_route(
 
     if payload.target_state == "en_route_pickup":
         try:
-            ride = service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_en_route_pickup(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="assignment-accepted",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "arrived_pickup":
         try:
-            ride = service.driver_arrived_pickup(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_arrived_pickup(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="pickup-arrived",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "rider_loaded":
         try:
-            ride = service.driver_pickup_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_pickup_complete(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="rider-loaded",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="trip-started",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "trip_in_progress":
         try:
-            ride = service.driver_start_trip(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_start_trip(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="trip-progress",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "arrived_destination":
         try:
-            ride = service.driver_arrived_destination(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_arrived_destination(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="location-updated",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
         await emitter.emit_dispatch_changed(
             organization_id=effective_org_id,
             event_name="trip-progress",
-            actor_user_id=user.user_id,
-            details={"ride_id": ride_id, "driver_id": driver_id, "target_state": payload.target_state},
+            actor_user_id=actor_user_id,
+            details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
     elif payload.target_state == "completed":
-        pre_driver = service.get_driver_by_id(db, driver_id)
+        pre_driver = service.get_driver_by_id(db, effective_driver_id)
         previous_driver_status = str(getattr(pre_driver, "status", "") or "") if pre_driver else None
         try:
-            ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
-        except service.RideLifecycleConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            ride = _sync_driver_progress_action(
+                db,
+                ride_id,
+                lambda: service.driver_dropoff_complete(db, driver_id=effective_driver_id, ride_id=ride_id, actor_user_id=actor_user_id),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not ride:
@@ -6166,8 +6534,8 @@ async def progress_driver_route(
         await _emit_driver_trip_completion_events(
             db=db,
             ride=ride,
-            driver_id=driver_id,
-            actor_user_id=user.user_id,
+            driver_id=effective_driver_id,
+            actor_user_id=actor_user_id,
             previous_driver_status=previous_driver_status,
             source="driver_route_progress_complete",
         )
@@ -6180,12 +6548,12 @@ async def progress_driver_route(
     refreshed = service.get_driver_live_workspace_data(
         db,
         organization_id=effective_org_id,
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
     )
     refreshed_assignment = refreshed.get("assignment")
     refreshed_ride = refreshed.get("ride")
-    return DriverLiveWorkspaceResponse(
-        driver_id=driver_id,
+    response = DriverLiveWorkspaceResponse(
+        driver_id=effective_driver_id,
         organization_id=effective_org_id,
         safety_status=str(refreshed.get("safety_status") or "ok"),
         reconnect_safe=bool(refreshed.get("reconnect_safe")),
@@ -6195,6 +6563,22 @@ async def progress_driver_route(
         eta_minutes=refreshed.get("eta_minutes"),
         timeline_states=list(refreshed.get("timeline_states") or []),
     )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="route_progress",
+        driver_id=effective_driver_id,
+        ride_id=ride_id,
+        assignment_state=payload.target_state,
+        api_response={
+            "target_state": payload.target_state,
+            "ride_id": ride_id,
+            "requested_driver_id": driver_id,
+            "effective_driver_id": effective_driver_id,
+            "active_ride_status": str(getattr(refreshed_ride, "lifecycle_state", None) or getattr(refreshed_ride, "status", None) or ""),
+        },
+    )
+    return response
 
 
 @router.get("/admin/command-center/summary")
@@ -7606,9 +7990,10 @@ def get_ride_workflow_path(
 @router.get("/rides/{ride_id}/completion-handoff", response_model=RideCompletionHandoffResponse)
 def get_ride_completion_handoff(
     ride_id: str,
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_ride_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     ride = service.get_ride_by_id(db, ride_id)
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
@@ -7697,11 +8082,11 @@ def get_driver_completion_snapshot(
     driver_id: str,
     organization_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
     """Authoritative completed-trip view for driver earnings, history, and billing."""
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -8228,9 +8613,124 @@ def get_driver(
     return driver
 
 
+@public_router.post("/drivers/mobile-login", response_model=DriverLoginResponse)
+async def driver_mobile_login(
+    payload: DriverMobileLoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Public driver sign-in for the mobile app (phone verification, no platform JWT)."""
+    try:
+        driver = service.find_driver_by_login_phone(
+            db,
+            phone=payload.phone,
+            driver_id=payload.driver_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found for this phone number")
+
+    try:
+        login_result = service.driver_login(
+            db,
+            driver_id=driver.id,
+            phone=payload.phone,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    driver_obj = login_result["driver"]
+    session_obj = login_result["session"]
+    session_token = login_result["session_token"]
+
+    emitter = get_emitter()
+    await emitter.emit_driver_status_changed(
+        organization_id=driver_obj.organization_id,
+        driver_id=driver_obj.id,
+        from_status="offline",
+        to_status=str(driver_obj.availability_state),
+        actor_user_id=str(driver_obj.id),
+        details={"event_name": "driver-mobile-online"},
+    )
+    await emitter.emit_dispatch_changed(
+        organization_id=driver_obj.organization_id,
+        event_name="driver-online",
+        actor_user_id=str(driver_obj.id),
+        details={"driver_id": driver_obj.id, "availability_state": driver_obj.availability_state, "source": "mobile_login"},
+    )
+
+    response = DriverLoginResponse(
+        driver_id=driver_obj.id,
+        organization_id=driver_obj.organization_id,
+        session_id=str(session_obj.id),
+        session_token=session_token,
+        session_state=session_obj.session_state,
+        auth_state=driver_obj.auth_state,
+        availability_state=driver_obj.availability_state,
+        is_online=bool(driver_obj.is_online),
+        issued_at=session_obj.issued_at,
+        expires_at=session_obj.expires_at,
+    )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="mobile_login",
+        driver_id=driver_obj.id,
+        assignment_state=str(driver_obj.availability_state or ""),
+        api_response={
+            "session_id": str(session_obj.id),
+            "session_state": session_obj.session_state,
+            "auth_state": driver_obj.auth_state,
+            "availability_state": driver_obj.availability_state,
+        },
+    )
+    return response
+
+
+@router.post("/drivers/mobile-assignment-sync-log")
+def ingest_driver_mobile_assignment_sync_log(
+    payload: DriverMobileAssignmentSyncLogRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Persist frontend Driver Mobile assignment sync diagnostics to the rotating log."""
+    driver_id = payload.authenticated_driver_id
+    session_id = resolve_driver_session_id(db, driver_id=driver_id, request=request)
+    if not session_id:
+        session_id = _sync_safe_text(payload.driver_session_id) or None
+    record_driver_mobile_assignment_sync(
+        source="frontend",
+        event=payload.event,
+        authenticated_driver_id=driver_id,
+        driver_session_id=session_id,
+        requested_ride_id=payload.requested_ride_id,
+        assignment_state=payload.assignment_state,
+        api_response=payload.api_response,
+        frontend_state_transition=payload.frontend_state_transition,
+        http_status=payload.http_status,
+        route=payload.route or request.url.path,
+        http_method=request.method,
+        extra=payload.extra,
+    )
+    return {"ok": True}
+
+
+@router.post("/ops-shell/hydration-diag-log")
+def ingest_ops_shell_hydration_diag_log(
+    payload: dict[str, Any] = Body(default_factory=dict),
+):
+    """Persist ops-shell hydration diagnostics to the rotating log."""
+    from app.modules.health_isf.ops_shell_hydration_log import record_ops_shell_hydration
+
+    record_ops_shell_hydration(payload or {})
+    return {"ok": True}
+
+
 @router.post("/drivers/login", response_model=DriverLoginResponse)
 async def driver_login(
     payload: DriverLoginRequest,
+    request: Request,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
@@ -8268,9 +8768,10 @@ async def driver_login(
         details={"driver_id": driver_obj.id, "availability_state": driver_obj.availability_state},
     )
 
-    return DriverLoginResponse(
+    response = DriverLoginResponse(
         driver_id=driver_obj.id,
         organization_id=driver_obj.organization_id,
+        session_id=str(session_obj.id),
         session_token=session_token,
         session_state=session_obj.session_state,
         auth_state=driver_obj.auth_state,
@@ -8279,6 +8780,19 @@ async def driver_login(
         issued_at=session_obj.issued_at,
         expires_at=session_obj.expires_at,
     )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="driver_login",
+        driver_id=driver_obj.id,
+        assignment_state=str(driver_obj.availability_state or ""),
+        api_response={
+            "session_id": str(session_obj.id),
+            "session_state": session_obj.session_state,
+            "auth_state": driver_obj.auth_state,
+        },
+    )
+    return response
 
 
 @router.post("/drivers/logout")
@@ -8319,12 +8833,36 @@ async def driver_logout(
 @router.post("/drivers/availability", response_model=DriverRuntimeStatusResponse)
 async def set_driver_availability(
     payload: DriverAvailabilityRequest,
-    user: UserContext = Depends(get_current_user_context),
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
     driver = service.get_driver_by_id(db, payload.driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
+
+    user: UserContext | None = None
+    actor_user_id = ""
+    if creds:
+        try:
+            platform_auth = _platform_user_context(creds, db, allowed_roles=HEALTH_ISF_PLATFORM_ROLES)
+            if platform_auth:
+                user = platform_auth.user
+                actor_user_id = platform_auth.actor_user_id
+        except HTTPException:
+            pass
+    session_token = (payload.session_token or "").strip() or None
+    if not session_token:
+        session_token = request.headers.get("X-Driver-Session-Token") or request.headers.get("x-driver-session-token")
+        session_token = str(session_token).strip() if session_token else None
+    if not user and session_token:
+        driver_auth = _driver_session_context(payload.driver_id, session_token, db)
+        if driver_auth:
+            user = driver_auth.user
+            actor_user_id = driver_auth.actor_user_id
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     enforce_entity_tenant(user, driver.organization_id)
     previous = str(driver.availability_state or driver.status or "offline")
     try:
@@ -8332,7 +8870,7 @@ async def set_driver_availability(
             db,
             driver_id=payload.driver_id,
             availability_state=payload.availability_state,
-            session_token=payload.session_token,
+            session_token=session_token,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -8345,17 +8883,17 @@ async def set_driver_availability(
         driver_id=updated.id,
         from_status=previous,
         to_status=updated.availability_state,
-        actor_user_id=user.user_id,
+        actor_user_id=actor_user_id,
         details={"event_name": "driver-availability-updated"},
     )
     await emitter.emit_dispatch_changed(
         organization_id=updated.organization_id,
         event_name="driver-availability-updated",
-        actor_user_id=user.user_id,
+        actor_user_id=actor_user_id,
         details={"driver_id": updated.id, "availability_state": updated.availability_state},
     )
 
-    runtime = service.get_driver_runtime_status(db, driver_id=updated.id, session_token=payload.session_token)
+    runtime = service.get_driver_runtime_status(db, driver_id=updated.id, session_token=session_token)
     return DriverRuntimeStatusResponse(
         driver_id=updated.id,
         organization_id=updated.organization_id,
@@ -8473,18 +9011,31 @@ def validate_driver_session(
 @router.get("/drivers/{driver_id}/assigned-rides", response_model=list[RideResponse])
 def get_driver_assigned_rides(
     driver_id: str,
+    request: Request,
     organization_id: str | None = Query(None),
-    _: None = Depends(require_health_isf_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
     enforce_entity_tenant(user, driver.organization_id)
     rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=driver_id)
-    return [_ride_response_with_financials(db, ride) for ride in rides]
+    response = [_ride_response_with_financials(db, ride) for ride in rides]
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="assigned_rides_fetch",
+        driver_id=driver_id,
+        ride_id=str(rides[0].id) if rides else None,
+        api_response={
+            "count": len(rides),
+            "ride_ids": [str(ride.id) for ride in rides[:20]],
+        },
+    )
+    return response
 
 
 @router.patch("/drivers/{driver_id}", response_model=DriverResponse)
@@ -8510,18 +9061,27 @@ def patch_driver(
 async def driver_accept_ride(
     driver_id: str,
     payload: DriverRideActionRequest,
-    _user = Depends(require_driver_workflow_access),
-    user: UserContext = Depends(get_current_user_context),
+    request: Request,
+    auth: DriverEndpointAuth = Depends(require_driver_accept_auth()),
     db: Session = Depends(get_db),
 ):
-    driver = service.get_driver_by_id(db, driver_id)
+    user = auth.user
+    effective_driver_id = driver_id
+    if auth.actor_user_id is None:
+        effective_driver_id = str(auth.user.user_id)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
     try:
-        ride = service.accept_driver_ride(db, driver_id=driver_id, ride_id=payload.ride_id, actor_user_id=_user.id)
-    except service.RideLifecycleConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        ride = service.accept_driver_ride(
+            db,
+            driver_id=effective_driver_id,
+            ride_id=payload.ride_id,
+            actor_user_id=auth.actor_user_id,
+        )
+    except service.RideLifecycleConflictError:
+        ride = service.get_ride_by_id(db, payload.ride_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:
@@ -8533,27 +9093,41 @@ async def driver_accept_ride(
         ride_id=ride.id,
         from_status=RideStatus.ASSIGNED.value,
         to_status=RideStatus.ASSIGNED.value,
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
     )
     await emitter.emit_driver_active_ride_state(
         organization_id=ride.organization_id,
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         active_ride_id=ride.id,
         state=RideStatus.ASSIGNED.value,
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
         details={"source": "driver_accept_route"},
     )
     await emitter.emit_dispatch_changed(
         organization_id=ride.organization_id,
         event_name="assignment-accepted",
-        actor_user_id=_user.id,
-        details={"ride_id": ride.id, "driver_id": driver_id},
+        actor_user_id=auth.actor_user_id,
+        details={"ride_id": ride.id, "driver_id": effective_driver_id},
     )
     await emitter.emit_dispatch_changed(
         organization_id=ride.organization_id,
         event_name="driver-offer-accepted",
-        actor_user_id=_user.id,
-        details={"ride_id": ride.id, "driver_id": driver_id},
+        actor_user_id=auth.actor_user_id,
+        details={"ride_id": ride.id, "driver_id": effective_driver_id},
+    )
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="accept_ride",
+        driver_id=effective_driver_id,
+        ride_id=payload.ride_id,
+        assignment_state=str(getattr(ride, "lifecycle_state", None) or getattr(ride, "status", None) or "accepted"),
+        api_response={
+            "ride_id": str(ride.id),
+            "status": str(getattr(ride, "lifecycle_state", None) or getattr(ride, "status", None) or ""),
+            "requested_driver_id": driver_id,
+            "effective_driver_id": effective_driver_id,
+        },
     )
     return ride
 
@@ -8562,10 +9136,10 @@ async def driver_accept_ride(
 async def driver_decline_ride(
     driver_id: str,
     payload: DriverRideActionRequest,
-    _user = Depends(require_driver_workflow_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform(workflow_only=True)),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -8575,7 +9149,7 @@ async def driver_decline_ride(
             db,
             driver_id=driver_id,
             ride_id=payload.ride_id,
-            actor_user_id=_user.id,
+            actor_user_id=auth.actor_user_id,
             note=payload.note,
         )
     except ValueError as exc:
@@ -8589,26 +9163,26 @@ async def driver_decline_ride(
         ride_id=ride.id,
         from_status=RideStatus.ASSIGNED.value,
         to_status=RideStatus.QUEUED.value,
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
     )
     await emitter.emit_driver_active_ride_state(
         organization_id=ride.organization_id,
         driver_id=driver_id,
         active_ride_id=None,
         state=RideStatus.QUEUED.value,
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
         details={"source": "driver_decline_route"},
     )
     await emitter.emit_dispatch_changed(
         organization_id=ride.organization_id,
         event_name="assignment-rejected",
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
         details={"ride_id": ride.id, "driver_id": driver_id, "note": payload.note},
     )
     await emitter.emit_dispatch_changed(
         organization_id=ride.organization_id,
         event_name="driver-offer-rejected",
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
         details={"ride_id": ride.id, "driver_id": driver_id, "note": payload.note},
     )
     return ride
@@ -8826,17 +9400,17 @@ def get_ride_pickup_status(
 async def driver_dropoff_complete(
     driver_id: str,
     payload: DriverRideActionRequest,
-    _user = Depends(require_driver_workflow_access),
-    user: UserContext = Depends(get_current_user_context),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform(workflow_only=True)),
     db: Session = Depends(get_db),
 ):
+    user = auth.user
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
     previous_driver_status = str(getattr(driver, "status", "") or "")
     try:
-        ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=payload.ride_id, actor_user_id=_user.id)
+        ride = service.driver_dropoff_complete(db, driver_id=driver_id, ride_id=payload.ride_id, actor_user_id=auth.actor_user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:
@@ -8846,7 +9420,7 @@ async def driver_dropoff_complete(
         db=db,
         ride=ride,
         driver_id=driver_id,
-        actor_user_id=_user.id,
+        actor_user_id=auth.actor_user_id,
         previous_driver_status=previous_driver_status,
         source="driver_dropoff_route",
     )

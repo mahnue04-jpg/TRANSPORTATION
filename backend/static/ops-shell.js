@@ -14,7 +14,7 @@
     "billing": { path: APP_BASE_PATH + "/billing", title: "Billing", subtitle: "Revenue tracking, claims reimbursement, and financial controls." },
     "analytics": { path: APP_BASE_PATH + "/analytics", title: "Reports & Analytics", subtitle: "Operational and financial analytics across dispatch and care delivery." },
     "alerts": { path: APP_BASE_PATH + "/alerts", title: "Alerts", subtitle: "Operational alerts, escalations, and supervision-critical notices." },
-    "mobile": { path: APP_BASE_PATH + "/mobile", title: "Mobile Apps", subtitle: "Embedded multi-role mobile ecosystem for driver, rider, admin, and provider." },
+    "mobile": { path: APP_BASE_PATH + "/mobile", title: "Driver Mobile", subtitle: "Field driver sign-in, trip workflow, and assignment sync." },
     "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "AI Assistant", subtitle: "Side operational assistant for guidance, summaries, and supervised recommendations." },
     "settings": { path: APP_BASE_PATH + "/settings", title: "Settings", subtitle: "Organization, permissions, and platform configuration controls." },
     "system-health": { path: APP_BASE_PATH + "/system-health", title: "Operations Status", subtitle: "Operational readiness and live monitoring posture." }
@@ -84,6 +84,8 @@
     "production proof",
     "proof driver",
     "live dispatch driver",
+    "hydration proof",
+    "proof rider",
     "malik_final_proof",
     "prod_sync_",
     "bill_sync_",
@@ -106,6 +108,8 @@
     "flow dropoff",
     "browser pickup",
     "browser dropoff",
+    "proof pickup",
+    "proof dropoff",
     "final local production readiness",
     "billing module sync",
     "production sync consecutive"
@@ -117,7 +121,8 @@
     "dropoff_complete",
     "closed",
     "resolved",
-    "declined"
+    "declined",
+    "no_show"
   ];
 
   var ROLE_OPERATIONAL_PATHS = {
@@ -436,7 +441,9 @@
       refreshPausedUntilMs: 0,
       backendDownConsecutive: 0,
       silentRetryCount: 0,
-      suppressSyntheticClicks: 0
+      suppressSyntheticClicks: 0,
+      hydrationLoadGen: 0,
+      lastPageDataSignature: ""
     }
   };
 
@@ -449,8 +456,61 @@
   var driverPollAbortController = null;
   var driverLastConfirmedWorkflow = null;
   var driverLastAppliedObservedAt = 0;
+  var driverActionInFlight = false;
   var DRIVER_SESSION_STORAGE_KEY = "amicor_driver_session";
   var driverMobileAuthCache = null;
+
+  function getMobileSessionDriverId() {
+    if (!isDriverMobileAppRoute()) return "";
+    var persisted = readPersistedDriverSession();
+    return persisted && persisted.driver_id ? safeText(persisted.driver_id, "") : "";
+  }
+
+  function getCanonicalMobileDriverContext() {
+    if (!isDriverMobileSessionRoute()) {
+      return {
+        driverId: "",
+        sessionToken: "",
+        driverName: "",
+        organizationId: "",
+        authenticated: false,
+        uiState: "not_mobile"
+      };
+    }
+    var persisted = readPersistedDriverSession();
+    if (!persisted || !persisted.driver_id || !persisted.session_token) {
+      return {
+        driverId: "",
+        sessionToken: "",
+        driverName: "",
+        organizationId: "",
+        authenticated: false,
+        uiState: "login_required"
+      };
+    }
+    return {
+      driverId: safeText(persisted.driver_id, ""),
+      sessionToken: safeText(persisted.session_token, ""),
+      sessionId: safeText(persisted.session_id, ""),
+      driverName: safeText(persisted.driver_name, ""),
+      organizationId: safeText(persisted.organization_id, ""),
+      authenticated: true,
+      uiState: "session_ready"
+    };
+  }
+
+  function resolveCanonicalMobileDriverId() {
+    var ctx = getCanonicalMobileDriverContext();
+    if (ctx.authenticated && ctx.driverId) {
+      driverBoundDriverId = ctx.driverId;
+      return ctx.driverId;
+    }
+    return "";
+  }
+
+  function isMobileDriverApiUrl(url) {
+    return safeText(url, "").indexOf("/api/health-isf/drivers/") >= 0;
+  }
 
   function readPersistedDriverSession() {
     try {
@@ -465,6 +525,7 @@
         driver_name: safeText(parsed.driver_name || parsed.driverName, ""),
         role: safeText(parsed.role, "driver").toLowerCase() || "driver",
         session_token: safeText(parsed.session_token || parsed.sessionToken, ""),
+        session_id: safeText(parsed.session_id || parsed.sessionId, ""),
         organization_id: safeText(parsed.organization_id || parsed.organizationId, ""),
         updated_at: safeText(parsed.updated_at, "")
       };
@@ -481,20 +542,43 @@
       driver_name: safeText(payload && (payload.driver_name || payload.driverName), ""),
       role: "driver",
       session_token: safeText(payload && (payload.session_token || payload.sessionToken), ""),
+      session_id: safeText(payload && (payload.session_id || payload.sessionId), ""),
       organization_id: safeText(payload && (payload.organization_id || payload.organizationId), ""),
       updated_at: new Date().toISOString()
     };
     try {
       localStorage.setItem(DRIVER_SESSION_STORAGE_KEY, JSON.stringify(session));
-      localStorage.setItem("amicor_driver_workflow_id", driverId);
-      localStorage.setItem("amicor_shell_role", "driver");
+      if (!isDriverMobileAppRoute()) {
+        localStorage.setItem("amicor_driver_workflow_id", driverId);
+      }
     } catch (_) {}
-    bindDriverIdentity(driverId);
+    bindDriverIdentity(driverId, { forceRebind: true });
     driverMobileAuthCache = null;
     try {
       window.dispatchEvent(new CustomEvent("ami:driver-session-updated", { detail: session }));
     } catch (_) {}
     return session;
+  }
+
+  function getDriverSessionToken() {
+    var persisted = readPersistedDriverSession();
+    return persisted && persisted.session_token ? persisted.session_token : "";
+  }
+
+  function applyDriverSessionHeaders(headers, platformToken, requestUrl) {
+    var next = Object.assign({}, headers || {});
+    var mobileCtx = getCanonicalMobileDriverContext();
+    var driverSessionToken = mobileCtx.sessionToken || getDriverSessionToken();
+    if (isDriverMobileAppRoute() && mobileCtx.authenticated && isMobileDriverApiUrl(requestUrl)) {
+      if (driverSessionToken) {
+        next["X-Driver-Session-Token"] = driverSessionToken;
+      }
+      return next;
+    }
+    if (driverSessionToken && !platformToken) {
+      next["X-Driver-Session-Token"] = driverSessionToken;
+    }
+    return next;
   }
 
   window._amiPersistDriverSession = persistDriverSession;
@@ -514,10 +598,46 @@
   window._amiClearDriverSession = clearPersistedDriverSession;
 
   async function resolveDriverMobileAuth(token) {
-    if (driverMobileAuthCache && safeText(driverMobileAuthCache.driver_id, "")) {
+    var persisted = readPersistedDriverSession();
+    if (isDriverMobileAppRoute()) {
+      if (
+        driverMobileAuthCache
+        && persisted
+        && safeText(driverMobileAuthCache.driver_id, "") !== safeText(persisted.driver_id, "")
+      ) {
+        driverMobileAuthCache = null;
+      }
+      if (driverMobileAuthCache && safeText(driverMobileAuthCache.driver_id, "")) {
+        return driverMobileAuthCache;
+      }
+      if (persisted && persisted.driver_id && persisted.session_token) {
+        driverMobileAuthCache = {
+          valid: true,
+          requires_login: false,
+          driver_id: persisted.driver_id,
+          driver_name: persisted.driver_name || "",
+          session_role: "driver",
+          auth_role: "driver",
+          organization_id: persisted.organization_id || "",
+          session_token: persisted.session_token || "",
+          source: "persisted_driver_session"
+        };
+        bindDriverIdentity(persisted.driver_id);
+        return driverMobileAuthCache;
+      }
+      driverMobileAuthCache = {
+        valid: false,
+        requires_login: true,
+        driver_id: "",
+        driver_name: "",
+        session_role: "driver",
+        auth_role: "driver",
+        organization_id: "",
+        session_token: "",
+        source: "driver_mobile_login_required"
+      };
       return driverMobileAuthCache;
     }
-    var persisted = readPersistedDriverSession();
     var authRole = "";
     var authEmail = "";
     var authName = "";
@@ -622,6 +742,43 @@
     return driverMobileAuthCache;
   }
 
+  function resetDriverMobileAfterCompletion() {
+    var mobileCtx = getCanonicalMobileDriverContext();
+    driverLastConfirmedWorkflow = null;
+    driverHydrateLockUntil = 0;
+    state.driverWorkflow = {
+      driverId: mobileCtx.driverId || driverBoundDriverId || "",
+      workspace: null,
+      activeRide: { has_active_ride: false, ride: null },
+      activeOffer: null,
+      assignedRides: [],
+      earnings: safeObject((safeObject(state.driverWorkflow)).earnings),
+      completedRides: Array.isArray((safeObject(state.driverWorkflow)).completedRides)
+        ? state.driverWorkflow.completedRides
+        : [],
+      billingHandoffs: Array.isArray((safeObject(state.driverWorkflow)).billingHandoffs)
+        ? state.driverWorkflow.billingHandoffs
+        : []
+    };
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.currentDriverId = mobileCtx.driverId || state.driverApp.currentDriverId || "";
+    state.driverApp.shiftOnline = true;
+    state.driverApp.activeTripId = "";
+    state.driverApp.activeStage = "queued";
+    state.driverApp.tripQueue = [];
+    state.driverApp.mobileUiState = mobileCtx.authenticated ? "awaiting_assignment" : "login_required";
+    state.driverApp.lastStatusUpdate = mobileCtx.authenticated ? "Awaiting Assignment" : "Driver login required";
+    syncDriverEarningsSummaryToApp(
+      state.driverApp,
+      safeObject((safeObject(state.driverWorkflow)).earnings),
+      Array.isArray((safeObject(state.driverWorkflow)).completedRides) ? state.driverWorkflow.completedRides : [],
+      Array.isArray((safeObject(state.driverWorkflow)).billingHandoffs) ? state.driverWorkflow.billingHandoffs : []
+    );
+    if (state.driverApp.lastActionResult) {
+      state.driverApp.lastActionResult.current_ride_status = "completed";
+    }
+  }
+
   function resetDriverBoundIdentity() {
     driverBoundDriverId = "";
     driverLastConfirmedWorkflow = null;
@@ -631,10 +788,25 @@
     } catch (_) {}
   }
 
-  function bindDriverIdentity(driverId) {
+  function bindDriverIdentity(driverId, options) {
+    var opts = options || {};
+    if (isDriverMobileAppRoute()) {
+      var sessionId = resolveCanonicalMobileDriverId();
+      if (sessionId && opts.forceRebind !== true) {
+        return sessionId;
+      }
+      if (opts.forceRebind === true) {
+        var normalizedForce = safeText(driverId, "");
+        if (normalizedForce) {
+          driverBoundDriverId = normalizedForce;
+          return normalizedForce;
+        }
+      }
+      return sessionId || driverBoundDriverId || "";
+    }
     var normalized = safeText(driverId, "");
-    if (!normalized) return "";
-    if (driverBoundDriverId && driverBoundDriverId !== normalized) {
+    if (!normalized) return driverBoundDriverId || "";
+    if (driverBoundDriverId && driverBoundDriverId !== normalized && opts.forceRebind !== true) {
       console.warn("[DriverPoll] driver_id rebind blocked", {
         bound: driverBoundDriverId,
         attempted: normalized
@@ -642,14 +814,19 @@
       return driverBoundDriverId;
     }
     driverBoundDriverId = normalized;
-    try {
-      localStorage.setItem("amicor_driver_workflow_id", normalized);
-    } catch (_) {}
+    if (!isDriverMobileAppRoute()) {
+      try {
+        localStorage.setItem("amicor_driver_workflow_id", normalized);
+      } catch (_) {}
+    }
     return normalized;
   }
 
   async function resolveBoundDriverId(token, options) {
     var opts = options || {};
+    if (isDriverMobileAppRoute()) {
+      return resolveCanonicalMobileDriverId();
+    }
     if (driverBoundDriverId && opts.forceRebind !== true) {
       return driverBoundDriverId;
     }
@@ -689,6 +866,60 @@
     } catch (_) {}
   }
 
+  function logDriverMobileAssignmentSync(entry) {
+    if (!isDriverMobileSessionRoute()) return;
+    var ctx = getCanonicalMobileDriverContext();
+    var opts = safeObject(entry);
+    var driverId = safeText(opts.authenticated_driver_id, ctx.driverId);
+    if (!driverId) return;
+    var priorUi = safeText((safeObject(state.driverApp)).mobileUiState, "");
+    var nextUi = safeText(opts.next_ui_state, priorUi);
+    var transition = safeText(opts.frontend_state_transition, "");
+    if (!transition && nextUi && nextUi !== priorUi) {
+      transition = priorUi ? (priorUi + "->" + nextUi) : nextUi;
+    }
+    var payload = {
+      authenticated_driver_id: driverId,
+      assignment_driver_id: safeText(opts.assignment_driver_id, "") || null,
+      driver_session_id: safeText(opts.driver_session_id, ctx.sessionId),
+      requested_ride_id: safeText(opts.requested_ride_id, "") || null,
+      assignment_state: safeText(opts.assignment_state, "") || null,
+      api_response: opts.api_response || null,
+      frontend_state_transition: transition || null,
+      http_status: opts.http_status == null ? null : opts.http_status,
+      route: safeText(opts.route, "") || null,
+      event: safeText(opts.event, "assignment_sync"),
+      extra: opts.extra || null
+    };
+    try {
+      console.info("[DriverMobileSync]", payload);
+      if (!Array.isArray(window.__amiDriverMobileSyncLog)) {
+        window.__amiDriverMobileSyncLog = [];
+      }
+      window.__amiDriverMobileSyncLog.push(Object.assign({ ts: new Date().toISOString() }, payload));
+      if (window.__amiDriverMobileSyncLog.length > 300) {
+        window.__amiDriverMobileSyncLog = window.__amiDriverMobileSyncLog.slice(-300);
+      }
+    } catch (_) {}
+    var ingestUrl = "/api/health-isf/drivers/mobile-assignment-sync-log";
+    try {
+      fetch(ingestUrl, {
+        method: "POST",
+        headers: applyDriverSessionHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        }, getAccessToken(), ingestUrl),
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(function () {});
+    } catch (_) {}
+  }
+
+  function logDriverMobileRefreshSync(options) {
+    logDriverMobileAssignmentSync(safeObject(options));
+  }
+
   function driverRefreshCollectTripIds(activeRidePayload, assignedRideRows, offerEnvelope) {
     var ids = [];
     function push(id) {
@@ -713,6 +944,21 @@
     return incomingIds.indexOf(priorTripId) < 0;
   }
 
+  function isOperationalExcludedRideMeta(name, pickup, dropoff, notes) {
+    return isProofOrDemoTripMeta(name, pickup, dropoff, notes);
+  }
+
+  function filterOperationalRidesForHydration(rides) {
+    return (Array.isArray(rides) ? rides : []).filter(function (ride) {
+      return !isOperationalExcludedRideMeta(
+        ride.passenger_name || ride.rider_name,
+        ride.pickup_address || ride.pickup,
+        ride.dropoff_address || ride.dropoff,
+        ride.notes
+      );
+    });
+  }
+
   function driverRefreshHasOpenAssignment(activeRidePayload, assignedRideRows, offerEnvelope) {
     var activeRide = safeObject(activeRidePayload);
     if (activeRide.has_active_ride === true && safeText((safeObject(activeRide.ride)).id, "")) {
@@ -724,7 +970,7 @@
     }
     return Array.isArray(assignedRideRows) && assignedRideRows.some(function (row) {
       var status = normalizeRideStatusToken(row.lifecycle_state || row.status);
-      return ["completed", "cancelled", "failed", "declined"].indexOf(status) < 0;
+      return !isTerminalRideStatus(status);
     });
   }
 
@@ -758,15 +1004,25 @@
   }
 
   var DRIVER_UI_RENDER_MS = 300;
+  var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 12000;
   var DRIVER_WORKSPACE_ROLES = ["driver", "admin", "dispatcher", "supervisor"];
 
   function hasValidDriverMobileSession() {
     var cached = driverMobileAuthCache;
     if (cached && cached.valid === true && safeText(cached.driver_id, "")) {
+      if (isDriverMobileAppRoute()) {
+        return !!safeText(cached.session_token, "");
+      }
       return true;
     }
     var persisted = readPersistedDriverSession();
-    return !!(persisted && persisted.driver_id);
+    if (!persisted || !persisted.driver_id) {
+      return false;
+    }
+    if (isDriverMobileAppRoute()) {
+      return !!safeText(persisted.session_token, "");
+    }
+    return true;
   }
 
   function isDriverWorkspaceRoute() {
@@ -781,8 +1037,86 @@
     return DRIVER_WORKSPACE_ROLES.indexOf(state.role) >= 0;
   }
 
-  function isDriverMobileSurface() {
+  function isDriverMobileSessionRoute() {
     return state.route === "mobile" || state.route === "drivers";
+  }
+
+  function isDriverMobileAppRoute() {
+    if (state.route === "mobile") {
+      return true;
+    }
+    if (state.route === "drivers" && readPersistedDriverSession()) {
+      return true;
+    }
+    return false;
+  }
+
+  function isDriverMobileSurface() {
+    return isDriverMobileAppRoute();
+  }
+
+  function wrapDriverMobilePage(bodyHtml) {
+    return '<div class="driver-mobile-page">' + String(bodyHtml || "") + '</div>';
+  }
+
+  function applyDriverMobileShellLayout(enabled) {
+    document.body.classList.toggle("driver-mobile-app", !!enabled);
+  }
+
+  function getPlatformRole() {
+    return ROLE_ACCESS[state.role] ? state.role : "admin";
+  }
+
+  function initializePlatformRole(pathRoute) {
+    var platformRole = "";
+    try {
+      platformRole = safeText(localStorage.getItem(PLATFORM_ROLE_KEY), "");
+    } catch (_) {}
+    if (platformRole && ROLE_ACCESS[platformRole]) {
+      return platformRole;
+    }
+    var legacyRole = "admin";
+    try {
+      var raw = localStorage.getItem("amicor_shell_role") || "admin";
+      legacyRole = ROLE_ACCESS[raw] ? raw : "admin";
+    } catch (_) {}
+    if (legacyRole === "driver" && pathRoute !== "mobile" && pathRoute !== "drivers") {
+      legacyRole = "admin";
+    }
+    savePlatformRole(legacyRole);
+    return legacyRole;
+  }
+
+  function normalizeDriverLoginPhone(raw) {
+    var digits = safeText(raw, "").replace(/[^\d+]/g, "");
+    if (!digits) return "";
+    if (digits.charAt(0) !== "+") {
+      digits = digits.replace(/^\+/, "");
+    }
+    if (digits.length === 10) {
+      return digits.slice(0, 3) + "-" + digits.slice(3, 6) + "-" + digits.slice(6);
+    }
+    if (digits.length === 11 && digits.charAt(0) === "1") {
+      return digits.slice(1, 4) + "-" + digits.slice(4, 7) + "-" + digits.slice(7);
+    }
+    return safeText(raw, "").trim();
+  }
+
+  function syncDriverMobilePhoneState(rawPhone) {
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.mobileLogin = safeObject(state.driverApp.mobileLogin);
+    state.driverApp.mobileLogin.phone = normalizeDriverLoginPhone(rawPhone);
+    return state.driverApp.mobileLogin.phone;
+  }
+
+  function readDriverMobilePhoneInput() {
+    var phoneInput = document.getElementById("driver-mobile-phone");
+    var fromDom = safeText(phoneInput && phoneInput.value, "").trim();
+    if (fromDom) {
+      return syncDriverMobilePhoneState(fromDom);
+    }
+    var fromState = safeText((safeObject(state.driverApp)).mobileLogin && state.driverApp.mobileLogin.phone, "").trim();
+    return normalizeDriverLoginPhone(fromState);
   }
 
   function scheduleRenderPage(options) {
@@ -822,12 +1156,17 @@
   window.__amiDispatcherDraftRenderDeferred = false;
 
   var SESSION_STATE_KEY = "amicor_shell_session_v1";
+  var PLATFORM_ROLE_KEY = "amicor_platform_role";
   var PLATFORM_RESET_EPOCH_KEY = "amicor_platform_reset_epoch_v1";
   var USER_ACTIVITY_COOLDOWN_MS = 5000;
   var REFRESH_TRIGGER_COOLDOWN_MS = 2500;
   var STABLE_POLL_INTERVAL_MS = 30000;
   var BACKEND_DOWN_PAUSE_MS = 60000;
   var MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE = 2;
+  var ENTERPRISE_HYDRATION_TIMEOUT_MS = 22000;
+  var SESSION_READY_TIMEOUT_MS = 8000;
+  var AI_SNAPSHOT_TIMEOUT_MS = 8000;
+  var RIDER_SUBMIT_TIMEOUT_MS = 15000;
 
   var els = {
     pageTitle: document.getElementById("page-title"),
@@ -857,6 +1196,12 @@
     el.__stableHtml = html;
     el.innerHTML = html;
     return true;
+  }
+
+  function syncPageContentHtml(el, html) {
+    if (!el) return;
+    el.__stableHtml = html;
+    el.innerHTML = html;
   }
 
   function formatIsoShort(ts) {
@@ -892,6 +1237,8 @@
       String((Array.isArray(lw.billingHandoffs) ? lw.billingHandoffs : []).length),
       String((state.adminRevenue && state.adminRevenue.completed_trip_count) || 0),
       safeText((safeObject(state.driverApp)).secondaryTab, "earnings"),
+      safeText((safeObject(state.driverApp)).mobileUiState, ""),
+      hasValidDriverMobileSession() ? "session" : "anon",
       rideSig,
       safeText((state.supervision || {}).supervision_status, ""),
       safeText((state.health || {}).status, ""),
@@ -1002,7 +1349,7 @@
     var now = Date.now();
     var triggerSource = safeText(source, "unknown");
     if (state.runtime.refreshPausedUntilMs > now) {
-      state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["backend_down_8011"]));
+      state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["backend_refresh_paused"]));
       return true;
     }
     if (triggerSource === "interval" && (now - safeNumber(state.runtime.lastRefreshTriggerAt, 0)) < STABLE_POLL_INTERVAL_MS - 500) {
@@ -1088,6 +1435,10 @@
 
   function roleFromStorage() {
     try {
+      var platformRaw = localStorage.getItem(PLATFORM_ROLE_KEY);
+      if (platformRaw && ROLE_ACCESS[platformRaw]) {
+        return platformRaw;
+      }
       var raw = localStorage.getItem("amicor_shell_role") || "admin";
       return ROLE_ACCESS[raw] ? raw : "admin";
     } catch (_) {
@@ -1119,10 +1470,17 @@
     return ROLE_DEFAULT_ROUTE[role] || "dashboard";
   }
 
-  function saveRole(role) {
+  function savePlatformRole(role) {
+    var nextRole = ROLE_ACCESS[role] ? role : "admin";
     try {
-      localStorage.setItem("amicor_shell_role", role);
+      localStorage.setItem(PLATFORM_ROLE_KEY, nextRole);
+      localStorage.setItem("amicor_shell_role", nextRole);
     } catch (_) {}
+    return nextRole;
+  }
+
+  function saveRole(role) {
+    savePlatformRole(role);
   }
 
   function getRoleWorkspaceConfig(role) {
@@ -1448,8 +1806,9 @@
     var parsed = parseSessionState();
     if (!parsed) return;
 
-    if (ROLE_ACCESS[parsed.role]) {
-      state.role = parsed.role;
+    if (parsed.platformRole && ROLE_ACCESS[parsed.platformRole]) {
+      state.role = parsed.platformRole;
+      savePlatformRole(parsed.platformRole);
     }
 
     if (parsed.roleRoutes && typeof parsed.roleRoutes === "object") {
@@ -1552,7 +1911,8 @@
   function persistSessionState() {
     try {
       var payload = {
-        role: state.role,
+        role: getPlatformRole(),
+        platformRole: getPlatformRole(),
         route: state.route,
         roleRoutes: state.roleRoutes,
         runtime: {
@@ -1674,7 +2034,13 @@
       default: "Operations status updates are temporarily delayed. Monitoring remains active."
     },
     backend_down_8011: {
-      default: "Backend on port 8011 is unreachable. Auto-refresh is paused briefly to prevent loop churn."
+      default: "Backend API is unreachable. Auto-refresh is paused briefly to prevent loop churn."
+    },
+    backend_refresh_paused: {
+      default: "Auto-refresh is paused briefly after a connectivity check. Data may be stale until the next refresh."
+    },
+    backend_unreachable: {
+      default: "Backend API did not respond. Check that the server on this page origin is running, then hard-refresh."
     },
     supervision_snapshot_unavailable: {
       default: "Supervisor updates are temporarily delayed. Monitoring remains active."
@@ -2012,15 +2378,16 @@
   }
 
   function updateTopBadges() {
-    var profile = ROLE_PROFILE[state.role] || ROLE_PROFILE.admin;
-    var displayRole = state.role;
+    var platformRole = getPlatformRole();
+    var profile = ROLE_PROFILE[platformRole] || ROLE_PROFILE.admin;
+    var displayRole = platformRole;
     var displayName = "";
     var displaySubrole = titleizeWords(displayRole);
-    if (isDriverMobileSurface()) {
+    if (isDriverMobileAppRoute()) {
       var mobileAuth = driverMobileAuthCache || null;
       if (!mobileAuth || !mobileAuth.valid) {
         var persistedBadge = readPersistedDriverSession();
-        if (persistedBadge && persistedBadge.driver_id) {
+        if (persistedBadge && persistedBadge.driver_id && persistedBadge.session_token) {
           mobileAuth = {
             valid: true,
             driver_name: persistedBadge.driver_name,
@@ -2028,21 +2395,36 @@
           };
         }
       }
+      displayRole = "driver";
+      profile = ROLE_PROFILE.driver;
       if (mobileAuth && mobileAuth.valid) {
-        displayRole = "driver";
         displayName = safeText(mobileAuth.driver_name, "") || "Driver";
         displaySubrole = "driver";
+      } else {
+        displayName = "Driver Mobile";
+        displaySubrole = "sign in required";
+      }
+    } else if (state.route === "drivers" && platformRole === "driver") {
+      var driverBadgeAuth = driverMobileAuthCache || null;
+      if ((!driverBadgeAuth || !driverBadgeAuth.valid) && hasValidDriverMobileSession()) {
+        var persistedDriverBadge = readPersistedDriverSession();
+        if (persistedDriverBadge && persistedDriverBadge.driver_id) {
+          driverBadgeAuth = {
+            valid: true,
+            driver_name: persistedDriverBadge.driver_name,
+            driver_id: persistedDriverBadge.driver_id
+          };
+        }
+      }
+      if (driverBadgeAuth && driverBadgeAuth.valid) {
+        displayRole = "driver";
+        displayName = safeText(driverBadgeAuth.driver_name, "") || "Driver";
+        displaySubrole = "driver";
         profile = ROLE_PROFILE.driver;
-      } else if (mobileAuth && mobileAuth.requires_login) {
-        displayRole = safeText(mobileAuth.auth_role, state.role);
-        displayName = safeText(mobileAuth.auth_name, "") || "Operator";
-        displaySubrole = displayRole;
-      } else if (!hasValidDriverMobileSession()) {
-        displaySubrole = "driver login required";
       }
     }
     try {
-      if (!displayName && window.AmiCorSession && typeof window.AmiCorSession.getIdentity === "function") {
+      if (!displayName && !isDriverMobileAppRoute() && window.AmiCorSession && typeof window.AmiCorSession.getIdentity === "function") {
         var identity = window.AmiCorSession.getIdentity() || {};
         displayName = safeText(identity.name || identity.display_name, "");
       }
@@ -2050,9 +2432,14 @@
     if (!displayName) {
       displayName = displayRole === "dispatcher" ? "Dispatcher" : titleizeWords(displayRole);
     }
-    document.body.setAttribute("data-role", displayRole);
-    els.roleBadge.textContent = "role: " + displayRole;
-    els.roleContext.textContent = profile.context;
+    var badgeRole = isDriverMobileAppRoute() ? displayRole : platformRole;
+    var badgeProfile = isDriverMobileAppRoute() ? (ROLE_PROFILE[displayRole] || profile) : profile;
+    document.body.setAttribute("data-role", badgeRole);
+    els.roleBadge.textContent = "role: " + badgeRole;
+    els.roleContext.textContent = badgeProfile.context;
+    if (els.roleSelect && !isDriverMobileAppRoute()) {
+      els.roleSelect.value = platformRole;
+    }
     try {
       var userNameEl = document.getElementById("ops-user-name");
       var userRoleEl = document.getElementById("ops-user-role");
@@ -2076,8 +2463,9 @@
     }
 
     if (els.workspacePill) {
+      var workspaceProfile = ROLE_PROFILE[platformRole] || ROLE_PROFILE.admin;
       els.workspacePill.className = "badge badge-soft";
-      els.workspacePill.textContent = "workspace: " + profile.emphasis;
+      els.workspacePill.textContent = "workspace: " + workspaceProfile.emphasis;
     }
 
     if (els.notificationPill) {
@@ -4221,8 +4609,21 @@
     var history = Array.isArray(riderState.tripHistory) ? riderState.tripHistory : [];
     var activeRequestId = safeText(riderState.activeRequestId, "");
     var lastSubmit = safeObject(riderState.lastSubmit);
+    var submitStatus = safeObject(riderState.submitStatus);
     var submitBanner = "";
-    if (lastSubmit.rideId) {
+    if (safeText(submitStatus.message, "")) {
+      var tone = safeText(submitStatus.level, "info");
+      var bg = tone === "error" ? "#fef2f2" : (tone === "success" ? "#ecfdf5" : "#eff6ff");
+      var border = tone === "error" ? "#fca5a5" : (tone === "success" ? "#86efac" : "#93c5fd");
+      var color = tone === "error" ? "#991b1b" : (tone === "success" ? "#065f46" : "#1e3a8a");
+      submitBanner =
+        '<div class="rider-submit-status" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:' + bg + ';border:1px solid ' + border + ';color:' + color + '">' +
+          escapeHtml(safeText(submitStatus.message, "")) +
+          (submitStatus.rideId ? ('<br>Ride ID: <code>' + escapeHtml(safeText(submitStatus.rideId, "")) + '</code>') : "") +
+          (submitStatus.requestId ? ('<br>Request ID: <code>' + escapeHtml(safeText(submitStatus.requestId, "")) + '</code>') : "") +
+          (submitStatus.status ? ('<br>Status: ' + escapeHtml(titleizeWords(safeText(submitStatus.status, "pending")))) : "") +
+        '</div>';
+    } else if (lastSubmit.rideId) {
       submitBanner =
         '<div class="rider-submit-success" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #86efac;color:#065f46">' +
           '<strong>Ride request submitted.</strong><br>' +
@@ -4258,8 +4659,8 @@
             '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
           '<div class="command-actions">' +
-            '<button class="preview-action rider-action" data-rider-action="request_now">Request Ride Now</button>' +
-            '<button class="preview-action rider-action" data-rider-action="schedule_recurring">Schedule Recurring Ride</button>' +
+            '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? 'Submitting ride…' : 'Request Ride Now') + '</button>' +
+            '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Schedule Recurring Ride</button>' +
             '<button class="preview-action rider-action" data-rider-action="cancel_active_trip"' + (activeRequestId ? '' : ' disabled') + '>Cancel Active Ride</button>' +
           '</div>' +
           '<p class="muted">Latest action: ' + escapeHtml(safeText(riderState.lastAction, 'none')) + '</p>' +
@@ -4465,8 +4866,21 @@
     return safeNumber(order[token], 0);
   }
 
-  function finalizeDriverTripQueue(liveQueue) {
+  function finalizeDriverTripQueue(liveQueue, boundDriverId) {
     var queue = Array.isArray(liveQueue) ? liveQueue.slice() : [];
+    var driverId = safeText(boundDriverId, "");
+    queue = queue.filter(function (trip) {
+      var tripId = safeText(trip.tripId, "");
+      if (!tripId) return false;
+      var status = normalizeDriverTripStatus(trip.status);
+      if (["completed", "cancelled", "failed", "declined", "no_show", "expired", "reassignment_pending"].indexOf(status) >= 0) {
+        return false;
+      }
+      if (driverId && safeText(trip.assignedDriver, "") && safeText(trip.assignedDriver, "") !== driverId) {
+        return false;
+      }
+      return true;
+    });
     queue.sort(function (a, b) {
       var aRank = driverTripLifecycleRank(a.status);
       var bRank = driverTripLifecycleRank(b.status);
@@ -4476,6 +4890,9 @@
       if (bTs !== aTs) return bTs - aTs;
       return safeText(b.tripId, "").localeCompare(safeText(a.tripId, ""));
     });
+    if (queue.length > 1) {
+      queue = queue.slice(0, 1);
+    }
     return {
       queue: queue,
       activeTripId: queue.length > 0 ? safeText(queue[0].tripId, "") : ""
@@ -4493,6 +4910,9 @@
   }
 
   async function resolveSessionDriverId(token) {
+    if (isDriverMobileAppRoute()) {
+      return getMobileSessionDriverId();
+    }
     var persisted = readPersistedDriverSession();
     if (persisted && persisted.driver_id) {
       return persisted.driver_id;
@@ -4633,6 +5053,124 @@
     liveQueue.push(entry);
   }
 
+  function resolveDriverTripLifecycleStatus(assignmentState, lifecycleState) {
+    var assignment = safeText(assignmentState, "");
+    var lifecycle = safeText(lifecycleState, "");
+    if (!lifecycle && assignment) return assignment;
+    if (!assignment && lifecycle) return lifecycle;
+    var aRank = driverTripLifecycleRank(assignment);
+    var lRank = driverTripLifecycleRank(lifecycle);
+    if (lRank > aRank) return lifecycle;
+    if (lRank === aRank && lifecycle) return lifecycle;
+    return assignment;
+  }
+
+  function resolveAssignmentDriverId(source) {
+    var row = safeObject(source);
+    return safeText(row.driver_id || row.driverId, "");
+  }
+
+  function resolveRideDriverId(rideRow) {
+    return safeText((safeObject(rideRow)).driver_id || (safeObject(rideRow)).driverId, "");
+  }
+
+  function validateMobileTripOwnership(sessionDriverId, rideRow, offerRow, assignmentRow, sourceTag) {
+    sessionDriverId = safeText(sessionDriverId, "");
+    var rideId = safeText(
+      (safeObject(rideRow)).id || (safeObject(offerRow)).ride_id || (safeObject(assignmentRow)).ride_id,
+      ""
+    );
+    var rideStatus = normalizeRideStatusToken(
+      (safeObject(rideRow)).lifecycle_state || (safeObject(rideRow)).status
+    );
+    if (rideStatus && isTerminalRideStatus(rideStatus)) {
+      return {
+        accepted: false,
+        reason: "terminal_ride_status",
+        ride_id: rideId,
+        assignment_driver_id: resolveAssignmentDriverId(offerRow) || resolveAssignmentDriverId(assignmentRow),
+        source: sourceTag
+      };
+    }
+    var offerDriverId = resolveAssignmentDriverId(offerRow);
+    var assignmentDriverId = resolveAssignmentDriverId(assignmentRow);
+    var rideDriverId = resolveRideDriverId(rideRow);
+    if (!sessionDriverId) {
+      return {
+        accepted: false,
+        reason: "missing_session_driver",
+        ride_id: rideId,
+        assignment_driver_id: assignmentDriverId || offerDriverId || rideDriverId,
+        source: sourceTag
+      };
+    }
+    if (offerDriverId && offerDriverId !== sessionDriverId) {
+      return {
+        accepted: false,
+        reason: "offer_driver_mismatch",
+        ride_id: rideId,
+        assignment_driver_id: offerDriverId,
+        source: sourceTag
+      };
+    }
+    if (assignmentDriverId && assignmentDriverId !== sessionDriverId) {
+      return {
+        accepted: false,
+        reason: "assignment_driver_mismatch",
+        ride_id: rideId,
+        assignment_driver_id: assignmentDriverId,
+        source: sourceTag
+      };
+    }
+    if (rideDriverId && rideDriverId !== sessionDriverId) {
+      if (!(offerDriverId === sessionDriverId || assignmentDriverId === sessionDriverId)) {
+        return {
+          accepted: false,
+          reason: "ride_driver_mismatch",
+          ride_id: rideId,
+          assignment_driver_id: rideDriverId,
+          source: sourceTag
+        };
+      }
+    }
+    return {
+      accepted: true,
+      reason: "accepted",
+      ride_id: rideId,
+      assignment_driver_id: offerDriverId || assignmentDriverId || rideDriverId || sessionDriverId,
+      source: sourceTag
+    };
+  }
+
+  function logDriverMobileHydrationDecision(sessionDriverId, decision, activeOfferEnvelope) {
+    if (!isDriverMobileSessionRoute()) return;
+    logDriverMobileAssignmentSync({
+      event: "mobile_hydration_trip_filter",
+      authenticated_driver_id: sessionDriverId,
+      assignment_driver_id: safeText(decision.assignment_driver_id, "") || null,
+      requested_ride_id: safeText(decision.ride_id, "") || null,
+      api_response: {
+        active_offer: activeOfferEnvelope || null,
+        decision: decision
+      },
+      extra: {
+        accepted: !!decision.accepted,
+        reason: safeText(decision.reason, ""),
+        source: safeText(decision.source, "")
+      }
+    });
+  }
+
+  function appendOwnedDriverTrip(sessionDriverId, liveQueue, entry, rideRow, offerRow, assignmentRow, sourceTag, activeOfferEnvelope) {
+    var decision = validateMobileTripOwnership(sessionDriverId, rideRow, offerRow, assignmentRow, sourceTag);
+    logDriverMobileHydrationDecision(sessionDriverId, decision, activeOfferEnvelope);
+    if (!decision.accepted) return;
+    if (decision.assignment_driver_id) {
+      entry.assignedDriver = decision.assignment_driver_id;
+    }
+    appendUniqueDriverTrip(liveQueue, entry);
+  }
+
   function ensureDriverMobileState(slice) {
     var driverWorkflow = safeObject(state.driverWorkflow);
     var buildSource = (function () {
@@ -4646,6 +5184,13 @@
       if (safeText(driverLastConfirmedWorkflow.driverId, "") !== safeText(driverWorkflow.driverId, "")) return build;
       var confirmed = driverLastConfirmedWorkflow;
       var confirmedActive = safeObject(confirmed.activeRide);
+      var confirmedRide = safeObject(confirmedActive.ride);
+      var confirmedStatus = normalizeRideStatusToken(
+        confirmedRide.lifecycle_state || confirmedRide.status || confirmedActive.assignment_state
+      );
+      if (["completed", "cancelled", "failed", "declined", "no_show", "expired"].indexOf(confirmedStatus) >= 0) {
+        return build;
+      }
       var buildActive = safeObject(build.activeRide);
       var confirmedRideId = safeText((safeObject(confirmedActive.ride)).id, "");
       if (confirmedActive.has_active_ride === true && confirmedRideId) {
@@ -4658,7 +5203,12 @@
       }
       var confirmedOffer = safeObject(confirmed.activeOffer);
       var buildOffer = safeObject(build.activeOffer);
-      if (safeText((safeObject(confirmedOffer.offer)).ride_id, "") && !safeText((safeObject(buildOffer.offer)).ride_id, "")) {
+      var confirmedOfferRow = safeObject(confirmedOffer.offer);
+      if (
+        safeText(confirmedOfferRow.ride_id, "")
+        && !safeText((safeObject(buildOffer.offer)).ride_id, "")
+        && resolveAssignmentDriverId(confirmedOfferRow) === safeText(driverWorkflow.driverId, "")
+      ) {
         build.activeOffer = confirmedOffer;
       }
       return build;
@@ -4673,23 +5223,34 @@
     var offerEnvelope = safeObject(buildSource.activeOffer);
     var activeOffer = safeObject(offerEnvelope.offer);
     var assignedRideRows = Array.isArray(buildSource.assignedRides) ? buildSource.assignedRides : [];
-    var workflowDriverId = safeText(driverWorkflow.driverId, "") || driverBoundDriverId || safeText((safeObject(state.driverApp)).currentDriverId, "");
+    var workflowDriverId = resolveCanonicalMobileDriverId()
+      || safeText(driverWorkflow.driverId, "")
+      || driverBoundDriverId
+      || safeText((safeObject(state.driverApp)).currentDriverId, "");
     if (workflowDriverId) {
       var liveQueue = [];
 
       if (activeRidePayload.has_active_ride === true && safeText(canonicalRide.id, "")) {
-        var canonicalStatus = safeText(
-          activeRidePayload.assignment_state || canonicalRide.lifecycle_state || canonicalRide.status,
-          "assigned"
-        );
+        var canonicalStatus = resolveDriverTripLifecycleStatus(
+          activeRidePayload.assignment_state,
+          canonicalRide.lifecycle_state || canonicalRide.status
+        ) || "assigned";
+        if (isTerminalRideStatus(canonicalStatus)) {
+          canonicalStatus = "";
+        }
         if (
-          ["reassignment_pending", "rejected", "expired", "dropoff_complete"].indexOf(
+          canonicalStatus
+          && ["reassignment_pending", "rejected", "expired", "dropoff_complete"].indexOf(
             canonicalStatus.toLowerCase()
           ) >= 0
         ) {
           canonicalStatus = safeText(canonicalRide.lifecycle_state || canonicalRide.status, "assigned");
         }
-        appendUniqueDriverTrip(liveQueue, buildDriverTripEntry(safeText(canonicalRide.id, ""), {
+        if (canonicalStatus && !isTerminalRideStatus(canonicalStatus)) {
+        appendOwnedDriverTrip(
+          workflowDriverId,
+          liveQueue,
+          buildDriverTripEntry(safeText(canonicalRide.id, ""), {
           patient: canonicalRide.passenger_name,
           riderPhone: canonicalRide.passenger_phone || canonicalRide.rider_phone,
           pickup: canonicalRide.pickup_address || canonicalRide.pickup,
@@ -4701,12 +5262,18 @@
           scheduledWindow: canonicalRide.requested_at || canonicalRide.appointment_time,
           requestedAt: canonicalRide.requested_at || canonicalRide.created_at,
           coordinationStatus: canonicalStatus,
-          assignedDriver: workflowDriverId,
+          assignedDriver: resolveAssignmentDriverId(canonicalAssignment) || resolveRideDriverId(canonicalRide) || workflowDriverId,
           assignedDriverName: activeRidePayload.driver_name,
-          providerName: activeRidePayload.provider_name,
           offerId: canonicalAssignment.offer_id || canonicalAssignment.id,
           trustedFromBackend: true
-        }));
+        }),
+          canonicalRide,
+          activeOffer,
+          canonicalAssignment,
+          "active_ride_payload",
+          offerEnvelope
+        );
+        }
       }
 
       var offerRideId = safeText(activeOffer.ride_id, "");
@@ -4721,7 +5288,10 @@
         )
         && (offerState === "offered" || offerState === "assigned" || offerState === "awaiting_approval" || offerState === "reassignment_pending")
       ) {
-        appendUniqueDriverTrip(liveQueue, buildDriverTripEntry(offerRideId, {
+        appendOwnedDriverTrip(
+          workflowDriverId,
+          liveQueue,
+          buildDriverTripEntry(offerRideId, {
           patient: activeOffer.passenger_name,
           riderPhone: activeOffer.passenger_phone || activeOffer.rider_phone,
           pickup: activeOffer.pickup_address,
@@ -4730,9 +5300,15 @@
           scheduledWindow: activeOffer.offer_expires_at || activeOffer.requested_at,
           requestedAt: activeOffer.requested_at || activeOffer.offer_expires_at,
           coordinationStatus: activeOffer.assignment_state,
-          assignedDriver: workflowDriverId,
+          assignedDriver: resolveAssignmentDriverId(activeOffer) || workflowDriverId,
           offerId: activeOffer.id || activeOffer.offer_id
-        }));
+        }),
+          null,
+          activeOffer,
+          null,
+          "active_offer",
+          offerEnvelope
+        );
       }
 
       var workspaceRideId = safeText(activeRide.id, "");
@@ -4753,7 +5329,10 @@
             normalizeDriverTripStatus(workspaceRideStatus)
           ) >= 0
         ) {
-          appendUniqueDriverTrip(liveQueue, buildDriverTripEntry(workspaceRideId, {
+          appendOwnedDriverTrip(
+            workflowDriverId,
+            liveQueue,
+            buildDriverTripEntry(workspaceRideId, {
             patient: activeRide.passenger_name,
             riderPhone: activeRide.passenger_phone || activeRide.rider_phone,
             pickup: activeRide.pickup_address || activeRide.pickup,
@@ -4765,9 +5344,15 @@
             scheduledWindow: activeRide.requested_at || activeRide.appointment_time,
             requestedAt: activeRide.requested_at || activeRide.created_at,
             coordinationStatus: workspaceAssignmentState || "assignment_active",
-            assignedDriver: workflowDriverId,
+            assignedDriver: resolveAssignmentDriverId(activeAssignment) || resolveRideDriverId(activeRide) || workflowDriverId,
             offerId: activeAssignment.offer_id || activeAssignment.id
-          }));
+          }),
+            activeRide,
+            null,
+            activeAssignment,
+            "live_workspace_ride",
+            offerEnvelope
+          );
         }
       } else if (
         safeText(activeAssignment.ride_id, "")
@@ -4775,17 +5360,26 @@
       ) {
         var assignmentRideId = safeText(activeAssignment.ride_id, "");
         var assignmentState = safeText(activeAssignment.assignment_state, "assigned").toLowerCase();
-        if (["offered", "assigned", "awaiting_approval", "accepted", "en_route_pickup"].indexOf(assignmentState) >= 0) {
-          appendUniqueDriverTrip(liveQueue, buildDriverTripEntry(assignmentRideId, {
+        if (["offered", "assigned", "awaiting_approval", "accepted", "en_route_pickup", "arrived_pickup", "waiting_at_pickup", "arrived", "pickup_complete", "rider_loaded", "in_progress", "trip_in_progress"].indexOf(assignmentState) >= 0) {
+          appendOwnedDriverTrip(
+            workflowDriverId,
+            liveQueue,
+            buildDriverTripEntry(assignmentRideId, {
             patient: activeAssignment.passenger_name,
             pickup: activeRide.pickup_address || activeRide.pickup || "Pickup pending",
             dropoff: activeRide.dropoff_address || activeRide.dropoff || "Dropoff pending",
             status: assignmentState || activeAssignment.ride_status || "assigned",
             scheduledWindow: activeAssignment.offer_expires_at || activeAssignment.offered_at,
             coordinationStatus: assignmentState,
-            assignedDriver: workflowDriverId,
+            assignedDriver: resolveAssignmentDriverId(activeAssignment) || workflowDriverId,
             offerId: activeAssignment.offer_id || activeAssignment.id
-          }));
+          }),
+            activeRide,
+            null,
+            activeAssignment,
+            "live_workspace_assignment",
+            offerEnvelope
+          );
         }
       }
 
@@ -4795,7 +5389,18 @@
         if (isProofOrDemoTripMeta(ride.passenger_name, ride.pickup_address, ride.dropoff_address, ride.notes)) return;
         var rideStatus = normalizeRideStatusToken(ride.lifecycle_state || ride.status);
         if (["completed", "cancelled", "failed", "declined"].indexOf(rideStatus) >= 0) return;
-        appendUniqueDriverTrip(liveQueue, buildDriverTripEntry(rideId, {
+        if (["queued", "pending", "requested"].indexOf(rideStatus) >= 0) {
+          var isActiveOffer = offerRideId && offerRideId === rideId;
+          var isActiveAssignment = workspaceRideId === rideId || safeText(activeAssignment.ride_id, "") === rideId;
+          var hasActiveRide = activeRidePayload.has_active_ride === true && safeText(canonicalRide.id, "") === rideId;
+          if (!isActiveOffer && !isActiveAssignment && !hasActiveRide) {
+            return;
+          }
+        }
+        appendOwnedDriverTrip(
+          workflowDriverId,
+          liveQueue,
+          buildDriverTripEntry(rideId, {
           patient: ride.passenger_name,
           riderPhone: ride.passenger_phone,
           pickup: ride.pickup_address,
@@ -4804,28 +5409,45 @@
           scheduledWindow: ride.requested_at || ride.updated_at,
           requestedAt: ride.requested_at || ride.created_at,
           coordinationStatus: rideStatus || "assigned",
-          assignedDriver: workflowDriverId,
+          assignedDriver: resolveRideDriverId(ride) || workflowDriverId,
           offerId: safeText(activeAssignment.offer_id, ""),
           trustedFromBackend: true
-        }));
+        }),
+          ride,
+          null,
+          activeAssignment,
+          "assigned_rides_row",
+          offerEnvelope
+        );
       });
 
-      var finalized = finalizeDriverTripQueue(liveQueue);
+      var finalized = finalizeDriverTripQueue(liveQueue, workflowDriverId);
       liveQueue = finalized.queue;
       var liveDriver = (Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : []).find(function (driver) {
         return safeText(driver.id || driver.driver_id, "") === workflowDriverId;
       }) || {};
       var earningsSummary = safeObject(driverWorkflow.earnings);
       var completedFromApi = Array.isArray(driverWorkflow.completedRides) ? driverWorkflow.completedRides.length : 0;
+      var billingRowsForSummary = Array.isArray(driverWorkflow.billingHandoffs) ? driverWorkflow.billingHandoffs : [];
+      var earningsDisplay = deriveDriverEarningsDisplayFields(
+        earningsSummary,
+        Array.isArray(driverWorkflow.completedRides) ? driverWorkflow.completedRides : [],
+        billingRowsForSummary
+      );
       var earningsTripCount = safeNumber(earningsSummary.trip_count, 0);
       var earningsTripCountToday = safeNumber(earningsSummary.trip_count_today, 0);
       // Canonical completed-trip count comes from backend financial/completed-ride APIs only.
       // Prefer today's completed count for the summary tile; fall back to lifetime API count.
-      var completedCount = earningsTripCountToday > 0
-        ? earningsTripCountToday
-        : Math.max(completedFromApi, earningsTripCount);
+      var completedCount = Math.max(
+        earningsDisplay.completedTrips,
+        earningsTripCountToday > 0 ? earningsTripCountToday : 0,
+        completedFromApi,
+        earningsTripCount
+      );
       var shiftOnline = workflowDriverId !== "";
-      if (liveDriver && Object.keys(liveDriver).length) {
+      if (isDriverMobileAppRoute() && getCanonicalMobileDriverContext().authenticated) {
+        shiftOnline = true;
+      } else if (liveDriver && Object.keys(liveDriver).length) {
         shiftOnline = safeText(liveDriver.status, "available") !== "offline"
           || asBoolean(liveDriver.is_online, false);
       }
@@ -4864,8 +5486,8 @@
         }).length,
         declinedCount: safeNumber(priorDriverApp.declinedCount, 0),
         completedTrips: completedCount,
-        earningsToday: safeNumber(earningsSummary.earnings_today_usd, 0),
-        earningsLifetime: safeNumber(earningsSummary.earnings_lifetime_usd, 0),
+        earningsToday: earningsDisplay.earningsToday,
+        earningsLifetime: earningsDisplay.earningsLifetime,
         completedRideHistory: Array.isArray(driverWorkflow.completedRides) && driverWorkflow.completedRides.length
           ? driverWorkflow.completedRides
           : [],
@@ -4873,12 +5495,36 @@
         tripQueue: liveQueue,
         notifications: preservedNotifications,
         documents: documentRows,
-        lastStatusUpdate: safeText(priorDriverApp.lastStatusUpdate, "Driver workspace synchronized")
+        lastStatusUpdate: safeText(priorDriverApp.lastStatusUpdate, "Driver workspace synchronized"),
+        lastActionResult: safeObject(priorDriverApp.lastActionResult),
+        mobileUiState: liveQueue.length > 0 ? "active_ride" : (isDriverMobileAppRoute() ? "awaiting_assignment" : safeText(priorDriverApp.mobileUiState, "awaiting_assignment"))
       };
       return;
     }
 
     var priorEmpty = safeObject(state.driverApp);
+    var emptyMobileCtx = getCanonicalMobileDriverContext();
+    if (isDriverMobileAppRoute() && emptyMobileCtx.authenticated) {
+      state.driverApp = {
+        seedAssignedRide: "",
+        currentDriverId: emptyMobileCtx.driverId,
+        shiftOnline: true,
+        activeTripId: "",
+        activeStage: "queued",
+        secondaryTab: safeText(priorEmpty.secondaryTab, "earnings") || "earnings",
+        acceptedCount: 0,
+        declinedCount: 0,
+        completedTrips: safeNumber(priorEmpty.completedTrips, 0),
+        earningsToday: safeNumber(priorEmpty.earningsToday, 0),
+        earningsLifetime: safeNumber(priorEmpty.earningsLifetime, 0),
+        tripQueue: [],
+        notifications: Array.isArray(priorEmpty.notifications) ? priorEmpty.notifications : [],
+        documents: Array.isArray(priorEmpty.documents) ? priorEmpty.documents : [],
+        lastStatusUpdate: safeText(priorEmpty.lastStatusUpdate, "Loading assignment"),
+        mobileUiState: safeText(priorEmpty.mobileUiState, "loading_assignment")
+      };
+      return;
+    }
     state.driverApp = {
       seedAssignedRide: "",
       currentDriverId: "",
@@ -4890,6 +5536,7 @@
       declinedCount: 0,
       completedTrips: 0,
       earningsToday: 0,
+      earningsLifetime: 0,
       tripQueue: [],
       notifications: Array.isArray(priorEmpty.notifications) ? priorEmpty.notifications : [],
       documents: Array.isArray(priorEmpty.documents) ? priorEmpty.documents : [],
@@ -4941,10 +5588,10 @@
     }
     if (!safeText(ride.id, "")) return null;
 
-    var status = safeText(
-      activeRidePayload.assignment_state || ride.lifecycle_state || ride.status,
-      "assigned"
-    );
+    var status = resolveDriverTripLifecycleStatus(
+      activeRidePayload.assignment_state,
+      ride.lifecycle_state || ride.status
+    ) || "assigned";
     if (
       ["reassignment_pending", "rejected", "expired", "dropoff_complete"].indexOf(
         status.toLowerCase()
@@ -5098,22 +5745,18 @@
     var shiftOnline = asBoolean(appState.shiftOnline, false);
     var stage = safeText(appState.activeStage, "queued");
     var statusText = shiftOnline ? "On shift" : "Off shift";
-    var lastStatusUpdate = safeText(appState.lastStatusUpdate, "").toLowerCase();
-    var tripStatus = activeTrip ? safeText(activeTrip.status, "queued").toLowerCase() : "none";
-    var canAccept = ["queued", "assigned"].indexOf(tripStatus) >= 0;
-    var canArrive = ["accepted", "driver_en_route", "en_route_pickup"].indexOf(tripStatus) >= 0
-      || lastStatusUpdate.indexOf("accepted trip") === 0;
-    var canStart = ["arrived", "at_pickup", "en_route_pickup", "driver_en_route"].indexOf(tripStatus) >= 0
-      || lastStatusUpdate.indexOf("arrived at pickup") === 0;
-    var canComplete = ["rider_onboard", "in_progress", "in_transit"].indexOf(tripStatus) >= 0
-      || stage === "in_progress"
-      || lastStatusUpdate.indexOf("trip started for") === 0
-      || lastStatusUpdate.indexOf("transit progress updated") === 0;
+    var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
+    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0;
+    var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
+    var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
+    var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
+    var canComplete = ["in_progress", "in_transit", "trip_in_progress", "arrived_destination"].indexOf(tripStatus) >= 0;
 
     var disableAccept = !shiftOnline || !activeTrip || !canAccept;
     var disableDecline = !shiftOnline || !activeTrip || !canAccept;
     var disableArrive = !shiftOnline || !activeTrip || !canArrive;
-    var disableStart = !shiftOnline || !activeTrip || !canStart;
+    var disablePickup = !shiftOnline || !activeTrip || !canPickup;
+    var disableStartTransport = !shiftOnline || !activeTrip || !canStartTransport;
     var disableComplete = !shiftOnline || !activeTrip || !canComplete;
 
     return '' +
@@ -5127,8 +5770,9 @@
             '<button class="preview-action driver-action" data-driver-action="accept_trip"' + (disableAccept ? ' disabled' : '') + '>Accept Transport</button>' +
             '<button class="preview-action driver-action" data-driver-action="decline_trip"' + (disableDecline ? ' disabled' : '') + '>Decline Transport</button>' +
             '<button class="preview-action driver-action" data-driver-action="arrive_pickup"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
-            '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disableStart ? ' disabled' : '') + '>Patient Onboard / Begin Transport</button>' +
-            '<button class="preview-action driver-action" data-driver-action="complete_trip"' + (disableComplete ? ' disabled' : '') + '>Arrived at Facility / Complete Transport</button>' +
+            '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disablePickup ? ' disabled' : '') + '>Pickup / Rider Onboard</button>' +
+            '<button class="preview-action driver-action" data-driver-action="start_transport"' + (disableStartTransport ? ' disabled' : '') + '>Start Transport</button>' +
+            '<button class="preview-action driver-action" data-driver-action="complete_trip"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
           '</div>' +
           '<p class="muted">Latest update: ' + escapeHtml(safeText(appState.lastStatusUpdate, 'None')) + '</p>' +
         '</div>' +
@@ -5144,14 +5788,153 @@
       '</div>';
   }
 
+  function renderDriverMobileLoginForm() {
+    var loginState = safeObject(state.driverApp && state.driverApp.mobileLogin);
+    var statusText = safeText(loginState.status, "Not signed in");
+    var errorText = safeText(loginState.error, "");
+    var phoneValue = escapeHtml(safeText(loginState.phone, ""));
+    return wrapDriverMobilePage(
+      '<div class="driver-workflow-card driver-mobile-auth" id="driver-mobile-login-panel">' +
+        '<h4>Driver Login</h4>' +
+        '<p class="muted">Sign in with your registered driver phone number (example: 917-555-1004). No dispatcher workspace access is required.</p>' +
+        '<label for="driver-mobile-phone">Driver phone</label>' +
+        '<input id="driver-mobile-phone" name="driver_mobile_phone" type="tel" inputmode="tel" autocomplete="tel" value="' + phoneValue + '" />' +
+        '<label for="driver-mobile-id">Driver ID (optional)</label>' +
+        '<input id="driver-mobile-id" name="driver_mobile_id" type="text" autocomplete="off" placeholder="Use only if phone matches multiple drivers" />' +
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+          '<button class="preview-action driver-action" id="driver-mobile-login-btn" type="button">Driver Login</button>' +
+        '</div>' +
+        '<p id="driver-mobile-login-status" style="margin-top:10px;"><strong>Login status:</strong> ' + escapeHtml(statusText) + '</p>' +
+        (errorText
+          ? '<p id="driver-mobile-login-error" class="runtime-strip-item" style="color:#b91c1c;margin-top:8px;">' + escapeHtml(errorText) + '</p>'
+          : '<p id="driver-mobile-login-error" class="runtime-strip-item" style="display:none;color:#b91c1c;margin-top:8px;"></p>') +
+      '</div>'
+    );
+  }
+
+  async function submitDriverMobileLogin() {
+    var phoneInput = document.getElementById("driver-mobile-phone");
+    var driverIdInput = document.getElementById("driver-mobile-id");
+    var statusEl = document.getElementById("driver-mobile-login-status");
+    var errorEl = document.getElementById("driver-mobile-login-error");
+    var phone = readDriverMobilePhoneInput();
+    var driverId = safeText(driverIdInput && driverIdInput.value, "").trim();
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.mobileLogin = safeObject(state.driverApp.mobileLogin);
+    state.driverApp.mobileLogin.phone = phone;
+    if (!phone) {
+      state.driverApp.mobileLogin.error = "Enter your driver phone number.";
+      state.driverApp.mobileLogin.status = "Login failed";
+      if (errorEl) {
+        errorEl.style.display = "block";
+        errorEl.textContent = state.driverApp.mobileLogin.error;
+      }
+      if (statusEl) {
+        statusEl.innerHTML = "<strong>Login status:</strong> Login failed";
+      }
+      return { ok: false };
+    }
+    state.driverApp.mobileLogin.status = "Signing in…";
+    state.driverApp.mobileLogin.error = "";
+    if (statusEl) {
+      statusEl.innerHTML = "<strong>Login status:</strong> Signing in…";
+    }
+    if (errorEl) {
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+    }
+    var payload = { phone: phone };
+    if (driverId) {
+      payload.driver_id = driverId;
+    }
+    try {
+      var response = await fetch("/api/health-isf/drivers/mobile-login", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      });
+      var body = {};
+      try {
+        body = await response.json();
+      } catch (_) {}
+      if (!response.ok) {
+        var detail = safeText(body.detail, "Driver login failed");
+        if (Array.isArray(body.detail)) {
+          detail = body.detail.map(function (item) {
+            return safeText(item && item.msg, safeText(item, "validation_error"));
+          }).join("; ");
+        }
+        state.driverApp.mobileLogin.status = "Login failed";
+        state.driverApp.mobileLogin.error = detail;
+        scheduleRenderPage({ immediate: true });
+        return { ok: false, error: detail };
+      }
+      var priorSessionDriver = safeText((safeObject(state.driverApp)).currentDriverId, "");
+      var nextSessionDriver = safeText(body.driver_id, "");
+      if (priorSessionDriver && priorSessionDriver !== nextSessionDriver) {
+        driverLastConfirmedWorkflow = null;
+      }
+      persistDriverSession({
+        driver_id: body.driver_id,
+        session_token: body.session_token,
+        session_id: body.session_id,
+        organization_id: body.organization_id,
+        driver_name: safeText(body.driver_name, "Driver")
+      });
+      driverMobileAuthCache = {
+        valid: true,
+        requires_login: false,
+        driver_id: safeText(body.driver_id, ""),
+        driver_name: safeText(body.driver_name, "Driver"),
+        session_role: "driver",
+        auth_role: "driver",
+        organization_id: safeText(body.organization_id, ""),
+        session_token: safeText(body.session_token, ""),
+        session_id: safeText(body.session_id, ""),
+        source: "mobile_login"
+      };
+      state.driverApp.currentDriverId = safeText(body.driver_id, "");
+      state.driverApp.shiftOnline = true;
+      state.driverApp.mobileUiState = "loading_assignment";
+      state.driverApp.mobileLogin.status = "Signed in as driver " + safeText(body.driver_id, "");
+      state.driverApp.mobileLogin.error = "";
+      bindDriverIdentity(body.driver_id, { forceRebind: true });
+      logDriverMobileAssignmentSync({
+        event: "mobile_login",
+        assignment_state: safeText(body.availability_state, ""),
+        api_response: {
+          driver_id: safeText(body.driver_id, ""),
+          session_id: safeText(body.session_id, ""),
+          session_state: safeText(body.session_state, ""),
+          auth_state: safeText(body.auth_state, "")
+        },
+        http_status: 200,
+        route: "/api/health-isf/drivers/mobile-login",
+        frontend_state_transition: "login_required->loading_assignment",
+        next_ui_state: "loading_assignment"
+      });
+      scheduleRenderPage({ immediate: true });
+      try {
+        await refreshDriverWorkflowData({ forceReset: true });
+      } catch (_) {}
+      scheduleRenderPage({ immediate: true });
+      return { ok: true, response: body };
+    } catch (error) {
+      var message = safeText(error && error.message, "Driver login failed");
+      state.driverApp.mobileLogin.status = "Login failed";
+      state.driverApp.mobileLogin.error = message;
+      scheduleRenderPage({ immediate: true });
+      return { ok: false, error: message };
+    }
+  }
+
   function renderDriverMobileExperience(phase17, slice) {
     if (isDriverMobileSurface() && !hasValidDriverMobileSession()) {
-      return renderPanelBlock(
-        "Driver Mobile App",
-        "Authenticated driver session required",
-        '<div class="driver-workflow-card"><h4>Driver login required</h4><p class="muted">Select a driver in the Drivers workspace, complete driver login, then return to this screen. Dispatcher and operator sessions cannot view assigned driver rides.</p></div>',
-        "driver-mobile-auth"
-      );
+      return renderDriverMobileLoginForm();
     }
     ensureDriverMobileState(slice);
     var persistedSession = readPersistedDriverSession();
@@ -5160,6 +5943,8 @@
       driver_id: persistedSession.driver_id,
       driver_name: persistedSession.driver_name
     } : null);
+    var appState = safeObject(state.driverApp);
+    var mobileUiState = safeText(appState.mobileUiState, "awaiting_assignment");
     var driverSessionHeader = "";
     if (sessionAuth && safeText(sessionAuth.driver_id, "")) {
       driverSessionHeader =
@@ -5168,9 +5953,25 @@
           ' <span class="muted">ID: ' + escapeHtml(safeText(sessionAuth.driver_id, "")) + '</span>' +
         '</div>';
     }
-    var appState = safeObject(state.driverApp);
+    if (mobileUiState === "loading_assignment") {
+      return wrapDriverMobilePage(
+        driverSessionHeader +
+        '<div class="driver-workflow-card"><strong>Loading assignment</strong>' +
+        '<p class="muted">Syncing active ride for the authenticated driver session…</p></div>'
+      );
+    }
+    if (mobileUiState === "api_error") {
+      return wrapDriverMobilePage(
+        driverSessionHeader +
+        '<div class="driver-workflow-card" style="border-color:#fca5a5;background:#fff7f7;">' +
+        '<strong>Assignment sync error</strong>' +
+        '<p class="muted">' + escapeHtml(safeText(appState.syncWarning, "Unable to load driver assignment. Refresh to retry.")) + '</p>' +
+        '<button class="preview-action driver-action" type="button" onclick="window.AmiOpsShellActions && window.AmiOpsShellActions.refreshDriverWorkflowData && window.AmiOpsShellActions.refreshDriverWorkflowData({})">Retry Sync</button>' +
+        '</div>'
+      );
+    }
     var queue = Array.isArray(appState.tripQueue) ? appState.tripQueue : [];
-    var activeTrip = getDriverTripById(appState.activeTripId);
+    var activeTrip = resolveDriverActiveTrip(appState.activeTripId) || getDriverTripById(appState.activeTripId);
     var waitingLabels = driverMobileWaitingLabels();
     var riderName = activeTrip ? safeText(activeTrip.patient, "Rider pending") : waitingLabels.riderName;
     var routePickup = activeTrip ? safeText(activeTrip.pickup, "Pickup pending") : waitingLabels.routePickup;
@@ -5253,30 +6054,49 @@
     ).slice(0, 30);
 
     if (activeTrip) {
-      var activeRide = allRides.find(function (ride) {
-        return safeText(ride.id, "") === safeText(activeTrip.tripId, "");
+      var workflowActive = safeObject((safeObject(state.driverWorkflow)).activeRide);
+      var workflowRide = safeObject(workflowActive.ride);
+      var workflowAssignment = safeObject(workflowActive.active_assignment);
+      var activeRide = safeText(workflowRide.id, "")
+        ? workflowRide
+        : (allRides.find(function (ride) {
+            return safeText(ride.id, "") === safeText(activeTrip.tripId, "");
+          }) || {});
+      var assignedDriver = drivers.find(function (item) {
+        return safeText(item.id, "") === safeText(activeTrip.assignedDriver || activeRide.driver_id || workflowRide.driver_id, "");
       }) || {};
       var provider = providers.find(function (item) {
-        return safeText(item.id, "") === safeText(activeRide.provider_id, "");
+        return safeText(item.id, "") === safeText(activeRide.provider_id || workflowRide.provider_id, "");
       }) || {};
-      var assignedDriver = drivers.find(function (item) {
-        return safeText(item.id, "") === safeText(activeRide.driver_id, "");
-      }) || {};
-      providerName = safeText(activeTrip.providerName || provider.name || provider.provider_name, providerName);
+      providerName = safeText(
+        activeTrip.providerName || workflowActive.provider_name || provider.name || provider.provider_name,
+        providerName
+      );
       assignedDriverLabel = safeText(
-        activeTrip.assignedDriverName || assignedDriver.name || assignedDriver.driver_name || activeRide.driver_id,
+        activeTrip.assignedDriverName
+          || workflowActive.driver_name
+          || assignedDriver.name
+          || assignedDriver.driver_name
+          || activeRide.driver_id
+          || activeTrip.assignedDriver,
         assignedDriverLabel
       );
     }
     var acceptedCount = safeNumber(appState.acceptedCount, 0);
     var declinedCount = safeNumber(appState.declinedCount, 0);
     var completedTrips = safeNumber(appState.completedTrips, 0);
-    var earningsToday = safeNumber(appState.earningsToday, 0);
     var historyRides = Array.isArray(appState.completedRideHistory) ? appState.completedRideHistory : completedRides;
-    var earningsLifetime = safeNumber(appState.earningsLifetime, 0);
-    var recentEarningsTrips = Array.isArray((safeObject(state.driverWorkflow)).earnings && (safeObject(state.driverWorkflow)).earnings.recent_trips)
-      ? (safeObject(state.driverWorkflow)).earnings.recent_trips
-      : [];
+    var earningsPayload = safeObject((safeObject(state.driverWorkflow)).earnings);
+    var earningsDisplay = deriveDriverEarningsDisplayFields(
+      earningsPayload,
+      historyRides,
+      billingHandoffs
+    );
+    var earningsToday = earningsDisplay.earningsToday;
+    var earningsLifetime = earningsDisplay.earningsLifetime;
+    completedTrips = Math.max(completedTrips, earningsDisplay.completedTrips);
+    var billingHandoffCount = Math.max(billingHandoffs.length, earningsDisplay.billingHandoffCount);
+    var recentEarningsTrips = Array.isArray(earningsPayload.recent_trips) ? earningsPayload.recent_trips : [];
     var historyRows = historyRides.slice(0, 12).map(function (ride) {
       var fare = safeNumber(ride.fare_amount || ride.estimated_fare_usd || ride.ride_price_usd, 0);
       var payout = safeNumber(ride.driver_pay_usd || ride.payout_amount, 0);
@@ -5310,16 +6130,14 @@
           '<div class="tile"><strong>$' + escapeHtml(String(earningsToday.toFixed(2))) + '</strong><p class="muted">Today</p></div>' +
           '<div class="tile"><strong>$' + escapeHtml(String(earningsLifetime.toFixed(2))) + '</strong><p class="muted">Lifetime</p></div>' +
           '<div class="tile"><strong>' + escapeHtml(String(completedTrips)) + '</strong><p class="muted">Completed Trips</p></div>' +
-          '<div class="tile"><strong>' + escapeHtml(String(billingHandoffs.length)) + '</strong><p class="muted">Billing Handoffs</p></div>' +
+          '<div class="tile"><strong>' + escapeHtml(String(billingHandoffCount)) + '</strong><p class="muted">Billing Handoffs</p></div>' +
         '</div>' +
         '<div class="table-wrap" style="margin-top:10px;"><table class="ops-table"><thead><tr><th>Ride</th><th>Driver Pay</th><th>Fare</th><th>Completed</th></tr></thead><tbody>' +
           (earningsTripRows || '<tr><td colspan="4">No earnings rows yet.</td></tr>') +
         '</tbody></table></div>';
     }
 
-    return renderPanelBlock(
-      "Driver Mobile App",
-      "Trip-first driver workflow aligned to field operations, with quick trip actions and secondary tabs for earnings, documents, and history.",
+    return wrapDriverMobilePage(
       driverSessionHeader +
       '<div class="driver-mobile-layout">' +
         '<section class="driver-mobile-phone">' +
@@ -5416,8 +6234,7 @@
             '<div class="driver-secondary-content">' + secondaryContent + '</div>' +
           '</article>' +
         '</section>' +
-      '</div>',
-      "driver mobile"
+      '</div>'
     );
   }
 
@@ -6210,7 +7027,10 @@
           if (["completed", "cancelled", "failed", "dropoff_complete"].indexOf(stateText) >= 0) {
             return false;
           }
-          return ["requested", "scheduled", "assigned", "delayed", "pending", "new", "queued", "pending_review", "awaiting_approval", "pending_assignment", "offered", "searching", "dispatchable", "reassignment_pending"].indexOf(stateText) >= 0;
+          if (["accepted", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination", "pickup_complete", "en_route_pickup"].indexOf(stateText) >= 0) {
+            return false;
+          }
+          return ["requested", "scheduled", "delayed", "pending", "new", "queued", "pending_review", "awaiting_approval", "pending_assignment", "offered", "searching", "dispatchable", "reassignment_pending"].indexOf(stateText) >= 0;
         });
         var activeTrips = trips.filter(function (trip) {
           var stateText = safeText(trip.state, "");
@@ -6519,7 +7339,10 @@
 
   function renderDrivers() {
     var phase17 = getPhase17Context();
-    if (state.role === "driver" || state.role === "admin" || state.role === "dispatcher" || state.role === "supervisor") {
+    if (isDriverMobileAppRoute()) {
+      return renderDriverDashboard(phase17);
+    }
+    if (state.role === "driver") {
       return renderDriverDashboard(phase17);
     }
     if (state.role === "driver_support") {
@@ -6947,7 +7770,12 @@
     var liveDispatch = safeObject(snapshot.live_dispatch);
     var focused = safeObject(liveDispatch.focused_ride);
     var queueIds = Array.isArray(liveDispatch.queue_ride_ids) ? liveDispatch.queue_ride_ids : [];
-    var dispatchQueue = Array.isArray((safeObject(state.liveWorkflow)).dispatchQueue) ? state.liveWorkflow.dispatchQueue : [];
+    var snapshotQueue = Array.isArray(liveDispatch.queue) ? liveDispatch.queue : [];
+    var workflowQueue = Array.isArray((safeObject(state.liveWorkflow)).dispatchQueue) ? state.liveWorkflow.dispatchQueue : [];
+    var dispatchQueue = snapshotQueue.length > 0 ? snapshotQueue : workflowQueue;
+    var queueDepth = snapshotQueue.length > 0
+      ? snapshotQueue.length
+      : safeNumber(liveDispatch.queue_count, dispatchQueue.length);
     var newestRideId = safeText(focused.ride_id, queueIds.length > 0 ? safeText(queueIds[0], "") : (dispatchQueue[0] ? safeText(dispatchQueue[0].ride_id, "") : ""));
     var queueHtml = dispatchQueue.slice(0, 8).map(function (item) {
       var rideId = safeText(item.ride_id, "");
@@ -6963,7 +7791,7 @@
       "Live Dispatch Assignment Queue",
       "Same authoritative dispatch queue used by the dashboard assignment board.",
       '<div class="grid-3">' +
-        renderMetric("Queue Depth", String(safeNumber(liveDispatch.queue_count, dispatchQueue.length))) +
+        renderMetric("Queue Depth", String(queueDepth)) +
         renderMetric("Focused Ride", newestRideId ? newestRideId.slice(0, 8) + "…" : "none") +
         renderMetric("Assignment State", escapeHtml(safeText(focused.assignment_state, "pending"))) +
       '</div>' +
@@ -7610,6 +8438,9 @@
 
   function renderMobile() {
     var phase17 = getPhase17Context();
+    if (state.route === "mobile") {
+      return renderDriverDashboard(phase17);
+    }
     if (state.role === "rider") {
       return renderRiderDashboard(phase17);
     }
@@ -8536,6 +9367,34 @@
     ].join("");
   }
 
+  function renderDriverMobileLoadingPanel() {
+    var appState = safeObject(state.driverApp);
+    var errorText = safeText(appState.mobileBootstrapError, "");
+    var syncWarning = safeText(appState.syncWarning, "");
+    var detail = errorText || syncWarning;
+    return wrapDriverMobilePage(
+      '<div class="driver-workflow-card driver-mobile-loading">' +
+        '<strong>Loading driver assignment</strong>' +
+        '<p class="muted">Preparing the dedicated Driver Mobile session. Enterprise operations hydration is skipped on this route.</p>' +
+        (detail
+          ? '<p class="driver-mobile-load-error" style="color:#b91c1c;margin-top:10px;"><strong>Sync error:</strong> ' + escapeHtml(detail) + '</p>'
+          : '') +
+      '</div>'
+    );
+  }
+
+  function renderDriverMobileApiErrorPanel() {
+    var appState = safeObject(state.driverApp);
+    var detail = safeText(appState.mobileBootstrapError, "") || safeText(appState.syncWarning, "Driver assignment sync failed.");
+    return wrapDriverMobilePage(
+      '<div class="driver-workflow-card" style="border-color:#fca5a5;background:#fff7f7;">' +
+        '<strong>Driver Mobile load error</strong>' +
+        '<p class="muted">' + escapeHtml(detail) + '</p>' +
+        '<button class="preview-action driver-action" type="button" onclick="window.AmiOpsShellActions && window.AmiOpsShellActions.refreshDriverWorkflowData && window.AmiOpsShellActions.refreshDriverWorkflowData({})">Retry</button>' +
+      '</div>'
+    );
+  }
+
   function renderPage() {
     if (!state.loading && (isDispatcherDraftFieldActive() || isRiderDraftFieldActive())) {
       window.__amiDispatcherDraftRenderDeferred = true;
@@ -8550,6 +9409,7 @@
     }
     window.__amiDispatcherDraftRenderDeferred = false;
     traceDispatcherPickupRender("renderPage:start");
+    applyDriverMobileShellLayout(isDriverMobileAppRoute());
     state.runtime.lastRenderTimestamp = new Date().toISOString();
     var routeMeta = ROUTES[state.route] || ROUTES.dashboard;
     document.body.setAttribute("data-route", state.route);
@@ -8559,12 +9419,19 @@
 
     if (state.loading) {
       if (state.role === "dispatcher" && state.route === "dispatch") {
-        els.pageContent.innerHTML =
+        syncPageContentHtml(
+          els.pageContent,
           '<section class="panel"><p class="muted">Loading latest backend snapshots. Dispatcher actions remain available.</p></section>' +
-          renderDispatcherOperationsWorkspace();
+          renderDispatcherOperationsWorkspace()
+        );
         return;
       }
-      els.pageContent.innerHTML =
+      if (isDriverMobileAppRoute()) {
+        syncPageContentHtml(els.pageContent, renderDriverMobileLoadingPanel());
+        return;
+      }
+      syncPageContentHtml(
+        els.pageContent,
         '<section class="panel hydration-loading">' +
           '<div class="hydration-spinner" aria-hidden="true"></div>' +
           '<h3>Preparing Command Surface</h3>' +
@@ -8574,7 +9441,8 @@
             '<div class="loading-skeleton"></div>' +
             '<div class="loading-skeleton"></div>' +
           '</div>' +
-        '</section>';
+        '</section>'
+      );
       return;
     }
 
@@ -8616,7 +9484,7 @@
     }
 
     var warningBanner = "";
-    if (state.fetchWarnings.length > 0) {
+    if (!isDriverMobileAppRoute() && state.fetchWarnings.length > 0) {
       var warningRows = warningDisplayEntries().slice(0, 3).map(function (entry) {
         return '<span class="runtime-strip-item">' + escapeHtml(entry.message) + '</span>';
       }).join("");
@@ -8642,13 +9510,23 @@
     updateLastUpdatedLabel();
     if (!state.loading && dataSig === state.runtime.lastPageDataSignature && els.pageContent.__stableHtml === fullHtml) {
       traceDispatcherPickupRender("renderPage:skipped-stable");
+      if (canUseDriverWorkspaceActions()) {
+        bindDriverWorkspaceEvents();
+      } else if (isDriverMobileSurface()) {
+        bindDriverWorkspaceEvents();
+      }
+      if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && (state.role === "rider" || state.route === "riders")) {
+        bindRiderWorkspaceEvents();
+      }
       return;
     }
     state.runtime.lastPageDataSignature = dataSig;
+    if (els.pageContent && els.pageContent.innerText && els.pageContent.innerText.indexOf("Preparing Command Surface") >= 0) {
+      els.pageContent.__stableHtml = "";
+    }
     var domChanged = setHtmlIfChanged(els.pageContent, fullHtml);
     if (!domChanged) {
       traceDispatcherPickupRender("renderPage:skipped-html");
-      return;
     }
     var reloadButton = document.getElementById("ops-empty-reload");
     if (reloadButton) {
@@ -8662,6 +9540,8 @@
     });
     if (canUseDriverWorkspaceActions()) {
       bindDriverWorkspaceEvents();
+    } else if (isDriverMobileSurface()) {
+      bindDriverWorkspaceEvents();
     }
     if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && (state.role === "rider" || state.route === "riders")) {
       bindRiderWorkspaceEvents();
@@ -8673,13 +9553,50 @@
     var host = els.pageContent;
     if (!host) return;
 
+    var loginButton = document.getElementById("driver-mobile-login-btn");
+    if (loginButton && loginButton.getAttribute("data-ami-login-bound") !== "1") {
+      loginButton.setAttribute("data-ami-login-bound", "1");
+      loginButton.addEventListener("click", function () {
+        void submitDriverMobileLogin();
+      });
+    }
+    var phoneInput = document.getElementById("driver-mobile-phone");
+    if (phoneInput) {
+      var savedPhone = safeText((safeObject(state.driverApp)).mobileLogin && state.driverApp.mobileLogin.phone, "");
+      if (savedPhone && !safeText(phoneInput.value, "")) {
+        phoneInput.value = savedPhone;
+      }
+      phoneInput.addEventListener("input", function (event) {
+        syncDriverMobilePhoneState(safeText(event && event.target && event.target.value, ""));
+      });
+      phoneInput.addEventListener("change", function (event) {
+        syncDriverMobilePhoneState(safeText(event && event.target && event.target.value, ""));
+      });
+      phoneInput.addEventListener("keydown", function (event) {
+        if (event && event.key === "Enter") {
+          event.preventDefault();
+          void submitDriverMobileLogin();
+        }
+      });
+    }
+
     var actionButtons = Array.prototype.slice.call(host.querySelectorAll("[data-driver-action]"));
     actionButtons.forEach(function (button) {
+      if (button.getAttribute("data-ami-action-bound") === "1") return;
+      button.setAttribute("data-ami-action-bound", "1");
       button.addEventListener("click", async function () {
+        if (driverActionInFlight) return;
         var action = safeText(button.getAttribute("data-driver-action"), "");
         var tripId = safeText(button.getAttribute("data-trip-id"), "");
         var noteId = safeText(button.getAttribute("data-note-id"), "");
-        await handleDriverWorkspaceAction(action, tripId, noteId);
+        driverActionInFlight = true;
+        button.disabled = true;
+        try {
+          await handleDriverWorkspaceAction(action, tripId, noteId);
+        } finally {
+          driverActionInFlight = false;
+          button.disabled = false;
+        }
       });
     });
   }
@@ -8715,6 +9632,11 @@
 
     var runtime = window.AmiDriverRuntime;
     var currentDriverId = safeText(appState.currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
+
+    if (action === "mobile_login") {
+      await submitDriverMobileLogin();
+      return;
+    }
 
     if (action === "accept_trip") {
       var visibleTripId = safeText(appState.activeTripId, "") || safeText(tripId, "");
@@ -9006,7 +9928,9 @@
     var method = safeText(options.method, "GET").toUpperCase();
     var scopedUrl = withOrganizationScope(url);
     var token = explicitToken || getAccessToken();
-    var headers = { "Accept": "application/json" };
+    var mobileCtx = getCanonicalMobileDriverContext();
+    var useDriverSessionOnly = isDriverMobileAppRoute() && mobileCtx.authenticated && isMobileDriverApiUrl(scopedUrl);
+    var headers = applyDriverSessionHeaders({ "Accept": "application/json" }, token, scopedUrl);
     if (options.headers && typeof options.headers === "object") {
       Object.keys(options.headers).forEach(function (key) {
         headers[key] = options.headers[key];
@@ -9015,7 +9939,7 @@
     if (options.body != null && !headers["Content-Type"] && !headers["content-type"]) {
       headers["Content-Type"] = "application/json";
     }
-    if (token) {
+    if (token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
     var retries = method === "GET" ? 1 : 0;
@@ -9031,12 +9955,7 @@
         if (options.signal) {
           requestInit.signal = options.signal;
         }
-        var response;
-        if (!explicitToken && window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
-          response = await withTimeout(window.AmiCorSession.authFetch(scopedUrl, requestInit), method === "GET" ? 20000 : 12000);
-        } else {
-          response = await withTimeout(fetch(scopedUrl, requestInit), method === "GET" ? 20000 : 12000);
-        }
+        var response = await withTimeout(fetch(scopedUrl, requestInit), method === "GET" ? 20000 : 12000);
 
         if (!response.ok) {
           throw new Error(scopedUrl + ":http_" + response.status);
@@ -9095,7 +10014,7 @@
     bootstrapAppSession();
     try {
       if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
-        await window.AmiCorSession.ensureReady();
+        await withTimeout(window.AmiCorSession.ensureReady(), SESSION_READY_TIMEOUT_MS);
       }
     } catch (_) {}
     state.hydration = safeObject(state.hydration);
@@ -9156,30 +10075,35 @@
     }
     return new Promise(function (resolve) {
       var settled = false;
+      var dismissWatch = null;
+      var authDeadline = null;
       function finish(ok) {
         if (settled) return;
         settled = true;
+        if (dismissWatch) clearInterval(dismissWatch);
+        if (authDeadline) clearTimeout(authDeadline);
         resolve(!!ok && !!getAccessToken());
       }
       function openLogin() {
         window.AmiCorAuthUI.showLogin(function (identity) {
           applyLoginIdentity(identity);
+          finish(true);
           loadBackendData({ silent: true }).finally(function () {
             renderPage();
-            finish(true);
           });
         }, openSignup);
-        var dismissWatch = setInterval(function () {
+        dismissWatch = setInterval(function () {
           if (getAccessToken()) {
-            clearInterval(dismissWatch);
             finish(true);
             return;
           }
           if (!document.getElementById("amicor-auth-overlay")) {
-            clearInterval(dismissWatch);
             finish(false);
           }
         }, 400);
+        authDeadline = setTimeout(function () {
+          finish(!!getAccessToken());
+        }, 90000);
       }
       function openSignup() {
         if (!(window.AmiCorAuthUI && typeof window.AmiCorAuthUI.showSignup === "function")) {
@@ -9188,9 +10112,9 @@
         }
         window.AmiCorAuthUI.showSignup(function (identity) {
           applyLoginIdentity(identity);
+          finish(true);
           loadBackendData({ silent: true }).finally(function () {
             renderPage();
-            finish(true);
           });
         }, openLogin);
       }
@@ -9205,15 +10129,7 @@
       init.credentials = "same-origin";
     }
     var token = getAccessToken();
-    if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function" && token) {
-      try {
-        var sessionResponse = await withTimeout(window.AmiCorSession.authFetch(scopedUrl, init), timeoutMs || 12000);
-        if (sessionResponse && sessionResponse.status !== 401 && sessionResponse.status !== 403) {
-          return sessionResponse;
-        }
-      } catch (_) {}
-    }
-    var headers = Object.assign({}, init.headers || {});
+    var headers = applyDriverSessionHeaders(Object.assign({}, init.headers || {}), token, scopedUrl);
     if (token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
@@ -9221,19 +10137,31 @@
     return await withTimeout(fetch(scopedUrl, init), timeoutMs || 12000);
   }
 
-  async function postJson(url, payload, timeoutMs) {
+  async function postJson(url, payload, timeoutMs, options) {
+    var opts = options || {};
     var scopedUrl = withOrganizationScope(url);
+    var headers = {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
+    if (opts.idempotencyKey) {
+      headers["X-Idempotency-Key"] = String(opts.idempotencyKey);
+    }
     var response = await authorizedFetch(scopedUrl, {
       method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-      },
+      headers: headers,
       body: JSON.stringify(payload || {})
     }, timeoutMs || 12000);
 
     if (!response.ok) {
-      throw new Error(scopedUrl + ":http_" + response.status);
+      var errDetail = scopedUrl + ":http_" + response.status;
+      try {
+        var errBody = await response.json();
+        if (errBody && errBody.detail) {
+          errDetail = String(errBody.detail);
+        }
+      } catch (_) {}
+      throw new Error(errDetail);
     }
     return response.json();
   }
@@ -9402,6 +10330,84 @@
     });
   }
 
+  function isSameLocalDay(value) {
+    var raw = safeText(value, "");
+    if (!raw) return false;
+    try {
+      var parsed = new Date(raw);
+      if (!Number.isFinite(parsed.getTime())) return false;
+      var now = new Date();
+      return parsed.getFullYear() === now.getFullYear()
+        && parsed.getMonth() === now.getMonth()
+        && parsed.getDate() === now.getDate();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function sumDriverPayRows(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce(function (total, row) {
+      return total + safeNumber(row.driver_pay_usd || row.payout_amount || row.driver_pay, 0);
+    }, 0);
+  }
+
+  function deriveDriverEarningsDisplayFields(earningsPayload, completedRideRows, billingHandoffRows) {
+    var earnings = safeObject(earningsPayload);
+    var completed = Array.isArray(completedRideRows) ? completedRideRows : [];
+    var handoffs = dedupeBillingHandoffsByRideId(Array.isArray(billingHandoffRows) ? billingHandoffRows : []);
+    var recentTrips = Array.isArray(earnings.recent_trips) ? earnings.recent_trips : [];
+    var sourceRows = recentTrips.length ? recentTrips : completed;
+
+    var earningsToday = safeNumber(earnings.earnings_today_usd, NaN);
+    var earningsLifetime = safeNumber(earnings.earnings_lifetime_usd, NaN);
+    var completedTrips = safeNumber(earnings.trip_count_today, NaN);
+    if (!Number.isFinite(completedTrips) || completedTrips <= 0) {
+      completedTrips = safeNumber(earnings.trip_count, NaN);
+    }
+
+    if ((!Number.isFinite(earningsLifetime) || earningsLifetime <= 0) && sourceRows.length) {
+      earningsLifetime = sumDriverPayRows(sourceRows);
+    }
+    if (!Number.isFinite(earningsLifetime)) {
+      earningsLifetime = 0;
+    }
+
+    if ((!Number.isFinite(earningsToday) || earningsToday <= 0) && sourceRows.length) {
+      var todayRows = sourceRows.filter(function (row) {
+        return isSameLocalDay(row.completed_at || row.updated_at || row.created_at);
+      });
+      if (todayRows.length) {
+        earningsToday = sumDriverPayRows(todayRows);
+      }
+    }
+    if (!Number.isFinite(earningsToday)) {
+      earningsToday = 0;
+    }
+
+    if (!Number.isFinite(completedTrips) || completedTrips <= 0) {
+      completedTrips = Math.max(completed.length, recentTrips.length, safeNumber(earnings.trip_count, 0));
+    }
+
+    return {
+      earningsToday: earningsToday,
+      earningsLifetime: earningsLifetime,
+      completedTrips: completedTrips,
+      billingHandoffCount: handoffs.length
+    };
+  }
+
+  function syncDriverEarningsSummaryToApp(appState, earningsPayload, completedRideRows, billingHandoffRows) {
+    var app = safeObject(appState);
+    var display = deriveDriverEarningsDisplayFields(earningsPayload, completedRideRows, billingHandoffRows);
+    app.earningsToday = display.earningsToday;
+    app.earningsLifetime = display.earningsLifetime;
+    app.completedTrips = Math.max(safeNumber(app.completedTrips, 0), display.completedTrips);
+    if (Array.isArray(billingHandoffRows) && billingHandoffRows.length) {
+      app.billingHandoffs = billingHandoffRows;
+    }
+    return app;
+  }
+
   function applyDriverWorkflowSnapshot(resolvedDriverId, snapshot, partial, options) {
     var opts = options || {};
     var preserveOnEmpty = opts.preserveOnEmpty === true;
@@ -9429,9 +10435,15 @@
 
     var priorActiveRide = safeObject(priorWorkflow.activeRide);
     var priorRideId = safeText((safeObject(priorActiveRide.ride)).id, "") || priorTripId;
+    var priorRideStatus = normalizeRideStatusToken(
+      (safeObject(priorActiveRide.ride)).lifecycle_state
+        || (safeObject(priorActiveRide.ride)).status
+        || priorActiveRide.assignment_state
+    );
+    var priorRideTerminal = priorRideId && isTerminalRideStatus(priorRideStatus);
     var incomingActiveRide = safeObject(partial.activeRide);
     var incomingRideId = safeText((safeObject(incomingActiveRide.ride)).id, "");
-    var priorTripCompleted = priorTripCompletedInSnapshot(priorRideId, payload);
+    var priorTripCompleted = priorTripCompletedInSnapshot(priorRideId, payload) || priorRideTerminal;
     if (
       partial.activeRide != null
       && priorActiveRide.has_active_ride === true
@@ -9489,16 +10501,7 @@
     state.driverApp = safeObject(state.driverApp);
     state.driverApp.currentDriverId = resolvedDriverId;
     state.driverApp.secondaryTab = safeText(priorApp.secondaryTab, "earnings") || "earnings";
-    if (Object.keys(earningsPayload).length) {
-      state.driverApp.earningsToday = safeNumber(earningsPayload.earnings_today_usd, safeNumber(priorApp.earningsToday, 0));
-      state.driverApp.earningsLifetime = safeNumber(earningsPayload.earnings_lifetime_usd, safeNumber(priorApp.earningsLifetime, 0));
-      state.driverApp.completedTrips = Math.max(
-        safeNumber(earningsPayload.trip_count_today, 0),
-        safeNumber(earningsPayload.trip_count, 0),
-        completedRideRows.length,
-        safeNumber(priorApp.completedTrips, 0)
-      );
-    }
+    syncDriverEarningsSummaryToApp(state.driverApp, earningsPayload, completedRideRows, billingHandoffRows);
     if (completedRideRows.length) {
       state.driverApp.completedRideHistory = completedRideRows;
     } else if (Array.isArray(priorApp.completedRideHistory) && priorApp.completedRideHistory.length) {
@@ -9535,14 +10538,42 @@
       completedRides: completedRideRows,
       billingHandoffs: billingHandoffRows
     };
+    var confirmedActiveRide = safeObject(nextActiveRide);
+    var confirmedRideRow = safeObject(confirmedActiveRide.ride);
+    var confirmedRideStatus = normalizeRideStatusToken(
+      confirmedRideRow.lifecycle_state || confirmedRideRow.status || confirmedActiveRide.assignment_state
+    );
+    var hasOpenWorkload = (
+      confirmedActiveRide.has_active_ride === true
+      && confirmedRideStatus
+      && TERMINAL_RIDE_STATUSES.indexOf(confirmedRideStatus) < 0
+    ) || (
+      Array.isArray(nextAssignedRides)
+      && nextAssignedRides.some(function (row) {
+        return !isTerminalRideStatus(row.lifecycle_state || row.status);
+      })
+    ) || !!safeText((safeObject(nextActiveOffer.offer)).ride_id, "");
+    if (!hasOpenWorkload) {
+      driverLastConfirmedWorkflow = null;
+    }
   }
 
   async function refreshDriverWorkflowData(options) {
     var opts = options || {};
     var refreshSeq = ++driverWorkflowRefreshSeq;
     var token = opts.token || getAccessToken();
+    var mobileCtx = getCanonicalMobileDriverContext();
+    var driverSessionToken = mobileCtx.sessionToken || getDriverSessionToken();
     var roleView = safeText(state.role, "").toLowerCase();
     var driverMobileView = isDriverMobileSurface() || roleView === "driver";
+    if (isDriverMobileAppRoute() && mobileCtx.authenticated) {
+      state.driverApp = safeObject(state.driverApp);
+      if (!state.driverApp.mobileUiState || state.driverApp.mobileUiState === "awaiting_assignment") {
+        state.driverApp.mobileUiState = "loading_assignment";
+      }
+      state.driverApp.currentDriverId = mobileCtx.driverId;
+      state.driverApp.shiftOnline = true;
+    }
     if (opts.forceReset === true) {
       var resetApp = safeObject(state.driverApp);
       resetApp.activeTripId = "";
@@ -9550,9 +10581,21 @@
       resetApp.tripQueue = [];
       state.driverApp = resetApp;
     }
-    if (!token) {
+    if (!token && !driverSessionToken) {
       if (driverMobileView && driverLastConfirmedWorkflow) {
         markDriverSyncWarning("Authentication required. Showing last confirmed driver trip.");
+        return;
+      }
+      if (isDriverMobileAppRoute()) {
+        state.driverApp = safeObject(state.driverApp);
+        state.driverApp.mobileUiState = "login_required";
+        logDriverMobileRefreshSync({
+          event: "assignment_refresh_auth_required",
+          frontend_state_transition: "session_missing->login_required",
+          next_ui_state: "login_required",
+          api_response: { reason: "missing_platform_and_driver_session" }
+        });
+        scheduleRenderPage();
         return;
       }
       clearDriverLiveTripState({ resetBoundIdentity: true });
@@ -9698,7 +10741,16 @@
       offerEnvelope,
       completionSnapshot
     );
-    var preserveOnEmpty = !apiHealthy || wouldClearActiveTrip || (priorTripId && authoritativeEmpty && !priorCompleted);
+    var preserveOnEmpty = !apiHealthy || (wouldClearActiveTrip && priorTripId && !priorCompleted && !authoritativeEmpty);
+    if (priorTripId && isTerminalRideStatus(
+      normalizeRideStatusToken(
+        (safeObject(priorWorkflow.activeRide && priorWorkflow.activeRide.ride)).lifecycle_state
+          || (safeObject(priorWorkflow.activeRide && priorWorkflow.activeRide.ride)).status
+          || (safeObject(priorWorkflow.activeRide)).assignment_state
+      )
+    )) {
+      preserveOnEmpty = false;
+    }
     var responseObservedAt = Date.now();
 
     if (refreshSeq < driverLastAppliedRefreshSeq) {
@@ -9725,6 +10777,58 @@
     }
 
     if (preserveOnEmpty) {
+      if (isDriverMobileSurface() && priorCompleted && authoritativeEmpty && apiHealthy) {
+        resetDriverMobileAfterCompletion();
+        clearDriverSyncWarning();
+        applyDriverWorkflowSnapshot(
+          resolvedDriverId,
+          completionOk ? completionSnapshot : null,
+          {
+            activeRide: activeRidePayload || { has_active_ride: false },
+            workspace: workspacePayload,
+            activeOffer: offerEnvelope,
+            assignedRides: assignedRideRows || []
+          },
+          { preserveOnEmpty: false }
+        );
+        driverLastAppliedRefreshSeq = refreshSeq;
+        driverLastAppliedObservedAt = responseObservedAt;
+        ensureDriverMobileState(null);
+        scheduleRenderPage(0);
+        return;
+      }
+      if (isDriverMobileAppRoute() && !apiHealthy) {
+        state.driverApp = safeObject(state.driverApp);
+        var priorUiOnApiError = safeText(state.driverApp.mobileUiState, "loading_assignment");
+        state.driverApp.mobileUiState = "api_error";
+        state.driverApp.shiftOnline = true;
+        state.driverApp.currentDriverId = resolvedDriverId;
+        markDriverSyncWarning("Driver assignment sync failed. Retry refresh or re-login.");
+        logDriverMobileRefreshSync({
+          event: "assignment_refresh_failed",
+          requested_ride_id: returnedRideId,
+          assignment_state: lifecycleState,
+          api_response: {
+            active_ride: activeRidePayload,
+            assigned_rides_count: Array.isArray(assignedRideRows) ? assignedRideRows.length : null,
+            http_status: {
+              active_ride: probeStatus(0),
+              live_workspace: probeStatus(1),
+              active_offer: probeStatus(2),
+              assigned_rides: probeStatus(3),
+              completion_snapshot: probeStatus(4)
+            }
+          },
+          http_status: probeStatus(0),
+          route: driverBase + "/active-ride",
+          frontend_state_transition: priorUiOnApiError + "->api_error",
+          next_ui_state: "api_error",
+          extra: { refresh_seq: refreshSeq, ignored_reason: "partial_or_failed_response" }
+        });
+        ensureDriverMobileState(null);
+        scheduleRenderPage(0);
+        return;
+      }
       markDriverSyncWarning("Driver refresh incomplete. Showing last confirmed trip.");
       logDriverPoll({
         seq: refreshSeq,
@@ -9745,18 +10849,22 @@
         observed_at: responseObservedAt
       });
       if (driverLastConfirmedWorkflow && safeText(driverLastConfirmedWorkflow.driverId, "") === resolvedDriverId) {
-        applyDriverWorkflowSnapshot(
-          resolvedDriverId,
-          completionOk ? completionSnapshot : null,
-          {
-            activeRide: driverLastConfirmedWorkflow.activeRide,
-            workspace: driverLastConfirmedWorkflow.workspace,
-            activeOffer: driverLastConfirmedWorkflow.activeOffer,
-            assignedRides: driverLastConfirmedWorkflow.assignedRides
-          },
-          { preserveOnEmpty: true }
-        );
-      } else if (priorTripId && priorWorkflow.activeRide) {
+        if (!authoritativeEmpty) {
+          applyDriverWorkflowSnapshot(
+            resolvedDriverId,
+            completionOk ? completionSnapshot : null,
+            {
+              activeRide: driverLastConfirmedWorkflow.activeRide,
+              workspace: driverLastConfirmedWorkflow.workspace,
+              activeOffer: driverLastConfirmedWorkflow.activeOffer,
+              assignedRides: driverLastConfirmedWorkflow.assignedRides
+            },
+            { preserveOnEmpty: true }
+          );
+        } else {
+          driverLastConfirmedWorkflow = null;
+        }
+      } else if (priorTripId && priorWorkflow.activeRide && !authoritativeEmpty) {
         applyDriverWorkflowSnapshot(
           resolvedDriverId,
           completionOk ? completionSnapshot : null,
@@ -9770,6 +10878,34 @@
         );
       }
       if (isDriverMobileSurface()) {
+        state.driverApp = safeObject(state.driverApp);
+        var priorUiOnStale = safeText(state.driverApp.mobileUiState, "loading_assignment");
+        state.driverApp.mobileUiState = "api_error";
+        logDriverMobileRefreshSync({
+          event: "assignment_refresh_preserved_stale",
+          requested_ride_id: returnedRideId,
+          assignment_state: lifecycleState,
+          api_response: {
+            active_ride: activeRidePayload,
+            assigned_rides_count: Array.isArray(assignedRideRows) ? assignedRideRows.length : null,
+            http_status: {
+              active_ride: probeStatus(0),
+              live_workspace: probeStatus(1),
+              active_offer: probeStatus(2),
+              assigned_rides: probeStatus(3),
+              completion_snapshot: probeStatus(4)
+            }
+          },
+          route: driverBase + "/active-ride",
+          frontend_state_transition: priorUiOnStale + "->api_error",
+          next_ui_state: "api_error",
+          extra: {
+            refresh_seq: refreshSeq,
+            ignored_reason: !apiHealthy
+              ? "partial_or_failed_response"
+              : (wouldClearActiveTrip ? "active_trip_downgrade_rejected" : "authoritative_empty_rejected")
+          }
+        });
         ensureDriverMobileState(null);
         scheduleRenderPage(0);
       }
@@ -9823,9 +10959,75 @@
       observed_at: responseObservedAt,
       last_applied_seq: driverLastAppliedRefreshSeq
     });
+    var nextMobileUiState = openAssignment ? "active_ride" : "awaiting_assignment";
+    if (isDriverMobileAppRoute()) {
+      state.driverApp = safeObject(state.driverApp);
+      var priorMobileUi = safeText(state.driverApp.mobileUiState, "loading_assignment");
+      state.driverApp.mobileUiState = nextMobileUiState;
+      logDriverMobileRefreshSync({
+        event: "assignment_refresh_applied",
+        requested_ride_id: returnedRideId,
+        assignment_state: lifecycleState,
+        api_response: {
+          has_active_ride: !!(activeRidePayload && activeRidePayload.has_active_ride),
+          assignment_state: lifecycleState,
+          ride_id: returnedRideId,
+          assigned_count: Array.isArray(assignedRideRows) ? assignedRideRows.length : 0,
+          http_status: {
+            active_ride: probeStatus(0),
+            live_workspace: probeStatus(1),
+            active_offer: probeStatus(2),
+            assigned_rides: probeStatus(3),
+            completion_snapshot: probeStatus(4)
+          }
+        },
+        http_status: 200,
+        route: driverBase + "/active-ride",
+        frontend_state_transition: priorMobileUi + "->" + nextMobileUiState,
+        next_ui_state: nextMobileUiState,
+        extra: { refresh_seq: refreshSeq, applied: true }
+      });
+    }
 
     if (isDriverMobileSurface()) {
       ensureDriverMobileState(null);
+      if (isDriverMobileSessionRoute()) {
+        var appAfterHydration = safeObject(state.driverApp);
+        var offerRow = safeObject(offerEnvelope && offerEnvelope.offer);
+        var activeRideRow = safeObject(activeRidePayload && activeRidePayload.ride);
+        var activeAssignmentRow = safeObject(activeRidePayload && activeRidePayload.active_assignment);
+        var assignmentDriverId = resolveAssignmentDriverId(offerRow)
+          || resolveAssignmentDriverId(activeAssignmentRow)
+          || resolveRideDriverId(activeRideRow)
+          || null;
+        var hydrationRideId = safeText(appAfterHydration.activeTripId, "")
+          || returnedRideId
+          || safeText(offerRow.ride_id, "")
+          || null;
+        logDriverMobileAssignmentSync({
+          event: "mobile_hydration_summary",
+          authenticated_driver_id: resolvedDriverId,
+          assignment_driver_id: assignmentDriverId,
+          requested_ride_id: hydrationRideId,
+          assignment_state: lifecycleState || safeText(offerRow.assignment_state, "") || null,
+          api_response: {
+            active_offer: offerEnvelope,
+            active_ride: activeRidePayload,
+            trip_queue_len: Array.isArray(appAfterHydration.tripQueue) ? appAfterHydration.tripQueue.length : 0,
+            active_trip_id: safeText(appAfterHydration.activeTripId, "") || null,
+            mobile_ui_state: safeText(appAfterHydration.mobileUiState, "")
+          },
+          route: driverBase + "/active-offer",
+          http_status: probeStatus(2),
+          extra: {
+            refresh_seq: refreshSeq,
+            open_assignment: openAssignment,
+            hydration_reason: Array.isArray(appAfterHydration.tripQueue) && appAfterHydration.tripQueue.length
+              ? "accepted_trips_in_queue"
+              : (openAssignment ? "api_open_assignment" : "awaiting_assignment")
+          }
+        });
+      }
       scheduleRenderPage(0);
     }
 
@@ -9853,21 +11055,97 @@
     };
   }
 
+  function makeRiderIdempotencyKey() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return "rider-submit-" + window.crypto.randomUUID();
+    }
+    return "rider-submit-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+  }
+
+  async function recoverCustomerRequestByIdempotency(idempotencyKey, maxAttempts) {
+    var key = safeText(idempotencyKey, "");
+    if (!key) {
+      return null;
+    }
+    var attempts = safeNumber(maxAttempts, 8);
+    for (var i = 0; i < attempts; i += 1) {
+      try {
+        var url = "/api/health-isf/customer-requests/idempotency/" + encodeURIComponent(key);
+        var response = await authorizedFetch(withOrganizationScope(url), {
+          method: "GET",
+          headers: { "Accept": "application/json" }
+        }, 10000);
+        if (response.status === 202) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, 500 + (i * 400));
+          });
+          continue;
+        }
+        if (response.status === 404) {
+          return null;
+        }
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (_) {}
+      await new Promise(function (resolve) {
+        setTimeout(resolve, 400);
+      });
+    }
+    return null;
+  }
+
   async function submitRiderRideRequest(recurring) {
     var authed = await ensureAuthenticatedSession("Sign in as a rider before requesting a ride.");
     if (!authed) {
+      state.riderApp = safeObject(state.riderApp);
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: "Sign in as a rider before requesting a ride."
+      };
+      persistSessionState();
+      renderPage();
+      window.alert("Sign in as a rider before requesting a ride.");
       return { ok: false, error: "auth_required" };
+    }
+
+    state.riderApp = safeObject(state.riderApp);
+    if (state.riderApp.submitInFlight) {
+      window.alert("A ride request is already being submitted. Please wait for the current request to finish.");
+      return { ok: false, error: "submit_in_flight" };
     }
 
     var formValues = readRiderFormValues();
     if (!formValues.name || !formValues.phone || !formValues.pickup || !formValues.dropoff) {
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: "Enter rider name, phone, pickup, and dropoff before submitting the request."
+      };
+      persistSessionState();
+      renderPage();
       window.alert("Enter rider name, phone, pickup, and dropoff before submitting the request.");
       return { ok: false };
     }
     if (formValues.pickup.trim().toLowerCase() === formValues.dropoff.trim().toLowerCase()) {
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: "Pickup and dropoff must be different addresses."
+      };
+      persistSessionState();
+      renderPage();
       window.alert("Pickup and dropoff must be different addresses.");
       return { ok: false };
     }
+
+    var idempotencyKey = makeRiderIdempotencyKey();
+    state.riderApp.submitInFlight = true;
+    state.riderApp.pendingIdempotencyKey = idempotencyKey;
+    state.riderApp.submitStatus = {
+      level: "info",
+      message: "Submitting ride…"
+    };
+    persistSessionState();
+    renderPage();
 
     var payload = {
       rider_name: formValues.name,
@@ -9877,10 +11155,46 @@
       ride_type: formValues.rideType || "healthcare",
       recurring: recurring === true,
       recurring_pattern: recurring === true ? { type: "weekly", days: ["mon", "wed", "fri"] } : null,
-      notes: formValues.notes || null
+      notes: formValues.notes || null,
+      client_request_key: idempotencyKey
     };
 
-    var created = await postJson("/api/health-isf/customer-requests", payload, 45000);
+    var created = null;
+    var recoveredAfterTimeout = false;
+    try {
+      created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
+        idempotencyKey: idempotencyKey
+      });
+    } catch (err) {
+      var detail = err && err.message ? err.message : "unknown error";
+      if (detail === "request_timeout") {
+        created = await recoverCustomerRequestByIdempotency(idempotencyKey, 10);
+        if (created && safeText(created.id, "")) {
+          recoveredAfterTimeout = true;
+        } else {
+          state.riderApp.submitStatus = {
+            level: "error",
+            message: "Ride request timed out after 15 seconds. Refresh and check rider history before submitting again."
+          };
+          throw new Error(
+            "The server did not respond within 15 seconds. Your request may still be processing.\n\n" +
+            "Request key: " + idempotencyKey + "\n\n" +
+            "Refresh this page in a few seconds to check ride status."
+          );
+        }
+      } else {
+        state.riderApp.submitStatus = {
+          level: "error",
+          message: "Ride request failed: " + detail
+        };
+        throw err;
+      }
+    } finally {
+      state.riderApp.submitInFlight = false;
+      state.riderApp.pendingIdempotencyKey = "";
+      persistSessionState();
+      renderPage();
+    }
     var rideId = safeText(created.ride_id, "");
     var requestId = safeText(created.id, "");
     var dispatchStatus = safeText(created.dispatch_status, "pending");
@@ -9893,6 +11207,13 @@
       requestId: requestId,
       status: dispatchStatus,
       submittedAt: new Date().toISOString()
+    };
+    state.riderApp.submitStatus = {
+      level: "success",
+      message: recoveredAfterTimeout ? "Ride request confirmed after network delay." : "Ride request submitted successfully.",
+      rideId: rideId,
+      requestId: requestId,
+      status: dispatchStatus
     };
     state.riderApp.activeTrip = {
       tripId: rideId,
@@ -9925,10 +11246,13 @@
     persistSessionState();
     renderPage();
     window.alert(
-      (recurring === true ? "Recurring ride scheduled successfully." : "Ride request submitted successfully.") +
+      (recoveredAfterTimeout
+        ? "Ride request confirmed after network delay."
+        : (recurring === true ? "Recurring ride scheduled successfully." : "Ride request submitted successfully.")) +
       "\n\nRide ID: " + rideId +
       "\nRequest ID: " + requestId +
       "\nStatus: " + dispatchStatus +
+      (recoveredAfterTimeout ? "\n\nRecovered using request key: " + idempotencyKey : "") +
       "\n\nDispatch can now review and assign a driver."
     );
     return { ok: true, request: created, rideId: rideId, requestId: requestId };
@@ -10026,6 +11350,15 @@
         }
       }
     } catch (_) {}
+    try {
+      var sessionRaw = localStorage.getItem("amicor_session");
+      if (sessionRaw) {
+        var session = JSON.parse(sessionRaw);
+        if (session && session.access_token) {
+          return String(session.access_token);
+        }
+      }
+    } catch (_) {}
     return "";
   }
 
@@ -10105,39 +11438,689 @@
     }).slice(0, 120);
   }
 
-  async function loadBackendData(options) {
+  async function loadDriverMobileBootstrap(options) {
     var opts = options || {};
     var silent = opts.silent === true;
+    var bootstrapTimedOut = false;
+    var bootstrapTimer = null;
 
     if (!silent) {
       state.loading = true;
       state.error = null;
       state.fetchWarnings = [];
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileBootstrapError = "";
+      if (!state.driverApp.mobileUiState) {
+        state.driverApp.mobileUiState = hasValidDriverMobileSession() ? "loading_assignment" : "login_required";
+      }
       renderPage();
     }
 
+    bootstrapTimer = setTimeout(function () {
+      if (!state.loading) return;
+      bootstrapTimedOut = true;
+      state.loading = false;
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileUiState = "api_error";
+      state.driverApp.mobileBootstrapError = "Driver mobile bootstrap timed out after " + String(DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS) + "ms";
+      renderPage();
+    }, DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS);
+
+    try {
+      var settled = await Promise.allSettled([
+        fetchJson("/api/system/health"),
+        fetchJson("/api/system/supervision")
+      ]);
+      if (settled[0].status === "fulfilled") {
+        state.health = settled[0].value || {};
+      } else {
+        var healthErr = settled[0].reason;
+        state.fetchWarnings.push("health_snapshot_unavailable");
+        state.driverApp = safeObject(state.driverApp);
+        state.driverApp.mobileBootstrapError = safeText(healthErr && healthErr.message, "/api/system/health unavailable");
+      }
+      if (settled[1].status === "fulfilled") {
+        state.supervision = settled[1].value || {};
+      } else {
+        var supervisionErr = settled[1].reason;
+        state.fetchWarnings.push("supervision_snapshot_unavailable");
+        if (!state.driverApp.mobileBootstrapError) {
+          state.driverApp.mobileBootstrapError = safeText(supervisionErr && supervisionErr.message, "/api/system/supervision unavailable");
+        }
+      }
+      state.runtime.backendHealth = (settled[0].status === "fulfilled" || settled[1].status === "fulfilled") ? "up" : "down";
+
+      await resolveDriverMobileAuth(getAccessToken());
+      if (!hasValidDriverMobileSession()) {
+        state.driverApp.mobileUiState = "login_required";
+        state.driverApp.mobileBootstrapError = "";
+        clearDriverSyncWarning();
+      } else {
+        state.driverApp.mobileUiState = "loading_assignment";
+        state.driverApp.shiftOnline = true;
+        try {
+          await refreshDriverWorkflowData({ forceReset: opts.forceDriverReset === true });
+          state.driverApp.mobileBootstrapError = "";
+        } catch (syncErr) {
+          state.driverApp.mobileUiState = "api_error";
+          state.driverApp.mobileBootstrapError = safeText(syncErr && syncErr.message, "driver_assignment_sync_failed");
+          markDriverSyncWarning(state.driverApp.mobileBootstrapError);
+        }
+      }
+    } catch (err) {
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileUiState = "api_error";
+      state.driverApp.mobileBootstrapError = safeText(err && err.message, "driver_mobile_bootstrap_failed");
+    } finally {
+      if (bootstrapTimer) {
+        clearTimeout(bootstrapTimer);
+      }
+      if (!bootstrapTimedOut) {
+        state.loading = false;
+        state.hydration = {
+          authTokenPresent: !!getAccessToken() || hasValidDriverMobileSession(),
+          opsHydrated: false,
+          roleSlice: "driver",
+          lastUpdatedAt: new Date().toISOString(),
+          warningCount: state.fetchWarnings.length,
+          integrityState: state.driverApp.mobileUiState === "api_error" ? "DEGRADED" : "replay_safe"
+        };
+        recomputeAssistantRuntimeState();
+        persistSessionState();
+        renderPage();
+      }
+    }
+  }
+
+  var hydrationDiagSeq = 0;
+  var enterpriseOpsHydrationInFlight = false;
+
+  function beginOpsHydrationDiagnostic(route, role, silent) {
+    return {
+      id: "hydr-" + Date.now() + "-" + (++hydrationDiagSeq),
+      route: safeText(route, "dashboard"),
+      role: safeText(role, "admin"),
+      silent: silent === true,
+      loading_start: new Date().toISOString(),
+      requests: [],
+      rejected: [],
+      loading_end: null,
+      final_state: null
+    };
+  }
+
+  function recordOpsHydrationRequest(diag, name, phase, status, durationMs, error) {
+    if (!diag) return;
+    var row = {
+      name: safeText(name, "unknown"),
+      phase: safeText(phase, "request"),
+      status: status == null ? null : Number(status),
+      duration_ms: durationMs == null ? null : Number(durationMs),
+      error: safeText(error, "") || null,
+      at: new Date().toISOString()
+    };
+    diag.requests.push(row);
+    if (error) {
+      diag.rejected.push(row);
+    }
+  }
+
+  function finishOpsHydrationDiagnostic(diag, finalState) {
+    if (!diag) return;
+    diag.loading_end = new Date().toISOString();
+    diag.final_state = safeObject(finalState);
+    try {
+      console.info("[OpsHydration]", diag);
+    } catch (_) {}
+    void postOpsHydrationDiagnostic(diag);
+  }
+
+  async function postOpsHydrationDiagnostic(diag) {
+    try {
+      await withTimeout(fetch("/api/health-isf/ops-shell/hydration-diag-log", {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(diag || {})
+      }), 4000);
+    } catch (_) {}
+  }
+
+  function clearStaleEnterpriseLoadingHtml() {
+    if (!els.pageContent) return;
+    var text = safeText(els.pageContent.innerText, "");
+    if (text.indexOf("Preparing Command Surface") >= 0) {
+      els.pageContent.__stableHtml = "";
+      state.runtime.lastPageDataSignature = "";
+    }
+  }
+
+  function finalizeShellHydration(hasToken, settled, opsFailures) {
+    state.fetchWarnings = dedupeWarnings(state.fetchWarnings);
+    var integrityState = computeHydrationIntegrity(
+      hasToken,
+      opsFailures,
+      state.fetchWarnings,
+      settled[0] && settled[0].status === "fulfilled",
+      (settled[1] && settled[1].status === "fulfilled") || (settled[2] && settled[2].status === "fulfilled")
+    );
+    if (state.fetchWarnings.length === 2) {
+      state.error = "operations_fetch_unavailable";
+    } else if (state.fetchWarnings.length > 0) {
+      state.error = "partial_operations_data";
+    }
+    state.hydration = {
+      authTokenPresent: hasToken,
+      opsHydrated: hasToken && opsFailures === 0 && state.fetchWarnings.indexOf("enterprise_ops_background_pending") < 0,
+      roleSlice: state.role,
+      lastUpdatedAt: new Date().toISOString(),
+      warningCount: state.fetchWarnings.length,
+      integrityState: integrityState
+    };
+    recomputeAssistantRuntimeState();
+    persistSessionState();
+  }
+
+  function scheduleEnterpriseMonitoringHydration(token, timelineCursor, loadGen, diag) {
+    if (!token) return;
+    if (enterpriseOpsHydrationInFlight) return;
+    enterpriseOpsHydrationInFlight = true;
+    state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["enterprise_ops_background_pending"]));
+    void hydrateEnterpriseMonitoringOps(token, timelineCursor, loadGen, diag).finally(function () {
+      enterpriseOpsHydrationInFlight = false;
+    });
+  }
+
+  async function hydrateEssentialWorkflowData(token, opts) {
+    var workflowSettled = await Promise.allSettled([
+      fetchJson("/api/health-isf/dispatch/queue?limit=200", {}, token),
+      fetchJson("/api/health-isf/dispatch/active-assignments?limit=200", {}, token),
+      fetchJson("/api/health-isf/activity-feed?limit=40", {}, token)
+    ]);
+    var liveWorkflow = {
+      dispatchQueue: workflowSettled[0].status === "fulfilled" && Array.isArray(workflowSettled[0].value) ? workflowSettled[0].value : [],
+      activeAssignments: workflowSettled[1].status === "fulfilled" && Array.isArray(workflowSettled[1].value) ? workflowSettled[1].value : [],
+      activityFeed: workflowSettled[2].status === "fulfilled" && Array.isArray((workflowSettled[2].value || {}).activities) ? (workflowSettled[2].value || {}).activities : [],
+      drivers: [],
+      rides: [],
+      providers: [],
+      customerRequests: [],
+      vehicles: []
+    };
+    try {
+      liveWorkflow.drivers = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
+    } catch (_) {}
+    try {
+      liveWorkflow.rides = await fetchJson("/api/health-isf/rides?limit=200&active_only=true&exclude_test=true", {}, token);
+    } catch (_) {}
+    try {
+      liveWorkflow.billingHandoffs = await fetchJson("/api/health-isf/operations/billing-handoffs?limit=100", {}, token);
+    } catch (_) {
+      liveWorkflow.billingHandoffs = [];
+    }
+    try {
+      liveWorkflow.tripDocuments = await fetchJson("/api/health-isf/operations/trip-documents?limit=200", {}, token);
+    } catch (_) {
+      liveWorkflow.tripDocuments = [];
+    }
+    try {
+      state.adminRevenue = await fetchJson("/api/health-isf/operations/admin-revenue", {}, token);
+    } catch (_) {
+      state.adminRevenue = state.adminRevenue || null;
+    }
+    var workflowReferenceSettled = await Promise.allSettled([
+      fetchJson("/api/health-isf/providers?limit=200", {}, token),
+      fetchJson("/api/health-isf/customer-requests?limit=200", {}, token),
+      fetchJson("/api/health-isf/vehicles/active?limit=40", {}, token)
+    ]);
+    state.liveWorkflow = {
+      dispatchQueue: liveWorkflow.dispatchQueue,
+      activeAssignments: liveWorkflow.activeAssignments,
+      drivers: Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : [],
+      activityFeed: liveWorkflow.activityFeed,
+      rides: filterOperationalRidesForHydration(Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : []),
+      billingHandoffs: dedupeBillingHandoffsByRideId(Array.isArray(liveWorkflow.billingHandoffs) ? liveWorkflow.billingHandoffs : []),
+      tripDocuments: Array.isArray(liveWorkflow.tripDocuments) ? liveWorkflow.tripDocuments : [],
+      providers: workflowReferenceSettled[0].status === "fulfilled" && Array.isArray(workflowReferenceSettled[0].value) ? workflowReferenceSettled[0].value : [],
+      customerRequests: workflowReferenceSettled[1].status === "fulfilled" && Array.isArray(workflowReferenceSettled[1].value) ? workflowReferenceSettled[1].value : [],
+      vehicles: workflowReferenceSettled[2].status === "fulfilled" && Array.isArray(workflowReferenceSettled[2].value) ? workflowReferenceSettled[2].value : []
+    };
+    if (canUseDriverWorkspaceActions()) {
+      try {
+        var driverMobileReset = isDriverMobileSurface() && opts && opts.forceDriverReset === true;
+        if (driverMobileReset) {
+          clearDriverLiveTripState({ resetBoundIdentity: false });
+        }
+        await refreshDriverWorkflowData({ token: token, forceReset: driverMobileReset });
+      } catch (_) {
+        state.fetchWarnings.push("driver_workspace_unavailable");
+      }
+    }
+    try {
+      var focusRideId = "";
+      var dispatchRows = Array.isArray(liveWorkflow.dispatchQueue) ? liveWorkflow.dispatchQueue.slice() : [];
+      dispatchRows = dispatchRows.filter(function (row) {
+        return !isOperationalExcludedRideMeta(
+          row.passenger_name || row.rider_name,
+          row.pickup_address,
+          row.dropoff_address,
+          row.notes
+        );
+      });
+      dispatchRows.sort(function (a, b) {
+        var aTs = Date.parse(safeText(a.requested_at || a.created_at, "")) || 0;
+        var bTs = Date.parse(safeText(b.requested_at || b.created_at, "")) || 0;
+        return bTs - aTs;
+      });
+      if (dispatchRows.length > 0) {
+        focusRideId = safeText(dispatchRows[0].ride_id, "");
+      }
+      var aiSnapshotUrl = "/api/health-isf/ai-dispatch/snapshot?publish=false"
+        + (focusRideId ? "&ride_id=" + encodeURIComponent(focusRideId) : "");
+      void withTimeout(fetchJson(aiSnapshotUrl, {}, token), AI_SNAPSHOT_TIMEOUT_MS).then(function (snapshot) {
+        state.healthIsfAiSnapshot = snapshot;
+        var snapshotDispatch = safeObject((safeObject(snapshot)).live_dispatch);
+        if (Array.isArray(snapshotDispatch.queue) && snapshotDispatch.queue.length > 0) {
+          state.liveWorkflow = safeObject(state.liveWorkflow);
+          state.liveWorkflow.dispatchQueue = snapshotDispatch.queue.filter(function (row) {
+            return !isOperationalExcludedRideMeta(
+              row.passenger_name || row.rider_name,
+              row.pickup_address,
+              row.dropoff_address,
+              row.notes
+            );
+          });
+        }
+        if (!state.loading) {
+          renderPage();
+        }
+      }).catch(function () {
+        state.healthIsfAiSnapshot = state.healthIsfAiSnapshot || null;
+        state.fetchWarnings.push("ai_dispatch_snapshot_unavailable");
+      });
+    } catch (_) {
+      state.healthIsfAiSnapshot = null;
+      state.fetchWarnings.push("ai_dispatch_snapshot_unavailable");
+    }
+  }
+  async function hydrateEnterpriseMonitoringOps(token, timelineCursor, loadGen, diag) {
+    if (!token) return;
+    var opsFailures = 0;
+    var started = Date.now();
+    var opsSettled = await Promise.allSettled([
+      fetchJson("/api/ops/dashboard-summary"),
+      fetchJson("/api/ops/live-status"),
+      fetchJson("/api/ops/alerts"),
+      fetchJson("/api/ops/recommendations"),
+      fetchJson("/api/ops/stream?after_sequence=" + encodeURIComponent(String(timelineCursor)) + "&limit=60&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/compliance/dashboard-summary?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/queue?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/timeline?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/notifications?limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/live-stream?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/sla?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/queue-health?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/orchestration/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/regions?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/queues?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/capacity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/continuity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/health?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/federation/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/timeline?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/projection?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/comparison?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/continuity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/evidence?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/replay/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/predictive/governance", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, prediction_scope: "governance" }) }, token),
+      fetchJson("/api/ops/predictive/constraints", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, constraint_domain: "operational_constraints" }) }, token),
+      fetchJson("/api/ops/predictive/capacity", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, capacity_scope: "capacity_pressure" }) }, token),
+      fetchJson("/api/ops/predictive/risk", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, risk_domain: "governance_risk" }) }, token),
+      fetchJson("/api/ops/predictive/anomaly", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, anomaly_scope: "operational_anomaly" }) }, token),
+      fetchJson("/api/ops/predictive/drift?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/predictive/recommendations?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/predictive/trends?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/predictive/evidence?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/predictive/export-bundle?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/provenance", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, decision_scope: "governance_decision" }) }, token),
+      fetchJson("/api/ops/governance/explanations", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, explanation_scope: "governance_explanation" }) }, token),
+      fetchJson("/api/ops/governance/reasoning", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, reasoning_scope: "advisory_reasoning" }) }, token),
+      fetchJson("/api/ops/governance/memory", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, memory_window: "long_horizon", trend_window: "long_horizon" }) }, token),
+      fetchJson("/api/ops/governance/ancestry?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/lineage?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/history?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/trends?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/export-bundle?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/policy/matrix", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
+      fetchJson("/api/ops/governance/framework/map", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
+      fetchJson("/api/ops/governance/policy/evaluate", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
+      fetchJson("/api/ops/governance/policy/score", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
+      fetchJson("/api/ops/governance/rationale/build", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null }) }, token),
+      fetchJson("/api/ops/governance/policy/lineage?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/policy/history?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/violations?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/constraints?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/frameworks?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
+      fetchJson("/api/ops/governance/risk/evaluate", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null }) }, token)
+    ]);
+
+    var coreOpsRejectedAsUnauthorized = opsSettled.slice(0, 5).every(function (result) {
+      return result.status === "rejected" && isHttpStatusError(result.reason, 401);
+    });
+
+    if (coreOpsRejectedAsUnauthorized) {
+      // Do not wipe the signed-in session when /api/ops/* rejects but health-isf
+      // workflow APIs remain authorized. Rider/dispatch/driver/billing must stay live.
+      state.fetchWarnings.push("ops_secondary_auth_limited");
+      state.ops.dashboardSummary = null;
+      state.ops.liveStatus = null;
+      state.ops.alerts = [];
+      state.ops.recommendations = [];
+    }
+
+    // Re-check token after restore; never force guest/token-missing when a valid session exists.
+    if (!getAccessToken()) {
+      return;
+    }
+
+    if (opsSettled[0].status === "fulfilled") {
+      state.ops.dashboardSummary = opsSettled[0].value || null;
+      state.ops.visibility = ((opsSettled[0].value || {}).visibility || {});
+    } else {
+      opsFailures += 1;
+    }
+    if (opsSettled[1].status === "fulfilled") {
+      state.ops.liveStatus = opsSettled[1].value || null;
+    } else {
+      opsFailures += 1;
+    }
+    if (opsSettled[2].status === "fulfilled") {
+      state.ops.alerts = (opsSettled[2].value || {}).alerts || [];
+    } else {
+      opsFailures += 1;
+    }
+    if (opsSettled[3].status === "fulfilled") {
+      state.ops.recommendations = (opsSettled[3].value || {}).recommendations || [];
+    } else {
+      opsFailures += 1;
+    }
+    if (opsSettled[4].status === "fulfilled") {
+      var streamPayload = opsSettled[4].value || {};
+      var streamEvents = Array.isArray(streamPayload.contract_events) ? streamPayload.contract_events.map(contractEventToTimelineItem) : [];
+      state.ops.timeline = mergeTimeline(state.ops.timeline, streamEvents || []);
+      state.ops.timelineCursor = safeNumber(streamPayload.next_cursor, timelineCursor);
+      state.ops.stream = {
+        connected: asBoolean((streamPayload.stream_status || {}).connected, false),
+        mode: safeText((streamPayload.stream_status || {}).mode, "polling_fallback"),
+        fallbackPollingActive: asBoolean((streamPayload.stream_status || {}).fallback_polling_active, true),
+        lastEventReceived: safeText((streamPayload.stream_status || {}).last_event_received, null),
+        eventCount: safeNumber((streamPayload.stream_status || {}).event_count, streamEvents.length),
+        timelineSyncStatus: safeText((streamPayload.stream_status || {}).timeline_sync_status, "idle"),
+        supervisionSafe: asBoolean((streamPayload.stream_status || {}).supervision_safe, true),
+        replaySafe: asBoolean((streamPayload.stream_status || {}).replay_safe, true)
+      };
+      state.ops.correlation = {
+        totalGroups: safeNumber((streamPayload.correlation || {}).total_groups, 0),
+        groups: Array.isArray((streamPayload.correlation || {}).groups) ? (streamPayload.correlation || {}).groups : []
+      };
+      if (state.ops.stream.mode === "polling_fallback") {
+        state.fetchWarnings.push("stream_polling_fallback");
+      }
+    } else {
+      state.fetchWarnings.push("streaming_unavailable");
+      try {
+        var timelinePayload = await fetchJson("/api/ops/timeline?after_sequence=" + encodeURIComponent(String(timelineCursor)) + "&limit=60");
+        state.ops.timeline = mergeTimeline(state.ops.timeline, timelinePayload.events || []);
+        state.ops.timelineCursor = safeNumber(timelinePayload.next_cursor, timelineCursor);
+        state.ops.stream = {
+          connected: false,
+          mode: "polling_fallback",
+          fallbackPollingActive: true,
+          lastEventReceived: (Array.isArray(timelinePayload.events) && timelinePayload.events.length > 0) ? safeText(timelinePayload.events[timelinePayload.events.length - 1].timestamp, null) : null,
+          eventCount: Array.isArray(timelinePayload.events) ? timelinePayload.events.length : 0,
+          timelineSyncStatus: "active",
+          supervisionSafe: true,
+          replaySafe: true
+        };
+        state.ops.correlation = { totalGroups: 0, groups: [] };
+        state.fetchWarnings.push("stream_polling_fallback");
+      } catch (_) {
+        opsFailures += 1;
+      }
+    }
+    if (opsSettled[5].status === "fulfilled") {
+      var compliancePayload = opsSettled[5].value || {};
+      state.ops.compliance = {
+        compliance_overview: compliancePayload.compliance_overview || null,
+        expiration_queue: compliancePayload.expiration_queue || null,
+        approval_queue: compliancePayload.approval_queue || null,
+        compliance_timeline: Array.isArray(compliancePayload.compliance_timeline) ? compliancePayload.compliance_timeline : [],
+        phase25: {
+          evidence_chain_viewer: Array.isArray(((compliancePayload.phase25 || {}).evidence_chain_viewer)) ? (compliancePayload.phase25 || {}).evidence_chain_viewer : [],
+          document_lineage_viewer: Array.isArray(((compliancePayload.phase25 || {}).document_lineage_viewer)) ? (compliancePayload.phase25 || {}).document_lineage_viewer : [],
+          supervisor_review_queue: Array.isArray(((compliancePayload.phase25 || {}).supervisor_review_queue)) ? (compliancePayload.phase25 || {}).supervisor_review_queue : [],
+          regulatory_export_builder: Array.isArray(((compliancePayload.phase25 || {}).regulatory_export_builder)) ? (compliancePayload.phase25 || {}).regulatory_export_builder : [],
+          signed_access_monitor: Array.isArray(((compliancePayload.phase25 || {}).signed_access_monitor)) ? (compliancePayload.phase25 || {}).signed_access_monitor : [],
+          retention_status_dashboard: Array.isArray(((compliancePayload.phase25 || {}).retention_status_dashboard)) ? (compliancePayload.phase25 || {}).retention_status_dashboard : []
+        },
+        profiles: Array.isArray(compliancePayload.profiles) ? compliancePayload.profiles : [],
+        documents: Array.isArray(compliancePayload.documents) ? compliancePayload.documents : []
+      };
+    } else {
+      state.fetchWarnings.push("compliance_unavailable");
+    }
+
+    if (
+      opsSettled[6].status === "fulfilled" &&
+      opsSettled[7].status === "fulfilled" &&
+      opsSettled[8].status === "fulfilled" &&
+      opsSettled[9].status === "fulfilled" &&
+      opsSettled[10].status === "fulfilled" &&
+      opsSettled[11].status === "fulfilled" &&
+      opsSettled[12].status === "fulfilled"
+    ) {
+      state.ops.orchestration = {
+        queue_snapshot: opsSettled[6].value || { tasks: [], queue_health: {} },
+        timeline_projection: opsSettled[7].value || { events: [], next_cursor: 0 },
+        notifications: opsSettled[8].value || { notifications: [] },
+        live_stream: opsSettled[9].value || { events: [], next_cursor: 0, checkpoint: null, stream_cursor: null },
+        sla: opsSettled[10].value || { alerts: [], metrics: {} },
+        queue_health: opsSettled[11].value || { queue_pressure_dashboard: {} },
+        export_bundle: opsSettled[12].value || { bundle_id: null, bundle_checksum: null, replay_reconstruction: {} }
+      };
+    } else {
+      state.fetchWarnings.push("orchestration_unavailable");
+    }
+
+    if (
+      opsSettled[13].status === "fulfilled" &&
+      opsSettled[14].status === "fulfilled" &&
+      opsSettled[15].status === "fulfilled" &&
+      opsSettled[16].status === "fulfilled" &&
+      opsSettled[17].status === "fulfilled" &&
+      opsSettled[18].status === "fulfilled"
+    ) {
+      state.ops.federation = {
+        regions: opsSettled[13].value || { regions: [] },
+        queues: opsSettled[14].value || { regions: [] },
+        capacity: opsSettled[15].value || { forecasts: [] },
+        continuity: opsSettled[16].value || { continuity_projection: [] },
+        health: opsSettled[17].value || { regions: [] },
+        export_bundle: opsSettled[18].value || { bundle_id: null, bundle_checksum: null, payload: {} }
+      };
+    } else {
+      state.fetchWarnings.push("federation_unavailable");
+    }
+
+    if (
+      opsSettled[19].status === "fulfilled" &&
+      opsSettled[20].status === "fulfilled" &&
+      opsSettled[21].status === "fulfilled" &&
+      opsSettled[22].status === "fulfilled" &&
+      opsSettled[23].status === "fulfilled" &&
+      opsSettled[24].status === "fulfilled"
+    ) {
+      state.ops.replay = {
+        session: { frames: [] },
+        scenario: null,
+        branch: null,
+        timeline: opsSettled[19].value || { events: [] },
+        projection: opsSettled[20].value || { events: [] },
+        comparison: opsSettled[21].value || { comparisons: [] },
+        continuity: opsSettled[22].value || null,
+        evidence: opsSettled[23].value || { payload: {} },
+        export_bundle: opsSettled[24].value || { bundle_id: null, bundle_checksum: null, payload: {} }
+      };
+    } else {
+      state.fetchWarnings.push("replay_unavailable");
+    }
+
+    if (
+      opsSettled[25].status === "fulfilled" &&
+      opsSettled[26].status === "fulfilled" &&
+      opsSettled[27].status === "fulfilled" &&
+      opsSettled[28].status === "fulfilled" &&
+      opsSettled[29].status === "fulfilled" &&
+      opsSettled[30].status === "fulfilled" &&
+      opsSettled[31].status === "fulfilled" &&
+      opsSettled[32].status === "fulfilled" &&
+      opsSettled[33].status === "fulfilled" &&
+      opsSettled[34].status === "fulfilled"
+    ) {
+      state.ops.predictive = {
+        governance: opsSettled[25].value || null,
+        constraints: opsSettled[26].value || null,
+        capacity: opsSettled[27].value || null,
+        risk: opsSettled[28].value || null,
+        anomaly: opsSettled[29].value || null,
+        drift: opsSettled[30].value || { drift_events: [] },
+        recommendations: opsSettled[31].value || { recommendations: [] },
+        trends: opsSettled[32].value || { trends: [] },
+        evidence: opsSettled[33].value || { payload: {} },
+        export_bundle: opsSettled[34].value || { bundle_id: null, bundle_checksum: null, payload: {} }
+      };
+    } else {
+      state.fetchWarnings.push("predictive_unavailable");
+    }
+
+    if (
+      opsSettled[35].status === "fulfilled" &&
+      opsSettled[36].status === "fulfilled" &&
+      opsSettled[37].status === "fulfilled" &&
+      opsSettled[38].status === "fulfilled" &&
+      opsSettled[39].status === "fulfilled" &&
+      opsSettled[40].status === "fulfilled" &&
+      opsSettled[41].status === "fulfilled" &&
+      opsSettled[42].status === "fulfilled" &&
+      opsSettled[43].status === "fulfilled" &&
+      opsSettled[44].status === "fulfilled" &&
+      opsSettled[45].status === "fulfilled" &&
+      opsSettled[46].status === "fulfilled" &&
+      opsSettled[47].status === "fulfilled" &&
+      opsSettled[48].status === "fulfilled" &&
+      opsSettled[49].status === "fulfilled" &&
+      opsSettled[50].status === "fulfilled" &&
+      opsSettled[51].status === "fulfilled" &&
+      opsSettled[52].status === "fulfilled" &&
+      opsSettled[53].status === "fulfilled" &&
+      opsSettled[54].status === "fulfilled"
+    ) {
+      state.ops.governance = {
+        provenance: opsSettled[35].value || null,
+        explanations: opsSettled[36].value || null,
+        reasoning: opsSettled[37].value || null,
+        memory: opsSettled[38].value || null,
+        ancestry: opsSettled[39].value || { ancestry_trace: [] },
+        lineage: opsSettled[40].value || null,
+        history: opsSettled[41].value || null,
+        trends: opsSettled[42].value || null,
+        export_bundle: opsSettled[43].value || { bundle_id: null, bundle_checksum: null, payload: {} },
+        policyMatrix: opsSettled[44].value || { policy_matrix: [], constraint_versions: [] },
+        policyFrameworkMap: opsSettled[45].value || { frameworks: [], framework_rule_mappings: [] },
+        policyEvaluations: opsSettled[46].value || { constraint_evaluations: [], constraint_violations: [], regulatory_evidence_refs: [] },
+        policyScore: opsSettled[47].value || null,
+        rationaleChain: opsSettled[48].value || { rationale_chain: [], decision_trace: [] },
+        policyLineage: opsSettled[49].value || { policy_lineage: [] },
+        policyHistory: opsSettled[50].value || { constraint_history: [], score_history: [] },
+        policyViolations: opsSettled[51].value || { violations: [] },
+        policyConstraints: opsSettled[52].value || { constraints: [] },
+        policyFrameworks: opsSettled[53].value || { frameworks: [] },
+        risk: opsSettled[54].value || { recommendations: [] }
+      };
+    } else {
+      state.fetchWarnings.push("governance_unavailable");
+    }
+
+    recordOpsHydrationRequest(diag, "enterprise_ops_bundle", "background_complete", 200, Date.now() - started, null);
+    if (loadGen !== state.runtime.hydrationLoadGen) return;
+    state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).filter(function (w) { return w !== "enterprise_ops_background_pending"; }));
+    if (opsFailures > 0) state.fetchWarnings.push("ops_hydration_partial");
+    state.hydration.opsHydrated = opsFailures === 0;
+    state.hydration.lastUpdatedAt = new Date().toISOString();
+    persistSessionState();
+    if (!state.loading) renderPage();
+  }
+
+  async function loadBackendData(options) {
+    var opts = options || {};
+    var silent = opts.silent === true;
+    var hydrationLoadGen = 0;
+    var hydrationDiag = null;
+    var hasToken = false;
+    var settled = [];
+    var hydrationTimedOut = false;
+    var hydrationTimer = null;
+
+    if (isDriverMobileAppRoute()) {
+      return loadDriverMobileBootstrap(opts);
+    }
+
+    refreshInFlight = true;
+    hydrationDiag = beginOpsHydrationDiagnostic(state.route, state.role, silent);
+    if (!silent) {
+      state.loading = true;
+      state.error = null;
+      state.fetchWarnings = [];
+      hydrationTimer = setTimeout(function () {
+        if (!state.loading) return;
+        hydrationTimedOut = true;
+        state.loading = false;
+        state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["hydration_timeout"]));
+        clearStaleEnterpriseLoadingHtml();
+        renderPage();
+      }, ENTERPRISE_HYDRATION_TIMEOUT_MS);
+      renderPage();
+    }
+
+    try {
     if (!getAccessToken()) {
       await ensurePlatformSessionReady();
     }
 
-    var settled = await Promise.allSettled([
+    settled = await Promise.allSettled([
+      fetchJson("/api/health"),
       fetchJson("/api/system/health"),
       fetchJson("/api/system/supervision")
     ]);
 
-    if (settled[0].status === "fulfilled") {
-      state.health = settled[0].value || {};
+    var apiHealthOk = settled[0].status === "fulfilled";
+    if (settled[1].status === "fulfilled") {
+      state.health = settled[1].value || {};
+    } else if (settled[0].status === "fulfilled" && settled[0].value && settled[0].value.data) {
+      state.health = { status: safeText((settled[0].value.data || {}).status, "ok") };
+      state.fetchWarnings.push("health_snapshot_unavailable");
     } else {
       state.fetchWarnings.push("health_snapshot_unavailable");
     }
 
-    if (settled[1].status === "fulfilled") {
-      state.supervision = settled[1].value || {};
+    if (settled[2].status === "fulfilled") {
+      state.supervision = settled[2].value || {};
     } else {
       state.fetchWarnings.push("supervision_snapshot_unavailable");
     }
 
-    var backendHealthy = settled[0].status === "fulfilled" || settled[1].status === "fulfilled";
+    var backendHealthy = apiHealthOk || settled[1].status === "fulfilled" || settled[2].status === "fulfilled";
     if (backendHealthy) {
       state.runtime.backendHealth = "up";
       state.runtime.backendDownConsecutive = 0;
@@ -10148,21 +12131,21 @@
       state.runtime.backendDownConsecutive = safeNumber(state.runtime.backendDownConsecutive, 0) + 1;
       state.runtime.silentRetryCount = safeNumber(state.runtime.silentRetryCount, 0) + 1;
       state.runtime.reconnectCount = safeNumber(state.runtime.reconnectCount, 0) + 1;
-      state.runtime.lastReconnectReason = "backend_down_8011";
-      state.fetchWarnings.push("backend_down_8011");
+      state.runtime.lastReconnectReason = "backend_unreachable";
+      state.fetchWarnings.push("backend_unreachable");
       if (state.runtime.backendDownConsecutive >= MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE) {
         state.runtime.refreshPausedUntilMs = Date.now() + BACKEND_DOWN_PAUSE_MS;
       }
     }
 
     var token = getAccessToken();
+    hasToken = Boolean(token);
     if (token) {
       var resetSynced = await syncPlatformResetEpoch(token);
       if (resetSynced) {
         opts.forceDriverReset = true;
       }
     }
-    var hasToken = Boolean(token);
     var timelineCursor = safeNumber((state.ops || {}).timelineCursor, 0);
     var opsFailures = 0;
 
@@ -10250,14 +12233,14 @@
             hasToken,
             0,
             state.fetchWarnings,
-            settled[0].status === "fulfilled",
-            settled[1].status === "fulfilled"
+            apiHealthOk || settled[1].status === "fulfilled",
+            settled[2].status === "fulfilled"
           )
         };
         recomputeAssistantRuntimeState();
         persistSessionState();
-        state.loading = false;
-        renderPage();
+        state.runtime.hydrationLoadGen = safeNumber(state.runtime.hydrationLoadGen, 0) + 1;
+        scheduleEnterpriseMonitoringHydration(token, timelineCursor, state.runtime.hydrationLoadGen, hydrationDiag);
         return;
       }
 
@@ -10324,333 +12307,43 @@
             hasToken,
             0,
             state.fetchWarnings,
-            settled[0].status === "fulfilled",
-            settled[1].status === "fulfilled"
+            apiHealthOk || settled[1].status === "fulfilled",
+            settled[2].status === "fulfilled"
           )
         };
         recomputeAssistantRuntimeState();
         persistSessionState();
-        state.loading = false;
-        renderPage();
+        state.runtime.hydrationLoadGen = safeNumber(state.runtime.hydrationLoadGen, 0) + 1;
+        scheduleEnterpriseMonitoringHydration(token, timelineCursor, state.runtime.hydrationLoadGen, hydrationDiag);
         return;
       }
 
-      var opsSettled = await Promise.allSettled([
-        fetchJson("/api/ops/dashboard-summary"),
-        fetchJson("/api/ops/live-status"),
-        fetchJson("/api/ops/alerts"),
-        fetchJson("/api/ops/recommendations"),
-        fetchJson("/api/ops/stream?after_sequence=" + encodeURIComponent(String(timelineCursor)) + "&limit=60&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/compliance/dashboard-summary?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/queue?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/timeline?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/notifications?limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/live-stream?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/sla?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/queue-health?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/orchestration/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/regions?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/queues?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/capacity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/continuity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/health?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/federation/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/timeline?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/projection?after_sequence=0&limit=120&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/comparison?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/continuity?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/evidence?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/replay/export-bundle?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/predictive/governance", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, prediction_scope: "governance" }) }, token),
-        fetchJson("/api/ops/predictive/constraints", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, constraint_domain: "operational_constraints" }) }, token),
-        fetchJson("/api/ops/predictive/capacity", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, capacity_scope: "capacity_pressure" }) }, token),
-        fetchJson("/api/ops/predictive/risk", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, risk_domain: "governance_risk" }) }, token),
-        fetchJson("/api/ops/predictive/anomaly", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, anomaly_scope: "operational_anomaly" }) }, token),
-        fetchJson("/api/ops/predictive/drift?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/predictive/recommendations?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/predictive/trends?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/predictive/evidence?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/predictive/export-bundle?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/provenance", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, decision_scope: "governance_decision" }) }, token),
-        fetchJson("/api/ops/governance/explanations", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, explanation_scope: "governance_explanation" }) }, token),
-        fetchJson("/api/ops/governance/reasoning", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, reasoning_scope: "advisory_reasoning" }) }, token),
-        fetchJson("/api/ops/governance/memory", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, memory_window: "long_horizon", trend_window: "long_horizon" }) }, token),
-        fetchJson("/api/ops/governance/ancestry?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/lineage?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/history?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/trends?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/export-bundle?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/policy/matrix", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
-        fetchJson("/api/ops/governance/framework/map", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
-        fetchJson("/api/ops/governance/policy/evaluate", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
-        fetchJson("/api/ops/governance/policy/score", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null, policy_scope: "governance_policy_constraints" }) }, token),
-        fetchJson("/api/ops/governance/rationale/build", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null }) }, token),
-        fetchJson("/api/ops/governance/policy/lineage?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/policy/history?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/violations?replay_session_id=" + encodeURIComponent(String(((state.ops.replay || {}).timeline || {}).replay_session_id || "")) + "&role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/constraints?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/frameworks?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
-        fetchJson("/api/ops/governance/risk/evaluate", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null }) }, token)
-      ]);
+      var hydrationLoadGen = safeNumber(state.runtime.hydrationLoadGen, 0) + 1;
+      state.runtime.hydrationLoadGen = hydrationLoadGen;
+      scheduleEnterpriseMonitoringHydration(token, timelineCursor, hydrationLoadGen, hydrationDiag);
 
-      var coreOpsRejectedAsUnauthorized = opsSettled.slice(0, 5).every(function (result) {
-        return result.status === "rejected" && isHttpStatusError(result.reason, 401);
-      });
-
-      if (coreOpsRejectedAsUnauthorized) {
-        // Do not wipe the signed-in session when /api/ops/* rejects but health-isf
-        // workflow APIs remain authorized. Rider/dispatch/driver/billing must stay live.
-        state.fetchWarnings.push("ops_secondary_auth_limited");
-        state.ops.dashboardSummary = null;
-        state.ops.liveStatus = null;
-        state.ops.alerts = [];
-        state.ops.recommendations = [];
-      }
-
-      // Re-check token after restore; never force guest/token-missing when a valid session exists.
-      hasToken = !!getAccessToken();
-      if (!hasToken) {
-        state.hydration = {
-          authTokenPresent: false,
-          opsHydrated: false,
-          roleSlice: state.role,
-          lastUpdatedAt: new Date().toISOString(),
-          warningCount: state.fetchWarnings.length,
-          integrityState: "AUTH_REQUIRED"
-        };
-        recomputeAssistantRuntimeState();
-        persistSessionState();
-        state.loading = false;
-        renderPage();
-        return;
-      }
-
-      if (opsSettled[0].status === "fulfilled") {
-        state.ops.dashboardSummary = opsSettled[0].value || null;
-        state.ops.visibility = ((opsSettled[0].value || {}).visibility || {});
-      } else {
-        opsFailures += 1;
-      }
-      if (opsSettled[1].status === "fulfilled") {
-        state.ops.liveStatus = opsSettled[1].value || null;
-      } else {
-        opsFailures += 1;
-      }
-      if (opsSettled[2].status === "fulfilled") {
-        state.ops.alerts = (opsSettled[2].value || {}).alerts || [];
-      } else {
-        opsFailures += 1;
-      }
-      if (opsSettled[3].status === "fulfilled") {
-        state.ops.recommendations = (opsSettled[3].value || {}).recommendations || [];
-      } else {
-        opsFailures += 1;
-      }
-      if (opsSettled[4].status === "fulfilled") {
-        var streamPayload = opsSettled[4].value || {};
-        var streamEvents = Array.isArray(streamPayload.contract_events) ? streamPayload.contract_events.map(contractEventToTimelineItem) : [];
-        state.ops.timeline = mergeTimeline(state.ops.timeline, streamEvents || []);
-        state.ops.timelineCursor = safeNumber(streamPayload.next_cursor, timelineCursor);
-        state.ops.stream = {
-          connected: asBoolean((streamPayload.stream_status || {}).connected, false),
-          mode: safeText((streamPayload.stream_status || {}).mode, "polling_fallback"),
-          fallbackPollingActive: asBoolean((streamPayload.stream_status || {}).fallback_polling_active, true),
-          lastEventReceived: safeText((streamPayload.stream_status || {}).last_event_received, null),
-          eventCount: safeNumber((streamPayload.stream_status || {}).event_count, streamEvents.length),
-          timelineSyncStatus: safeText((streamPayload.stream_status || {}).timeline_sync_status, "idle"),
-          supervisionSafe: asBoolean((streamPayload.stream_status || {}).supervision_safe, true),
-          replaySafe: asBoolean((streamPayload.stream_status || {}).replay_safe, true)
-        };
-        state.ops.correlation = {
-          totalGroups: safeNumber((streamPayload.correlation || {}).total_groups, 0),
-          groups: Array.isArray((streamPayload.correlation || {}).groups) ? (streamPayload.correlation || {}).groups : []
-        };
-        if (state.ops.stream.mode === "polling_fallback") {
-          state.fetchWarnings.push("stream_polling_fallback");
-        }
-      } else {
-        state.fetchWarnings.push("streaming_unavailable");
+      if (state.role === "rider" || state.route === "riders") {
         try {
-          var timelinePayload = await fetchJson("/api/ops/timeline?after_sequence=" + encodeURIComponent(String(timelineCursor)) + "&limit=60");
-          state.ops.timeline = mergeTimeline(state.ops.timeline, timelinePayload.events || []);
-          state.ops.timelineCursor = safeNumber(timelinePayload.next_cursor, timelineCursor);
-          state.ops.stream = {
-            connected: false,
-            mode: "polling_fallback",
-            fallbackPollingActive: true,
-            lastEventReceived: (Array.isArray(timelinePayload.events) && timelinePayload.events.length > 0) ? safeText(timelinePayload.events[timelinePayload.events.length - 1].timestamp, null) : null,
-            eventCount: Array.isArray(timelinePayload.events) ? timelinePayload.events.length : 0,
-            timelineSyncStatus: "active",
-            supervisionSafe: true,
-            replaySafe: true
-          };
-          state.ops.correlation = { totalGroups: 0, groups: [] };
-          state.fetchWarnings.push("stream_polling_fallback");
+          await refreshRiderWorkspaceData();
         } catch (_) {
-          opsFailures += 1;
+          state.fetchWarnings.push("rider_workspace_unavailable");
         }
       }
-      if (opsSettled[5].status === "fulfilled") {
-        var compliancePayload = opsSettled[5].value || {};
-        state.ops.compliance = {
-          compliance_overview: compliancePayload.compliance_overview || null,
-          expiration_queue: compliancePayload.expiration_queue || null,
-          approval_queue: compliancePayload.approval_queue || null,
-          compliance_timeline: Array.isArray(compliancePayload.compliance_timeline) ? compliancePayload.compliance_timeline : [],
-          phase25: {
-            evidence_chain_viewer: Array.isArray(((compliancePayload.phase25 || {}).evidence_chain_viewer)) ? (compliancePayload.phase25 || {}).evidence_chain_viewer : [],
-            document_lineage_viewer: Array.isArray(((compliancePayload.phase25 || {}).document_lineage_viewer)) ? (compliancePayload.phase25 || {}).document_lineage_viewer : [],
-            supervisor_review_queue: Array.isArray(((compliancePayload.phase25 || {}).supervisor_review_queue)) ? (compliancePayload.phase25 || {}).supervisor_review_queue : [],
-            regulatory_export_builder: Array.isArray(((compliancePayload.phase25 || {}).regulatory_export_builder)) ? (compliancePayload.phase25 || {}).regulatory_export_builder : [],
-            signed_access_monitor: Array.isArray(((compliancePayload.phase25 || {}).signed_access_monitor)) ? (compliancePayload.phase25 || {}).signed_access_monitor : [],
-            retention_status_dashboard: Array.isArray(((compliancePayload.phase25 || {}).retention_status_dashboard)) ? (compliancePayload.phase25 || {}).retention_status_dashboard : []
-          },
-          profiles: Array.isArray(compliancePayload.profiles) ? compliancePayload.profiles : [],
-          documents: Array.isArray(compliancePayload.documents) ? compliancePayload.documents : []
-        };
-      } else {
-        state.fetchWarnings.push("compliance_unavailable");
-      }
 
-      if (
-        opsSettled[6].status === "fulfilled" &&
-        opsSettled[7].status === "fulfilled" &&
-        opsSettled[8].status === "fulfilled" &&
-        opsSettled[9].status === "fulfilled" &&
-        opsSettled[10].status === "fulfilled" &&
-        opsSettled[11].status === "fulfilled" &&
-        opsSettled[12].status === "fulfilled"
-      ) {
-        state.ops.orchestration = {
-          queue_snapshot: opsSettled[6].value || { tasks: [], queue_health: {} },
-          timeline_projection: opsSettled[7].value || { events: [], next_cursor: 0 },
-          notifications: opsSettled[8].value || { notifications: [] },
-          live_stream: opsSettled[9].value || { events: [], next_cursor: 0, checkpoint: null, stream_cursor: null },
-          sla: opsSettled[10].value || { alerts: [], metrics: {} },
-          queue_health: opsSettled[11].value || { queue_pressure_dashboard: {} },
-          export_bundle: opsSettled[12].value || { bundle_id: null, bundle_checksum: null, replay_reconstruction: {} }
-        };
+      if (state.route === "riders") {
+        try {
+          var riderRequestRows = await fetchJson("/api/health-isf/customer-requests?limit=80", {}, token);
+          state.liveWorkflow = safeObject(state.liveWorkflow);
+          state.liveWorkflow.customerRequests = Array.isArray(riderRequestRows) ? riderRequestRows : [];
+        } catch (_) {
+          state.fetchWarnings.push("rider_requests_unavailable");
+        }
       } else {
-        state.fetchWarnings.push("orchestration_unavailable");
-      }
-
-      if (
-        opsSettled[13].status === "fulfilled" &&
-        opsSettled[14].status === "fulfilled" &&
-        opsSettled[15].status === "fulfilled" &&
-        opsSettled[16].status === "fulfilled" &&
-        opsSettled[17].status === "fulfilled" &&
-        opsSettled[18].status === "fulfilled"
-      ) {
-        state.ops.federation = {
-          regions: opsSettled[13].value || { regions: [] },
-          queues: opsSettled[14].value || { regions: [] },
-          capacity: opsSettled[15].value || { forecasts: [] },
-          continuity: opsSettled[16].value || { continuity_projection: [] },
-          health: opsSettled[17].value || { regions: [] },
-          export_bundle: opsSettled[18].value || { bundle_id: null, bundle_checksum: null, payload: {} }
-        };
-      } else {
-        state.fetchWarnings.push("federation_unavailable");
-      }
-
-      if (
-        opsSettled[19].status === "fulfilled" &&
-        opsSettled[20].status === "fulfilled" &&
-        opsSettled[21].status === "fulfilled" &&
-        opsSettled[22].status === "fulfilled" &&
-        opsSettled[23].status === "fulfilled" &&
-        opsSettled[24].status === "fulfilled"
-      ) {
-        state.ops.replay = {
-          session: { frames: [] },
-          scenario: null,
-          branch: null,
-          timeline: opsSettled[19].value || { events: [] },
-          projection: opsSettled[20].value || { events: [] },
-          comparison: opsSettled[21].value || { comparisons: [] },
-          continuity: opsSettled[22].value || null,
-          evidence: opsSettled[23].value || { payload: {} },
-          export_bundle: opsSettled[24].value || { bundle_id: null, bundle_checksum: null, payload: {} }
-        };
-      } else {
-        state.fetchWarnings.push("replay_unavailable");
-      }
-
-      if (
-        opsSettled[25].status === "fulfilled" &&
-        opsSettled[26].status === "fulfilled" &&
-        opsSettled[27].status === "fulfilled" &&
-        opsSettled[28].status === "fulfilled" &&
-        opsSettled[29].status === "fulfilled" &&
-        opsSettled[30].status === "fulfilled" &&
-        opsSettled[31].status === "fulfilled" &&
-        opsSettled[32].status === "fulfilled" &&
-        opsSettled[33].status === "fulfilled" &&
-        opsSettled[34].status === "fulfilled"
-      ) {
-        state.ops.predictive = {
-          governance: opsSettled[25].value || null,
-          constraints: opsSettled[26].value || null,
-          capacity: opsSettled[27].value || null,
-          risk: opsSettled[28].value || null,
-          anomaly: opsSettled[29].value || null,
-          drift: opsSettled[30].value || { drift_events: [] },
-          recommendations: opsSettled[31].value || { recommendations: [] },
-          trends: opsSettled[32].value || { trends: [] },
-          evidence: opsSettled[33].value || { payload: {} },
-          export_bundle: opsSettled[34].value || { bundle_id: null, bundle_checksum: null, payload: {} }
-        };
-      } else {
-        state.fetchWarnings.push("predictive_unavailable");
-      }
-
-      if (
-        opsSettled[35].status === "fulfilled" &&
-        opsSettled[36].status === "fulfilled" &&
-        opsSettled[37].status === "fulfilled" &&
-        opsSettled[38].status === "fulfilled" &&
-        opsSettled[39].status === "fulfilled" &&
-        opsSettled[40].status === "fulfilled" &&
-        opsSettled[41].status === "fulfilled" &&
-        opsSettled[42].status === "fulfilled" &&
-        opsSettled[43].status === "fulfilled" &&
-        opsSettled[44].status === "fulfilled" &&
-        opsSettled[45].status === "fulfilled" &&
-        opsSettled[46].status === "fulfilled" &&
-        opsSettled[47].status === "fulfilled" &&
-        opsSettled[48].status === "fulfilled" &&
-        opsSettled[49].status === "fulfilled" &&
-        opsSettled[50].status === "fulfilled" &&
-        opsSettled[51].status === "fulfilled" &&
-        opsSettled[52].status === "fulfilled" &&
-        opsSettled[53].status === "fulfilled" &&
-        opsSettled[54].status === "fulfilled"
-      ) {
-        state.ops.governance = {
-          provenance: opsSettled[35].value || null,
-          explanations: opsSettled[36].value || null,
-          reasoning: opsSettled[37].value || null,
-          memory: opsSettled[38].value || null,
-          ancestry: opsSettled[39].value || { ancestry_trace: [] },
-          lineage: opsSettled[40].value || null,
-          history: opsSettled[41].value || null,
-          trends: opsSettled[42].value || null,
-          export_bundle: opsSettled[43].value || { bundle_id: null, bundle_checksum: null, payload: {} },
-          policyMatrix: opsSettled[44].value || { policy_matrix: [], constraint_versions: [] },
-          policyFrameworkMap: opsSettled[45].value || { frameworks: [], framework_rule_mappings: [] },
-          policyEvaluations: opsSettled[46].value || { constraint_evaluations: [], constraint_violations: [], regulatory_evidence_refs: [] },
-          policyScore: opsSettled[47].value || null,
-          rationaleChain: opsSettled[48].value || { rationale_chain: [], decision_trace: [] },
-          policyLineage: opsSettled[49].value || { policy_lineage: [] },
-          policyHistory: opsSettled[50].value || { constraint_history: [], score_history: [] },
-          policyViolations: opsSettled[51].value || { violations: [] },
-          policyConstraints: opsSettled[52].value || { constraints: [] },
-          policyFrameworks: opsSettled[53].value || { frameworks: [] },
-          risk: opsSettled[54].value || { recommendations: [] }
-        };
-      } else {
-        state.fetchWarnings.push("governance_unavailable");
+        try {
+          await hydrateEssentialWorkflowData(token, opts);
+        } catch (_) {
+          state.fetchWarnings.push("live_workflow_feed_unavailable");
+        }
       }
 
       if (opsFailures > 0) {
@@ -10681,109 +12374,6 @@
             replay_safe: true
           }
         };
-      }
-
-      if (state.role === "rider" || state.route === "riders") {
-        try {
-          await refreshRiderWorkspaceData();
-        } catch (_) {
-          state.fetchWarnings.push("rider_workspace_unavailable");
-        }
-      }
-
-      {
-        try {
-          var workflowSettled = await Promise.allSettled([
-            fetchJson("/api/health-isf/dispatch/queue?limit=200", {}, token),
-            fetchJson("/api/health-isf/dispatch/active-assignments?limit=200", {}, token),
-            fetchJson("/api/health-isf/activity-feed?limit=40", {}, token)
-          ]);
-          var liveWorkflow = {
-            dispatchQueue: workflowSettled[0].status === "fulfilled" && Array.isArray(workflowSettled[0].value) ? workflowSettled[0].value : [],
-            activeAssignments: workflowSettled[1].status === "fulfilled" && Array.isArray(workflowSettled[1].value) ? workflowSettled[1].value : [],
-            activityFeed: workflowSettled[2].status === "fulfilled" && Array.isArray((workflowSettled[2].value || {}).activities) ? (workflowSettled[2].value || {}).activities : [],
-            drivers: [],
-            rides: [],
-            providers: [],
-            customerRequests: [],
-            vehicles: []
-          };
-
-          try {
-            liveWorkflow.drivers = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
-          } catch (_) {}
-
-          try {
-            liveWorkflow.rides = await fetchJson("/api/health-isf/rides?limit=200&active_only=true&exclude_test=true", {}, token);
-          } catch (_) {}
-
-          try {
-            liveWorkflow.billingHandoffs = await fetchJson("/api/health-isf/operations/billing-handoffs?limit=100", {}, token);
-          } catch (_) {
-            liveWorkflow.billingHandoffs = [];
-          }
-
-          try {
-            liveWorkflow.tripDocuments = await fetchJson("/api/health-isf/operations/trip-documents?limit=200", {}, token);
-          } catch (_) {
-            liveWorkflow.tripDocuments = [];
-          }
-
-          try {
-            state.adminRevenue = await fetchJson("/api/health-isf/operations/admin-revenue", {}, token);
-          } catch (_) {
-            state.adminRevenue = state.adminRevenue || null;
-          }
-
-          var workflowReferenceSettled = await Promise.allSettled([
-            fetchJson("/api/health-isf/providers?limit=200", {}, token),
-            fetchJson("/api/health-isf/customer-requests?limit=200", {}, token),
-            fetchJson("/api/health-isf/vehicles/active?limit=40", {}, token)
-          ]);
-          state.liveWorkflow = {
-            dispatchQueue: liveWorkflow.dispatchQueue,
-            activeAssignments: liveWorkflow.activeAssignments,
-            drivers: Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : [],
-            activityFeed: liveWorkflow.activityFeed,
-            rides: Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : [],
-            billingHandoffs: dedupeBillingHandoffsByRideId(
-              Array.isArray(liveWorkflow.billingHandoffs) ? liveWorkflow.billingHandoffs : []
-            ),
-            tripDocuments: Array.isArray(liveWorkflow.tripDocuments) ? liveWorkflow.tripDocuments : [],
-            providers: workflowReferenceSettled[0].status === "fulfilled" && Array.isArray(workflowReferenceSettled[0].value) ? workflowReferenceSettled[0].value : [],
-            customerRequests: workflowReferenceSettled[1].status === "fulfilled" && Array.isArray(workflowReferenceSettled[1].value) ? workflowReferenceSettled[1].value : [],
-            vehicles: workflowReferenceSettled[2].status === "fulfilled" && Array.isArray(workflowReferenceSettled[2].value) ? workflowReferenceSettled[2].value : []
-          };
-          if (canUseDriverWorkspaceActions()) {
-            try {
-              var driverMobileReset = isDriverMobileSurface() && opts.forceDriverReset === true;
-              if (driverMobileReset) {
-                clearDriverLiveTripState({ resetBoundIdentity: false });
-              }
-              await refreshDriverWorkflowData({ token: token, forceReset: driverMobileReset });
-            } catch (_) {
-              state.fetchWarnings.push("driver_workspace_unavailable");
-            }
-          }
-          try {
-            var focusRideId = "";
-            if (Array.isArray(liveWorkflow.dispatchQueue) && liveWorkflow.dispatchQueue.length > 0) {
-              focusRideId = safeText(liveWorkflow.dispatchQueue[0].ride_id, "");
-            }
-            var aiSnapshotUrl = "/api/health-isf/ai-dispatch/snapshot?publish=false"
-              + (focusRideId ? "&ride_id=" + encodeURIComponent(focusRideId) : "");
-            state.healthIsfAiSnapshot = await fetchJson(aiSnapshotUrl, {}, token);
-          } catch (_) {
-            state.healthIsfAiSnapshot = null;
-            state.fetchWarnings.push("ai_dispatch_snapshot_unavailable");
-          }
-        } catch (_) {
-          state.fetchWarnings.push("live_workflow_feed_unavailable");
-        }
-      }
-
-      if (opsSettled[4].status !== "fulfilled") {
-        state.fetchWarnings.push("timeline_integrity_warning");
       }
 
       if ((state.role === "provider" || state.role === "admin") && (!state.ops.dashboardSummary || safeText(state.ops.visibility.show_provider_metrics, true) === "false")) {
@@ -10926,35 +12516,29 @@
       };
     }
 
-    state.fetchWarnings = dedupeWarnings(state.fetchWarnings);
-
-    var integrityState = computeHydrationIntegrity(
-      hasToken,
-      opsFailures,
-      state.fetchWarnings,
-      settled[0].status === "fulfilled",
-      settled[1].status === "fulfilled"
-    );
-
-    if (state.fetchWarnings.length === 2) {
-      state.error = "operations_fetch_unavailable";
-    } else if (state.fetchWarnings.length > 0) {
-      state.error = "partial_operations_data";
+    finalizeShellHydration(hasToken, settled, 0);
+    } catch (err) {
+      state.error = safeText(err && err.message, "operations_fetch_unavailable");
+      if (isDriverMobileAppRoute()) {
+        state.driverApp = safeObject(state.driverApp);
+        state.driverApp.mobileUiState = "api_error";
+        state.driverApp.mobileBootstrapError = state.error;
+      }
+      finishOpsHydrationDiagnostic(hydrationDiag, { error: state.error, route: state.route, role: state.role });
+    } finally {
+      if (hydrationTimer) {
+        clearTimeout(hydrationTimer);
+      }
+      refreshInFlight = false;
+      if (!hydrationTimedOut) {
+        state.loading = false;
+        clearStaleEnterpriseLoadingHtml();
+        renderPage();
+      }
+      if (hydrationDiag) {
+        finishOpsHydrationDiagnostic(hydrationDiag, { route: state.route, role: state.role, loading: false });
+      }
     }
-
-    state.hydration = {
-      authTokenPresent: hasToken,
-      opsHydrated: hasToken && opsFailures === 0,
-      roleSlice: state.role,
-      lastUpdatedAt: new Date().toISOString(),
-      warningCount: state.fetchWarnings.length,
-      integrityState: integrityState
-    };
-
-    recomputeAssistantRuntimeState();
-    persistSessionState();
-    state.loading = false;
-    renderPage();
   }
 
   function startRefreshLoop() {
@@ -11088,6 +12672,9 @@
         history.pushState({ route: target, role: state.role }, "", nextPath);
       }
     }
+    if (getAccessToken() && !refreshInFlight) {
+      loadBackendData({ silent: true }).catch(function () {});
+    }
   }
 
   function bindEvents() {
@@ -11144,6 +12731,21 @@
     documentEventBindings.push({ eventName: "visibilitychange", handler: onVisibilityChange });
     document.addEventListener("visibilitychange", onVisibilityChange);
 
+    if (els.pageContent) {
+      var riderActionDelegate = function (event) {
+        var target = event && event.target;
+        if (!target || !target.closest) return;
+        var button = target.closest("[data-rider-action]");
+        if (!button || !els.pageContent.contains(button)) return;
+        event.preventDefault();
+        var action = safeText(button.getAttribute("data-rider-action"), "");
+        var noteId = safeText(button.getAttribute("data-note-id"), "");
+        void handleRiderWorkspaceAction(action, noteId);
+      };
+      documentEventBindings.push({ eventName: "click", handler: riderActionDelegate, element: els.pageContent });
+      els.pageContent.addEventListener("click", riderActionDelegate);
+    }
+
     var onStorage = function (event) {
       if (!event || !event.key) return;
       if (event.key === "amicor_session" || event.key === "amicor_identity") {
@@ -11187,9 +12789,7 @@
       void resolveDriverMobileAuth(getAccessToken()).then(function () {
         updateTopBadges();
         scheduleRenderPage();
-        if (isDriverMobileSurface()) {
-          refreshDriverWorkflowData({ token: getAccessToken() }).catch(function () {});
-        }
+        refreshDriverWorkflowData({ token: getAccessToken() }).catch(function () {});
       });
     };
     windowEventBindings.push({ eventName: "ami:driver-session-updated", handler: onDriverSessionUpdated });
@@ -11273,26 +12873,23 @@
     state.assistant = buildDefaultAssistantState();
     state.runtime.operatorMode = isOperatorModeEnabled();
     await ensurePlatformSessionReady();
-    state.role = roleFromStorage();
+    var pathRoute = routeFromPath(window.location.pathname);
+    state.role = initializePlatformRole(pathRoute);
     hydrateSessionState();
     recomputeAssistantRuntimeState();
     var deepLinkedRole = roleFromOperationalPath(window.location.pathname);
     if (deepLinkedRole && ROLE_ACCESS[deepLinkedRole]) {
       state.role = deepLinkedRole;
-      saveRole(deepLinkedRole);
+      savePlatformRole(deepLinkedRole);
     }
-    els.roleSelect.value = state.role;
-    var pathRoute = routeFromPath(window.location.pathname);
+    els.roleSelect.value = getPlatformRole();
     var rememberedRoute = safeText((state.roleRoutes || {})[state.role], "");
     var initialRoute = pathRoute === "dashboard" && rememberedRoute ? rememberedRoute : pathRoute;
     setRoute(initialRoute, false, "initialize");
     bindEvents();
     startRefreshLoop();
     if (isDriverMobileSurface()) {
-      void resolveDriverMobileAuth(getAccessToken()).then(function () {
-        updateTopBadges();
-        scheduleRenderPage({ immediate: true });
-      });
+      updateTopBadges();
     }
     loadBackendData({ forceDriverReset: false });
     void refreshAssistantPersistence();
@@ -11340,7 +12937,14 @@
     refreshDriverWorkflowData: refreshDriverWorkflowData,
     applyDriverWorkflowSnapshot: applyDriverWorkflowSnapshot,
     scheduleRenderPage: scheduleRenderPage,
-    lockDriverHydration: lockDriverHydration
+    lockDriverHydration: lockDriverHydration,
+    ensureAuthenticatedSession: ensureAuthenticatedSession,
+    getAccessToken: getAccessToken,
+    getMobileSessionDriverId: getMobileSessionDriverId,
+    getCanonicalMobileDriverContext: getCanonicalMobileDriverContext,
+    resolveCanonicalMobileDriverId: resolveCanonicalMobileDriverId,
+    resetDriverMobileAfterCompletion: resetDriverMobileAfterCompletion,
+    logDriverMobileAssignmentSync: logDriverMobileAssignmentSync
   };
 
   window.AmiOpsShellState = state;
@@ -11407,6 +13011,58 @@ function normalizeDriverTripStatus(raw) {
   return mapped[value] || value;
 }
 
+function resolveDriverTripLifecycleStatus(assignmentState, lifecycleState) {
+  var assignment = safeText(assignmentState, "");
+  var lifecycle = safeText(lifecycleState, "");
+  if (!lifecycle && assignment) return assignment;
+  if (!assignment && lifecycle) return lifecycle;
+  var order = {
+    queued: 1,
+    assigned: 2,
+    offered: 2,
+    pending: 2,
+    accepted: 3,
+    driver_en_route: 4,
+    en_route_pickup: 4,
+    arrived: 5,
+    arrived_pickup: 5,
+    waiting_at_pickup: 5,
+    rider_onboard: 6,
+    rider_loaded: 6,
+    in_progress: 7,
+    trip_in_progress: 7,
+    in_transit: 7,
+    arrived_destination: 8,
+    completed: 9
+  };
+  var aKey = normalizeDriverTripStatus(assignment);
+  var lKey = normalizeDriverTripStatus(lifecycle);
+  var aRank = order[aKey] || 0;
+  var lRank = order[lKey] || 0;
+  if (lRank > aRank) return lifecycle;
+  if (lRank === aRank && lifecycle) return lifecycle;
+  return assignment;
+}
+
+function _amiStatusFromRouteProgressPayload(payload, fallback) {
+  var workspace = safeObject(payload);
+  var activeRide = safeObject(workspace.active_ride || payload);
+  var assignment = safeObject(workspace.active_assignment);
+  return resolveDriverTripLifecycleStatus(
+    safeText(assignment.assignment_state, ""),
+    safeText(activeRide.lifecycle_state || activeRide.status, fallback)
+  );
+}
+
+function _amiCanonicalMobileDriverId(shell) {
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.resolveCanonicalMobileDriverId === "function") {
+    var sessionBound = safeText(window.AmiOpsShellActions.resolveCanonicalMobileDriverId(), "");
+    if (sessionBound) return sessionBound;
+  }
+  shell = shell || _amiDriverShellState();
+  return safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+}
+
 function _amiDriverShellState() {
   state = window.AmiOpsShellState || state || {};
   if (!window.AmiOpsShellState) {
@@ -11456,11 +13112,55 @@ async function _amiRequestJson(url, method, payload) {
   }
 }
 
+async function _amiEnsureDispatcherAuth(message) {
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getAccessToken === "function") {
+    if (window.AmiOpsShellActions.getAccessToken()) {
+      return true;
+    }
+  }
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.ensureAuthenticatedSession === "function") {
+    return await window.AmiOpsShellActions.ensureAuthenticatedSession(message || "Sign in to use dispatch actions.");
+  }
+  window.alert(message || "Sign in to use dispatch actions.");
+  return false;
+}
+
 async function _amiRefreshDispatcherWorkspace() {
-  if (!window.AmiOpsShellActions || typeof window.AmiOpsShellActions.refreshData !== "function") {
+  var token = window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getAccessToken === "function"
+    ? window.AmiOpsShellActions.getAccessToken()
+    : "";
+  if (!token || !window.AmiOpsShellActions || typeof window.AmiOpsShellActions.requestJson !== "function") {
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshData === "function") {
+      await window.AmiOpsShellActions.refreshData();
+    }
     return;
   }
-  await window.AmiOpsShellActions.refreshData();
+  state.liveWorkflow = safeObject(state.liveWorkflow);
+  var settled = await Promise.allSettled([
+    window.AmiOpsShellActions.requestJson("/api/health-isf/providers?limit=200", "GET"),
+    window.AmiOpsShellActions.requestJson("/api/health-isf/customer-requests?limit=200", "GET"),
+    window.AmiOpsShellActions.requestJson("/api/health-isf/rides?limit=200&active_only=true&exclude_test=true", "GET"),
+    window.AmiOpsShellActions.requestJson("/api/health-isf/drivers?limit=120", "GET"),
+    window.AmiOpsShellActions.requestJson("/api/health-isf/dispatch/queue?limit=200", "GET")
+  ]);
+  if (settled[0].status === "fulfilled" && settled[0].value && settled[0].value.ok && Array.isArray(settled[0].value.response)) {
+    state.liveWorkflow.providers = settled[0].value.response;
+  }
+  if (settled[1].status === "fulfilled" && settled[1].value && settled[1].value.ok && Array.isArray(settled[1].value.response)) {
+    state.liveWorkflow.customerRequests = settled[1].value.response;
+  }
+  if (settled[2].status === "fulfilled" && settled[2].value && settled[2].value.ok && Array.isArray(settled[2].value.response)) {
+    state.liveWorkflow.rides = settled[2].value.response;
+  }
+  if (settled[3].status === "fulfilled" && settled[3].value && settled[3].value.ok && Array.isArray(settled[3].value.response)) {
+    state.liveWorkflow.drivers = settled[3].value.response;
+  }
+  if (settled[4].status === "fulfilled" && settled[4].value && settled[4].value.ok && Array.isArray(settled[4].value.response)) {
+    state.liveWorkflow.dispatchQueue = settled[4].value.response;
+  }
+  if (typeof window.AmiOpsShellRender === "function") {
+    window.AmiOpsShellRender();
+  }
 }
 
 function _amiValue(id) {
@@ -11642,6 +13342,9 @@ window._amiUpdateRiderProfileDraft = function(field, value) {
 };
 
 window._amiHandleDispatcherCreatePatient = async function() {
+  if (!(await _amiEnsureDispatcherAuth("Sign in as admin or dispatcher before creating a rider."))) {
+    return;
+  }
   var riderName = _amiValue("dispatcher-patient-name");
   var riderPhone = _amiValue("dispatcher-patient-phone");
   var pickup = _amiValue("dispatcher-patient-pickup");
@@ -11748,6 +13451,9 @@ window._amiHandleDispatcherCreateDriver = async function() {
 };
 
 window._amiHandleDispatcherCreateProvider = async function() {
+  if (!(await _amiEnsureDispatcherAuth("Sign in as admin or dispatcher before creating a provider."))) {
+    return;
+  }
   var name = _amiValue("dispatcher-provider-name");
   var address = _amiValue("dispatcher-provider-address");
   var phone = _amiValue("dispatcher-provider-phone");
@@ -11788,15 +13494,25 @@ window._amiHandleDispatcherCreateProvider = async function() {
 };
 
 window._amiHandleDispatcherCreateRide = async function() {
+  if (!(await _amiEnsureDispatcherAuth("Sign in as admin or dispatcher before creating a ride."))) {
+    return;
+  }
   var passengerName = _amiValue("dispatcher-ride-passenger");
   var passengerPhone = _amiValue("dispatcher-ride-phone");
   var pickup = _amiValue("dispatcher-ride-pickup");
   var dropoff = _amiValue("dispatcher-ride-dropoff");
   var serviceType = _amiValue("dispatcher-ride-service");
   var providerId = _amiValue("dispatcher-ride-provider");
+  if (!providerId) {
+    var liveProviders = Array.isArray((safeObject(state.liveWorkflow)).providers) ? state.liveWorkflow.providers : [];
+    if (liveProviders.length === 1) {
+      providerId = safeText(liveProviders[0].id, "");
+      _amiSetValue("dispatcher-ride-provider", providerId);
+    }
+  }
   if (!passengerName || !passengerPhone || !pickup || !dropoff || !serviceType || !providerId) {
     _amiDispatcherError("Create Ride failed", "Missing ride, passenger, or provider fields.");
-    window.alert("Enter passenger, phone, pickup, dropoff, service type, and provider.");
+    window.alert("Enter passenger, phone, pickup, dropoff, service type, and provider. If the provider list is empty, sign in and click Reload workspace, or create a provider first.");
     return;
   }
   var result = await _amiRequestJson(
@@ -12264,11 +13980,20 @@ async function _amiSendJson(url, method, payload) {
 
 async function _amiResolveDriverForTrip(driverId, tripId) {
   var resolvedDriverId = safeText(driverId, "");
+  var sessionDriverId = "";
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getMobileSessionDriverId === "function") {
+    sessionDriverId = safeText(window.AmiOpsShellActions.getMobileSessionDriverId(), "");
+    if (sessionDriverId) {
+      resolvedDriverId = sessionDriverId;
+    }
+  }
   try {
     var ride = safeObject(await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null));
-    var assignedDriverId = safeText(ride.driver_id, "");
-    if (assignedDriverId) {
-      resolvedDriverId = assignedDriverId;
+    if (!sessionDriverId) {
+      var assignedDriverId = safeText(ride.driver_id, "");
+      if (assignedDriverId) {
+        resolvedDriverId = assignedDriverId;
+      }
     }
     return { driverId: resolvedDriverId, ride: ride };
   } catch (_) {
@@ -12378,18 +14103,33 @@ async function _amiAfterDriverWorkflowRefresh(lastAction) {
   _amiScheduleRenderPage();
 }
 
+function _amiLogDriverMobileSync(entry) {
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.logDriverMobileAssignmentSync === "function") {
+    window.AmiOpsShellActions.logDriverMobileAssignmentSync(entry || {});
+  }
+}
+
 window._amiHandleDriverAcceptTrip = async function(tripId) {
   var shell = _amiDriverShellState();
-  var driverId = safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
+  function acceptHttpStatus(err, code) {
+    var text = safeText(err && err.message, "");
+    return text.indexOf(":http_" + String(code)) >= 0;
+  }
   var payload = null;
+  var acceptErr = null;
   try {
     payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-ride",
       "POST",
       { ride_id: tripId }
     );
-  } catch (_) {
+  } catch (err) {
+    acceptErr = err;
+    if (acceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function") {
+      window._amiClearDriverSession();
+    }
     try {
       payload = await _amiSendJson(
         "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
@@ -12397,7 +14137,21 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
         { ride_id: tripId, target_state: "en_route_pickup" }
       );
     } catch (err2) {
-      window.alert("Unable to submit driver accept action for " + tripId + ".");
+      _amiLogDriverMobileSync({
+        event: "accept_ride_failed",
+        requested_ride_id: tripId,
+        route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+        api_response: {
+          error: safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, "accept_failed"))
+        },
+        frontend_state_transition: "active_ride->active_ride",
+        extra: { action: "Accept Trip" }
+      });
+      if (acceptHttpStatus(acceptErr, 401) || acceptHttpStatus(err2, 401)) {
+        window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
+      } else {
+        window.alert("Unable to submit driver accept action for " + tripId + ".");
+      }
       shell = _amiDriverShellState();
       shell.driverApp = safeObject(shell.driverApp);
       shell.driverApp.lastActionResult = {
@@ -12413,17 +14167,39 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     }
   }
   var activeRide = safeObject(payload.active_ride || payload);
-  shell = _amiPatchDriverTripStatus(tripId, safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route"));
+  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
+    try {
+      payload = await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+        "POST",
+        { ride_id: tripId, target_state: "en_route_pickup" }
+      );
+      activeRide = safeObject(payload.active_ride || payload);
+    } catch (_) {}
+  }
+  var displayStatus = _amiStatusFromRouteProgressPayload(payload, "driver_en_route");
+  shell = _amiPatchDriverTripStatus(tripId, displayStatus);
   shell.driverApp.lastActionResult = {
     last_action: "Accept Trip",
     api_status: "ok",
     db_record_id: safeText(activeRide.id, tripId),
     updated_table: "health_isf_rides",
     ui_refreshed: "yes",
-    current_ride_status: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route")
+    current_ride_status: displayStatus
   };
   window.AmiOpsShellState = shell;
   _amiScheduleRenderPage();
+  _amiLogDriverMobileSync({
+    event: "accept_ride",
+    requested_ride_id: tripId,
+    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route"),
+    api_response: activeRide,
+    http_status: 200,
+    route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+    frontend_state_transition: "active_ride->active_ride",
+    extra: { action: "Accept Trip" }
+  });
   try {
     _amiLockDriverHydration(3500);
     await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
@@ -12433,7 +14209,7 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
 
 window._amiHandleDriverArriveTrip = async function(tripId) {
   var shell = _amiDriverShellState();
-  var driverId = safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
   try {
     var payload = await _amiSendJson(
@@ -12441,19 +14217,37 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
       "POST",
       { ride_id: tripId, target_state: "arrived_pickup" }
     );
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "arrived_pickup");
     var activeRide = safeObject(payload.active_ride || payload);
-    shell = _amiPatchDriverTripStatus(tripId, safeText(activeRide.lifecycle_state || activeRide.status, "arrived_pickup"));
+    shell = _amiPatchDriverTripStatus(tripId, nextStatus);
     shell.driverApp.lastActionResult = {
       last_action: "Arrived at Pickup",
       api_status: "ok",
       db_record_id: safeText(activeRide.id, tripId),
       updated_table: "health_isf_rides",
       ui_refreshed: "yes",
-      current_ride_status: safeText(activeRide.lifecycle_state || activeRide.status, "arrived")
+      current_ride_status: nextStatus
     };
     window.AmiOpsShellState = shell;
     _amiScheduleRenderPage();
+    _amiLogDriverMobileSync({
+      event: "route_progress",
+      requested_ride_id: tripId,
+      assignment_state: nextStatus,
+      api_response: activeRide,
+      http_status: 200,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Arrived at Pickup", target_state: "arrived_pickup" }
+    });
   } catch (_) {
+    _amiLogDriverMobileSync({
+      event: "route_progress_failed",
+      requested_ride_id: tripId,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      api_response: { error: "arrived_pickup_failed" },
+      extra: { action: "Arrived at Pickup", target_state: "arrived_pickup" }
+    });
     window.alert("Unable to submit driver arrive action for " + tripId + ".");
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
@@ -12476,7 +14270,7 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
 
 window._amiHandleDriverStartTrip = async function(tripId) {
   var shell = _amiDriverShellState();
-  var driverId = safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
   try {
     var payload = await _amiSendJson(
@@ -12484,19 +14278,37 @@ window._amiHandleDriverStartTrip = async function(tripId) {
       "POST",
       { ride_id: tripId, target_state: "rider_loaded" }
     );
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "rider_loaded");
     var activeRide = safeObject(payload.active_ride || payload);
-    shell = _amiPatchDriverTripStatus(tripId, safeText(activeRide.lifecycle_state || activeRide.status, "rider_loaded"));
+    shell = _amiPatchDriverTripStatus(tripId, nextStatus);
     shell.driverApp.lastActionResult = {
       last_action: "Pickup / Rider Onboard",
       api_status: "ok",
       db_record_id: safeText(activeRide.id, tripId),
       updated_table: "health_isf_rides",
       ui_refreshed: "yes",
-      current_ride_status: safeText(activeRide.lifecycle_state || activeRide.status, "rider_onboard")
+      current_ride_status: nextStatus
     };
     window.AmiOpsShellState = shell;
     _amiScheduleRenderPage();
+    _amiLogDriverMobileSync({
+      event: "route_progress",
+      requested_ride_id: tripId,
+      assignment_state: nextStatus,
+      api_response: activeRide,
+      http_status: 200,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Pickup / Rider Onboard", target_state: "rider_loaded" }
+    });
   } catch (_) {
+    _amiLogDriverMobileSync({
+      event: "route_progress_failed",
+      requested_ride_id: tripId,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      api_response: { error: "rider_loaded_failed" },
+      extra: { action: "Pickup / Rider Onboard", target_state: "rider_loaded" }
+    });
     window.alert("Unable to submit driver start action for " + tripId + ".");
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
@@ -12523,7 +14335,7 @@ window._amiHandleDriverOnboardTrip = async function(tripId) {
 
 window._amiHandleDriverProgressTrip = async function(tripId) {
   var shell = _amiDriverShellState();
-  var driverId = safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
   try {
     var payload = await _amiSendJson(
@@ -12531,19 +14343,37 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
       "POST",
       { ride_id: tripId, target_state: "trip_in_progress" }
     );
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "trip_in_progress");
     var activeRide = safeObject(payload.active_ride || payload);
-    shell = _amiPatchDriverTripStatus(tripId, safeText(activeRide.lifecycle_state || activeRide.status, "trip_in_progress"));
+    shell = _amiPatchDriverTripStatus(tripId, nextStatus);
     shell.driverApp.lastActionResult = {
       last_action: "Start Transport",
       api_status: "ok",
       db_record_id: safeText(activeRide.id, tripId),
       updated_table: "health_isf_rides",
       ui_refreshed: "yes",
-      current_ride_status: safeText(activeRide.lifecycle_state || activeRide.status, "in_progress")
+      current_ride_status: nextStatus
     };
     window.AmiOpsShellState = shell;
     _amiScheduleRenderPage();
+    _amiLogDriverMobileSync({
+      event: "route_progress",
+      requested_ride_id: tripId,
+      assignment_state: nextStatus,
+      api_response: activeRide,
+      http_status: 200,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Start Transport", target_state: "trip_in_progress" }
+    });
   } catch (_) {
+    _amiLogDriverMobileSync({
+      event: "route_progress_failed",
+      requested_ride_id: tripId,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      api_response: { error: "trip_in_progress_failed" },
+      extra: { action: "Start Transport", target_state: "trip_in_progress" }
+    });
     window.alert("Unable to update route progress for " + tripId + ".");
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
@@ -12566,15 +14396,17 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
 
 window._amiHandleDriverCompleteTrip = async function(tripId) {
   var shell = _amiDriverShellState();
-  var driverId = safeText((safeObject(shell.driverApp)).currentDriverId || (safeObject(shell.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId(shell);
+  if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getMobileSessionDriverId === "function") {
+    var boundId = safeText(window.AmiOpsShellActions.getMobileSessionDriverId(), "");
+    if (boundId) driverId = boundId;
+  }
   if (!driverId || !tripId) return false;
   var handoffId = "";
   var paymentId = "";
   var completedRideId = safeText(tripId, "");
   var handoff = {};
   try {
-    var advanced = await _amiAdvanceRideForCompletion(driverId, tripId);
-    driverId = safeText(advanced.driverId, driverId);
     var progressPayload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
@@ -12634,7 +14466,19 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
       }
       shell.driverWorkflow.completedRides = priorCompleted;
       shell.driverApp.completedRideHistory = priorCompleted;
-      shell.driverApp.completedTrips = Math.max(safeNumber(shell.driverApp.completedTrips, 0), priorCompleted.length);
+      syncDriverEarningsSummaryToApp(
+        shell.driverApp,
+        safeObject(shell.driverWorkflow.earnings),
+        priorCompleted,
+        shell.driverApp.billingHandoffs
+      );
+      if (handoff && Object.keys(handoff).length) {
+        var handoffPay = safeNumber(handoff.driver_pay_usd, 0);
+        if (handoffPay > 0) {
+          shell.driverApp.earningsToday = safeNumber(shell.driverApp.earningsToday, 0) + handoffPay;
+          shell.driverApp.earningsLifetime = safeNumber(shell.driverApp.earningsLifetime, 0) + handoffPay;
+        }
+      }
     }
     shell.driverApp.lastActionResult = {
       last_action: "Complete Trip",
@@ -12645,6 +14489,9 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
       current_ride_status: safeText(completedRide.lifecycle_state || completedRide.status, "completed")
     };
     window.AmiOpsShellState = shell;
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.resetDriverMobileAfterCompletion === "function") {
+      window.AmiOpsShellActions.resetDriverMobileAfterCompletion();
+    }
     _amiScheduleRenderPage();
   } catch (_) {
     window.alert("Unable to submit driver complete action for " + tripId + ".");
@@ -12679,7 +14526,7 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
 };
 
 window._amiHandleDriverCallRider = async function(tripId) {
-  var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId();
   if (!driverId || !tripId) return false;
   try {
     var payload = await _amiSendJson(
@@ -12716,7 +14563,7 @@ window._amiHandleDriverCallRider = async function(tripId) {
 };
 
 window._amiHandleDriverDeclineTrip = async function(tripId) {
-  var driverId = safeText((safeObject(state.driverApp)).currentDriverId || (safeObject(state.driverWorkflow)).driverId, "");
+  var driverId = _amiCanonicalMobileDriverId();
   var driverWorkflow = safeObject(state.driverWorkflow);
   var offerEnvelope = safeObject(driverWorkflow.activeOffer);
   var offer = safeObject(offerEnvelope.offer);
@@ -12777,6 +14624,37 @@ window._amiHandleDriverIncident = async function(tripId) {
 };
 
 window._amiHandleDriverShiftReadiness = async function(driverId, status) {
+  var sessionToken = "";
+  try {
+    var persisted = JSON.parse(localStorage.getItem("amicor_driver_session") || "null");
+    sessionToken = safeText(persisted && persisted.session_token, "");
+  } catch (_) {}
+  var platformToken = "";
+  try {
+    var sessionRaw = localStorage.getItem("amicor_session");
+    if (sessionRaw) {
+      var sessionObj = JSON.parse(sessionRaw);
+      platformToken = safeText(sessionObj && (sessionObj.access_token || sessionObj.token), "");
+    }
+  } catch (_) {}
+  if (sessionToken && !platformToken) {
+    try {
+      await _amiSendJson("/api/health-isf/drivers/availability", "POST", {
+        driver_id: driverId,
+        availability_state: status === "available" ? "available" : "offline",
+        session_token: sessionToken
+      });
+      var shell = _amiDriverShellState();
+      shell.driverApp = safeObject(shell.driverApp);
+      shell.driverApp.shiftOnline = status === "available";
+      window.AmiOpsShellState = shell;
+      await _amiRefreshDriverWorkflow("Shift readiness updated");
+      return true;
+    } catch (_) {
+      window.alert("Unable to update shift readiness for " + driverId + ".");
+      return false;
+    }
+  }
   var result = await _amiSubmitWorkspaceAction(
     "driver.update_shift_readiness",
     { driver_id: driverId, status: status },

@@ -532,8 +532,13 @@ try:
     if modules_dir not in sys.path:
         sys.path.insert(0, modules_dir)
     
-    from app.modules.health_isf.routes import router as health_isf_router, websocket_router as health_isf_websocket_router  # type: ignore
+    from app.modules.health_isf.routes import (
+        router as health_isf_router,
+        public_router as health_isf_public_router,
+        websocket_router as health_isf_websocket_router,
+    )  # type: ignore
     from app.modules.health_isf.ai_operations_routes import router as health_isf_ai_router  # type: ignore
+    app.include_router(health_isf_public_router)
     app.include_router(health_isf_router)
     app.include_router(health_isf_websocket_router)
     app.include_router(health_isf_ai_router)

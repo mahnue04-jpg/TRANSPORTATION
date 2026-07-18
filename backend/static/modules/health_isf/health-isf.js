@@ -6003,6 +6003,37 @@
     }
   }
 
+  async function syncDriverMobileWorkspaceAfterLogin(driverId) {
+    const resolvedDriverId = String(driverId || '').trim();
+    if (!resolvedDriverId) {
+      return;
+    }
+    try {
+      localStorage.setItem('amicor_shell_role', 'driver');
+      localStorage.setItem('amicor_driver_workflow_id', resolvedDriverId);
+    } catch (_) {}
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshDriverWorkflowData === 'function') {
+      try {
+        await window.AmiOpsShellActions.refreshDriverWorkflowData({
+          forceReset: false,
+          lastAction: 'Driver session activated',
+        });
+      } catch (_) {}
+    }
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.scheduleRenderPage === 'function') {
+      window.AmiOpsShellActions.scheduleRenderPage({ immediate: true });
+    }
+    try {
+      window.dispatchEvent(new CustomEvent('ami:driver-session-updated', {
+        detail: {
+          driver_id: resolvedDriverId,
+          driver_name: lookupDriverName(resolvedDriverId),
+          session_token: String(state.driverRuntimeToken || '').trim(),
+        },
+      }));
+    } catch (_) {}
+  }
+
   async function loginDriverRuntime() {
     const inputs = getDriverRuntimeInputs();
     if (!inputs.driverId) {
@@ -6042,6 +6073,7 @@
         organization_id: String((response && response.organization_id) || '').trim(),
       });
     }
+    await syncDriverMobileWorkspaceAfterLogin(resolvedDriverId);
     return response;
   }
 

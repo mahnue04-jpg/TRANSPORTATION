@@ -1883,3 +1883,133 @@ body[data-role="operations"] .ops-sidebar {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* Dedicated Driver Mobile app shell — /app/mobile only */
+body.driver-mobile-app {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+body.driver-mobile-app .ops-app {
+  grid-template-columns: 1fr;
+}
+
+body.driver-mobile-app .ops-sidebar,
+body.driver-mobile-app .ops-role-box,
+body.driver-mobile-app .ops-search,
+body.driver-mobile-app .ops-kicker,
+body.driver-mobile-app #workspace-pill,
+body.driver-mobile-app #notification-pill,
+body.driver-mobile-app #role-badge,
+body.driver-mobile-app #last-updated-pill {
+  display: none !important;
+}
+
+body.driver-mobile-app .ops-main {
+  min-height: 100vh;
+  background: #f3f4f6;
+}
+
+body.driver-mobile-app .ops-topbar {
+  padding: 14px 16px;
+  border-bottom: 1px solid #d1d5db;
+  background: linear-gradient(180deg, #0f766e 0%, #115e59 100%);
+  color: #ecfdf5;
+}
+
+body.driver-mobile-app .ops-topbar h2,
+body.driver-mobile-app .ops-topbar .ops-subtitle {
+  color: #ecfdf5;
+}
+
+body.driver-mobile-app .ops-topbar-meta {
+  gap: 8px;
+}
+
+body.driver-mobile-app #connection-badge {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ecfdf5;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+body.driver-mobile-app .ops-user-pill {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ecfdf5;
+}
+
+body.driver-mobile-app .ops-content {
+  padding: 16px;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  min-width: 0;
+}
+
+body.driver-mobile-app .ops-main {
+  min-height: 100vh;
+  background: #f3f4f6;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+body.driver-mobile-app .driver-mobile-page {
+  width: 100%;
+  min-width: 0;
+}
+
+body.driver-mobile-app .driver-mobile-layout {
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+}
+
+body.driver-mobile-app .driver-mobile-phone,
+body.driver-mobile-app .driver-mobile-ops {
+  min-width: 0;
+}
+
+body.driver-mobile-app .driver-mobile-ops .driver-workflow-card,
+body.driver-mobile-app .driver-mobile-phone .driver-workflow-card {
+  min-width: 0;
+}
+
+body.driver-mobile-app .driver-secondary-content {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+body.driver-mobile-app .driver-mobile-ops .table-wrap,
+body.driver-mobile-app .driver-mobile-phone .table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+body.driver-mobile-app .driver-mobile-ops .ops-table,
+body.driver-mobile-app .driver-mobile-phone .ops-table {
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  body.driver-mobile-app .driver-mobile-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+body.driver-mobile-app .driver-workflow-card,
+body.driver-mobile-app .driver-mobile-auth {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+body.driver-mobile-app .driver-workflow-card .muted,
+body.driver-mobile-app .driver-mobile-auth .muted {
+  color: #6b7280;
+}
+
+body.driver-mobile-app .runtime-strip {
+  display: none !important;
+}

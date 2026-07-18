@@ -272,6 +272,7 @@ class CustomerRideRequestCreateRequest(BaseModel):
     recurring: bool = False
     recurring_pattern: Optional[dict[str, Any]] = None
     notes: Optional[str] = Field(None, max_length=1000)
+    client_request_key: Optional[str] = Field(None, max_length=128)
 
     @field_validator("pickup_address", "dropoff_address", "rider_name", mode="before")
     @classmethod
@@ -366,9 +367,23 @@ class DriverLoginRequest(BaseModel):
         return phone
 
 
+class DriverMobileLoginRequest(BaseModel):
+    phone: str = Field(..., min_length=1, max_length=20)
+    driver_id: Optional[str] = Field(None, min_length=1, max_length=36)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_mobile_login_phone(cls, value: str) -> str:
+        phone = _sanitize_text(value, max_len=20) or ""
+        if not PHONE_RE.match(phone):
+            raise ValueError("phone must be a valid phone number")
+        return phone
+
+
 class DriverLoginResponse(BaseModel):
     driver_id: str
     organization_id: str
+    session_id: str
     session_token: str
     session_state: str
     auth_state: str
@@ -376,6 +391,19 @@ class DriverLoginResponse(BaseModel):
     is_online: bool
     issued_at: datetime
     expires_at: datetime
+
+
+class DriverMobileAssignmentSyncLogRequest(BaseModel):
+    authenticated_driver_id: str = Field(..., min_length=1, max_length=36)
+    driver_session_id: Optional[str] = Field(None, max_length=36)
+    requested_ride_id: Optional[str] = Field(None, max_length=36)
+    assignment_state: Optional[str] = Field(None, max_length=64)
+    api_response: Optional[dict[str, Any]] = None
+    frontend_state_transition: Optional[str] = Field(None, max_length=256)
+    http_status: Optional[int] = None
+    route: Optional[str] = Field(None, max_length=256)
+    event: str = Field(default="assignment_sync", max_length=64)
+    extra: Optional[dict[str, Any]] = None
 
 
 class DriverLogoutRequest(BaseModel):

@@ -244,15 +244,39 @@ class AIDispatchOrchestrationService:
         queue = service.get_dispatch_queue(db, organization_id=organization_id, limit=50)
         focused_ride: dict[str, Any] | None = None
         target_ride_id = str(ride_id or "").strip()
-        if not target_ride_id and queue:
-            target_ride_id = str(queue[0].get("ride_id") or "")
+
+        def _queue_row_valid(row: dict[str, Any]) -> bool:
+            rid = str(row.get("ride_id") or "")
+            if not rid:
+                return False
+            state = str(row.get("assignment_state") or "").lower()
+            if state in {"completed", "cancelled", "dropoff_complete", "failed", "no_show"}:
+                return False
+            ride_row = service.get_ride_by_id(db, rid)
+            if not ride_row or service._ride_is_terminal(ride_row) or service.is_operational_excluded_ride(ride_row):
+                return False
+            return True
+
+        valid_queue = [row for row in queue if _queue_row_valid(row)]
+        if target_ride_id:
+            ride_check = service.get_ride_by_id(db, target_ride_id)
+            if (
+                not ride_check
+                or ride_check.organization_id != organization_id
+                or service._ride_is_terminal(ride_check)
+                or service.is_operational_excluded_ride(ride_check)
+                or not any(str(row.get("ride_id") or "") == target_ride_id for row in valid_queue)
+            ):
+                target_ride_id = ""
+        if not target_ride_id and valid_queue:
+            target_ride_id = str(valid_queue[0].get("ride_id") or "")
 
         if target_ride_id:
             ride = service.get_ride_by_id(db, target_ride_id)
             if ride and ride.organization_id == organization_id:
-                queue_row = next((row for row in queue if str(row.get("ride_id")) == target_ride_id), None)
+                queue_row = next((row for row in valid_queue if str(row.get("ride_id")) == target_ride_id), None)
                 driver = service.get_driver_by_id(db, ride.driver_id) if ride.driver_id else None
-                active_assignment = service._active_assignment_for_ride(db, ride.id)
+                active_assignment = service._authoritative_assignment_for_ride(db, ride)
                 focused_ride = {
                     "ride_id": ride.id,
                     "passenger_name": ride.passenger_name,
@@ -266,12 +290,13 @@ class AIDispatchOrchestrationService:
                     ),
                     "driver_id": str(ride.driver_id) if ride.driver_id else None,
                     "driver_name": driver.name if driver else None,
+                    "requested_at": ride.requested_at.isoformat() if ride.requested_at else None,
                 }
 
         return {
-            "queue_count": len(queue),
-            "queue_ride_ids": [str(row.get("ride_id") or "") for row in queue[:25]],
-            "queue": queue[:25],
+            "queue_count": len(valid_queue),
+            "queue_ride_ids": [str(row.get("ride_id") or "") for row in valid_queue[:25]],
+            "queue": valid_queue[:25],
             "focused_ride": focused_ride,
         }
 

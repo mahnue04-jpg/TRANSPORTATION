@@ -17,6 +17,18 @@ from app import logging_utils
 logger = logging.getLogger("amicor.tenant_auth")
 
 
+PUBLIC_HEALTH_ISF_PATHS = frozenset(
+    {
+        "/api/health-isf/drivers/mobile-login",
+    }
+)
+
+DRIVER_SESSION_HEADER_PATH_PREFIXES = (
+    "/api/health-isf/drivers/",
+    "/api/health-isf/rides/",
+)
+
+
 class TenantAuthValidationMiddleware(BaseHTTPMiddleware):
     """Validate bearer tokens early for tenant-sensitive API paths.
 
@@ -31,6 +43,18 @@ class TenantAuthValidationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response: # type: ignore
         path = request.url.path
         if not any(path.startswith(prefix) for prefix in self.protected_prefixes):
+            return await call_next(request) # type: ignore
+
+        if request.method.upper() == "POST" and path in PUBLIC_HEALTH_ISF_PATHS:
+            return await call_next(request) # type: ignore
+
+        driver_session = (
+            request.headers.get("X-Driver-Session-Token")
+            or request.headers.get("x-driver-session-token")
+            or ""
+        ).strip()
+        if driver_session and any(path.startswith(prefix) for prefix in DRIVER_SESSION_HEADER_PATH_PREFIXES):
+            request.state.auth_context = {"driver_session": True}
             return await call_next(request) # type: ignore
 
         auth_header = request.headers.get("Authorization", "")
