@@ -13245,6 +13245,59 @@ async function _amiEnsureDispatcherAuth(message) {
   return false;
 }
 
+async function _amiEnsureDispatchWriteRole(message) {
+  if (!(await _amiEnsureDispatcherAuth(message))) {
+    return false;
+  }
+  var writeRoles = ["admin", "dispatcher", "supervisor"];
+  function currentJwtRole() {
+    if (window.AmiCorSession && typeof window.AmiCorSession.getRole === "function") {
+      return safeText(window.AmiCorSession.getRole(), "").toLowerCase();
+    }
+    return "";
+  }
+  if (writeRoles.indexOf(currentJwtRole()) >= 0) {
+    return true;
+  }
+  var authorized = [];
+  if (window.AmiCorSession && typeof window.AmiCorSession.getSessionProfile === "function") {
+    var profile = safeObject(window.AmiCorSession.getSessionProfile());
+    if (Array.isArray(profile.authorizedRoles)) {
+      authorized = profile.authorizedRoles.map(function (item) {
+        return safeText(item, "").toLowerCase();
+      });
+    }
+  }
+  if (!authorized.length && window.AmiCorSession && typeof window.AmiCorSession.getCurrent === "function") {
+    var identity = safeObject((window.AmiCorSession.getCurrent() || {}).identity);
+    if (Array.isArray(identity.authorizedRoles)) {
+      authorized = identity.authorizedRoles.map(function (item) {
+        return safeText(item, "").toLowerCase();
+      });
+    }
+  }
+  var platformRole = "";
+  try {
+    platformRole = safeText(window.localStorage.getItem("amicor_platform_role"), "").toLowerCase();
+  } catch (_err) {}
+  var preferred = writeRoles.indexOf(platformRole) >= 0
+    ? platformRole
+    : (["dispatcher", "admin", "supervisor"].find(function (item) {
+        return authorized.indexOf(item) >= 0;
+      }) || "");
+  if (!preferred || !(window.AmiCorSession && typeof window.AmiCorSession.switchWorkspaceRole === "function")) {
+    window.alert("Insufficient role permissions. Switch to dispatcher or admin before creating rides.");
+    return false;
+  }
+  try {
+    await window.AmiCorSession.switchWorkspaceRole(preferred);
+  } catch (err) {
+    window.alert(safeText(err && err.message, "Unable to switch workspace role for ride creation."));
+    return false;
+  }
+  return writeRoles.indexOf(currentJwtRole()) >= 0;
+}
+
 async function _amiRefreshDispatcherWorkspace() {
   var token = window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getAccessToken === "function"
     ? window.AmiOpsShellActions.getAccessToken()
@@ -13614,7 +13667,7 @@ window._amiHandleDispatcherCreateProvider = async function() {
 };
 
 window._amiHandleDispatcherCreateRide = async function() {
-  if (!(await _amiEnsureDispatcherAuth("Sign in as admin or dispatcher before creating a ride."))) {
+  if (!(await _amiEnsureDispatchWriteRole("Sign in as admin or dispatcher before creating a ride."))) {
     return;
   }
   var passengerName = _amiValue("dispatcher-ride-passenger");

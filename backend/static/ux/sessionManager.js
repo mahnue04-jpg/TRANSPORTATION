@@ -358,6 +358,9 @@ const AmiCorSession = {
     const identity = current.identity || null;
     const active = this.isActive();
     const tokenExpiresAt = identity && identity.tokenExpiresAt ? Number(identity.tokenExpiresAt) : null;
+    const authorizedRoles = Array.isArray(identity && identity.authorizedRoles)
+      ? identity.authorizedRoles.map(normalizeRole)
+      : [];
     return {
       sessionId: current.sessionId || null,
       active,
@@ -365,6 +368,7 @@ const AmiCorSession = {
       email: identity && identity.email ? String(identity.email) : null,
       displayName: identity && identity.name ? String(identity.name) : null,
       role: this.getRole() || "guest",
+      authorizedRoles,
       organizationId: this.getOrganizationId(),
       organizationName: identity && identity.organizationName ? String(identity.organizationName) : null,
       accessTokenPresent: !!this.getAccessToken(),

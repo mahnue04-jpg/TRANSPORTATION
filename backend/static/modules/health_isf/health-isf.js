@@ -4773,20 +4773,52 @@
     return DISPATCH_WRITE_ROLES.includes(getCurrentRole());
   }
 
+  function resolveAuthorizedWorkspaceRoles() {
+    const profile = getSessionProfile();
+    const fromProfile = Array.isArray(profile.authorizedRoles)
+      ? profile.authorizedRoles.map(function (item) {
+          return String(item || "").toLowerCase();
+        })
+      : [];
+    if (fromProfile.length > 0) {
+      return fromProfile;
+    }
+    if (window.AmiCorSession && typeof window.AmiCorSession.getCurrent === "function") {
+      const identity = (window.AmiCorSession.getCurrent() || {}).identity || {};
+      const fromIdentity = Array.isArray(identity.authorizedRoles)
+        ? identity.authorizedRoles.map(function (item) {
+            return String(item || "").toLowerCase();
+          })
+        : [];
+      if (fromIdentity.length > 0) {
+        return fromIdentity;
+      }
+    }
+    return [];
+  }
+
+  function resolvePreferredDispatchWriteRole(authorized) {
+    const platformRole = (function () {
+      try {
+        return String(window.localStorage.getItem("amicor_platform_role") || "").toLowerCase();
+      } catch (_err) {
+        return "";
+      }
+    })();
+    if (DISPATCH_WRITE_ROLES.includes(platformRole)) {
+      return platformRole;
+    }
+    return ["dispatcher", "admin", "supervisor"].find(function (item) {
+      return authorized.indexOf(item) !== -1;
+    }) || "";
+  }
+
   async function ensureDispatchWriteRole() {
     const role = getCurrentRole();
     if (DISPATCH_WRITE_ROLES.includes(role)) {
       return true;
     }
-    const profile = getSessionProfile();
-    const authorized = Array.isArray(profile.authorizedRoles)
-      ? profile.authorizedRoles.map(function (item) {
-          return String(item || "").toLowerCase();
-        })
-      : [];
-    const preferred = ["dispatcher", "admin", "supervisor"].find(function (item) {
-      return authorized.indexOf(item) !== -1;
-    });
+    const preferred = resolvePreferredDispatchWriteRole(resolveAuthorizedWorkspaceRoles());
     if (!preferred) {
       return false;
     }
@@ -4794,6 +4826,7 @@
       return false;
     }
     await window.AmiCorSession.switchWorkspaceRole(preferred);
+    applyRoleUiAccess();
     return DISPATCH_WRITE_ROLES.includes(getCurrentRole());
   }
 
@@ -8517,6 +8550,12 @@
     const els = getEls();
     if (!els.modal) return;
     clearCreateRideErrors();
+    const ready = await ensureDispatchWriteRole();
+    if (!ready) {
+      renderCreateRideErrors({}, "Insufficient role permissions");
+      showToastSafe("Ride creation requires dispatcher, admin, or supervisor workspace access.", "error");
+      return;
+    }
     wireCreateRideFormSubmit();
     els.modal.hidden = false;
     els.modal.style.display = "grid";
@@ -8823,6 +8862,12 @@
   async function handleCreateRideSubmit(event) {
     event.preventDefault();
     if (state.createRideSubmitting) return;
+    const ready = await ensureDispatchWriteRole();
+    if (!ready) {
+      renderCreateRideErrors({}, "Insufficient role permissions");
+      showToastSafe("Ride creation failed: Insufficient role permissions", "error");
+      throw new Error("Insufficient role permissions");
+    }
     const form = event.target;
     const formData = new FormData(form);
     const errors = {};
