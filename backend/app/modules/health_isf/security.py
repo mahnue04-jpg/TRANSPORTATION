@@ -58,16 +58,22 @@ def enforce_tenant_scope(user: UserContext, requested_org_id: str | None) -> str
         return effective_org_id
 
     if not user.organization_id:
+        if normalize_role(user.role) == ROLE_DRIVER and requested_org_id:
+            return str(requested_org_id)
         raise HTTPException(status_code=403, detail="User missing organization scope")
 
     if requested_org_id and requested_org_id != user.organization_id:
+        if normalize_role(user.role) == ROLE_DRIVER:
+            return user.organization_id
         raise HTTPException(status_code=403, detail="Cross-tenant access denied")
 
     return user.organization_id
 
 
-def enforce_entity_tenant(user: UserContext, entity_org_id: str) -> None:
+def enforce_entity_tenant(user: UserContext, entity_org_id: str | None) -> None:
     if is_super_admin(user):
+        return
+    if not entity_org_id:
         return
     if not user.organization_id or user.organization_id != entity_org_id:
         raise HTTPException(status_code=403, detail="Entity is outside tenant boundary")

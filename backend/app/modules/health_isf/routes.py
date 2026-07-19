@@ -6297,8 +6297,9 @@ def get_driver_active_ride(
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    enforce_entity_tenant(user, driver.organization_id)
-    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    enforce_entity_tenant(user, resolved_org_id)
+    effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
     try:
         snapshot = service.get_driver_active_ride_data(
             db,
@@ -6349,8 +6350,9 @@ def get_driver_live_workspace(
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    enforce_entity_tenant(user, driver.organization_id)
-    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    enforce_entity_tenant(user, resolved_org_id)
+    effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
     try:
         snapshot = service.get_driver_live_workspace_data(
             db,
@@ -8662,7 +8664,7 @@ async def driver_mobile_login(
 
     response = DriverLoginResponse(
         driver_id=driver_obj.id,
-        organization_id=driver_obj.organization_id,
+        organization_id=service.resolve_driver_organization_id(db, driver_obj, persist_missing=False),
         session_id=str(session_obj.id),
         session_token=session_token,
         session_state=session_obj.session_state,
@@ -9020,8 +9022,9 @@ def get_driver_assigned_rides(
     driver = service.get_driver_by_id(db, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
-    enforce_entity_tenant(user, driver.organization_id)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
+    enforce_entity_tenant(user, resolved_org_id)
     rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=driver_id)
     response = [_ride_response_with_financials(db, ride) for ride in rides]
     record_backend_assignment_sync(
@@ -9080,8 +9083,8 @@ async def driver_accept_ride(
             ride_id=payload.ride_id,
             actor_user_id=auth.actor_user_id,
         )
-    except service.RideLifecycleConflictError:
-        ride = service.get_ride_by_id(db, payload.ride_id)
+    except service.RideLifecycleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:

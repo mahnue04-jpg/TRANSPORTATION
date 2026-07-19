@@ -101,12 +101,14 @@ def _driver_session_context(
         return None
     if not service.validate_driver_session_token(db, driver_id=driver_id, session_token=session_token):
         return None
+    org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    db.refresh(driver)
     ctx = UserContext(
         user_id=str(driver.id),
         email=str(getattr(driver, "email", "") or ""),
         role=ROLE_DRIVER,
         organization_name=None,
-        organization_id=driver.organization_id,
+        organization_id=org_id,
     )
     return DriverEndpointAuth(user=ctx, actor_user_id=None)
 
@@ -122,6 +124,15 @@ def require_driver_mobile_or_platform(*, workflow_only: bool = False):
     ) -> DriverEndpointAuth:
         session_token = _driver_session_token(request)
         if session_token:
+            session_row = service.resolve_active_driver_session_from_token(
+                db,
+                session_token=session_token,
+            )
+            if session_row:
+                session_driver_id = str(session_row.driver_id)
+                driver_auth = _driver_session_context(session_driver_id, session_token, db)
+                if driver_auth:
+                    return driver_auth
             driver_auth = _driver_session_context(driver_id, session_token, db)
             if driver_auth:
                 return driver_auth

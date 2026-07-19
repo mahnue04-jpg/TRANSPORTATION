@@ -212,6 +212,7 @@ class TripFinancialEngine:
         ride: HealthISFRide,
         *,
         actor_user_id: str | None = None,
+        materialize_payout_row: bool = True,
     ) -> dict[str, Any] | None:
         """Idempotent financial settlement for a completed ride.
 
@@ -250,6 +251,21 @@ class TripFinancialEngine:
                     payout=payout,
                     breakdown=breakdown,
                 )
+            elif payment:
+                request_row = (
+                    db.query(HealthISFCustomerRideRequest)
+                    .filter(HealthISFCustomerRideRequest.ride_id == ride.id)
+                    .first()
+                )
+                breakdown = cls.calculate_breakdown(ride, request_row=request_row)
+                summary["documents"] = cls._ensure_trip_documents(
+                    db,
+                    ride=ride,
+                    record=existing,
+                    payment=payment,
+                    payout=None,
+                    breakdown=breakdown,
+                )
             else:
                 summary["documents"] = cls.list_trip_documents_for_ride(
                     db, ride_id=ride.id, organization_id=ride.organization_id
@@ -266,29 +282,6 @@ class TripFinancialEngine:
             .first()
         )
         breakdown = cls.calculate_breakdown(ride, request_row=request_row)
-
-        payout = (
-            db.query(HealthISFPayout)
-            .filter(HealthISFPayout.trip_id == trip.id)
-            .order_by(desc(HealthISFPayout.created_at))
-            .first()
-        )
-        if not payout:
-            payout = HealthISFPayout(
-                id=uuid4(),
-                driver_id=ride.driver_id,
-                trip_id=trip.id,
-                amount_usd=breakdown.driver_pay_usd,
-                status="pending",
-                description=f"Driver earnings for completed ride {ride.id[:8]}",
-                created_at=now(),
-                updated_at=now(),
-            )
-            db.add(payout)
-            db.flush()
-        else:
-            payout.amount_usd = breakdown.driver_pay_usd
-            payout.updated_at = now()
 
         payment = (
             db.query(HealthISFPaymentTransaction)
@@ -332,6 +325,31 @@ class TripFinancialEngine:
             payment.settlement_status = "settled"
             payment.paid_at = payment.paid_at or now()
             payment.updated_at = now()
+
+        payout: HealthISFPayout | None = None
+        if materialize_payout_row:
+            payout = (
+                db.query(HealthISFPayout)
+                .filter(HealthISFPayout.trip_id == trip.id)
+                .order_by(desc(HealthISFPayout.created_at))
+                .first()
+            )
+            if not payout:
+                payout = HealthISFPayout(
+                    id=uuid4(),
+                    driver_id=ride.driver_id,
+                    trip_id=trip.id,
+                    amount_usd=breakdown.driver_pay_usd,
+                    status="pending",
+                    description=f"Driver earnings for completed ride {ride.id[:8]}",
+                    created_at=now(),
+                    updated_at=now(),
+                )
+                db.add(payout)
+                db.flush()
+            else:
+                payout.amount_usd = breakdown.driver_pay_usd
+                payout.updated_at = now()
 
         existing_settlements = (
             db.query(HealthISFSettlementLedger)
@@ -424,7 +442,7 @@ class TripFinancialEngine:
                 ride_id=ride.id,
                 handoff_status="ready",
                 payment_transaction_id=payment.id,
-                payout_id=payout.id,
+                payout_id=payout.id if payout else None,
                 claim_id=getattr(claim, "id", None),
                 ride_price_usd=breakdown.ride_price_usd,
                 driver_pay_usd=breakdown.driver_pay_usd,
@@ -437,7 +455,7 @@ class TripFinancialEngine:
         else:
             handoff.handoff_status = "ready"
             handoff.payment_transaction_id = handoff.payment_transaction_id or payment.id
-            handoff.payout_id = handoff.payout_id or payout.id
+            handoff.payout_id = handoff.payout_id or (payout.id if payout else None)
             handoff.ride_price_usd = breakdown.ride_price_usd
             handoff.driver_pay_usd = breakdown.driver_pay_usd
             handoff.platform_revenue_usd = breakdown.platform_revenue_usd
@@ -446,7 +464,12 @@ class TripFinancialEngine:
         # Re-check immediately before insert to collapse near-concurrent completions.
         raced = cls.get_financial_record_for_ride(db, ride_id=ride.id)
         if raced:
-            return cls.process_trip_completion(db, ride, actor_user_id=actor_user_id)
+            return cls.process_trip_completion(
+                db,
+                ride,
+                actor_user_id=actor_user_id,
+                materialize_payout_row=materialize_payout_row,
+            )
 
         record = HealthISFTripFinancialRecord(
             id=uuid4(),
@@ -459,7 +482,7 @@ class TripFinancialEngine:
             provider_share_usd=breakdown.provider_share_usd,
             processing_fee_usd=breakdown.processing_fee_usd,
             payment_transaction_id=payment.id,
-            payout_id=payout.id,
+            payout_id=payout.id if payout else None,
             claim_id=getattr(claim, "id", None),
             billing_handoff_id=handoff.id,
             is_healthcare=breakdown.is_healthcare,
@@ -535,10 +558,11 @@ class TripFinancialEngine:
         ride: HealthISFRide,
         record: HealthISFTripFinancialRecord,
         payment: HealthISFPaymentTransaction,
-        payout: HealthISFPayout,
+        payout: HealthISFPayout | None,
         breakdown: RideFinancialBreakdown,
     ) -> list[dict[str, Any]]:
         """Create receipt, payout statement, and billing record documents for a completed trip."""
+        payout_reference = str(getattr(payout, "id", "") or record.id)
         existing = (
             db.query(HealthISFTripDocument)
             .filter(
@@ -573,7 +597,7 @@ class TripFinancialEngine:
                 "content": {
                     "driver_id": ride.driver_id,
                     "driver_pay_usd": breakdown.driver_pay_usd,
-                    "payout_id": payout.id,
+                    "payout_id": payout_reference,
                     "ride_price_usd": breakdown.ride_price_usd,
                 },
             },
@@ -601,7 +625,7 @@ class TripFinancialEngine:
                 row.status = "issued"
                 row.financial_record_id = record.id
                 row.payment_transaction_id = payment.id
-                row.payout_id = payout.id
+                row.payout_id = payout.id if payout else None
                 row.content_json = json.dumps(spec["content"], separators=(",", ":"))
                 created.append(row)
                 continue
@@ -612,7 +636,7 @@ class TripFinancialEngine:
                 driver_id=ride.driver_id,
                 financial_record_id=record.id,
                 payment_transaction_id=payment.id,
-                payout_id=payout.id,
+                payout_id=payout.id if payout else None,
                 document_type=str(spec["document_type"]),
                 title=str(spec["title"]),
                 reference=str(spec["reference"]),

@@ -1042,13 +1042,7 @@
   }
 
   function isDriverMobileAppRoute() {
-    if (state.route === "mobile") {
-      return true;
-    }
-    if (state.route === "drivers" && readPersistedDriverSession()) {
-      return true;
-    }
-    return false;
+    return state.route === "mobile";
   }
 
   function isDriverMobileSurface() {
@@ -6288,9 +6282,42 @@
     ].join("");
   }
 
+  function renderDriverRoleHomeDashboard(phase17) {
+    var slice = buildRoleHydrationSlice("driver", phase17);
+    var driverApp = safeObject(state.driverApp);
+    var workflow = safeObject(state.driverWorkflow);
+    var activeTripId = safeText(driverApp.activeTripId, "") || safeText((safeObject(workflow.activeRide && workflow.activeRide.ride)).id, "");
+    var syncWarning = safeText(driverApp.syncWarning, "");
+    return [
+      renderRoleIdentityPanel("driver", slice, safeText((phase17.supervision || {}).supervision_status, "unknown")),
+      renderHydrationStatusPanel("Driver", slice),
+      renderOperationalHeartbeatPanel(slice),
+      renderPanelBlock(
+        "Driver Operations Home",
+        "Command overview and entry points. Open Driver Mobile for live assignment sync and trip workflow.",
+        '<div class="grid-4">' +
+          renderMetric("Active Trip", activeTripId ? activeTripId.slice(0, 8) : "None") +
+          renderMetric("Shift", driverApp.shiftOnline ? "Online" : "Offline") +
+          renderMetric("Assignment Sync", syncWarning ? "Retry needed" : "Ready", syncWarning ? "warn" : "good") +
+          renderMetric("Queued Offers", String(Array.isArray(workflow.tripQueue) ? workflow.tripQueue.length : 0)) +
+        '</div>' +
+        renderQuickLinks(roleWorkspaceLinks("driver", "homeLinks", [
+          { href: "/app/mobile", title: "Driver Mobile App", description: "Accept assignments, run pickup workflow, and complete trips.", note: "live" },
+          { href: "/app/trips", title: "Trip Timeline", description: "Review active and completed transport history.", note: "read-only" },
+          { href: "/app/billing", title: "Earnings", description: "Trip payouts and billing handoff visibility.", note: "live" }
+        ])),
+        "driver-home"
+      ),
+      renderRoleAiGuidance("Driver", "Driver Mobile is the authoritative assignment surface. This dashboard stays read-only for trip actions.")
+    ].join("");
+  }
+
   function renderDriverDashboard(phase17) {
     var slice = buildRoleHydrationSlice("driver", phase17);
-    return renderDriverMobileExperience(phase17, slice);
+    if (state.route === "mobile") {
+      return renderDriverMobileExperience(phase17, slice);
+    }
+    return renderDriverRoleHomeDashboard(phase17);
   }
 
   function renderProviderDashboard(phase17) {
@@ -6462,7 +6489,7 @@
     var phase17 = getPhase17Context();
     if (state.role === "dispatcher") return renderDispatcherDashboard(phase17);
     if (state.role === "rider") return renderRiderDashboard(phase17);
-    if (state.role === "driver") return renderDriverDashboard(phase17);
+    if (state.role === "driver") return renderDriverRoleHomeDashboard(phase17);
     if (state.role === "provider") return renderProviderDashboard(phase17);
     if (state.role === "compliance_officer") return renderComplianceOfficerDashboard(phase17);
     if (state.role === "supervisor") return renderSupervisorDashboard(phase17);
@@ -7339,11 +7366,8 @@
 
   function renderDrivers() {
     var phase17 = getPhase17Context();
-    if (isDriverMobileAppRoute()) {
-      return renderDriverDashboard(phase17);
-    }
     if (state.role === "driver") {
-      return renderDriverDashboard(phase17);
+      return renderDriverRoleHomeDashboard(phase17);
     }
     if (state.role === "driver_support") {
       return renderDriverSupportDashboard(phase17);
@@ -8438,13 +8462,10 @@
 
   function renderMobile() {
     var phase17 = getPhase17Context();
-    if (state.route === "mobile") {
-      return renderDriverDashboard(phase17);
-    }
     if (state.role === "rider") {
-      return renderRiderDashboard(phase17);
+      return renderRiderAppExperience(buildRoleHydrationSlice("rider", phase17));
     }
-    return renderDriverDashboard(phase17);
+    return renderDriverMobileExperience(phase17, buildRoleHydrationSlice("driver", phase17));
   }
 
   function renderSettings() {
@@ -9923,6 +9944,13 @@
     });
   }
 
+  function unwrapApiPayload(payload) {
+    if (payload && typeof payload === "object" && Object.prototype.hasOwnProperty.call(payload, "ok") && Object.prototype.hasOwnProperty.call(payload, "data")) {
+      return payload.data;
+    }
+    return payload;
+  }
+
   async function fetchJson(url, requestOptions, explicitToken) {
     var options = safeObject(requestOptions);
     var method = safeText(options.method, "GET").toUpperCase();
@@ -9965,7 +9993,7 @@
           return {};
         }
 
-        return response.json();
+        return unwrapApiPayload(await response.json());
       } catch (error) {
         var message = safeText(error && error.message, "");
         var transient = message.indexOf("request_timeout") >= 0 || message.indexOf("Failed to fetch") >= 0 || message.indexOf("NetworkError") >= 0;
@@ -10242,18 +10270,23 @@
       safeText(activeRequest.requestId || activeRequest.id, "") ||
       safeText(activeRide.id || activeRide.ride_id, "")
     );
+    var tripStatus = safeText(activeRide.status || activeRequest.status, "pending").toLowerCase();
+    var trackingStates = ["assigned", "offered", "accepted", "in_progress", "driver_en_route", "arrived", "pickup_complete", "rider_loaded", "trip_in_progress", "en_route_pickup"];
+    var liveTracking = hasActiveRide && trackingStates.indexOf(tripStatus) >= 0;
+    var driverAssigned = !!(safeText(activeRide.driver_name || activeRide.assigned_driver_name, "") && safeText(activeRide.driver_name || activeRide.assigned_driver_name, "") !== "Awaiting assignment");
 
     state.riderApp = {
       profile: profile,
       activeRequestId: hasActiveRide ? safeText(activeRequest.requestId || activeRequest.id, "") : "",
+      submitInFlight: false,
       activeTrip: hasActiveRide ? {
         tripId: safeText(activeRide.id || activeRequest.tripId, safeText(activeRequest.ride_id, "")),
         status: safeText(activeRide.status || activeRequest.status, "pending"),
         pickup: safeText(activeRide.pickup_address || activeRide.pickup || activeRequest.pickup, profile.pickup),
         dropoff: safeText(activeRide.dropoff_address || activeRide.dropoff || activeRequest.dropoff, profile.dropoff),
         etaMin: safeText(payload.etaMinutes, activeRide.estimated_duration_minutes || "pending"),
-        driverName: safeText(activeRide.driver_name || activeRide.assigned_driver_name, "Awaiting assignment"),
-        vehicle: safeText(activeRide.vehicle_id || activeRide.vehicle, "Vehicle pending"),
+        driverName: safeText(activeRide.driver_name || activeRide.assigned_driver_name, driverAssigned ? "Assigned driver" : "Awaiting assignment"),
+        vehicle: safeText(activeRide.vehicle_id || activeRide.vehicle, driverAssigned ? "En route" : "Vehicle pending"),
         supportContact: "24/7 Rider Care"
       } : emptyRiderActiveTrip(),
       recurringSchedule: Array.isArray(riderState.recurringSchedule) ? riderState.recurringSchedule : [],
@@ -10261,7 +10294,16 @@
       tripHistory: history,
       timeline: timeline,
       lastAction: safeText(payload.lastAction, history.length > 0 ? "Rider workspace synchronized" : "Ready to request a ride"),
-      lastSubmit: riderState.lastSubmit || null
+      lastSubmit: riderState.lastSubmit || null,
+      submitStatus: hasActiveRide ? {
+        level: liveTracking ? "success" : "info",
+        message: liveTracking
+          ? "Driver assigned — live tracking is active."
+          : (safeText(riderState.submitStatus && riderState.submitStatus.message, "") || "Ride request submitted — awaiting driver assignment."),
+        rideId: safeText(activeRide.id || activeRequest.ride_id || (riderState.lastSubmit && riderState.lastSubmit.rideId), ""),
+        requestId: safeText(activeRequest.requestId || activeRequest.id, ""),
+        status: tripStatus
+      } : (riderState.submitStatus || null)
     };
   }
 
@@ -10284,9 +10326,9 @@
       fetchJson(trackingUrl)
     ]);
 
-    var historyPayload = settled[0].status === "fulfilled" ? safeObject(settled[0].value) : {};
-    var activePayload = settled[1].status === "fulfilled" ? safeObject(settled[1].value) : {};
-    var trackingPayload = settled[2].status === "fulfilled" ? safeObject(settled[2].value) : {};
+    var historyPayload = settled[0].status === "fulfilled" ? safeObject(unwrapApiPayload(settled[0].value)) : {};
+    var activePayload = settled[1].status === "fulfilled" ? safeObject(unwrapApiPayload(settled[1].value)) : {};
+    var trackingPayload = settled[2].status === "fulfilled" ? safeObject(unwrapApiPayload(settled[2].value)) : {};
     var historyRows = Array.isArray(historyPayload.history) ? historyPayload.history : [];
     var activeRequest = historyRows.map(mapCustomerRequestToHistoryRow).find(function (item) {
       var status = safeText(item.status, "").toLowerCase();
@@ -10720,9 +10762,11 @@
     var completionSnapshot = probe[4].status === "fulfilled" ? safeObject(probe[4].value) : null;
 
     var activeRideOk = probe[0].status === "fulfilled";
+    var workspaceOk = probe[1].status === "fulfilled";
+    var offerOk = probe[2].status === "fulfilled";
     var assignedOk = probe[3].status === "fulfilled";
     var completionOk = probe[4].status === "fulfilled";
-    var apiHealthy = activeRideOk && assignedOk;
+    var apiHealthy = activeRideOk && (assignedOk || offerOk || workspaceOk);
     var returnedRideId = safeText((safeObject(activeRidePayload && activeRidePayload.ride)).id, "");
     var lifecycleState = safeText(
       activeRidePayload && (activeRidePayload.assignment_state || (activeRidePayload.ride && (activeRidePayload.ride.lifecycle_state || activeRidePayload.ride.status))),
@@ -11363,6 +11407,17 @@
   }
 
   function getOrganizationId() {
+    if (isDriverMobileAppRoute()) {
+      var persistedDriver = readPersistedDriverSession();
+      var driverOrg = safeText(persistedDriver && persistedDriver.organization_id, "").trim();
+      if (driverOrg) {
+        return driverOrg;
+      }
+      if (driverMobileAuthCache && safeText(driverMobileAuthCache.organization_id, "").trim()) {
+        return safeText(driverMobileAuthCache.organization_id, "").trim();
+      }
+    }
+
     try {
       if (window.AmiCorSession && typeof window.AmiCorSession.getOrganizationId === "function") {
         var runtimeOrgId = safeText(window.AmiCorSession.getOrganizationId(), "").trim();
@@ -12840,8 +12895,16 @@
 
     runtimeUpdateHandler = function () {
       persistSessionState();
-      if (isDriverMobileSurface()) {
+      if (isDriverMobileAppRoute()) {
+        requestSilentRefresh("runtime-event");
         return;
+      }
+      if (state.role === "rider") {
+        refreshRiderWorkspaceData({ lastAction: "Live ride update received" }).catch(function () {}).finally(function () {
+          if (!state.loading) {
+            scheduleRenderPage();
+          }
+        });
       }
       requestSilentRefresh("runtime-event");
     };
