@@ -1473,6 +1473,52 @@
     return nextRole;
   }
 
+  var AUTH_SYNC_PLATFORM_ROLES = {
+    admin: "admin",
+    dispatcher: "dispatcher",
+    supervisor: "supervisor",
+    staff: "staff",
+    rider: "rider",
+    provider: "provider",
+    driver: "driver",
+    compliance_officer: "compliance_officer",
+    driver_support: "driver_support",
+    medical_coordinator: "medical_coordinator"
+  };
+
+  function getJwtSessionRole() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.getRole === "function") {
+        return safeText(window.AmiCorSession.getRole(), "").toLowerCase();
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  function resolveAuthRoleForPlatformRole(platformRole) {
+    var key = safeText(platformRole, "").toLowerCase();
+    return AUTH_SYNC_PLATFORM_ROLES[key] || key;
+  }
+
+  function syncPlatformRoleAuth(platformRole) {
+    var authRole = resolveAuthRoleForPlatformRole(platformRole);
+    if (!authRole || !getAccessToken()) {
+      return Promise.resolve(false);
+    }
+    if (getJwtSessionRole() === authRole) {
+      return Promise.resolve(true);
+    }
+    if (!(window.AmiCorSession && typeof window.AmiCorSession.switchWorkspaceRole === "function")) {
+      return Promise.resolve(false);
+    }
+    return window.AmiCorSession.switchWorkspaceRole(authRole).then(function () {
+      return true;
+    }).catch(function (error) {
+      console.warn("[ops-shell] workspace role sync failed", error);
+      return false;
+    });
+  }
+
   function saveRole(role) {
     savePlatformRole(role);
   }
@@ -1977,13 +2023,17 @@
     var rememberedRoute = safeText(state.roleRoutes[nextRole], "");
     var targetRoute = routeAllowed(nextRole, rememberedRoute) ? rememberedRoute : defaultRouteForRole(nextRole);
     setRoute(targetRoute, pushHistory !== false, "role-switch");
-    loadBackendData({ silent: true, forceDriverReset: nextRole === "driver" });
-    void safeLogAssistantEvent("workflow", "role_switch", "success", {
-      from_role: safeText(previousRole, "unknown"),
-      to_role: safeText(state.role, "unknown")
-    }, "");
-    renderPage();
-    persistSessionState();
+    syncPlatformRoleAuth(nextRole).finally(function () {
+      loadBackendData({ silent: true, forceDriverReset: nextRole === "driver" });
+      void safeLogAssistantEvent("workflow", "role_switch", "success", {
+        from_role: safeText(previousRole, "unknown"),
+        to_role: safeText(state.role, "unknown"),
+        jwt_role: getJwtSessionRole()
+      }, "");
+      renderPage();
+      persistSessionState();
+      updateTopBadges();
+    });
   }
 
   function asBoolean(value, fallback) {
@@ -2426,6 +2476,7 @@
     if (!displayName) {
       displayName = displayRole === "dispatcher" ? "Dispatcher" : titleizeWords(displayRole);
     }
+    var jwtRole = getJwtSessionRole();
     var badgeRole = isDriverMobileAppRoute() ? displayRole : platformRole;
     var badgeProfile = isDriverMobileAppRoute() ? (ROLE_PROFILE[displayRole] || profile) : profile;
     document.body.setAttribute("data-role", badgeRole);
@@ -2438,7 +2489,9 @@
       var userNameEl = document.getElementById("ops-user-name");
       var userRoleEl = document.getElementById("ops-user-role");
       if (userNameEl) userNameEl.textContent = displayName;
-      if (userRoleEl) userRoleEl.textContent = displaySubrole;
+      if (userRoleEl) {
+        userRoleEl.textContent = jwtRole ? titleizeWords(jwtRole) : displaySubrole;
+      }
     } catch (_) {}
 
     var supervision = state.supervision;
@@ -10090,6 +10143,9 @@
     }
     state.hydration = safeObject(state.hydration);
     state.hydration.authTokenPresent = !!getAccessToken();
+    void syncPlatformRoleAuth(getPlatformRole()).then(function () {
+      updateTopBadges();
+    });
   }
 
   function ensureAuthenticatedSession(message) {
@@ -12938,6 +12994,7 @@
     await ensurePlatformSessionReady();
     var pathRoute = routeFromPath(window.location.pathname);
     state.role = initializePlatformRole(pathRoute);
+    await syncPlatformRoleAuth(getPlatformRole());
     hydrateSessionState();
     recomputeAssistantRuntimeState();
     var deepLinkedRole = roleFromOperationalPath(window.location.pathname);

@@ -4767,8 +4767,34 @@
     return String(window.AmiCorSession.getRole() || "staff").toLowerCase();
   }
 
+  const DISPATCH_WRITE_ROLES = ["admin", "dispatcher", "supervisor"];
+
   function canMutateRides() {
-    return ["admin", "dispatcher", "staff"].includes(getCurrentRole());
+    return DISPATCH_WRITE_ROLES.includes(getCurrentRole());
+  }
+
+  async function ensureDispatchWriteRole() {
+    const role = getCurrentRole();
+    if (DISPATCH_WRITE_ROLES.includes(role)) {
+      return true;
+    }
+    const profile = getSessionProfile();
+    const authorized = Array.isArray(profile.authorizedRoles)
+      ? profile.authorizedRoles.map(function (item) {
+          return String(item || "").toLowerCase();
+        })
+      : [];
+    const preferred = ["dispatcher", "admin", "supervisor"].find(function (item) {
+      return authorized.indexOf(item) !== -1;
+    });
+    if (!preferred) {
+      return false;
+    }
+    if (!(window.AmiCorSession && typeof window.AmiCorSession.switchWorkspaceRole === "function")) {
+      return false;
+    }
+    await window.AmiCorSession.switchWorkspaceRole(preferred);
+    return DISPATCH_WRITE_ROLES.includes(getCurrentRole());
   }
 
   function driverWorkflowButtons(ride) {
@@ -5720,6 +5746,10 @@
   }
 
   async function updateRideStatus(rideId, status) {
+    const ready = await ensureDispatchWriteRole();
+    if (!ready) {
+      throw new Error("Insufficient role permissions");
+    }
     await fetchJson("/api/health-isf/rides/" + encodeURIComponent(rideId) + "/status", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -5729,6 +5759,10 @@
   }
 
   async function assignDriver(rideId, driverId) {
+    const ready = await ensureDispatchWriteRole();
+    if (!ready) {
+      throw new Error("Insufficient role permissions");
+    }
     const selectedDriver = (Array.isArray(state.drivers) ? state.drivers : []).find(function (driver) {
       return String(driver && driver.id || '') === String(driverId || '');
     });

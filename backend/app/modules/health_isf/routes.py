@@ -314,6 +314,7 @@ require_health_isf_write_access = require_any_role(
     ROLE_ADMIN,
     ROLE_SUPER_ADMIN_SUPPORT,
     ROLE_DISPATCHER,
+    ROLE_SUPERVISOR,
 )
 require_dispatcher_workflow_access = require_any_role(
     ROLE_ADMIN,
