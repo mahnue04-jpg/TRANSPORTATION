@@ -7150,12 +7150,14 @@ def accept_driver_ride(
         DispatchAssignmentState.ARRIVED_DESTINATION.value,
         DispatchAssignmentState.DROPOFF_COMPLETE.value,
     }
-    if lifecycle_state in post_accept_states:
-        raise RideLifecycleConflictError("Ride assignment already accepted by this driver")
-    if ride.accepted_at and lifecycle_state == RideStatus.ASSIGNED.value:
-        raise RideLifecycleConflictError("Ride assignment already accepted by this driver")
-    if assignment_state in post_accept_assignment_states:
-        raise RideLifecycleConflictError("Ride assignment already accepted by this driver")
+    if (
+        lifecycle_state in post_accept_states
+        or (ride.accepted_at and lifecycle_state == RideStatus.ASSIGNED.value)
+        or assignment_state in post_accept_assignment_states
+    ):
+        # Idempotent accept: driver/mobile clients may retry after hydration lag.
+        db.refresh(ride)
+        return ride
     if assignment_state and assignment_state not in {
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.ASSIGNED.value,

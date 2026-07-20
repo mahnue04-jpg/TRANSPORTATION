@@ -55,6 +55,13 @@ class DriverEndpointAuth(NamedTuple):
     actor_user_id: str | None
 
 
+def effective_driver_id_from_auth(driver_id: str, auth: DriverEndpointAuth) -> str:
+    """Driver mobile session tokens bind to the authenticated driver, not the URL path."""
+    if auth.actor_user_id is None:
+        return str(auth.user.user_id)
+    return driver_id
+
+
 def _driver_session_token(request: Request) -> str | None:
     token = request.headers.get("X-Driver-Session-Token") or request.headers.get("x-driver-session-token")
     if not token:

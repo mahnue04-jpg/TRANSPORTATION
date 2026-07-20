@@ -42,6 +42,7 @@ from app.helpers import now, uuid4
 from app.modules.health_isf import service
 from app.modules.health_isf.driver_mobile_auth import (
     DriverEndpointAuth,
+    effective_driver_id_from_auth,
     require_driver_accept_auth,
     require_driver_mobile_or_platform,
     require_driver_workflow_auth,
@@ -1013,12 +1014,6 @@ def _sync_driver_progress_action(db: Session, ride_id: str, action):
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
     return ride
-
-
-def _effective_driver_id_from_auth(driver_id: str, auth: DriverEndpointAuth) -> str:
-    if auth.actor_user_id is None:
-        return str(auth.user.user_id)
-    return driver_id
 
 
 async def _emit_driver_trip_completion_events(
@@ -6233,7 +6228,8 @@ def get_driver_active_offer(
     db: Session = Depends(get_db),
 ):
     user = auth.user
-    driver = service.get_driver_by_id(db, driver_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
@@ -6241,13 +6237,13 @@ def get_driver_active_offer(
     offer = service.get_driver_active_offer(
         db,
         organization_id=effective_org_id,
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
     )
     if not offer:
         workspace = service.get_driver_live_workspace_data(
             db,
             organization_id=effective_org_id,
-            driver_id=driver_id,
+            driver_id=effective_driver_id,
         )
         assignment = workspace.get("assignment")
         if assignment and str(getattr(assignment, "assignment_state", "") or "").lower() in {
@@ -6272,15 +6268,15 @@ def get_driver_active_offer(
             offer_payload["requested_at"] = ride.requested_at.isoformat() if ride.requested_at else None
     logger.info(
         "driver_active_offer driver_id=%s offer_ride_id=%s assignment_driver_id=%s assignment_state=%s has_offer=%s",
-        driver_id,
+        effective_driver_id,
         (offer_payload or {}).get("ride_id") if offer_payload else None,
-        (offer_payload or {}).get("driver_id") if offer_payload else driver_id,
+        (offer_payload or {}).get("driver_id") if offer_payload else effective_driver_id,
         (offer_payload or {}).get("assignment_state") if offer_payload else None,
         bool(offer_payload),
     )
     return {
         "organization_id": effective_org_id,
-        "driver_id": driver_id,
+        "driver_id": effective_driver_id,
         "offer": offer_payload,
     }
 
@@ -6295,7 +6291,8 @@ def get_driver_active_ride(
 ):
     """Authoritative active assigned ride for the driver mobile app."""
     user = auth.user
-    driver = service.get_driver_by_id(db, driver_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
@@ -6305,7 +6302,7 @@ def get_driver_active_ride(
         snapshot = service.get_driver_active_ride_data(
             db,
             organization_id=effective_org_id,
-            driver_id=driver_id,
+            driver_id=effective_driver_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -6313,7 +6310,7 @@ def get_driver_active_ride(
     assignment = snapshot.get("assignment")
     ride = snapshot.get("ride")
     response = DriverActiveRideResponse(
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         organization_id=effective_org_id,
         has_active_ride=bool(snapshot.get("has_active_ride")),
         assignment_state=str(snapshot.get("assignment_state") or ""),
@@ -6327,7 +6324,7 @@ def get_driver_active_ride(
         db,
         request=request,
         event="active_ride_fetch",
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         ride_id=str(ride.id) if ride else None,
         assignment_state=response.assignment_state,
         api_response={
@@ -6348,7 +6345,8 @@ def get_driver_live_workspace(
     db: Session = Depends(get_db),
 ):
     user = auth.user
-    driver = service.get_driver_by_id(db, driver_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
@@ -6358,7 +6356,7 @@ def get_driver_live_workspace(
         snapshot = service.get_driver_live_workspace_data(
             db,
             organization_id=effective_org_id,
-            driver_id=driver_id,
+            driver_id=effective_driver_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -6366,7 +6364,7 @@ def get_driver_live_workspace(
     assignment = snapshot.get("assignment")
     ride = snapshot.get("ride")
     response = DriverLiveWorkspaceResponse(
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         organization_id=effective_org_id,
         safety_status=str(snapshot.get("safety_status") or "ok"),
         reconnect_safe=bool(snapshot.get("reconnect_safe")),
@@ -6380,7 +6378,7 @@ def get_driver_live_workspace(
         db,
         request=request,
         event="live_workspace_fetch",
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         ride_id=str(ride.id) if ride else None,
         assignment_state=str(getattr(assignment, "assignment_state", None) or getattr(assignment, "state", None) or ""),
         api_response={
@@ -6403,7 +6401,7 @@ async def progress_driver_route(
 ):
     user = auth.user
     actor_user_id = auth.actor_user_id
-    effective_driver_id = _effective_driver_id_from_auth(driver_id, auth)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
     driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -6953,6 +6951,16 @@ async def dispatcher_assign_driver_for_customer_request(
         lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
         transition_reason="dispatcher_manual_assignment",
         assignment_transition_source="dispatcher_request_assign_driver",
+    )
+
+    emitter = get_emitter()
+    await emitter.emit_driver_active_ride_state(
+        organization_id=effective_org_id,
+        driver_id=payload.driver_id,
+        active_ride_id=ride.id,
+        state=RideLifecycleManager.normalize_state(getattr(ride, "lifecycle_state", None) or ride.status),
+        actor_user_id=user.user_id,
+        details={"source": "dispatcher_request_assign_driver", "request_id": updated.id},
     )
 
     return DispatcherCustomerRequestActionResponse(
@@ -8090,7 +8098,8 @@ def get_driver_completion_snapshot(
 ):
     """Authoritative completed-trip view for driver earnings, history, and billing."""
     user = auth.user
-    driver = service.get_driver_by_id(db, driver_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
@@ -8098,11 +8107,11 @@ def get_driver_completion_snapshot(
     snapshot = service.get_driver_completion_snapshot(
         db,
         organization_id=effective_org_id,
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         limit=limit,
     )
     return DriverCompletionSnapshotResponse(
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         organization_id=effective_org_id,
         earnings=DriverEarningsSummaryResponse(**snapshot["earnings"]),
         completed_ride_count=int(snapshot.get("completed_ride_count") or 0),
@@ -9020,19 +9029,20 @@ def get_driver_assigned_rides(
     db: Session = Depends(get_db),
 ):
     user = auth.user
-    driver = service.get_driver_by_id(db, driver_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
     enforce_entity_tenant(user, resolved_org_id)
-    rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=driver_id)
+    rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=effective_driver_id)
     response = [_ride_response_with_financials(db, ride) for ride in rides]
     record_backend_assignment_sync(
         db,
         request=request,
         event="assigned_rides_fetch",
-        driver_id=driver_id,
+        driver_id=effective_driver_id,
         ride_id=str(rides[0].id) if rides else None,
         api_response={
             "count": len(rides),
@@ -9070,9 +9080,7 @@ async def driver_accept_ride(
     db: Session = Depends(get_db),
 ):
     user = auth.user
-    effective_driver_id = driver_id
-    if auth.actor_user_id is None:
-        effective_driver_id = str(auth.user.user_id)
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
     driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -9091,19 +9099,22 @@ async def driver_accept_ride(
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
 
+    accepted_lifecycle = RideLifecycleManager.normalize_state(
+        getattr(ride, "lifecycle_state", None) or ride.status
+    )
     emitter = get_emitter()
     await emitter.emit_ride_status_changed(
         organization_id=ride.organization_id,
         ride_id=ride.id,
         from_status=RideStatus.ASSIGNED.value,
-        to_status=RideStatus.ASSIGNED.value,
+        to_status=accepted_lifecycle or RideStatus.ASSIGNED.value,
         actor_user_id=auth.actor_user_id,
     )
     await emitter.emit_driver_active_ride_state(
         organization_id=ride.organization_id,
         driver_id=effective_driver_id,
         active_ride_id=ride.id,
-        state=RideStatus.ASSIGNED.value,
+        state=accepted_lifecycle or RideStatus.ASSIGNED.value,
         actor_user_id=auth.actor_user_id,
         details={"source": "driver_accept_route"},
     )

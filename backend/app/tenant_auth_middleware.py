@@ -104,4 +104,11 @@ class TenantAuthValidationMiddleware(BaseHTTPMiddleware):
                 path=path,
                 error=detail_text,
             )
-            return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+            response_detail = "Invalid token"
+            if "signature invalid" in detail_text.lower():
+                response_detail = "Token signature invalid"
+            return JSONResponse(
+                status_code=401,
+                headers={"X-Auth-Refresh-Hint": "/api/auth/refresh"},
+                content={"detail": response_detail, "refresh_hint": "/api/auth/refresh"},
+            )

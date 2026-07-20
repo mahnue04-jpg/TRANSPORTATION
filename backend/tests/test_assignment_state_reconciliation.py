@@ -216,7 +216,7 @@ def test_clean_state_complete_then_assign_next_ride(client: TestClient) -> None:
         headers=dispatcher_headers,
         json={"ride_id": ride_one},
     )
-    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.status_code == 200, duplicate.text
 
     for target_state in (
         "en_route_pickup",

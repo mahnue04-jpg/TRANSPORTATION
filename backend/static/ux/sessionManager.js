@@ -71,6 +71,9 @@ function purgeStorageKeys() {
     localStorage.removeItem(STORAGE_KEY_IDENTITY);
     localStorage.removeItem(STORAGE_KEY_RUNTIME_MARKER);
   } catch (_) {}
+  try {
+    sessionStorage.removeItem("amicor_session_boot_refreshed");
+  } catch (_) {}
 }
 
 function isRuntimeCompatible(identity) {
@@ -584,6 +587,12 @@ const AmiCorSession = {
     if (!this.getAccessToken() || hasTokenExpired()) {
       return !!(await this.refreshAccessToken(true));
     }
+    try {
+      if (typeof sessionStorage !== "undefined" && !sessionStorage.getItem("amicor_session_boot_refreshed")) {
+        sessionStorage.setItem("amicor_session_boot_refreshed", "1");
+        return !!(await this.refreshAccessToken(true));
+      }
+    } catch (_) {}
     return !!(await this.refreshAccessToken(false));
   },
 

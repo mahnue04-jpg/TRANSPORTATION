@@ -5815,6 +5815,9 @@
       body: JSON.stringify({ driver_id: driverId }),
     });
     state.selectedRideId = rideId;
+    if (typeof window._amiNotifyDriverAssignmentIssued === "function") {
+      window._amiNotifyDriverAssignmentIssued({ ride_id: rideId, driver_id: driverId, source: "dispatch_assign_driver" });
+    }
     await refreshData();
   }
 
@@ -6705,6 +6708,7 @@
     });
     const rideId = String(firstDefined(
       response && response.ride_id,
+      response && response.ride && response.ride.id,
       response && response.data && response.data.ride_id,
       body && body.ride_id,
       ''
@@ -6717,6 +6721,7 @@
       refreshData(),
     ]);
     await refreshRideTimeline().catch(function () { return null; });
+    return response;
   }
 
   async function acceptDriverIncomingOffer() {
@@ -10244,9 +10249,21 @@
           setRequestActionStatus('Driver ID is required for assign.', 'warn');
           return;
         }
-        runCustomerRequestAction('/assign-driver', 'POST', { driver_id: driverId }).then(function () {
+        runCustomerRequestAction('/assign-driver', 'POST', { driver_id: driverId }).then(function (result) {
           setRequestActionStatus('Driver assigned to customer request.', 'ok');
-          return refreshData();
+          if (typeof window._amiNotifyDriverAssignmentIssued === 'function') {
+            var rideId = String(
+              (result && result.ride && result.ride.id)
+              || (result && result.request && result.request.ride_id)
+              || ''
+            );
+            window._amiNotifyDriverAssignmentIssued({
+              ride_id: rideId,
+              driver_id: driverId,
+              source: 'dispatcher_request_assign_driver'
+            });
+          }
+          return null;
         }).catch(function (error) {
           setRequestActionStatus('Assign failed: ' + error.message, 'error');
           showToastSafe('Assign driver failed: ' + error.message, 'error');

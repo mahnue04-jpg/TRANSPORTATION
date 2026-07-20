@@ -567,15 +567,12 @@
 
   function applyDriverSessionHeaders(headers, platformToken, requestUrl) {
     var next = Object.assign({}, headers || {});
-    var mobileCtx = getCanonicalMobileDriverContext();
-    var driverSessionToken = mobileCtx.sessionToken || getDriverSessionToken();
-    if (isDriverMobileAppRoute() && mobileCtx.authenticated && isMobileDriverApiUrl(requestUrl)) {
-      if (driverSessionToken) {
-        next["X-Driver-Session-Token"] = driverSessionToken;
-      }
+    if (!isMobileDriverApiUrl(requestUrl)) {
       return next;
     }
-    if (driverSessionToken && !platformToken) {
+    var mobileCtx = getCanonicalMobileDriverContext();
+    var driverSessionToken = mobileCtx.sessionToken || getDriverSessionToken();
+    if (driverSessionToken) {
       next["X-Driver-Session-Token"] = driverSessionToken;
     }
     return next;
@@ -1155,6 +1152,7 @@
   var USER_ACTIVITY_COOLDOWN_MS = 5000;
   var REFRESH_TRIGGER_COOLDOWN_MS = 2500;
   var STABLE_POLL_INTERVAL_MS = 30000;
+  var DRIVER_AWAITING_POLL_INTERVAL_MS = 5000;
   var BACKEND_DOWN_PAUSE_MS = 60000;
   var MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE = 2;
   var ENTERPRISE_HYDRATION_TIMEOUT_MS = 22000;
@@ -5544,8 +5542,21 @@
         documents: documentRows,
         lastStatusUpdate: safeText(priorDriverApp.lastStatusUpdate, "Driver workspace synchronized"),
         lastActionResult: safeObject(priorDriverApp.lastActionResult),
-        mobileUiState: liveQueue.length > 0 ? "active_ride" : (isDriverMobileAppRoute() ? "awaiting_assignment" : safeText(priorDriverApp.mobileUiState, "awaiting_assignment"))
+        mobileUiState: (function () {
+          if (liveQueue.length > 0) return "active_ride";
+          if (!isDriverMobileAppRoute()) {
+            return safeText(priorDriverApp.mobileUiState, "awaiting_assignment");
+          }
+          var apiPending = driverRefreshHasOpenAssignment(
+            activeRidePayload,
+            assignedRideRows,
+            offerEnvelope
+          );
+          if (apiPending) return "loading_assignment";
+          return "awaiting_assignment";
+        })()
       };
+      restartDriverMobilePollInterval();
       return;
     }
 
@@ -5793,7 +5804,8 @@
     var stage = safeText(appState.activeStage, "queued");
     var statusText = shiftOnline ? "On shift" : "Off shift";
     var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
-    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0;
+    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
+      && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
     var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
@@ -6029,7 +6041,8 @@
     var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
     var shiftOnline = asBoolean(appState.shiftOnline, false);
     var isTerminal = ["completed", "cancelled", "declined"].indexOf(tripStatus) >= 0;
-    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0;
+    var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
+      && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
     var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
@@ -10008,7 +10021,12 @@
     var options = safeObject(requestOptions);
     var method = safeText(options.method, "GET").toUpperCase();
     var scopedUrl = withOrganizationScope(url);
-    var token = explicitToken || getAccessToken();
+    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+      try {
+        await window.AmiCorSession.ensureReady();
+      } catch (_) {}
+    }
+    var token = getAccessToken() || explicitToken;
     var mobileCtx = getCanonicalMobileDriverContext();
     var useDriverSessionOnly = isDriverMobileAppRoute() && mobileCtx.authenticated && isMobileDriverApiUrl(scopedUrl);
     var headers = applyDriverSessionHeaders({ "Accept": "application/json" }, token, scopedUrl);
@@ -10025,18 +10043,36 @@
     }
     var retries = method === "GET" ? 1 : 0;
     var attempt = 0;
+    async function performFetch(currentToken) {
+      var nextHeaders = applyDriverSessionHeaders({ "Accept": "application/json" }, currentToken, scopedUrl);
+      if (options.headers && typeof options.headers === "object") {
+        Object.keys(options.headers).forEach(function (key) {
+          nextHeaders[key] = options.headers[key];
+        });
+      }
+      if (options.body != null && !nextHeaders["Content-Type"] && !nextHeaders["content-type"]) {
+        nextHeaders["Content-Type"] = "application/json";
+      }
+      if (currentToken && !nextHeaders.Authorization && !nextHeaders.authorization) {
+        nextHeaders.Authorization = "Bearer " + currentToken;
+      }
+      var requestInit = {
+        method: method,
+        headers: nextHeaders,
+        body: options.body,
+        credentials: "same-origin"
+      };
+      if (options.signal) {
+        requestInit.signal = options.signal;
+      }
+      if (!useDriverSessionOnly && window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+        return window.AmiCorSession.authFetch(scopedUrl, requestInit);
+      }
+      return fetch(scopedUrl, requestInit);
+    }
     while (attempt <= retries) {
       try {
-        var requestInit = {
-          method: method,
-          headers: headers,
-          body: options.body,
-          credentials: "same-origin"
-        };
-        if (options.signal) {
-          requestInit.signal = options.signal;
-        }
-        var response = await withTimeout(fetch(scopedUrl, requestInit), method === "GET" ? 20000 : 12000);
+        var response = await withTimeout(performFetch(token), method === "GET" ? 20000 : 12000);
 
         if (!response.ok) {
           throw new Error(scopedUrl + ":http_" + response.status);
@@ -10150,14 +10186,23 @@
 
   function ensureAuthenticatedSession(message) {
     bootstrapAppSession();
-    if (getAccessToken()) {
-      return Promise.resolve(true);
+    var readyPromise = Promise.resolve(true);
+    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+      readyPromise = window.AmiCorSession.ensureReady().then(function (ready) {
+        return ready !== false;
+      }).catch(function () {
+        return false;
+      });
     }
-    if (!(window.AmiCorAuthUI && typeof window.AmiCorAuthUI.showLogin === "function")) {
-      window.alert(message || "Sign in required to continue.");
-      return Promise.resolve(false);
-    }
-    return new Promise(function (resolve) {
+    return readyPromise.then(function () {
+      if (getAccessToken()) {
+        return true;
+      }
+      if (!(window.AmiCorAuthUI && typeof window.AmiCorAuthUI.showLogin === "function")) {
+        window.alert(message || "Sign in required to continue.");
+        return false;
+      }
+      return new Promise(function (resolve) {
       var settled = false;
       var dismissWatch = null;
       var authDeadline = null;
@@ -10204,10 +10249,10 @@
       }
       openLogin();
     });
+    });
   }
 
-  async function authorizedFetch(scopedUrl, requestInit, timeoutMs) {
-    bootstrapAppSession();
+  function buildAuthorizedRequestInit(scopedUrl, requestInit) {
     var init = Object.assign({}, requestInit || {});
     if (!init.credentials) {
       init.credentials = "same-origin";
@@ -10218,7 +10263,38 @@
       headers.Authorization = "Bearer " + token;
     }
     init.headers = headers;
-    return await withTimeout(fetch(scopedUrl, init), timeoutMs || 12000);
+    return init;
+  }
+
+  async function authorizedFetch(scopedUrl, requestInit, timeoutMs) {
+    bootstrapAppSession();
+    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+      try {
+        await window.AmiCorSession.ensureReady();
+      } catch (_) {}
+    }
+
+    async function executeFetch() {
+      var init = buildAuthorizedRequestInit(scopedUrl, requestInit);
+      if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+        return window.AmiCorSession.authFetch(scopedUrl, init);
+      }
+      return fetch(scopedUrl, init);
+    }
+
+    var response = await withTimeout(executeFetch(), timeoutMs || 12000);
+    if (
+      response.status === 401
+      && window.AmiCorSession
+      && typeof window.AmiCorSession.refreshAccessToken === "function"
+      && window.AmiCorSession.getRefreshToken()
+    ) {
+      var refreshed = await window.AmiCorSession.refreshAccessToken(true);
+      if (refreshed) {
+        response = await withTimeout(executeFetch(), timeoutMs || 12000);
+      }
+    }
+    return response;
   }
 
   async function postJson(url, payload, timeoutMs, options) {
@@ -10262,7 +10338,14 @@
     }, 12000);
 
     if (!response.ok) {
-      throw new Error(scopedUrl + ":http_" + response.status);
+      var errDetail = scopedUrl + ":http_" + response.status;
+      try {
+        var errBody = await response.json();
+        if (errBody && errBody.detail) {
+          errDetail = String(errBody.detail);
+        }
+      } catch (_) {}
+      throw new Error(errDetail);
     }
     if (response.status === 204) {
       return {};
@@ -11064,6 +11147,7 @@
       state.driverApp = safeObject(state.driverApp);
       var priorMobileUi = safeText(state.driverApp.mobileUiState, "loading_assignment");
       state.driverApp.mobileUiState = nextMobileUiState;
+      restartDriverMobilePollInterval();
       logDriverMobileRefreshSync({
         event: "assignment_refresh_applied",
         requested_ride_id: returnedRideId,
@@ -11267,7 +11351,26 @@
       });
     } catch (err) {
       var detail = err && err.message ? err.message : "unknown error";
-      if (detail === "request_timeout") {
+      if (
+        (detail === "Invalid token" || detail === "Token expired" || detail.indexOf("Token signature invalid") >= 0)
+        && window.AmiCorSession
+        && typeof window.AmiCorSession.refreshAccessToken === "function"
+        && window.AmiCorSession.getRefreshToken()
+      ) {
+        var refreshed = await window.AmiCorSession.refreshAccessToken(true);
+        if (refreshed) {
+          try {
+            created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
+              idempotencyKey: idempotencyKey
+            });
+          } catch (retryErr) {
+            detail = retryErr && retryErr.message ? retryErr.message : detail;
+          }
+        }
+      }
+      if (created && safeText(created.id, "")) {
+        // recovered via refresh retry
+      } else if (detail === "request_timeout") {
         created = await recoverCustomerRequestByIdempotency(idempotencyKey, 10);
         if (created && safeText(created.id, "")) {
           recoveredAfterTimeout = true;
@@ -11447,15 +11550,6 @@
         var runtimeToken = window.AmiCorSession.getAccessToken();
         if (runtimeToken) {
           return String(runtimeToken);
-        }
-      }
-    } catch (_) {}
-    try {
-      var sessionRaw = localStorage.getItem("amicor_session");
-      if (sessionRaw) {
-        var session = JSON.parse(sessionRaw);
-        if (session && session.access_token) {
-          return String(session.access_token);
         }
       }
     } catch (_) {}
@@ -12205,9 +12299,7 @@
     }
 
     try {
-    if (!getAccessToken()) {
-      await ensurePlatformSessionReady();
-    }
+    await ensurePlatformSessionReady();
 
     settled = await Promise.allSettled([
       fetchJson("/api/health"),
@@ -12653,12 +12745,24 @@
   }
 
   function startRefreshLoop() {
+    restartDriverMobilePollInterval();
+  }
+
+  function restartDriverMobilePollInterval() {
     if (refreshHandle) {
       clearInterval(refreshHandle);
+      refreshHandle = null;
+    }
+    var intervalMs = STABLE_POLL_INTERVAL_MS;
+    if (isDriverMobileAppRoute()) {
+      var mobileUi = safeText((safeObject(state.driverApp)).mobileUiState, "awaiting_assignment");
+      if (mobileUi === "awaiting_assignment" || mobileUi === "loading_assignment") {
+        intervalMs = DRIVER_AWAITING_POLL_INTERVAL_MS;
+      }
     }
     refreshHandle = setInterval(function () {
       requestSilentRefresh("interval");
-    }, STABLE_POLL_INTERVAL_MS);
+    }, intervalMs);
   }
 
   function cleanupLifecycleBindings() {
@@ -12698,6 +12802,17 @@
     runtimeUpdateHandler = null;
     eventsBound = false;
   }
+
+  function notifyDriverAssignmentIssued(detail) {
+    try {
+      localStorage.setItem("amicor_driver_assignment_ping", String(Date.now()));
+    } catch (_) {}
+    try {
+      window.dispatchEvent(new CustomEvent("ami:driver-assignment-issued", { detail: detail || {} }));
+    } catch (_) {}
+  }
+
+  window._amiNotifyDriverAssignmentIssued = notifyDriverAssignmentIssued;
 
   function requestSilentRefresh(source) {
     var triggerSource = safeText(source, "unknown");
@@ -12872,6 +12987,9 @@
           }
         });
       }
+      if (event.key === "amicor_driver_assignment_ping" && isDriverMobileSurface()) {
+        refreshDriverWorkflowData({ lastAction: "Driver assignment ping (storage)" }).catch(function () {});
+      }
     };
     windowEventBindings.push({ eventName: "storage", handler: onStorage });
     window.addEventListener("storage", onStorage);
@@ -12905,6 +13023,13 @@
     };
     windowEventBindings.push({ eventName: "ami:driver-session-updated", handler: onDriverSessionUpdated });
     window.addEventListener("ami:driver-session-updated", onDriverSessionUpdated);
+
+    var onDriverAssignmentIssued = function () {
+      if (!isDriverMobileSurface()) return;
+      refreshDriverWorkflowData({ lastAction: "Driver assignment issued (event)" }).catch(function () {});
+    };
+    windowEventBindings.push({ eventName: "ami:driver-assignment-issued", handler: onDriverAssignmentIssued });
+    window.addEventListener("ami:driver-assignment-issued", onDriverAssignmentIssued);
 
     var onOnline = function () {
       requestSilentRefresh("online");
@@ -14288,7 +14413,7 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
   if (!driverId || !tripId) return false;
   function acceptHttpStatus(err, code) {
     var text = safeText(err && err.message, "");
-    return text.indexOf(":http_" + String(code)) >= 0;
+    return text.indexOf(":http_" + String(code)) >= 0 || text.toLowerCase().indexOf("already accepted") >= 0;
   }
   var payload = null;
   var acceptErr = null;
@@ -14303,45 +14428,84 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     if (acceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function") {
       window._amiClearDriverSession();
     }
+    if (!acceptHttpStatus(err, 409)) {
+      try {
+        payload = await _amiSendJson(
+          "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+          "POST",
+          { ride_id: tripId, target_state: "en_route_pickup" }
+        );
+      } catch (err2) {
+        _amiLogDriverMobileSync({
+          event: "accept_ride_failed",
+          requested_ride_id: tripId,
+          route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+          api_response: {
+            error: safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, "accept_failed"))
+          },
+          frontend_state_transition: "active_ride->active_ride",
+          extra: { action: "Accept Trip" }
+        });
+        if (acceptHttpStatus(acceptErr, 401) || acceptHttpStatus(err2, 401)) {
+          window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
+        } else {
+          window.alert(
+            "Unable to submit driver accept action for " + tripId + ". "
+            + safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, ""))
+          );
+        }
+        shell = _amiDriverShellState();
+        shell.driverApp = safeObject(shell.driverApp);
+        shell.driverApp.lastActionResult = {
+          last_action: "Accept Trip",
+          api_status: "error",
+          db_record_id: safeText(tripId, "n/a"),
+          updated_table: "health_isf_rides",
+          ui_refreshed: "no",
+          current_ride_status: "unchanged"
+        };
+        window.AmiOpsShellState = shell;
+        return false;
+      }
+    } else {
+      try {
+        payload = await _amiSendJson(
+          "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+          "POST",
+          { ride_id: tripId, target_state: "en_route_pickup" }
+        );
+      } catch (err3) {
+        try {
+          payload = await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null);
+        } catch (_) {
+          payload = null;
+        }
+      }
+    }
+  }
+  if (!payload) {
+    window.alert("Unable to submit driver accept action for " + tripId + ".");
+    return false;
+  }
+  var activeRide = safeObject(payload.active_ride || payload);
+  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+  var assignmentAfterAccept = safeText(
+    (safeObject(payload.active_assignment)).assignment_state || payload.assignment_state,
+    ""
+  ).toLowerCase();
+  var alreadyAccepted = !!activeRide.accepted_at
+    || assignmentAfterAccept === "accepted"
+    || assignmentAfterAccept === "en_route_pickup";
+  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0 && !alreadyAccepted) {
     try {
       payload = await _amiSendJson(
         "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
         "POST",
         { ride_id: tripId, target_state: "en_route_pickup" }
       );
-    } catch (err2) {
-      _amiLogDriverMobileSync({
-        event: "accept_ride_failed",
-        requested_ride_id: tripId,
-        route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
-        api_response: {
-          error: safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, "accept_failed"))
-        },
-        frontend_state_transition: "active_ride->active_ride",
-        extra: { action: "Accept Trip" }
-      });
-      if (acceptHttpStatus(acceptErr, 401) || acceptHttpStatus(err2, 401)) {
-        window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
-      } else {
-        window.alert("Unable to submit driver accept action for " + tripId + ".");
-      }
-      shell = _amiDriverShellState();
-      shell.driverApp = safeObject(shell.driverApp);
-      shell.driverApp.lastActionResult = {
-        last_action: "Accept Trip",
-        api_status: "error",
-        db_record_id: safeText(tripId, "n/a"),
-        updated_table: "health_isf_rides",
-        ui_refreshed: "no",
-        current_ride_status: "unchanged"
-      };
-      window.AmiOpsShellState = shell;
-      return false;
-    }
-  }
-  var activeRide = safeObject(payload.active_ride || payload);
-  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
-  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
+      activeRide = safeObject(payload.active_ride || payload);
+    } catch (_) {}
+  } else if (alreadyAccepted && ["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
     try {
       payload = await _amiSendJson(
         "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
@@ -14351,7 +14515,7 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
       activeRide = safeObject(payload.active_ride || payload);
     } catch (_) {}
   }
-  var displayStatus = _amiStatusFromRouteProgressPayload(payload, "driver_en_route");
+  var displayStatus = _amiStatusFromRouteProgressPayload(payload, alreadyAccepted ? "driver_en_route" : "accepted");
   shell = _amiPatchDriverTripStatus(tripId, displayStatus);
   shell.driverApp.lastActionResult = {
     last_action: "Accept Trip",
