@@ -1158,7 +1158,9 @@
   var ENTERPRISE_HYDRATION_TIMEOUT_MS = 22000;
   var SESSION_READY_TIMEOUT_MS = 8000;
   var AI_SNAPSHOT_TIMEOUT_MS = 8000;
-  var RIDER_SUBMIT_TIMEOUT_MS = 15000;
+  var RIDER_SUBMIT_TIMEOUT_MS = 60000;
+  var RIDER_RECOVERY_MAX_ATTEMPTS = 30;
+  var RIDER_RECOVERY_POLL_MS = 2000;
 
   var els = {
     pageTitle: document.getElementById("page-title"),
@@ -4704,7 +4706,7 @@
             '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
           '<div class="command-actions">' +
-            '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? 'Submitting ride…' : 'Request Ride Now') + '</button>' +
+            '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? (safeText(riderState.submitStatus && riderState.submitStatus.message, "").indexOf("Checking status") >= 0 ? 'Checking ride status…' : 'Submitting ride…') : 'Request Ride Now') + '</button>' +
             '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Schedule Recurring Ride</button>' +
             '<button class="preview-action rider-action" data-rider-action="cancel_active_trip"' + (activeRequestId ? '' : ' disabled') + '>Cancel Active Ride</button>' +
           '</div>' +
@@ -9937,22 +9939,17 @@
       }
       return;
     } else if (action === "request_now") {
-      try {
-        await submitRiderRideRequest(false);
-        return;
-      } catch (err) {
-        var detail = err && err.message ? err.message : "unknown error";
-        window.alert("Unable to submit rider request: " + detail);
-        return;
+      var submitResult = await submitRiderRideRequest(false);
+      if (submitResult && submitResult.ok === false && submitResult.confirmedFailure) {
+        window.alert(submitResult.message || "We could not confirm your ride request. Refresh and check ride history before trying again.");
       }
+      return;
     } else if (action === "schedule_recurring") {
-      try {
-        await submitRiderRideRequest(true);
-        return;
-      } catch (_) {
-        window.alert("Unable to schedule recurring rider request.");
-        return;
+      var recurringResult = await submitRiderRideRequest(true);
+      if (recurringResult && recurringResult.ok === false && recurringResult.confirmedFailure) {
+        window.alert(recurringResult.message || "We could not confirm your recurring ride request. Refresh and check ride history before trying again.");
       }
+      return;
     } else if (action === "cancel_active_trip") {
       try {
         await cancelActiveRiderRequest();
@@ -10015,6 +10012,19 @@
       return payload.data;
     }
     return payload;
+  }
+
+  function logRiderSubmitEvent(eventName, detail) {
+    var entry = {
+      event: eventName,
+      ts: new Date().toISOString(),
+      detail: detail || {}
+    };
+    if (!window.__amiRiderSubmitLog) window.__amiRiderSubmitLog = [];
+    window.__amiRiderSubmitLog.push(entry);
+    try {
+      console.info("[rider-submit]", eventName, entry.detail);
+    } catch (_) {}
   }
 
   async function fetchJson(url, requestOptions, explicitToken) {
@@ -10323,7 +10333,7 @@
       } catch (_) {}
       throw new Error(errDetail);
     }
-    return response.json();
+    return unwrapApiPayload(await response.json());
   }
 
   async function sendJson(url, method, payload, timeoutMs) {
@@ -10350,7 +10360,7 @@
     if (response.status === 204) {
       return {};
     }
-    return response.json();
+    return unwrapApiPayload(await response.json());
   }
 
   function normalizeRiderPhone(phone) {
@@ -11246,37 +11256,146 @@
     return "rider-submit-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
   }
 
-  async function recoverCustomerRequestByIdempotency(idempotencyKey, maxAttempts) {
+  async function recoverCustomerRequestByIdempotency(idempotencyKey, options) {
     var key = safeText(idempotencyKey, "");
     if (!key) {
       return null;
     }
-    var attempts = safeNumber(maxAttempts, 8);
+    var opts = options || {};
+    var attempts = safeNumber(opts.maxAttempts, RIDER_RECOVERY_MAX_ATTEMPTS);
     for (var i = 0; i < attempts; i += 1) {
       try {
         var url = "/api/health-isf/customer-requests/idempotency/" + encodeURIComponent(key);
         var response = await authorizedFetch(withOrganizationScope(url), {
           method: "GET",
           headers: { "Accept": "application/json" }
-        }, 10000);
+        }, 15000);
         if (response.status === 202) {
+          if (typeof opts.onProcessing === "function") {
+            opts.onProcessing(i + 1, attempts);
+          }
           await new Promise(function (resolve) {
-            setTimeout(resolve, 500 + (i * 400));
+            setTimeout(resolve, RIDER_RECOVERY_POLL_MS);
           });
           continue;
         }
         if (response.status === 404) {
-          return null;
+          await new Promise(function (resolve) {
+            setTimeout(resolve, RIDER_RECOVERY_POLL_MS);
+          });
+          continue;
         }
         if (response.ok) {
-          return await response.json();
+          return unwrapApiPayload(await response.json());
         }
       } catch (_) {}
       await new Promise(function (resolve) {
-        setTimeout(resolve, 400);
+        setTimeout(resolve, RIDER_RECOVERY_POLL_MS);
       });
     }
     return null;
+  }
+
+  async function recoverCustomerRequestByPhone(formValues, idempotencyKey) {
+    var phone = normalizeRiderPhone(formValues && formValues.phone);
+    if (!phone) {
+      return null;
+    }
+    try {
+      var historyUrl = "/api/health-isf/customers/workspace/history?rider_phone=" + encodeURIComponent(phone) + "&limit=10";
+      var historyPayload = await fetchJson(historyUrl);
+      var history = safeObject(unwrapApiPayload(historyPayload));
+      var rows = Array.isArray(history.history) ? history.history : [];
+      var pickupNorm = safeText(formValues.pickup, "").trim().toLowerCase();
+      var dropoffNorm = safeText(formValues.dropoff, "").trim().toLowerCase();
+      var cutoff = Date.now() - (5 * 60 * 1000);
+      for (var i = 0; i < rows.length; i += 1) {
+        var row = safeObject(rows[i]);
+        var submittedAt = safeText(row.submitted_at || row.created_at, "");
+        var ts = submittedAt ? new Date(submittedAt).getTime() : 0;
+        if (ts && ts < cutoff) {
+          continue;
+        }
+        var rowPickup = safeText(row.pickup_address || row.pickup, "").trim().toLowerCase();
+        var rowDropoff = safeText(row.dropoff_address || row.dropoff, "").trim().toLowerCase();
+        if (rowPickup === pickupNorm && rowDropoff === dropoffNorm && safeText(row.id, "")) {
+          return row;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function applyRiderSubmitSuccess(created, formValues, recurring, recoveredAfterTimeout, idempotencyKey) {
+    var rideId = safeText(created.ride_id, "");
+    var requestId = safeText(created.id, "");
+    var dispatchStatus = safeText(created.dispatch_status, "pending");
+
+    state.riderApp = safeObject(state.riderApp);
+    state.riderApp.profile = formValues;
+    state.riderApp.activeRequestId = requestId;
+    state.riderApp.lastSubmit = {
+      rideId: rideId,
+      requestId: requestId,
+      status: dispatchStatus,
+      submittedAt: new Date().toISOString()
+    };
+    state.riderApp.submitStatus = {
+      level: "success",
+      message: recoveredAfterTimeout ? "Ride request confirmed after network delay." : "Ride request submitted successfully.",
+      rideId: rideId,
+      requestId: requestId,
+      status: dispatchStatus
+    };
+    state.riderApp.activeTrip = {
+      tripId: rideId,
+      status: dispatchStatus,
+      pickup: formValues.pickup,
+      dropoff: formValues.dropoff,
+      etaMin: "",
+      driverName: "Awaiting assignment",
+      vehicle: "Vehicle pending",
+      supportContact: "24/7 Rider Care"
+    };
+
+    logRiderSubmitEvent(recoveredAfterTimeout ? "rider_submit_recovered" : "rider_submit_success", {
+      idempotencyKey: idempotencyKey,
+      rideId: rideId,
+      requestId: requestId,
+      dispatchStatus: dispatchStatus,
+      recurring: recurring === true
+    });
+
+    void refreshRiderWorkspaceData({
+      lastAction: recurring === true
+        ? ("Recurring ride scheduled. Ride ID: " + rideId)
+        : ("Ride request submitted. Ride ID: " + rideId)
+    }).catch(function () {});
+
+    window.dispatchEvent(new CustomEvent("ami:ops-runtime-updated", {
+      detail: { source: "rider-ride-created", rideId: rideId, requestId: requestId }
+    }));
+    requestSilentRefresh("rider-ride-created");
+
+    addRiderNotification(
+      recurring === true ? "low" : "medium",
+      recurring === true
+        ? ("Recurring ride request submitted. Ride ID: " + rideId)
+        : ("Ride request submitted. Ride ID: " + rideId + " is now in the dispatcher queue.")
+    );
+    persistSessionState();
+    renderPage();
+    window.alert(
+      (recoveredAfterTimeout
+        ? "Ride request confirmed after network delay."
+        : (recurring === true ? "Recurring ride scheduled successfully." : "Ride request submitted successfully.")) +
+      "\n\nRide ID: " + rideId +
+      "\nRequest ID: " + requestId +
+      "\nStatus: " + dispatchStatus +
+      (recoveredAfterTimeout ? "\n\nRecovered using request key: " + idempotencyKey : "") +
+      "\n\nDispatch can now review and assign a driver."
+    );
+    return { ok: true, request: created, rideId: rideId, requestId: requestId };
   }
 
   async function submitRiderRideRequest(recurring) {
@@ -11321,7 +11440,7 @@
       return { ok: false };
     }
 
-    var idempotencyKey = makeRiderIdempotencyKey();
+    var idempotencyKey = safeText(state.riderApp.pendingIdempotencyKey, "") || makeRiderIdempotencyKey();
     state.riderApp.submitInFlight = true;
     state.riderApp.pendingIdempotencyKey = idempotencyKey;
     state.riderApp.submitStatus = {
@@ -11330,6 +11449,11 @@
     };
     persistSessionState();
     renderPage();
+
+    logRiderSubmitEvent("rider_submit_started", {
+      idempotencyKey: idempotencyKey,
+      recurring: recurring === true
+    });
 
     var payload = {
       rider_name: formValues.name,
@@ -11345,14 +11469,15 @@
 
     var created = null;
     var recoveredAfterTimeout = false;
+    var submitError = "";
     try {
       created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
         idempotencyKey: idempotencyKey
       });
     } catch (err) {
-      var detail = err && err.message ? err.message : "unknown error";
+      submitError = err && err.message ? err.message : "unknown error";
       if (
-        (detail === "Invalid token" || detail === "Token expired" || detail.indexOf("Token signature invalid") >= 0)
+        (submitError === "Invalid token" || submitError === "Token expired" || submitError.indexOf("Token signature invalid") >= 0)
         && window.AmiCorSession
         && typeof window.AmiCorSession.refreshAccessToken === "function"
         && window.AmiCorSession.getRefreshToken()
@@ -11363,102 +11488,88 @@
             created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
               idempotencyKey: idempotencyKey
             });
+            submitError = "";
           } catch (retryErr) {
-            detail = retryErr && retryErr.message ? retryErr.message : detail;
+            submitError = retryErr && retryErr.message ? retryErr.message : submitError;
           }
         }
       }
-      if (created && safeText(created.id, "")) {
-        // recovered via refresh retry
-      } else if (detail === "request_timeout") {
-        created = await recoverCustomerRequestByIdempotency(idempotencyKey, 10);
-        if (created && safeText(created.id, "")) {
-          recoveredAfterTimeout = true;
-        } else {
-          state.riderApp.submitStatus = {
-            level: "error",
-            message: "Ride request timed out after 15 seconds. Refresh and check rider history before submitting again."
-          };
-          throw new Error(
-            "The server did not respond within 15 seconds. Your request may still be processing.\n\n" +
-            "Request key: " + idempotencyKey + "\n\n" +
-            "Refresh this page in a few seconds to check ride status."
-          );
-        }
-      } else {
-        state.riderApp.submitStatus = {
-          level: "error",
-          message: "Ride request failed: " + detail
-        };
-        throw err;
-      }
-    } finally {
+    }
+
+    if (created && safeText(created.id, "")) {
       state.riderApp.submitInFlight = false;
       state.riderApp.pendingIdempotencyKey = "";
       persistSessionState();
       renderPage();
+      return applyRiderSubmitSuccess(created, formValues, recurring, false, idempotencyKey);
     }
-    var rideId = safeText(created.ride_id, "");
-    var requestId = safeText(created.id, "");
-    var dispatchStatus = safeText(created.dispatch_status, "pending");
 
-    state.riderApp = safeObject(state.riderApp);
-    state.riderApp.profile = formValues;
-    state.riderApp.activeRequestId = requestId;
-    state.riderApp.lastSubmit = {
-      rideId: rideId,
-      requestId: requestId,
-      status: dispatchStatus,
-      submittedAt: new Date().toISOString()
-    };
+    var timedOut = submitError === "request_timeout" || submitError.indexOf("request_timeout") >= 0;
+    if (timedOut) {
+      logRiderSubmitEvent("rider_submit_timeout_recovery_started", { idempotencyKey: idempotencyKey });
+      state.riderApp.submitStatus = {
+        level: "info",
+        message: "Your ride request is still processing. Checking status…"
+      };
+      persistSessionState();
+      renderPage();
+
+      created = await recoverCustomerRequestByIdempotency(idempotencyKey, {
+        maxAttempts: RIDER_RECOVERY_MAX_ATTEMPTS,
+        onProcessing: function (attempt, maxAttempts) {
+          state.riderApp.submitStatus = {
+            level: "info",
+            message: "Your ride request is still processing. Checking status… (" + attempt + "/" + maxAttempts + ")"
+          };
+          persistSessionState();
+          renderPage();
+        }
+      });
+
+      if (created && safeText(created.id, "")) {
+        recoveredAfterTimeout = true;
+      } else {
+        created = await recoverCustomerRequestByPhone(formValues, idempotencyKey);
+        if (created && safeText(created.id, "")) {
+          recoveredAfterTimeout = true;
+        }
+      }
+    }
+
+    if (created && safeText(created.id, "")) {
+      state.riderApp.submitInFlight = false;
+      state.riderApp.pendingIdempotencyKey = "";
+      persistSessionState();
+      renderPage();
+      return applyRiderSubmitSuccess(created, formValues, recurring, recoveredAfterTimeout, idempotencyKey);
+    }
+
+    logRiderSubmitEvent("rider_submit_confirmed_failed", {
+      idempotencyKey: idempotencyKey,
+      error: submitError || "recovery_exhausted",
+      timedOut: timedOut
+    });
+
+    var failureMessage = timedOut
+      ? "We could not confirm your ride request yet. The server may still be waking up or processing your request.\n\nWait a moment, refresh this page, and check ride history before submitting again.\n\nRequest key: " + idempotencyKey
+      : "Ride request failed: " + (submitError || "unknown error");
+
+    state.riderApp.submitInFlight = false;
+    state.riderApp.pendingIdempotencyKey = "";
     state.riderApp.submitStatus = {
-      level: "success",
-      message: recoveredAfterTimeout ? "Ride request confirmed after network delay." : "Ride request submitted successfully.",
-      rideId: rideId,
-      requestId: requestId,
-      status: dispatchStatus
+      level: "error",
+      message: timedOut
+        ? "Could not confirm ride status yet. Refresh and check ride history."
+        : "Ride request failed: " + (submitError || "unknown error")
     };
-    state.riderApp.activeTrip = {
-      tripId: rideId,
-      status: dispatchStatus,
-      pickup: formValues.pickup,
-      dropoff: formValues.dropoff,
-      etaMin: "",
-      driverName: "Awaiting assignment",
-      vehicle: "Vehicle pending",
-      supportContact: "24/7 Rider Care"
-    };
-
-    void refreshRiderWorkspaceData({
-      lastAction: recurring === true
-        ? ("Recurring ride scheduled. Ride ID: " + rideId)
-        : ("Ride request submitted. Ride ID: " + rideId)
-    }).catch(function () {});
-
-    window.dispatchEvent(new CustomEvent("ami:ops-runtime-updated", {
-      detail: { source: "rider-ride-created", rideId: rideId, requestId: requestId }
-    }));
-    requestSilentRefresh("rider-ride-created");
-
-    addRiderNotification(
-      recurring === true ? "low" : "medium",
-      recurring === true
-        ? ("Recurring ride request submitted. Ride ID: " + rideId)
-        : ("Ride request submitted. Ride ID: " + rideId + " is now in the dispatcher queue.")
-    );
     persistSessionState();
     renderPage();
-    window.alert(
-      (recoveredAfterTimeout
-        ? "Ride request confirmed after network delay."
-        : (recurring === true ? "Recurring ride scheduled successfully." : "Ride request submitted successfully.")) +
-      "\n\nRide ID: " + rideId +
-      "\nRequest ID: " + requestId +
-      "\nStatus: " + dispatchStatus +
-      (recoveredAfterTimeout ? "\n\nRecovered using request key: " + idempotencyKey : "") +
-      "\n\nDispatch can now review and assign a driver."
-    );
-    return { ok: true, request: created, rideId: rideId, requestId: requestId };
+    return {
+      ok: false,
+      confirmedFailure: true,
+      message: failureMessage,
+      idempotencyKey: idempotencyKey
+    };
   }
 
   async function cancelActiveRiderRequest() {
