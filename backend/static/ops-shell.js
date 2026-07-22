@@ -14705,12 +14705,33 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
   var shell = _amiDriverShellState();
   var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
-  try {
-    var payload = await _amiSendJson(
-      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-      "POST",
-      { ride_id: tripId, target_state: "arrived_pickup" }
-    );
+
+  function routeProgressHttpStatus(err, code) {
+    var text = safeText(err && err.message, "");
+    return text.indexOf(":http_" + String(code)) >= 0;
+  }
+
+  function arriveFailureMessage(err) {
+    return safeText(err && err.message, "arrived_pickup_failed");
+  }
+
+  function clearStaleDriverTrip(staleTripId) {
+    shell = _amiDriverShellState();
+    shell.driverApp = safeObject(shell.driverApp);
+    if (safeText(shell.driverApp.activeTripId, "") === safeText(staleTripId, "")) {
+      shell.driverApp.activeTripId = "";
+      shell.driverApp.activeStage = "queued";
+    }
+    shell.driverApp.tripQueue = (Array.isArray(shell.driverApp.tripQueue) ? shell.driverApp.tripQueue : []).filter(function (trip) {
+      return safeText(trip.tripId, "") !== safeText(staleTripId, "");
+    });
+    window.AmiOpsShellState = shell;
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.resetDriverMobileAfterCompletion === "function") {
+      window.AmiOpsShellActions.resetDriverMobileAfterCompletion();
+    }
+  }
+
+  function applyArriveSuccess(payload, recovered) {
     var nextStatus = _amiStatusFromRouteProgressPayload(payload, "arrived_pickup");
     var activeRide = safeObject(payload.active_ride || payload);
     shell = _amiPatchDriverTripStatus(tripId, nextStatus);
@@ -14725,24 +14746,111 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
     window.AmiOpsShellState = shell;
     _amiScheduleRenderPage();
     _amiLogDriverMobileSync({
-      event: "route_progress",
+      event: recovered ? "arrive_trip_recovered" : "route_progress",
       requested_ride_id: tripId,
       assignment_state: nextStatus,
       api_response: activeRide,
       http_status: 200,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
       frontend_state_transition: "active_ride->active_ride",
-      extra: { action: "Arrived at Pickup", target_state: "arrived_pickup" }
+      extra: { action: "Arrived at Pickup", target_state: "arrived_pickup", recovered: !!recovered }
     });
-  } catch (_) {
+  }
+
+  async function postRouteProgress(targetState) {
+    return await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+      "POST",
+      { ride_id: tripId, target_state: targetState },
+      45000
+    );
+  }
+
+  var queue = Array.isArray(shell.driverApp.tripQueue) ? shell.driverApp.tripQueue : [];
+  var tripRow = queue.find(function (trip) {
+    return safeText(trip.tripId, "") === safeText(tripId, "");
+  });
+  var preArriveStatus = normalizeDriverTripStatus(tripRow && tripRow.status);
+  if (["assigned", "accepted", "queued"].indexOf(preArriveStatus) >= 0) {
+    try {
+      await postRouteProgress("en_route_pickup");
+    } catch (_) {}
+  }
+
+  var payload = null;
+  var arriveErr = null;
+  try {
+    payload = await postRouteProgress("arrived_pickup");
+  } catch (err) {
+    arriveErr = err;
+    if (routeProgressHttpStatus(err, 400) || routeProgressHttpStatus(err, 409)) {
+      try {
+        await postRouteProgress("en_route_pickup");
+        payload = await postRouteProgress("arrived_pickup");
+        arriveErr = null;
+      } catch (retryErr) {
+        arriveErr = retryErr;
+      }
+    }
+  }
+
+  if (!payload) {
+    var lifecycle = await _amiFetchRideLifecycleState(tripId);
+    var arrivedStates = ["arrived", "arrived_pickup", "waiting_at_pickup", "at_pickup"];
+    if (arrivedStates.indexOf(lifecycle) >= 0) {
+      try {
+        payload = { active_ride: await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null) };
+      } catch (_) {
+        payload = { active_ride: { id: tripId, lifecycle_state: lifecycle, status: lifecycle } };
+      }
+    } else if (["completed", "cancelled", "failed", "declined", "no_show"].indexOf(lifecycle) >= 0) {
+      clearStaleDriverTrip(tripId);
+      _amiLogDriverMobileSync({
+        event: "arrive_trip_stale_cleared",
+        requested_ride_id: tripId,
+        route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+        api_response: { lifecycle_state: lifecycle, error: arriveFailureMessage(arriveErr) },
+        extra: { action: "Arrived at Pickup", target_state: "arrived_pickup" }
+      });
+      await _amiAfterDriverWorkflowRefresh("Cleared stale ride " + tripId);
+      window.alert(
+        "This ride is already " + lifecycle + ". Your active trip list was refreshed so you can continue with the current assignment."
+      );
+      return false;
+    } else {
+      try {
+        var rideLookup = safeObject(await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null));
+        var assignedDriverId = safeText(rideLookup.driver_id, "");
+        if (assignedDriverId && assignedDriverId !== safeText(driverId, "")) {
+          clearStaleDriverTrip(tripId);
+          _amiLogDriverMobileSync({
+            event: "arrive_trip_stale_cleared",
+            requested_ride_id: tripId,
+            route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+            api_response: {
+              lifecycle_state: lifecycle,
+              assigned_driver_id: assignedDriverId,
+              error: arriveFailureMessage(arriveErr)
+            },
+            extra: { action: "Arrived at Pickup", target_state: "arrived_pickup", reason: "driver_mismatch" }
+          });
+          await _amiAfterDriverWorkflowRefresh("Cleared reassigned ride " + tripId);
+          window.alert("This ride is no longer assigned to you. Your trip list was refreshed.");
+          return false;
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!payload) {
     _amiLogDriverMobileSync({
       event: "route_progress_failed",
       requested_ride_id: tripId,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
-      api_response: { error: "arrived_pickup_failed" },
+      api_response: { error: arriveFailureMessage(arriveErr) },
       extra: { action: "Arrived at Pickup", target_state: "arrived_pickup" }
     });
-    window.alert("Unable to submit driver arrive action for " + tripId + ".");
+    window.alert("Unable to submit driver arrive action for " + tripId + ". " + arriveFailureMessage(arriveErr));
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
     shell.driverApp.lastActionResult = {
@@ -14756,7 +14864,10 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
     window.AmiOpsShellState = shell;
     return false;
   }
+
+  applyArriveSuccess(payload, !!arriveErr);
   try {
+    _amiLockDriverHydration(3500);
     await _amiAfterDriverWorkflowRefresh("Arrived at pickup for " + tripId);
   } catch (_) {}
   return true;
