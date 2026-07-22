@@ -97,6 +97,46 @@ import logging
 
 logger = logging.getLogger("app.modules.health_isf.ride_execution_engine")
 REPLAY_WINDOW_SECONDS = max(30, int(os.environ.get("HEALTH_ISF_REPLAY_WINDOW_SECONDS", "900")))
+_PG_INT_MAX = 2_147_483_647
+
+
+def _normalize_execution_sequence_number(
+    db: Session,
+    ride: HealthISFRide,
+    sequence_number: int | None,
+    monotonic_ts: float | None,
+) -> int | None:
+    """Keep execution action sequence numbers inside PostgreSQL INTEGER range.
+
+    Callers derive sequence_number from ``int(time.monotonic() * 1000)``, which
+    overflows after ~24.8 days of process uptime and breaks route-progress writes.
+    """
+    candidate = sequence_number
+    if candidate is None and monotonic_ts is not None:
+        candidate = int(monotonic_ts * 1000)
+    if candidate is None:
+        return None
+    if candidate <= _PG_INT_MAX:
+        return candidate
+
+    last_seq = (
+        db.query(HealthISFRideExecutionAction)
+        .filter(
+            HealthISFRideExecutionAction.organization_id == ride.organization_id,
+            HealthISFRideExecutionAction.ride_id == ride.id,
+            HealthISFRideExecutionAction.action_status == "success",
+        )
+        .order_by(HealthISFRideExecutionAction.sequence_number.desc())
+        .first()
+    )
+    if last_seq and last_seq.sequence_number is not None:
+        next_num = int(last_seq.sequence_number) + 1
+        if next_num <= _PG_INT_MAX:
+            return next_num
+
+    wall = int(time.time())
+    return wall if wall <= _PG_INT_MAX else wall % _PG_INT_MAX
+
 
 class RideLifecycleManager:
     """Lifecycle manager with transition validation and audit-safe actions."""
@@ -154,6 +194,13 @@ class RideLifecycleManager:
         # Same-state transitions are treated as idempotent no-ops.
         if current_state == next_state:
             return False
+
+        sequence_number = _normalize_execution_sequence_number(
+            db,
+            ride,
+            sequence_number,
+            monotonic_ts,
+        )
 
         # Duplicate/replay protection: event_id, replay_key, sequence_number, monotonic_ts
         if event_id:
