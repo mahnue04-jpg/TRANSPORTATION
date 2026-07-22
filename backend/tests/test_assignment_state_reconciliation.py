@@ -307,3 +307,68 @@ def test_driver_app_prefers_newest_in_trip_ride(client: TestClient) -> None:
     assert active.status_code == 200, active.text
     assert (active.json().get("ride") or {}).get("id") == old_ride_id
     assert (active.json().get("ride") or {}).get("id") != new_ride_id
+
+
+def test_stale_prod_verify_offer_does_not_block_new_queue_offer(client: TestClient) -> None:
+    org_id = _org_id_for("dispatcher@amicor.local")
+    driver_id = _prepare_james(org_id)
+    dispatcher_headers = _headers(_login(client, "dispatcher@amicor.local")["access_token"])
+    rider_headers = _headers(_login(client, "rider@amicor.local")["access_token"])
+
+    _, stale_ride_id = _create_and_assign(client, dispatcher_headers, rider_headers, driver_id)
+    with SessionLocal() as db:
+        stale = db.query(HealthISFRide).filter(HealthISFRide.id == stale_ride_id).first()
+        assert stale is not None
+        stale.passenger_name = "Prod Verify API"
+        stale.pickup_address = "100 Verify Ave"
+        stale.dropoff_address = "200 Clinic Rd"
+        stale.accepted_at = hs.now() - timedelta(days=3)
+        stale.updated_at = hs.now()
+        assignment = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(
+                HealthISFDispatchAssignment.ride_id == stale_ride_id,
+                HealthISFDispatchAssignment.driver_id == driver_id,
+            )
+            .order_by(HealthISFDispatchAssignment.updated_at.desc())
+            .first()
+        )
+        assert assignment is not None
+        assignment.assignment_state = DispatchAssignmentState.OFFERED.value
+        assignment.accepted_at = None
+        assignment.offer_expires_at = None
+        assignment.queued_at = hs.now() - timedelta(days=3)
+        assignment.updated_at = hs.now()
+        db.commit()
+
+    mobile_login = client.post(
+        "/api/health-isf/drivers/mobile-login",
+        json={"phone": "917-555-1001", "driver_id": driver_id},
+    )
+    assert mobile_login.status_code == 200, mobile_login.text
+    mobile_headers = {"X-Driver-Session-Token": mobile_login.json()["session_token"]}
+    warmup = client.get(
+        f"/api/health-isf/drivers/{driver_id}/assigned-rides",
+        headers=mobile_headers,
+        params={"organization_id": org_id},
+    )
+    assert warmup.status_code == 200, warmup.text
+    assert stale_ride_id not in {str(row.get("id") or "") for row in warmup.json()}
+
+    _, fresh_ride_id = _create_and_assign(client, dispatcher_headers, rider_headers, driver_id)
+
+    assigned = client.get(
+        f"/api/health-isf/drivers/{driver_id}/assigned-rides",
+        headers=mobile_headers,
+        params={"organization_id": org_id},
+    )
+    assert assigned.status_code == 200, assigned.text
+    assigned_ids = {str(row.get("id") or "") for row in assigned.json()}
+    assert stale_ride_id not in assigned_ids
+    assert fresh_ride_id in assigned_ids
+
+    with SessionLocal() as db:
+        stale = db.query(HealthISFRide).filter(HealthISFRide.id == stale_ride_id).first()
+        assert stale is not None
+        assert hs.RideLifecycleManager.normalize_state(stale.lifecycle_state or stale.status) == RideStatus.CANCELLED.value
+        assert stale.driver_id is None
