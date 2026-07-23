@@ -1940,7 +1940,11 @@
     }
 
     var parsedRoute = safeText(parsed.route, "");
-    if (parsedRoute && routeAllowed(state.role, parsedRoute)) {
+    var pathLockedRoute = dedicatedRouteFromPath(window.location.pathname);
+    if (pathLockedRoute) {
+      state.route = pathLockedRoute;
+      state.roleRoutes[state.role] = pathLockedRoute;
+    } else if (parsedRoute && routeAllowed(state.role, parsedRoute)) {
       state.route = parsedRoute;
       state.roleRoutes[state.role] = parsedRoute;
     }
@@ -2082,6 +2086,11 @@
       }
     }
     return "dashboard";
+  }
+
+  function dedicatedRouteFromPath(pathname) {
+    var pathRoute = routeFromPath(pathname);
+    return pathRoute === "mobile" || pathRoute === "riders" ? pathRoute : "";
   }
 
   function routeAllowed(role, route) {
@@ -13042,8 +13051,14 @@
 
   function setRoute(route, pushHistory) {
     var source = arguments.length > 2 ? safeText(arguments[2], "route") : "route";
-    var target = ROUTES[route] ? route : "dashboard";
-    if (!routeAllowed(state.role, target)) {
+    var requested = ROUTES[route] ? route : "dashboard";
+    var pathLockedRoute = dedicatedRouteFromPath(window.location.pathname);
+    var target = requested;
+    if (pathLockedRoute) {
+      target = pathLockedRoute;
+    } else if (requested === "mobile" || requested === "riders") {
+      target = requested;
+    } else if (!routeAllowed(state.role, target)) {
       target = defaultRouteForRole(state.role);
     }
     state.runtime.lastNavigationSource = source;
@@ -13073,7 +13088,7 @@
       });
     }
     if (pushHistory) {
-      var nextPath = routePathForRole(target, state.role);
+      var nextPath = safeText((ROUTES[target] || {}).path, routePathForRole(target, state.role));
       if (String(window.location.pathname || "") !== String(nextPath || "")) {
         history.pushState({ route: target, role: state.role }, "", nextPath);
       }
