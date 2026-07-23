@@ -14633,44 +14633,68 @@ async function _amiSendJson(url, method, payload, timeoutMs) {
 
 function _amiRouteProgressCompletionSucceeded(progressPayload, tripId) {
   var workspace = safeObject(progressPayload);
-  var timeline = Array.isArray(workspace.timeline_states) ? workspace.timeline_states : [];
-  var hasCompletedTimeline = timeline.some(function (state) {
-    return safeText(state, "").toLowerCase() === "completed";
-  });
-  if (hasCompletedTimeline) {
-    return true;
-  }
+  var normalizedTripId = safeText(tripId, "");
   var activeRide = safeObject(workspace.active_ride);
   var activeRideId = safeText(activeRide.id || activeRide.ride_id, "");
-  if (activeRideId && activeRideId === safeText(tripId, "")) {
-    var lifecycle = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
-    if (lifecycle === "completed") {
-      return true;
-    }
-  }
-  return false;
+  var activeLifecycle = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+  return activeRideId === normalizedTripId && activeLifecycle === "completed";
 }
 
 function _amiResolveCompletionRidePayload(progressPayload, tripId) {
   var workspace = safeObject(progressPayload);
+  var normalizedTripId = safeText(tripId, "");
   var activeRide = safeObject(workspace.active_ride);
-  if (safeText(activeRide.id || activeRide.ride_id, "")) {
+  var activeRideId = safeText(activeRide.id || activeRide.ride_id, "");
+  var activeLifecycle = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+  if (activeRideId === normalizedTripId && activeLifecycle === "completed") {
     return activeRide;
-  }
-  if (_amiRouteProgressCompletionSucceeded(workspace, tripId)) {
-    return {
-      id: safeText(tripId, ""),
-      ride_id: safeText(tripId, ""),
-      lifecycle_state: "completed",
-      status: "completed"
-    };
   }
   return null;
 }
 
-async function _amiFetchRideLifecycleState(tripId) {
+async function _amiFetchRideLifecycleState(tripId, driverId) {
+  var normalizedTripId = safeText(tripId, "");
+  var resolvedDriverId = safeText(driverId, "") || _amiCanonicalMobileDriverId();
+  if (resolvedDriverId && normalizedTripId) {
+    try {
+      var snapshot = safeObject(await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/completion-snapshot?limit=50",
+        "GET",
+        null
+      ));
+      var completedRows = Array.isArray(snapshot.completed_rides) ? snapshot.completed_rides : [];
+      if (completedRows.some(function (row) {
+        return safeText(row.id || row.ride_id, "") === normalizedTripId;
+      })) {
+        return "completed";
+      }
+    } catch (_) {}
+    try {
+      var activePayload = safeObject(await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/active-ride",
+        "GET",
+        null
+      ));
+      var activeRide = safeObject(activePayload.ride);
+      if (safeText(activeRide.id || activeRide.ride_id, "") === normalizedTripId) {
+        return safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+      }
+      if (activePayload.has_active_ride !== true) {
+        var completedRides = await _amiSendJson(
+          "/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId) + "/completed-rides?limit=20",
+          "GET",
+          null
+        );
+        if (Array.isArray(completedRides) && completedRides.some(function (row) {
+          return safeText(row.id || row.ride_id, "") === normalizedTripId;
+        })) {
+          return "completed";
+        }
+      }
+    } catch (_) {}
+  }
   try {
-    var ride = safeObject(await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null));
+    var ride = safeObject(await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(normalizedTripId), "GET", null));
     return safeText(ride.lifecycle_state || ride.status, "").toLowerCase();
   } catch (_) {
     return "";
@@ -15335,6 +15359,7 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
   var handoff = {};
   var payload = null;
   try {
+    await _amiAdvanceRideForCompletion(driverId, tripId);
     var progressPayload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
@@ -15424,7 +15449,7 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
     }
     _amiScheduleRenderPage();
   } catch (err) {
-    var lifecycleAfterError = await _amiFetchRideLifecycleState(tripId);
+    var lifecycleAfterError = await _amiFetchRideLifecycleState(tripId, driverId);
     if (lifecycleAfterError === "completed") {
       _amiLogDriverMobileSync({
         event: "complete_trip_recovered",
