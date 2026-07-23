@@ -8,7 +8,7 @@
     "dispatch": { path: APP_BASE_PATH + "/dispatch", title: "Dispatch Board", subtitle: "Live fleet dispatch, assignment coordination, and escalation control." },
     "trips": { path: APP_BASE_PATH + "/trips", title: "Trips", subtitle: "Trip lifecycle monitoring across rider, driver, and provider flows." },
     "drivers": { path: APP_BASE_PATH + "/drivers", title: "Drivers", subtitle: "Driver operations, compliance state, and shift performance." },
-    "riders": { path: APP_BASE_PATH + "/riders", title: "Riders / Patients", subtitle: "Rider and patient transport coordination and experience visibility." },
+    "riders": { path: APP_BASE_PATH + "/riders", title: "Rider App", subtitle: "Request rides, track active trips, and contact support." },
     "providers": { path: APP_BASE_PATH + "/providers", title: "Providers", subtitle: "Facility and provider transport operations portal." },
     "vehicles": { path: APP_BASE_PATH + "/vehicles", title: "Vehicles", subtitle: "Fleet inventory, availability, and maintenance readiness." },
     "billing": { path: APP_BASE_PATH + "/billing", title: "Billing", subtitle: "Revenue tracking, claims reimbursement, and financial controls." },
@@ -67,7 +67,7 @@
     dispatcher: "dispatch",
     rider: "riders",
     provider: "providers",
-    driver: "drivers",
+    driver: "mobile",
     compliance_officer: "dashboard",
     supervisor: "dashboard",
     driver_support: "dashboard",
@@ -199,7 +199,7 @@
       dispatcher: "dispatch",
       rider: "riders",
       provider: "providers",
-      driver: "drivers",
+      driver: "mobile",
       compliance_officer: "dashboard",
       supervisor: "dashboard",
       driver_support: "dashboard",
@@ -458,6 +458,7 @@
   var driverLastAppliedObservedAt = 0;
   var driverActionInFlight = false;
   var DRIVER_SESSION_STORAGE_KEY = "amicor_driver_session";
+  var MOBILE_SURFACE_STORAGE_KEY = "amicor_last_mobile_surface";
   var driverMobileAuthCache = null;
 
   function getMobileSessionDriverId() {
@@ -512,6 +513,77 @@
     return safeText(url, "").indexOf("/api/health-isf/drivers/") >= 0;
   }
 
+  function persistMobileSurfacePreference(surface) {
+    var normalized = safeText(surface, "").toLowerCase();
+    if (normalized !== "driver" && normalized !== "rider") {
+      return;
+    }
+    try {
+      localStorage.setItem(MOBILE_SURFACE_STORAGE_KEY, normalized);
+    } catch (_) {}
+  }
+
+  function readMobileSurfacePreference() {
+    try {
+      var value = safeText(localStorage.getItem(MOBILE_SURFACE_STORAGE_KEY), "").toLowerCase();
+      return value === "driver" || value === "rider" ? value : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function shouldRestoreDedicatedMobileRoute(pathRoute) {
+    if (pathRoute === "mobile" || pathRoute === "riders") {
+      return false;
+    }
+    if (pathRoute !== "dashboard") {
+      return false;
+    }
+    var surface = readMobileSurfacePreference();
+    if (surface === "driver") {
+      var driverSession = readPersistedDriverSession();
+      return !!(driverSession && (driverSession.session_token || driverSession.driver_id));
+    }
+    if (surface === "rider") {
+      return getPlatformRole() === "rider" && !!getAccessToken();
+    }
+    return false;
+  }
+
+  function resolveInitialAppRoute(pathRoute, rememberedRoute) {
+    if (pathRoute === "mobile") {
+      return "mobile";
+    }
+    if (pathRoute === "riders") {
+      return "riders";
+    }
+    if (pathRoute !== "dashboard") {
+      return pathRoute;
+    }
+    if (shouldRestoreDedicatedMobileRoute(pathRoute)) {
+      return readMobileSurfacePreference() === "rider" ? "riders" : "mobile";
+    }
+    if (rememberedRoute && routeAllowed(getPlatformRole(), rememberedRoute)) {
+      return rememberedRoute;
+    }
+    return pathRoute;
+  }
+
+  function alignPlatformRoleWithDedicatedPath(pathRoute) {
+    if (pathRoute === "riders") {
+      persistMobileSurfacePreference("rider");
+      var jwtRole = getJwtSessionRole();
+      if (jwtRole === "rider" || state.role === "rider") {
+        state.role = "rider";
+        savePlatformRole("rider");
+      }
+      return;
+    }
+    if (pathRoute === "mobile") {
+      persistMobileSurfacePreference("driver");
+    }
+  }
+
   function readPersistedDriverSession() {
     try {
       var raw = localStorage.getItem(DRIVER_SESSION_STORAGE_KEY);
@@ -554,6 +626,7 @@
     } catch (_) {}
     bindDriverIdentity(driverId, { forceRebind: true });
     driverMobileAuthCache = null;
+    persistMobileSurfacePreference("driver");
     try {
       window.dispatchEvent(new CustomEvent("ami:driver-session-updated", { detail: session }));
     } catch (_) {}
@@ -774,6 +847,7 @@
     if (state.driverApp.lastActionResult) {
       state.driverApp.lastActionResult.current_ride_status = "completed";
     }
+    persistMobileSurfacePreference("driver");
   }
 
   function resetDriverBoundIdentity() {
@@ -1052,6 +1126,11 @@
 
   function applyDriverMobileShellLayout(enabled) {
     document.body.classList.toggle("driver-mobile-app", !!enabled);
+  }
+
+  function applyDedicatedSurfaceLayout() {
+    applyDriverMobileShellLayout(isDriverMobileAppRoute());
+    document.body.classList.toggle("rider-app-surface", state.route === "riders");
   }
 
   function getPlatformRole() {
@@ -6326,9 +6405,8 @@
         "Rider Home Actions",
         "Quick access to the live rider workflow, support, and trip controls.",
         renderQuickLinks(roleWorkspaceLinks("rider", "homeLinks", [
-          { href: "/app/mobile", title: "Rider Mobile", description: "Primary rider experience for booking, tracking, and support.", note: "live" },
+          { href: "/app/riders", title: "Rider App", description: "Book rides, track active trips, and manage support.", note: "live" },
           { href: "/app/trips", title: "Trip Timeline", description: "See ride history, active trip context, and support posture.", note: "read-only" },
-          { href: "/app/riders", title: "Rider Workspace", description: "Open the full customer coordination workspace.", note: "live" },
           { href: "/app/alerts", title: "Safety & Support", description: "Escalate ride concerns through supervised support flows.", note: "supervised" }
         ])),
         "rider-actions"
@@ -8329,25 +8407,14 @@
     ].join("");
   }
 
+  function renderRiderDedicatedSurface() {
+    var phase17 = getPhase17Context();
+    var slice = buildRoleHydrationSlice("rider", phase17);
+    return '<div class="rider-mobile-page">' + renderRiderAppExperience(slice) + "</div>";
+  }
+
   function renderRidersRoute() {
-    return [
-      renderRiderDashboard(),
-      renderPanelBlock(
-        "Rider / Patient Coordination",
-        "Visibility into patient support, pickup quality, and communication readiness.",
-        '<div class="grid-3">' +
-          renderMetric("Support Queue", String(countEventsByKeyword((state.supervision || {}).recent_events || [], "support"))) +
-          renderMetric("Escalations", String(countEventsByLevel((state.supervision || {}).recent_events || [], "warning"))) +
-          renderMetric("Patient Signals", String(countEventsByKeyword((state.supervision || {}).recent_events || [], "patient"))) +
-        '</div>' +
-        renderNoticeList([
-          "Rider and patient actions remain operator-supervised.",
-          "Dispatch assignment remains policy-gated.",
-          "No unsupervised trip changes are allowed from this view."
-        ]),
-        "riders"
-      )
-    ].join("");
+    return renderRiderDedicatedSurface();
   }
 
   function renderVehicles() {
@@ -8530,9 +8597,6 @@
 
   function renderMobile() {
     var phase17 = getPhase17Context();
-    if (state.role === "rider") {
-      return renderRiderAppExperience(buildRoleHydrationSlice("rider", phase17));
-    }
     return renderDriverMobileExperience(phase17, buildRoleHydrationSlice("driver", phase17));
   }
 
@@ -9498,7 +9562,7 @@
     }
     window.__amiDispatcherDraftRenderDeferred = false;
     traceDispatcherPickupRender("renderPage:start");
-    applyDriverMobileShellLayout(isDriverMobileAppRoute());
+    applyDedicatedSurfaceLayout();
     state.runtime.lastRenderTimestamp = new Date().toISOString();
     var routeMeta = ROUTES[state.route] || ROUTES.dashboard;
     document.body.setAttribute("data-route", state.route);
@@ -12985,6 +13049,11 @@
     state.runtime.lastNavigationSource = source;
     state.route = target;
     state.roleRoutes[state.role] = target;
+    if (target === "mobile") {
+      persistMobileSurfacePreference("driver");
+    } else if (target === "riders") {
+      persistMobileSurfacePreference("rider");
+    }
     recomputeAssistantRuntimeState();
     renderNav();
     renderPage();
@@ -13232,6 +13301,7 @@
     state.role = initializePlatformRole(pathRoute);
     await syncPlatformRoleAuth(getPlatformRole());
     hydrateSessionState();
+    alignPlatformRoleWithDedicatedPath(pathRoute);
     recomputeAssistantRuntimeState();
     var deepLinkedRole = roleFromOperationalPath(window.location.pathname);
     if (deepLinkedRole && ROLE_ACCESS[deepLinkedRole]) {
@@ -13240,8 +13310,14 @@
     }
     els.roleSelect.value = getPlatformRole();
     var rememberedRoute = safeText((state.roleRoutes || {})[state.role], "");
-    var initialRoute = pathRoute === "dashboard" && rememberedRoute ? rememberedRoute : pathRoute;
+    var initialRoute = resolveInitialAppRoute(pathRoute, rememberedRoute);
     setRoute(initialRoute, false, "initialize");
+    if ((initialRoute === "mobile" || initialRoute === "riders") && pathRoute === "dashboard") {
+      var dedicatedPath = routePathForRole(initialRoute, state.role);
+      if (window.history && window.history.replaceState && String(window.location.pathname || "") !== String(dedicatedPath || "")) {
+        window.history.replaceState({ route: initialRoute, role: state.role }, "", dedicatedPath);
+      }
+    }
     bindEvents();
     startRefreshLoop();
     if (isDriverMobileSurface()) {
@@ -14549,7 +14625,17 @@ function _amiDriverTripPhone(tripId) {
 
 async function _amiAfterDriverWorkflowRefresh(lastAction) {
   try {
-    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshData === "function") {
+    var shell = _amiDriverShellState();
+    var onMobileRoute = safeText(shell.route, "") === "mobile";
+    if (
+      onMobileRoute
+      && window.AmiOpsShellActions
+      && typeof window.AmiOpsShellActions.refreshDriverWorkflowData === "function"
+    ) {
+      await window.AmiOpsShellActions.refreshDriverWorkflowData({
+        lastAction: safeText(lastAction, "Driver workspace synchronized")
+      });
+    } else if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshData === "function") {
       await window.AmiOpsShellActions.refreshData();
     } else {
       await _amiRefreshDriverWorkflow(lastAction);
@@ -15164,9 +15250,6 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
       await window.AmiOpsShellActions.refreshDriverWorkflowData({
         lastAction: "Completed trip " + completedRideId
       });
-    }
-    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.refreshData === "function") {
-      await window.AmiOpsShellActions.refreshData();
     } else {
       await _amiRefreshDriverWorkflow("Completed trip " + completedRideId);
     }

@@ -2013,3 +2013,54 @@ body.driver-mobile-app .driver-mobile-auth .muted {
 body.driver-mobile-app .runtime-strip {
   display: none !important;
 }
+
+/* Dedicated Rider app shell — /app/riders only */
+body.rider-app-surface {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+body.rider-app-surface .ops-app {
+  grid-template-columns: 1fr;
+}
+
+body.rider-app-surface .ops-sidebar,
+body.rider-app-surface .ops-role-box,
+body.rider-app-surface .ops-search,
+body.rider-app-surface .ops-kicker,
+body.rider-app-surface #workspace-pill,
+body.rider-app-surface #notification-pill,
+body.rider-app-surface #role-badge,
+body.rider-app-surface #last-updated-pill {
+  display: none !important;
+}
+
+body.rider-app-surface .ops-main {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+body.rider-app-surface .ops-topbar {
+  padding: 14px 16px;
+  border-bottom: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%);
+  color: #eff6ff;
+}
+
+body.rider-app-surface .ops-topbar h2,
+body.rider-app-surface .ops-topbar .ops-subtitle {
+  color: #eff6ff;
+}
+
+body.rider-app-surface .ops-content {
+  padding: 16px;
+}
+
+body.rider-app-surface .runtime-strip {
+  display: none !important;
+}
+
+body.rider-app-surface .rider-mobile-page {
+  max-width: 720px;
+  margin: 0 auto;
+}

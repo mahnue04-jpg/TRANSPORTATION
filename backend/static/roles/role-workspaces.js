@@ -4,9 +4,8 @@
   window.AmiRoleWorkspaces = {
     rider: {
       homeLinks: [
-        { href: "/app/mobile", title: "Rider Mobile", description: "Primary rider experience for booking, tracking, and support.", note: "live" },
+        { href: "/app/riders", title: "Rider App", description: "Book rides, track active trips, and manage support.", note: "live" },
         { href: "/app/trips", title: "Trip Timeline", description: "See ride history, active trip context, and support posture.", note: "read-only" },
-        { href: "/app/riders", title: "Rider Workspace", description: "Open the full customer coordination workspace.", note: "live" },
         { href: "/app/alerts", title: "Safety & Support", description: "Escalate ride concerns through supervised support flows.", note: "supervised" }
       ]
     },

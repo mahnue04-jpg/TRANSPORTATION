@@ -2881,6 +2881,7 @@ def serve_ops_shell(request: Request) -> HTMLResponse:
 
 @app.get("/dashboard", include_in_schema=False)
 @app.get("/rides", include_in_schema=False)
+@app.get("/mobile", include_in_schema=False)
 @app.get("/providers", include_in_schema=False)
 @app.get("/drivers", include_in_schema=False)
 @app.get("/operations", include_in_schema=False)
