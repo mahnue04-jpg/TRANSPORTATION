@@ -15,7 +15,7 @@ INIT_SCRIPT = """
   localStorage.setItem('amicor_platform_role', 'driver');
   localStorage.setItem('amicor_shell_role', 'driver');
   localStorage.setItem('amicor_last_mobile_surface', 'driver');
-  localStorage.setItem('amicor_driver_session_v1', JSON.stringify({
+  localStorage.setItem('amicor_driver_session', JSON.stringify({
     driver_id: 'session-isolation-proof-driver',
     driver_name: 'Isolation Proof Driver',
     role: 'driver',
@@ -91,7 +91,8 @@ def main() -> int:
         )
 
         page.goto(f"{BASE}/app/riders", wait_until="domcontentloaded", timeout=120000)
-        page.wait_for_timeout(3500)
+        page.wait_for_selector("#rider-name-input", timeout=30000)
+        page.wait_for_timeout(1500)
         riders = {
             "url": page.url,
             "body_class": page.evaluate("() => document.body.className"),

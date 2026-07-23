@@ -513,6 +513,21 @@
     return safeText(url, "").indexOf("/api/health-isf/drivers/") >= 0;
   }
 
+  function isDriverMobileRideApiUrl(url) {
+    return isDriverMobileAppRoute() && safeText(url, "").indexOf("/api/health-isf/rides/") >= 0;
+  }
+
+  function shouldUseDriverSessionFirstFetch(scopedUrl) {
+    if (!isDriverMobileSessionRoute()) {
+      return false;
+    }
+    var driverSessionToken = getDriverSessionToken();
+    if (!driverSessionToken) {
+      return false;
+    }
+    return isMobileDriverApiUrl(scopedUrl) || isDriverMobileRideApiUrl(scopedUrl);
+  }
+
   function persistMobileSurfacePreference(surface) {
     var normalized = safeText(surface, "").toLowerCase();
     if (normalized !== "driver" && normalized !== "rider") {
@@ -640,7 +655,7 @@
 
   function applyDriverSessionHeaders(headers, platformToken, requestUrl) {
     var next = Object.assign({}, headers || {});
-    if (!isMobileDriverApiUrl(requestUrl)) {
+    if (!isMobileDriverApiUrl(requestUrl) && !isDriverMobileRideApiUrl(requestUrl)) {
       return next;
     }
     var mobileCtx = getCanonicalMobileDriverContext();
@@ -10183,15 +10198,18 @@
     var options = safeObject(requestOptions);
     var method = safeText(options.method, "GET").toUpperCase();
     var scopedUrl = withOrganizationScope(url);
-    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+    var useDriverSessionOnly = shouldUseDriverSessionFirstFetch(scopedUrl);
+    if (!useDriverSessionOnly && window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
       try {
         await window.AmiCorSession.ensureReady();
       } catch (_) {}
     }
     var token = getAccessToken() || explicitToken;
-    var mobileCtx = getCanonicalMobileDriverContext();
-    var useDriverSessionOnly = isDriverMobileAppRoute() && mobileCtx.authenticated && isMobileDriverApiUrl(scopedUrl);
     var headers = applyDriverSessionHeaders({ "Accept": "application/json" }, token, scopedUrl);
+    if (useDriverSessionOnly) {
+      delete headers.Authorization;
+      delete headers.authorization;
+    }
     if (options.headers && typeof options.headers === "object") {
       Object.keys(options.headers).forEach(function (key) {
         headers[key] = options.headers[key];
@@ -10200,7 +10218,7 @@
     if (options.body != null && !headers["Content-Type"] && !headers["content-type"]) {
       headers["Content-Type"] = "application/json";
     }
-    if (token && !headers.Authorization && !headers.authorization) {
+    if (!useDriverSessionOnly && token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
     var retries = method === "GET" ? 1 : 0;
@@ -10215,8 +10233,12 @@
       if (options.body != null && !nextHeaders["Content-Type"] && !nextHeaders["content-type"]) {
         nextHeaders["Content-Type"] = "application/json";
       }
-      if (currentToken && !nextHeaders.Authorization && !nextHeaders.authorization) {
+      if (!useDriverSessionOnly && currentToken && !nextHeaders.Authorization && !nextHeaders.authorization) {
         nextHeaders.Authorization = "Bearer " + currentToken;
+      }
+      if (useDriverSessionOnly) {
+        delete nextHeaders.Authorization;
+        delete nextHeaders.authorization;
       }
       var requestInit = {
         method: method,
@@ -10421,7 +10443,10 @@
     }
     var token = getAccessToken();
     var headers = applyDriverSessionHeaders(Object.assign({}, init.headers || {}), token, scopedUrl);
-    if (token && !headers.Authorization && !headers.authorization) {
+    if (shouldUseDriverSessionFirstFetch(scopedUrl)) {
+      delete headers.Authorization;
+      delete headers.authorization;
+    } else if (token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
     init.headers = headers;
@@ -10430,7 +10455,8 @@
 
   async function authorizedFetch(scopedUrl, requestInit, timeoutMs) {
     bootstrapAppSession();
-    if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+    var driverSessionFirst = shouldUseDriverSessionFirstFetch(scopedUrl);
+    if (!driverSessionFirst && window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
       try {
         await window.AmiCorSession.ensureReady();
       } catch (_) {}
@@ -10438,6 +10464,9 @@
 
     async function executeFetch() {
       var init = buildAuthorizedRequestInit(scopedUrl, requestInit);
+      if (driverSessionFirst) {
+        return fetch(scopedUrl, init);
+      }
       if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
         return window.AmiCorSession.authFetch(scopedUrl, init);
       }
@@ -10446,7 +10475,8 @@
 
     var response = await withTimeout(executeFetch(), timeoutMs || 12000);
     if (
-      response.status === 401
+      !driverSessionFirst
+      && response.status === 401
       && window.AmiCorSession
       && typeof window.AmiCorSession.refreshAccessToken === "function"
       && window.AmiCorSession.getRefreshToken()
@@ -10476,11 +10506,12 @@
     }, timeoutMs || 12000);
 
     if (!response.ok) {
-      var errDetail = scopedUrl + ":http_" + response.status;
+      var postStatus = response.status;
+      var errDetail = scopedUrl + ":http_" + postStatus;
       try {
         var errBody = await response.json();
         if (errBody && errBody.detail) {
-          errDetail = String(errBody.detail);
+          errDetail = String(errBody.detail) + " :http_" + postStatus;
         }
       } catch (_) {}
       throw new Error(errDetail);
@@ -10500,11 +10531,12 @@
     }, timeoutMs || 12000);
 
     if (!response.ok) {
-      var errDetail = scopedUrl + ":http_" + response.status;
+      var sendStatus = response.status;
+      var errDetail = scopedUrl + ":http_" + sendStatus;
       try {
         var errBody = await response.json();
         if (errBody && errBody.detail) {
-          errDetail = String(errBody.detail);
+          errDetail = String(errBody.detail) + " :http_" + sendStatus;
         }
       } catch (_) {}
       throw new Error(errDetail);
@@ -14744,14 +14776,127 @@ function _amiLogDriverMobileSync(entry) {
   }
 }
 
+function _amiDriverAcceptHttpStatus(err, code) {
+  var text = safeText(err && err.message, "").toLowerCase();
+  if (text.indexOf(":http_" + String(code)) >= 0) {
+    return true;
+  }
+  if (code === 401) {
+    return text.indexOf("authentication required") >= 0
+      || text.indexOf("unauthorized") >= 0
+      || text.indexOf("session expired") >= 0;
+  }
+  if (code === 409) {
+    return text.indexOf("already accepted") >= 0
+      || text.indexOf("conflict") >= 0
+      || text.indexOf("cannot accept") >= 0
+      || text.indexOf("lifecycle") >= 0;
+  }
+  return false;
+}
+
+function _amiDriverMobileSessionStillActive() {
+  try {
+    if (window.AmiOpsShellActions && typeof window.AmiOpsShellActions.getCanonicalMobileDriverContext === "function") {
+      return !!window.AmiOpsShellActions.getCanonicalMobileDriverContext().authenticated;
+    }
+  } catch (_) {}
+  return false;
+}
+
+async function _amiRecoverAcceptedDriverTrip(driverId, tripId) {
+  if (!driverId || !tripId) {
+    return null;
+  }
+  try {
+    var workspace = safeObject(await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/active-ride",
+      "GET",
+      null
+    ));
+    var ride = safeObject(workspace.ride || workspace.active_ride);
+    var rideId = safeText(ride.id || ride.ride_id || workspace.ride_id, "");
+    if (rideId !== safeText(tripId, "")) {
+      return null;
+    }
+    var assignmentState = safeText(workspace.assignment_state, "").toLowerCase();
+    var lifecycle = safeText(ride.lifecycle_state || ride.status, "").toLowerCase();
+    var acceptedStates = ["accepted", "en_route_pickup", "driver_en_route", "arrived", "arrived_pickup", "pickup_complete", "rider_loaded", "in_progress", "trip_in_progress"];
+    if (ride.accepted_at || acceptedStates.indexOf(assignmentState) >= 0 || acceptedStates.indexOf(lifecycle) >= 0) {
+      return {
+        active_ride: ride,
+        assignment_state: assignmentState || lifecycle || "accepted",
+        recovered: true
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAccepted) {
+  var shell = _amiDriverShellState();
+  var activeRide = safeObject(payload.active_ride || payload);
+  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
+  var assignmentAfterAccept = safeText(
+    (safeObject(payload.active_assignment)).assignment_state || payload.assignment_state,
+    ""
+  ).toLowerCase();
+  var wasAlreadyAccepted = alreadyAccepted
+    || !!activeRide.accepted_at
+    || assignmentAfterAccept === "accepted"
+    || assignmentAfterAccept === "en_route_pickup";
+  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0 && !wasAlreadyAccepted) {
+    try {
+      payload = await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+        "POST",
+        { ride_id: tripId, target_state: "en_route_pickup" }
+      );
+      activeRide = safeObject(payload.active_ride || payload);
+    } catch (_) {}
+  } else if (wasAlreadyAccepted && ["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
+    try {
+      payload = await _amiSendJson(
+        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+        "POST",
+        { ride_id: tripId, target_state: "en_route_pickup" }
+      );
+      activeRide = safeObject(payload.active_ride || payload);
+    } catch (_) {}
+  }
+  var displayStatus = _amiStatusFromRouteProgressPayload(payload, wasAlreadyAccepted ? "driver_en_route" : "accepted");
+  shell = _amiPatchDriverTripStatus(tripId, displayStatus);
+  shell.driverApp.lastActionResult = {
+    last_action: "Accept Trip",
+    api_status: "ok",
+    db_record_id: safeText(activeRide.id, tripId),
+    updated_table: "health_isf_rides",
+    ui_refreshed: "yes",
+    current_ride_status: displayStatus
+  };
+  window.AmiOpsShellState = shell;
+  _amiScheduleRenderPage();
+  _amiLogDriverMobileSync({
+    event: "accept_ride",
+    requested_ride_id: tripId,
+    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route"),
+    api_response: activeRide,
+    http_status: 200,
+    route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+    frontend_state_transition: "active_ride->active_ride",
+    extra: { action: "Accept Trip" }
+  });
+  try {
+    _amiLockDriverHydration(3500);
+    await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
+  } catch (_) {}
+  return true;
+}
+
 window._amiHandleDriverAcceptTrip = async function(tripId) {
   var shell = _amiDriverShellState();
   var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
-  function acceptHttpStatus(err, code) {
-    var text = safeText(err && err.message, "");
-    return text.indexOf(":http_" + String(code)) >= 0 || text.toLowerCase().indexOf("already accepted") >= 0;
-  }
   var payload = null;
   var acceptErr = null;
   try {
@@ -14762,10 +14907,10 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     );
   } catch (err) {
     acceptErr = err;
-    if (acceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function") {
+    if (_amiDriverAcceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function" && !_amiDriverMobileSessionStillActive()) {
       window._amiClearDriverSession();
     }
-    if (!acceptHttpStatus(err, 409)) {
+    if (!_amiDriverAcceptHttpStatus(err, 409)) {
       try {
         payload = await _amiSendJson(
           "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
@@ -14773,6 +14918,10 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
           { ride_id: tripId, target_state: "en_route_pickup" }
         );
       } catch (err2) {
+        var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+        if (recovered) {
+          return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
+        }
         _amiLogDriverMobileSync({
           event: "accept_ride_failed",
           requested_ride_id: tripId,
@@ -14783,7 +14932,7 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
           frontend_state_transition: "active_ride->active_ride",
           extra: { action: "Accept Trip" }
         });
-        if (acceptHttpStatus(acceptErr, 401) || acceptHttpStatus(err2, 401)) {
+        if (_amiDriverAcceptHttpStatus(acceptErr, 401) || _amiDriverAcceptHttpStatus(err2, 401)) {
           window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
         } else {
           window.alert(
@@ -14821,64 +14970,14 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     }
   }
   if (!payload) {
+    var recoveredEmpty = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+    if (recoveredEmpty) {
+      return await _amiFinalizeDriverAcceptTrip(tripId, recoveredEmpty, driverId, true);
+    }
     window.alert("Unable to submit driver accept action for " + tripId + ".");
     return false;
   }
-  var activeRide = safeObject(payload.active_ride || payload);
-  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
-  var assignmentAfterAccept = safeText(
-    (safeObject(payload.active_assignment)).assignment_state || payload.assignment_state,
-    ""
-  ).toLowerCase();
-  var alreadyAccepted = !!activeRide.accepted_at
-    || assignmentAfterAccept === "accepted"
-    || assignmentAfterAccept === "en_route_pickup";
-  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0 && !alreadyAccepted) {
-    try {
-      payload = await _amiSendJson(
-        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-        "POST",
-        { ride_id: tripId, target_state: "en_route_pickup" }
-      );
-      activeRide = safeObject(payload.active_ride || payload);
-    } catch (_) {}
-  } else if (alreadyAccepted && ["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
-    try {
-      payload = await _amiSendJson(
-        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-        "POST",
-        { ride_id: tripId, target_state: "en_route_pickup" }
-      );
-      activeRide = safeObject(payload.active_ride || payload);
-    } catch (_) {}
-  }
-  var displayStatus = _amiStatusFromRouteProgressPayload(payload, alreadyAccepted ? "driver_en_route" : "accepted");
-  shell = _amiPatchDriverTripStatus(tripId, displayStatus);
-  shell.driverApp.lastActionResult = {
-    last_action: "Accept Trip",
-    api_status: "ok",
-    db_record_id: safeText(activeRide.id, tripId),
-    updated_table: "health_isf_rides",
-    ui_refreshed: "yes",
-    current_ride_status: displayStatus
-  };
-  window.AmiOpsShellState = shell;
-  _amiScheduleRenderPage();
-  _amiLogDriverMobileSync({
-    event: "accept_ride",
-    requested_ride_id: tripId,
-    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route"),
-    api_response: activeRide,
-    http_status: 200,
-    route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
-    frontend_state_transition: "active_ride->active_ride",
-    extra: { action: "Accept Trip" }
-  });
-  try {
-    _amiLockDriverHydration(3500);
-    await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
-  } catch (_) {}
-  return true;
+  return await _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, false);
 };
 
 window._amiHandleDriverArriveTrip = async function(tripId) {
