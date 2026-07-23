@@ -11085,6 +11085,14 @@
       return match ? Number(match[1]) : "failed";
     }
 
+    function driverCoreProbeAuthFailed() {
+      var statuses = [probeStatus(0), probeStatus(1), probeStatus(2), probeStatus(3)];
+      var authFailures = statuses.filter(function (status) {
+        return status === 401 || status === 403;
+      }).length;
+      return authFailures >= 2 && authFailures >= statuses.length - 1;
+    }
+
     var activeRidePayload = probe[0].status === "fulfilled" ? safeObject(probe[0].value) : null;
     var workspacePayload = probe[1].status === "fulfilled" ? safeObject(probe[1].value) : null;
     var offerEnvelope = probe[2].status === "fulfilled" ? safeObject(probe[2].value) : null;
@@ -11182,6 +11190,35 @@
       if (isDriverMobileAppRoute() && !apiHealthy) {
         state.driverApp = safeObject(state.driverApp);
         var priorUiOnApiError = safeText(state.driverApp.mobileUiState, "loading_assignment");
+        if (driverCoreProbeAuthFailed()) {
+          clearPersistedDriverSession();
+          driverMobileAuthCache = null;
+          state.driverApp.mobileUiState = "login_required";
+          state.driverApp.currentDriverId = "";
+          state.driverApp.activeTripId = "";
+          state.driverApp.tripQueue = [];
+          markDriverSyncWarning("Driver session expired. Sign in with your registered phone again.");
+          logDriverMobileRefreshSync({
+            event: "assignment_refresh_auth_expired",
+            requested_ride_id: returnedRideId,
+            assignment_state: lifecycleState,
+            api_response: {
+              http_status: {
+                active_ride: probeStatus(0),
+                live_workspace: probeStatus(1),
+                active_offer: probeStatus(2),
+                assigned_rides: probeStatus(3),
+                completion_snapshot: probeStatus(4)
+              }
+            },
+            frontend_state_transition: priorUiOnApiError + "->login_required",
+            next_ui_state: "login_required",
+            extra: { refresh_seq: refreshSeq, ignored_reason: "driver_session_auth_failed" }
+          });
+          ensureDriverMobileState(null);
+          scheduleRenderPage(0);
+          return;
+        }
         state.driverApp.mobileUiState = "api_error";
         state.driverApp.shiftOnline = true;
         state.driverApp.currentDriverId = resolvedDriverId;
