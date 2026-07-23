@@ -1120,6 +1120,67 @@
     return isDriverMobileAppRoute();
   }
 
+  function isRiderDedicatedSurface() {
+    return state.route === "riders";
+  }
+
+  function isRiderJwtRole(jwtRole) {
+    var role = safeText(jwtRole, "").toLowerCase();
+    return role === "rider" || role === "staff";
+  }
+
+  function isRiderSurfaceAuthenticated() {
+    return !!getAccessToken() && isRiderJwtRole(getJwtSessionRole());
+  }
+
+  function getRiderSurfaceIdentityName() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.getSessionProfile === "function") {
+        var sessionProfile = window.AmiCorSession.getSessionProfile() || {};
+        var profileName = safeText(sessionProfile.displayName, "");
+        if (profileName) {
+          return profileName;
+        }
+      }
+      if (window.AmiCorSession && typeof window.AmiCorSession.getCurrent === "function") {
+        var current = window.AmiCorSession.getCurrent() || {};
+        var identity = safeObject(current.identity);
+        var identityName = safeText(identity.name || identity.display_name, "");
+        if (identityName) {
+          return identityName;
+        }
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  function getRiderSurfacePresentation() {
+    var jwtRole = getJwtSessionRole();
+    var riderProfile = ROLE_PROFILE.rider;
+    if (!isRiderSurfaceAuthenticated()) {
+      return {
+        displayName: "Signed Out",
+        displaySubrole: "Rider",
+        badgeRole: "rider",
+        profile: riderProfile
+      };
+    }
+    if (jwtRole === "staff") {
+      return {
+        displayName: getRiderSurfaceIdentityName() || "Rider Staff",
+        displaySubrole: "Rider Staff",
+        badgeRole: "rider",
+        profile: riderProfile
+      };
+    }
+    return {
+      displayName: getRiderSurfaceIdentityName() || "Rider",
+      displaySubrole: "Rider",
+      badgeRole: "rider",
+      profile: riderProfile
+    };
+  }
+
   function wrapDriverMobilePage(bodyHtml) {
     return '<div class="driver-mobile-page">' + String(bodyHtml || "") + '</div>';
   }
@@ -1580,6 +1641,9 @@
   }
 
   function syncPlatformRoleAuth(platformRole) {
+    if (isRiderDedicatedSurface() || dedicatedRouteFromPath(window.location.pathname) === "riders") {
+      return Promise.resolve(false);
+    }
     var authRole = resolveAuthRoleForPlatformRole(platformRole);
     if (!authRole || !getAccessToken()) {
       return Promise.resolve(false);
@@ -2515,7 +2579,22 @@
     var displayRole = platformRole;
     var displayName = "";
     var displaySubrole = titleizeWords(displayRole);
-    if (isDriverMobileAppRoute()) {
+    var badgeRole = platformRole;
+    var badgeProfile = profile;
+    var workspaceProfile = profile;
+    var roleSelectValue = platformRole;
+    var preferJwtRoleLabel = true;
+
+    if (isRiderDedicatedSurface()) {
+      var riderPresentation = getRiderSurfacePresentation();
+      displayName = riderPresentation.displayName;
+      displaySubrole = riderPresentation.displaySubrole;
+      badgeRole = riderPresentation.badgeRole;
+      badgeProfile = riderPresentation.profile;
+      workspaceProfile = riderPresentation.profile;
+      roleSelectValue = "rider";
+      preferJwtRoleLabel = false;
+    } else if (isDriverMobileAppRoute()) {
       var mobileAuth = driverMobileAuthCache || null;
       if (!mobileAuth || !mobileAuth.valid) {
         var persistedBadge = readPersistedDriverSession();
@@ -2536,6 +2615,9 @@
         displayName = "Driver Mobile";
         displaySubrole = "sign in required";
       }
+      badgeRole = displayRole;
+      badgeProfile = ROLE_PROFILE[displayRole] || profile;
+      preferJwtRoleLabel = false;
     } else if (state.route === "drivers" && platformRole === "driver") {
       var driverBadgeAuth = driverMobileAuthCache || null;
       if ((!driverBadgeAuth || !driverBadgeAuth.valid) && hasValidDriverMobileSession()) {
@@ -2556,29 +2638,27 @@
       }
     }
     try {
-      if (!displayName && !isDriverMobileAppRoute() && window.AmiCorSession && typeof window.AmiCorSession.getIdentity === "function") {
+      if (!displayName && !isDriverMobileAppRoute() && !isRiderDedicatedSurface() && window.AmiCorSession && typeof window.AmiCorSession.getIdentity === "function") {
         var identity = window.AmiCorSession.getIdentity() || {};
         displayName = safeText(identity.name || identity.display_name, "");
       }
     } catch (_) {}
-    if (!displayName) {
+    if (!displayName && !isRiderDedicatedSurface()) {
       displayName = displayRole === "dispatcher" ? "Dispatcher" : titleizeWords(displayRole);
     }
     var jwtRole = getJwtSessionRole();
-    var badgeRole = isDriverMobileAppRoute() ? displayRole : platformRole;
-    var badgeProfile = isDriverMobileAppRoute() ? (ROLE_PROFILE[displayRole] || profile) : profile;
     document.body.setAttribute("data-role", badgeRole);
     els.roleBadge.textContent = "role: " + badgeRole;
     els.roleContext.textContent = badgeProfile.context;
     if (els.roleSelect && !isDriverMobileAppRoute()) {
-      els.roleSelect.value = platformRole;
+      els.roleSelect.value = roleSelectValue;
     }
     try {
       var userNameEl = document.getElementById("ops-user-name");
       var userRoleEl = document.getElementById("ops-user-role");
       if (userNameEl) userNameEl.textContent = displayName;
       if (userRoleEl) {
-        userRoleEl.textContent = jwtRole ? titleizeWords(jwtRole) : displaySubrole;
+        userRoleEl.textContent = preferJwtRoleLabel && jwtRole ? titleizeWords(jwtRole) : displaySubrole;
       }
     } catch (_) {}
 
@@ -2598,7 +2678,6 @@
     }
 
     if (els.workspacePill) {
-      var workspaceProfile = ROLE_PROFILE[platformRole] || ROLE_PROFILE.admin;
       els.workspacePill.className = "badge badge-soft";
       els.workspacePill.textContent = "workspace: " + workspaceProfile.emphasis;
     }
@@ -4769,7 +4848,7 @@
     }
 
     var authBanner = "";
-    if (!getAccessToken()) {
+    if (!isRiderSurfaceAuthenticated()) {
       authBanner =
         '<div class="rider-auth-required" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
           '<strong>Sign in required.</strong> Log in as a rider to submit ride requests. ' +
