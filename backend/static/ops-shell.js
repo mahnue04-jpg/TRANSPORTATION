@@ -5739,9 +5739,6 @@
             offerEnvelope
           );
           if (apiPending) return "loading_assignment";
-          if (safeText(priorDriverApp.mobileUiState, "") === "api_error") {
-            return "api_error";
-          }
           return "awaiting_assignment";
         })()
       };
@@ -5768,7 +5765,11 @@
         notifications: Array.isArray(priorEmpty.notifications) ? priorEmpty.notifications : [],
         documents: Array.isArray(priorEmpty.documents) ? priorEmpty.documents : [],
         lastStatusUpdate: safeText(priorEmpty.lastStatusUpdate, "Loading assignment"),
-        mobileUiState: safeText(priorEmpty.mobileUiState, "loading_assignment")
+        mobileUiState: (function () {
+          var prior = safeText(priorEmpty.mobileUiState, "loading_assignment");
+          if (prior === "api_error") return "awaiting_assignment";
+          return prior;
+        })()
       };
       return;
     }
@@ -11167,9 +11168,11 @@
     }
 
     if (preserveOnEmpty) {
-      if (isDriverMobileSurface() && priorCompleted && authoritativeEmpty && apiHealthy) {
+      if (isDriverMobileSurface() && authoritativeEmpty && apiHealthy) {
         resetDriverMobileAfterCompletion();
         clearDriverSyncWarning();
+        state.driverApp = safeObject(state.driverApp);
+        state.driverApp.mobileBootstrapError = "";
         applyDriverWorkflowSnapshot(
           resolvedDriverId,
           completionOk ? completionSnapshot : null,
@@ -11297,6 +11300,15 @@
         );
       }
       if (isDriverMobileSurface()) {
+        if (authoritativeEmpty && apiHealthy) {
+          resetDriverMobileAfterCompletion();
+          clearDriverSyncWarning();
+          state.driverApp = safeObject(state.driverApp);
+          state.driverApp.mobileBootstrapError = "";
+          ensureDriverMobileState(null);
+          scheduleRenderPage(0);
+          return;
+        }
         state.driverApp = safeObject(state.driverApp);
         var priorUiOnStale = safeText(state.driverApp.mobileUiState, "loading_assignment");
         state.driverApp.mobileUiState = "api_error";
@@ -11332,6 +11344,8 @@
     }
 
     clearDriverSyncWarning();
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.mobileBootstrapError = "";
     var offerPayload = safeObject(offerEnvelope && offerEnvelope.offer);
     if (
       offerPayload
