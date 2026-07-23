@@ -454,6 +454,7 @@
   var driverBoundDriverId = "";
   var driverLastAppliedRefreshSeq = 0;
   var driverPollAbortController = null;
+  var driverWorkflowRefreshPromise = null;
   var driverLastConfirmedWorkflow = null;
   var driverLastAppliedObservedAt = 0;
   var driverActionInFlight = false;
@@ -5726,6 +5727,7 @@
         documents: documentRows,
         lastStatusUpdate: safeText(priorDriverApp.lastStatusUpdate, "Driver workspace synchronized"),
         lastActionResult: safeObject(priorDriverApp.lastActionResult),
+        syncWarning: safeText(priorDriverApp.syncWarning, ""),
         mobileUiState: (function () {
           if (liveQueue.length > 0) return "active_ride";
           if (!isDriverMobileAppRoute()) {
@@ -5737,6 +5739,9 @@
             offerEnvelope
           );
           if (apiPending) return "loading_assignment";
+          if (safeText(priorDriverApp.mobileUiState, "") === "api_error") {
+            return "api_error";
+          }
           return "awaiting_assignment";
         })()
       };
@@ -10934,6 +10939,16 @@
   }
 
   async function refreshDriverWorkflowData(options) {
+    if (driverWorkflowRefreshPromise) {
+      return driverWorkflowRefreshPromise;
+    }
+    driverWorkflowRefreshPromise = refreshDriverWorkflowDataImpl(options).finally(function () {
+      driverWorkflowRefreshPromise = null;
+    });
+    return driverWorkflowRefreshPromise;
+  }
+
+  async function refreshDriverWorkflowDataImpl(options) {
     var opts = options || {};
     var refreshSeq = ++driverWorkflowRefreshSeq;
     var token = opts.token || getAccessToken();
@@ -10976,14 +10991,6 @@
       clearDriverLiveTripState({ resetBoundIdentity: true });
       return;
     }
-
-    if (driverPollAbortController && typeof driverPollAbortController.abort === "function") {
-      try {
-        driverPollAbortController.abort();
-      } catch (_) {}
-    }
-    driverPollAbortController = typeof AbortController !== "undefined" ? new AbortController() : null;
-    var pollSignal = driverPollAbortController ? driverPollAbortController.signal : null;
 
     var resolvedDriverId = "";
     if (driverMobileView) {
@@ -11040,7 +11047,7 @@
     }
     bindDriverIdentity(resolvedDriverId);
 
-    var fetchOpts = pollSignal ? { signal: pollSignal } : {};
+    var fetchOpts = {};
     var driverBase = "/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId);
     var probe = await Promise.allSettled([
       fetchJson(driverBase + "/active-ride", fetchOpts, token),
@@ -11070,16 +11077,6 @@
       });
       return;
     }
-    if (pollSignal && pollSignal.aborted) {
-      logDriverPoll({
-        seq: refreshSeq,
-        driver_id: resolvedDriverId,
-        applied: false,
-        ignored_reason: "aborted"
-      });
-      return;
-    }
-
     function probeStatus(index) {
       if (!probe[index]) return "missing";
       if (probe[index].status === "fulfilled") return 200;
@@ -11099,7 +11096,8 @@
     var offerOk = probe[2].status === "fulfilled";
     var assignedOk = probe[3].status === "fulfilled";
     var completionOk = probe[4].status === "fulfilled";
-    var apiHealthy = activeRideOk && (assignedOk || offerOk || workspaceOk);
+    var coreProbeOk = activeRideOk || workspaceOk || offerOk || assignedOk;
+    var apiHealthy = coreProbeOk;
     var returnedRideId = safeText((safeObject(activeRidePayload && activeRidePayload.ride)).id, "");
     var lifecycleState = safeText(
       activeRidePayload && (activeRidePayload.assignment_state || (activeRidePayload.ride && (activeRidePayload.ride.lifecycle_state || activeRidePayload.ride.status))),
@@ -11119,6 +11117,13 @@
       completionSnapshot
     );
     var preserveOnEmpty = !apiHealthy || (wouldClearActiveTrip && priorTripId && !priorCompleted && !authoritativeEmpty);
+    var incomingTripIds = driverRefreshCollectTripIds(activeRidePayload, assignedRideRows || [], offerEnvelope);
+    var hasFreshOpenAssignment = openAssignment && apiHealthy && incomingTripIds.some(function (tripId) {
+      return !!tripId && tripId !== priorTripId;
+    });
+    if (hasFreshOpenAssignment) {
+      preserveOnEmpty = false;
+    }
     if (priorTripId && isTerminalRideStatus(
       normalizeRideStatusToken(
         (safeObject(priorWorkflow.activeRide && priorWorkflow.activeRide.ride)).lifecycle_state

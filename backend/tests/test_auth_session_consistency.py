@@ -152,3 +152,63 @@ def test_driver_login_succeeds_with_offer_pending_availability_and_active_assign
         )
         assert assignment is not None
         assert str(assignment.assignment_state) == DispatchAssignmentState.OFFERED.value
+
+
+def test_mobile_login_offline_driver_with_active_workload_succeeds() -> None:
+    client = _client()
+    with SessionLocal() as db:
+        driver = (
+            db.query(HealthISFDriver)
+            .filter(HealthISFDriver.name.ilike("%Driver Five%"))
+            .first()
+        )
+        if driver is None:
+            driver = (
+                db.query(HealthISFDriver)
+                .filter(HealthISFDriver.phone.ilike("%1005%"))
+                .first()
+            )
+        assert driver is not None
+        ride = HealthISFRide(
+            id=hs.uuid4(),
+            organization_id=driver.organization_id,
+            passenger_name="Offline Login Proof",
+            passenger_phone="646-555-9005",
+            pickup_address="100 Proof Ave, New York, NY",
+            dropoff_address="200 Clinic Rd, New York, NY",
+            service_type="medical_transport",
+            status=RideStatus.ASSIGNED.value,
+            lifecycle_state=RideStatus.ASSIGNED.value,
+            driver_id=driver.id,
+        )
+        db.add(ride)
+        db.flush()
+        db.add(
+            HealthISFDispatchAssignment(
+                id=hs.uuid4(),
+                organization_id=driver.organization_id,
+                ride_id=ride.id,
+                driver_id=driver.id,
+                assignment_state=DispatchAssignmentState.OFFERED.value,
+            )
+        )
+        driver.status = DriverStatus.OFFLINE.value
+        driver.availability_state = "offline"
+        driver.auth_state = "inactive"
+        driver.is_online = False
+        db.commit()
+        phone = str(driver.phone)
+        driver_id = str(driver.id)
+
+    login = client.post("/api/health-isf/drivers/mobile-login", json={"phone": phone})
+    assert login.status_code == 200, login.text
+    assert login.json()["session_token"]
+
+    with SessionLocal() as db:
+        refreshed = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert refreshed is not None
+        assert refreshed.is_online is True
+        assert hs._coerce_driver_status(refreshed.status) in {
+            DriverStatus.AVAILABLE,
+            DriverStatus.ASSIGNED,
+        }

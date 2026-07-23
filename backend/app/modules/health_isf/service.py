@@ -4348,7 +4348,11 @@ def driver_login(
     current_status = _coerce_driver_status(driver.status)
     if workload > 0:
         if current_status in {DriverStatus.OFFLINE, DriverStatus.UNAVAILABLE, DriverStatus.AVAILABLE}:
-            _set_driver_status(db, driver, DriverStatus.ASSIGNED)
+            if current_status in {DriverStatus.OFFLINE, DriverStatus.UNAVAILABLE}:
+                _set_driver_status(db, driver, DriverStatus.AVAILABLE)
+                current_status = DriverStatus.AVAILABLE
+            if current_status == DriverStatus.AVAILABLE:
+                _set_driver_status(db, driver, DriverStatus.ASSIGNED)
     elif (
         current_status != DriverStatus.AVAILABLE
         and _driver_status_from_availability(driver.availability_state) == DriverStatus.AVAILABLE
