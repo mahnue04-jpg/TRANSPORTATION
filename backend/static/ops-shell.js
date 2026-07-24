@@ -1090,8 +1090,52 @@
     state.driverApp.syncWarning = "";
   }
 
+  function clearDriverMobileSyncError() {
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.syncWarning = "";
+    state.driverApp.mobileBootstrapError = "";
+  }
+
+  function recoverDriverMobileSyncUiState() {
+    if (!isDriverMobileAppRoute() || !hasValidDriverMobileSession()) {
+      return;
+    }
+    var appState = safeObject(state.driverApp);
+    if (safeText(appState.mobileUiState, "") !== "api_error") {
+      return;
+    }
+    var workflow = safeObject(state.driverWorkflow);
+    var hasOpenAssignment = driverRefreshHasOpenAssignment(
+      workflow.activeRide,
+      Array.isArray(workflow.assignedRides) ? workflow.assignedRides : [],
+      workflow.activeOffer
+    );
+    if (hasOpenAssignment) {
+      return;
+    }
+    resetDriverMobileAfterCompletion();
+    clearDriverMobileSyncError();
+  }
+
+  async function retryDriverMobileAssignmentSync() {
+    clearDriverMobileSyncError();
+    state.driverApp = safeObject(state.driverApp);
+    state.driverApp.mobileUiState = "loading_assignment";
+    scheduleRenderPage({ immediate: true });
+    try {
+      await refreshDriverWorkflowData({ forceReset: true });
+    } catch (err) {
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileUiState = "api_error";
+      state.driverApp.mobileBootstrapError = safeText(err && err.message, "driver_assignment_sync_failed");
+      markDriverSyncWarning(state.driverApp.mobileBootstrapError);
+    }
+    recoverDriverMobileSyncUiState();
+    scheduleRenderPage({ immediate: true });
+  }
+
   var DRIVER_UI_RENDER_MS = 300;
-  var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 12000;
+  var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 30000;
   var DRIVER_WORKSPACE_ROLES = ["driver", "admin", "dispatcher", "supervisor"];
 
   function hasValidDriverMobileSession() {
@@ -6186,6 +6230,7 @@
       return renderDriverMobileLoginForm();
     }
     ensureDriverMobileState(slice);
+    recoverDriverMobileSyncUiState();
     var persistedSession = readPersistedDriverSession();
     var sessionAuth = driverMobileAuthCache || (persistedSession ? {
       valid: true,
@@ -6214,8 +6259,13 @@
         driverSessionHeader +
         '<div class="driver-workflow-card" style="border-color:#fca5a5;background:#fff7f7;">' +
         '<strong>Assignment sync error</strong>' +
-        '<p class="muted">' + escapeHtml(safeText(appState.syncWarning, "Unable to load driver assignment. Refresh to retry.")) + '</p>' +
-        '<button class="preview-action driver-action" type="button" onclick="window.AmiOpsShellActions && window.AmiOpsShellActions.refreshDriverWorkflowData && window.AmiOpsShellActions.refreshDriverWorkflowData({})">Retry Sync</button>' +
+        '<p class="muted">' + escapeHtml(
+          safeText(
+            appState.syncWarning,
+            safeText(appState.mobileBootstrapError, "Unable to load driver assignment. Refresh to retry.")
+          )
+        ) + '</p>' +
+        '<button class="preview-action driver-action" type="button" onclick="window.AmiOpsShellActions && window.AmiOpsShellActions.retryDriverMobileAssignmentSync && window.AmiOpsShellActions.retryDriverMobileAssignmentSync()">Retry Sync</button>' +
         '</div>'
       );
     }
@@ -10959,8 +11009,16 @@
     var driverMobileView = isDriverMobileSurface() || roleView === "driver";
     if (isDriverMobileAppRoute() && mobileCtx.authenticated) {
       state.driverApp = safeObject(state.driverApp);
-      if (!state.driverApp.mobileUiState || state.driverApp.mobileUiState === "awaiting_assignment") {
+      var priorMobileUi = safeText(state.driverApp.mobileUiState, "loading_assignment");
+      if (
+        !priorMobileUi
+        || priorMobileUi === "awaiting_assignment"
+        || priorMobileUi === "api_error"
+      ) {
         state.driverApp.mobileUiState = "loading_assignment";
+      }
+      if (priorMobileUi === "api_error") {
+        clearDriverMobileSyncError();
       }
       state.driverApp.currentDriverId = mobileCtx.driverId;
       state.driverApp.shiftOnline = true;
@@ -11054,7 +11112,9 @@
       fetchJson(driverBase + "/active-ride", fetchOpts, token),
       fetchJson(driverBase + "/live-workspace", fetchOpts, token),
       fetchJson(driverBase + "/active-offer", fetchOpts, token),
-      fetchJson(driverBase + "/assigned-rides", fetchOpts, token),
+      fetchJson(driverBase + "/assigned-rides", fetchOpts, token)
+    ]);
+    var completionProbe = await Promise.allSettled([
       fetchJson(driverBase + "/completion-snapshot?limit=50", fetchOpts, token)
     ]);
 
@@ -11086,6 +11146,14 @@
       return match ? Number(match[1]) : "failed";
     }
 
+    function completionProbeStatus() {
+      if (!completionProbe[0]) return "missing";
+      if (completionProbe[0].status === "fulfilled") return 200;
+      var completionReason = safeText(completionProbe[0].reason && completionProbe[0].reason.message, "error");
+      var completionMatch = completionReason.match(/http_(\d+)/);
+      return completionMatch ? Number(completionMatch) : "failed";
+    }
+
     function driverCoreProbeAuthFailed() {
       var statuses = [probeStatus(0), probeStatus(1), probeStatus(2), probeStatus(3)];
       var authFailures = statuses.filter(function (status) {
@@ -11098,13 +11166,15 @@
     var workspacePayload = probe[1].status === "fulfilled" ? safeObject(probe[1].value) : null;
     var offerEnvelope = probe[2].status === "fulfilled" ? safeObject(probe[2].value) : null;
     var assignedRideRows = probe[3].status === "fulfilled" && Array.isArray(probe[3].value) ? probe[3].value : null;
-    var completionSnapshot = probe[4].status === "fulfilled" ? safeObject(probe[4].value) : null;
+    var completionSnapshot = completionProbe[0] && completionProbe[0].status === "fulfilled"
+      ? safeObject(completionProbe[0].value)
+      : null;
 
     var activeRideOk = probe[0].status === "fulfilled";
     var workspaceOk = probe[1].status === "fulfilled";
     var offerOk = probe[2].status === "fulfilled";
     var assignedOk = probe[3].status === "fulfilled";
-    var completionOk = probe[4].status === "fulfilled";
+    var completionOk = !!(completionProbe[0] && completionProbe[0].status === "fulfilled");
     var coreProbeOk = activeRideOk || workspaceOk || offerOk || assignedOk;
     var apiHealthy = coreProbeOk;
     var returnedRideId = safeText((safeObject(activeRidePayload && activeRidePayload.ride)).id, "");
@@ -11211,7 +11281,7 @@
                 live_workspace: probeStatus(1),
                 active_offer: probeStatus(2),
                 assigned_rides: probeStatus(3),
-                completion_snapshot: probeStatus(4)
+                completion_snapshot: completionProbeStatus()
               }
             },
             frontend_state_transition: priorUiOnApiError + "->login_required",
@@ -11238,7 +11308,7 @@
               live_workspace: probeStatus(1),
               active_offer: probeStatus(2),
               assigned_rides: probeStatus(3),
-              completion_snapshot: probeStatus(4)
+              completion_snapshot: completionProbeStatus()
             }
           },
           http_status: probeStatus(0),
@@ -11260,7 +11330,7 @@
           live_workspace: probeStatus(1),
           active_offer: probeStatus(2),
           assigned_rides: probeStatus(3),
-          completion_snapshot: probeStatus(4)
+          completion_snapshot: completionProbeStatus()
         },
         returned_ride_id: returnedRideId,
         lifecycle_state: lifecycleState,
@@ -11312,6 +11382,7 @@
         state.driverApp = safeObject(state.driverApp);
         var priorUiOnStale = safeText(state.driverApp.mobileUiState, "loading_assignment");
         state.driverApp.mobileUiState = "api_error";
+        markDriverSyncWarning("Unable to confirm active assignment. Retry sync or wait for dispatch.");
         logDriverMobileRefreshSync({
           event: "assignment_refresh_preserved_stale",
           requested_ride_id: returnedRideId,
@@ -11324,7 +11395,7 @@
               live_workspace: probeStatus(1),
               active_offer: probeStatus(2),
               assigned_rides: probeStatus(3),
-              completion_snapshot: probeStatus(4)
+              completion_snapshot: completionProbeStatus()
             }
           },
           route: driverBase + "/active-ride",
@@ -11381,7 +11452,7 @@
         live_workspace: probeStatus(1),
         active_offer: probeStatus(2),
         assigned_rides: probeStatus(3),
-        completion_snapshot: probeStatus(4)
+        completion_snapshot: completionProbeStatus()
       },
       returned_ride_id: returnedRideId,
       lifecycle_state: lifecycleState,
@@ -11412,7 +11483,7 @@
             live_workspace: probeStatus(1),
             active_offer: probeStatus(2),
             assigned_rides: probeStatus(3),
-            completion_snapshot: probeStatus(4)
+            completion_snapshot: completionProbeStatus()
           }
         },
         http_status: 200,
@@ -11998,6 +12069,7 @@
     var opts = options || {};
     var silent = opts.silent === true;
     var bootstrapTimedOut = false;
+    var bootstrapRefreshSettled = false;
     var bootstrapTimer = null;
 
     if (!silent) {
@@ -12013,12 +12085,15 @@
     }
 
     bootstrapTimer = setTimeout(function () {
-      if (!state.loading) return;
+      if (!state.loading || bootstrapRefreshSettled) return;
       bootstrapTimedOut = true;
       state.loading = false;
       state.driverApp = safeObject(state.driverApp);
-      state.driverApp.mobileUiState = "api_error";
-      state.driverApp.mobileBootstrapError = "Driver mobile bootstrap timed out after " + String(DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS) + "ms";
+      if (safeText(state.driverApp.mobileUiState, "") !== "awaiting_assignment") {
+        state.driverApp.mobileUiState = "api_error";
+        state.driverApp.mobileBootstrapError = "Driver mobile bootstrap timed out after " + String(DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS) + "ms";
+        markDriverSyncWarning(state.driverApp.mobileBootstrapError);
+      }
       renderPage();
     }, DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS);
 
@@ -12055,7 +12130,10 @@
         state.driverApp.mobileUiState = "loading_assignment";
         state.driverApp.shiftOnline = true;
         try {
-          await refreshDriverWorkflowData({ forceReset: opts.forceDriverReset === true });
+          await refreshDriverWorkflowData({ forceReset: opts.forceDriverReset === true }).finally(function () {
+            bootstrapRefreshSettled = true;
+          });
+          recoverDriverMobileSyncUiState();
           state.driverApp.mobileBootstrapError = "";
         } catch (syncErr) {
           state.driverApp.mobileUiState = "api_error";
@@ -12071,7 +12149,21 @@
       if (bootstrapTimer) {
         clearTimeout(bootstrapTimer);
       }
-      if (!bootstrapTimedOut) {
+      if (bootstrapTimedOut && bootstrapRefreshSettled) {
+        recoverDriverMobileSyncUiState();
+        state.loading = false;
+        state.hydration = {
+          authTokenPresent: !!getAccessToken() || hasValidDriverMobileSession(),
+          opsHydrated: false,
+          roleSlice: "driver",
+          lastUpdatedAt: new Date().toISOString(),
+          warningCount: state.fetchWarnings.length,
+          integrityState: state.driverApp.mobileUiState === "api_error" ? "DEGRADED" : "replay_safe"
+        };
+        recomputeAssistantRuntimeState();
+        persistSessionState();
+        renderPage();
+      } else if (!bootstrapTimedOut) {
         state.loading = false;
         state.hydration = {
           authTokenPresent: !!getAccessToken() || hasValidDriverMobileSession(),
@@ -13549,6 +13641,7 @@
     },
     sendJson: sendJson,
     refreshDriverWorkflowData: refreshDriverWorkflowData,
+    retryDriverMobileAssignmentSync: retryDriverMobileAssignmentSync,
     applyDriverWorkflowSnapshot: applyDriverWorkflowSnapshot,
     scheduleRenderPage: scheduleRenderPage,
     lockDriverHydration: lockDriverHydration,
