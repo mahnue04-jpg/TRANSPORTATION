@@ -1390,6 +1390,76 @@ def _schema_add_column_if_missing(
         )
 
 
+def ensure_driver_mobile_login_schema() -> None:
+    """Ensure only the tables/columns required for public driver mobile login."""
+    from app.db.session import engine
+
+    Base.metadata.tables["health_isf_driver_sessions"].create(bind=engine, checkfirst=True)
+
+    with engine.begin() as conn:
+        inspector = inspect(conn)
+        table_names = set(inspector.get_table_names())
+
+        if "health_isf_drivers" in table_names:
+            datetime_sql = _schema_datetime_sql(conn.dialect.name)
+            driver_column_types = {
+                "auth_state": "VARCHAR(32) NOT NULL DEFAULT 'inactive'",
+                "availability_state": "VARCHAR(32) NOT NULL DEFAULT 'offline'",
+                "is_online": "BOOLEAN NOT NULL DEFAULT FALSE",
+                "last_seen_at": datetime_sql,
+                "version": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for column_name, column_type in driver_column_types.items():
+                _schema_add_column_if_missing(
+                    conn,
+                    inspector,
+                    "health_isf_drivers",
+                    column_name,
+                    column_type,
+                )
+
+        if "health_isf_dispatch_assignments" not in table_names:
+            try:
+                Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
+            except Exception:
+                _SCHEMA_LOGGER.exception("ensure_driver_mobile_login_dispatch_table_failed")
+            return
+
+        datetime_sql = _schema_datetime_sql(conn.dialect.name)
+        dispatch_assignment_column_types = {
+            "score": "FLOAT",
+            "score_breakdown_json": "TEXT",
+            "timeout_seconds": "INTEGER NOT NULL DEFAULT 90",
+            "queued_at": datetime_sql,
+            "search_started_at": datetime_sql,
+            "offered_at": datetime_sql,
+            "offer_expires_at": datetime_sql,
+            "assigned_at": datetime_sql,
+            "accepted_at": datetime_sql,
+            "en_route_pickup_at": datetime_sql,
+            "pickup_complete_at": datetime_sql,
+            "dropoff_complete_at": datetime_sql,
+            "reassignment_pending_at": datetime_sql,
+            "reassignment_started_at": datetime_sql,
+            "reassignment_completed_at": datetime_sql,
+            "reassignment_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "reassignment_reason": "VARCHAR(128)",
+            "reassignment_chain_id": "VARCHAR(64)",
+            "rejected_at": datetime_sql,
+            "expired_at": datetime_sql,
+            "closed_reason": "VARCHAR(128)",
+            "metadata_json": "TEXT",
+        }
+        for column_name, column_type in dispatch_assignment_column_types.items():
+            _schema_add_column_if_missing(
+                conn,
+                inspector,
+                "health_isf_dispatch_assignments",
+                column_name,
+                column_type,
+            )
+
+
 def ensure_health_isf_schema() -> None:
     """Apply lightweight additive schema upgrades for older Health ISF databases."""
     from app.db.session import engine
