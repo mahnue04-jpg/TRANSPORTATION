@@ -8768,7 +8768,11 @@ async def driver_mobile_login(
     """Public driver sign-in for the mobile app (phone verification, no platform JWT)."""
     from app.modules.health_isf.models import ensure_health_isf_schema
 
-    ensure_health_isf_schema()
+    try:
+        ensure_health_isf_schema()
+    except Exception as exc:
+        logger.exception("driver_mobile_login_schema_failed phone=%s", payload.phone)
+        raise HTTPException(status_code=503, detail="Driver login schema unavailable") from exc
     try:
         driver = service.find_driver_by_login_phone(
             db,

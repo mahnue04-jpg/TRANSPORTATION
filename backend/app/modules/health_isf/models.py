@@ -2,6 +2,7 @@
 Database models for Health ISF (Integrated Services for Health) module.
 MVP scope: ride requests, drivers, providers, dispatch tracking, trip status, payout placeholder.
 """
+import logging
 from datetime import datetime
 from enum import Enum
 from sqlalchemy import (
@@ -1359,6 +1360,36 @@ class SecuritySuspiciousActivity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
+_SCHEMA_LOGGER = logging.getLogger(__name__)
+
+
+def _schema_datetime_sql(dialect_name: str) -> str:
+    if dialect_name == "postgresql":
+        return "TIMESTAMP WITH TIME ZONE"
+    return "DATETIME"
+
+
+def _schema_add_column_if_missing(
+    conn,
+    inspector,
+    table_name: str,
+    column_name: str,
+    column_type_sql: str,
+) -> None:
+    columns = {column["name"] for column in inspector.get_columns(table_name)}
+    if column_name in columns:
+        return
+    try:
+        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type_sql}"))
+    except Exception:
+        _SCHEMA_LOGGER.exception(
+            "health_isf_schema_add_column_failed table=%s column=%s type=%s",
+            table_name,
+            column_name,
+            column_type_sql,
+        )
+
+
 def ensure_health_isf_schema() -> None:
     """Apply lightweight additive schema upgrades for older Health ISF databases."""
     from app.db.session import engine
@@ -1482,43 +1513,50 @@ def ensure_health_isf_schema() -> None:
                 #     conn.execute(text("UPDATE health_isf_ride_execution_actions SET event_id = :eid WHERE id = :id"), {"eid": str(uuid.uuid4()), "id": row["id"]})
 
         if "health_isf_driver_sessions" not in table_names:
-            Base.metadata.tables["health_isf_driver_sessions"].create(bind=conn)
+            try:
+                Base.metadata.tables["health_isf_driver_sessions"].create(bind=conn)
+            except Exception:
+                _SCHEMA_LOGGER.exception("health_isf_driver_sessions_create_failed")
 
         if "health_isf_dispatch_assignments" not in table_names:
-            Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
-        else:
-            dispatch_assignment_columns = {column["name"] for column in inspector.get_columns("health_isf_dispatch_assignments")}
-            _dispatch_assignment_column_upgrades = {
+            try:
+                Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
+            except Exception:
+                _SCHEMA_LOGGER.exception("health_isf_dispatch_assignments_create_failed")
+        elif "health_isf_dispatch_assignments" in table_names:
+            datetime_sql = _schema_datetime_sql(conn.dialect.name)
+            dispatch_assignment_column_types = {
                 "score": "FLOAT",
                 "score_breakdown_json": "TEXT",
                 "timeout_seconds": "INTEGER NOT NULL DEFAULT 90",
-                "queued_at": "DATETIME",
-                "search_started_at": "DATETIME",
-                "offered_at": "DATETIME",
-                "offer_expires_at": "DATETIME",
-                "assigned_at": "DATETIME",
-                "accepted_at": "DATETIME",
-                "en_route_pickup_at": "DATETIME",
-                "pickup_complete_at": "DATETIME",
-                "dropoff_complete_at": "DATETIME",
-                "reassignment_pending_at": "DATETIME",
-                "reassignment_started_at": "DATETIME",
-                "reassignment_completed_at": "DATETIME",
+                "queued_at": datetime_sql,
+                "search_started_at": datetime_sql,
+                "offered_at": datetime_sql,
+                "offer_expires_at": datetime_sql,
+                "assigned_at": datetime_sql,
+                "accepted_at": datetime_sql,
+                "en_route_pickup_at": datetime_sql,
+                "pickup_complete_at": datetime_sql,
+                "dropoff_complete_at": datetime_sql,
+                "reassignment_pending_at": datetime_sql,
+                "reassignment_started_at": datetime_sql,
+                "reassignment_completed_at": datetime_sql,
                 "reassignment_attempt_count": "INTEGER NOT NULL DEFAULT 0",
                 "reassignment_reason": "VARCHAR(128)",
                 "reassignment_chain_id": "VARCHAR(64)",
-                "rejected_at": "DATETIME",
-                "expired_at": "DATETIME",
+                "rejected_at": datetime_sql,
+                "expired_at": datetime_sql,
                 "closed_reason": "VARCHAR(128)",
                 "metadata_json": "TEXT",
             }
-            for column_name, column_type in _dispatch_assignment_column_upgrades.items():
-                if column_name not in dispatch_assignment_columns:
-                    conn.execute(
-                        text(
-                            f"ALTER TABLE health_isf_dispatch_assignments ADD COLUMN {column_name} {column_type}"
-                        )
-                    )
+            for column_name, column_type in dispatch_assignment_column_types.items():
+                _schema_add_column_if_missing(
+                    conn,
+                    inspector,
+                    "health_isf_dispatch_assignments",
+                    column_name,
+                    column_type,
+                )
 
         if "health_isf_dispatch_logs" in table_names:
             dispatch_log_columns = {column["name"] for column in inspector.get_columns("health_isf_dispatch_logs")}
