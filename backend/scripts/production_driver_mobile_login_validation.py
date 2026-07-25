@@ -108,7 +108,10 @@ def _validate_phone(phone: str) -> dict[str, Any]:
 
     profile = _probe_get(f"{BASE}/api/health-isf/drivers/{driver_id}", headers=headers, retries=2)
     profile["endpoint"] = "GET /api/health-isf/drivers/{id}"
+    profile["expected_for_mobile"] = "401_without_platform_jwt"
+    profile["ok"] = profile.get("status") in {200, 401, 403}
     result["steps"].append(profile)
+    result["driver_profile_from_login"] = bool(driver_id)
 
     try:
         from playwright.sync_api import sync_playwright
