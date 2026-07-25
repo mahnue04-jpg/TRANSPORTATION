@@ -6282,9 +6282,10 @@
     var driverSessionHeader = "";
     if (sessionAuth && safeText(sessionAuth.driver_id, "")) {
       driverSessionHeader =
-        '<div class="driver-session-banner" style="margin-bottom:12px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#f8fafc;">' +
-          '<strong>Active Driver:</strong> ' + escapeHtml(safeText(sessionAuth.driver_name, "Driver")) +
-          ' <span class="muted">ID: ' + escapeHtml(safeText(sessionAuth.driver_id, "")) + '</span>' +
+        '<div class="driver-session-banner" style="margin-bottom:12px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#f8fafc;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">' +
+          '<div><strong>Active Driver:</strong> ' + escapeHtml(safeText(sessionAuth.driver_name, "Driver")) +
+          ' <span class="muted">ID: ' + escapeHtml(safeText(sessionAuth.driver_id, "")) + '</span></div>' +
+          '<button class="preview-action driver-action" type="button" data-driver-action="sign_out">Sign Out</button>' +
         '</div>';
     }
     if (mobileUiState === "loading_assignment") {
@@ -10004,6 +10005,23 @@
       return;
     }
 
+    if (action === "sign_out") {
+      clearPersistedDriverSession();
+      driverMobileAuthCache = null;
+      driverLastConfirmedWorkflow = null;
+      resetDriverMobileAfterCompletion();
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileUiState = "login_required";
+      state.driverApp.mobileLogin = safeObject(state.driverApp.mobileLogin);
+      state.driverApp.mobileLogin.status = "Not signed in";
+      state.driverApp.mobileLogin.error = "";
+      clearDriverMobileSyncError();
+      state.driverApp.lastStatusUpdate = "Signed out";
+      window.AmiOpsShellState = state;
+      scheduleRenderPage({ immediate: true });
+      return;
+    }
+
     if (action === "accept_trip") {
       var visibleTripId = safeText(appState.activeTripId, "") || safeText(tripId, "");
       if (!visibleTripId) {
@@ -10351,7 +10369,7 @@
     if (!useDriverSessionOnly && token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
-    var retries = method === "GET" ? 1 : 0;
+    var retries = method === "GET" ? (isMobileDriverApiUrl(scopedUrl) ? 2 : 1) : 0;
     var attempt = 0;
     async function performFetch(currentToken) {
       var nextHeaders = applyDriverSessionHeaders({ "Accept": "application/json" }, currentToken, scopedUrl);
@@ -11313,7 +11331,29 @@
       var authFailures = statuses.filter(function (status) {
         return status === 401 || status === 403;
       }).length;
-      return authFailures >= 2 && authFailures >= statuses.length - 1;
+      return authFailures >= 2;
+    }
+
+    function driverCoreProbeNotFound() {
+      var statuses = [probeStatus(0), probeStatus(1), probeStatus(2), probeStatus(3)];
+      var notFound = statuses.filter(function (status) {
+        return status === 404;
+      }).length;
+      return notFound >= 2;
+    }
+
+    function invalidateDriverMobileSession(message) {
+      clearPersistedDriverSession();
+      driverMobileAuthCache = null;
+      state.driverApp = safeObject(state.driverApp);
+      state.driverApp.mobileUiState = "login_required";
+      state.driverApp.currentDriverId = "";
+      state.driverApp.activeTripId = "";
+      state.driverApp.tripQueue = [];
+      state.driverApp.mobileLogin = safeObject(state.driverApp.mobileLogin);
+      state.driverApp.mobileLogin.status = "Not signed in";
+      state.driverApp.mobileLogin.error = safeText(message, "Driver session invalid.");
+      markDriverSyncWarning(safeText(message, "Driver session invalid. Sign in again."));
     }
 
     var activeRidePayload = probe[0].status === "fulfilled" ? safeObject(probe[0].value) : null;
@@ -11417,14 +11457,33 @@
       if (isDriverMobileAppRoute() && !apiHealthy) {
         state.driverApp = safeObject(state.driverApp);
         var priorUiOnApiError = safeText(state.driverApp.mobileUiState, "loading_assignment");
+        if (driverCoreProbeNotFound()) {
+          invalidateDriverMobileSession(
+            "Driver profile was not found on this server. Sign in again with your registered driver phone."
+          );
+          logDriverMobileRefreshSync({
+            event: "assignment_refresh_driver_not_found",
+            requested_ride_id: returnedRideId,
+            assignment_state: lifecycleState,
+            api_response: {
+              http_status: {
+                active_ride: probeStatus(0),
+                live_workspace: probeStatus(1),
+                active_offer: probeStatus(2),
+                assigned_rides: probeStatus(3),
+                completion_snapshot: completionProbeStatus()
+              }
+            },
+            frontend_state_transition: priorUiOnApiError + "->login_required",
+            next_ui_state: "login_required",
+            extra: { refresh_seq: refreshSeq, ignored_reason: "driver_profile_not_found" }
+          });
+          ensureDriverMobileState(null);
+          scheduleRenderPage(0);
+          return;
+        }
         if (driverCoreProbeAuthFailed()) {
-          clearPersistedDriverSession();
-          driverMobileAuthCache = null;
-          state.driverApp.mobileUiState = "login_required";
-          state.driverApp.currentDriverId = "";
-          state.driverApp.activeTripId = "";
-          state.driverApp.tripQueue = [];
-          markDriverSyncWarning("Driver session expired. Sign in with your registered phone again.");
+          invalidateDriverMobileSession("Driver session expired. Sign in with your registered phone again.");
           logDriverMobileRefreshSync({
             event: "assignment_refresh_auth_expired",
             requested_ride_id: returnedRideId,
@@ -11449,7 +11508,7 @@
         state.driverApp.mobileUiState = "api_error";
         state.driverApp.shiftOnline = true;
         state.driverApp.currentDriverId = resolvedDriverId;
-        markDriverSyncWarning("Driver assignment sync failed. Retry refresh or re-login.");
+        markDriverSyncWarning("Driver assignment sync failed. Retry sync or sign out and sign in again.");
         logDriverMobileRefreshSync({
           event: "assignment_refresh_failed",
           requested_ride_id: returnedRideId,
