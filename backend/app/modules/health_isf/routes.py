@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth import (
     ROLE_ADMIN,
@@ -8765,6 +8766,9 @@ async def driver_mobile_login(
     db: Session = Depends(get_db),
 ):
     """Public driver sign-in for the mobile app (phone verification, no platform JWT)."""
+    from app.modules.health_isf.models import ensure_health_isf_schema
+
+    ensure_health_isf_schema()
     try:
         driver = service.find_driver_by_login_phone(
             db,
@@ -8773,6 +8777,9 @@ async def driver_mobile_login(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.exception("driver_mobile_login_lookup_failed phone=%s", payload.phone)
+        raise HTTPException(status_code=503, detail="Driver lookup database unavailable") from exc
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found for this phone number")
 
@@ -8784,52 +8791,69 @@ async def driver_mobile_login(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.exception("driver_mobile_login_session_failed phone=%s driver_id=%s", payload.phone, driver.id)
+        raise HTTPException(status_code=503, detail="Driver session database unavailable") from exc
 
     driver_obj = login_result["driver"]
     session_obj = login_result["session"]
     session_token = login_result["session_token"]
 
     emitter = get_emitter()
-    await emitter.emit_driver_status_changed(
-        organization_id=driver_obj.organization_id,
-        driver_id=driver_obj.id,
-        from_status="offline",
-        to_status=str(driver_obj.availability_state),
-        actor_user_id=str(driver_obj.id),
-        details={"event_name": "driver-mobile-online"},
-    )
-    await emitter.emit_dispatch_changed(
-        organization_id=driver_obj.organization_id,
-        event_name="driver-online",
-        actor_user_id=str(driver_obj.id),
-        details={"driver_id": driver_obj.id, "availability_state": driver_obj.availability_state, "source": "mobile_login"},
-    )
+    try:
+        await emitter.emit_driver_status_changed(
+            organization_id=driver_obj.organization_id,
+            driver_id=driver_obj.id,
+            from_status="offline",
+            to_status=str(driver_obj.availability_state or "available"),
+            actor_user_id=str(driver_obj.id),
+            details={"event_name": "driver-mobile-online"},
+        )
+        await emitter.emit_dispatch_changed(
+            organization_id=driver_obj.organization_id,
+            event_name="driver-online",
+            actor_user_id=str(driver_obj.id),
+            details={
+                "driver_id": driver_obj.id,
+                "availability_state": driver_obj.availability_state,
+                "source": "mobile_login",
+            },
+        )
+    except Exception:
+        logger.exception("driver_mobile_login_emitter_failed driver_id=%s", driver_obj.id)
+
+    organization_id = service.resolve_driver_organization_id(db, driver_obj, persist_missing=False)
+    if not organization_id:
+        organization_id = str(getattr(driver_obj, "organization_id", "") or "")
 
     response = DriverLoginResponse(
-        driver_id=driver_obj.id,
-        organization_id=service.resolve_driver_organization_id(db, driver_obj, persist_missing=False),
+        driver_id=str(driver_obj.id),
+        organization_id=str(organization_id),
         session_id=str(session_obj.id),
         session_token=session_token,
-        session_state=session_obj.session_state,
-        auth_state=driver_obj.auth_state,
-        availability_state=driver_obj.availability_state,
+        session_state=str(session_obj.session_state or "active"),
+        auth_state=str(driver_obj.auth_state or "active"),
+        availability_state=str(driver_obj.availability_state or "available"),
         is_online=bool(driver_obj.is_online),
         issued_at=session_obj.issued_at,
         expires_at=session_obj.expires_at,
     )
-    record_backend_assignment_sync(
-        db,
-        request=request,
-        event="mobile_login",
-        driver_id=driver_obj.id,
-        assignment_state=str(driver_obj.availability_state or ""),
-        api_response={
-            "session_id": str(session_obj.id),
-            "session_state": session_obj.session_state,
-            "auth_state": driver_obj.auth_state,
-            "availability_state": driver_obj.availability_state,
-        },
-    )
+    try:
+        record_backend_assignment_sync(
+            db,
+            request=request,
+            event="mobile_login",
+            driver_id=driver_obj.id,
+            assignment_state=str(driver_obj.availability_state or ""),
+            api_response={
+                "session_id": str(session_obj.id),
+                "session_state": session_obj.session_state,
+                "auth_state": driver_obj.auth_state,
+                "availability_state": driver_obj.availability_state,
+            },
+        )
+    except Exception:
+        logger.exception("driver_mobile_login_sync_log_failed driver_id=%s", driver_obj.id)
     return response
 
 

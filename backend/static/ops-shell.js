@@ -458,6 +458,7 @@
   var driverLastConfirmedWorkflow = null;
   var driverLastAppliedObservedAt = 0;
   var driverActionInFlight = false;
+  var driverMobileLoginInFlight = false;
   var DRIVER_SESSION_STORAGE_KEY = "amicor_driver_session";
   var MOBILE_SURFACE_STORAGE_KEY = "amicor_last_mobile_surface";
   var driverMobileAuthCache = null;
@@ -1135,6 +1136,7 @@
   }
 
   var DRIVER_UI_RENDER_MS = 300;
+  var DRIVER_MOBILE_LOGIN_TIMEOUT_MS = 30000;
   var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 30000;
   var DRIVER_WORKSPACE_ROLES = ["driver", "admin", "dispatcher", "supervisor"];
 
@@ -6145,16 +6147,111 @@
     );
   }
 
-  async function submitDriverMobileLogin() {
+  function classifyDriverLoginFailure(error, response, body) {
+    var status = response && response.status ? Number(response.status) : 0;
+    var message = safeText(error && error.message, "");
+    var detail = safeText(body && body.detail, "");
+    if (Array.isArray(body && body.detail)) {
+      detail = body.detail.map(function (item) {
+        return safeText(item && item.msg, safeText(item, "validation_error"));
+      }).join("; ");
+    }
+    if (message === "request_timeout") {
+      return {
+        category: "network_timeout",
+        message: "Network timeout: login took longer than 30 seconds. The server may still be waking up — wait and try again."
+      };
+    }
+    if (!response) {
+      if (/failed to fetch|networkerror|load failed/i.test(message)) {
+        return {
+          category: "render_cold_start",
+          message: "Cannot reach server (Render cold start or network issue). Wait about 30 seconds and try again."
+        };
+      }
+      return {
+        category: "network_timeout",
+        message: message || "Network error during driver login."
+      };
+    }
+    if (status === 404) {
+      return {
+        category: "driver_not_found",
+        message: detail || "Driver not found for this phone number."
+      };
+    }
+    if (status === 401 || status === 403) {
+      return {
+        category: "expired_session",
+        message: detail || "Session expired or unauthorized. Sign in again."
+      };
+    }
+    if (status === 502 || status === 503 || status === 504) {
+      return {
+        category: "render_cold_start",
+        message: detail || ("Server unavailable (HTTP " + String(status) + "). Possible Render cold start — wait and retry.")
+      };
+    }
+    if (status >= 500) {
+      return {
+        category: "render_cold_start",
+        message: detail || ("Server error during login (HTTP " + String(status) + "). If the app was sleeping, wait and retry.")
+      };
+    }
+    if (/multiple drivers match/i.test(detail)) {
+      return {
+        category: "driver_not_found",
+        message: detail + " Enter the optional Driver ID and try again."
+      };
+    }
+    return {
+      category: "driver_not_found",
+      message: detail || message || "Driver login failed."
+    };
+  }
+
+  function classifyDriverPostLoginSyncFailure(error) {
+    var message = safeText(error && error.message, "Driver assignment sync failed");
+    if (message === "request_timeout") {
+      return {
+        category: "post_login_sync_failure",
+        message: "Signed in, but assignment sync timed out after 30 seconds. Tap Retry Sync."
+      };
+    }
+    if (/http_401|http_403|session invalid|auth required/i.test(message)) {
+      return {
+        category: "expired_session",
+        message: "Signed in, but the driver session expired during sync. Sign in again."
+      };
+    }
+    if (/http_404|driver not found/i.test(message)) {
+      return {
+        category: "driver_not_found",
+        message: "Signed in, but driver profile was not found during sync."
+      };
+    }
+    return {
+      category: "post_login_sync_failure",
+      message: "Signed in, but post-login sync failed: " + message
+    };
+  }
+
+  async function submitDriverMobileLogin(options) {
+    var opts = options || {};
     var phoneInput = document.getElementById("driver-mobile-phone");
     var driverIdInput = document.getElementById("driver-mobile-id");
+    var loginButton = document.getElementById("driver-mobile-login-btn");
     var statusEl = document.getElementById("driver-mobile-login-status");
     var errorEl = document.getElementById("driver-mobile-login-error");
     var phone = readDriverMobilePhoneInput();
-    var driverId = safeText(driverIdInput && driverIdInput.value, "").trim();
+    var allowDriverId = opts.allowDriverId === true;
+    var driverId = allowDriverId ? safeText(driverIdInput && driverIdInput.value, "").trim() : "";
     state.driverApp = safeObject(state.driverApp);
     state.driverApp.mobileLogin = safeObject(state.driverApp.mobileLogin);
     state.driverApp.mobileLogin.phone = phone;
+    if (driverMobileLoginInFlight) {
+      return { ok: false, error: "Login already in progress" };
+    }
     if (!phone) {
       state.driverApp.mobileLogin.error = "Enter your driver phone number.";
       state.driverApp.mobileLogin.status = "Login failed";
@@ -6167,6 +6264,11 @@
       }
       return { ok: false };
     }
+    if (!allowDriverId && driverIdInput) {
+      driverIdInput.value = "";
+    }
+    driverMobileLoginInFlight = true;
+    if (loginButton) loginButton.disabled = true;
     state.driverApp.mobileLogin.status = "Signing in…";
     state.driverApp.mobileLogin.error = "";
     if (statusEl) {
@@ -6180,8 +6282,9 @@
     if (driverId) {
       payload.driver_id = driverId;
     }
+    var loginResult = { ok: false };
     try {
-      var response = await fetch("/api/health-isf/drivers/mobile-login", {
+      var response = await withTimeout(fetch("/api/health-isf/drivers/mobile-login", {
         method: "POST",
         headers: {
           "Accept": "application/json",
@@ -6189,22 +6292,20 @@
         },
         credentials: "same-origin",
         body: JSON.stringify(payload)
-      });
+      }), DRIVER_MOBILE_LOGIN_TIMEOUT_MS);
       var body = {};
       try {
         body = await response.json();
       } catch (_) {}
       if (!response.ok) {
-        var detail = safeText(body.detail, "Driver login failed");
-        if (Array.isArray(body.detail)) {
-          detail = body.detail.map(function (item) {
-            return safeText(item && item.msg, safeText(item, "validation_error"));
-          }).join("; ");
-        }
+        var failure = classifyDriverLoginFailure(null, response, body);
         state.driverApp.mobileLogin.status = "Login failed";
-        state.driverApp.mobileLogin.error = detail;
-        scheduleRenderPage({ immediate: true });
-        return { ok: false, error: detail };
+        state.driverApp.mobileLogin.error = "[" + failure.category.replace(/_/g, " ") + "] " + failure.message;
+        loginResult = { ok: false, error: failure.message, category: failure.category };
+        if (/multiple drivers match/i.test(failure.message)) {
+          loginResult.requiresDriverId = true;
+        }
+        return loginResult;
       }
       var priorSessionDriver = safeText((safeObject(state.driverApp)).currentDriverId, "");
       var nextSessionDriver = safeText(body.driver_id, "");
@@ -6252,16 +6353,36 @@
       });
       scheduleRenderPage({ immediate: true });
       try {
-        await refreshDriverWorkflowData({ forceReset: true });
-      } catch (_) {}
+        await withTimeout(refreshDriverWorkflowData({ forceReset: true }), DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS);
+      } catch (syncError) {
+        var syncFailure = classifyDriverPostLoginSyncFailure(syncError);
+        state.driverApp.mobileUiState = "api_error";
+        state.driverApp.syncWarning = syncFailure.message;
+        state.driverApp.mobileBootstrapError = syncFailure.message;
+        state.driverApp.mobileLogin.error = "[" + syncFailure.category.replace(/_/g, " ") + "] " + syncFailure.message;
+        markDriverSyncWarning(syncFailure.message);
+        loginResult = { ok: true, response: body, syncFailed: true, category: syncFailure.category };
+        return loginResult;
+      }
       scheduleRenderPage({ immediate: true });
-      return { ok: true, response: body };
+      loginResult = { ok: true, response: body };
+      return loginResult;
     } catch (error) {
-      var message = safeText(error && error.message, "Driver login failed");
+      var loginFailure = classifyDriverLoginFailure(error, null, null);
       state.driverApp.mobileLogin.status = "Login failed";
-      state.driverApp.mobileLogin.error = message;
+      state.driverApp.mobileLogin.error = "[" + loginFailure.category.replace(/_/g, " ") + "] " + loginFailure.message;
+      loginResult = { ok: false, error: loginFailure.message, category: loginFailure.category };
+      return loginResult;
+    } finally {
+      driverMobileLoginInFlight = false;
+      if (loginButton) loginButton.disabled = false;
+      if (safeText(state.driverApp.mobileLogin.status, "") === "Signing in…") {
+        state.driverApp.mobileLogin.status = "Login failed";
+        if (!safeText(state.driverApp.mobileLogin.error, "")) {
+          state.driverApp.mobileLogin.error = "[network timeout] Login did not complete. Try again.";
+        }
+      }
       scheduleRenderPage({ immediate: true });
-      return { ok: false, error: message };
     }
   }
 
@@ -9924,7 +10045,7 @@
     if (loginButton && loginButton.getAttribute("data-ami-login-bound") !== "1") {
       loginButton.setAttribute("data-ami-login-bound", "1");
       loginButton.addEventListener("click", function () {
-        void submitDriverMobileLogin();
+        void submitDriverMobileLogin({ allowDriverId: !!safeText(document.getElementById("driver-mobile-id") && document.getElementById("driver-mobile-id").value, "").trim() });
       });
     }
     var phoneInput = document.getElementById("driver-mobile-phone");

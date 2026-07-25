@@ -1481,20 +1481,44 @@ def ensure_health_isf_schema() -> None:
                 # for row in conn.execute(text("SELECT id FROM health_isf_ride_execution_actions WHERE event_id = '' OR event_id IS NULL")):
                 #     conn.execute(text("UPDATE health_isf_ride_execution_actions SET event_id = :eid WHERE id = :id"), {"eid": str(uuid.uuid4()), "id": row["id"]})
 
+        if "health_isf_driver_sessions" not in table_names:
+            Base.metadata.tables["health_isf_driver_sessions"].create(bind=conn)
+
         if "health_isf_dispatch_assignments" not in table_names:
             Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
         else:
             dispatch_assignment_columns = {column["name"] for column in inspector.get_columns("health_isf_dispatch_assignments")}
-            if "reassignment_started_at" not in dispatch_assignment_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_assignments ADD COLUMN reassignment_started_at DATETIME"))
-            if "reassignment_completed_at" not in dispatch_assignment_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_assignments ADD COLUMN reassignment_completed_at DATETIME"))
-            if "reassignment_attempt_count" not in dispatch_assignment_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_assignments ADD COLUMN reassignment_attempt_count INTEGER NOT NULL DEFAULT 0"))
-            if "reassignment_reason" not in dispatch_assignment_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_assignments ADD COLUMN reassignment_reason VARCHAR(128)"))
-            if "reassignment_chain_id" not in dispatch_assignment_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_assignments ADD COLUMN reassignment_chain_id VARCHAR(64)"))
+            _dispatch_assignment_column_upgrades = {
+                "score": "FLOAT",
+                "score_breakdown_json": "TEXT",
+                "timeout_seconds": "INTEGER NOT NULL DEFAULT 90",
+                "queued_at": "DATETIME",
+                "search_started_at": "DATETIME",
+                "offered_at": "DATETIME",
+                "offer_expires_at": "DATETIME",
+                "assigned_at": "DATETIME",
+                "accepted_at": "DATETIME",
+                "en_route_pickup_at": "DATETIME",
+                "pickup_complete_at": "DATETIME",
+                "dropoff_complete_at": "DATETIME",
+                "reassignment_pending_at": "DATETIME",
+                "reassignment_started_at": "DATETIME",
+                "reassignment_completed_at": "DATETIME",
+                "reassignment_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+                "reassignment_reason": "VARCHAR(128)",
+                "reassignment_chain_id": "VARCHAR(64)",
+                "rejected_at": "DATETIME",
+                "expired_at": "DATETIME",
+                "closed_reason": "VARCHAR(128)",
+                "metadata_json": "TEXT",
+            }
+            for column_name, column_type in _dispatch_assignment_column_upgrades.items():
+                if column_name not in dispatch_assignment_columns:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE health_isf_dispatch_assignments ADD COLUMN {column_name} {column_type}"
+                        )
+                    )
 
         if "health_isf_dispatch_logs" in table_names:
             dispatch_log_columns = {column["name"] for column in inspector.get_columns("health_isf_dispatch_logs")}
