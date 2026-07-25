@@ -1444,6 +1444,10 @@ def _assignment_counts_as_active_workload(
         return False
     if _is_orphaned_dispatch_assignment(row, ride):
         return False
+    from app.modules.health_isf.scheduling import is_protected_scheduled_reservation
+
+    if is_protected_scheduled_reservation(ride, row):
+        return False
     return True
 
 
@@ -1559,6 +1563,11 @@ def _release_orphaned_dispatch_assignment(
 
     if is_operational_excluded_ride(ride):
         _close_excluded_driver_binding(db, row, ride, reason=reason)
+        return
+
+    from app.modules.health_isf.scheduling import is_protected_scheduled_reservation
+
+    if is_protected_scheduled_reservation(ride, row):
         return
 
     if (
@@ -2643,6 +2652,10 @@ def evaluate_dispatch_candidates(
             continue
         if not _driver_is_dispatch_candidate(db, driver, exclude_driver_ids=exclude_ids):
             continue
+        from app.modules.health_isf.scheduling import driver_has_schedule_conflict
+
+        if driver_has_schedule_conflict(db, str(driver.id), ride):
+            continue
 
         active_workload = _driver_active_workload_count(db, driver.id)
         mobile_ready = _driver_mobile_dispatch_ready(driver)
@@ -3116,6 +3129,20 @@ def auto_assign_request(
     lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
     if lifecycle in {RideStatus.COMPLETED.value, RideStatus.CANCELLED.value, RideStatus.FAILED.value}:
         raise ValueError("Cannot auto-assign terminal ride")
+
+    from app.modules.health_isf.scheduling import is_dispatch_eligible
+
+    if not is_dispatch_eligible(ride):
+        _commit_or_rollback(db)
+        return {
+            "ride": ride,
+            "offer": None,
+            "candidates": [],
+            "candidate_snapshot": [],
+            "candidate_order_valid": True,
+            "selection_parity_ok": True,
+            "reason": "ride_not_dispatch_eligible",
+        }
 
     reconcile_organization_driver_workloads(db, organization_id=ride.organization_id)
     expire_stale_dispatch_offers(db, organization_id=ride.organization_id, ride_id=ride.id)
@@ -3598,6 +3625,9 @@ def get_dispatch_queue(
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     reconcile_organization_driver_workloads(db, organization_id=organization_id)
+    from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
+
+    promote_dispatch_eligible_rides(db, organization_id=organization_id)
     active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
     active_lifecycle_states = [
         RideStatus.REQUESTED.value,
@@ -3698,6 +3728,10 @@ def get_dispatch_queue(
                 dispatcher_message = "AI dispatch recommendation awaiting dispatcher approval"
         elif assignment_state == "pending_assignment":
             dispatcher_message = "No available driver"
+        from app.modules.health_isf.scheduling import format_scheduling_summary
+
+        scheduling_summary = format_scheduling_summary(ride)
+        appointment_window = scheduling_summary if scheduling_summary != "Immediate ride" else None
         rows.append(
             {
                 "ride_id": str(ride.id),
@@ -3708,6 +3742,14 @@ def get_dispatch_queue(
                 "requested_at": ride.requested_at or ride.created_at or now(),
                 "ride_status": _normalize_status_token(ride.lifecycle_state or ride.status),
                 "assignment_state": assignment_state,
+                "trip_leg": getattr(ride, "trip_leg", None),
+                "round_trip_group_id": getattr(ride, "round_trip_group_id", None),
+                "pickup_time": getattr(ride, "pickup_time", None),
+                "appointment_time": getattr(ride, "appointment_time", None),
+                "dispatch_eligible_at": getattr(ride, "dispatch_eligible_at", None),
+                "call_when_ready": bool(getattr(ride, "call_when_ready", False)),
+                "scheduling_summary": scheduling_summary,
+                "appointment_window": appointment_window,
                 "attempt_index": int(assignment.attempt_index) if assignment else 0,
                 "offered_driver_id": recommended_driver_id,
                 "recommended_driver_id": recommended_driver_id,
@@ -3758,9 +3800,22 @@ def get_newest_unassigned_queue_ride(
             continue
         if is_operational_excluded_ride(ride):
             continue
+        from app.modules.health_isf.scheduling import is_dispatch_eligible
+
+        if not is_dispatch_eligible(ride):
+            continue
         candidates.append((ride, row))
     if not candidates:
         return None
+    candidates.sort(
+        key=lambda item: (
+            _coerce_utc(getattr(item[0], "dispatch_eligible_at", None))
+            or _coerce_utc(getattr(item[0], "appointment_time", None))
+            or _coerce_utc(getattr(item[0], "requested_at", None))
+            or datetime.max.replace(tzinfo=timezone.utc),
+            _coerce_utc(getattr(item[0], "requested_at", None)) or datetime.min.replace(tzinfo=timezone.utc),
+        )
+    )
     return candidates[0]
 
 
@@ -4599,6 +4654,23 @@ def get_customer_ride_request_by_id(db: Session, request_id: str) -> Optional[He
     )
 
 
+def get_round_trip_group(
+    db: Session,
+    *,
+    organization_id: str,
+    round_trip_group_id: str,
+) -> list[HealthISFRide]:
+    return (
+        db.query(HealthISFRide)
+        .filter(
+            HealthISFRide.organization_id == organization_id,
+            HealthISFRide.round_trip_group_id == round_trip_group_id,
+        )
+        .order_by(HealthISFRide.created_at.asc())
+        .all()
+    )
+
+
 def get_customer_request_by_ride_id(db: Session, ride_id: str) -> Optional[HealthISFCustomerRideRequest]:
     return (
         db.query(HealthISFCustomerRideRequest)
@@ -4950,6 +5022,11 @@ def _expire_superseded_preaccept_offers_for_driver(
         if keep_ride_id and ride_id == str(keep_ride_id):
             continue
         ride = get_ride_by_id(db, ride_id) if ride_id else None
+        if ride and not _ride_is_terminal(ride) and not is_operational_excluded_ride(ride):
+            from app.modules.health_isf.scheduling import is_protected_scheduled_reservation
+
+            if is_protected_scheduled_reservation(ride, row):
+                continue
         if not ride or _ride_is_terminal(ride) or is_operational_excluded_ride(ride):
             _release_orphaned_dispatch_assignment(db, row, ride, reason=reason)
             closed += 1
@@ -6198,7 +6275,122 @@ def create_customer_ride_request(
     recurring_pattern: Optional[dict[str, Any]],
     notes: Optional[str] = None,
     submitted_by_user_id: Optional[str] = None,
+    trip_type: str = "one_way",
+    service_date: Optional[Any] = None,
+    pickup_time: Optional[datetime] = None,
+    arrival_time: Optional[datetime] = None,
+    return_pickup_type: Optional[str] = "scheduled_time",
+    return_pickup_time: Optional[datetime] = None,
+    recurrence: str = "none",
+    recurrence_weekdays: Optional[list[str]] = None,
+    recurrence_start_date: Optional[Any] = None,
+    recurrence_end_date: Optional[Any] = None,
+    return_pickup_address: Optional[str] = None,
+    return_dropoff_address: Optional[str] = None,
+    same_driver_preference: bool = False,
 ) -> tuple[HealthISFCustomerRideRequest, HealthISFRide]:
+    from app.modules.health_isf.scheduling import (
+        apply_scheduling_fields_to_ride,
+        create_scheduled_ride_request,
+        parse_scheduling_payload,
+    )
+
+    scheduling = parse_scheduling_payload(
+        {
+            "trip_type": trip_type,
+            "service_date": service_date,
+            "pickup_time": pickup_time,
+            "arrival_time": arrival_time or scheduled_time,
+            "scheduled_time": scheduled_time,
+            "return_pickup_type": return_pickup_type,
+            "return_pickup_time": return_pickup_time,
+            "recurrence": recurrence if recurrence != "none" else ("weekly" if recurring else "none"),
+            "recurrence_weekdays": recurrence_weekdays,
+            "recurrence_start_date": recurrence_start_date,
+            "recurrence_end_date": recurrence_end_date,
+            "return_pickup_address": return_pickup_address,
+            "return_dropoff_address": return_dropoff_address,
+            "same_driver_preference": same_driver_preference,
+            "recurring": recurring,
+            "recurring_pattern": recurring_pattern,
+        }
+    )
+    use_scheduling = (
+        scheduling["trip_type"] == "round_trip"
+        or scheduling["recurrence"] == "weekly"
+        or scheduling["pickup_time"] is not None
+        or scheduling["arrival_time"] is not None
+    )
+
+    normalized_ride_type = _normalize_customer_ride_type(ride_type)
+    provider = (
+        db.query(HealthISFProvider)
+        .filter(
+            HealthISFProvider.organization_id == organization_id,
+            HealthISFProvider.is_active == True,
+        )
+        .order_by(HealthISFProvider.created_at.asc())
+        .first()
+    )
+    if not provider:
+        raise ValueError("No active provider available for this organization")
+
+    def _create_ride_wrapper(db_session: Session, **kwargs: Any) -> HealthISFRide:
+        kwargs.setdefault("provider_id", provider.id)
+        kwargs["service_type"] = serialize_service_category(normalized_ride_type)
+        return create_ride(db_session, skip_intake_automation=True, **kwargs)
+
+    def _create_request_wrapper(db_session: Session, **kwargs: Any) -> HealthISFCustomerRideRequest:
+        ride = kwargs["ride"]
+        linked = kwargs.get("linked_ride_ids") or [str(ride.id)]
+        metadata = kwargs.get("scheduling_metadata") or {}
+        request_obj = HealthISFCustomerRideRequest(
+            id=uuid4(),
+            organization_id=organization_id,
+            ride_id=ride.id,
+            submitted_by_user_id=submitted_by_user_id,
+            rider_name=rider_name,
+            rider_phone=rider_phone,
+            pickup_address=pickup_address,
+            dropoff_address=dropoff_address,
+            scheduled_time=kwargs.get("scheduled_time"),
+            ride_type=normalized_ride_type,
+            is_recurring=bool(kwargs.get("is_recurring")),
+            recurring_pattern_json=json.dumps(kwargs.get("recurring_pattern"))
+            if kwargs.get("recurring_pattern")
+            else None,
+            notes=notes,
+            trip_type=str(kwargs.get("trip_type") or "one_way"),
+            scheduling_metadata_json=json.dumps(metadata) if metadata else None,
+            linked_ride_ids_json=json.dumps(linked),
+            dispatch_status=CustomerRequestStatus.PENDING.value,
+            pending_at=now(),
+            created_at=now(),
+            updated_at=now(),
+        )
+        db_session.add(request_obj)
+        _commit_or_rollback(db_session)
+        db_session.refresh(request_obj)
+        return request_obj
+
+    if use_scheduling:
+        request_row, primary, _all_rides = create_scheduled_ride_request(
+            db,
+            organization_id=organization_id,
+            rider_name=rider_name,
+            rider_phone=rider_phone,
+            pickup_address=pickup_address,
+            dropoff_address=dropoff_address,
+            ride_type=normalized_ride_type,
+            notes=notes,
+            submitted_by_user_id=submitted_by_user_id,
+            scheduling=scheduling,
+            create_ride_fn=_create_ride_wrapper,
+            create_request_fn=_create_request_wrapper,
+        )
+        _commit_or_rollback(db)
+        return request_row, primary
+
     pickup_norm = str(pickup_address or "").strip().lower()
     dropoff_norm = str(dropoff_address or "").strip().lower()
     if pickup_norm and dropoff_norm and pickup_norm == dropoff_norm:
@@ -6248,6 +6440,15 @@ def create_customer_ride_request(
         actor_user_id=submitted_by_user_id,
         skip_intake_automation=True,
     )
+    from app.modules.health_isf.scheduling import apply_scheduling_fields_to_ride
+
+    apply_scheduling_fields_to_ride(
+        ride,
+        trip_leg="one_way",
+        pickup_time=pickup_time,
+        arrival_time=normalized_scheduled or arrival_time,
+    )
+    db.add(ride)
 
     request_obj = HealthISFCustomerRideRequest(
         id=uuid4(),
@@ -6263,6 +6464,7 @@ def create_customer_ride_request(
         is_recurring=bool(recurring),
         recurring_pattern_json=json.dumps(recurring_payload) if recurring_payload else None,
         notes=notes,
+        trip_type=trip_type or "one_way",
         dispatch_status=CustomerRequestStatus.PENDING.value,
         pending_at=now(),
         created_at=now(),
@@ -6405,6 +6607,22 @@ def list_driver_assigned_rides(
             driver_id=driver_id,
             assignment=assignment,
         ):
+            continue
+        merged[str(ride.id)] = ride
+
+    scheduled_rows = (
+        db.query(HealthISFRide)
+        .filter(
+            HealthISFRide.organization_id == organization_id,
+            HealthISFRide.driver_id == driver_id,
+            HealthISFRide.lifecycle_state == "scheduled",
+        )
+        .order_by(HealthISFRide.appointment_time.asc(), HealthISFRide.pickup_time.asc())
+        .limit(limit)
+        .all()
+    )
+    for ride in scheduled_rows:
+        if _is_ai_proof_ride(ride) or is_operational_excluded_ride(ride) or _ride_is_terminal(ride):
             continue
         merged[str(ride.id)] = ride
 

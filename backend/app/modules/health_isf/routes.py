@@ -117,6 +117,7 @@ from app.modules.health_isf.schemas import (
     RecurringScheduleResponse,
     RecurringScheduleStatusUpdateRequest,
     RideCreate, RideHistoryEventResponse, RideResponse, RideStatusUpdateRequest,
+    RoundTripGroupResponse,
     RideArrivalStatusResponse,
     RideCompletionHandoffResponse,
     TripFinancialSummaryResponse,
@@ -227,7 +228,18 @@ logger = logging.getLogger("amicor.health_isf.routes")
 
 
 def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResponse:
+    from app.modules.health_isf.scheduling import format_scheduling_summary
+
     payload = RideResponse.model_validate(ride).model_dump()
+    payload["scheduling_summary"] = format_scheduling_summary(ride)
+    payload["round_trip_group_id"] = getattr(ride, "round_trip_group_id", None)
+    payload["trip_leg"] = getattr(ride, "trip_leg", None)
+    payload["pickup_time"] = getattr(ride, "pickup_time", None)
+    payload["return_pickup_type"] = getattr(ride, "return_pickup_type", None)
+    payload["same_driver_preference"] = bool(getattr(ride, "same_driver_preference", False))
+    payload["dispatch_eligible_at"] = getattr(ride, "dispatch_eligible_at", None)
+    payload["call_when_ready"] = bool(getattr(ride, "call_when_ready", False))
+    payload["scheduling_series_id"] = getattr(ride, "scheduling_series_id", None)
     if ride.driver_id:
         driver = service.get_driver_by_id(db, str(ride.driver_id))
         if driver:
@@ -669,10 +681,21 @@ def _serialize_driver_application(app: Any) -> DriverApplicationResponse:
     )
 
 
-def _serialize_customer_request(row: Any) -> CustomerRideRequestResponse:
+def _serialize_customer_request(row: Any, db: Session | None = None) -> CustomerRideRequestResponse:
+    from app.modules.health_isf.scheduling import format_scheduling_summary
+
     recurring_pattern = _safe_json_load(getattr(row, "recurring_pattern_json", None), None)
     if recurring_pattern is not None and not isinstance(recurring_pattern, dict):
         recurring_pattern = None
+    scheduling_metadata = _safe_json_load(getattr(row, "scheduling_metadata_json", None), None)
+    linked_ride_ids = _safe_json_load(getattr(row, "linked_ride_ids_json", None), None) or []
+    if not isinstance(linked_ride_ids, list):
+        linked_ride_ids = []
+    ride = getattr(row, "ride", None)
+    if ride is None and db is not None and getattr(row, "ride_id", None):
+        ride = service.get_ride_by_id(db, str(row.ride_id))
+    summary = format_scheduling_summary(ride) if ride is not None else None
+    group_id = getattr(ride, "round_trip_group_id", None) if ride is not None else None
     return CustomerRideRequestResponse(
         id=row.id,
         organization_id=row.organization_id,
@@ -696,6 +719,12 @@ def _serialize_customer_request(row: Any) -> CustomerRideRequestResponse:
         cancelled_at=row.cancelled_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        trip_type=str(getattr(row, "trip_type", None) or "one_way"),
+        scheduling_metadata=scheduling_metadata if isinstance(scheduling_metadata, dict) else None,
+        linked_ride_ids=[str(item) for item in linked_ride_ids],
+        scheduling_summary=summary,
+        round_trip_group_id=str(group_id) if group_id else None,
+        created_ride_count=len(linked_ride_ids) if linked_ride_ids else 1,
     )
 
 
@@ -5730,6 +5759,19 @@ def create_customer_ride_request(
             recurring_pattern=payload.recurring_pattern,
             notes=payload.notes,
             submitted_by_user_id=user.user_id,
+            trip_type=payload.trip_type,
+            service_date=payload.service_date,
+            pickup_time=payload.pickup_time,
+            arrival_time=payload.arrival_time,
+            return_pickup_type=payload.return_pickup_type,
+            return_pickup_time=payload.return_pickup_time,
+            recurrence=payload.recurrence,
+            recurrence_weekdays=payload.recurrence_weekdays,
+            recurrence_start_date=payload.recurrence_start_date,
+            recurrence_end_date=payload.recurrence_end_date,
+            return_pickup_address=payload.return_pickup_address,
+            return_dropoff_address=payload.return_dropoff_address,
+            same_driver_preference=payload.same_driver_preference,
         )
     except ValueError as exc:
         if idempotency_key:
@@ -5785,7 +5827,98 @@ def create_customer_ride_request(
         organization_id=organization_id,
         http_status=201,
     )
-    return _serialize_customer_request(request_row)
+    return _serialize_customer_request(request_row, db=db)
+
+
+@router.post("/customer-requests/{request_id}/patient-ready", response_model=CustomerRideRequestResponse)
+async def customer_request_patient_ready(
+    request_id: str,
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Activate call-when-ready return leg(s) for a round-trip customer request."""
+    from app.modules.health_isf.scheduling import activate_call_when_ready_return
+
+    row = service.get_customer_ride_request_by_id(db, request_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Customer request not found")
+    enforce_entity_tenant(user, row.organization_id)
+    effective_org_id = enforce_tenant_scope(user, organization_id or row.organization_id)
+    ride = service.get_ride_by_id(db, str(row.ride_id))
+    if not ride:
+        raise HTTPException(status_code=404, detail="Primary ride not found")
+    group_id = str(getattr(ride, "round_trip_group_id", "") or "")
+    if not group_id:
+        raise HTTPException(status_code=400, detail="Request is not linked to a round-trip group")
+    activated = activate_call_when_ready_return(
+        db,
+        organization_id=effective_org_id,
+        round_trip_group_id=group_id,
+        actor_user_id=user.user_id,
+    )
+    if not activated:
+        raise HTTPException(status_code=400, detail="No call-when-ready return leg found for this group")
+    await _emit_dispatch_lifecycle_event(
+        db=db,
+        organization_id=effective_org_id,
+        ride_id=str(activated[0].id),
+        event_name="patient-ready",
+        actor_user_id=user.user_id,
+        details={
+            "request_id": request_id,
+            "round_trip_group_id": group_id,
+            "activated_ride_ids": [str(item.id) for item in activated],
+        },
+        request_id=f"patient_ready_{request_id}",
+        lifecycle_state=str(activated[0].lifecycle_state or "queued"),
+        transition_reason="patient_ready",
+        assignment_transition_source="rider_scheduling",
+    )
+    db.refresh(row)
+    return _serialize_customer_request(row, db=db)
+
+
+@router.get("/rides/round-trip/{group_id}", response_model=RoundTripGroupResponse)
+def get_round_trip_group_view(
+    group_id: str,
+    organization_id: str | None = Query(None),
+    _: None = Depends(require_health_isf_access),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Read-only round-trip group view with per-leg billing aggregation."""
+    from app.modules.health_isf.scheduling import format_scheduling_summary
+
+    effective_org_id = enforce_tenant_scope(user, organization_id)
+    rides = service.get_round_trip_group(
+        db,
+        organization_id=effective_org_id,
+        round_trip_group_id=group_id,
+    )
+    if not rides:
+        raise HTTPException(status_code=404, detail="Round-trip group not found")
+    ride_responses: list[RideResponse] = []
+    driver_pay_total = 0.0
+    platform_revenue_total = 0.0
+    for ride in rides:
+        enforce_entity_tenant(user, ride.organization_id)
+        response = _ride_response_with_financials(db, ride)
+        ride_responses.append(response)
+        if response.driver_pay_usd is not None:
+            driver_pay_total += float(response.driver_pay_usd)
+        if response.platform_revenue_usd is not None:
+            platform_revenue_total += float(response.platform_revenue_usd)
+    summary_parts = [format_scheduling_summary(ride) for ride in rides]
+    combined_summary = " | ".join(part for part in summary_parts if part)
+    return RoundTripGroupResponse(
+        round_trip_group_id=group_id,
+        rides=ride_responses,
+        driver_pay_total_usd=round(driver_pay_total, 2),
+        platform_revenue_total_usd=round(platform_revenue_total, 2),
+        scheduling_summary=combined_summary or None,
+    )
 
 
 @router.get("/customer-requests/idempotency/{idempotency_key}", response_model=CustomerRideRequestResponse)
@@ -7627,7 +7760,7 @@ def get_ride(
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
     enforce_entity_tenant(user, ride.organization_id)
-    return ride
+    return _ride_response_with_financials(db, ride)
 
 
 @router.patch("/rides/{ride_id}/status", response_model=RideResponse)

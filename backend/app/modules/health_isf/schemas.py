@@ -2,7 +2,7 @@
 Pydantic schemas for Health ISF API requests/responses.
 MVP scope: simple validated schemas, no advanced validation.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 from typing import Any, Optional, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -273,6 +273,19 @@ class CustomerRideRequestCreateRequest(BaseModel):
     recurring_pattern: Optional[dict[str, Any]] = None
     notes: Optional[str] = Field(None, max_length=1000)
     client_request_key: Optional[str] = Field(None, max_length=128)
+    service_date: Optional[date] = None
+    pickup_time: Optional[datetime] = None
+    arrival_time: Optional[datetime] = None
+    trip_type: Literal["one_way", "round_trip"] = "one_way"
+    return_pickup_type: Optional[Literal["scheduled_time", "call_when_ready"]] = "scheduled_time"
+    return_pickup_time: Optional[datetime] = None
+    recurrence: Literal["none", "weekly"] = "none"
+    recurrence_weekdays: Optional[list[str]] = None
+    recurrence_start_date: Optional[date] = None
+    recurrence_end_date: Optional[date] = None
+    return_pickup_address: Optional[str] = Field(None, max_length=512)
+    return_dropoff_address: Optional[str] = Field(None, max_length=512)
+    same_driver_preference: bool = False
 
     @field_validator("pickup_address", "dropoff_address", "rider_name", mode="before")
     @classmethod
@@ -309,6 +322,16 @@ class CustomerRideRequestCreateRequest(BaseModel):
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
             if scheduled < cutoff:
                 raise ValueError("scheduled_time cannot be in the past")
+        if self.trip_type == "round_trip" and self.return_pickup_type == "scheduled_time":
+            if not self.return_pickup_time and not self.arrival_time:
+                raise ValueError("return_pickup_time or arrival_time required for scheduled return")
+        if self.recurrence == "weekly" and not self.recurrence_weekdays:
+            if self.recurring_pattern and isinstance(self.recurring_pattern, dict):
+                self.recurrence_weekdays = self.recurring_pattern.get("days")
+            if not self.recurrence_weekdays:
+                raise ValueError("recurrence_weekdays required for weekly recurrence")
+        if self.recurring and self.recurrence == "none":
+            object.__setattr__(self, "recurrence", "weekly")
         return self
 
 
@@ -339,6 +362,12 @@ class CustomerRideRequestResponse(BaseModel):
     cancelled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    trip_type: Optional[str] = "one_way"
+    scheduling_metadata: Optional[dict[str, Any]] = None
+    linked_ride_ids: list[str] = Field(default_factory=list)
+    scheduling_summary: Optional[str] = None
+    round_trip_group_id: Optional[str] = None
+    created_ride_count: int = 1
 
 
 class CustomerRideQueueMetricsResponse(BaseModel):
@@ -554,6 +583,14 @@ class DispatchQueueItemResponse(BaseModel):
     reassignment_attempt_count: int = 0
     reassignment_reason: Optional[str] = None
     reassignment_chain_id: Optional[str] = None
+    trip_leg: Optional[str] = None
+    round_trip_group_id: Optional[str] = None
+    pickup_time: Optional[datetime] = None
+    appointment_time: Optional[datetime] = None
+    dispatch_eligible_at: Optional[datetime] = None
+    call_when_ready: bool = False
+    scheduling_summary: Optional[str] = None
+    appointment_window: Optional[str] = None
 
 
 class DispatchActiveAssignmentItemResponse(BaseModel):
@@ -841,6 +878,15 @@ class RideResponse(RideBase):
     platform_revenue_usd: Optional[float] = None
     financial_record_id: Optional[str] = None
     driver_name: Optional[str] = None
+    round_trip_group_id: Optional[str] = None
+    trip_leg: Optional[str] = None
+    pickup_time: Optional[datetime] = None
+    return_pickup_type: Optional[str] = None
+    same_driver_preference: bool = False
+    dispatch_eligible_at: Optional[datetime] = None
+    call_when_ready: bool = False
+    scheduling_series_id: Optional[str] = None
+    scheduling_summary: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -851,6 +897,14 @@ class DispatcherCustomerRequestActionResponse(BaseModel):
     ride: Optional[RideResponse] = None
     offer: Optional[DispatchOfferResponse] = None
     message: str
+
+
+class RoundTripGroupResponse(BaseModel):
+    round_trip_group_id: str
+    rides: list[RideResponse] = Field(default_factory=list)
+    driver_pay_total_usd: float = 0.0
+    platform_revenue_total_usd: float = 0.0
+    scheduling_summary: Optional[str] = None
 
 
 class RideArrivalStatusResponse(BaseModel):

@@ -392,6 +392,14 @@ class HealthISFRide(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    round_trip_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    trip_leg: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    pickup_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    return_pickup_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    same_driver_preference: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    dispatch_eligible_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    call_when_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    scheduling_series_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     organization: Mapped["HealthISFOrganization"] = relationship(back_populates="rides")
     provider: Mapped["HealthISFProvider"] = relationship(back_populates="rides")
@@ -506,6 +514,9 @@ class HealthISFCustomerRideRequest(Base):
     is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     recurring_pattern_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trip_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    scheduling_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linked_ride_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     dispatch_status: Mapped[str] = mapped_column(String(32), nullable=False, default=CustomerRequestStatus.PENDING.value, index=True)
     pending_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False, index=True)
     broadcasted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1394,6 +1405,22 @@ def ensure_health_isf_schema() -> None:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN picked_up_at DATETIME"))
             if "transporting_at" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN transporting_at DATETIME"))
+            if "round_trip_group_id" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN round_trip_group_id VARCHAR(36)"))
+            if "trip_leg" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN trip_leg VARCHAR(16)"))
+            if "pickup_time" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN pickup_time DATETIME"))
+            if "return_pickup_type" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN return_pickup_type VARCHAR(32)"))
+            if "same_driver_preference" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN same_driver_preference BOOLEAN NOT NULL DEFAULT 0"))
+            if "dispatch_eligible_at" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN dispatch_eligible_at DATETIME"))
+            if "call_when_ready" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN call_when_ready BOOLEAN NOT NULL DEFAULT 0"))
+            if "scheduling_series_id" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN scheduling_series_id VARCHAR(36)"))
             conn.execute(text("UPDATE health_isf_rides SET lifecycle_state='queued' WHERE lifecycle_state IS NULL OR lifecycle_state=''"))
             conn.execute(text("UPDATE health_isf_rides SET lifecycle_state='queued' WHERE status='pending'"))
             conn.execute(text("UPDATE health_isf_rides SET lifecycle_state='assigned' WHERE status='accepted'"))
@@ -1405,6 +1432,15 @@ def ensure_health_isf_schema() -> None:
             conn.execute(text("UPDATE health_isf_rides SET arrived_at = COALESCE(arrived_at, updated_at) WHERE lifecycle_state='arrived'"))
             conn.execute(text("UPDATE health_isf_rides SET picked_up_at = COALESCE(picked_up_at, updated_at) WHERE lifecycle_state='rider_onboard'"))
             conn.execute(text("UPDATE health_isf_rides SET transporting_at = COALESCE(transporting_at, updated_at) WHERE lifecycle_state='in_progress'"))
+
+        if "health_isf_customer_ride_requests" in table_names:
+            req_columns = {column["name"] for column in inspector.get_columns("health_isf_customer_ride_requests")}
+            if "trip_type" not in req_columns:
+                conn.execute(text("ALTER TABLE health_isf_customer_ride_requests ADD COLUMN trip_type VARCHAR(32)"))
+            if "scheduling_metadata_json" not in req_columns:
+                conn.execute(text("ALTER TABLE health_isf_customer_ride_requests ADD COLUMN scheduling_metadata_json TEXT"))
+            if "linked_ride_ids_json" not in req_columns:
+                conn.execute(text("ALTER TABLE health_isf_customer_ride_requests ADD COLUMN linked_ride_ids_json TEXT"))
 
         if "health_isf_recurring_ride_schedules" not in table_names:
             Base.metadata.tables["health_isf_recurring_ride_schedules"].create(bind=conn)

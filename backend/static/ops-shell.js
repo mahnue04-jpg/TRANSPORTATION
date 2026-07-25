@@ -4877,7 +4877,10 @@
     ensureRiderAppState(slice);
     var riderState = safeObject(state.riderApp);
     var activeTrip = safeObject(riderState.activeTrip);
-    var profile = safeObject(riderState.profile);
+    var profile = riderProfileDefaults();
+    var showReturnSection = safeText(profile.tripType, "one_way") === "round_trip";
+    var showRecurrenceSection = safeText(profile.recurrence, "none") === "weekly";
+    var showScheduledReturn = showReturnSection && safeText(profile.returnPickupType, "scheduled_time") !== "call_when_ready";
     var notifications = Array.isArray(riderState.notifications) ? riderState.notifications : [];
     var recurring = Array.isArray(riderState.recurringSchedule) ? riderState.recurringSchedule : [];
     var history = Array.isArray(riderState.tripHistory) ? riderState.tripHistory : [];
@@ -4930,11 +4933,38 @@
             '<label class="muted">Pickup<input id="rider-pickup-input" type="text" value="' + escapeHtml(safeText(profile.pickup, "")) + '" placeholder="Pickup address" oninput="window._amiUpdateRiderProfileDraft(\'pickup\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
             '<label class="muted">Dropoff<input id="rider-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.dropoff, "")) + '" placeholder="Dropoff address" oninput="window._amiUpdateRiderProfileDraft(\'dropoff\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
             '<label class="muted">Ride Type<select id="rider-ride-type-input" onchange="window._amiUpdateRiderProfileDraft(\'rideType\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="healthcare"' + (safeText(profile.rideType, "healthcare") === "healthcare" ? ' selected' : '') + '>Healthcare</option><option value="work"' + (safeText(profile.rideType, "healthcare") === "work" ? ' selected' : '') + '>Work</option><option value="grocery"' + (safeText(profile.rideType, "healthcare") === "grocery" ? ' selected' : '') + '>Grocery</option><option value="church"' + (safeText(profile.rideType, "healthcare") === "church" ? ' selected' : '') + '>Church</option><option value="personal"' + (safeText(profile.rideType, "healthcare") === "personal" ? ' selected' : '') + '>Personal</option></select></label>' +
+            '<label class="muted">Service Date<input id="rider-service-date-input" type="date" value="' + escapeHtml(safeText(profile.serviceDate, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'serviceDate\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Requested Pickup Time<input id="rider-pickup-time-input" type="time" value="' + escapeHtml(safeText(profile.pickupTime, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'pickupTime\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Required Arrival / Appointment Time<input id="rider-arrival-time-input" type="time" value="' + escapeHtml(safeText(profile.arrivalTime, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'arrivalTime\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Trip Type<select id="rider-trip-type-input" onchange="window._amiUpdateRiderProfileDraft(\'tripType\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="one_way"' + (safeText(profile.tripType, "one_way") === "one_way" ? ' selected' : '') + '>One Way</option><option value="round_trip"' + (safeText(profile.tripType, "one_way") === "round_trip" ? ' selected' : '') + '>Round Trip</option></select></label>' +
+            (showReturnSection
+              ? '<label class="muted">Return Ride Mode<select id="rider-return-type-input" onchange="window._amiUpdateRiderProfileDraft(\'returnPickupType\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="scheduled_time"' + (safeText(profile.returnPickupType, "scheduled_time") === "scheduled_time" ? ' selected' : '') + '>Fixed Return Time</option><option value="call_when_ready"' + (safeText(profile.returnPickupType, "scheduled_time") === "call_when_ready" ? ' selected' : '') + '>Call When Ready</option></select></label>' +
+                (showScheduledReturn
+                  ? '<label class="muted">Fixed Return Pickup Time<input id="rider-return-time-input" type="time" value="' + escapeHtml(safeText(profile.returnPickupTime, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'returnPickupTime\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
+                  : '<p class="muted">Return leg will dispatch when patient is marked ready.</p>') +
+                '<label class="muted">Return Pickup Address<input id="rider-return-pickup-input" type="text" value="' + escapeHtml(safeText(profile.returnPickupAddress, profile.dropoff)) + '" placeholder="Clinic or return pickup location" oninput="window._amiUpdateRiderProfileDraft(\'returnPickupAddress\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+                '<label class="muted">Return Destination Address<input id="rider-return-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.returnDropoffAddress, profile.pickup)) + '" placeholder="Home or return destination" oninput="window._amiUpdateRiderProfileDraft(\'returnDropoffAddress\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
+              : '') +
+            '<label class="muted">Recurring Ride Option<select id="rider-recurrence-input" onchange="window._amiUpdateRiderProfileDraft(\'recurrence\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="none"' + (safeText(profile.recurrence, "none") === "none" ? ' selected' : '') + '>None</option><option value="weekly"' + (safeText(profile.recurrence, "none") === "weekly" ? ' selected' : '') + '>Weekly (Dialysis)</option></select></label>' +
+            (showRecurrenceSection
+              ? '<div class="muted" style="grid-column:1/-1">Recurring Weekdays: ' +
+                renderRiderWeekdayCheckbox("mon", "Mon", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("wed", "Wed", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("tue", "Tue", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("thu", "Thu", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("fri", "Fri", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("sat", "Sat", profile.recurrenceWeekdays) +
+                renderRiderWeekdayCheckbox("sun", "Sun", profile.recurrenceWeekdays) +
+                '</div>' +
+                '<label class="muted">Recurrence Start Date<input id="rider-recurrence-start-input" type="date" value="' + escapeHtml(safeText(profile.recurrenceStartDate, profile.serviceDate)) + '" oninput="window._amiUpdateRiderProfileDraft(\'recurrenceStartDate\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+                '<label class="muted">Recurrence End Date<input id="rider-recurrence-end-input" type="date" value="' + escapeHtml(safeText(profile.recurrenceEndDate, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'recurrenceEndDate\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
+              : '') +
+            '<label class="muted" style="display:flex;align-items:center;gap:8px;margin-top:6px"><input id="rider-same-driver-input" type="checkbox"' + (profile.sameDriverPreference ? ' checked' : '') + ' onchange="window._amiUpdateRiderProfileDraft(\'sameDriverPreference\', this.checked)"> Same-Driver Preference</label>' +
             '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
           '<div class="command-actions">' +
             '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? (safeText(riderState.submitStatus && riderState.submitStatus.message, "").indexOf("Checking status") >= 0 ? 'Checking ride status…' : 'Submitting ride…') : 'Request Ride Now') + '</button>' +
-            '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Schedule Recurring Ride</button>' +
+            '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Submit Scheduled Ride</button>' +
             '<button class="preview-action rider-action" data-rider-action="cancel_active_trip"' + (activeRequestId ? '' : ' disabled') + '>Cancel Active Ride</button>' +
           '</div>' +
           '<p class="muted">Latest action: ' + escapeHtml(safeText(riderState.lastAction, 'none')) + '</p>' +
@@ -5249,6 +5279,8 @@
       status: normalizeDriverTripStatus(payload.status || "queued"),
       type: safeText(payload.type, "transport"),
       scheduledWindow: safeText(payload.scheduledWindow, "Offer pending"),
+      schedulingSummary: safeText(payload.schedulingSummary, ""),
+      tripLeg: safeText(payload.tripLeg, ""),
       requestedAt: requestedAt,
       coordinationStatus: safeText(payload.coordinationStatus, "assignment_offered"),
       assignedDriver: safeText(payload.assignedDriver, ""),
@@ -5900,7 +5932,9 @@
       priority: ride.priority_tag,
       fare: ride.estimated_fare_usd,
       status: status,
-      scheduledWindow: ride.requested_at || ride.created_at,
+      scheduledWindow: ride.scheduling_summary || ride.requested_at || ride.created_at,
+      schedulingSummary: safeText(ride.scheduling_summary, ""),
+      tripLeg: safeText(ride.trip_leg, ""),
       requestedAt: ride.requested_at || ride.created_at,
       coordinationStatus: status,
       assignedDriver: safeText(driverWorkflow.driverId, ""),
@@ -6040,16 +6074,20 @@
     var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
     var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
       && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
-    var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
+    var canStartRoute = ["accepted", "assigned"].indexOf(tripStatus) >= 0;
+    var canArrive = ["driver_en_route", "en_route_pickup"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
-    var canComplete = ["in_progress", "in_transit", "trip_in_progress", "arrived_destination"].indexOf(tripStatus) >= 0;
+    var canArriveDestination = ["in_progress", "in_transit", "trip_in_progress"].indexOf(tripStatus) >= 0;
+    var canComplete = ["arrived_destination"].indexOf(tripStatus) >= 0;
 
     var disableAccept = !shiftOnline || !activeTrip || !canAccept;
     var disableDecline = !shiftOnline || !activeTrip || !canAccept;
+    var disableStartRoute = !shiftOnline || !activeTrip || !canStartRoute;
     var disableArrive = !shiftOnline || !activeTrip || !canArrive;
     var disablePickup = !shiftOnline || !activeTrip || !canPickup;
     var disableStartTransport = !shiftOnline || !activeTrip || !canStartTransport;
+    var disableArriveDestination = !shiftOnline || !activeTrip || !canArriveDestination;
     var disableComplete = !shiftOnline || !activeTrip || !canComplete;
 
     return '' +
@@ -6057,14 +6095,16 @@
         '<div class="driver-workflow-card">' +
           '<h4>Shift and Medical Transport Workflow</h4>' +
           '<p class="muted">Status: <strong>' + escapeHtml(statusText) + '</strong> • Stage: <strong>' + escapeHtml(titleizeWords(stage)) + '</strong> • Continuity: <strong>protected</strong></p>' +
-          '<p class="muted">Workflow: <strong>Accept Transport</strong> → <strong>Arrived at Pickup</strong> → <strong>Patient Onboard</strong> → <strong>Begin Transport</strong> → <strong>Arrived at Facility</strong> → <strong>Complete Transport</strong></p>' +
+          '<p class="muted">Workflow: <strong>Accept Trip</strong> → <strong>Start Route / En Route to Pickup</strong> → <strong>Arrived at Pickup</strong> → <strong>Rider On Board / Picked Up</strong> → <strong>Start Transportation</strong> → <strong>Arrived at Destination</strong> → <strong>Complete Trip</strong></p>' +
           '<div class="command-actions">' +
             '<button class="preview-action driver-action" data-driver-action="toggle_shift">' + escapeHtml(shiftOnline ? 'End Shift' : 'Start Shift') + '</button>' +
-            '<button class="preview-action driver-action" data-driver-action="accept_trip"' + (disableAccept ? ' disabled' : '') + '>Accept Transport</button>' +
+            '<button class="preview-action driver-action" data-driver-action="accept_trip"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
             '<button class="preview-action driver-action" data-driver-action="decline_trip"' + (disableDecline ? ' disabled' : '') + '>Decline Transport</button>' +
+            '<button class="preview-action driver-action" data-driver-action="start_route"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
             '<button class="preview-action driver-action" data-driver-action="arrive_pickup"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
-            '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disablePickup ? ' disabled' : '') + '>Pickup / Rider Onboard</button>' +
-            '<button class="preview-action driver-action" data-driver-action="start_transport"' + (disableStartTransport ? ' disabled' : '') + '>Start Transport</button>' +
+            '<button class="preview-action driver-action" data-driver-action="start_trip"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
+            '<button class="preview-action driver-action" data-driver-action="start_transport"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
+            '<button class="preview-action driver-action" data-driver-action="arrive_destination"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
             '<button class="preview-action driver-action" data-driver-action="complete_trip"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
           '</div>' +
           '<p class="muted">Latest update: ' + escapeHtml(safeText(appState.lastStatusUpdate, 'None')) + '</p>' +
@@ -6283,15 +6323,19 @@
     var isTerminal = ["completed", "cancelled", "declined"].indexOf(tripStatus) >= 0;
     var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
       && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
-    var canArrive = ["accepted", "driver_en_route", "en_route_pickup", "assigned"].indexOf(tripStatus) >= 0;
+    var canStartRoute = ["accepted", "assigned"].indexOf(tripStatus) >= 0;
+    var canArrive = ["driver_en_route", "en_route_pickup"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
-    var canComplete = ["in_progress", "in_transit", "trip_in_progress", "arrived_destination"].indexOf(tripStatus) >= 0;
+    var canArriveDestination = ["in_progress", "in_transit", "trip_in_progress"].indexOf(tripStatus) >= 0;
+    var canComplete = ["arrived_destination"].indexOf(tripStatus) >= 0;
     var disableAccept = !shiftOnline || !activeTrip || !canAccept || isTerminal;
+    var disableStartRoute = !shiftOnline || !activeTrip || !canStartRoute || isTerminal;
     var disableArrive = !shiftOnline || !activeTrip || !canArrive || isTerminal;
     var disableNoShow = !shiftOnline || !activeTrip || isTerminal;
     var disablePickup = !shiftOnline || !activeTrip || !canPickup || isTerminal;
     var disableStartTransport = !shiftOnline || !activeTrip || !canStartTransport || isTerminal;
+    var disableArriveDestination = !shiftOnline || !activeTrip || !canArriveDestination || isTerminal;
     var disableComplete = !shiftOnline || !activeTrip || !canComplete || isTerminal;
     var secondaryTab = safeText(appState.secondaryTab, "earnings").toLowerCase();
     var etaText = String(activeTrip ? safeNumber(activeTrip.etaMin, 0) : 0) + " min";
@@ -6455,19 +6499,24 @@
               '<tr><th>Rider Name</th><td>' + escapeHtml(riderName) + '</td></tr>' +
               '<tr><th>Pickup Address</th><td>' + escapeHtml(routePickup) + '</td></tr>' +
               '<tr><th>Destination Address</th><td>' + escapeHtml(routeDropoff) + '</td></tr>' +
+              (activeTrip && safeText(activeTrip.schedulingSummary, "")
+                ? '<tr><th>Scheduling</th><td>' + escapeHtml(safeText(activeTrip.schedulingSummary, "")) + (safeText(activeTrip.tripLeg, "") ? (' (' + escapeHtml(titleizeWords(safeText(activeTrip.tripLeg, ""))) + ')') : '') + '</td></tr>'
+                : '') +
               '<tr><th>Provider</th><td>' + escapeHtml(providerName) + '</td></tr>' +
               '<tr><th>Driver Assigned</th><td>' + escapeHtml(assignedDriverLabel) + '</td></tr>' +
               '<tr><th>ETA</th><td>' + escapeHtml(etaText) + '</td></tr>' +
             '</tbody></table></div>' +
             '<div class="command-actions">' +
               '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
+              '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
+              '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
+              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
               (riderPhone
                 ? '<button class="preview-action driver-action" data-driver-action="call_rider" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (!activeTrip ? ' disabled' : '') + '>Call Rider</button>'
                 : '<button class="preview-action" disabled>Call Rider</button>') +
-              '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Pickup / Rider Onboard</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transport</button>' +
-              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
               '<button class="preview-action driver-action" data-driver-action="decline_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableNoShow ? ' disabled' : '') + '>No Show</button>' +
             '</div>' +
             '<p class="muted">Latest update: ' + escapeHtml(safeText(appState.lastStatusUpdate, 'None')) + '</p>' +
@@ -7270,8 +7319,10 @@
             assignedDriverName: safeText(normalized.assigned_driver_name || normalized.recommended_driver_name || normalized.assigned_driver_id || normalized.driver_name || normalized.driver_id, "unassigned"),
             etaMin: safeNumber(normalized.eta_minutes || normalized.estimated_arrival_minutes || normalized.eta_min, 0),
             completedAt: safeText(normalized.completed_at || normalized.closed_at || "", ""),
-            appointmentWindow: safeText(normalized.appointment_window || normalized.scheduled_window || normalized.window, "window pending"),
-            coordinationNote: safeText(normalized.coordination_note || normalized.dispatcher_message || normalized.dispatcher_note || normalized.notes, "coordination pending")
+            appointmentWindow: safeText(normalized.appointment_window || normalized.scheduling_summary || normalized.scheduled_window || normalized.window, "window pending"),
+            coordinationNote: safeText(normalized.coordination_note || normalized.dispatcher_message || normalized.dispatcher_note || normalized.scheduling_summary || normalized.notes, "coordination pending"),
+            tripLeg: safeText(normalized.trip_leg, ""),
+            schedulingSummary: safeText(normalized.scheduling_summary, "")
           };
         }
 
@@ -7296,7 +7347,10 @@
                 assigned_driver_name: ride.driver_name || ride.driver_id,
                 requested_at: ride.requested_at || ride.created_at,
                 created_at: ride.created_at,
-                updated_at: ride.updated_at
+                updated_at: ride.updated_at,
+                scheduling_summary: ride.scheduling_summary,
+                trip_leg: ride.trip_leg,
+                appointment_window: ride.scheduling_summary
               };
             }))
             .concat(activeRouteModule)
@@ -7482,11 +7536,11 @@
           var priority = safeText(trip.priority, "standard");
           var pc = priority === "urgent" ? "badge badge-bad" : priority === "standard" ? "badge badge-soft" : "badge badge-neutral";
           var tripId = safeText(trip.id, "");
-          return '<tr><td>' + escapeHtml(safeText(trip.id, "TRIP")) + '</td><td>' + escapeHtml(safeText(trip.riderName, "Rider")) + '</td><td>' + escapeHtml(safeText(trip.pickup, "Pickup")) + '</td><td>' + escapeHtml(safeText(trip.dropoff, "Dropoff")) + '</td><td class="muted">' + escapeHtml(tripWaitText(trip)) + '</td><td><span class="' + pc + '">' + escapeHtml(priority) + '</span></td><td>' + lifecycleBadge(trip.state) + '</td><td class="muted time-stamp-cell">' + escapeHtml(formatOperationalTime(trip.requestedAt)) + '</td><td class="muted appointment-window-cell">' + escapeHtml(safeText(trip.appointmentWindow, "window pending")) + '</td><td class="muted coordination-note-cell">' + escapeHtml(safeText(trip.coordinationNote, "coordination pending")) + '</td><td><span class="badge badge-soft">' + escapeHtml(tripSlaText(trip)) + '</span></td>' +
+          return '<tr><td>' + escapeHtml(safeText(trip.id, "TRIP")) + '</td><td>' + escapeHtml(safeText(trip.riderName, "Rider")) + '</td><td>' + escapeHtml(safeText(trip.tripLeg, "—")) + '</td><td>' + escapeHtml(safeText(trip.pickup, "Pickup")) + '</td><td>' + escapeHtml(safeText(trip.dropoff, "Dropoff")) + '</td><td class="muted">' + escapeHtml(tripWaitText(trip)) + '</td><td><span class="' + pc + '">' + escapeHtml(priority) + '</span></td><td>' + lifecycleBadge(trip.state) + '</td><td class="muted time-stamp-cell">' + escapeHtml(formatOperationalTime(trip.requestedAt)) + '</td><td class="muted appointment-window-cell">' + escapeHtml(safeText(trip.appointmentWindow, "window pending")) + '</td><td class="muted coordination-note-cell">' + escapeHtml(safeText(trip.coordinationNote, "coordination pending")) + '</td><td><span class="badge badge-soft">' + escapeHtml(tripSlaText(trip)) + '</span></td>' +
             '<td><button class="btn-action btn-assign" onclick="window._amiHandleDispatchAssign(\'' + escapeHtml(tripId) + '\')">Assign</button> <button class="btn-action" onclick="window._amiHandleDispatchReassign(\'' + escapeHtml(tripId) + '\')">Reassign</button> <button class="btn-action" onclick="window._amiHandleDispatchEscalate(\'' + escapeHtml(tripId) + '\')">Escalate</button> <button class="btn-action" onclick="window._amiHandleDispatchCancel(\'' + escapeHtml(tripId) + '\')">Cancel</button> <button class="btn-action" onclick="window._amiHandleDispatchContactRider(\'' + escapeHtml(tripId) + '\')">Contact Rider</button> <button class="btn-action" onclick="window._amiHandleDispatchContactDriver(\'' + escapeHtml(tripId) + '\')">Contact Driver</button></td></tr>';
         }).join("");
         if (!queueRows) {
-          queueRows = '<tr><td colspan="12" class="muted">No pending transport assignments. Intake queue is currently stable and all active transports are supervised.</td></tr>';
+          queueRows = '<tr><td colspan="13" class="muted">No pending transport assignments. Intake queue is currently stable and all active transports are supervised.</td></tr>';
         }
 
         var driverCards = availableDrivers.map(function (driver) {
@@ -7568,7 +7622,7 @@
             'dispatch-lifecycle'
           ),
           renderPanelBlock("Active Trip Queue", "Requested, scheduled, assigned, and delayed healthcare transport trips requiring dispatch action.",
-            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Trip ID</th><th>Patient</th><th>Pickup Facility</th><th>Dropoff Facility</th><th>Wait Time</th><th>Priority</th><th>Trip Stage</th><th>Requested At</th><th>Appt Window</th><th>Coordination</th><th>SLA Window</th><th>Actions</th></tr></thead><tbody id="dispatch-queue-tbody">' + queueRows + '</tbody></table></div>',
+            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Trip ID</th><th>Patient</th><th>Leg</th><th>Pickup Facility</th><th>Dropoff Facility</th><th>Wait Time</th><th>Priority</th><th>Trip Stage</th><th>Requested At</th><th>Appt Window</th><th>Coordination</th><th>SLA Window</th><th>Actions</th></tr></thead><tbody id="dispatch-queue-tbody">' + queueRows + '</tbody></table></div>',
             "dispatch-queue"),
           renderPanelBlock("Driver Status Board", "Driver statuses, selection, and assignment routing.",
             '<div id="available-drivers-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">' + driverCards + '</div>',
@@ -10010,6 +10064,16 @@
         return;
       }
       updated = true;
+    } else if (action === "start_route" && activeTrip) {
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
+      }
+      if (!(await window._amiHandleDriverStartRoute(safeText(activeTrip.tripId, "")))) {
+        return;
+      }
+      handlerMutatedApp = true;
+      updated = true;
     } else if (action === "arrive_pickup" && activeTrip) {
       if (!currentDriverId) {
         window.alert("Driver profile is not bound yet.");
@@ -10036,6 +10100,16 @@
         return;
       }
       if (!(await window._amiHandleDriverProgressTrip(safeText(activeTrip.tripId, "")))) {
+        return;
+      }
+      handlerMutatedApp = true;
+      updated = true;
+    } else if (action === "arrive_destination" && activeTrip) {
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
+      }
+      if (!(await window._amiHandleDriverArriveDestination(safeText(activeTrip.tripId, "")))) {
         return;
       }
       handlerMutatedApp = true;
@@ -10610,14 +10684,91 @@
   function riderProfileDefaults() {
     var existing = safeObject(state.riderApp);
     var profile = safeObject(existing.profile);
+    var weekdays = Array.isArray(profile.recurrenceWeekdays) ? profile.recurrenceWeekdays : [];
     return {
       name: safeText(profile.name, ""),
       phone: normalizeRiderPhone(profile.phone || ""),
       pickup: safeText(profile.pickup, ""),
       dropoff: safeText(profile.dropoff, ""),
       notes: safeText(profile.notes, ""),
-      rideType: safeText(profile.rideType, "healthcare")
+      rideType: safeText(profile.rideType, "healthcare"),
+      serviceDate: safeText(profile.serviceDate, ""),
+      pickupTime: safeText(profile.pickupTime, ""),
+      arrivalTime: safeText(profile.arrivalTime, ""),
+      tripType: safeText(profile.tripType, "one_way"),
+      returnPickupType: safeText(profile.returnPickupType, "scheduled_time"),
+      returnPickupTime: safeText(profile.returnPickupTime, ""),
+      returnPickupAddress: safeText(profile.returnPickupAddress, ""),
+      returnDropoffAddress: safeText(profile.returnDropoffAddress, ""),
+      recurrence: safeText(profile.recurrence, "none"),
+      recurrenceWeekdays: weekdays,
+      recurrenceStartDate: safeText(profile.recurrenceStartDate, ""),
+      recurrenceEndDate: safeText(profile.recurrenceEndDate, ""),
+      sameDriverPreference: profile.sameDriverPreference === true || profile.sameDriverPreference === "true"
     };
+  }
+
+  function renderRiderWeekdayCheckbox(day, label, selectedDays) {
+    var days = Array.isArray(selectedDays) ? selectedDays : [];
+    var checked = days.indexOf(day) >= 0 ? " checked" : "";
+    return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:8px"><input type="checkbox" value="' + day + '"' + checked + ' onchange="window._amiToggleRiderWeekday(\'' + day + '\', this.checked)"> ' + label + '</label>';
+  }
+
+  function riderDateTimeToIso(dateStr, timeStr) {
+    var datePart = safeText(dateStr, "");
+    var timePart = safeText(timeStr, "");
+    if (!datePart && !timePart) {
+      return null;
+    }
+    if (timePart.indexOf("T") >= 0) {
+      var parsed = new Date(timePart);
+      return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    }
+    if (datePart && timePart) {
+      var combined = new Date(datePart + "T" + timePart);
+      return isNaN(combined.getTime()) ? null : combined.toISOString();
+    }
+    if (datePart) {
+      var dateOnly = new Date(datePart + "T00:00:00");
+      return isNaN(dateOnly.getTime()) ? null : dateOnly.toISOString();
+    }
+    return null;
+  }
+
+  function buildRiderSchedulingPayload(formValues, options) {
+    var opts = options || {};
+    var forceWeekly = opts.forceWeekly === true;
+    var recurrence = forceWeekly ? "weekly" : safeText(formValues.recurrence, "none");
+    if (recurrence !== "weekly") {
+      recurrence = "none";
+    }
+    var tripType = safeText(formValues.tripType, "one_way");
+    var returnType = safeText(formValues.returnPickupType, "scheduled_time");
+    var payload = {
+      service_date: safeText(formValues.serviceDate, "") || null,
+      pickup_time: riderDateTimeToIso(formValues.serviceDate, formValues.pickupTime),
+      arrival_time: riderDateTimeToIso(formValues.serviceDate, formValues.arrivalTime),
+      trip_type: tripType === "round_trip" ? "round_trip" : "one_way",
+      return_pickup_type: returnType === "call_when_ready" ? "call_when_ready" : "scheduled_time",
+      return_pickup_time: returnType === "call_when_ready"
+        ? null
+        : riderDateTimeToIso(formValues.serviceDate, formValues.returnPickupTime),
+      recurrence: recurrence,
+      recurrence_weekdays: Array.isArray(formValues.recurrenceWeekdays) ? formValues.recurrenceWeekdays : [],
+      recurrence_start_date: safeText(formValues.recurrenceStartDate, formValues.serviceDate) || null,
+      recurrence_end_date: safeText(formValues.recurrenceEndDate, "") || null,
+      return_pickup_address: safeText(formValues.returnPickupAddress, formValues.dropoff) || null,
+      return_dropoff_address: safeText(formValues.returnDropoffAddress, formValues.pickup) || null,
+      same_driver_preference: formValues.sameDriverPreference === true,
+      recurring: recurrence === "weekly",
+      recurring_pattern: recurrence === "weekly"
+        ? { type: "weekly", days: Array.isArray(formValues.recurrenceWeekdays) ? formValues.recurrenceWeekdays : [] }
+        : null
+    };
+    if (payload.arrival_time) {
+      payload.scheduled_time = payload.arrival_time;
+    }
+    return payload;
   }
 
   function mapCustomerRequestToHistoryRow(item) {
@@ -10628,6 +10779,9 @@
       date: safeText(requestRow.created_at || requestRow.updated_at || requestRow.pending_at, "date"),
       route: safeText(requestRow.pickup_address, "Pickup") + " -> " + safeText(requestRow.dropoff_address, "Dropoff"),
       status: safeText(requestRow.dispatch_status, "pending"),
+      schedulingSummary: safeText(requestRow.scheduling_summary, ""),
+      tripType: safeText(requestRow.trip_type, "one_way"),
+      linkedRideCount: safeNumber(requestRow.created_ride_count, 1),
       riderName: safeText(requestRow.rider_name, "Rider"),
       pickup: safeText(requestRow.pickup_address, "Pickup"),
       dropoff: safeText(requestRow.dropoff_address, "Dropoff"),
@@ -11550,13 +11704,38 @@
     var dropoffInput = document.getElementById("rider-dropoff-input");
     var notesInput = document.getElementById("rider-notes-input");
     var rideTypeInput = document.getElementById("rider-ride-type-input");
+    var serviceDateInput = document.getElementById("rider-service-date-input");
+    var pickupTimeInput = document.getElementById("rider-pickup-time-input");
+    var arrivalTimeInput = document.getElementById("rider-arrival-time-input");
+    var tripTypeInput = document.getElementById("rider-trip-type-input");
+    var returnTypeInput = document.getElementById("rider-return-type-input");
+    var returnTimeInput = document.getElementById("rider-return-time-input");
+    var returnPickupInput = document.getElementById("rider-return-pickup-input");
+    var returnDropoffInput = document.getElementById("rider-return-dropoff-input");
+    var recurrenceInput = document.getElementById("rider-recurrence-input");
+    var recurrenceStartInput = document.getElementById("rider-recurrence-start-input");
+    var recurrenceEndInput = document.getElementById("rider-recurrence-end-input");
+    var sameDriverInput = document.getElementById("rider-same-driver-input");
     return {
       name: safeText(nameInput && nameInput.value, currentProfile.name),
       phone: normalizeRiderPhone(phoneInput && phoneInput.value || currentProfile.phone),
       pickup: safeText(pickupInput && pickupInput.value, currentProfile.pickup),
       dropoff: safeText(dropoffInput && dropoffInput.value, currentProfile.dropoff),
       notes: safeText(notesInput && notesInput.value, currentProfile.notes),
-      rideType: safeText(rideTypeInput && rideTypeInput.value, currentProfile.rideType)
+      rideType: safeText(rideTypeInput && rideTypeInput.value, currentProfile.rideType),
+      serviceDate: safeText(serviceDateInput && serviceDateInput.value, currentProfile.serviceDate),
+      pickupTime: safeText(pickupTimeInput && pickupTimeInput.value, currentProfile.pickupTime),
+      arrivalTime: safeText(arrivalTimeInput && arrivalTimeInput.value, currentProfile.arrivalTime),
+      tripType: safeText(tripTypeInput && tripTypeInput.value, currentProfile.tripType),
+      returnPickupType: safeText(returnTypeInput && returnTypeInput.value, currentProfile.returnPickupType),
+      returnPickupTime: safeText(returnTimeInput && returnTimeInput.value, currentProfile.returnPickupTime),
+      returnPickupAddress: safeText(returnPickupInput && returnPickupInput.value, currentProfile.returnPickupAddress),
+      returnDropoffAddress: safeText(returnDropoffInput && returnDropoffInput.value, currentProfile.returnDropoffAddress),
+      recurrence: safeText(recurrenceInput && recurrenceInput.value, currentProfile.recurrence),
+      recurrenceWeekdays: Array.isArray(currentProfile.recurrenceWeekdays) ? currentProfile.recurrenceWeekdays.slice() : [],
+      recurrenceStartDate: safeText(recurrenceStartInput && recurrenceStartInput.value, currentProfile.recurrenceStartDate),
+      recurrenceEndDate: safeText(recurrenceEndInput && recurrenceEndInput.value, currentProfile.recurrenceEndDate),
+      sameDriverPreference: !!(sameDriverInput ? sameDriverInput.checked : currentProfile.sameDriverPreference)
     };
   }
 
@@ -11772,11 +11951,13 @@
       pickup_address: formValues.pickup,
       dropoff_address: formValues.dropoff,
       ride_type: formValues.rideType || "healthcare",
-      recurring: recurring === true,
-      recurring_pattern: recurring === true ? { type: "weekly", days: ["mon", "wed", "fri"] } : null,
       notes: formValues.notes || null,
       client_request_key: idempotencyKey
     };
+    var schedulingPayload = buildRiderSchedulingPayload(formValues, { forceWeekly: recurring === true });
+    Object.keys(schedulingPayload).forEach(function (key) {
+      payload[key] = schedulingPayload[key];
+    });
 
     var created = null;
     var recoveredAfterTimeout = false;
@@ -14085,6 +14266,8 @@ window._amiUpdateRiderProfileDraft = function(field, value) {
   if (!key) return;
   if (key === "phone") {
     shellState.riderApp.profile.phone = safeText(value, "").replace(/[^\d+]/g, "").slice(0, 20);
+  } else if (key === "sameDriverPreference") {
+    shellState.riderApp.profile.sameDriverPreference = value === true || value === "true";
   } else {
     shellState.riderApp.profile[key] = safeText(value, "");
   }
@@ -14099,6 +14282,27 @@ window._amiUpdateRiderProfileDraft = function(field, value) {
     };
     sessionStorage.setItem("amicor_shell_session_v1", JSON.stringify(parsed));
   } catch (_) {}
+};
+
+window._amiToggleRiderWeekday = function(day, checked) {
+  var shellState = window.AmiOpsShellState || state || {};
+  shellState.riderApp = shellState.riderApp && typeof shellState.riderApp === "object" ? shellState.riderApp : {};
+  shellState.riderApp.profile = shellState.riderApp.profile && typeof shellState.riderApp.profile === "object"
+    ? shellState.riderApp.profile
+    : {};
+  var weekdays = Array.isArray(shellState.riderApp.profile.recurrenceWeekdays)
+    ? shellState.riderApp.profile.recurrenceWeekdays.slice()
+    : [];
+  var normalized = safeText(day, "").toLowerCase().slice(0, 3);
+  var idx = weekdays.indexOf(normalized);
+  if (checked && idx < 0) {
+    weekdays.push(normalized);
+  } else if (!checked && idx >= 0) {
+    weekdays.splice(idx, 1);
+  }
+  shellState.riderApp.profile.recurrenceWeekdays = weekdays;
+  window._amiUpdateRiderProfileDraft("recurrenceWeekdays", weekdays.join(","));
+  shellState.riderApp.profile.recurrenceWeekdays = weekdays;
 };
 
 window._amiHandleDispatcherCreatePatient = async function() {
@@ -15009,35 +15213,7 @@ async function _amiRecoverAcceptedDriverTrip(driverId, tripId) {
 async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAccepted) {
   var shell = _amiDriverShellState();
   var activeRide = safeObject(payload.active_ride || payload);
-  var lifecycleAfterAccept = safeText(activeRide.lifecycle_state || activeRide.status, "").toLowerCase();
-  var assignmentAfterAccept = safeText(
-    (safeObject(payload.active_assignment)).assignment_state || payload.assignment_state,
-    ""
-  ).toLowerCase();
-  var wasAlreadyAccepted = alreadyAccepted
-    || !!activeRide.accepted_at
-    || assignmentAfterAccept === "accepted"
-    || assignmentAfterAccept === "en_route_pickup";
-  if (["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0 && !wasAlreadyAccepted) {
-    try {
-      payload = await _amiSendJson(
-        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-        "POST",
-        { ride_id: tripId, target_state: "en_route_pickup" }
-      );
-      activeRide = safeObject(payload.active_ride || payload);
-    } catch (_) {}
-  } else if (wasAlreadyAccepted && ["queued", "assigned", ""].indexOf(lifecycleAfterAccept) >= 0) {
-    try {
-      payload = await _amiSendJson(
-        "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-        "POST",
-        { ride_id: tripId, target_state: "en_route_pickup" }
-      );
-      activeRide = safeObject(payload.active_ride || payload);
-    } catch (_) {}
-  }
-  var displayStatus = _amiStatusFromRouteProgressPayload(payload, wasAlreadyAccepted ? "driver_en_route" : "accepted");
+  var displayStatus = _amiStatusFromRouteProgressPayload(payload, "accepted");
   shell = _amiPatchDriverTripStatus(tripId, displayStatus);
   shell.driverApp.lastActionResult = {
     last_action: "Accept Trip",
@@ -15052,12 +15228,12 @@ async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAc
   _amiLogDriverMobileSync({
     event: "accept_ride",
     requested_ride_id: tripId,
-    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "driver_en_route"),
+    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "accepted"),
     api_response: activeRide,
     http_status: 200,
     route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
     frontend_state_transition: "active_ride->active_ride",
-    extra: { action: "Accept Trip" }
+    extra: { action: "Accept Trip", already_accepted: !!alreadyAccepted }
   });
   try {
     _amiLockDriverHydration(3500);
@@ -15084,61 +15260,45 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
       window._amiClearDriverSession();
     }
     if (!_amiDriverAcceptHttpStatus(err, 409)) {
-      try {
-        payload = await _amiSendJson(
-          "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-          "POST",
-          { ride_id: tripId, target_state: "en_route_pickup" }
-        );
-      } catch (err2) {
-        var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
-        if (recovered) {
-          return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
-        }
-        _amiLogDriverMobileSync({
-          event: "accept_ride_failed",
-          requested_ride_id: tripId,
-          route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
-          api_response: {
-            error: safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, "accept_failed"))
-          },
-          frontend_state_transition: "active_ride->active_ride",
-          extra: { action: "Accept Trip" }
-        });
-        if (_amiDriverAcceptHttpStatus(acceptErr, 401) || _amiDriverAcceptHttpStatus(err2, 401)) {
-          window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
-        } else {
-          window.alert(
-            "Unable to submit driver accept action for " + tripId + ". "
-            + safeText(err2 && err2.message, safeText(acceptErr && acceptErr.message, ""))
-          );
-        }
-        shell = _amiDriverShellState();
-        shell.driverApp = safeObject(shell.driverApp);
-        shell.driverApp.lastActionResult = {
-          last_action: "Accept Trip",
-          api_status: "error",
-          db_record_id: safeText(tripId, "n/a"),
-          updated_table: "health_isf_rides",
-          ui_refreshed: "no",
-          current_ride_status: "unchanged"
-        };
-        window.AmiOpsShellState = shell;
-        return false;
+      var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+      if (recovered) {
+        return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
       }
+      _amiLogDriverMobileSync({
+        event: "accept_ride_failed",
+        requested_ride_id: tripId,
+        route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+        api_response: {
+          error: safeText(acceptErr && acceptErr.message, "accept_failed")
+        },
+        frontend_state_transition: "active_ride->active_ride",
+        extra: { action: "Accept Trip" }
+      });
+      if (_amiDriverAcceptHttpStatus(acceptErr, 401)) {
+        window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
+      } else {
+        window.alert(
+          "Unable to submit driver accept action for " + tripId + ". "
+          + safeText(acceptErr && acceptErr.message, "")
+        );
+      }
+      shell = _amiDriverShellState();
+      shell.driverApp = safeObject(shell.driverApp);
+      shell.driverApp.lastActionResult = {
+        last_action: "Accept Trip",
+        api_status: "error",
+        db_record_id: safeText(tripId, "n/a"),
+        updated_table: "health_isf_rides",
+        ui_refreshed: "no",
+        current_ride_status: "unchanged"
+      };
+      window.AmiOpsShellState = shell;
+      return false;
     } else {
       try {
-        payload = await _amiSendJson(
-          "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
-          "POST",
-          { ride_id: tripId, target_state: "en_route_pickup" }
-        );
-      } catch (err3) {
-        try {
-          payload = await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null);
-        } catch (_) {
-          payload = null;
-        }
+        payload = await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null);
+      } catch (_) {
+        payload = null;
       }
     }
   }
@@ -15222,12 +15382,6 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
   var tripRow = queue.find(function (trip) {
     return safeText(trip.tripId, "") === safeText(tripId, "");
   });
-  var preArriveStatus = normalizeDriverTripStatus(tripRow && tripRow.status);
-  if (["assigned", "accepted", "queued"].indexOf(preArriveStatus) >= 0) {
-    try {
-      await postRouteProgress("en_route_pickup");
-    } catch (_) {}
-  }
 
   var payload = null;
   var arriveErr = null;
@@ -15237,7 +15391,6 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
     arriveErr = err;
     if (routeProgressHttpStatus(err, 400) || routeProgressHttpStatus(err, 409)) {
       try {
-        await postRouteProgress("en_route_pickup");
         payload = await postRouteProgress("arrived_pickup");
         arriveErr = null;
       } catch (retryErr) {
@@ -15325,7 +15478,7 @@ window._amiHandleDriverArriveTrip = async function(tripId) {
   return true;
 };
 
-window._amiHandleDriverStartTrip = async function(tripId) {
+window._amiHandleDriverStartRoute = async function(tripId) {
   var shell = _amiDriverShellState();
   var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
@@ -15333,13 +15486,13 @@ window._amiHandleDriverStartTrip = async function(tripId) {
     var payload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
-      { ride_id: tripId, target_state: "rider_loaded" }
+      { ride_id: tripId, target_state: "en_route_pickup" }
     );
-    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "rider_loaded");
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "driver_en_route");
     var activeRide = safeObject(payload.active_ride || payload);
     shell = _amiPatchDriverTripStatus(tripId, nextStatus);
     shell.driverApp.lastActionResult = {
-      last_action: "Pickup / Rider Onboard",
+      last_action: "Start Route / En Route to Pickup",
       api_status: "ok",
       db_record_id: safeText(activeRide.id, tripId),
       updated_table: "health_isf_rides",
@@ -15356,7 +15509,50 @@ window._amiHandleDriverStartTrip = async function(tripId) {
       http_status: 200,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
       frontend_state_transition: "active_ride->active_ride",
-      extra: { action: "Pickup / Rider Onboard", target_state: "rider_loaded" }
+      extra: { action: "Start Route / En Route to Pickup", target_state: "en_route_pickup" }
+    });
+  } catch (_) {
+    window.alert("Unable to start route for " + tripId + ".");
+    return false;
+  }
+  try {
+    await _amiAfterDriverWorkflowRefresh("En route to pickup for " + tripId);
+  } catch (_) {}
+  return true;
+};
+
+window._amiHandleDriverStartTrip = async function(tripId) {
+  var shell = _amiDriverShellState();
+  var driverId = _amiCanonicalMobileDriverId(shell);
+  if (!driverId || !tripId) return false;
+  try {
+    var payload = await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+      "POST",
+      { ride_id: tripId, target_state: "rider_loaded" }
+    );
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "rider_loaded");
+    var activeRide = safeObject(payload.active_ride || payload);
+    shell = _amiPatchDriverTripStatus(tripId, nextStatus);
+    shell.driverApp.lastActionResult = {
+      last_action: "Rider On Board / Picked Up",
+      api_status: "ok",
+      db_record_id: safeText(activeRide.id, tripId),
+      updated_table: "health_isf_rides",
+      ui_refreshed: "yes",
+      current_ride_status: nextStatus
+    };
+    window.AmiOpsShellState = shell;
+    _amiScheduleRenderPage();
+    _amiLogDriverMobileSync({
+      event: "route_progress",
+      requested_ride_id: tripId,
+      assignment_state: nextStatus,
+      api_response: activeRide,
+      http_status: 200,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Rider On Board / Picked Up", target_state: "rider_loaded" }
     });
   } catch (_) {
     _amiLogDriverMobileSync({
@@ -15364,13 +15560,13 @@ window._amiHandleDriverStartTrip = async function(tripId) {
       requested_ride_id: tripId,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
       api_response: { error: "rider_loaded_failed" },
-      extra: { action: "Pickup / Rider Onboard", target_state: "rider_loaded" }
+      extra: { action: "Rider On Board / Picked Up", target_state: "rider_loaded" }
     });
     window.alert("Unable to submit driver start action for " + tripId + ".");
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
     shell.driverApp.lastActionResult = {
-      last_action: "Pickup / Rider Onboard",
+      last_action: "Rider On Board / Picked Up",
       api_status: "error",
       db_record_id: safeText(tripId, "n/a"),
       updated_table: "health_isf_rides",
@@ -15404,7 +15600,7 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
     var activeRide = safeObject(payload.active_ride || payload);
     shell = _amiPatchDriverTripStatus(tripId, nextStatus);
     shell.driverApp.lastActionResult = {
-      last_action: "Start Transport",
+      last_action: "Start Transportation",
       api_status: "ok",
       db_record_id: safeText(activeRide.id, tripId),
       updated_table: "health_isf_rides",
@@ -15421,7 +15617,7 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
       http_status: 200,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
       frontend_state_transition: "active_ride->active_ride",
-      extra: { action: "Start Transport", target_state: "trip_in_progress" }
+      extra: { action: "Start Transportation", target_state: "trip_in_progress" }
     });
   } catch (_) {
     _amiLogDriverMobileSync({
@@ -15429,13 +15625,13 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
       requested_ride_id: tripId,
       route: "/api/health-isf/drivers/" + driverId + "/route-progress",
       api_response: { error: "trip_in_progress_failed" },
-      extra: { action: "Start Transport", target_state: "trip_in_progress" }
+      extra: { action: "Start Transportation", target_state: "trip_in_progress" }
     });
     window.alert("Unable to update route progress for " + tripId + ".");
     shell = _amiDriverShellState();
     shell.driverApp = safeObject(shell.driverApp);
     shell.driverApp.lastActionResult = {
-      last_action: "Start Transport",
+      last_action: "Start Transportation",
       api_status: "error",
       db_record_id: safeText(tripId, "n/a"),
       updated_table: "health_isf_rides",
@@ -15447,6 +15643,49 @@ window._amiHandleDriverProgressTrip = async function(tripId) {
   }
   try {
     await _amiAfterDriverWorkflowRefresh("Transit progress updated for " + tripId);
+  } catch (_) {}
+  return true;
+};
+
+window._amiHandleDriverArriveDestination = async function(tripId) {
+  var shell = _amiDriverShellState();
+  var driverId = _amiCanonicalMobileDriverId(shell);
+  if (!driverId || !tripId) return false;
+  try {
+    var payload = await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
+      "POST",
+      { ride_id: tripId, target_state: "arrived_destination" }
+    );
+    var nextStatus = _amiStatusFromRouteProgressPayload(payload, "arrived_destination");
+    var activeRide = safeObject(payload.active_ride || payload);
+    shell = _amiPatchDriverTripStatus(tripId, nextStatus);
+    shell.driverApp.lastActionResult = {
+      last_action: "Arrived at Destination",
+      api_status: "ok",
+      db_record_id: safeText(activeRide.id, tripId),
+      updated_table: "health_isf_rides",
+      ui_refreshed: "yes",
+      current_ride_status: nextStatus
+    };
+    window.AmiOpsShellState = shell;
+    _amiScheduleRenderPage();
+    _amiLogDriverMobileSync({
+      event: "route_progress",
+      requested_ride_id: tripId,
+      assignment_state: nextStatus,
+      api_response: activeRide,
+      http_status: 200,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Arrived at Destination", target_state: "arrived_destination" }
+    });
+  } catch (_) {
+    window.alert("Unable to mark arrived at destination for " + tripId + ".");
+    return false;
+  }
+  try {
+    await _amiAfterDriverWorkflowRefresh("Arrived at destination for " + tripId);
   } catch (_) {}
   return true;
 };
@@ -15466,7 +15705,6 @@ window._amiHandleDriverCompleteTrip = async function(tripId) {
   var handoff = {};
   var payload = null;
   try {
-    await _amiAdvanceRideForCompletion(driverId, tripId);
     var progressPayload = await _amiSendJson(
       "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/route-progress",
       "POST",
