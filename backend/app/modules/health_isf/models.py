@@ -1405,7 +1405,7 @@ def ensure_driver_mobile_login_schema() -> None:
             driver_column_types = {
                 "auth_state": "VARCHAR(32) NOT NULL DEFAULT 'inactive'",
                 "availability_state": "VARCHAR(32) NOT NULL DEFAULT 'offline'",
-                "is_online": "BOOLEAN NOT NULL DEFAULT FALSE",
+                "is_online": "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0",
                 "last_seen_at": datetime_sql,
                 "version": "INTEGER NOT NULL DEFAULT 0",
             }
@@ -1414,6 +1414,44 @@ def ensure_driver_mobile_login_schema() -> None:
                     conn,
                     inspector,
                     "health_isf_drivers",
+                    column_name,
+                    column_type,
+                )
+
+        if "health_isf_rides" in table_names:
+            datetime_sql = _schema_datetime_sql(conn.dialect.name)
+            bool_default = "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
+            ride_column_types = {
+                "version": "INTEGER NOT NULL DEFAULT 0",
+                "priority_score": "FLOAT",
+                "priority_tag": "VARCHAR(32)",
+                "is_emergency": bool_default,
+                "appointment_time": datetime_sql,
+                "recurring_trip_pattern": "TEXT",
+                "recurring_schedule_id": "VARCHAR(36)",
+                "recurring_instance_date": datetime_sql,
+                "ai_dispatch_context": "TEXT",
+                "intake_fingerprint": "VARCHAR(128)",
+                "lifecycle_state": "VARCHAR(32) DEFAULT 'requested'",
+                "assigned_at": datetime_sql,
+                "enroute_at": datetime_sql,
+                "arrived_at": datetime_sql,
+                "picked_up_at": datetime_sql,
+                "transporting_at": datetime_sql,
+                "round_trip_group_id": "VARCHAR(36)",
+                "trip_leg": "VARCHAR(16)",
+                "pickup_time": datetime_sql,
+                "return_pickup_type": "VARCHAR(32)",
+                "same_driver_preference": bool_default,
+                "dispatch_eligible_at": datetime_sql,
+                "call_when_ready": bool_default,
+                "scheduling_series_id": "VARCHAR(36)",
+            }
+            for column_name, column_type in ride_column_types.items():
+                _schema_add_column_if_missing(
+                    conn,
+                    inspector,
+                    "health_isf_rides",
                     column_name,
                     column_type,
                 )
@@ -1462,6 +1500,14 @@ def ensure_driver_mobile_login_schema() -> None:
 
 def ensure_health_isf_schema() -> None:
     """Apply lightweight additive schema upgrades for older Health ISF databases."""
+    try:
+        _ensure_health_isf_schema_impl()
+    except Exception:
+        _SCHEMA_LOGGER.exception("ensure_health_isf_schema_failed")
+
+
+def _ensure_health_isf_schema_impl() -> None:
+    """Internal schema upgrade implementation."""
     from app.db.session import engine
 
     Base.metadata.create_all(bind=engine)
