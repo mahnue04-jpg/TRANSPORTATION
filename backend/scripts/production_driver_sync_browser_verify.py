@@ -206,7 +206,7 @@ def write_report(report: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env-file", default=".runtime/production.env")
+    parser.add_argument("--env-file", default=None, help="Optional production credentials file")
     args = parser.parse_args()
     if args.env_file:
         os.environ["AMICOR_PRODUCTION_ENV_FILE"] = args.env_file
@@ -249,6 +249,20 @@ def main() -> int:
     report["deploy_commit"] = live.get("deploy_commit")
 
     auth = resolve_fn()
+    if not auth.get("ok") and args.env_file:
+        for key in (
+            "AMICOR_SEED_PASSWORD",
+            "AMICOR_DEPLOYMENT_SYNC_KEY",
+            "AMICOR_DISPATCHER_ACCESS_TOKEN",
+            "AMICOR_RIDER_ACCESS_TOKEN",
+            "AMICOR_PRODUCTION_JWT",
+        ):
+            os.environ.pop(key, None)
+        import importlib
+        from scripts import production_auth as prod_auth
+
+        importlib.reload(prod_auth)
+        auth = prod_auth.resolve_production_tokens()
     auth_step = step(
         "Production authentication",
         bool(auth.get("ok")),

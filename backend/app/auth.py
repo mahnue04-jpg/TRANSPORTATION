@@ -392,10 +392,9 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
     """Backfill organization scope for legacy accounts missing tenant assignment."""
     current_org = getattr(user, "organization_id", None)
     try:
-        from app.modules.health_isf.models import ensure_health_isf_schema, HealthISFProvider, HealthISFDriver
+        from app.modules.health_isf.models import HealthISFProvider, HealthISFDriver
         from app.modules.health_isf import service as health_isf_service
 
-        ensure_health_isf_schema()
         default_org = health_isf_service._get_or_create_default_org(db)
         health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
         health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)
@@ -433,7 +432,14 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
                 health_isf_service.ensure_sample_drivers(db, organization_id=current_org_str)
 
         final_org_id = str(getattr(user, "organization_id", None) or default_org.id)
-        health_isf_service.ensure_operational_bootstrap(db, organization_id=final_org_id)
+        try:
+            health_isf_service.ensure_operational_bootstrap(db, organization_id=final_org_id)
+        except Exception as bootstrap_exc:
+            logger.warning(
+                "Operational bootstrap skipped during login for %s: %s",
+                getattr(user, "id", "unknown"),
+                bootstrap_exc,
+            )
 
         if not getattr(user, "organization_name", None):
             user.organization_name = DEFAULT_ORGANIZATION_NAME
