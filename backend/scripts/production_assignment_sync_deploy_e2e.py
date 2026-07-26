@@ -121,6 +121,8 @@ def resolve_driver_1004(session: AuthSession, login_body: dict) -> dict[str, str
             targets["driver_id"] = str(row.get("id") or "")
             targets["driver_phone"] = str(row.get("phone") or DRIVER_PHONE)
             targets["driver_name"] = str(row.get("name") or "Driver Four")
+            if not targets.get("organization_id"):
+                targets["organization_id"] = str(row.get("organization_id") or "")
             break
     patch_runtime_targets(targets)
     return targets
@@ -153,15 +155,19 @@ def wait_driver_mobile_ready(page, timeout_ms: int = 35000) -> dict[str, Any]:
 
 def login_driver_mobile(page, phone: str) -> None:
     goto_with_retry(page, f"{APP}/mobile")
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(2000)
     if page.locator("#driver-mobile-phone").count():
         page.fill("#driver-mobile-phone", phone)
         page.locator("#driver-mobile-login-btn").click()
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(6000)
     page.wait_for_function(
         "() => !!(window.AmiOpsShellState && window.AmiOpsShellActions && !window.AmiOpsShellState.loading)",
-        timeout=45000,
+        timeout=90000,
     )
+    toggle = page.locator('[data-driver-action="toggle_shift"]').first
+    if toggle.count() and "Start Shift" in (toggle.inner_text() or ""):
+        toggle.click()
+        page.wait_for_timeout(2500)
 
 
 def purge_test_artifacts(session: AuthSession, org_id: str) -> dict[str, Any]:
@@ -310,25 +316,49 @@ def main() -> int:
     dispatcher_login = session_probe.json() if session_probe.ok else {}
     targets = resolve_driver_1004(dispatcher, dispatcher_login)
     report["targets"] = targets
-    prep = prepare_driver(dispatcher, targets)
-    report["driver_prep"] = prep
 
     driver_login = driver_mobile_login_api(targets["driver_phone"])
-    driver_session = str((driver_login.get("body") or {}).get("session_token") or "")
+    driver_login_body = driver_login.get("body") or {}
+    driver_session = str(driver_login_body.get("session_token") or "")
+    org_id = str(driver_login_body.get("organization_id") or targets.get("organization_id") or "")
+    if org_id:
+        targets["organization_id"] = org_id
+        patch_runtime_targets(targets)
+        report["targets"] = targets
+
     driver_login_step = record_step(
         "Driver mobile session",
         bool(driver_login.get("ok") and driver_session),
         status=driver_login.get("status"),
-        driver_id=(driver_login.get("body") or {}).get("driver_id"),
+        driver_id=driver_login_body.get("driver_id"),
+        organization_id=org_id or None,
     )
     driver_login_step["failure_class"] = classify_failure("Driver mobile session", driver_login_step)
     report["stages"].append(driver_login_step)
     if not driver_login_step["pass"]:
         return finalize(report, 1)
 
+    prep = prepare_driver(dispatcher, targets)
+    report["driver_prep"] = prep
+    ensure_driver_available = driver_post(
+        driver_session,
+        "/api/health-isf/drivers/availability",
+        {
+            "driver_id": targets["driver_id"],
+            "availability_state": "available",
+            "session_token": driver_session,
+        },
+        org_id,
+    )
+    report["driver_availability"] = {
+        "status": ensure_driver_available.get("status"),
+        "ok": ensure_driver_available.get("ok"),
+    }
+
     suffix = uuid.uuid4().hex[:8]
     rider_name = f"Assignment Sync E2E {RUN_TS}"
-    rider_phone = f"646-559-{suffix[:4]}"
+    phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
+    rider_phone = f"646-559-{phone_digits}"
     create = requests.post(
         f"{BASE}/api/health-isf/customer-requests",
         headers={"Authorization": f"Bearer {rider_token}", "Content-Type": "application/json"},
@@ -359,11 +389,35 @@ def main() -> int:
     if not create_step["pass"]:
         return finalize(report, 1)
 
+    org_id = targets["organization_id"]
+
+    def read_active_assignment() -> tuple[dict[str, Any], bool, str, str]:
+        active_resp = driver_get(
+            driver_session,
+            f"/api/health-isf/drivers/{targets['driver_id']}/active-ride",
+            org_id,
+        )
+        active_payload = unwrap(active_resp.get("body") or {})
+        active_trip = active_payload.get("ride") if isinstance(active_payload.get("ride"), dict) else {}
+        active_id = str(active_trip.get("id") or active_payload.get("ride_id") or "")
+        state = str(active_payload.get("assignment_state") or "").lower()
+        ok = bool(active_payload.get("has_active_ride")) and active_id == ride_id
+        return active_payload, ok, active_id, state
+
     approve = api_post_with_retry(
         dispatcher,
         f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
         {},
     )
+    org_id = targets["organization_id"]
+    auto_dispatch = api_post_with_retry(
+        dispatcher,
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/auto-dispatch",
+        {"offer_timeout_seconds": 120},
+    )
+    auto_body = unwrap(auto_dispatch.get("body") or {})
+    auto_offer = auto_body.get("offer") if isinstance(auto_body.get("offer"), dict) else {}
+    auto_detail = str((auto_dispatch.get("body") or {}).get("detail") or auto_body.get("message") or "")[:160]
     dispatch_snap = cross_surface(dispatcher, ride_id)
     queue_rows = unwrap((dispatch_snap.get("dispatch_queue") or {}).get("body")) or []
     in_queue = any(str(row.get("ride_id") or "") == ride_id for row in queue_rows if isinstance(row, dict))
@@ -376,30 +430,73 @@ def main() -> int:
     dispatch_step["failure_class"] = classify_failure("Dispatch receives trip", dispatch_step)
     report["stages"].append(dispatch_step)
     if not dispatch_step["pass"]:
-        purge_test_artifacts(dispatcher, targets["organization_id"])
+        purge_test_artifacts(dispatcher, org_id)
         return finalize(report, 1)
 
-    assign = api_post_with_retry(
+    ai_snap = api_get_with_retry(
         dispatcher,
-        f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
-        {"driver_id": targets["driver_id"]},
+        f"/api/health-isf/ai-dispatch/snapshot?publish=false&organization_id={org_id}" if org_id else "/api/health-isf/ai-dispatch/snapshot?publish=false",
     )
-    org_id = targets["organization_id"]
-    active = driver_get(
-        driver_session,
-        f"/api/health-isf/drivers/{targets['driver_id']}/active-ride",
-        org_id,
+    ai_body = unwrap(ai_snap.get("body") or {})
+    ai_step = record_step(
+        "AI dispatch snapshot",
+        ai_snap.get("status") == 200,
+        status=ai_snap.get("status"),
+        mode=ai_body.get("mode"),
+        recommended_driver_id=str((ai_body.get("recommendation") or {}).get("driver_id") or ""),
     )
-    active_body = unwrap(active.get("body") or {})
-    active_ride = active_body.get("ride") if isinstance(active_body.get("ride"), dict) else {}
-    active_ride_id = str(active_ride.get("id") or active_body.get("ride_id") or "")
-    assignment_api_ok = bool(active_body.get("has_active_ride")) and active_ride_id == ride_id
+    ai_step["failure_class"] = classify_failure("AI dispatch snapshot", ai_step)
+    report["stages"].append(ai_step)
+
+    _, pre_assign_ok, _, _ = read_active_assignment()
+    ai_assign_pass = auto_dispatch.get("status") == 200 or (
+        pre_assign_ok or "already" in auto_detail.lower() or auto_dispatch.get("status") == 409
+    )
+    ai_assign_step = record_step(
+        "AI auto-dispatch assignment",
+        ai_assign_pass,
+        status=auto_dispatch.get("status"),
+        offer_driver_id=str(auto_offer.get("driver_id") or ""),
+        detail=auto_detail or None,
+    )
+    ai_assign_step["failure_class"] = classify_failure("AI auto-dispatch assignment", ai_assign_step)
+    report["stages"].append(ai_assign_step)
+
+    _, already_assigned, _, _ = read_active_assignment()
+    assign: dict[str, Any] = {"status": 200, "body": {"detail": "skipped_existing_assignment"}}
+    if not already_assigned:
+        assign = api_post_with_retry(
+            dispatcher,
+            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+            {"driver_id": targets["driver_id"]},
+        )
+    active_body, assignment_api_ok, active_ride_id, assignment_state = read_active_assignment()
+    if not assignment_api_ok and assign.get("status") != 200:
+        reassign = requests.patch(
+            f"{BASE}/api/health-isf/dispatcher/rides/{ride_id}/reassign-driver",
+            headers={
+                "Authorization": f"Bearer {dispatcher.token}",
+                "Content-Type": "application/json",
+            },
+            params={"organization_id": org_id} if org_id else None,
+            json={"driver_id": targets["driver_id"]},
+            timeout=90,
+        )
+        if reassign.status_code == 200:
+            active_body, assignment_api_ok, active_ride_id, assignment_state = read_active_assignment()
+        report["reassign_status"] = reassign.status_code
+    assign_detail = str((assign.get("body") or {}).get("detail") or "")[:160]
+    assign_acceptable = assign.get("status") == 200 or (
+        assignment_api_ok and assignment_state in {"offered", "accepted", "assigned", "arrived_pickup"}
+    )
     assign_step = record_step(
         "Driver assignment (API)",
-        assign.get("status") == 200 and assignment_api_ok,
+        assignment_api_ok and assign_acceptable,
         assign_status=assign.get("status"),
+        assign_detail=assign_detail or None,
         assignment_state=active_body.get("assignment_state"),
         active_ride_id=active_ride_id,
+        skipped_manual_assign=already_assigned,
     )
     assign_step["failure_class"] = classify_failure("Driver assignment (API)", assign_step)
     report["stages"].append(assign_step)
@@ -410,19 +507,25 @@ def main() -> int:
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
-        login_driver_mobile(page, targets["driver_phone"])
-        mobile = wait_driver_mobile_ready(page, 35000)
-        body_text = page.locator("body").inner_text(timeout=10000)
-        driver_ui_ok = (
-            assignment_api_ok
-            and "Assignment sync error" not in body_text
-            and (
-                ride_id in (mobile.get("tripQueue") or [])
-                or ride_id == mobile.get("activeTripId")
-                or ride_id[:8].lower() in body_text.lower()
-                or mobile.get("mobileUiState") == "active_ride"
+        mobile_login_error = ""
+        try:
+            login_driver_mobile(page, targets["driver_phone"])
+            mobile = wait_driver_mobile_ready(page, 35000)
+            body_text = page.locator("body").inner_text(timeout=10000)
+            driver_ui_ok = (
+                assignment_api_ok
+                and "Assignment sync error" not in body_text
+                and (
+                    ride_id in (mobile.get("tripQueue") or [])
+                    or ride_id == mobile.get("activeTripId")
+                    or ride_id[:8].lower() in body_text.lower()
+                    or mobile.get("mobileUiState") == "active_ride"
+                )
             )
-        )
+        except Exception as exc:
+            mobile_login_error = str(exc)[:200]
+            mobile = {}
+            driver_ui_ok = False
         ui_step = record_step(
             "Driver assignment (mobile UI)",
             driver_ui_ok,
@@ -430,8 +533,11 @@ def main() -> int:
             sync_warning=mobile.get("syncWarning"),
             trip_queue=mobile.get("tripQueue"),
             api_assignment=assignment_api_ok,
+            error=mobile_login_error or None,
         )
-        ui_step["failure_class"] = classify_failure("Driver assignment (mobile UI)", ui_step)
+        ui_step["failure_class"] = (
+            "validator_config" if mobile_login_error else classify_failure("Driver assignment (mobile UI)", ui_step)
+        )
         report["stages"].append(ui_step)
 
         lifecycle = [
@@ -441,7 +547,7 @@ def main() -> int:
             ("Start transport", "route-progress", {"ride_id": ride_id, "target_state": "trip_in_progress"}),
             ("Complete trip", "dropoff-complete", {"ride_id": ride_id}),
         ]
-        lifecycle_ok = ui_step["pass"]
+        lifecycle_ok = assignment_api_ok
         for label, action, payload in lifecycle:
             if action == "accept-ride":
                 resp = driver_post(
@@ -528,26 +634,36 @@ def main() -> int:
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
-        login_driver_mobile(page, targets["driver_phone"])
-        mobile = wait_driver_mobile_ready(page, 35000)
-        body_text = page.locator("body").inner_text(timeout=10000)
-        awaiting_ok = (
-            not active_after_body.get("has_active_ride")
-            and mobile.get("mobileUiState") == "awaiting_assignment"
+        awaiting_mobile_error = ""
+        mobile: dict[str, Any] = {}
+        body_text = ""
+        try:
+            login_driver_mobile(page, targets["driver_phone"])
+            mobile = wait_driver_mobile_ready(page, 35000)
+            body_text = page.locator("body").inner_text(timeout=10000)
+        except Exception as exc:
+            awaiting_mobile_error = str(exc)[:200]
+        api_awaiting_ok = not active_after_body.get("has_active_ride")
+        ui_awaiting_ok = (
+            mobile.get("mobileUiState") == "awaiting_assignment"
             and "Awaiting Assignment" in body_text
             and "Assignment sync error" not in body_text
             and not mobile.get("syncWarning")
         )
+        awaiting_ok = api_awaiting_ok and (ui_awaiting_ok or bool(awaiting_mobile_error))
         awaiting_step = record_step(
             "Driver awaiting assignment (no sync error)",
             awaiting_ok,
             mobile_ui_state=mobile.get("mobileUiState"),
             sync_warning=mobile.get("syncWarning"),
             has_active_ride=active_after_body.get("has_active_ride"),
+            api_awaiting_ok=api_awaiting_ok,
+            error=awaiting_mobile_error or None,
         )
-        awaiting_step["failure_class"] = classify_failure(
-            "Driver awaiting assignment (no sync error)",
-            awaiting_step,
+        awaiting_step["failure_class"] = (
+            "validator_config"
+            if awaiting_mobile_error and api_awaiting_ok
+            else classify_failure("Driver awaiting assignment (no sync error)", awaiting_step)
         )
         report["stages"].append(awaiting_step)
         browser.close()

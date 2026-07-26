@@ -228,7 +228,7 @@ from app.observability import increment as increment_metric
 logger = logging.getLogger("amicor.health_isf.routes")
 
 
-def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResponse:
+def _ride_response_base(db: Session, ride: HealthISFRide) -> dict[str, Any]:
     from app.modules.health_isf.scheduling import format_scheduling_summary
 
     payload = RideResponse.model_validate(ride).model_dump()
@@ -245,6 +245,11 @@ def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResp
         driver = service.get_driver_by_id(db, str(ride.driver_id))
         if driver:
             payload["driver_name"] = str(getattr(driver, "name", None) or "")
+    return payload
+
+
+def _ride_response_with_financials(db: Session, ride: HealthISFRide) -> RideResponse:
+    payload = _ride_response_base(db, ride)
     financial = TripFinancialEngine.get_ride_financial_summary(db, ride_id=ride.id)
     if financial:
         payload["fare_amount"] = financial.get("fare_amount")
@@ -9187,6 +9192,7 @@ def get_driver_assigned_rides(
     driver_id: str,
     request: Request,
     organization_id: str | None = Query(None),
+    limit: int = Query(25, ge=1, le=100),
     auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
     db: Session = Depends(get_db),
 ):
@@ -9198,8 +9204,17 @@ def get_driver_assigned_rides(
     resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
     enforce_entity_tenant(user, resolved_org_id)
-    rides = service.list_driver_assigned_rides(db, organization_id=effective_org_id, driver_id=effective_driver_id)
-    response = [_ride_response_with_financials(db, ride) for ride in rides]
+    rides = service.list_driver_assigned_rides(
+        db,
+        organization_id=effective_org_id,
+        driver_id=effective_driver_id,
+        limit=limit,
+    )
+    driver_mobile_session = auth.actor_user_id is None
+    if driver_mobile_session:
+        response = [RideResponse(**_ride_response_base(db, ride)) for ride in rides]
+    else:
+        response = [_ride_response_with_financials(db, ride) for ride in rides]
     record_backend_assignment_sync(
         db,
         request=request,

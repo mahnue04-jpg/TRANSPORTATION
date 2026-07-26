@@ -1083,7 +1083,6 @@
     state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["driver_sync_degraded"]));
     state.driverApp = safeObject(state.driverApp);
     state.driverApp.syncWarning = safeText(message, "Driver workspace synchronization delayed. Showing last confirmed trip.");
-    state.driverApp.lastStatusUpdate = state.driverApp.syncWarning;
   }
 
   function clearDriverSyncWarning() {
@@ -1112,6 +1111,9 @@
       workflow.activeOffer
     );
     if (hasOpenAssignment) {
+      clearDriverMobileSyncError();
+      state.driverApp.mobileUiState = "active_ride";
+      scheduleRenderPage({ immediate: true });
       return;
     }
     resetDriverMobileAfterCompletion();
@@ -6357,7 +6359,6 @@
       } catch (syncError) {
         var syncFailure = classifyDriverPostLoginSyncFailure(syncError);
         state.driverApp.mobileUiState = "api_error";
-        state.driverApp.syncWarning = syncFailure.message;
         state.driverApp.mobileBootstrapError = syncFailure.message;
         state.driverApp.mobileLogin.error = "[" + syncFailure.category.replace(/_/g, " ") + "] " + syncFailure.message;
         markDriverSyncWarning(syncFailure.message);
@@ -6642,9 +6643,12 @@
               '<button class="preview-action driver-action" data-driver-action="decline_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableNoShow ? ' disabled' : '') + '>No Show</button>' +
             '</div>' +
             '<p class="muted">Latest update: ' + escapeHtml(safeText(appState.lastStatusUpdate, 'None')) + '</p>' +
-            (safeText(appState.syncWarning, "")
-              ? '<p class="muted" style="color:#b45309;">' + escapeHtml(safeText(appState.syncWarning, "")) + '</p>'
-              : '') +
+            (function () {
+              var syncWarning = safeText(appState.syncWarning, "");
+              var latestUpdate = safeText(appState.lastStatusUpdate, "");
+              if (!syncWarning || syncWarning === latestUpdate) return "";
+              return '<p class="muted" style="color:#b45309;">' + escapeHtml(syncWarning) + '</p>';
+            })() +
           '</article>' +
           renderDriverOperationalMap(activeTrip) +
           '<article class="driver-workflow-card">' +
@@ -11401,15 +11405,42 @@
 
     var fetchOpts = {};
     var driverBase = "/api/health-isf/drivers/" + encodeURIComponent(resolvedDriverId);
-    var probe = await Promise.allSettled([
+    var criticalProbe = await Promise.allSettled([
       fetchJson(driverBase + "/active-ride", fetchOpts, token),
       fetchJson(driverBase + "/live-workspace", fetchOpts, token),
-      fetchJson(driverBase + "/active-offer", fetchOpts, token),
-      fetchJson(driverBase + "/assigned-rides", fetchOpts, token)
+      fetchJson(driverBase + "/active-offer", fetchOpts, token)
     ]);
     var completionProbe = await Promise.allSettled([
       fetchJson(driverBase + "/completion-snapshot?limit=50", fetchOpts, token)
     ]);
+    var assignedProbeResult;
+    if (isDriverMobileAppRoute()) {
+      assignedProbeResult = await Promise.race([
+        Promise.resolve(
+          fetchJson(driverBase + "/assigned-rides?limit=15", fetchOpts, token)
+        ).then(function (value) {
+          return { status: "fulfilled", value: value };
+        }, function (reason) {
+          return { status: "rejected", reason: reason };
+        }),
+        new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve({ status: "rejected", reason: new Error("assigned_rides_deferred") });
+          }, 10000);
+        })
+      ]);
+    } else {
+      var assignedSettled = await Promise.allSettled([
+        fetchJson(driverBase + "/assigned-rides", fetchOpts, token)
+      ]);
+      assignedProbeResult = assignedSettled[0];
+    }
+    var probe = [
+      criticalProbe[0],
+      criticalProbe[1],
+      criticalProbe[2],
+      assignedProbeResult
+    ];
 
     if (refreshSeq !== driverWorkflowRefreshSeq) {
       logDriverPoll({
@@ -11490,8 +11521,9 @@
     var offerOk = probe[2].status === "fulfilled";
     var assignedOk = probe[3].status === "fulfilled";
     var completionOk = !!(completionProbe[0] && completionProbe[0].status === "fulfilled");
-    var coreProbeOk = activeRideOk || workspaceOk || offerOk || assignedOk;
-    var apiHealthy = coreProbeOk;
+    var driverMobileCoreHealthy = activeRideOk || workspaceOk || offerOk;
+    var coreProbeOk = driverMobileCoreHealthy || assignedOk;
+    var apiHealthy = isDriverMobileAppRoute() ? driverMobileCoreHealthy : coreProbeOk;
     var returnedRideId = safeText((safeObject(activeRidePayload && activeRidePayload.ride)).id, "");
     var lifecycleState = safeText(
       activeRidePayload && (activeRidePayload.assignment_state || (activeRidePayload.ride && (activeRidePayload.ride.lifecycle_state || activeRidePayload.ride.status))),
@@ -11511,6 +11543,9 @@
       completionSnapshot
     );
     var preserveOnEmpty = !apiHealthy || (wouldClearActiveTrip && priorTripId && !priorCompleted && !authoritativeEmpty);
+    if (isDriverMobileAppRoute() && driverMobileCoreHealthy && openAssignment) {
+      preserveOnEmpty = false;
+    }
     var incomingTripIds = driverRefreshCollectTripIds(activeRidePayload, assignedRideRows || [], offerEnvelope);
     var hasFreshOpenAssignment = openAssignment && apiHealthy && incomingTripIds.some(function (tripId) {
       return !!tripId && tripId !== priorTripId;
@@ -11575,7 +11610,7 @@
         scheduleRenderPage(0);
         return;
       }
-      if (isDriverMobileAppRoute() && !apiHealthy) {
+      if (isDriverMobileAppRoute() && !driverMobileCoreHealthy) {
         state.driverApp = safeObject(state.driverApp);
         var priorUiOnApiError = safeText(state.driverApp.mobileUiState, "loading_assignment");
         if (driverCoreProbeNotFound()) {
@@ -11709,6 +11744,25 @@
           clearDriverSyncWarning();
           state.driverApp = safeObject(state.driverApp);
           state.driverApp.mobileBootstrapError = "";
+          ensureDriverMobileState(null);
+          scheduleRenderPage(0);
+          return;
+        }
+        if (driverMobileCoreHealthy && openAssignment) {
+          applyDriverWorkflowSnapshot(
+            resolvedDriverId,
+            completionOk ? completionSnapshot : null,
+            {
+              activeRide: activeRidePayload || { has_active_ride: false },
+              workspace: workspacePayload,
+              activeOffer: offerEnvelope,
+              assignedRides: assignedRideRows || []
+            },
+            { preserveOnEmpty: false }
+          );
+          driverLastAppliedRefreshSeq = refreshSeq;
+          driverLastAppliedObservedAt = responseObservedAt;
+          clearDriverMobileSyncError();
           ensureDriverMobileState(null);
           scheduleRenderPage(0);
           return;

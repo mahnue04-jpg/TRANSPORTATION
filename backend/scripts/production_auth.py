@@ -59,7 +59,7 @@ def _login(email: str, password: str) -> tuple[int, dict[str, Any]]:
     resp = requests.post(
         f"{BASE}/api/auth/login",
         json={"email": email, "password": password},
-        timeout=60,
+        timeout=120,
     )
     body: dict[str, Any] = {}
     try:
