@@ -210,6 +210,19 @@ def main() -> int:
     args = parser.parse_args()
     if args.env_file:
         os.environ["AMICOR_PRODUCTION_ENV_FILE"] = args.env_file
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(args.env_file, override=True)
+        except ImportError:
+            pass
+        import importlib
+        from scripts import production_auth as prod_auth
+
+        importlib.reload(prod_auth)
+        resolve_fn = prod_auth.resolve_production_tokens
+    else:
+        resolve_fn = resolve_production_tokens
 
     report: dict[str, Any] = {
         "run_ts": RUN_TS,
@@ -235,12 +248,18 @@ def main() -> int:
     live = requests.get(f"{BASE}/api/health/live", timeout=120).json()
     report["deploy_commit"] = live.get("deploy_commit")
 
-    auth = resolve_production_tokens()
-    report["stages"].append(
-        step("Production authentication", bool(auth.get("ok")), auth_method=auth.get("auth_method"))
+    auth = resolve_fn()
+    auth_step = step(
+        "Production authentication",
+        bool(auth.get("ok")),
+        auth_method=auth.get("auth_method"),
+        audit=auth.get("audit"),
+        error=auth.get("error"),
     )
+    report["stages"].append(auth_step)
     if not auth.get("ok"):
         write_report(report)
+        print(json.dumps({"verdict": "FAIL", "step": "Production authentication", "audit": auth.get("audit")}, indent=2))
         return 1
 
     dispatcher = AuthSession(email=str(auth.get("dispatcher_email") or "dispatcher@amicor.local"))

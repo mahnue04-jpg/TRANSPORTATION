@@ -1394,108 +1394,114 @@ def ensure_driver_mobile_login_schema() -> None:
     """Ensure only the tables/columns required for public driver mobile login."""
     from app.db.session import engine
 
-    Base.metadata.tables["health_isf_driver_sessions"].create(bind=engine, checkfirst=True)
+    try:
+        Base.metadata.tables["health_isf_driver_sessions"].create(bind=engine, checkfirst=True)
+    except Exception:
+        _SCHEMA_LOGGER.exception("ensure_driver_mobile_login_sessions_table_failed")
 
-    with engine.begin() as conn:
-        inspector = inspect(conn)
-        table_names = set(inspector.get_table_names())
+    try:
+        with engine.begin() as conn:
+            inspector = inspect(conn)
+            table_names = set(inspector.get_table_names())
 
-        if "health_isf_drivers" in table_names:
+            if "health_isf_drivers" in table_names:
+                datetime_sql = _schema_datetime_sql(conn.dialect.name)
+                driver_column_types = {
+                    "auth_state": "VARCHAR(32) NOT NULL DEFAULT 'inactive'",
+                    "availability_state": "VARCHAR(32) NOT NULL DEFAULT 'offline'",
+                    "is_online": "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0",
+                    "last_seen_at": datetime_sql,
+                    "version": "INTEGER NOT NULL DEFAULT 0",
+                }
+                for column_name, column_type in driver_column_types.items():
+                    _schema_add_column_if_missing(
+                        conn,
+                        inspector,
+                        "health_isf_drivers",
+                        column_name,
+                        column_type,
+                    )
+
+            if "health_isf_rides" in table_names:
+                datetime_sql = _schema_datetime_sql(conn.dialect.name)
+                bool_default = "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
+                ride_column_types = {
+                    "version": "INTEGER NOT NULL DEFAULT 0",
+                    "priority_score": "FLOAT",
+                    "priority_tag": "VARCHAR(32)",
+                    "is_emergency": bool_default,
+                    "appointment_time": datetime_sql,
+                    "recurring_trip_pattern": "TEXT",
+                    "recurring_schedule_id": "VARCHAR(36)",
+                    "recurring_instance_date": datetime_sql,
+                    "ai_dispatch_context": "TEXT",
+                    "intake_fingerprint": "VARCHAR(128)",
+                    "lifecycle_state": "VARCHAR(32) DEFAULT 'requested'",
+                    "assigned_at": datetime_sql,
+                    "enroute_at": datetime_sql,
+                    "arrived_at": datetime_sql,
+                    "picked_up_at": datetime_sql,
+                    "transporting_at": datetime_sql,
+                    "round_trip_group_id": "VARCHAR(36)",
+                    "trip_leg": "VARCHAR(16)",
+                    "pickup_time": datetime_sql,
+                    "return_pickup_type": "VARCHAR(32)",
+                    "same_driver_preference": bool_default,
+                    "dispatch_eligible_at": datetime_sql,
+                    "call_when_ready": bool_default,
+                    "scheduling_series_id": "VARCHAR(36)",
+                }
+                for column_name, column_type in ride_column_types.items():
+                    _schema_add_column_if_missing(
+                        conn,
+                        inspector,
+                        "health_isf_rides",
+                        column_name,
+                        column_type,
+                    )
+
+            if "health_isf_dispatch_assignments" not in table_names:
+                try:
+                    Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
+                except Exception:
+                    _SCHEMA_LOGGER.exception("ensure_driver_mobile_login_dispatch_table_failed")
+                return
+
             datetime_sql = _schema_datetime_sql(conn.dialect.name)
-            driver_column_types = {
-                "auth_state": "VARCHAR(32) NOT NULL DEFAULT 'inactive'",
-                "availability_state": "VARCHAR(32) NOT NULL DEFAULT 'offline'",
-                "is_online": "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0",
-                "last_seen_at": datetime_sql,
-                "version": "INTEGER NOT NULL DEFAULT 0",
-            }
-            for column_name, column_type in driver_column_types.items():
-                _schema_add_column_if_missing(
-                    conn,
-                    inspector,
-                    "health_isf_drivers",
-                    column_name,
-                    column_type,
-                )
-
-        if "health_isf_rides" in table_names:
-            datetime_sql = _schema_datetime_sql(conn.dialect.name)
-            bool_default = "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
-            ride_column_types = {
-                "version": "INTEGER NOT NULL DEFAULT 0",
-                "priority_score": "FLOAT",
-                "priority_tag": "VARCHAR(32)",
-                "is_emergency": bool_default,
-                "appointment_time": datetime_sql,
-                "recurring_trip_pattern": "TEXT",
-                "recurring_schedule_id": "VARCHAR(36)",
-                "recurring_instance_date": datetime_sql,
-                "ai_dispatch_context": "TEXT",
-                "intake_fingerprint": "VARCHAR(128)",
-                "lifecycle_state": "VARCHAR(32) DEFAULT 'requested'",
+            dispatch_assignment_column_types = {
+                "score": "FLOAT",
+                "score_breakdown_json": "TEXT",
+                "timeout_seconds": "INTEGER NOT NULL DEFAULT 90",
+                "queued_at": datetime_sql,
+                "search_started_at": datetime_sql,
+                "offered_at": datetime_sql,
+                "offer_expires_at": datetime_sql,
                 "assigned_at": datetime_sql,
-                "enroute_at": datetime_sql,
-                "arrived_at": datetime_sql,
-                "picked_up_at": datetime_sql,
-                "transporting_at": datetime_sql,
-                "round_trip_group_id": "VARCHAR(36)",
-                "trip_leg": "VARCHAR(16)",
-                "pickup_time": datetime_sql,
-                "return_pickup_type": "VARCHAR(32)",
-                "same_driver_preference": bool_default,
-                "dispatch_eligible_at": datetime_sql,
-                "call_when_ready": bool_default,
-                "scheduling_series_id": "VARCHAR(36)",
+                "accepted_at": datetime_sql,
+                "en_route_pickup_at": datetime_sql,
+                "pickup_complete_at": datetime_sql,
+                "dropoff_complete_at": datetime_sql,
+                "reassignment_pending_at": datetime_sql,
+                "reassignment_started_at": datetime_sql,
+                "reassignment_completed_at": datetime_sql,
+                "reassignment_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+                "reassignment_reason": "VARCHAR(128)",
+                "reassignment_chain_id": "VARCHAR(64)",
+                "rejected_at": datetime_sql,
+                "expired_at": datetime_sql,
+                "closed_reason": "VARCHAR(128)",
+                "metadata_json": "TEXT",
             }
-            for column_name, column_type in ride_column_types.items():
+            for column_name, column_type in dispatch_assignment_column_types.items():
                 _schema_add_column_if_missing(
                     conn,
                     inspector,
-                    "health_isf_rides",
+                    "health_isf_dispatch_assignments",
                     column_name,
                     column_type,
                 )
-
-        if "health_isf_dispatch_assignments" not in table_names:
-            try:
-                Base.metadata.tables["health_isf_dispatch_assignments"].create(bind=conn)
-            except Exception:
-                _SCHEMA_LOGGER.exception("ensure_driver_mobile_login_dispatch_table_failed")
-            return
-
-        datetime_sql = _schema_datetime_sql(conn.dialect.name)
-        dispatch_assignment_column_types = {
-            "score": "FLOAT",
-            "score_breakdown_json": "TEXT",
-            "timeout_seconds": "INTEGER NOT NULL DEFAULT 90",
-            "queued_at": datetime_sql,
-            "search_started_at": datetime_sql,
-            "offered_at": datetime_sql,
-            "offer_expires_at": datetime_sql,
-            "assigned_at": datetime_sql,
-            "accepted_at": datetime_sql,
-            "en_route_pickup_at": datetime_sql,
-            "pickup_complete_at": datetime_sql,
-            "dropoff_complete_at": datetime_sql,
-            "reassignment_pending_at": datetime_sql,
-            "reassignment_started_at": datetime_sql,
-            "reassignment_completed_at": datetime_sql,
-            "reassignment_attempt_count": "INTEGER NOT NULL DEFAULT 0",
-            "reassignment_reason": "VARCHAR(128)",
-            "reassignment_chain_id": "VARCHAR(64)",
-            "rejected_at": datetime_sql,
-            "expired_at": datetime_sql,
-            "closed_reason": "VARCHAR(128)",
-            "metadata_json": "TEXT",
-        }
-        for column_name, column_type in dispatch_assignment_column_types.items():
-            _schema_add_column_if_missing(
-                conn,
-                inspector,
-                "health_isf_dispatch_assignments",
-                column_name,
-                column_type,
-            )
+    except Exception:
+        _SCHEMA_LOGGER.exception("ensure_driver_mobile_login_schema_failed")
 
 
 def ensure_health_isf_schema() -> None:
