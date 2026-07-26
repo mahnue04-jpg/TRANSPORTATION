@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 from sqlalchemy import and_, case, desc, func, or_, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.helpers import now, uuid4
@@ -4321,23 +4322,53 @@ def find_driver_by_login_phone(
     driver_id: str | None = None,
 ) -> Optional[HealthISFDriver]:
     normalized_id = str(driver_id or "").strip()
-    candidates = (
-        db.query(HealthISFDriver)
-        .filter(HealthISFDriver.is_active.is_(True))
-        .all()
-    )
-    matches: list[HealthISFDriver] = []
-    for driver in candidates:
-        if not _phones_match_for_driver_login(driver.phone, phone):
-            continue
-        if normalized_id and str(driver.id) != normalized_id:
-            continue
-        matches.append(driver)
-    if not matches:
-        return None
-    if len(matches) > 1 and not normalized_id:
-        raise ValueError("Multiple drivers match this phone; select a driver profile")
-    return matches[0]
+
+    def _match_rows(rows: list[Any]) -> Optional[HealthISFDriver]:
+        matches: list[str] = []
+        for row in rows:
+            row_id = str(getattr(row, "id", None) or row[0])
+            row_phone = str(getattr(row, "phone", None) or row[1])
+            if not _phones_match_for_driver_login(row_phone, phone):
+                continue
+            if normalized_id and row_id != normalized_id:
+                continue
+            matches.append(row_id)
+        if not matches:
+            return None
+        if len(matches) > 1 and not normalized_id:
+            raise ValueError("Multiple drivers match this phone; select a driver profile")
+        return get_driver_by_id(db, matches[0])
+
+    try:
+        candidates = (
+            db.query(HealthISFDriver)
+            .filter(HealthISFDriver.is_active.is_(True))
+            .all()
+        )
+        matches: list[HealthISFDriver] = []
+        for driver in candidates:
+            if not _phones_match_for_driver_login(driver.phone, phone):
+                continue
+            if normalized_id and str(driver.id) != normalized_id:
+                continue
+            matches.append(driver)
+        if not matches:
+            return None
+        if len(matches) > 1 and not normalized_id:
+            raise ValueError("Multiple drivers match this phone; select a driver profile")
+        return matches[0]
+    except SQLAlchemyError:
+        from app.modules.health_isf.models import ensure_driver_mobile_login_schema
+
+        db.rollback()
+        ensure_driver_mobile_login_schema()
+        rows = db.execute(
+            text("SELECT id, phone FROM health_isf_drivers WHERE is_active = TRUE")
+        ).all()
+        driver = _match_rows(rows)
+        if driver:
+            return driver
+        raise
 
 
 def driver_login(

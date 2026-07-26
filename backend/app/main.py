@@ -273,6 +273,9 @@ async def lifespan(app: FastAPI):
             from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
             ensure_health_isf_schema()
             logger.info("Health ISF schema verified.")
+            from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
+            ensure_driver_mobile_login_schema()
+            logger.info("Driver mobile login schema verified.")
         except Exception as health_schema_exc:
             logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
     except Exception as exc:
