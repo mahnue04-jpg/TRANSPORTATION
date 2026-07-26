@@ -392,55 +392,11 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
     """Backfill organization scope for legacy accounts missing tenant assignment."""
     current_org = getattr(user, "organization_id", None)
     try:
-        from app.modules.health_isf.models import HealthISFProvider, HealthISFDriver
         from app.modules.health_isf import service as health_isf_service
 
         default_org = health_isf_service._get_or_create_default_org(db)
-        health_isf_service.ensure_sample_providers(db, organization_id=default_org.id)
-        health_isf_service.ensure_sample_drivers(db, organization_id=default_org.id)
-
-        current_org_str = str(current_org).strip() if current_org else ""
-        if not current_org_str:
+        if not str(current_org or "").strip():
             user.organization_id = default_org.id
-        elif current_org_str != str(default_org.id):
-            provider_count = (
-                db.query(HealthISFProvider)
-                .filter(HealthISFProvider.organization_id == current_org_str)
-                .count()
-            )
-            driver_count = (
-                db.query(HealthISFDriver)
-                .filter(
-                    HealthISFDriver.organization_id == current_org_str,
-                    HealthISFDriver.is_active == True,
-                )
-                .count()
-            )
-            canonical_names = [str(item["name"]).strip().lower() for item in health_isf_service.SAMPLE_DRIVERS]
-            canonical_driver_count = (
-                db.query(HealthISFDriver)
-                .filter(
-                    HealthISFDriver.organization_id == current_org_str,
-                    HealthISFDriver.is_active == True,
-                    func.lower(HealthISFDriver.name).in_(canonical_names),
-                )
-                .count()
-            )
-            if provider_count == 0 or driver_count == 0:
-                user.organization_id = default_org.id
-            elif canonical_driver_count < len(health_isf_service.SAMPLE_DRIVERS):
-                health_isf_service.ensure_sample_drivers(db, organization_id=current_org_str)
-
-        final_org_id = str(getattr(user, "organization_id", None) or default_org.id)
-        try:
-            health_isf_service.ensure_operational_bootstrap(db, organization_id=final_org_id)
-        except Exception as bootstrap_exc:
-            logger.warning(
-                "Operational bootstrap skipped during login for %s: %s",
-                getattr(user, "id", "unknown"),
-                bootstrap_exc,
-            )
-
         if not getattr(user, "organization_name", None):
             user.organization_name = DEFAULT_ORGANIZATION_NAME
         db.commit()
@@ -448,6 +404,10 @@ def ensure_user_organization(db: Session, user: Any) -> str | None:
         return str(getattr(user, "organization_id", None) or default_org.id)
     except Exception as exc:
         logger.warning("Failed to ensure user organization for %s: %s", getattr(user, "id", "unknown"), exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return str(current_org) if current_org else None
 
 
@@ -1031,7 +991,12 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     rt = RefreshTokenModel(user_id=user.id, token_hash=hashed, expires_at=expires)
     db.add(rt)
     user.last_login = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Login commit failed for user_id=%s: %s", user.id, exc)
+        raise HTTPException(status_code=503, detail="Login persistence unavailable") from exc
 
     logger.info("Login: user_id=%s ip=%s", user.id, ip)
     try:
