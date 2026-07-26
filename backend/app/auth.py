@@ -957,6 +957,44 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
     return {"user_id": user.id, "email": user.email, "status": "created"}
 
 
+def _fetch_login_user(db: Session, email: str) -> Any | None:
+    """Load a platform user for password login, with a raw-SQL fallback for schema drift."""
+    from app.db.models import User as UserModel
+
+    normalized = email.strip().lower()
+    try:
+        return (
+            db.query(UserModel)
+            .filter(UserModel.email == normalized)
+            .first()
+        )
+    except Exception:
+        db.rollback()
+        logger.warning("ORM login lookup failed for email=%s; trying SQL fallback", normalized, exc_info=True)
+
+    bind = db.get_bind()
+    inspector = inspect(bind)
+    if "platform_users" not in inspector.get_table_names():
+        return None
+    available = {col["name"] for col in inspector.get_columns("platform_users")}
+    required = ["id", "email", "hashed_password", "is_active", "role"]
+    if not all(col in available for col in required):
+        return None
+    optional = ["session_role", "authorized_roles", "organization_id", "organization_name", "display_name"]
+    select_cols = required + [column for column in optional if column in available]
+    sql = f"SELECT {', '.join(select_cols)} FROM platform_users WHERE lower(email) = :email LIMIT 1"
+    row = db.execute(text(sql), {"email": normalized}).mappings().first()
+    if not row:
+        return None
+    user = UserModel()
+    for column in select_cols:
+        setattr(user, column, row[column])
+    for column in optional:
+        if column not in select_cols and hasattr(UserModel, column):
+            setattr(user, column, None)
+    return user
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Password login — returns access + refresh tokens."""
@@ -971,9 +1009,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         logger.exception("ensure_auth_schema_failed_during_login")
 
     try:
-        user = db.query(UserModel).filter(
-            UserModel.email == req.email.strip().lower()
-        ).first()
+        user = _fetch_login_user(db, req.email)
     except Exception as exc:
         db.rollback()
         logger.exception("Login user lookup failed for email=%s", req.email)
@@ -992,7 +1028,17 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     if session_role not in authorized:
         session_role = normalize_role(getattr(user, "role", None))
     user.session_role = session_role
-    db.add(user)
+
+    persisted_user = None
+    try:
+        persisted_user = db.get(UserModel, str(user.id))
+    except Exception:
+        db.rollback()
+    if persisted_user is not None:
+        persisted_user.session_role = session_role
+        persisted_user.last_login = datetime.now(timezone.utc)
+        db.add(persisted_user)
+        user = persisted_user
 
     access = create_access_token(_access_token_payload(user, session_role))
     # Refresh token
@@ -1001,7 +1047,6 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     expires = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     rt = RefreshTokenModel(user_id=user.id, token_hash=hashed, expires_at=expires)
     db.add(rt)
-    user.last_login = datetime.now(timezone.utc)
     try:
         db.commit()
     except Exception as exc:
