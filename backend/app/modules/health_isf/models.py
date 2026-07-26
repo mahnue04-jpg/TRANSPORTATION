@@ -1379,9 +1379,16 @@ def _schema_add_column_if_missing(
     columns = {column["name"] for column in inspector.get_columns(table_name)}
     if column_name in columns:
         return
+    savepoint = f"amicor_schema_{table_name}_{column_name}"[:60]
     try:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text(f"SAVEPOINT {savepoint}"))
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type_sql}"))
+        if conn.dialect.name == "postgresql":
+            conn.execute(text(f"RELEASE SAVEPOINT {savepoint}"))
     except Exception:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text(f"ROLLBACK TO SAVEPOINT {savepoint}"))
         _SCHEMA_LOGGER.exception(
             "health_isf_schema_add_column_failed table=%s column=%s type=%s",
             table_name,
