@@ -287,26 +287,27 @@ def ensure_auth_schema() -> None:
 
     columns = {col["name"] for col in inspector.get_columns("platform_users")}
     with engine.begin() as conn:
-        if "role" not in columns:
-            conn.execute(
-                text("ALTER TABLE platform_users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'staff'")
-            )
-        if "organization_name" not in columns:
-            conn.execute(
-                text("ALTER TABLE platform_users ADD COLUMN organization_name VARCHAR(128)")
-            )
-        if "organization_id" not in columns:
-            conn.execute(
-                text("ALTER TABLE platform_users ADD COLUMN organization_id VARCHAR(36)")
-            )
-        if "authorized_roles" not in columns:
-            conn.execute(
-                text("ALTER TABLE platform_users ADD COLUMN authorized_roles VARCHAR(512)")
-            )
-        if "session_role" not in columns:
-            conn.execute(
-                text("ALTER TABLE platform_users ADD COLUMN session_role VARCHAR(32)")
-            )
+        auth_columns = {
+            "role": "VARCHAR(32) NOT NULL DEFAULT 'staff'",
+            "organization_name": "VARCHAR(128)",
+            "organization_id": "VARCHAR(36)",
+            "authorized_roles": "VARCHAR(512)",
+            "session_role": "VARCHAR(32)",
+        }
+        for column_name, column_type in auth_columns.items():
+            if column_name in columns:
+                continue
+            savepoint = f"auth_schema_{column_name}"[:60]
+            try:
+                if conn.dialect.name == "postgresql":
+                    conn.execute(text(f"SAVEPOINT {savepoint}"))
+                conn.execute(text(f"ALTER TABLE platform_users ADD COLUMN {column_name} {column_type}"))
+                if conn.dialect.name == "postgresql":
+                    conn.execute(text(f"RELEASE SAVEPOINT {savepoint}"))
+            except Exception:
+                if conn.dialect.name == "postgresql":
+                    conn.execute(text(f"ROLLBACK TO SAVEPOINT {savepoint}"))
+                logger.exception("ensure_auth_schema_add_column_failed column=%s", column_name)
 
 
 def seed_default_users() -> list[dict[str, str]]:
@@ -964,9 +965,19 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
     check_rate_limit(f"login:{ip}", limit=_RATE_LIMIT_AUTH)
 
-    user = db.query(UserModel).filter(
-        UserModel.email == req.email.strip().lower()
-    ).first()
+    try:
+        ensure_auth_schema()
+    except Exception:
+        logger.exception("ensure_auth_schema_failed_during_login")
+
+    try:
+        user = db.query(UserModel).filter(
+            UserModel.email == req.email.strip().lower()
+        ).first()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Login user lookup failed for email=%s", req.email)
+        raise HTTPException(status_code=503, detail="Login database unavailable") from exc
     if not user or not verify_password(req.password, user.hashed_password):
         # Constant-time-ish rejection
         time.sleep(0.2)
