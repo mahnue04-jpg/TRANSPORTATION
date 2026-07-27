@@ -81,21 +81,29 @@ def validate_database(db_path: Optional[str] = None) -> dict: # type: ignore
     database_url = os.environ.get("DATABASE_URL", "").strip()
     if database_url.startswith("postgres"):
         try:
-            from app.db.session import check_db_connection
+            from app.db.session import check_db_connection_detail
 
-            ok = check_db_connection()
-            return {
+            detail = check_db_connection_detail()
+            ok = bool(detail.get("connected"))
+            result = {
                 "ok": ok,
                 "backend": "postgresql",
                 "database_url_configured": True,
-                "detail": "PostgreSQL reachable" if ok else "PostgreSQL unreachable",
+                "detail": "PostgreSQL reachable" if ok else detail.get("detail", "PostgreSQL unreachable"),
             }
+            if not ok:
+                if detail.get("error_class"):
+                    result["error_class"] = detail["error_class"]
+                if detail.get("blocker_category"):
+                    result["blocker_category"] = detail["blocker_category"]
+            return result
         except Exception as exc:
             return {
                 "ok": False,
                 "backend": "postgresql",
                 "database_url_configured": True,
-                "error": str(exc),
+                "error_class": type(exc).__name__,
+                "blocker_category": "connectivity_failure",
                 "detail": "PostgreSQL connectivity check failed",
             }
 

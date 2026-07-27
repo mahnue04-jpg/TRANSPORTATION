@@ -68,11 +68,41 @@ def init_platform_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def check_db_connection() -> bool:
-    """Return True if the database is reachable."""
+def _classify_db_connection_error(exc: Exception) -> str:
+    """Map a connection exception to a production-safe blocker category."""
+    message = str(exc).lower()
+    if "password authentication failed" in message or "authentication failed" in message:
+        return "expired_password_or_credentials"
+    if "ssl" in message or "certificate" in message:
+        return "ssl_connectivity_failure"
+    if "could not translate host name" in message or "name or service not known" in message:
+        return "incorrect_database_url"
+    if "connection refused" in message or "no route to host" in message:
+        return "missing_or_suspended_postgresql_service"
+    if "timeout" in message or "timed out" in message:
+        return "connectivity_failure"
+    if "too many clients" in message or "pool" in message:
+        return "database_connection_pool_failure"
+    if "does not exist" in message and "database" in message:
+        return "incorrect_database_url"
+    return "connectivity_failure"
+
+
+def check_db_connection_detail() -> dict:
+    """Return connection status with a sanitized error category (no credentials)."""
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+        return {"connected": True}
+    except Exception as exc:
+        return {
+            "connected": False,
+            "error_class": type(exc).__name__,
+            "blocker_category": _classify_db_connection_error(exc),
+            "detail": "Database unreachable",
+        }
+
+
+def check_db_connection() -> bool:
+    """Return True if the database is reachable."""
+    return bool(check_db_connection_detail().get("connected"))

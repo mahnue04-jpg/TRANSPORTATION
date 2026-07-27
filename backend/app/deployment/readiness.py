@@ -224,12 +224,20 @@ class DeploymentReadinessChecker:
         production_env = cls.run_production_env_validation()
         config = cls.run_config_checks()
 
+        db_detail: dict[str, Any] = {}
         if db_ok is None:
             try:
-                from app.db.session import check_db_connection
-                db_ok = check_db_connection()
-            except Exception:
+                from app.db.session import check_db_connection_detail
+                db_detail = check_db_connection_detail()
+                db_ok = bool(db_detail.get("connected"))
+            except Exception as exc:
                 db_ok = False
+                db_detail = {
+                    "connected": False,
+                    "error_class": type(exc).__name__,
+                    "blocker_category": "connectivity_failure",
+                    "detail": "Database connectivity check failed",
+                }
 
         blocked_reasons = cls._build_blocked_reasons(
             env,
@@ -263,7 +271,19 @@ class DeploymentReadinessChecker:
             "config_checks": config,
             "database": {
                 "connected": bool(db_ok),
-                "detail": "Database reachable" if db_ok else "Database unreachable",
+                "detail": "Database reachable" if db_ok else db_detail.get("detail", "Database unreachable"),
+                **(
+                    {}
+                    if db_ok
+                    else {
+                        k: v
+                        for k, v in {
+                            "error_class": db_detail.get("error_class"),
+                            "blocker_category": db_detail.get("blocker_category"),
+                        }.items()
+                        if v
+                    }
+                ),
             },
             "blocked_reasons": blocked_reasons,
             "summary": cls._compose_summary(overall_status, blocked_reasons),

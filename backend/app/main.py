@@ -602,10 +602,9 @@ def health_readiness():
     Returns 503 with blocked_reasons when deployment blockers are present.
     """
     from app.deployment.readiness import DeploymentReadinessChecker
-    from app.db.session import check_db_connection
     from fastapi.responses import JSONResponse
 
-    report = DeploymentReadinessChecker.build_readiness_report(db_ok=check_db_connection())
+    report = DeploymentReadinessChecker.build_readiness_report()
     status_code = 200 if report["overall_status"] == "ready" else 503
     return JSONResponse(content=report, status_code=status_code)
 
