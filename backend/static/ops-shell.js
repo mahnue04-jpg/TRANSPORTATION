@@ -1194,7 +1194,13 @@
   }
 
   function isRiderSurfaceAuthenticated() {
-    return !!getAccessToken() && isRiderJwtRole(getJwtSessionRole());
+    if (!getAccessToken()) {
+      return false;
+    }
+    if (isRiderDedicatedSurface()) {
+      return true;
+    }
+    return isRiderJwtRole(getJwtSessionRole());
   }
 
   function getRiderSurfaceIdentityName() {
@@ -2723,6 +2729,10 @@
       if (userNameEl) userNameEl.textContent = displayName;
       if (userRoleEl) {
         userRoleEl.textContent = preferJwtRoleLabel && jwtRole ? titleizeWords(jwtRole) : displaySubrole;
+      }
+      var logoutBtn = document.getElementById("btn-logout");
+      if (logoutBtn && isRiderDedicatedSurface()) {
+        logoutBtn.hidden = !isRiderSurfaceAuthenticated();
       }
     } catch (_) {}
 
@@ -4915,7 +4925,13 @@
     }
 
     var authBanner = "";
-    if (!isRiderSurfaceAuthenticated()) {
+    if (isRiderSurfaceAuthenticated()) {
+      authBanner =
+        '<div class="rider-auth-session" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #86efac;color:#065f46;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">' +
+          '<div><strong>Signed in as</strong> ' + escapeHtml(getRiderSurfacePresentation().displayName) + '</div>' +
+          '<button type="button" class="preview-action rider-action" data-rider-action="sign_out">Sign Out</button>' +
+        '</div>';
+    } else {
       authBanner =
         '<div class="rider-auth-required" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
           '<strong>Sign in required.</strong> Log in as a rider to submit ride requests. ' +
@@ -5016,7 +5032,7 @@
       pending: "queued",
       dispatchable: "queued",
       assigned: "assigned",
-      accepted: "driver_en_route",
+      accepted: "accepted",
       en_route_pickup: "driver_en_route",
       driver_en_route: "driver_en_route",
       arrived_pickup: "arrived",
@@ -6434,6 +6450,9 @@
     }
     var queue = Array.isArray(appState.tripQueue) ? appState.tripQueue : [];
     var activeTrip = resolveDriverActiveTrip(appState.activeTripId) || getDriverTripById(appState.activeTripId);
+    if (activeTrip && isDriverMobileSurface()) {
+      appState.shiftOnline = true;
+    }
     var waitingLabels = driverMobileWaitingLabels();
     var riderName = activeTrip ? safeText(activeTrip.patient, "Rider pending") : waitingLabels.riderName;
     var routePickup = activeTrip ? safeText(activeTrip.pickup, "Pickup pending") : waitingLabels.routePickup;
@@ -10118,7 +10137,8 @@
     }
     state.driverApp = appState;
 
-    var activeTrip = resolveDriverActiveTrip(tripId || appState.activeTripId);
+    var activeTrip = resolveDriverActiveTrip(tripId || appState.activeTripId)
+      || getDriverTripById(tripId || appState.activeTripId);
     var updated = false;
     var handlerMutatedApp = false;
 
@@ -10158,7 +10178,7 @@
         return;
       }
       appState.activeTripId = visibleTripId;
-      activeTrip = resolveDriverActiveTrip(visibleTripId);
+      activeTrip = resolveDriverActiveTrip(visibleTripId) || getDriverTripById(visibleTripId);
     }
 
     if (action === "toggle_shift") {
@@ -10377,6 +10397,25 @@
         persistSessionState();
         renderPage();
       }
+      return;
+    } else if (action === "sign_out") {
+      try {
+        if (window.AmiCorSession && typeof window.AmiCorSession.logout === "function") {
+          await window.AmiCorSession.logout();
+        } else if (window.AmiCorSession && typeof window.AmiCorSession.clear === "function") {
+          window.AmiCorSession.clear();
+        }
+      } catch (_) {}
+      riderState.submitInFlight = false;
+      riderState.submitStatus = {};
+      riderState.lastAction = "Signed out";
+      state.riderApp = riderState;
+      persistSessionState();
+      try {
+        var logoutBtn = document.getElementById("btn-logout");
+        if (logoutBtn) logoutBtn.hidden = true;
+      } catch (_) {}
+      renderPage();
       return;
     } else if (action === "request_now") {
       var submitResult = await submitRiderRideRequest(false);
@@ -13839,6 +13878,27 @@
       };
       documentEventBindings.push({ eventName: "click", handler: riderActionDelegate, element: els.pageContent });
       els.pageContent.addEventListener("click", riderActionDelegate);
+
+      var driverActionDelegate = function (event) {
+        var target = event && event.target;
+        if (!target || !target.closest) return;
+        var button = target.closest("[data-driver-action]");
+        if (!button || !els.pageContent.contains(button)) return;
+        if (button.disabled) return;
+        event.preventDefault();
+        if (driverActionInFlight) return;
+        var action = safeText(button.getAttribute("data-driver-action"), "");
+        var tripId = safeText(button.getAttribute("data-trip-id"), "");
+        var noteId = safeText(button.getAttribute("data-note-id"), "");
+        driverActionInFlight = true;
+        button.disabled = true;
+        void handleDriverWorkspaceAction(action, tripId, noteId).finally(function () {
+          driverActionInFlight = false;
+          button.disabled = false;
+        });
+      };
+      documentEventBindings.push({ eventName: "click", handler: driverActionDelegate, element: els.pageContent });
+      els.pageContent.addEventListener("click", driverActionDelegate);
     }
 
     var onStorage = function (event) {
