@@ -1,3 +1,9 @@
+databases:
+  - name: amicor-health-isf-db
+    plan: free
+    databaseName: amicor
+    user: amicor
+
 services:
   - type: web
     name: amicor-health-isf
@@ -5,13 +11,16 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
+    releaseCommand: alembic upgrade heads
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/readiness
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: amicor-health-isf-db
+          property: connectionString
       - key: SECRET_KEY
         sync: false
       - key: JWT_SECRET

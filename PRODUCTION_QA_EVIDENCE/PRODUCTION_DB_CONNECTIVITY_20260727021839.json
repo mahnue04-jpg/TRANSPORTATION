@@ -1,0 +1,290 @@
+{
+  "run_ts": "20260727021839",
+  "base": "https://amicor-health-isf-py.onrender.com",
+  "deploy_commit": "5c5dcbbb5199f12474e2f11347c22b96bd024792",
+  "postgresql_connected": false,
+  "readiness_status": "not_ready",
+  "blocked_reasons": [
+    "Database connectivity check failed \u2014 verify DATABASE_URL, network access, and credentials."
+  ],
+  "detail_db_check": {
+    "ok": true,
+    "db_path": "/opt/render/project/src/backend/data/chat.db"
+  },
+  "probes": [
+    {
+      "url": "/api/health/live",
+      "status": 200,
+      "elapsed_ms": 1848,
+      "body": {
+        "status": "ok",
+        "version": "2026.07.10-production-fleet.1",
+        "environment": "production",
+        "frontend_build_version": "2026.07.10-production-fleet.1",
+        "hydration_version": "2026.07.10-production-fleet.1",
+        "deploy_commit": "5c5dcbbb5199f12474e2f11347c22b96bd024792",
+        "deploy_branch": "main"
+      }
+    },
+    {
+      "url": "/api/health",
+      "status": 200,
+      "elapsed_ms": 1798,
+      "body": {
+        "ok": true,
+        "data": {
+          "status": "ok",
+          "version": "2026.07.10-production-fleet.1"
+        },
+        "error": null,
+        "meta": {
+          "request_id": null,
+          "latency_ms": null,
+          "version": "2026.07.10-production-fleet.1"
+        }
+      }
+    },
+    {
+      "url": "/api/health/readiness",
+      "status": 503,
+      "elapsed_ms": 1745,
+      "body": {
+        "overall_status": "not_ready",
+        "score": 32,
+        "environment": {
+          "required_present": true,
+          "issues": [],
+          "warnings": [],
+          "passed": [
+            "DATABASE_URL",
+            "SECRET_KEY",
+            "JWT_SECRET"
+          ]
+        },
+        "production_environment": {
+          "required_present": true,
+          "issues": [],
+          "passed": [
+            "DATABASE_URL",
+            "SECRET_KEY",
+            "JWT_SECRET",
+            "ALLOWED_ORIGINS",
+            "AMICOR_PUBLIC_URL",
+            "APP_VERSION"
+          ],
+          "required_vars": [
+            "DATABASE_URL",
+            "SECRET_KEY",
+            "JWT_SECRET",
+            "ALLOWED_ORIGINS",
+            "AMICOR_PUBLIC_URL",
+            "APP_VERSION"
+          ]
+        },
+        "config_checks": {
+          "cors_not_wildcard": {
+            "passed": true,
+            "detail": "CORS origins appear restricted"
+          },
+          "debug_disabled": {
+            "passed": true,
+            "detail": "Debug mode off"
+          },
+          "log_level_appropriate": {
+            "passed": true,
+            "detail": "Log level INFO is appropriate"
+          },
+          "app_version_set": {
+            "passed": true,
+            "detail": "App version: 2026.07.10-production-fleet.1"
+          },
+          "production_database": {
+            "passed": true,
+            "detail": "Database URL points to production-grade data store"
+          },
+          "public_url_set": {
+            "passed": true,
+            "detail": "Public URL configured: https://amicor-health-isf-py.onrender.com"
+          }
+        },
+        "database": {
+          "connected": false,
+          "detail": "Database unreachable"
+        },
+        "blocked_reasons": [
+          "Database connectivity check failed \u2014 verify DATABASE_URL, network access, and credentials."
+        ],
+        "summary": "Deployment blocked: Database connectivity check failed \u2014 verify DATABASE_URL, network access, and credentials.",
+        "recommendations": [
+          "Database connectivity check failed \u2014 verify DATABASE_URL, network access, and credentials."
+        ]
+      }
+    },
+    {
+      "url": "/api/health/operational",
+      "status": 200,
+      "elapsed_ms": 1770,
+      "body": {
+        "status": "degraded",
+        "checks": {
+          "database": {
+            "healthy": false
+          },
+          "websocket": {
+            "healthy": true,
+            "active_connections": 0
+          }
+        },
+        "environment": {
+          "app_version": "2026.07.10-production-fleet.1",
+          "log_level": "INFO"
+        },
+        "runtime_governor_telemetry": {
+          "status": "degraded",
+          "runtime_governor_status": "degraded",
+          "active_workflows": 0,
+          "completed_workflows": 0,
+          "orphan_workflows_detected": 0,
+          "stale_events_rejected": 0,
+          "replay_events_rejected": 0,
+          "duplicate_events_rejected": 0,
+          "lifecycle_transition_rejects": 0,
+          "websocket_connects": 0,
+          "websocket_disconnects": 0,
+          "websocket_reconnects": 0,
+          "governor_cleanup_cycles": 0,
+          "crash_recovery_runs": 0,
+          "latest_cleanup_timestamp": null,
+          "latest_crash_recovery_timestamp": null
+        },
+        "assistant_security_telemetry": {
+          "previews_generated": 0,
+          "confirmations_verified": 0,
+          "confirmations_rejected": 0,
+          "redis_fail_closed": 0,
+          "ledger_write_failures": 0,
+          "replay_rejected": 0,
+          "duplicate_rejected": 0,
+          "token_mismatch_rejected": 0,
+          "chain_integrity_failures": 0,
+          "confirm_avg_latency_ms": 0.0,
+          "distributed_replay_protection": false,
+          "policy_version": "phase14.0",
+          "audit_chain_verified": false,
+          "audit_chain_verified_events": 0,
+          "audit_chain_last_hash": "UNKNOWN"
+        }
+      }
+    },
+    {
+      "url": "/api/health/detail",
+      "status": 200,
+      "elapsed_ms": 1722,
+      "body": {
+        "ok": true,
+        "data": {
+          "status": "healthy",
+          "db": {
+            "ok": true,
+            "db_path": "/opt/render/project/src/backend/data/chat.db"
+          },
+          "startup": {
+            "timestamp": 1785118372.6444798,
+            "environment": {
+              "ok": true,
+              "missing_required": [],
+              "warnings": [
+                "DB_FILENAME not set \u2014 Defaults to /opt/render/project/src/backend/data/chat.db.",
+                "MAX_HISTORY not set \u2014 Defaults to 10 messages.",
+                "AMICOR_BUILD_VERSION not set \u2014 Canonical runtime version used by frontend build and hydration contract.",
+                "AMICOR_FRONTEND_BUILD_VERSION not set \u2014 Legacy/deprecated split version variable (ignored by runtime contract).",
+                "AMICOR_HYDRATION_VERSION not set \u2014 Legacy/deprecated split version variable (ignored by runtime contract)."
+              ]
+            },
+            "database": {
+              "ok": true,
+              "db_path": "/opt/render/project/src/backend/data/chat.db"
+            },
+            "ok": true,
+            "version": "2026.07.10-production-fleet.1",
+            "log_level": "INFO"
+          },
+          "version": "2026.07.10-production-fleet.1"
+        },
+        "error": null,
+        "meta": {
+          "request_id": null,
+          "latency_ms": null,
+          "version": "2026.07.10-production-fleet.1"
+        }
+      }
+    },
+    {
+      "url": "/api/admin/dashboard",
+      "status": 200,
+      "elapsed_ms": 1745,
+      "body": {
+        "status": "ok",
+        "database": {
+          "reachable": false
+        },
+        "platform": {
+          "registered_users": 0,
+          "total_uploads": 0
+        },
+        "providers": [],
+        "observability": {
+          "uptime_seconds": 372,
+          "started_at": "2026-07-27T02:12:36.849689+00:00",
+          "counters": {
+            "http.requests.total": 10,
+            "http.requests.method.GET": 10,
+            "http.responses.status.503": 2,
+            "http.responses.status.200": 8
+          },
+          "latencies": {
+            "http.requests.latency_ms": {
+              "count": 10,
+              "avg_ms": 560.0,
+              "p50_ms": 5.0,
+              "p95_ms": 4640.0,
+              "p99_ms": 4640.0,
+              "max_ms": 4640.0
+            }
+          },
+          "recent_errors": []
+        },
+        "recent_provider_logs": [],
+        "version": "2026.07.10-production-fleet.1"
+      }
+    },
+    {
+      "url": "/api/auth/login",
+      "status": 503,
+      "elapsed_ms": 1753,
+      "body": {
+        "detail": "Login database unavailable"
+      }
+    },
+    {
+      "url": "/api/health-isf/drivers/mobile-login",
+      "status": 503,
+      "elapsed_ms": 2133,
+      "body": {
+        "detail": "Driver lookup database unavailable"
+      }
+    }
+  ],
+  "verdict": "FAIL",
+  "render_actions_required": [
+    "Open Render dashboard \u2192 PostgreSQL and confirm the database instance is Available (not suspended).",
+    "Copy the Postgres Internal Connection String from the database service page.",
+    "Open the web service amicor-health-isf-py \u2192 Environment \u2192 set DATABASE_URL to that internal connection string.",
+    "Remove any external/public Postgres URL; Render web services must use the internal hostname.",
+    "Redeploy the web service after saving DATABASE_URL.",
+    "In Render Shell (web service): cd backend && alembic upgrade heads",
+    "Verify GET /api/health/readiness returns 200 and database.connected=true.",
+    "Verify POST /api/auth/login returns 401 (not 503) for invalid credentials.",
+    "Verify POST /api/health-isf/drivers/mobile-login returns 200 for phone 917-555-1004."
+  ]
+}

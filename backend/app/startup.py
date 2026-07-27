@@ -77,12 +77,32 @@ def validate_environment() -> dict: # type: ignore
 
 # ── Database validation ────────────────────────────────────────────────────────
 def validate_database(db_path: Optional[str] = None) -> dict: # type: ignore
-    """Check that the SQLite database path is accessible and writable."""
+    """Validate the configured runtime database (PostgreSQL or SQLite)."""
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if database_url.startswith("postgres"):
+        try:
+            from app.db.session import check_db_connection
+
+            ok = check_db_connection()
+            return {
+                "ok": ok,
+                "backend": "postgresql",
+                "database_url_configured": True,
+                "detail": "PostgreSQL reachable" if ok else "PostgreSQL unreachable",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "backend": "postgresql",
+                "database_url_configured": True,
+                "error": str(exc),
+                "detail": "PostgreSQL connectivity check failed",
+            }
+
     if db_path is None:
         db_path = os.environ.get("DB_FILENAME", _DEFAULT_DB)
 
     try:
-        # Ensure parent directory exists (mirrors database.py behaviour)
         parent = os.path.dirname(db_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -91,9 +111,9 @@ def validate_database(db_path: Optional[str] = None) -> dict: # type: ignore
         conn.execute("SELECT 1")
         conn.execute("PRAGMA integrity_check")
         conn.close()
-        return {"ok": True, "db_path": db_path} # type: ignore
+        return {"ok": True, "backend": "sqlite", "db_path": db_path}
     except Exception as exc:
-        return {"ok": False, "db_path": db_path, "error": str(exc)} # type: ignore
+        return {"ok": False, "backend": "sqlite", "db_path": db_path, "error": str(exc)}
 
 
 def startup_recovery(max_retries: int = 3, delay_s: float = 1.0) -> bool:
