@@ -13,12 +13,28 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO / "backend") not in sys.path:
     sys.path.insert(0, str(REPO / "backend"))
 
-from scripts.production_auth import BASE, dispatcher_headers, org_id
+from scripts import production_auth as pa
 
+BASE = pa.BASE
 OUTBOUND_RIDE_ID = "a6722aae-4466-4080-9241-a358b143147a"
 RETURN_RIDE_ID = "cba6723a-764b-49a2-a5c9-fcb37a78cbfb"
 DRIVER_PHONE = os.getenv("MAHUNE_VERIFY_DRIVER_PHONE", "917-555-1004")
 EVIDENCE_DIR = REPO / "PRODUCTION_QA_EVIDENCE"
+
+
+def _auth() -> tuple[dict, str]:
+    tokens = pa.resolve_production_tokens()
+    if not tokens.get("ok"):
+        raise RuntimeError(str(tokens.get("error") or "auth failed"))
+    headers = {"Authorization": f"Bearer {tokens['dispatcher_token']}"}
+    org = os.getenv(
+        "AMICOR_ORG_ID",
+        "308dc05a-6781-4ef7-91fc-ff22606937e3",
+    ).strip()
+    session = requests.get(f"{BASE}/api/auth/session", headers=headers, timeout=60)
+    if session.ok:
+        org = str(session.json().get("organization_id") or org)
+    return headers, org
 
 
 def _get(path: str, headers: dict) -> dict:
@@ -38,20 +54,19 @@ def _post(path: str, headers: dict, payload: dict | None = None) -> dict:
     return body
 
 
-def _trigger_maintenance(headers: dict) -> None:
-    queue = _get(f"/api/health-isf/dispatcher/queue?organization_id={org_id()}", headers)
-    _ = queue
+def _trigger_maintenance(headers: dict, org_id: str) -> None:
+    _get(f"/api/health-isf/dispatch/queue?organization_id={org_id}&limit=50", headers)
 
 
 def main() -> int:
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    headers = dispatcher_headers()
+    headers, org_id = _auth()
 
     before_outbound = _get(f"/api/health-isf/rides/{OUTBOUND_RIDE_ID}", headers)
     before_return = _get(f"/api/health-isf/rides/{RETURN_RIDE_ID}", headers)
 
-    _trigger_maintenance(headers)
+    _trigger_maintenance(headers, org_id)
 
     after_outbound = _get(f"/api/health-isf/rides/{OUTBOUND_RIDE_ID}", headers)
     after_return = _get(f"/api/health-isf/rides/{RETURN_RIDE_ID}", headers)
@@ -70,7 +85,7 @@ def main() -> int:
     report = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "deploy_base": BASE,
-        "org_id": org_id(),
+        "org_id": org_id,
         "outbound_ride_id": OUTBOUND_RIDE_ID,
         "return_ride_id": RETURN_RIDE_ID,
         "driver_phone": DRIVER_PHONE,

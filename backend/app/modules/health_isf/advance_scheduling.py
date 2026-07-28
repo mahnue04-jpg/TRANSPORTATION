@@ -776,7 +776,7 @@ def sweep_pending_advance_scheduling(
         db.query(HealthISFRide)
         .filter(
             HealthISFRide.organization_id == organization_id,
-            HealthISFRide.lifecycle_state == "scheduled",
+            HealthISFRide.driver_id.is_(None),
         )
         .order_by(HealthISFRide.pickup_time.asc())
         .limit(max(1, int(limit)))
@@ -788,11 +788,15 @@ def sweep_pending_advance_scheduling(
             continue
         if is_immediate_ride(ride) and is_dispatch_eligible(ride):
             continue
-        if ride.driver_id:
+        if not is_immediate_ride(ride) or not is_dispatch_eligible(ride):
             assignment = _latest_assignment_for_ride(db, ride.id)
-            if assignment and is_scheduled_assignment_state(assignment.assignment_state):
+            if assignment and str(getattr(assignment, "assignment_state", "") or "") in {
+                DispatchAssignmentState.SCHEDULED_OFFERED.value,
+                DispatchAssignmentState.SCHEDULED_ACCEPTED.value,
+                DispatchAssignmentState.OFFERED.value,
+                DispatchAssignmentState.ACCEPTED.value,
+            }:
                 continue
-        if not ride.driver_id:
             result = run_advance_scheduling_for_ride(
                 db,
                 ride_id=str(ride.id),
