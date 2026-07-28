@@ -20,6 +20,16 @@ OUT = Path(__file__).resolve().parents[2] / "PRODUCTION_QA_EVIDENCE" / f"AUTODIS
 
 
 def login(email: str) -> tuple[str, dict]:
+    if email == "dispatcher@amicor.local" and SYNC_KEY:
+        token_resp = requests.post(
+            f"{BASE}/api/auth/deployment/operator-workspace-token",
+            headers={"X-Amicor-Deployment-Key": SYNC_KEY},
+            json={"role": "dispatcher"},
+            timeout=240,
+        )
+        if token_resp.status_code == 200:
+            body = token_resp.json()
+            return body["access_token"], body
     r = requests.post(f"{BASE}/api/auth/login", json={"email": email, "password": PASSWORD}, timeout=240)
     if r.status_code != 200 and SYNC_KEY:
         requests.post(f"{BASE}/api/auth/deployment/sync-seed-users", headers={"X-Amicor-Deployment-Key": SYNC_KEY}, timeout=240)

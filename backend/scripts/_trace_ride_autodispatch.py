@@ -28,6 +28,17 @@ def wake() -> dict:
 
 def login(email: str) -> dict:
     sync_key = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", PASSWORD).strip()
+    if email == "dispatcher@amicor.local" and sync_key:
+        token_resp = requests.post(
+            f"{BASE}/api/auth/deployment/operator-workspace-token",
+            headers={"X-Amicor-Deployment-Key": sync_key},
+            json={"role": "dispatcher"},
+            timeout=240,
+        )
+        if token_resp.status_code == 200:
+            body = token_resp.json()
+            body["organization_id"] = body.get("organization_id")
+            return body
     r = requests.post(f"{BASE}/api/auth/login", json={"email": email, "password": PASSWORD}, timeout=240)
     if r.status_code != 200 and sync_key:
         requests.post(

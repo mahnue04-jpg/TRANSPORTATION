@@ -6446,6 +6446,20 @@ def get_driver_active_ride(
     resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
     enforce_entity_tenant(user, resolved_org_id)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
+    if auth.actor_user_id is None:
+        try:
+            service.promote_pending_immediate_customer_requests(
+                db,
+                organization_id=effective_org_id,
+                actor_user_id=None,
+                limit=10,
+            )
+        except Exception:
+            logger.warning(
+                "promote_pending_immediate_customer_requests failed for org=%s",
+                effective_org_id,
+                exc_info=True,
+            )
     try:
         snapshot = service.get_driver_active_ride_data(
             db,
