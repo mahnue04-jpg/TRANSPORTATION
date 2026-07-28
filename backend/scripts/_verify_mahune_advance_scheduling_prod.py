@@ -18,6 +18,7 @@ from scripts import production_auth as pa
 BASE = pa.BASE
 OUTBOUND_RIDE_ID = "a6722aae-4466-4080-9241-a358b143147a"
 RETURN_RIDE_ID = "cba6723a-764b-49a2-a5c9-fcb37a78cbfb"
+CUSTOMER_REQUEST_ID = "257b9f51-a905-4d39-ab48-e1abc557b05f"
 DRIVER_PHONE = os.getenv("MAHUNE_VERIFY_DRIVER_PHONE", "917-555-1004")
 EVIDENCE_DIR = REPO / "PRODUCTION_QA_EVIDENCE"
 
@@ -55,7 +56,24 @@ def _post(path: str, headers: dict, payload: dict | None = None) -> dict:
 
 
 def _trigger_maintenance(headers: dict, org_id: str) -> None:
-    _get(f"/api/health-isf/dispatch/queue?organization_id={org_id}&limit=50", headers)
+    _get(
+        f"/api/health-isf/dispatch/queue?organization_id={org_id}&limit=50&force_maintenance=true",
+        headers,
+    )
+
+
+def _run_request_advance_scheduling(headers: dict, request_id: str) -> dict:
+    approve = _post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
+        headers,
+        {},
+    )
+    _ = approve
+    return _post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/auto-dispatch",
+        headers,
+        {"offer_timeout_seconds": 120},
+    )
 
 
 def main() -> int:
@@ -67,6 +85,10 @@ def main() -> int:
     before_return = _get(f"/api/health-isf/rides/{RETURN_RIDE_ID}", headers)
 
     _trigger_maintenance(headers, org_id)
+    try:
+        auto_dispatch_result = _run_request_advance_scheduling(headers, CUSTOMER_REQUEST_ID)
+    except RuntimeError as exc:
+        auto_dispatch_result = {"error": str(exc)}
 
     after_outbound = _get(f"/api/health-isf/rides/{OUTBOUND_RIDE_ID}", headers)
     after_return = _get(f"/api/health-isf/rides/{RETURN_RIDE_ID}", headers)
@@ -78,6 +100,18 @@ def main() -> int:
     )
     driver_id = str(driver_login.get("driver_id") or "")
     driver_headers = {"X-Driver-Session-Token": str(driver_login.get("session_token") or "")}
+
+    for ride_id in (OUTBOUND_RIDE_ID, RETURN_RIDE_ID):
+        ride = after_outbound if ride_id == OUTBOUND_RIDE_ID else after_return
+        if str(ride.get("driver_id") or "") == driver_id:
+            try:
+                _post(
+                    f"/api/health-isf/drivers/{driver_id}/accept-scheduled-ride",
+                    driver_headers,
+                    {"ride_id": ride_id},
+                )
+            except RuntimeError:
+                pass
 
     active = _get(f"/api/health-isf/drivers/{driver_id}/active-ride", driver_headers)
     upcoming = _get(f"/api/health-isf/drivers/{driver_id}/upcoming-schedule", driver_headers)
@@ -99,6 +133,7 @@ def main() -> int:
             "return": after_return,
         },
         "driver_active_ride": active,
+        "auto_dispatch_result": auto_dispatch_result,
         "driver_upcoming_schedule": upcoming,
         "pass_checks": {
             "outbound_has_driver_after_sweep": bool(after_outbound.get("driver_id")),

@@ -7182,15 +7182,33 @@ async def dispatcher_auto_dispatch_customer_request(
     if not request_row:
         raise HTTPException(status_code=404, detail="Customer request not found")
 
-    try:
-        result = service.auto_assign_request(
+    ride = service.get_ride_by_id(db, request_row.ride_id)
+    from app.modules.health_isf.scheduling import is_immediate_ride
+
+    if ride and not is_immediate_ride(ride):
+        from app.modules.health_isf.advance_scheduling import run_advance_scheduling_for_customer_request
+
+        outcomes = run_advance_scheduling_for_customer_request(
             db,
-            ride_id=request_row.ride_id,
+            request_id=str(request_row.id),
+            organization_id=effective_org_id,
             actor_user_id=user.user_id,
-            offer_timeout_seconds=payload.offer_timeout_seconds,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        offer = None
+        for outcome in outcomes:
+            if outcome.get("offer"):
+                offer = outcome["offer"]
+        result = {"offer": offer, "mode": "scheduled_reserved"}
+    else:
+        try:
+            result = service.auto_assign_request(
+                db,
+                ride_id=request_row.ride_id,
+                actor_user_id=user.user_id,
+                offer_timeout_seconds=payload.offer_timeout_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     offer = result.get("offer")
     if offer:
@@ -10719,6 +10737,7 @@ async def dispatch_reject_offer(
 def dispatch_queue(
     organization_id: str | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
+    force_maintenance: bool = Query(False),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
@@ -10727,6 +10746,7 @@ def dispatch_queue(
         db,
         organization_id=effective_org_id,
         actor_user_id=user.user_id,
+        force=force_maintenance,
     )
     return [
         DispatchQueueItemResponse(**row)
