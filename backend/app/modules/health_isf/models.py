@@ -110,6 +110,8 @@ class DispatchAssignmentState(str, Enum):
     ARRIVED_DESTINATION = "arrived_destination"
     DROPOFF_COMPLETE = "dropoff_complete"
     REASSIGNMENT_PENDING = "reassignment_pending"
+    SCHEDULED_OFFERED = "scheduled_offered"
+    SCHEDULED_ACCEPTED = "scheduled_accepted"
 
 
 class TripStatus(str, Enum):

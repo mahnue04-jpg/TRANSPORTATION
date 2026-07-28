@@ -80,4 +80,29 @@ def maybe_run_organization_dispatch_maintenance(
         logger.warning("promote_dispatch_eligible_rides failed org=%s", organization_id, exc_info=True)
         report["promote_dispatch_eligible_error"] = True
 
+    try:
+        from app.modules.health_isf.advance_scheduling import (
+            promote_scheduled_reservations,
+            send_scheduled_reminders,
+            sweep_pending_advance_scheduling,
+        )
+
+        report["advance_scheduling_sweep"] = sweep_pending_advance_scheduling(
+            db,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        report["scheduled_reservations_activated"] = promote_scheduled_reservations(
+            db,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        report["scheduled_reminders_sent"] = send_scheduled_reminders(
+            db,
+            organization_id=organization_id,
+        )
+    except Exception:
+        logger.warning("advance scheduling maintenance failed org=%s", organization_id, exc_info=True)
+        report["advance_scheduling_error"] = True
+
     return report

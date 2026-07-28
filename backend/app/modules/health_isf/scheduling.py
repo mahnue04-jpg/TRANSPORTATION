@@ -249,6 +249,7 @@ def driver_has_schedule_conflict(
     exclude_ride_ids: Optional[set[str]] = None,
 ) -> bool:
     """True when candidate overlaps an active or protected reservation for the driver."""
+    from app.modules.health_isf.advance_scheduling import SCHEDULED_DISPATCH_ASSIGNMENT_STATES
     from app.modules.health_isf.service import (
         ACTIVE_DISPATCH_ASSIGNMENT_STATES,
         get_ride_by_id,
@@ -258,11 +259,12 @@ def driver_has_schedule_conflict(
     from app.modules.health_isf.models import HealthISFDispatchAssignment
 
     exclude = {str(x) for x in (exclude_ride_ids or set()) if x}
+    conflict_states = set(ACTIVE_DISPATCH_ASSIGNMENT_STATES) | set(SCHEDULED_DISPATCH_ASSIGNMENT_STATES)
     rows = (
         db.query(HealthISFDispatchAssignment)
         .filter(
             HealthISFDispatchAssignment.driver_id == driver_id,
-            HealthISFDispatchAssignment.assignment_state.in_(list(ACTIVE_DISPATCH_ASSIGNMENT_STATES)),
+            HealthISFDispatchAssignment.assignment_state.in_(list(conflict_states)),
         )
         .all()
     )

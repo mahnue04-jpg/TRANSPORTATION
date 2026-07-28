@@ -658,6 +658,8 @@ class DriverActiveRideResponse(BaseModel):
     eta_minutes: Optional[int] = None
     active_assignment: Optional[DispatchActiveAssignmentItemResponse] = None
     ride: Optional["RideResponse"] = None
+    upcoming_schedule: list[dict[str, Any]] = Field(default_factory=list)
+    scheduled_offers: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RiderEventFeedItem(BaseModel):

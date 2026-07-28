@@ -258,7 +258,10 @@ def test_future_assignment_survives_unrelated_completion(client: TestClient) -> 
     future_ride_id = future_req["ride_id"]
 
     with SessionLocal() as db:
-        service.assign_driver_to_ride(db, future_ride_id, driver_id, actor_user_id=None)
+        from app.modules.health_isf.advance_scheduling import accept_scheduled_ride, assign_driver_to_scheduled_ride
+
+        assign_driver_to_scheduled_ride(db, ride_id=future_ride_id, driver_id=driver_id, actor_user_id=None)
+        accept_scheduled_ride(db, driver_id=driver_id, ride_id=future_ride_id, actor_user_id=None)
         future = service.get_ride_by_id(db, future_ride_id)
         assert future is not None
         assert str(future.driver_id or "") == driver_id

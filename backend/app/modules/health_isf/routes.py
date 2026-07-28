@@ -6479,6 +6479,12 @@ def get_driver_active_ride(
         eta_minutes=snapshot.get("eta_minutes"),
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
         ride=ride_response,
+        upcoming_schedule=list(snapshot.get("upcoming_schedule") or []),
+        scheduled_offers=[
+            item
+            for item in list(snapshot.get("upcoming_schedule") or [])
+            if item.get("can_accept")
+        ],
     )
     record_driver_read_timing(
         endpoint="active-ride",
@@ -9272,6 +9278,81 @@ def get_driver_assigned_rides(
         },
     )
     return response
+
+
+@router.get("/drivers/{driver_id}/upcoming-schedule")
+def get_driver_upcoming_schedule(
+    driver_id: str,
+    organization_id: str | None = Query(None),
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform()),
+    db: Session = Depends(get_db),
+):
+    user = auth.user
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    from app.modules.health_isf.advance_scheduling import list_upcoming_schedule_for_driver
+
+    entries = list_upcoming_schedule_for_driver(
+        db,
+        organization_id=effective_org_id,
+        driver_id=effective_driver_id,
+    )
+    return {
+        "organization_id": effective_org_id,
+        "driver_id": effective_driver_id,
+        "upcoming_schedule": entries,
+        "count": len(entries),
+    }
+
+
+@router.post("/drivers/{driver_id}/accept-scheduled-ride")
+async def driver_accept_scheduled_ride(
+    driver_id: str,
+    payload: DriverRideActionRequest,
+    request: Request,
+    auth: DriverEndpointAuth = Depends(require_driver_accept_auth()),
+    db: Session = Depends(get_db),
+):
+    user = auth.user
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    from app.modules.health_isf.advance_scheduling import accept_scheduled_ride
+
+    try:
+        assignment = accept_scheduled_ride(
+            db,
+            driver_id=effective_driver_id,
+            ride_id=payload.ride_id,
+            actor_user_id=auth.actor_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ride = service.get_ride_by_id(db, payload.ride_id)
+    record_backend_assignment_sync(
+        db,
+        request=request,
+        event="accept_scheduled_ride",
+        driver_id=effective_driver_id,
+        ride_id=payload.ride_id,
+        assignment_state=str(assignment.assignment_state),
+        api_response={
+            "ride_id": payload.ride_id,
+            "assignment_id": str(assignment.id),
+            "assignment_state": str(assignment.assignment_state),
+        },
+    )
+    return {
+        "assignment_id": str(assignment.id),
+        "assignment_state": str(assignment.assignment_state),
+        "ride": RideResponse.model_validate(ride) if ride else None,
+    }
 
 
 @router.patch("/drivers/{driver_id}", response_model=DriverResponse)

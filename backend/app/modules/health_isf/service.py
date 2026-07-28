@@ -152,6 +152,11 @@ ACTIVE_DISPATCH_ASSIGNMENT_STATES = {
     DispatchAssignmentState.ARRIVED_DESTINATION.value,
 }
 
+SCHEDULED_DISPATCH_ASSIGNMENT_STATES = {
+    DispatchAssignmentState.SCHEDULED_OFFERED.value,
+    DispatchAssignmentState.SCHEDULED_ACCEPTED.value,
+}
+
 DRIVER_APP_ASSIGNMENT_STATES = tuple(ACTIVE_DISPATCH_ASSIGNMENT_STATES) + (
     DispatchAssignmentState.REASSIGNMENT_PENDING.value,
 )
@@ -315,6 +320,19 @@ def evaluate_driver_ride_operational_state(
         RideStatus.PENDING.value,
         RideStatus.ASSIGNED.value,
     }
+
+    if row and assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+        from app.modules.health_isf.scheduling import is_dispatch_eligible
+
+        if not is_dispatch_eligible(ride):
+            return DriverRideOperationalState(
+                is_active=False,
+                has_active_offer=assignment_state == DispatchAssignmentState.SCHEDULED_OFFERED.value,
+                is_dispatch_eligible=False,
+                effective_assignment_state=assignment_state,
+                reason="scheduled_reservation",
+                assignment=row,
+            )
 
     if row and assignment_state in ACTIVE_DISPATCH_ASSIGNMENT_STATES:
         offer_open = assignment_state in {
@@ -1448,6 +1466,10 @@ def _assignment_counts_as_active_workload(
     from app.modules.health_isf.scheduling import is_protected_scheduled_reservation
 
     if is_protected_scheduled_reservation(ride, row):
+        return False
+    from app.modules.health_isf.advance_scheduling import is_scheduled_assignment_state
+
+    if is_scheduled_assignment_state(assignment_state):
         return False
     return True
 
@@ -3444,9 +3466,9 @@ def _prepare_pending_customer_request_for_intake_auto_dispatch(
             action="auto_dispatch_skipped",
             request_id=request_id,
             actor_user_id=actor_user_id,
-            note="scheduled_or_protected_future_ride",
+            note="routed_to_advance_scheduling",
         )
-        return False, "awaiting_dispatcher_approval"
+        return False, "advance_scheduling"
 
     if not is_dispatch_eligible(ride):
         _record_auto_dispatch_audit(
@@ -3585,6 +3607,48 @@ def run_intake_dispatch_automation(
             actor_user_id=actor_user_id,
         )
         if not proceed:
+            from app.modules.health_isf.scheduling import is_immediate_ride
+
+            if _mode == "advance_scheduling" or not is_immediate_ride(ride):
+                from app.modules.health_isf.advance_scheduling import (
+                    run_advance_scheduling_for_customer_request,
+                    run_advance_scheduling_for_ride,
+                )
+
+                if request_obj:
+                    outcomes = run_advance_scheduling_for_customer_request(
+                        db,
+                        request_id=str(request_obj.id),
+                        organization_id=organization_id,
+                        actor_user_id=actor_user_id,
+                    )
+                else:
+                    outcomes = [
+                        run_advance_scheduling_for_ride(
+                            db,
+                            ride_id=str(ride.id),
+                            organization_id=organization_id,
+                            actor_user_id=actor_user_id,
+                        )
+                    ]
+                offer = None
+                selected_driver = None
+                for outcome in outcomes:
+                    if outcome.get("offer"):
+                        offer = outcome["offer"]
+                        selected_driver = outcome.get("selected_driver")
+                _commit_or_rollback(db)
+                db.refresh(ride)
+                if request_obj:
+                    db.refresh(request_obj)
+                return {
+                    "ride": ride,
+                    "mode": "scheduled_reserved" if offer else "awaiting_dispatcher_approval",
+                    "recommendation": None,
+                    "offer": offer,
+                    "selected_driver": selected_driver,
+                    "candidates": [],
+                }
             _commit_or_rollback(db)
             return {
                 "ride": ride,
@@ -3616,6 +3680,18 @@ def run_intake_dispatch_automation(
     _commit_or_rollback(db)
 
     if _is_intake_auto_dispatch_enabled(db, organization_id):
+        from app.modules.health_isf.scheduling import is_immediate_ride
+
+        if not is_immediate_ride(ride):
+            _commit_or_rollback(db)
+            return {
+                "ride": ride,
+                "mode": "scheduled_reserved" if ride.driver_id else "awaiting_dispatcher_approval",
+                "recommendation": None,
+                "offer": _latest_assignment_for_ride(db, ride.id),
+                "selected_driver": get_driver_by_id(db, ride.driver_id) if ride.driver_id else None,
+                "candidates": [],
+            }
         auto_result = auto_assign_request(
             db,
             ride_id=ride_id,
@@ -5076,6 +5152,8 @@ def finalize_customer_request_intake_dispatch(
 
     if assignment_state == DispatchAssignmentState.OFFERED.value:
         _set_customer_request_status(request_obj, CustomerRequestStatus.ASSIGNED.value)
+    elif assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+        _set_customer_request_status(request_obj, CustomerRequestStatus.ASSIGNED.value)
     elif assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
         _set_customer_request_status(request_obj, CustomerRequestStatus.APPROVED.value)
     elif assignment_state in {
@@ -5097,6 +5175,8 @@ def finalize_customer_request_intake_dispatch(
     mode = "pending"
     if assignment_state == DispatchAssignmentState.OFFERED.value:
         mode = "offered"
+    elif assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+        mode = "scheduled_reserved"
     elif assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
         mode = "awaiting_approval"
     elif ride.driver_id:
@@ -6901,6 +6981,8 @@ def _driver_ride_is_active_for_driver_app(
         driver_id=driver_id,
         assignment=assignment,
     )
+    if op.reason == "scheduled_reservation":
+        return False
     return op.is_active or op.has_active_offer
 
 

@@ -35,11 +35,17 @@ def _offer_is_readable(
     *,
     now_ts,
     as_utc_datetime,
+    immediate_only: bool = True,
 ) -> bool:
+    from app.modules.health_isf.service import SCHEDULED_DISPATCH_ASSIGNMENT_STATES
+
     state = str(assignment.assignment_state or "").lower()
+    if immediate_only and state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+        return False
     if state not in {
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+        DispatchAssignmentState.SCHEDULED_OFFERED.value,
     }:
         return False
     if assignment.offer_expires_at and as_utc_datetime(assignment.offer_expires_at) < as_utc_datetime(now_ts):
@@ -76,6 +82,7 @@ def build_driver_mobile_read_snapshot(
                 HealthISFDispatchAssignment.driver_id == driver_id,
                 HealthISFDispatchAssignment.assignment_state.in_(
                     list(service.DRIVER_APP_ASSIGNMENT_STATES)
+                    + list(service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES)
                     + [
                         DispatchAssignmentState.OFFERED.value,
                         DispatchAssignmentState.REASSIGNMENT_PENDING.value,
@@ -103,6 +110,8 @@ def build_driver_mobile_read_snapshot(
     }
 
     with stages.stage("workspace_assembly"):
+        from app.modules.health_isf.advance_scheduling import list_upcoming_schedule_for_driver
+
         ranked_candidates: list[tuple[tuple[int, str], HealthISFDispatchAssignment, HealthISFRide]] = []
         readable_offers: list[tuple[HealthISFDispatchAssignment, HealthISFRide]] = []
 
@@ -112,7 +121,7 @@ def build_driver_mobile_read_snapshot(
                 continue
             if service.is_operational_excluded_ride(ride):
                 continue
-            if _offer_is_readable(row, now_ts=now_ts, as_utc_datetime=service._as_utc_datetime):
+            if _offer_is_readable(row, now_ts=now_ts, as_utc_datetime=service._as_utc_datetime, immediate_only=True):
                 readable_offers.append((row, ride))
             if not service._driver_ride_is_active_for_driver_app(
                 db,
@@ -262,6 +271,13 @@ def build_driver_mobile_read_snapshot(
                 preloaded_rides=rides_by_id,
             )
 
+    with stages.stage("upcoming_schedule_query"):
+        upcoming_schedule = list_upcoming_schedule_for_driver(
+            db,
+            organization_id=organization_id,
+            driver_id=driver_id,
+        )
+
     return {
         "driver": driver,
         "organization_id": organization_id,
@@ -287,6 +303,7 @@ def build_driver_mobile_read_snapshot(
             "completed",
         ],
         "assigned_rides": assigned_rides,
+        "upcoming_schedule": upcoming_schedule,
         "timing_stages_ms": dict(stages.stages),
     }
 

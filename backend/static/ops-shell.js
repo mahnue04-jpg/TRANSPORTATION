@@ -6427,6 +6427,10 @@
       driver_name: persistedSession.driver_name
     } : null);
     var appState = safeObject(state.driverApp);
+    var workflow = safeObject(state.driverWorkflow);
+    var upcomingSchedule = Array.isArray(workflow.upcomingSchedule) ? workflow.upcomingSchedule : [];
+    var scheduledOffers = Array.isArray(workflow.scheduledOffers) ? workflow.scheduledOffers : [];
+    var immediateOffer = safeObject((safeObject(workflow.activeOffer)).offer);
     var mobileUiState = safeText(appState.mobileUiState, "awaiting_assignment");
     var driverSessionHeader = "";
     if (sessionAuth && safeText(sessionAuth.driver_id, "")) {
@@ -6639,6 +6643,36 @@
       '<div class="driver-mobile-layout">' +
         '<section class="driver-mobile-phone">' +
           '<header class="driver-mobile-head">' +
+            '<div><strong>Available Offers</strong><p>Immediate dispatch offers only</p></div>' +
+          '</header>' +
+          '<article class="driver-workflow-card">' +
+            (immediateOffer && safeText(immediateOffer.ride_id, "")
+              ? '<p><strong>Offer:</strong> ' + escapeHtml(shortOperationalId(immediateOffer.ride_id, "ride")) +
+                ' • ' + escapeHtml(safeText(immediateOffer.pickup_address, "Pickup")) + '</p>'
+              : '<p class="muted">No immediate offers right now.</p>') +
+          '</article>' +
+          '<header class="driver-mobile-head" style="margin-top:12px;">' +
+            '<div><strong>Upcoming Schedule</strong><p>Future reserved rides</p></div>' +
+          '</header>' +
+          '<article class="driver-workflow-card">' +
+            (upcomingSchedule.length
+              ? upcomingSchedule.map(function (item) {
+                  var row = safeObject(item);
+                  var acceptBtn = row.can_accept
+                    ? '<button class="preview-action driver-action" data-driver-action="accept_scheduled_ride" data-trip-id="' + escapeHtml(safeText(row.ride_id, "")) + '">Accept Scheduled Ride</button>'
+                    : '<span class="muted">Reserved</span>';
+                  return '<div class="driver-schedule-row" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #e5e7eb;">' +
+                    '<p><strong>' + escapeHtml(safeText(row.rider_name, "Rider")) + '</strong> • ' + escapeHtml(titleizeWords(safeText(row.trip_leg, "one_way"))) + '</p>' +
+                    '<p class="muted">' + escapeHtml(safeText(row.pickup_address, "Pickup")) + ' → ' + escapeHtml(safeText(row.dropoff_address, "Dropoff")) + '</p>' +
+                    '<p class="muted">Pickup: ' + escapeHtml(safeText(row.pickup_time, "pending")) +
+                    (safeText(row.return_pickup_time, "") ? (' • Return: ' + escapeHtml(safeText(row.return_pickup_time, ""))) : '') + '</p>' +
+                    '<p class="muted">Reminder: ' + escapeHtml(safeText(row.reminder_status, "pending")) + '</p>' +
+                    acceptBtn +
+                  '</div>';
+                }).join("")
+              : '<p class="muted">No upcoming scheduled rides.</p>') +
+          '</article>' +
+          '<header class="driver-mobile-head" style="margin-top:12px;">' +
             '<div><strong>Current Trip</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
             '<span class="status-dot">' + escapeHtml(activeTrip ? titleizeWords(safeText(activeTrip.status, appState.activeStage)) : waitingLabels.statusLabel) + '</span>' +
           '</header>' +
@@ -10224,6 +10258,30 @@
       appState.activeTripId = safeText(tripId, appState.activeTripId);
       appState.lastStatusUpdate = "Opened trip " + safeText(appState.activeTripId, "");
       updated = true;
+    } else if (action === "accept_scheduled_ride") {
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
+      }
+      var scheduledTripId = safeText(tripId, "");
+      if (!scheduledTripId) {
+        window.alert("Select a scheduled ride to accept.");
+        return;
+      }
+      try {
+        await _amiSendJson(
+          "/api/health-isf/drivers/" + encodeURIComponent(currentDriverId) + "/accept-scheduled-ride",
+          "POST",
+          { ride_id: scheduledTripId }
+        );
+        appState.lastStatusUpdate = "Scheduled ride reserved: " + scheduledTripId;
+        addDriverNotification("medium", "Scheduled ride accepted and added to Upcoming Schedule.");
+        updated = true;
+        await refreshDriverWorkflowData({ forceReset: false });
+      } catch (err) {
+        window.alert("Unable to accept scheduled ride: " + safeText(err && err.message, "unknown error"));
+      }
+      return;
     } else if (action === "accept_trip" && activeTrip) {
       if (!currentDriverId) {
         window.alert("Driver profile is not bound yet.");
@@ -11207,6 +11265,22 @@
     return app;
   }
 
+  function driverWorkflowPartialFromProbe(activeRidePayload, workspacePayload, offerEnvelope, assignedRideRows) {
+    var activeRide = safeObject(activeRidePayload);
+    return {
+      activeRide: activeRidePayload || { has_active_ride: false },
+      workspace: workspacePayload,
+      activeOffer: offerEnvelope,
+      assignedRides: assignedRideRows || [],
+      upcomingSchedule: Array.isArray(activeRide.upcoming_schedule) ? activeRide.upcoming_schedule : [],
+      scheduledOffers: Array.isArray(activeRide.scheduled_offers)
+        ? activeRide.scheduled_offers
+        : (Array.isArray(activeRide.upcoming_schedule)
+          ? activeRide.upcoming_schedule.filter(function (item) { return item && item.can_accept === true; })
+          : [])
+    };
+  }
+
   function applyDriverWorkflowSnapshot(resolvedDriverId, snapshot, partial, options) {
     var opts = options || {};
     var preserveOnEmpty = opts.preserveOnEmpty === true;
@@ -11231,6 +11305,12 @@
     var nextAssignedRides = Array.isArray(partial.assignedRides)
       ? partial.assignedRides
       : (Array.isArray(priorWorkflow.assignedRides) ? priorWorkflow.assignedRides : []);
+    var nextUpcomingSchedule = Array.isArray(partial.upcomingSchedule)
+      ? partial.upcomingSchedule
+      : (Array.isArray(priorWorkflow.upcomingSchedule) ? priorWorkflow.upcomingSchedule : []);
+    var nextScheduledOffers = Array.isArray(partial.scheduledOffers)
+      ? partial.scheduledOffers
+      : (Array.isArray(priorWorkflow.scheduledOffers) ? priorWorkflow.scheduledOffers : []);
 
     var priorActiveRide = safeObject(priorWorkflow.activeRide);
     var priorRideId = safeText((safeObject(priorActiveRide.ride)).id, "") || priorTripId;
@@ -11276,6 +11356,12 @@
       if (!Array.isArray(partial.assignedRides)) {
         nextAssignedRides = Array.isArray(priorWorkflow.assignedRides) ? priorWorkflow.assignedRides : [];
       }
+      if (!Array.isArray(partial.upcomingSchedule)) {
+        nextUpcomingSchedule = Array.isArray(priorWorkflow.upcomingSchedule) ? priorWorkflow.upcomingSchedule : [];
+      }
+      if (!Array.isArray(partial.scheduledOffers)) {
+        nextScheduledOffers = Array.isArray(priorWorkflow.scheduledOffers) ? priorWorkflow.scheduledOffers : [];
+      }
       if (!payload.earnings) earningsPayload = safeObject(priorWorkflow.earnings);
       if (!Array.isArray(payload.completed_rides)) {
         completedRideRows = Array.isArray(priorWorkflow.completedRides) ? priorWorkflow.completedRides : [];
@@ -11291,6 +11377,8 @@
       activeRide: nextActiveRide,
       activeOffer: nextActiveOffer,
       assignedRides: nextAssignedRides,
+      upcomingSchedule: nextUpcomingSchedule,
+      scheduledOffers: nextScheduledOffers,
       completedRides: completedRideRows,
       billingHandoffs: billingHandoffRows,
       documents: documentRows,
@@ -11333,6 +11421,8 @@
       workspace: nextWorkspace,
       activeOffer: nextActiveOffer,
       assignedRides: nextAssignedRides,
+      upcomingSchedule: nextUpcomingSchedule,
+      scheduledOffers: nextScheduledOffers,
       earnings: earningsPayload,
       completedRides: completedRideRows,
       billingHandoffs: billingHandoffRows
@@ -11667,12 +11757,7 @@
         applyDriverWorkflowSnapshot(
           resolvedDriverId,
           completionOk ? completionSnapshot : null,
-          {
-            activeRide: activeRidePayload || { has_active_ride: false },
-            workspace: workspacePayload,
-            activeOffer: offerEnvelope,
-            assignedRides: assignedRideRows || []
-          },
+          driverWorkflowPartialFromProbe(activeRidePayload, workspacePayload, offerEnvelope, assignedRideRows),
           { preserveOnEmpty: false }
         );
         driverLastAppliedRefreshSeq = refreshSeq;
@@ -11823,12 +11908,7 @@
           applyDriverWorkflowSnapshot(
             resolvedDriverId,
             completionOk ? completionSnapshot : null,
-            {
-              activeRide: activeRidePayload || { has_active_ride: false },
-              workspace: workspacePayload,
-              activeOffer: offerEnvelope,
-              assignedRides: assignedRideRows || []
-            },
+            driverWorkflowPartialFromProbe(activeRidePayload, workspacePayload, offerEnvelope, assignedRideRows),
             { preserveOnEmpty: false }
           );
           driverLastAppliedRefreshSeq = refreshSeq;
@@ -11892,12 +11972,7 @@
     applyDriverWorkflowSnapshot(
       resolvedDriverId,
       completionSnapshot,
-      {
-        activeRide: activeRidePayload,
-        workspace: workspacePayload,
-        activeOffer: offerEnvelope,
-        assignedRides: assignedRideRows || []
-      },
+      driverWorkflowPartialFromProbe(activeRidePayload, workspacePayload, offerEnvelope, assignedRideRows),
       { preserveOnEmpty: !completionOk }
     );
     driverLastAppliedRefreshSeq = refreshSeq;
