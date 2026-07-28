@@ -1138,8 +1138,9 @@
   }
 
   var DRIVER_UI_RENDER_MS = 300;
-  var DRIVER_MOBILE_LOGIN_TIMEOUT_MS = 30000;
-  var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 30000;
+  var DRIVER_MOBILE_LOGIN_TIMEOUT_MS = 45000;
+  var DRIVER_MOBILE_BOOTSTRAP_TIMEOUT_MS = 90000;
+  var DRIVER_MOBILE_FETCH_TIMEOUT_MS = 60000;
   var DRIVER_WORKSPACE_ROLES = ["driver", "admin", "dispatcher", "supervisor"];
 
   function hasValidDriverMobileSession() {
@@ -10534,6 +10535,10 @@
       headers.Authorization = "Bearer " + token;
     }
     var retries = method === "GET" ? (isMobileDriverApiUrl(scopedUrl) ? 2 : 1) : 0;
+    var fetchTimeoutMs = method === "GET" ? 20000 : 12000;
+    if (method === "GET" && isMobileDriverApiUrl(scopedUrl) && isDriverMobileAppRoute()) {
+      fetchTimeoutMs = DRIVER_MOBILE_FETCH_TIMEOUT_MS;
+    }
     var attempt = 0;
     async function performFetch(currentToken) {
       var nextHeaders = applyDriverSessionHeaders({ "Accept": "application/json" }, currentToken, scopedUrl);
@@ -10568,7 +10573,7 @@
     }
     while (attempt <= retries) {
       try {
-        var response = await withTimeout(performFetch(token), method === "GET" ? 20000 : 12000);
+        var response = await withTimeout(performFetch(token), fetchTimeoutMs);
 
         if (!response.ok) {
           throw new Error(scopedUrl + ":http_" + response.status);
@@ -11465,7 +11470,7 @@
         new Promise(function (resolve) {
           setTimeout(function () {
             resolve({ status: "rejected", reason: new Error("assigned_rides_deferred") });
-          }, 10000);
+          }, DRIVER_MOBILE_FETCH_TIMEOUT_MS);
         })
       ]);
     } else {
