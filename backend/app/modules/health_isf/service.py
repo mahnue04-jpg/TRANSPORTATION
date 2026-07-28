@@ -3227,6 +3227,23 @@ def auto_assign_request(
 
     selected = candidates[0]
     selected_driver_id = str(selected["driver"].id)
+    _record_dispatch(
+        db,
+        ride_id=ride.id,
+        action="auto_dispatch_selected_driver",
+        acted_by_user_id=actor_user_id,
+        driver_id=selected_driver_id,
+        note=json.dumps(
+            {
+                "eligible_driver_count": len(candidates),
+                "selected_score": selected.get("score"),
+            }
+        )[:2000],
+        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+        transition_reason="auto_assign_request",
+        transition_timestamp=now(),
+        assignment_transition_source="auto_assign_request",
+    )
     current_driver_id = str(ride.driver_id or "")
     assigned_ride = assign_driver_to_ride(
         db,
@@ -3277,6 +3294,247 @@ def auto_assign_request(
     }
 
 
+def _driver_dispatch_exclusion_reason(
+    db: Session,
+    driver: HealthISFDriver,
+    *,
+    ride: Optional[HealthISFRide] = None,
+    exclude_driver_ids: Optional[set[str]] = None,
+) -> Optional[str]:
+    exclude_ids = {str(item) for item in (exclude_driver_ids or set()) if str(item).strip()}
+    if str(driver.id) in exclude_ids:
+        return "excluded_driver_id"
+    if not bool(driver.is_active):
+        return "inactive_driver"
+    if _driver_active_workload_count(db, driver.id) > 0:
+        return "active_workload"
+    if _is_driver_busy(driver.status):
+        return "busy_status"
+    if not bool(driver.is_online):
+        return "offline"
+    if str(driver.availability_state or "offline").lower() != "available":
+        return f"availability_{str(driver.availability_state or 'offline').lower()}"
+    if _coerce_driver_status(driver.status) != DriverStatus.AVAILABLE:
+        return f"status_{_coerce_driver_status(driver.status).value}"
+    if str(driver.auth_state or "inactive").lower() != "active":
+        return f"auth_{str(driver.auth_state or 'inactive').lower()}"
+    if ride is not None:
+        from app.modules.health_isf.scheduling import driver_has_schedule_conflict
+
+        if driver_has_schedule_conflict(db, str(driver.id), ride):
+            return "schedule_conflict"
+    return None
+
+
+def _audit_auto_dispatch_driver_pool(
+    db: Session,
+    *,
+    ride: HealthISFRide,
+    request_id: Optional[str],
+    actor_user_id: Optional[str],
+) -> dict[str, Any]:
+    rows = (
+        db.query(HealthISFDriver)
+        .filter(
+            HealthISFDriver.organization_id == ride.organization_id,
+            HealthISFDriver.is_active == True,
+        )
+        .order_by(HealthISFDriver.updated_at.desc(), HealthISFDriver.id.asc())
+        .all()
+    )
+    eligible = 0
+    exclusions: list[dict[str, str]] = []
+    for driver in rows:
+        reason = _driver_dispatch_exclusion_reason(db, driver, ride=ride)
+        if reason:
+            exclusions.append(
+                {
+                    "driver_id": str(driver.id),
+                    "phone": str(driver.phone or ""),
+                    "reason": reason,
+                }
+            )
+        else:
+            eligible += 1
+    summary = {
+        "eligible_driver_count": eligible,
+        "active_driver_count": len(rows),
+        "exclusions": exclusions[:25],
+    }
+    _record_dispatch(
+        db,
+        ride_id=ride.id,
+        action="auto_dispatch_eligible_driver_count",
+        acted_by_user_id=actor_user_id,
+        note=json.dumps(summary)[:4000],
+        request_id=request_id,
+        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+        transition_reason="auto_dispatch_driver_pool_audit",
+        transition_timestamp=now(),
+        assignment_transition_source="run_intake_dispatch_automation",
+    )
+    return summary
+
+
+def _record_auto_dispatch_audit(
+    db: Session,
+    *,
+    ride_id: str,
+    action: str,
+    request_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    note: Optional[str] = None,
+    assignment_id: Optional[str] = None,
+    lifecycle_state: Optional[str] = None,
+) -> None:
+    _record_dispatch(
+        db,
+        ride_id=ride_id,
+        action=action,
+        acted_by_user_id=actor_user_id,
+        driver_id=driver_id,
+        note=note,
+        request_id=request_id,
+        assignment_id=assignment_id,
+        lifecycle_state=lifecycle_state,
+        transition_reason=action,
+        transition_timestamp=now(),
+        assignment_transition_source="auto_dispatch_pipeline",
+    )
+
+
+def _prepare_pending_customer_request_for_intake_auto_dispatch(
+    db: Session,
+    *,
+    ride: HealthISFRide,
+    request_obj: HealthISFCustomerRideRequest,
+    organization_id: str,
+    actor_user_id: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Auto-approve immediate dispatch-eligible rider requests when intake automation is enabled."""
+    from app.modules.health_isf.scheduling import is_dispatch_eligible, is_immediate_ride
+
+    request_id = str(request_obj.id)
+    _record_auto_dispatch_audit(
+        db,
+        ride_id=str(ride.id),
+        action="auto_dispatch_requested",
+        request_id=request_id,
+        actor_user_id=actor_user_id,
+        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+        note="customer_request_intake_background",
+    )
+
+    if not _is_intake_auto_dispatch_enabled(db, organization_id):
+        _record_auto_dispatch_audit(
+            db,
+            ride_id=str(ride.id),
+            action="auto_dispatch_skipped",
+            request_id=request_id,
+            actor_user_id=actor_user_id,
+            note="intake_auto_dispatch_disabled",
+        )
+        return False, "awaiting_dispatcher_approval"
+
+    if not is_immediate_ride(ride):
+        _record_auto_dispatch_audit(
+            db,
+            ride_id=str(ride.id),
+            action="auto_dispatch_skipped",
+            request_id=request_id,
+            actor_user_id=actor_user_id,
+            note="scheduled_or_protected_future_ride",
+        )
+        return False, "awaiting_dispatcher_approval"
+
+    if not is_dispatch_eligible(ride):
+        _record_auto_dispatch_audit(
+            db,
+            ride_id=str(ride.id),
+            action="auto_dispatch_skipped",
+            request_id=request_id,
+            actor_user_id=actor_user_id,
+            note="not_dispatch_eligible_yet",
+        )
+        return False, "awaiting_dispatcher_approval"
+
+    _record_auto_dispatch_audit(
+        db,
+        ride_id=str(ride.id),
+        action="auto_dispatch_started",
+        request_id=request_id,
+        actor_user_id=actor_user_id,
+        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+    )
+    _set_customer_request_status(request_obj, CustomerRequestStatus.DISPATCHABLE.value)
+    request_obj.updated_at = now()
+    _commit_or_rollback(db)
+    db.refresh(request_obj)
+    _record_auto_dispatch_audit(
+        db,
+        ride_id=str(ride.id),
+        action="auto_dispatch_auto_approved",
+        request_id=request_id,
+        actor_user_id=actor_user_id,
+        note="immediate_ride_dispatchable",
+    )
+    return True, "dispatchable"
+
+
+def promote_pending_immediate_customer_requests(
+    db: Session,
+    *,
+    organization_id: str,
+    actor_user_id: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Sweep pending immediate customer requests and run intake auto-dispatch."""
+    from app.modules.health_isf.scheduling import is_immediate_ride
+
+    if not _is_intake_auto_dispatch_enabled(db, organization_id):
+        return []
+
+    pending_rows = (
+        db.query(HealthISFCustomerRideRequest)
+        .filter(
+            HealthISFCustomerRideRequest.organization_id == organization_id,
+            HealthISFCustomerRideRequest.dispatch_status == CustomerRequestStatus.PENDING.value,
+        )
+        .order_by(HealthISFCustomerRideRequest.created_at.asc())
+        .limit(max(1, int(limit)))
+        .all()
+    )
+    outcomes: list[dict[str, Any]] = []
+    for request_obj in pending_rows:
+        ride = get_ride_by_id(db, str(request_obj.ride_id))
+        if not ride or not is_immediate_ride(ride):
+            continue
+        assignment_before = _latest_assignment_for_ride(db, ride.id)
+        if assignment_before and str(assignment_before.assignment_state or "").lower() in {
+            DispatchAssignmentState.OFFERED.value,
+            DispatchAssignmentState.ACCEPTED.value,
+            DispatchAssignmentState.ASSIGNED.value,
+        }:
+            continue
+        result = run_intake_dispatch_automation(
+            db,
+            ride_id=str(ride.id),
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        finalize_customer_request_intake_dispatch(db, request_obj=request_obj, actor_user_id=actor_user_id)
+        outcomes.append(
+            {
+                "request_id": str(request_obj.id),
+                "ride_id": str(ride.id),
+                "mode": result.get("mode"),
+                "offer_id": getattr(result.get("offer"), "id", None),
+            }
+        )
+    return outcomes
+
+
 def _is_intake_auto_dispatch_enabled(db: Session, organization_id: str) -> bool:
     """Return True when intake should auto-assign instead of awaiting dispatcher approval."""
     env_override = os.getenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED")
@@ -3307,10 +3565,8 @@ def run_intake_dispatch_automation(
         raise ValueError("Ride not found")
 
     request_obj = get_customer_request_by_ride_id(db, ride_id)
-    if request_obj and str(request_obj.dispatch_status or "").lower() in {
-        CustomerRequestStatus.PENDING.value,
-        CustomerRequestStatus.CANCELLED.value,
-    }:
+    request_id = str(request_obj.id) if request_obj else None
+    if request_obj and str(request_obj.dispatch_status or "").lower() == CustomerRequestStatus.CANCELLED.value:
         return {
             "ride": ride,
             "mode": "awaiting_dispatcher_approval",
@@ -3319,6 +3575,26 @@ def run_intake_dispatch_automation(
             "selected_driver": None,
             "candidates": [],
         }
+
+    if request_obj and str(request_obj.dispatch_status or "").lower() == CustomerRequestStatus.PENDING.value:
+        proceed, _mode = _prepare_pending_customer_request_for_intake_auto_dispatch(
+            db,
+            ride=ride,
+            request_obj=request_obj,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        if not proceed:
+            _commit_or_rollback(db)
+            return {
+                "ride": ride,
+                "mode": "awaiting_dispatcher_approval",
+                "recommendation": None,
+                "offer": None,
+                "selected_driver": None,
+                "candidates": [],
+            }
+        db.refresh(request_obj)
 
     if ride.driver_id:
         selected_driver = get_driver_by_id(db, ride.driver_id)
@@ -3331,6 +3607,14 @@ def run_intake_dispatch_automation(
             "candidates": [],
         }
 
+    driver_pool_summary = _audit_auto_dispatch_driver_pool(
+        db,
+        ride=ride,
+        request_id=request_id,
+        actor_user_id=actor_user_id,
+    )
+    _commit_or_rollback(db)
+
     if _is_intake_auto_dispatch_enabled(db, organization_id):
         auto_result = auto_assign_request(
             db,
@@ -3338,13 +3622,50 @@ def run_intake_dispatch_automation(
             actor_user_id=actor_user_id,
             offer_timeout_seconds=offer_timeout_seconds,
         )
-        if auto_result.get("offer"):
+        offer = auto_result.get("offer")
+        selected_driver = auto_result.get("selected_driver")
+        if offer:
+            db.refresh(ride)
+            _record_auto_dispatch_audit(
+                db,
+                ride_id=str(ride.id),
+                action="auto_dispatch_offer_created",
+                request_id=request_id,
+                actor_user_id=actor_user_id,
+                driver_id=str(getattr(offer, "driver_id", "") or getattr(selected_driver, "id", "") or "") or None,
+                assignment_id=str(getattr(offer, "id", "") or "") or None,
+                lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+                note=f"eligible_driver_count={driver_pool_summary.get('eligible_driver_count', 0)}",
+            )
+            _record_auto_dispatch_audit(
+                db,
+                ride_id=str(ride.id),
+                action="auto_dispatch_completed",
+                request_id=request_id,
+                actor_user_id=actor_user_id,
+                driver_id=str(getattr(offer, "driver_id", "") or "") or None,
+                assignment_id=str(getattr(offer, "id", "") or "") or None,
+                lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+            )
+            _commit_or_rollback(db)
             db.refresh(ride)
             return {
                 **auto_result,
                 "mode": "auto_assigned",
                 "recommendation": None,
             }
+
+        no_driver_reason = str(auto_result.get("reason") or "dispatch_search_no_candidates")
+        _record_auto_dispatch_audit(
+            db,
+            ride_id=str(ride.id),
+            action="auto_dispatch_failed",
+            request_id=request_id,
+            actor_user_id=actor_user_id,
+            note=no_driver_reason,
+            lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+        )
+        _commit_or_rollback(db)
 
         recommendation_result = recommend_driver_for_ride(
             db,
@@ -3361,6 +3682,18 @@ def run_intake_dispatch_automation(
                 )
                 if approved_result.get("offer"):
                     db.refresh(ride)
+                    _record_auto_dispatch_audit(
+                        db,
+                        ride_id=str(ride.id),
+                        action="auto_dispatch_completed",
+                        request_id=request_id,
+                        actor_user_id=actor_user_id,
+                        driver_id=str(getattr(approved_result.get("offer"), "driver_id", "") or "") or None,
+                        assignment_id=str(getattr(approved_result.get("offer"), "id", "") or "") or None,
+                        lifecycle_state=str(getattr(ride, "lifecycle_state", None) or ride.status),
+                        note="recommendation_auto_approved",
+                    )
+                    _commit_or_rollback(db)
                     return {
                         **approved_result,
                         "mode": "auto_assigned",
@@ -3629,6 +3962,7 @@ def get_dispatch_queue(
     from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
 
     promote_dispatch_eligible_rides(db, organization_id=organization_id)
+    promote_pending_immediate_customer_requests(db, organization_id=organization_id)
     active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
     active_lifecycle_states = [
         RideStatus.REQUESTED.value,

@@ -33,8 +33,10 @@ services:
         value: Amicor123!
       - key: AMICOR_PUBLIC_URL
         value: https://amicor-health-isf-py.onrender.com
+      - key: HEALTH_ISF_AUTO_DISPATCH_ENABLED
+        value: "true"
       - key: APP_VERSION
-        value: 2026.07.28-start-route-fix.1
+        value: 2026.07.28-auto-dispatch-fix.1
       - key: AMICOR_ENVIRONMENT
         value: production
       - key: APP_ENV

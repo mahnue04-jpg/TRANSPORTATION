@@ -1449,6 +1449,15 @@ def _run_customer_request_intake_dispatch_sync(
             return
         try:
             automation_started = time.perf_counter()
+            service._record_auto_dispatch_audit(
+                db,
+                ride_id=str(ride.id),
+                action="auto_dispatch_background_started",
+                request_id=str(request_row.id),
+                actor_user_id=actor_user_id,
+                note="customer_request_side_effects",
+            )
+            service._commit_or_rollback(db)
             service.run_intake_dispatch_automation(
                 db,
                 ride_id=str(ride.id),

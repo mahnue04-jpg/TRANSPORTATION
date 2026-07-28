@@ -138,7 +138,8 @@ def test_rider_role_creates_customer_request_and_dispatcher_sees_it(client: Test
     assert any(row.get("ride_id") == ride_id or row.get("id") == ride_id for row in dispatch_rows)
 
 
-def test_rider_request_full_dispatch_to_driver_offer(client: TestClient) -> None:
+def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
     dispatcher_auth = _login(client, "dispatcher@amicor.local")
     dispatcher_headers = {"Authorization": f"Bearer {dispatcher_auth['access_token']}"}
     org_id = _org_id_for("dispatcher@amicor.local")
