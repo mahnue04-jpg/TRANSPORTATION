@@ -41,7 +41,7 @@ def _ensure_driver(organization_id: str) -> str:
             id=uuid4(),
             organization_id=organization_id,
             name=f"Advance Driver {uuid4()[:6]}",
-            phone=f"917-555-{str(uuid4()).replace('-', '')[:4]}",
+            phone=f"917555{str(uuid4()).replace('-', '')[:4]}",
             vehicle_type="sedan",
             vehicle_plate=f"AD-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,
