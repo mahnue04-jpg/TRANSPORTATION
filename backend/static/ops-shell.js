@@ -519,6 +519,16 @@
     return isDriverMobileAppRoute() && safeText(url, "").indexOf("/api/health-isf/rides/") >= 0;
   }
 
+  function resolveDriverMobileFetchTimeoutMs(scopedUrl, explicitTimeoutMs) {
+    if (explicitTimeoutMs) {
+      return explicitTimeoutMs;
+    }
+    if (isMobileDriverApiUrl(scopedUrl) && isDriverMobileAppRoute()) {
+      return DRIVER_MOBILE_FETCH_TIMEOUT_MS;
+    }
+    return null;
+  }
+
   function shouldUseDriverSessionFirstFetch(scopedUrl) {
     if (!isDriverMobileSessionRoute()) {
       return false;
@@ -10182,6 +10192,20 @@
       activeTrip = resolveDriverActiveTrip(visibleTripId) || getDriverTripById(visibleTripId);
     }
 
+    if (action === "start_route") {
+      var startRouteTripId = safeText(appState.activeTripId, "") || safeText(tripId, "");
+      if (!startRouteTripId) {
+        window.alert("Start Route only applies to the currently visible ride.");
+        return;
+      }
+      if (safeText(tripId, "") && safeText(tripId, startRouteTripId) !== startRouteTripId) {
+        window.alert("Start Route only applies to the currently visible ride.");
+        return;
+      }
+      appState.activeTripId = startRouteTripId;
+      activeTrip = resolveDriverActiveTrip(startRouteTripId) || getDriverTripById(startRouteTripId);
+    }
+
     if (action === "toggle_shift") {
       if (!currentDriverId) {
         window.alert("Driver profile is not bound yet. Refresh the workspace after dispatch assignment.");
@@ -10535,9 +10559,9 @@
       headers.Authorization = "Bearer " + token;
     }
     var retries = method === "GET" ? (isMobileDriverApiUrl(scopedUrl) ? 2 : 1) : 0;
-    var fetchTimeoutMs = method === "GET" ? 20000 : 12000;
-    if (method === "GET" && isMobileDriverApiUrl(scopedUrl) && isDriverMobileAppRoute()) {
-      fetchTimeoutMs = DRIVER_MOBILE_FETCH_TIMEOUT_MS;
+    var fetchTimeoutMs = resolveDriverMobileFetchTimeoutMs(scopedUrl, options.timeoutMs);
+    if (!fetchTimeoutMs) {
+      fetchTimeoutMs = method === "GET" ? 20000 : 12000;
     }
     var attempt = 0;
     async function performFetch(currentToken) {
@@ -10790,7 +10814,8 @@
       return fetch(scopedUrl, init);
     }
 
-    var response = await withTimeout(executeFetch(), timeoutMs || 12000);
+    var authTimeoutMs = resolveDriverMobileFetchTimeoutMs(scopedUrl, timeoutMs) || timeoutMs || 12000;
+    var response = await withTimeout(executeFetch(), authTimeoutMs);
     if (
       !driverSessionFirst
       && response.status === 401
@@ -10800,7 +10825,7 @@
     ) {
       var refreshed = await window.AmiCorSession.refreshAccessToken(true);
       if (refreshed) {
-        response = await withTimeout(executeFetch(), timeoutMs || 12000);
+        response = await withTimeout(executeFetch(), authTimeoutMs);
       }
     }
     return response;
@@ -10816,11 +10841,12 @@
     if (opts.idempotencyKey) {
       headers["X-Idempotency-Key"] = String(opts.idempotencyKey);
     }
+    var postTimeoutMs = resolveDriverMobileFetchTimeoutMs(scopedUrl, timeoutMs) || timeoutMs || 12000;
     var response = await authorizedFetch(scopedUrl, {
       method: "POST",
       headers: headers,
       body: JSON.stringify(payload || {})
-    }, timeoutMs || 12000);
+    }, postTimeoutMs);
 
     if (!response.ok) {
       var postStatus = response.status;
@@ -10838,6 +10864,7 @@
 
   async function sendJson(url, method, payload, timeoutMs) {
     var scopedUrl = withOrganizationScope(url);
+    var sendTimeoutMs = resolveDriverMobileFetchTimeoutMs(scopedUrl, timeoutMs) || timeoutMs || 12000;
     var response = await authorizedFetch(scopedUrl, {
       method: safeText(method, "POST").toUpperCase(),
       headers: {
@@ -10845,7 +10872,7 @@
         "Content-Type": "application/json"
       },
       body: payload == null ? null : JSON.stringify(payload)
-    }, timeoutMs || 12000);
+    }, sendTimeoutMs);
 
     if (!response.ok) {
       var sendStatus = response.status;
@@ -14177,7 +14204,7 @@ function normalizeDriverTripStatus(raw) {
     pending: "queued",
     dispatchable: "queued",
     assigned: "assigned",
-    accepted: "driver_en_route",
+    accepted: "accepted",
     en_route_pickup: "driver_en_route",
     driver_en_route: "driver_en_route",
     arrived_pickup: "arrived",
