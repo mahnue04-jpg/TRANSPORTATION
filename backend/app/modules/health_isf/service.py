@@ -327,7 +327,7 @@ def evaluate_driver_ride_operational_state(
         if not is_dispatch_eligible(ride):
             return DriverRideOperationalState(
                 is_active=False,
-                has_active_offer=assignment_state == DispatchAssignmentState.SCHEDULED_OFFERED.value,
+                has_active_offer=False,
                 is_dispatch_eligible=False,
                 effective_assignment_state=assignment_state,
                 reason="scheduled_reservation",

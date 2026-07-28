@@ -161,7 +161,7 @@ def build_driver_mobile_read_snapshot(
                     driver_id=driver_id,
                     assignment=active_offer,
                 )
-                if op.is_active or op.has_active_offer:
+                if op.is_active or (op.has_active_offer and op.reason != "scheduled_reservation"):
                     ride = offer_ride
                     assignment = active_offer
 
@@ -184,7 +184,7 @@ def build_driver_mobile_read_snapshot(
                     driver_id=driver_id,
                     assignment=assignment,
                 )
-                if op.is_active or op.has_active_offer:
+                if op.is_active or (op.has_active_offer and op.reason != "scheduled_reservation"):
                     ride = fallback
 
         if ride:
@@ -218,7 +218,9 @@ def build_driver_mobile_read_snapshot(
                 driver_id=driver_id,
                 assignment=assignment,
             )
-            active_for_driver = op.is_active or op.has_active_offer
+            active_for_driver = op.is_active
+            if op.reason != "scheduled_reservation":
+                active_for_driver = op.is_active or op.has_active_offer
             assignment_state = op.effective_assignment_state or (
                 str(assignment.assignment_state) if assignment and assignment.assignment_state else ""
             )
@@ -285,7 +287,7 @@ def build_driver_mobile_read_snapshot(
         "ride": ride if active_for_driver else None,
         "assignment": assignment if active_for_driver else None,
         "active_offer": active_offer,
-        "has_active_ride": bool(ride and active_for_driver),
+        "has_active_ride": bool(ride and active_for_driver and assignment_state not in service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES),
         "assignment_state": assignment_state,
         "driver_name": str(getattr(driver, "name", None) or ""),
         "provider_name": provider_name,

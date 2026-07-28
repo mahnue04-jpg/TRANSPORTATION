@@ -116,6 +116,38 @@ def main() -> int:
     active = _get(f"/api/health-isf/drivers/{driver_id}/active-ride", driver_headers)
     upcoming = _get(f"/api/health-isf/drivers/{driver_id}/upcoming-schedule", driver_headers)
 
+    assigned_driver_id = str(after_outbound.get("driver_id") or after_return.get("driver_id") or "")
+    assigned_active = None
+    assigned_upcoming = None
+    if assigned_driver_id and assigned_driver_id != driver_id:
+        drivers = _get(f"/api/health-isf/drivers?organization_id={org_id}", headers)
+        assigned_phone = ""
+        if isinstance(drivers, list):
+            for row in drivers:
+                if str(row.get("id") or "") == assigned_driver_id:
+                    assigned_phone = str(row.get("phone") or "")
+                    break
+        if assigned_phone:
+            assigned_login = _post("/api/health-isf/drivers/mobile-login", {}, {"phone": assigned_phone})
+            assigned_headers = {"X-Driver-Session-Token": str(assigned_login.get("session_token") or "")}
+            for ride_id in (OUTBOUND_RIDE_ID, RETURN_RIDE_ID):
+                try:
+                    _post(
+                        f"/api/health-isf/drivers/{assigned_driver_id}/accept-scheduled-ride",
+                        assigned_headers,
+                        {"ride_id": ride_id},
+                    )
+                except RuntimeError:
+                    pass
+            assigned_active = _get(
+                f"/api/health-isf/drivers/{assigned_driver_id}/active-ride",
+                assigned_headers,
+            )
+            assigned_upcoming = _get(
+                f"/api/health-isf/drivers/{assigned_driver_id}/upcoming-schedule",
+                assigned_headers,
+            )
+
     report = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "deploy_base": BASE,
@@ -135,13 +167,20 @@ def main() -> int:
         "driver_active_ride": active,
         "auto_dispatch_result": auto_dispatch_result,
         "driver_upcoming_schedule": upcoming,
+        "assigned_driver_id": assigned_driver_id,
+        "assigned_driver_active_ride": assigned_active,
+        "assigned_driver_upcoming_schedule": assigned_upcoming,
         "pass_checks": {
             "outbound_has_driver_after_sweep": bool(after_outbound.get("driver_id")),
             "return_has_driver_after_sweep": bool(after_return.get("driver_id")),
-            "driver_no_active_trip": not bool(active.get("has_active_ride")),
+            "assigned_driver_no_active_trip": not bool((assigned_active or active).get("has_active_ride")),
             "mahune_visible_in_upcoming": any(
                 str(row.get("ride_id")) in {OUTBOUND_RIDE_ID, RETURN_RIDE_ID}
-                for row in (upcoming.get("upcoming_schedule") or active.get("upcoming_schedule") or [])
+                for row in (
+                    (assigned_upcoming or {}).get("upcoming_schedule")
+                    or (upcoming.get("upcoming_schedule") or [])
+                    or ((assigned_active or active).get("upcoming_schedule") or [])
+                )
             ),
         },
     }
