@@ -419,6 +419,7 @@ class HealthISFRide(Base):
         Index("idx_rides_driver_status", "driver_id", "status"),
         Index("idx_rides_provider_status", "provider_id", "status"),
         Index("idx_rides_org_status", "organization_id", "status"),
+        Index("idx_rides_org_driver_requested", "organization_id", "driver_id", "requested_at"),
     )
 
 
@@ -590,6 +591,8 @@ class HealthISFDispatchAssignment(Base):
         Index("idx_dispatch_assign_org_state", "organization_id", "assignment_state"),
         Index("idx_dispatch_assign_ride_attempt", "ride_id", "attempt_index"),
         Index("idx_dispatch_assign_offer_expiry", "assignment_state", "offer_expires_at"),
+        Index("idx_dispatch_assign_driver_state_updated", "driver_id", "assignment_state", "updated_at"),
+        Index("idx_dispatch_assign_org_driver_updated", "organization_id", "driver_id", "updated_at"),
     )
 
 

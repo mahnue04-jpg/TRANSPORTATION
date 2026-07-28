@@ -58,6 +58,15 @@ from app.modules.health_isf.driver_mobile_sync_log import (
     resolve_driver_session_id,
     safe_text as _sync_safe_text,
 )
+from app.modules.health_isf.driver_mobile_read_path import (
+    build_driver_mobile_read_snapshot,
+    list_driver_assigned_rides_readonly,
+)
+from app.modules.health_isf.driver_request_timing_log import (
+    DriverReadStageTimer,
+    record_driver_read_timing,
+)
+from app.modules.health_isf.dispatch_maintenance import maybe_run_organization_dispatch_maintenance
 from app.modules.health_isf.financial_engine import TripFinancialEngine
 from app.modules.health_isf.intake import (
     build_ai_dispatch_context,
@@ -6382,38 +6391,31 @@ def get_driver_active_offer(
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
-    offer = service.get_driver_active_offer(
-        db,
-        organization_id=effective_org_id,
-        driver_id=effective_driver_id,
-    )
-    if not offer:
-        workspace = service.get_driver_live_workspace_data(
+    timer = DriverReadStageTimer()
+    with timer.stage("db_connection"):
+        snapshot = build_driver_mobile_read_snapshot(
             db,
             organization_id=effective_org_id,
             driver_id=effective_driver_id,
+            timer=timer,
         )
-        assignment = workspace.get("assignment")
-        if assignment and str(getattr(assignment, "assignment_state", "") or "").lower() in {
-            DispatchAssignmentState.OFFERED.value,
-            DispatchAssignmentState.ASSIGNED.value,
-            DispatchAssignmentState.AWAITING_APPROVAL.value,
-            DispatchAssignmentState.REASSIGNMENT_PENDING.value,
-            DispatchAssignmentState.ACCEPTED.value,
-        }:
-            ride = workspace.get("ride")
-            if ride and not service._is_ai_proof_ride(ride):
-                offer = assignment
+    offer = snapshot.get("active_offer") or snapshot.get("assignment")
     offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None
-    if offer and offer_payload:
-        ride = service.get_ride_by_id(db, offer.ride_id)
-        if ride:
-            offer_payload["passenger_name"] = ride.passenger_name
-            offer_payload["passenger_phone"] = ride.passenger_phone
-            offer_payload["pickup_address"] = ride.pickup_address
-            offer_payload["dropoff_address"] = ride.dropoff_address
-            offer_payload["ride_status"] = service._normalize_status_token(ride.lifecycle_state or ride.status)
-            offer_payload["requested_at"] = ride.requested_at.isoformat() if ride.requested_at else None
+    ride = snapshot.get("ride")
+    if offer and offer_payload and ride:
+        offer_payload["passenger_name"] = ride.passenger_name
+        offer_payload["passenger_phone"] = ride.passenger_phone
+        offer_payload["pickup_address"] = ride.pickup_address
+        offer_payload["dropoff_address"] = ride.dropoff_address
+        offer_payload["ride_status"] = service._normalize_status_token(ride.lifecycle_state or ride.status)
+        offer_payload["requested_at"] = ride.requested_at.isoformat() if ride.requested_at else None
+    record_driver_read_timing(
+        endpoint="active-offer",
+        driver_id=effective_driver_id,
+        organization_id=effective_org_id,
+        stages=snapshot.get("timing_stages_ms") or timer.stages,
+        total_ms=timer.total_ms(),
+    )
     logger.info(
         "driver_active_offer driver_id=%s offer_ride_id=%s assignment_driver_id=%s assignment_state=%s has_offer=%s",
         effective_driver_id,
@@ -6443,34 +6445,30 @@ def get_driver_active_ride(
     driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=False)
     enforce_entity_tenant(user, resolved_org_id)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
-    if auth.actor_user_id is None:
-        try:
-            service.promote_pending_immediate_customer_requests(
+    timer = DriverReadStageTimer()
+    try:
+        with timer.stage("db_connection"):
+            snapshot = build_driver_mobile_read_snapshot(
                 db,
                 organization_id=effective_org_id,
-                actor_user_id=None,
-                limit=10,
+                driver_id=effective_driver_id,
+                timer=timer,
             )
-        except Exception:
-            logger.warning(
-                "promote_pending_immediate_customer_requests failed for org=%s",
-                effective_org_id,
-                exc_info=True,
-            )
-    try:
-        snapshot = service.get_driver_active_ride_data(
-            db,
-            organization_id=effective_org_id,
-            driver_id=effective_driver_id,
-        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     assignment = snapshot.get("assignment")
     ride = snapshot.get("ride")
+    driver_mobile_session = auth.actor_user_id is None
+    ride_response = None
+    if ride:
+        if driver_mobile_session:
+            ride_response = RideResponse(**_ride_response_base(db, ride))
+        else:
+            ride_response = _ride_response_with_financials(db, ride)
     response = DriverActiveRideResponse(
         driver_id=effective_driver_id,
         organization_id=effective_org_id,
@@ -6480,7 +6478,14 @@ def get_driver_active_ride(
         provider_name=str(snapshot.get("provider_name") or ""),
         eta_minutes=snapshot.get("eta_minutes"),
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
-        ride=_ride_response_with_financials(db, ride) if ride else None,
+        ride=ride_response,
+    )
+    record_driver_read_timing(
+        endpoint="active-ride",
+        driver_id=effective_driver_id,
+        organization_id=effective_org_id,
+        stages=snapshot.get("timing_stages_ms") or timer.stages,
+        total_ms=timer.total_ms(),
     )
     record_backend_assignment_sync(
         db,
@@ -6511,15 +6516,18 @@ def get_driver_live_workspace(
     driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=False)
     enforce_entity_tenant(user, resolved_org_id)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
+    timer = DriverReadStageTimer()
     try:
-        snapshot = service.get_driver_live_workspace_data(
-            db,
-            organization_id=effective_org_id,
-            driver_id=effective_driver_id,
-        )
+        with timer.stage("db_connection"):
+            snapshot = build_driver_mobile_read_snapshot(
+                db,
+                organization_id=effective_org_id,
+                driver_id=effective_driver_id,
+                timer=timer,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -6535,6 +6543,13 @@ def get_driver_live_workspace(
         assignment_countdown_seconds=snapshot.get("countdown"),
         eta_minutes=snapshot.get("eta_minutes"),
         timeline_states=list(snapshot.get("timeline_states") or []),
+    )
+    record_driver_read_timing(
+        endpoint="live-workspace",
+        driver_id=effective_driver_id,
+        organization_id=effective_org_id,
+        stages=snapshot.get("timing_stages_ms") or timer.stages,
+        total_ms=timer.total_ms(),
     )
     record_backend_assignment_sync(
         db,
@@ -9220,20 +9235,31 @@ def get_driver_assigned_rides(
     driver = service.get_driver_by_id(db, effective_driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=True)
+    resolved_org_id = service.resolve_driver_organization_id(db, driver, persist_missing=False)
     effective_org_id = enforce_tenant_scope(user, organization_id or resolved_org_id)
     enforce_entity_tenant(user, resolved_org_id)
-    rides = service.list_driver_assigned_rides(
-        db,
-        organization_id=effective_org_id,
-        driver_id=effective_driver_id,
-        limit=limit,
-    )
+    timer = DriverReadStageTimer()
+    with timer.stage("assigned_rides_query"):
+        rides = list_driver_assigned_rides_readonly(
+            db,
+            organization_id=effective_org_id,
+            driver_id=effective_driver_id,
+            limit=limit,
+        )
     driver_mobile_session = auth.actor_user_id is None
-    if driver_mobile_session:
-        response = [RideResponse(**_ride_response_base(db, ride)) for ride in rides]
-    else:
-        response = [_ride_response_with_financials(db, ride) for ride in rides]
+    with timer.stage("response_assembly"):
+        if driver_mobile_session:
+            response = [RideResponse(**_ride_response_base(db, ride)) for ride in rides]
+        else:
+            response = [_ride_response_with_financials(db, ride) for ride in rides]
+    record_driver_read_timing(
+        endpoint="assigned-rides",
+        driver_id=effective_driver_id,
+        organization_id=effective_org_id,
+        stages=timer.stages,
+        total_ms=timer.total_ms(),
+        extra={"limit": limit, "count": len(rides)},
+    )
     record_backend_assignment_sync(
         db,
         request=request,
@@ -10616,7 +10642,11 @@ def dispatch_queue(
     db: Session = Depends(get_db),
 ):
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    service.expire_stale_dispatch_offers(db, organization_id=effective_org_id)
+    maybe_run_organization_dispatch_maintenance(
+        db,
+        organization_id=effective_org_id,
+        actor_user_id=user.user_id,
+    )
     return [
         DispatchQueueItemResponse(**row)
         for row in service.get_dispatch_queue(db, organization_id=effective_org_id, limit=limit)
