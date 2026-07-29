@@ -1,6 +1,7 @@
 """Advance scheduling: reservations do not block immediate dispatch workload."""
 from __future__ import annotations
 
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -41,7 +42,7 @@ def _ensure_driver(organization_id: str) -> str:
             id=uuid4(),
             organization_id=organization_id,
             name=f"Advance Driver {uuid4()[:6]}",
-            phone=f"917555{str(uuid4()).replace('-', '')[:4]}",
+            phone=f"917555{random.randint(1000, 9999)}",
             vehicle_type="sedan",
             vehicle_plate=f"AD-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,

@@ -9351,7 +9351,9 @@ async def driver_accept_scheduled_ride(
             actor_user_id=auth.actor_user_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detail = str(exc)
+        status = 403 if "not reserved for this driver" in detail.lower() else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
     ride = service.get_ride_by_id(db, payload.ride_id)
     record_backend_assignment_sync(
         db,

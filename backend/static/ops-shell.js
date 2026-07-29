@@ -839,30 +839,44 @@
     return driverMobileAuthCache;
   }
 
-  function resetDriverMobileAfterCompletion() {
-    var mobileCtx = getCanonicalMobileDriverContext();
+  function clearDriverMobileWorkflowState(options) {
+    var opts = options || {};
+    var nextDriverId = safeText(opts.driverId, "");
     driverLastConfirmedWorkflow = null;
     driverHydrateLockUntil = 0;
+    driverLastAppliedRefreshSeq = 0;
+    driverLastAppliedObservedAt = 0;
     state.driverWorkflow = {
-      driverId: mobileCtx.driverId || driverBoundDriverId || "",
+      driverId: nextDriverId,
       workspace: null,
       activeRide: { has_active_ride: false, ride: null },
       activeOffer: null,
       assignedRides: [],
+      upcomingSchedule: [],
+      scheduledOffers: [],
       earnings: safeObject((safeObject(state.driverWorkflow)).earnings),
       completedRides: Array.isArray((safeObject(state.driverWorkflow)).completedRides)
         ? state.driverWorkflow.completedRides
         : [],
       billingHandoffs: Array.isArray((safeObject(state.driverWorkflow)).billingHandoffs)
         ? state.driverWorkflow.billingHandoffs
-        : []
+        : [],
+      documents: []
     };
     state.driverApp = safeObject(state.driverApp);
-    state.driverApp.currentDriverId = mobileCtx.driverId || state.driverApp.currentDriverId || "";
-    state.driverApp.shiftOnline = true;
+    state.driverApp.currentDriverId = nextDriverId;
     state.driverApp.activeTripId = "";
     state.driverApp.activeStage = "queued";
     state.driverApp.tripQueue = [];
+    try {
+      sessionStorage.removeItem("ops_driver_trip_cache_v1");
+    } catch (_) {}
+  }
+
+  function resetDriverMobileAfterCompletion() {
+    var mobileCtx = getCanonicalMobileDriverContext();
+    clearDriverMobileWorkflowState({ driverId: mobileCtx.driverId || driverBoundDriverId || "" });
+    state.driverApp.shiftOnline = true;
     state.driverApp.mobileUiState = mobileCtx.authenticated ? "awaiting_assignment" : "login_required";
     state.driverApp.lastStatusUpdate = mobileCtx.authenticated ? "Awaiting Assignment" : "Driver login required";
     syncDriverEarningsSummaryToApp(
@@ -6340,6 +6354,7 @@
       var nextSessionDriver = safeText(body.driver_id, "");
       if (priorSessionDriver && priorSessionDriver !== nextSessionDriver) {
         driverLastConfirmedWorkflow = null;
+        clearDriverMobileWorkflowState({ driverId: nextSessionDriver });
       }
       persistDriverSession({
         driver_id: body.driver_id,
@@ -10199,6 +10214,7 @@
       clearPersistedDriverSession();
       driverMobileAuthCache = null;
       driverLastConfirmedWorkflow = null;
+      clearDriverMobileWorkflowState({ driverId: "" });
       resetDriverMobileAfterCompletion();
       state.driverApp = safeObject(state.driverApp);
       state.driverApp.mobileUiState = "login_required";
@@ -11286,6 +11302,8 @@
     var preserveOnEmpty = opts.preserveOnEmpty === true;
     var payload = safeObject(snapshot);
     var priorWorkflow = safeObject(state.driverWorkflow);
+    var priorWorkflowDriverId = safeText(priorWorkflow.driverId, "");
+    var driverIdentityChanged = priorWorkflowDriverId && priorWorkflowDriverId !== safeText(resolvedDriverId, "");
     var priorApp = safeObject(state.driverApp);
     var priorTripId = priorDriverTripIdFromState();
     var earningsPayload = payload.earnings ? safeObject(payload.earnings) : safeObject(priorWorkflow.earnings);
@@ -11307,10 +11325,10 @@
       : (Array.isArray(priorWorkflow.assignedRides) ? priorWorkflow.assignedRides : []);
     var nextUpcomingSchedule = Array.isArray(partial.upcomingSchedule)
       ? partial.upcomingSchedule
-      : (Array.isArray(priorWorkflow.upcomingSchedule) ? priorWorkflow.upcomingSchedule : []);
+      : (driverIdentityChanged ? [] : (Array.isArray(priorWorkflow.upcomingSchedule) ? priorWorkflow.upcomingSchedule : []));
     var nextScheduledOffers = Array.isArray(partial.scheduledOffers)
       ? partial.scheduledOffers
-      : (Array.isArray(priorWorkflow.scheduledOffers) ? priorWorkflow.scheduledOffers : []);
+      : (driverIdentityChanged ? [] : (Array.isArray(priorWorkflow.scheduledOffers) ? priorWorkflow.scheduledOffers : []));
 
     var priorActiveRide = safeObject(priorWorkflow.activeRide);
     var priorRideId = safeText((safeObject(priorActiveRide.ride)).id, "") || priorTripId;
@@ -11349,7 +11367,7 @@
       }
     }
 
-    if (preserveOnEmpty) {
+    if (preserveOnEmpty && !driverIdentityChanged) {
       if (partial.activeRide == null) nextActiveRide = priorWorkflow.activeRide;
       if (partial.workspace == null) nextWorkspace = priorWorkflow.workspace;
       if (partial.activeOffer == null) nextActiveOffer = priorWorkflow.activeOffer;
