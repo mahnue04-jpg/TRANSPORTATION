@@ -217,6 +217,75 @@ def _ride_ids_in_round_trip_group(db: Session, ride: HealthISFRide) -> set[str]:
     return ride_ids
 
 
+def scheduled_reservation_owner_for_ride(
+    db: Session,
+    ride: HealthISFRide,
+) -> Optional[str]:
+    """Return the driver holding scheduled_accepted for this ride or round-trip group."""
+    ride_ids = _ride_ids_in_round_trip_group(db, ride)
+    row = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.ride_id.in_(list(ride_ids)),
+            HealthISFDispatchAssignment.assignment_state
+            == DispatchAssignmentState.SCHEDULED_ACCEPTED.value,
+        )
+        .order_by(desc(HealthISFDispatchAssignment.updated_at))
+        .first()
+    )
+    if not row:
+        return None
+    owner_id = str(row.driver_id or "")
+    return owner_id or None
+
+
+def assert_driver_may_use_immediate_workflow(
+    db: Session,
+    *,
+    ride: HealthISFRide,
+    driver_id: str,
+    assignment: Optional[HealthISFDispatchAssignment] = None,
+) -> None:
+    """Block Accept Trip and live workflow when another driver owns the scheduled reservation."""
+    from app.modules.health_isf.service import RideLifecycleConflictError, _authoritative_assignment_for_ride
+
+    owner_id = scheduled_reservation_owner_for_ride(db, ride)
+    if owner_id and str(owner_id) != str(driver_id):
+        raise ValueError("Ride is reserved for another driver")
+
+    resolved_assignment = assignment
+    if resolved_assignment is None:
+        resolved_assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver_id)
+
+    assignment_state = str(getattr(resolved_assignment, "assignment_state", "") or "").lower()
+    if assignment_state == DispatchAssignmentState.SCHEDULED_OFFERED.value:
+        raise RideLifecycleConflictError(
+            "Scheduled offers must be accepted via accept-scheduled-ride, not accept-ride"
+        )
+    if assignment_state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        if str(ride.driver_id or "") not in {"", str(driver_id)}:
+            raise ValueError("Ride is reserved for another driver")
+
+    ride_owner = str(ride.driver_id or "")
+    if ride_owner and ride_owner != str(driver_id):
+        if owner_id and owner_id != str(driver_id):
+            raise ValueError("Ride is reserved for another driver")
+        if assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+            raise ValueError("Ride is reserved for another driver")
+        if not resolved_assignment or str(resolved_assignment.driver_id or "") != str(driver_id):
+            raise ValueError("Ride is not assigned to this driver")
+        if assignment_state not in {
+            DispatchAssignmentState.OFFERED.value,
+            DispatchAssignmentState.ASSIGNED.value,
+            DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+            DispatchAssignmentState.ACCEPTED.value,
+            DispatchAssignmentState.EN_ROUTE_PICKUP.value,
+            DispatchAssignmentState.PICKUP_COMPLETE.value,
+            DispatchAssignmentState.ARRIVED_DESTINATION.value,
+        }:
+            raise ValueError("Ride is not assigned to this driver")
+
+
 def expire_competing_scheduled_assignments(
     db: Session,
     *,
@@ -742,6 +811,10 @@ def list_upcoming_schedule_for_driver(
         state = str(row.assignment_state or "")
         if state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
             if str(ride.driver_id or "") not in {"", str(driver_id)}:
+                continue
+        if state == DispatchAssignmentState.SCHEDULED_OFFERED.value:
+            reserved_owner = scheduled_reservation_owner_for_ride(db, ride)
+            if reserved_owner and str(reserved_owner) != str(driver_id):
                 continue
         if is_dispatch_eligible(ride):
             continue

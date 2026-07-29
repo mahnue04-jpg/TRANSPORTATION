@@ -148,6 +148,33 @@ def test_cross_driver_cannot_accept_reserved_scheduled_ride(client: TestClient) 
     assert denied.status_code in {400, 403}, denied.text
 
 
+def test_cross_driver_cannot_accept_immediate_ride_when_reserved(client: TestClient) -> None:
+    rider_auth = client.post("/api/auth/login", json={"email": "rider@amicor.local", "password": SEED_PASSWORD})
+    headers = {"Authorization": f"Bearer {rider_auth.json()['access_token']}"}
+    org_id = _org_id_for("rider@amicor.local")
+    suffix = uuid4()[:8]
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(8, "0")[:8]
+    phone_a = f"917561{digits[:4]}"
+    phone_b = f"917562{digits[4:8]}"
+    driver_a = _ensure_driver(org_id, phone=phone_a)
+    driver_b = _ensure_driver(org_id, phone=phone_b)
+    ride_id = _create_future_request(client, headers, suffix)
+
+    with SessionLocal() as db:
+        assign_driver_to_scheduled_ride(db, ride_id=ride_id, driver_id=driver_a)
+        assign_driver_to_scheduled_ride(db, ride_id=ride_id, driver_id=driver_b)
+        accept_scheduled_ride(db, driver_id=driver_a, ride_id=ride_id)
+
+    _, headers_b = _driver_session(client, phone_b)
+    denied = client.post(
+        f"/api/health-isf/drivers/{driver_b}/accept-ride",
+        headers=headers_b,
+        json={"ride_id": ride_id},
+    )
+    assert denied.status_code in {400, 403, 409}, denied.text
+    assert "reserved" in denied.text.lower() or "not assigned" in denied.text.lower() or "scheduled" in denied.text.lower()
+
+
 def test_active_ride_upcoming_schedule_is_driver_scoped(client: TestClient) -> None:
     rider_auth = client.post("/api/auth/login", json={"email": "rider@amicor.local", "password": SEED_PASSWORD})
     headers = {"Authorization": f"Bearer {rider_auth.json()['access_token']}"}

@@ -7900,17 +7900,27 @@ def accept_driver_ride(
     reconcile_ride_assignment_coherence(db, ride)
     db.refresh(ride)
 
+    assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
+    from app.modules.health_isf.advance_scheduling import assert_driver_may_use_immediate_workflow
+
+    assert_driver_may_use_immediate_workflow(db, ride=ride, driver_id=str(driver.id), assignment=assignment)
+
     if ride.driver_id != driver.id:
-        assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
         if not assignment or str(getattr(assignment, "driver_id", "") or "") != str(driver.id):
             raise ValueError("Ride is not assigned to this driver")
+        assignment_state_precheck = str(getattr(assignment, "assignment_state", "") or "").lower()
+        if assignment_state_precheck in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+            raise RideLifecycleConflictError(
+                f"Cannot accept ride from assignment state '{assignment_state_precheck}'"
+            )
         ride.driver_id = driver.id
         ride.updated_at = now()
         _commit_or_rollback(db)
         db.refresh(ride)
+        assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
 
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-    assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
+    assignment = assignment or _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
     assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
     post_accept_states = {
         RideStatus.DRIVER_EN_ROUTE.value,
@@ -7994,6 +8004,7 @@ def accept_driver_ride(
                     DispatchAssignmentState.OFFERED.value,
                     DispatchAssignmentState.ASSIGNED.value,
                     DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+                    DispatchAssignmentState.SCHEDULED_OFFERED.value,
                 ]
             ),
         )

@@ -5222,6 +5222,9 @@
       var tripId = safeText(trip.tripId, "");
       if (!tripId) return false;
       var status = normalizeDriverTripStatus(trip.status);
+      if (isScheduledAssignmentState(status)) {
+        return false;
+      }
       if (["completed", "cancelled", "failed", "declined", "no_show", "expired", "reassignment_pending"].indexOf(status) >= 0) {
         return false;
       }
@@ -5383,9 +5386,36 @@
     return safeText(raw, "").toLowerCase().replace(/^ridestatus\./, "").replace(/^driverstatus\./, "");
   }
 
+  function isScheduledAssignmentState(raw) {
+    var token = normalizeRideStatusToken(raw);
+    return token === "scheduled_offered" || token === "scheduled_accepted";
+  }
+
+  function isImmediateAssignmentState(raw) {
+    var token = normalizeRideStatusToken(raw);
+    if (isScheduledAssignmentState(token)) return false;
+    return [
+      "offered",
+      "assigned",
+      "awaiting_approval",
+      "reassignment_pending",
+      "accepted",
+      "en_route_pickup",
+      "arrived_pickup",
+      "waiting_at_pickup",
+      "pickup_complete",
+      "rider_loaded",
+      "in_progress",
+      "trip_in_progress"
+    ].indexOf(token) >= 0;
+  }
+
   function driverTripNeedsAcceptance(status, assignmentState) {
     var tripStatus = normalizeDriverTripStatus(status);
     var normalizedAssignment = safeText(assignmentState, "").toLowerCase();
+    if (isScheduledAssignmentState(normalizedAssignment)) {
+      return false;
+    }
     if (["offered", "assigned", "awaiting_approval", "pending_assignment"].indexOf(normalizedAssignment) >= 0) {
       return true;
     }
@@ -5446,6 +5476,30 @@
     var offerDriverId = resolveAssignmentDriverId(offerRow);
     var assignmentDriverId = resolveAssignmentDriverId(assignmentRow);
     var rideDriverId = resolveRideDriverId(rideRow);
+    var offerAssignmentState = safeText((safeObject(offerRow)).assignment_state, "").toLowerCase();
+    var rowAssignmentState = safeText((safeObject(assignmentRow)).assignment_state, "").toLowerCase();
+    var acceptedByDriverId = safeText(
+      (safeObject(offerRow)).accepted_by_driver_id || (safeObject(assignmentRow)).accepted_by_driver_id,
+      ""
+    );
+    if (isScheduledAssignmentState(offerAssignmentState) || isScheduledAssignmentState(rowAssignmentState)) {
+      return {
+        accepted: false,
+        reason: "scheduled_assignment_not_immediate",
+        ride_id: rideId,
+        assignment_driver_id: assignmentDriverId || offerDriverId || rideDriverId,
+        source: sourceTag
+      };
+    }
+    if (acceptedByDriverId && acceptedByDriverId !== sessionDriverId) {
+      return {
+        accepted: false,
+        reason: "scheduled_reservation_owner_mismatch",
+        ride_id: rideId,
+        assignment_driver_id: acceptedByDriverId,
+        source: sourceTag
+      };
+    }
     if (!sessionDriverId) {
       return {
         accepted: false,
@@ -5474,7 +5528,11 @@
       };
     }
     if (rideDriverId && rideDriverId !== sessionDriverId) {
-      if (!(offerDriverId === sessionDriverId || assignmentDriverId === sessionDriverId)) {
+      var immediateOfferForSession = offerDriverId === sessionDriverId
+        && isImmediateAssignmentState(offerAssignmentState || rowAssignmentState);
+      var immediateAssignmentForSession = assignmentDriverId === sessionDriverId
+        && isImmediateAssignmentState(rowAssignmentState || offerAssignmentState);
+      if (!(immediateOfferForSession || immediateAssignmentForSession)) {
         return {
           accepted: false,
           reason: "ride_driver_mismatch",
@@ -5545,6 +5603,10 @@
       var buildActive = safeObject(build.activeRide);
       var confirmedRideId = safeText((safeObject(confirmedActive.ride)).id, "");
       if (confirmedActive.has_active_ride === true && confirmedRideId) {
+        var confirmedRideDriverId = resolveRideDriverId(confirmedRide);
+        if (confirmedRideDriverId && confirmedRideDriverId !== safeText(driverWorkflow.driverId, "")) {
+          return build;
+        }
         if (buildActive.has_active_ride !== true || !safeText((safeObject(buildActive.ride)).id, "")) {
           build.activeRide = confirmedActive;
         }
@@ -5675,10 +5737,13 @@
         var workspaceRideStatus = activeRide.lifecycle_state || activeRide.status;
         var workspaceAssignmentState = safeText(activeAssignment.assignment_state, offerState);
         if (
+          !isScheduledAssignmentState(workspaceAssignmentState)
+          && (
           driverTripNeedsAcceptance(workspaceRideStatus, workspaceAssignmentState)
           || ["accepted", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit"].indexOf(
             normalizeDriverTripStatus(workspaceRideStatus)
           ) >= 0
+          )
         ) {
           appendOwnedDriverTrip(
             workflowDriverId,
@@ -5711,6 +5776,9 @@
       ) {
         var assignmentRideId = safeText(activeAssignment.ride_id, "");
         var assignmentState = safeText(activeAssignment.assignment_state, "assigned").toLowerCase();
+        if (isScheduledAssignmentState(assignmentState)) {
+          return;
+        }
         if (["offered", "assigned", "awaiting_approval", "accepted", "en_route_pickup", "arrived_pickup", "waiting_at_pickup", "arrived", "pickup_complete", "rider_loaded", "in_progress", "trip_in_progress"].indexOf(assignmentState) >= 0) {
           appendOwnedDriverTrip(
             workflowDriverId,
@@ -11374,12 +11442,6 @@
       if (!Array.isArray(partial.assignedRides)) {
         nextAssignedRides = Array.isArray(priorWorkflow.assignedRides) ? priorWorkflow.assignedRides : [];
       }
-      if (!Array.isArray(partial.upcomingSchedule)) {
-        nextUpcomingSchedule = Array.isArray(priorWorkflow.upcomingSchedule) ? priorWorkflow.upcomingSchedule : [];
-      }
-      if (!Array.isArray(partial.scheduledOffers)) {
-        nextScheduledOffers = Array.isArray(priorWorkflow.scheduledOffers) ? priorWorkflow.scheduledOffers : [];
-      }
       if (!payload.earnings) earningsPayload = safeObject(priorWorkflow.earnings);
       if (!Array.isArray(payload.completed_rides)) {
         completedRideRows = Array.isArray(priorWorkflow.completedRides) ? priorWorkflow.completedRides : [];
@@ -11710,7 +11772,11 @@
     );
 
     var priorWorkflow = safeObject(state.driverWorkflow);
+    var priorWorkflowDriverId = safeText(priorWorkflow.driverId, "");
     var priorTripId = priorDriverTripIdFromState();
+    if (priorWorkflowDriverId && priorWorkflowDriverId !== resolvedDriverId) {
+      driverLastConfirmedWorkflow = null;
+    }
     var openAssignment = driverRefreshHasOpenAssignment(activeRidePayload, assignedRideRows || [], offerEnvelope);
     var authoritativeEmpty = apiHealthy && !openAssignment;
     var priorCompleted = priorTripCompletedInSnapshot(priorTripId, completionSnapshot);
@@ -11722,6 +11788,9 @@
       completionSnapshot
     );
     var preserveOnEmpty = !apiHealthy || (wouldClearActiveTrip && priorTripId && !priorCompleted && !authoritativeEmpty);
+    if (priorWorkflowDriverId && priorWorkflowDriverId !== resolvedDriverId) {
+      preserveOnEmpty = false;
+    }
     if (isDriverMobileAppRoute() && driverMobileCoreHealthy && openAssignment) {
       preserveOnEmpty = false;
     }
