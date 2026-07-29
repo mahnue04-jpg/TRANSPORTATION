@@ -10765,19 +10765,26 @@ def dispatch_queue(
     organization_id: str | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
     force_maintenance: bool = Query(False),
+    read_only: bool = Query(False),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    maybe_run_organization_dispatch_maintenance(
-        db,
-        organization_id=effective_org_id,
-        actor_user_id=user.user_id,
-        force=force_maintenance,
-    )
+    if not read_only:
+        maybe_run_organization_dispatch_maintenance(
+            db,
+            organization_id=effective_org_id,
+            actor_user_id=user.user_id,
+            force=force_maintenance,
+        )
     return [
         DispatchQueueItemResponse(**row)
-        for row in service.get_dispatch_queue(db, organization_id=effective_org_id, limit=limit)
+        for row in service.get_dispatch_queue(
+            db,
+            organization_id=effective_org_id,
+            limit=limit,
+            read_only=read_only,
+        )
     ]
 
 

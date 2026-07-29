@@ -4044,12 +4044,14 @@ def get_dispatch_queue(
     *,
     organization_id: str,
     limit: int = 200,
+    read_only: bool = False,
 ) -> list[dict[str, Any]]:
-    reconcile_organization_driver_workloads(db, organization_id=organization_id)
-    from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
+    if not read_only:
+        reconcile_organization_driver_workloads(db, organization_id=organization_id)
+        from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
 
-    promote_dispatch_eligible_rides(db, organization_id=organization_id)
-    promote_pending_immediate_customer_requests(db, organization_id=organization_id)
+        promote_dispatch_eligible_rides(db, organization_id=organization_id)
+        promote_pending_immediate_customer_requests(db, organization_id=organization_id)
     active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
     active_lifecycle_states = [
         RideStatus.REQUESTED.value,

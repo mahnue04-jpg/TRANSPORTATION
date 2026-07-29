@@ -1390,7 +1390,7 @@
   var DRIVER_AWAITING_POLL_INTERVAL_MS = 5000;
   var BACKEND_DOWN_PAUSE_MS = 60000;
   var MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE = 2;
-  var ENTERPRISE_HYDRATION_TIMEOUT_MS = 22000;
+  var ENTERPRISE_HYDRATION_TIMEOUT_MS = 45000;
   var SESSION_READY_TIMEOUT_MS = 8000;
   var AI_SNAPSHOT_TIMEOUT_MS = 8000;
   var RIDER_SUBMIT_TIMEOUT_MS = 60000;
@@ -2347,6 +2347,27 @@
     },
     orchestration_unavailable: {
       default: "Dispatch coordination updates are temporarily delayed. Task boards remain view-only."
+    },
+    hydration_timeout: {
+      default: "Live data refresh timed out. Previously loaded records are kept until retry succeeds."
+    },
+    partial_operations_data: {
+      default: "Some live feeds are delayed. Existing records remain visible; tap Retry to refresh."
+    },
+    dispatch_queue_unavailable: {
+      default: "Dispatch queue refresh failed. Showing the last loaded queue snapshot."
+    },
+    live_workflow_feed_unavailable: {
+      default: "Live workflow refresh failed. Showing the last loaded operational snapshot."
+    },
+    billing_rides_unavailable: {
+      default: "Billing ride list refresh failed. Existing billing records remain visible."
+    },
+    billing_handoffs_unavailable: {
+      default: "Billing handoff refresh failed. Existing handoff records remain visible."
+    },
+    admin_revenue_unavailable: {
+      default: "Revenue totals refresh failed. Last known totals remain visible."
     }
   };
 
@@ -2371,6 +2392,74 @@
       }
       seen[key] = true;
       return true;
+    });
+  }
+
+  function isNonEmptyArray(value) {
+    return Array.isArray(value) && value.length > 0;
+  }
+
+  function preserveWorkflowField(incoming, previous, key) {
+    if (incoming === null || incoming === undefined) {
+      var prev = previous && previous[key];
+      return Array.isArray(prev) ? prev.slice() : [];
+    }
+    return Array.isArray(incoming) ? incoming : [];
+  }
+
+  function mergeLiveWorkflowSnapshot(previous, incoming) {
+    var prev = safeObject(previous);
+    var next = safeObject(incoming);
+    return {
+      dispatchQueue: preserveWorkflowField(next.dispatchQueue, prev, "dispatchQueue"),
+      activeAssignments: preserveWorkflowField(next.activeAssignments, prev, "activeAssignments"),
+      activityFeed: preserveWorkflowField(next.activityFeed, prev, "activityFeed"),
+      drivers: preserveWorkflowField(next.drivers, prev, "drivers"),
+      rides: preserveWorkflowField(next.rides, prev, "rides"),
+      providers: preserveWorkflowField(next.providers, prev, "providers"),
+      customerRequests: preserveWorkflowField(next.customerRequests, prev, "customerRequests"),
+      vehicles: preserveWorkflowField(next.vehicles, prev, "vehicles"),
+      billingHandoffs: preserveWorkflowField(next.billingHandoffs, prev, "billingHandoffs"),
+      tripDocuments: preserveWorkflowField(next.tripDocuments, prev, "tripDocuments")
+    };
+  }
+
+  function recordLastGoodLiveWorkflow() {
+    var wf = safeObject(state.liveWorkflow);
+    var hasData = isNonEmptyArray(wf.drivers)
+      || isNonEmptyArray(wf.rides)
+      || isNonEmptyArray(wf.dispatchQueue)
+      || isNonEmptyArray(wf.billingHandoffs)
+      || isNonEmptyArray(wf.providers);
+    if (!hasData) {
+      return;
+    }
+    state.runtime = safeObject(state.runtime);
+    try {
+      state.runtime.lastGoodLiveWorkflow = JSON.parse(JSON.stringify(wf));
+    } catch (_) {
+      state.runtime.lastGoodLiveWorkflow = wf;
+    }
+    if (state.adminRevenue) {
+      state.runtime.lastGoodAdminRevenue = state.adminRevenue;
+    }
+  }
+
+  function restoreLastGoodLiveWorkflowIfNeeded() {
+    var lastGood = safeObject(state.runtime && state.runtime.lastGoodLiveWorkflow);
+    if (!Object.keys(lastGood).length) {
+      return false;
+    }
+    state.liveWorkflow = mergeLiveWorkflowSnapshot(lastGood, safeObject(state.liveWorkflow));
+    if (!state.adminRevenue && state.runtime.lastGoodAdminRevenue) {
+      state.adminRevenue = state.runtime.lastGoodAdminRevenue;
+    }
+    return true;
+  }
+
+  async function sleepMs(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
     });
   }
 
@@ -10020,9 +10109,10 @@
     return [
       '<section class="panel">',
       '<h3>Operations data connectivity warning</h3>',
-      '<p class="muted">The shell remains available, but one or more operations snapshots are unavailable.</p>',
+      '<p class="muted">The shell remains available. Previously loaded records are preserved when a refresh fails.</p>',
       '<p><strong>Error:</strong> ' + escapeHtml(state.error || "operations_fetch_unavailable") + '</p>',
-      '<p class="muted">All visible values are safe fallback placeholders when data is unavailable.</p>',
+      '<p class="muted">Tap Retry to reload live data. Billing totals and lists will not be replaced with empty placeholders during a refresh failure.</p>',
+      '<button class="preview-action" type="button" onclick="window.AmiOpsShellActions && window.AmiOpsShellActions.retryOperationsHydration && window.AmiOpsShellActions.retryOperationsHydration()">Retry</button>',
       '</section>'
     ].join("");
   }
@@ -10374,11 +10464,7 @@
         return;
       }
       try {
-        await _amiSendJson(
-          "/api/health-isf/drivers/" + encodeURIComponent(currentDriverId) + "/accept-scheduled-ride",
-          "POST",
-          { ride_id: scheduledTripId }
-        );
+        await _amiAcceptScheduledRideWithRecovery(currentDriverId, scheduledTripId);
         appState.lastStatusUpdate = "Scheduled ride reserved: " + scheduledTripId;
         addDriverNotification("medium", "Scheduled ride accepted and added to Upcoming Schedule.");
         updated = true;
@@ -10726,7 +10812,7 @@
     if (!useDriverSessionOnly && token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = "Bearer " + token;
     }
-    var retries = method === "GET" ? (isMobileDriverApiUrl(scopedUrl) ? 2 : 1) : 0;
+    var retries = method === "GET" ? 2 : 0;
     var fetchTimeoutMs = resolveDriverMobileFetchTimeoutMs(scopedUrl, options.timeoutMs);
     if (!fetchTimeoutMs) {
       fetchTimeoutMs = method === "GET" ? 20000 : 12000;
@@ -10783,6 +10869,7 @@
           throw error;
         }
         attempt += 1;
+        await sleepMs(400 * Math.pow(2, attempt - 1));
       }
     }
     return {};
@@ -12919,6 +13006,7 @@
 
   function finalizeShellHydration(hasToken, settled, opsFailures) {
     state.fetchWarnings = dedupeWarnings(state.fetchWarnings);
+    restoreLastGoodLiveWorkflowIfNeeded();
     var integrityState = computeHydrationIntegrity(
       hasToken,
       opsFailures,
@@ -12954,59 +13042,90 @@
   }
 
   async function hydrateEssentialWorkflowData(token, opts) {
+    var previousWorkflow = safeObject(
+      (state.runtime && state.runtime.lastGoodLiveWorkflow) || state.liveWorkflow
+    );
     var workflowSettled = await Promise.allSettled([
-      fetchJson("/api/health-isf/dispatch/queue?limit=200", {}, token),
-      fetchJson("/api/health-isf/dispatch/active-assignments?limit=200", {}, token),
+      fetchJson("/api/health-isf/dispatch/queue?limit=80&read_only=true", {}, token),
+      fetchJson("/api/health-isf/dispatch/active-assignments?limit=80", {}, token),
       fetchJson("/api/health-isf/activity-feed?limit=40", {}, token)
     ]);
+    if (workflowSettled[0].status === "rejected") {
+      state.fetchWarnings.push("dispatch_queue_unavailable");
+    }
+    if (workflowSettled[1].status === "rejected") {
+      state.fetchWarnings.push("active_assignments_unavailable");
+    }
+    if (workflowSettled[2].status === "rejected") {
+      state.fetchWarnings.push("activity_feed_unavailable");
+    }
     var liveWorkflow = {
-      dispatchQueue: workflowSettled[0].status === "fulfilled" && Array.isArray(workflowSettled[0].value) ? workflowSettled[0].value : [],
-      activeAssignments: workflowSettled[1].status === "fulfilled" && Array.isArray(workflowSettled[1].value) ? workflowSettled[1].value : [],
-      activityFeed: workflowSettled[2].status === "fulfilled" && Array.isArray((workflowSettled[2].value || {}).activities) ? (workflowSettled[2].value || {}).activities : [],
-      drivers: [],
-      rides: [],
-      providers: [],
-      customerRequests: [],
-      vehicles: []
+      dispatchQueue: workflowSettled[0].status === "fulfilled" && Array.isArray(workflowSettled[0].value) ? workflowSettled[0].value : null,
+      activeAssignments: workflowSettled[1].status === "fulfilled" && Array.isArray(workflowSettled[1].value) ? workflowSettled[1].value : null,
+      activityFeed: workflowSettled[2].status === "fulfilled" && Array.isArray((workflowSettled[2].value || {}).activities) ? (workflowSettled[2].value || {}).activities : null,
+      drivers: null,
+      rides: null,
+      providers: null,
+      customerRequests: null,
+      vehicles: null,
+      billingHandoffs: null,
+      tripDocuments: null
     };
     try {
       liveWorkflow.drivers = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
-    } catch (_) {}
+    } catch (_) {
+      state.fetchWarnings.push("drivers_unavailable");
+    }
     try {
-      liveWorkflow.rides = await fetchJson("/api/health-isf/rides?limit=200&active_only=true&exclude_test=true", {}, token);
-    } catch (_) {}
+      liveWorkflow.rides = await fetchJson("/api/health-isf/rides?limit=120&active_only=true&exclude_test=true", {}, token);
+    } catch (_) {
+      state.fetchWarnings.push("rides_unavailable");
+    }
     try {
       liveWorkflow.billingHandoffs = await fetchJson("/api/health-isf/operations/billing-handoffs?limit=100", {}, token);
     } catch (_) {
-      liveWorkflow.billingHandoffs = [];
+      state.fetchWarnings.push("billing_handoffs_unavailable");
     }
     try {
       liveWorkflow.tripDocuments = await fetchJson("/api/health-isf/operations/trip-documents?limit=200", {}, token);
     } catch (_) {
-      liveWorkflow.tripDocuments = [];
+      state.fetchWarnings.push("trip_documents_unavailable");
     }
     try {
       state.adminRevenue = await fetchJson("/api/health-isf/operations/admin-revenue", {}, token);
     } catch (_) {
-      state.adminRevenue = state.adminRevenue || null;
+      state.fetchWarnings.push("admin_revenue_unavailable");
+      state.adminRevenue = state.adminRevenue || (state.runtime && state.runtime.lastGoodAdminRevenue) || null;
     }
     var workflowReferenceSettled = await Promise.allSettled([
-      fetchJson("/api/health-isf/providers?limit=200", {}, token),
-      fetchJson("/api/health-isf/customer-requests?limit=200", {}, token),
+      fetchJson("/api/health-isf/providers?limit=120", {}, token),
+      fetchJson("/api/health-isf/customer-requests?limit=120", {}, token),
       fetchJson("/api/health-isf/vehicles/active?limit=40", {}, token)
     ]);
-    state.liveWorkflow = {
+    if (workflowReferenceSettled[0].status === "rejected") {
+      state.fetchWarnings.push("providers_unavailable");
+    }
+    if (workflowReferenceSettled[1].status === "rejected") {
+      state.fetchWarnings.push("customer_requests_unavailable");
+    }
+    if (workflowReferenceSettled[2].status === "rejected") {
+      state.fetchWarnings.push("vehicles_unavailable");
+    }
+    state.liveWorkflow = mergeLiveWorkflowSnapshot(previousWorkflow, {
       dispatchQueue: liveWorkflow.dispatchQueue,
       activeAssignments: liveWorkflow.activeAssignments,
-      drivers: Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : [],
+      drivers: Array.isArray(liveWorkflow.drivers) ? liveWorkflow.drivers : null,
       activityFeed: liveWorkflow.activityFeed,
-      rides: filterOperationalRidesForHydration(Array.isArray(liveWorkflow.rides) ? liveWorkflow.rides : []),
-      billingHandoffs: dedupeBillingHandoffsByRideId(Array.isArray(liveWorkflow.billingHandoffs) ? liveWorkflow.billingHandoffs : []),
-      tripDocuments: Array.isArray(liveWorkflow.tripDocuments) ? liveWorkflow.tripDocuments : [],
-      providers: workflowReferenceSettled[0].status === "fulfilled" && Array.isArray(workflowReferenceSettled[0].value) ? workflowReferenceSettled[0].value : [],
-      customerRequests: workflowReferenceSettled[1].status === "fulfilled" && Array.isArray(workflowReferenceSettled[1].value) ? workflowReferenceSettled[1].value : [],
-      vehicles: workflowReferenceSettled[2].status === "fulfilled" && Array.isArray(workflowReferenceSettled[2].value) ? workflowReferenceSettled[2].value : []
-    };
+      rides: liveWorkflow.rides == null ? null : filterOperationalRidesForHydration(liveWorkflow.rides),
+      billingHandoffs: Array.isArray(liveWorkflow.billingHandoffs)
+        ? dedupeBillingHandoffsByRideId(liveWorkflow.billingHandoffs)
+        : null,
+      tripDocuments: Array.isArray(liveWorkflow.tripDocuments) ? liveWorkflow.tripDocuments : null,
+      providers: workflowReferenceSettled[0].status === "fulfilled" && Array.isArray(workflowReferenceSettled[0].value) ? workflowReferenceSettled[0].value : null,
+      customerRequests: workflowReferenceSettled[1].status === "fulfilled" && Array.isArray(workflowReferenceSettled[1].value) ? workflowReferenceSettled[1].value : null,
+      vehicles: workflowReferenceSettled[2].status === "fulfilled" && Array.isArray(workflowReferenceSettled[2].value) ? workflowReferenceSettled[2].value : null
+    });
+    recordLastGoodLiveWorkflow();
     if (canUseDriverWorkspaceActions()) {
       try {
         var driverMobileReset = isDriverMobileSurface() && opts && opts.forceDriverReset === true;
@@ -13409,6 +13528,8 @@
         hydrationTimedOut = true;
         state.loading = false;
         state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["hydration_timeout"]));
+        restoreLastGoodLiveWorkflowIfNeeded();
+        state.error = "partial_operations_data";
         clearStaleEnterpriseLoadingHtml();
         renderPage();
       }, ENTERPRISE_HYDRATION_TIMEOUT_MS);
@@ -13472,48 +13593,60 @@
     if (hasToken) {
       if (state.route === "dispatch") {
         try {
+          var dispatchPreviousWorkflow = safeObject(
+            (state.runtime && state.runtime.lastGoodLiveWorkflow) || state.liveWorkflow
+          );
           var dispatchWorkflowSettled = await Promise.allSettled([
-            fetchJson("/api/health-isf/dispatch/queue?limit=80", {}, token),
+            fetchJson("/api/health-isf/dispatch/queue?limit=80&read_only=true", {}, token),
             fetchJson("/api/health-isf/dispatch/active-assignments?limit=80", {}, token),
             fetchJson("/api/health-isf/activity-feed?limit=40", {}, token)
           ]);
+          if (dispatchWorkflowSettled[0].status === "rejected") {
+            state.fetchWarnings.push("dispatch_queue_unavailable");
+          }
           var dispatchLiveWorkflow = {
-            dispatchQueue: dispatchWorkflowSettled[0].status === "fulfilled" && Array.isArray(dispatchWorkflowSettled[0].value) ? dispatchWorkflowSettled[0].value : [],
-            activeAssignments: dispatchWorkflowSettled[1].status === "fulfilled" && Array.isArray(dispatchWorkflowSettled[1].value) ? dispatchWorkflowSettled[1].value : [],
-            activityFeed: dispatchWorkflowSettled[2].status === "fulfilled" && Array.isArray((dispatchWorkflowSettled[2].value || {}).activities) ? (dispatchWorkflowSettled[2].value || {}).activities : [],
-            drivers: [],
-            rides: [],
-            providers: [],
-            customerRequests: [],
-            vehicles: []
+            dispatchQueue: dispatchWorkflowSettled[0].status === "fulfilled" && Array.isArray(dispatchWorkflowSettled[0].value) ? dispatchWorkflowSettled[0].value : null,
+            activeAssignments: dispatchWorkflowSettled[1].status === "fulfilled" && Array.isArray(dispatchWorkflowSettled[1].value) ? dispatchWorkflowSettled[1].value : null,
+            activityFeed: dispatchWorkflowSettled[2].status === "fulfilled" && Array.isArray((dispatchWorkflowSettled[2].value || {}).activities) ? (dispatchWorkflowSettled[2].value || {}).activities : null,
+            drivers: null,
+            rides: null,
+            providers: null,
+            customerRequests: null,
+            vehicles: null
           };
 
           try {
             dispatchLiveWorkflow.drivers = await fetchJson("/api/health-isf/drivers?limit=120", {}, token);
-          } catch (_) {}
+          } catch (_) {
+            state.fetchWarnings.push("drivers_unavailable");
+          }
 
           try {
             dispatchLiveWorkflow.rides = await fetchJson("/api/health-isf/rides?limit=20&active_only=true&exclude_test=true", {}, token);
-          } catch (_) {}
+          } catch (_) {
+            state.fetchWarnings.push("rides_unavailable");
+          }
 
           var dispatchReferenceSettled = await Promise.allSettled([
             fetchJson("/api/health-isf/providers?limit=20", {}, token),
             fetchJson("/api/health-isf/customer-requests?limit=40", {}, token),
             fetchJson("/api/health-isf/vehicles/active?limit=40", {}, token)
           ]);
-          state.liveWorkflow = {
+          state.liveWorkflow = mergeLiveWorkflowSnapshot(dispatchPreviousWorkflow, {
             dispatchQueue: dispatchLiveWorkflow.dispatchQueue,
             activeAssignments: dispatchLiveWorkflow.activeAssignments,
-            drivers: Array.isArray(dispatchLiveWorkflow.drivers) ? dispatchLiveWorkflow.drivers : [],
+            drivers: Array.isArray(dispatchLiveWorkflow.drivers) ? dispatchLiveWorkflow.drivers : null,
             activityFeed: dispatchLiveWorkflow.activityFeed,
-            rides: Array.isArray(dispatchLiveWorkflow.rides) ? dispatchLiveWorkflow.rides : [],
-            providers: dispatchReferenceSettled[0].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[0].value) ? dispatchReferenceSettled[0].value : [],
-            customerRequests: dispatchReferenceSettled[1].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[1].value) ? dispatchReferenceSettled[1].value : [],
-            vehicles: dispatchReferenceSettled[2].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[2].value) ? dispatchReferenceSettled[2].value : []
-          };
+            rides: Array.isArray(dispatchLiveWorkflow.rides) ? dispatchLiveWorkflow.rides : null,
+            providers: dispatchReferenceSettled[0].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[0].value) ? dispatchReferenceSettled[0].value : null,
+            customerRequests: dispatchReferenceSettled[1].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[1].value) ? dispatchReferenceSettled[1].value : null,
+            vehicles: dispatchReferenceSettled[2].status === "fulfilled" && Array.isArray(dispatchReferenceSettled[2].value) ? dispatchReferenceSettled[2].value : null
+          });
+          recordLastGoodLiveWorkflow();
           renderPage();
         } catch (_) {
           state.fetchWarnings.push("live_workflow_feed_unavailable");
+          restoreLastGoodLiveWorkflowIfNeeded();
         }
 
         try {
@@ -13576,13 +13709,13 @@
           state.revenueWorkflow = await fetchJson("/api/health-isf/operations/revenue-workflow?window_hours=24", {}, token);
         } catch (_) {
           state.fetchWarnings.push("revenue_workflow_unavailable");
-          state.revenueWorkflow = null;
+          state.revenueWorkflow = state.revenueWorkflow || null;
         }
         try {
           state.adminRevenue = await fetchJson("/api/health-isf/operations/admin-revenue", {}, token);
         } catch (_) {
           state.fetchWarnings.push("admin_revenue_unavailable");
-          state.adminRevenue = null;
+          state.adminRevenue = state.adminRevenue || (state.runtime && state.runtime.lastGoodAdminRevenue) || null;
         }
         try {
           var billingRideRows = await fetchJson("/api/health-isf/rides?limit=40&history_only=true", {}, token);
@@ -13607,15 +13740,14 @@
           );
         } catch (_) {
           state.fetchWarnings.push("billing_handoffs_unavailable");
-          state.liveWorkflow.billingHandoffs = [];
         }
         try {
           var tripDocumentRows = await fetchJson("/api/health-isf/operations/trip-documents?limit=200", {}, token);
-          state.liveWorkflow.tripDocuments = Array.isArray(tripDocumentRows) ? tripDocumentRows : [];
+          state.liveWorkflow.tripDocuments = Array.isArray(tripDocumentRows) ? tripDocumentRows : state.liveWorkflow.tripDocuments;
         } catch (_) {
           state.fetchWarnings.push("trip_documents_unavailable");
-          state.liveWorkflow.tripDocuments = [];
         }
+        recordLastGoodLiveWorkflow();
         window.AmiOpsShellState = state;
         state.hydration = {
           authTokenPresent: hasToken,
@@ -13837,6 +13969,7 @@
     }
 
     finalizeShellHydration(hasToken, settled, 0);
+    recordLastGoodLiveWorkflow();
     } catch (err) {
       state.error = safeText(err && err.message, "operations_fetch_unavailable");
       if (isDriverMobileAppRoute()) {
@@ -14332,6 +14465,17 @@
         return { ok: true };
       } catch (err) {
         return { ok: false, detail: (err && err.message) ? err.message : "refresh_failed" };
+      }
+    },
+    retryOperationsHydration: async function () {
+      try {
+        state.error = null;
+        state.fetchWarnings = [];
+        await loadBackendData({ silent: false });
+        return { ok: true };
+      } catch (err) {
+        restoreLastGoodLiveWorkflowIfNeeded();
+        return { ok: false, detail: (err && err.message) ? err.message : "retry_failed" };
       }
     },
     sendJson: sendJson,
@@ -15437,6 +15581,49 @@ window._amiHandleMedicalFacilityCoordination = async function(taskId) {
   }
   window.alert("Facility coordination action submitted for supervised workflow.");
 };
+
+async function _amiAcceptScheduledRideWithRecovery(driverId, rideId) {
+  var acceptUrl = "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-scheduled-ride";
+  var scheduleUrl = "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/upcoming-schedule";
+  var acceptTimeoutMs = 60000;
+  var maxAttempts = 3;
+  var lastErr = null;
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await _amiSendJson(acceptUrl, "POST", { ride_id: rideId }, acceptTimeoutMs);
+    } catch (err) {
+      lastErr = err;
+      var msg = safeText(err && err.message, "");
+      var transient = msg.indexOf("request_timeout") >= 0 || msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0;
+      if (transient) {
+        try {
+          var schedulePayload = safeObject(await _amiSendJson(scheduleUrl, "GET", null));
+          var entries = Array.isArray(schedulePayload.upcoming_schedule) ? schedulePayload.upcoming_schedule : [];
+          var alreadyAccepted = entries.some(function (entry) {
+            var entryRideId = safeText(entry.ride_id || entry.id, "");
+            var assignmentState = safeText(entry.assignment_state || entry.status || entry.lifecycle_state, "").toLowerCase();
+            return entryRideId === rideId && (
+              assignmentState === "scheduled_accepted"
+              || assignmentState.indexOf("accepted") >= 0
+              || entry.can_accept === false
+            );
+          });
+          if (alreadyAccepted) {
+            return { ride_id: rideId, assignment_state: "scheduled_accepted", recovered_after_timeout: true };
+          }
+        } catch (_) {}
+      }
+      if (transient && attempt < maxAttempts - 1) {
+        await new Promise(function (resolve) {
+          setTimeout(resolve, 500 * Math.pow(2, attempt));
+        });
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr || new Error("accept_scheduled_ride_failed");
+}
 
 async function _amiSendJson(url, method, payload, timeoutMs) {
   var httpMethod = safeText(method, "POST").toUpperCase();
