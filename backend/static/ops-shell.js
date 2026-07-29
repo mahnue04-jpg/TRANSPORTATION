@@ -5333,6 +5333,7 @@
       coordinationStatus: safeText(payload.coordinationStatus, "assignment_offered"),
       assignedDriver: safeText(payload.assignedDriver, ""),
       assignedDriverName: safeText(payload.assignedDriverName, ""),
+      reservedByDriverId: safeText(payload.reservedByDriverId || payload.reserved_by_driver_id, ""),
       providerName: safeText(payload.providerName, ""),
       offerId: safeText(payload.offerId, ""),
       trustedFromBackend: payload.trustedFromBackend === true
@@ -5482,6 +5483,23 @@
       (safeObject(offerRow)).accepted_by_driver_id || (safeObject(assignmentRow)).accepted_by_driver_id,
       ""
     );
+    var reservedOwnerId = safeText(
+      (safeObject(rideRow)).scheduled_reservation_owner_id
+        || (safeObject(offerRow)).scheduled_reservation_owner_id
+        || (safeObject(assignmentRow)).scheduled_reservation_owner_id
+        || (safeObject(offerRow)).accepted_by_driver_id
+        || (safeObject(assignmentRow)).accepted_by_driver_id,
+      ""
+    );
+    if (reservedOwnerId && reservedOwnerId !== sessionDriverId) {
+      return {
+        accepted: false,
+        reason: "group_scheduled_reservation_owner",
+        ride_id: rideId,
+        assignment_driver_id: reservedOwnerId,
+        source: sourceTag
+      };
+    }
     if (isScheduledAssignmentState(offerAssignmentState) || isScheduledAssignmentState(rowAssignmentState)) {
       return {
         accepted: false,
@@ -5714,6 +5732,7 @@
           requestedAt: activeOffer.requested_at || activeOffer.offer_expires_at,
           coordinationStatus: activeOffer.assignment_state,
           assignedDriver: resolveAssignmentDriverId(activeOffer) || workflowDriverId,
+          reservedByDriverId: safeText(activeOffer.scheduled_reservation_owner_id, ""),
           offerId: activeOffer.id || activeOffer.offer_id
         }),
           null,
@@ -10369,6 +10388,11 @@
     } else if (action === "accept_trip" && activeTrip) {
       if (!currentDriverId) {
         window.alert("Driver profile is not bound yet.");
+        return;
+      }
+      var reservedOwnerId = safeText(activeTrip.reservedByDriverId || activeTrip.reserved_by_driver_id, "");
+      if (reservedOwnerId && reservedOwnerId !== currentDriverId) {
+        window.alert("This ride is reserved for another driver.");
         return;
       }
       if (!(await window._amiHandleDriverAcceptTrip(safeText(activeTrip.tripId, "")))) {
@@ -15747,48 +15771,54 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     if (_amiDriverAcceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function" && !_amiDriverMobileSessionStillActive()) {
       window._amiClearDriverSession();
     }
-    if (!_amiDriverAcceptHttpStatus(err, 409)) {
-      var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
-      if (recovered) {
-        return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
-      }
+    if (_amiDriverAcceptHttpStatus(acceptErr, 409)) {
       _amiLogDriverMobileSync({
-        event: "accept_ride_failed",
+        event: "accept_ride_denied_reserved",
         requested_ride_id: tripId,
         route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
         api_response: {
-          error: safeText(acceptErr && acceptErr.message, "accept_failed")
+          error: safeText(acceptErr && acceptErr.message, "reserved_for_other_driver")
         },
         frontend_state_transition: "active_ride->active_ride",
-        extra: { action: "Accept Trip" }
+        extra: { action: "Accept Trip", denied: true }
       });
-      if (_amiDriverAcceptHttpStatus(acceptErr, 401)) {
-        window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
-      } else {
-        window.alert(
-          "Unable to submit driver accept action for " + tripId + ". "
-          + safeText(acceptErr && acceptErr.message, "")
-        );
-      }
-      shell = _amiDriverShellState();
-      shell.driverApp = safeObject(shell.driverApp);
-      shell.driverApp.lastActionResult = {
-        last_action: "Accept Trip",
-        api_status: "error",
-        db_record_id: safeText(tripId, "n/a"),
-        updated_table: "health_isf_rides",
-        ui_refreshed: "no",
-        current_ride_status: "unchanged"
-      };
-      window.AmiOpsShellState = shell;
+      window.alert("This ride is reserved for another driver.");
       return false;
-    } else {
-      try {
-        payload = await _amiSendJson("/api/health-isf/rides/" + encodeURIComponent(tripId), "GET", null);
-      } catch (_) {
-        payload = null;
-      }
     }
+    var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+    if (recovered) {
+      return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
+    }
+    _amiLogDriverMobileSync({
+      event: "accept_ride_failed",
+      requested_ride_id: tripId,
+      route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+      api_response: {
+        error: safeText(acceptErr && acceptErr.message, "accept_failed")
+      },
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Accept Trip" }
+    });
+    if (_amiDriverAcceptHttpStatus(acceptErr, 401)) {
+      window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
+    } else {
+      window.alert(
+        "Unable to submit driver accept action for " + tripId + ". "
+        + safeText(acceptErr && acceptErr.message, "")
+      );
+    }
+    shell = _amiDriverShellState();
+    shell.driverApp = safeObject(shell.driverApp);
+    shell.driverApp.lastActionResult = {
+      last_action: "Accept Trip",
+      api_status: "error",
+      db_record_id: safeText(tripId, "n/a"),
+      updated_table: "health_isf_rides",
+      ui_refreshed: "no",
+      current_ride_status: "unchanged"
+    };
+    window.AmiOpsShellState = shell;
+    return false;
   }
   if (!payload) {
     var recoveredEmpty = await _amiRecoverAcceptedDriverTrip(driverId, tripId);

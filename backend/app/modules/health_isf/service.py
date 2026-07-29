@@ -282,6 +282,17 @@ def evaluate_driver_ride_operational_state(
             effective_assignment_state="",
             reason="terminal_or_excluded",
         )
+    from app.modules.health_isf.advance_scheduling import scheduled_reservation_owner_for_ride
+
+    group_owner = scheduled_reservation_owner_for_ride(db, ride)
+    if group_owner and str(group_owner) != target_driver:
+        return DriverRideOperationalState(
+            is_active=False,
+            has_active_offer=False,
+            is_dispatch_eligible=False,
+            effective_assignment_state="",
+            reason="group_scheduled_reservation",
+        )
     if str(ride.driver_id or "") != target_driver:
         row_check = assignment or _latest_driver_assignment_for_ride(
             db,
@@ -5654,6 +5665,13 @@ def get_driver_active_offer(
                 DispatchAssignmentState.ASSIGNED.value,
             }:
                 continue
+        if not _driver_mobile_offer_visible(
+            db,
+            ride=ride,
+            driver_id=driver_id,
+            assignment=offer,
+        ):
+            continue
         valid_offers.append((offer, ride))
     if not valid_offers:
         return None
@@ -6966,13 +6984,14 @@ def _latest_driver_assignment_for_ride(
     return preferred or rows[0]
 
 
-def _driver_ride_is_active_for_driver_app(
+def _driver_mobile_offer_visible(
     db: Session,
     *,
     ride: HealthISFRide,
     driver_id: str,
     assignment: Optional[HealthISFDispatchAssignment] = None,
 ) -> bool:
+    """Whether a driver mobile surface may expose this ride/offer."""
     if not _ride_is_driver_mobile_eligible(ride):
         return False
     op = evaluate_driver_ride_operational_state(
@@ -6981,9 +7000,24 @@ def _driver_ride_is_active_for_driver_app(
         driver_id=driver_id,
         assignment=assignment,
     )
-    if op.reason == "scheduled_reservation":
+    if op.reason in {"scheduled_reservation", "group_scheduled_reservation", "driver_mismatch"}:
         return False
     return op.is_active or op.has_active_offer
+
+
+def _driver_ride_is_active_for_driver_app(
+    db: Session,
+    *,
+    ride: HealthISFRide,
+    driver_id: str,
+    assignment: Optional[HealthISFDispatchAssignment] = None,
+) -> bool:
+    return _driver_mobile_offer_visible(
+        db,
+        ride=ride,
+        driver_id=driver_id,
+        assignment=assignment,
+    )
 
 
 def list_driver_assigned_rides(

@@ -80,6 +80,8 @@ def _record_scheduled_audit(
 ) -> None:
     from app.modules.health_isf.service import _record_dispatch, now
 
+    if not assignment_id:
+        assignment_id = None
     ride = db.query(HealthISFRide).filter(HealthISFRide.id == ride_id).first()
     lifecycle = str(getattr(ride, "lifecycle_state", None) or getattr(ride, "status", "") or "")
     _record_dispatch(
@@ -294,17 +296,27 @@ def expire_competing_scheduled_assignments(
     winning_assignment_id: Optional[str] = None,
     actor_user_id: Optional[str] = None,
 ) -> list[str]:
-    """Expire scheduled offers held by other drivers for this leg and round-trip group."""
-    from app.modules.health_isf.service import get_ride_by_id, now
+    """Expire competing assignments held by other drivers for this leg and round-trip group."""
+    from app.modules.health_isf.models import DispatchAssignmentState as DAS
+    from app.modules.health_isf.service import (
+        _close_dispatch_assignment_record,
+        get_ride_by_id,
+        now,
+    )
 
     ride_ids = _ride_ids_in_round_trip_group(db, ride)
     now_ts = now()
     expired: list[str] = []
+    competing_states = list(SCHEDULED_DISPATCH_ASSIGNMENT_STATES) + [
+        DAS.OFFERED.value,
+        DAS.ASSIGNED.value,
+        DAS.REASSIGNMENT_PENDING.value,
+    ]
     rows = (
         db.query(HealthISFDispatchAssignment)
         .filter(
             HealthISFDispatchAssignment.ride_id.in_(list(ride_ids)),
-            HealthISFDispatchAssignment.assignment_state.in_(list(SCHEDULED_DISPATCH_ASSIGNMENT_STATES)),
+            HealthISFDispatchAssignment.assignment_state.in_(competing_states),
         )
         .all()
     )
@@ -312,8 +324,11 @@ def expire_competing_scheduled_assignments(
         if winning_assignment_id and str(row.id) == str(winning_assignment_id):
             continue
         row_driver_id = str(row.driver_id or "")
+        row_state = str(row.assignment_state or "")
         if row_driver_id == str(winning_driver_id):
-            if str(row.assignment_state or "") != DispatchAssignmentState.SCHEDULED_OFFERED.value:
+            if row_state not in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
+                continue
+            if row_state != DispatchAssignmentState.SCHEDULED_OFFERED.value:
                 continue
             if winning_assignment_id and str(row.id) != str(winning_assignment_id):
                 row.assignment_state = "expired"
@@ -322,10 +337,22 @@ def expire_competing_scheduled_assignments(
                 row.updated_at = now_ts
                 expired.append(str(row.id))
             continue
-        row.assignment_state = "expired"
-        row.expired_at = now_ts
-        row.closed_reason = "scheduled_reservation_claimed_by_other_driver"
-        row.updated_at = now_ts
+        if row_state in {
+            DAS.OFFERED.value,
+            DAS.ASSIGNED.value,
+            DAS.REASSIGNMENT_PENDING.value,
+        }:
+            _close_dispatch_assignment_record(
+                db,
+                row,
+                target_state=DAS.REJECTED.value,
+                reason="group_scheduled_reservation_claimed_by_other_driver",
+            )
+        else:
+            row.assignment_state = "expired"
+            row.expired_at = now_ts
+            row.closed_reason = "scheduled_reservation_claimed_by_other_driver"
+            row.updated_at = now_ts
         expired.append(str(row.id))
         linked_ride = get_ride_by_id(db, str(row.ride_id or ""))
         if linked_ride and str(linked_ride.driver_id or "") == row_driver_id:
@@ -342,6 +369,45 @@ def expire_competing_scheduled_assignments(
             note=json.dumps({"expired_assignment_ids": expired[:20]})[:512],
         )
     return expired
+
+
+def reconcile_round_trip_group_reservation(
+    db: Session,
+    *,
+    ride: HealthISFRide,
+    winning_driver_id: str,
+    actor_user_id: Optional[str] = None,
+) -> list[str]:
+    """Bind every leg in a reserved round-trip group to the winning driver and clear cross-driver offers."""
+    from app.modules.health_isf.service import get_ride_by_id, now
+
+    ride_ids = _ride_ids_in_round_trip_group(db, ride)
+    now_ts = now()
+    updated: list[str] = []
+    for ride_id in ride_ids:
+        leg = get_ride_by_id(db, ride_id)
+        if not leg:
+            continue
+        if str(leg.driver_id or "") != str(winning_driver_id):
+            leg.driver_id = str(winning_driver_id)
+            leg.updated_at = now_ts
+            updated.append(str(leg.id))
+    expired = expire_competing_scheduled_assignments(
+        db,
+        ride=ride,
+        winning_driver_id=str(winning_driver_id),
+        actor_user_id=actor_user_id,
+    )
+    if updated or expired:
+        _record_scheduled_audit(
+            db,
+            ride_id=str(ride.id),
+            action="round_trip_group_reservation_reconciled",
+            actor_user_id=actor_user_id,
+            driver_id=str(winning_driver_id),
+            note=json.dumps({"updated_ride_ids": updated[:20], "expired_assignment_ids": expired[:20]})[:512],
+        )
+    return updated
 
 
 def assign_driver_to_scheduled_ride(
@@ -701,11 +767,10 @@ def accept_scheduled_ride(
         driver_id=str(driver_id),
         assignment_id=str(offer.id),
     )
-    expire_competing_scheduled_assignments(
+    reconcile_round_trip_group_reservation(
         db,
         ride=ride,
         winning_driver_id=str(driver_id),
-        winning_assignment_id=str(offer.id),
         actor_user_id=actor_user_id,
     )
     sync_customer_request_from_ride(db, ride, explicit_status=CustomerRequestStatus.ASSIGNED.value)
@@ -812,6 +877,9 @@ def list_upcoming_schedule_for_driver(
         if state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
             if str(ride.driver_id or "") not in {"", str(driver_id)}:
                 continue
+        group_owner = scheduled_reservation_owner_for_ride(db, ride)
+        if group_owner and str(group_owner) != str(driver_id):
+            continue
         if state == DispatchAssignmentState.SCHEDULED_OFFERED.value:
             reserved_owner = scheduled_reservation_owner_for_ride(db, ride)
             if reserved_owner and str(reserved_owner) != str(driver_id):
@@ -1032,6 +1100,7 @@ def reconcile_scheduled_reservation_ownership(
         .all()
     )
     expired_total: list[str] = []
+    reconciled: list[str] = []
     for row in accepted_rows:
         ride = get_ride_by_id(db, str(row.ride_id or ""))
         if not ride or not row.driver_id:
@@ -1045,9 +1114,17 @@ def reconcile_scheduled_reservation_ownership(
                 actor_user_id=actor_user_id,
             )
         )
-    if expired_total:
+        reconciled.extend(
+            reconcile_round_trip_group_reservation(
+                db,
+                ride=ride,
+                winning_driver_id=str(row.driver_id),
+                actor_user_id=actor_user_id,
+            )
+        )
+    if expired_total or reconciled:
         _commit_or_rollback(db)
-    return expired_total
+    return expired_total + reconciled
 
 
 def assignment_is_upcoming_reservation(

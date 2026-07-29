@@ -6402,6 +6402,31 @@ def get_driver_active_offer(
     offer = snapshot.get("active_offer") or snapshot.get("assignment")
     offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None
     ride = snapshot.get("ride")
+    if offer and offer_payload:
+        from app.modules.health_isf.advance_scheduling import scheduled_reservation_owner_for_ride
+
+        offer_ride = ride
+        owner_id = None
+        if not offer_ride and offer.ride_id:
+            offer_ride = service.get_ride_by_id(db, str(offer.ride_id))
+        if offer_ride:
+            owner_id = scheduled_reservation_owner_for_ride(db, offer_ride)
+            if owner_id:
+                offer_payload["scheduled_reservation_owner_id"] = owner_id
+            if not ride:
+                offer_payload["passenger_name"] = offer_ride.passenger_name
+                offer_payload["passenger_phone"] = offer_ride.passenger_phone
+                offer_payload["pickup_address"] = offer_ride.pickup_address
+                offer_payload["dropoff_address"] = offer_ride.dropoff_address
+                offer_payload["ride_status"] = service._normalize_status_token(
+                    offer_ride.lifecycle_state or offer_ride.status
+                )
+                offer_payload["requested_at"] = (
+                    offer_ride.requested_at.isoformat() if offer_ride.requested_at else None
+                )
+        if owner_id and str(owner_id) != str(effective_driver_id):
+            offer_payload = None
+            offer = None
     if offer and offer_payload and ride:
         offer_payload["passenger_name"] = ride.passenger_name
         offer_payload["passenger_phone"] = ride.passenger_phone

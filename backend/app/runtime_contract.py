@@ -66,6 +66,13 @@ def _resolve_runtime_environment(*, public_base: str | None = None) -> str:
 
 
 def _resolve_build_version() -> str:
+    commit = (
+        os.environ.get("RENDER_GIT_COMMIT")
+        or os.environ.get("GIT_COMMIT")
+        or ""
+    ).strip()
+    if commit:
+        return commit[:12]
     return os.environ.get(
         "APP_VERSION",
         os.environ.get(

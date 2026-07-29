@@ -524,6 +524,7 @@ class DispatchOfferResponse(BaseModel):
     rejected_at: Optional[datetime] = None
     expired_at: Optional[datetime] = None
     closed_reason: Optional[str] = None
+    scheduled_reservation_owner_id: Optional[str] = None
 
 
 class DispatchAutoAssignResponse(BaseModel):

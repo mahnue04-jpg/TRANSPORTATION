@@ -15,8 +15,15 @@ from app.modules.health_isf.advance_scheduling import (
     accept_scheduled_ride,
     assign_driver_to_scheduled_ride,
     list_upcoming_schedule_for_driver,
+    reconcile_scheduled_reservation_ownership,
 )
-from app.modules.health_isf.models import DispatchAssignmentState, DriverStatus, HealthISFDispatchAssignment, HealthISFDriver
+from app.modules.health_isf.models import (
+    DispatchAssignmentState,
+    DriverStatus,
+    HealthISFDispatchAssignment,
+    HealthISFDriver,
+    HealthISFRide,
+)
 
 
 @pytest.fixture(scope="module")
@@ -201,3 +208,93 @@ def test_active_ride_upcoming_schedule_is_driver_scoped(client: TestClient) -> N
     ids_b = {str(row.get("ride_id")) for row in (active_b.json().get("upcoming_schedule") or [])}
     assert ride_id in ids_a
     assert ride_id not in ids_b
+
+
+def _create_future_round_trip(client: TestClient, headers: dict[str, str], suffix: str) -> tuple[str, str]:
+    pickup = datetime.now(timezone.utc) + timedelta(days=4)
+    pickup = pickup.replace(hour=10, minute=0, second=0, microsecond=0)
+    arrival = pickup + timedelta(hours=1)
+    created = client.post(
+        "/api/health-isf/customer-requests",
+        headers=headers,
+        json={
+            "rider_name": f"group_owner_{suffix}",
+            "rider_phone": f"646556{''.join(ch for ch in suffix if ch.isdigit()).ljust(4, '0')[:4]}",
+            "pickup_address": f"10 Group Pickup {suffix}, NY",
+            "dropoff_address": f"20 Group Dropoff {suffix}, NY",
+            "ride_type": "healthcare",
+            "trip_type": "round_trip",
+            "service_date": pickup.date().isoformat(),
+            "pickup_time": pickup.isoformat(),
+            "arrival_time": arrival.isoformat(),
+            "return_pickup_type": "call_when_ready",
+        },
+    )
+    assert created.status_code == 201, created.text
+    linked = created.json().get("linked_ride_ids") or []
+    assert len(linked) >= 2
+    with SessionLocal() as db:
+        rides = db.query(HealthISFRide).filter(HealthISFRide.id.in_(linked)).all()
+        outbound = next(r for r in rides if str(r.trip_leg or "") == "outbound")
+        return_leg = next(r for r in rides if str(r.trip_leg or "") == "return")
+        return str(outbound.id), str(return_leg.id)
+
+
+def test_round_trip_group_blocks_sibling_leg_for_other_driver(client: TestClient) -> None:
+    rider_auth = client.post("/api/auth/login", json={"email": "rider@amicor.local", "password": SEED_PASSWORD})
+    headers = {"Authorization": f"Bearer {rider_auth.json()['access_token']}"}
+    org_id = _org_id_for("rider@amicor.local")
+    suffix = uuid4()[:8]
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(8, "0")[:8]
+    phone_a = f"917563{digits[:4]}"
+    phone_b = f"917564{digits[4:8]}"
+    driver_a = _ensure_driver(org_id, phone=phone_a)
+    driver_b = _ensure_driver(org_id, phone=phone_b)
+    outbound_id, return_id = _create_future_round_trip(client, headers, suffix)
+
+    with SessionLocal() as db:
+        assign_driver_to_scheduled_ride(db, ride_id=outbound_id, driver_id=driver_a)
+        assign_driver_to_scheduled_ride(db, ride_id=outbound_id, driver_id=driver_b)
+        accept_scheduled_ride(db, driver_id=driver_a, ride_id=outbound_id)
+        return_leg = db.query(HealthISFRide).filter(HealthISFRide.id == return_id).one()
+        assert str(return_leg.driver_id or "") == driver_a
+        stale_offer = HealthISFDispatchAssignment(
+            id=uuid4(),
+            organization_id=org_id,
+            ride_id=return_id,
+            driver_id=driver_b,
+            assignment_state=DispatchAssignmentState.OFFERED.value,
+            attempt_index=1,
+            timeout_seconds=90,
+        )
+        db.add(stale_offer)
+        return_leg.driver_id = driver_b
+        db.commit()
+
+    with SessionLocal() as db:
+        reconcile_scheduled_reservation_ownership(db=db, organization_id=org_id)
+        return_leg = db.query(HealthISFRide).filter(HealthISFRide.id == return_id).one()
+        assert str(return_leg.driver_id or "") == driver_a
+        b_offers = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(
+                HealthISFDispatchAssignment.ride_id == return_id,
+                HealthISFDispatchAssignment.driver_id == driver_b,
+                HealthISFDispatchAssignment.assignment_state == DispatchAssignmentState.OFFERED.value,
+            )
+            .all()
+        )
+        assert not b_offers
+
+    _, headers_b = _driver_session(client, phone_b)
+    offer_resp = client.get(f"/api/health-isf/drivers/{driver_b}/active-offer", headers=headers_b)
+    assert offer_resp.status_code == 200
+    offer_body = offer_resp.json().get("offer")
+    assert not offer_body or str(offer_body.get("ride_id") or "") not in {outbound_id, return_id}
+
+    denied = client.post(
+        f"/api/health-isf/drivers/{driver_b}/accept-ride",
+        headers=headers_b,
+        json={"ride_id": return_id},
+    )
+    assert denied.status_code in {400, 403, 409}, denied.text

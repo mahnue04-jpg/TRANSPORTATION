@@ -152,18 +152,19 @@ def build_driver_mobile_read_snapshot(
                 ),
                 reverse=True,
             )
-            active_offer = readable_offers[0][0]
-            if not ride:
-                offer_ride = readable_offers[0][1]
-                op = service.evaluate_driver_ride_operational_state(
+            for candidate_offer, candidate_ride in readable_offers:
+                if not service._driver_mobile_offer_visible(
                     db,
-                    ride=offer_ride,
+                    ride=candidate_ride,
                     driver_id=driver_id,
-                    assignment=active_offer,
-                )
-                if op.is_active or (op.has_active_offer and op.reason != "scheduled_reservation"):
-                    ride = offer_ride
-                    assignment = active_offer
+                    assignment=candidate_offer,
+                ):
+                    continue
+                active_offer = candidate_offer
+                if not ride:
+                    ride = candidate_ride
+                    assignment = candidate_offer
+                break
 
         if not ride:
             fallback = (
@@ -184,21 +185,35 @@ def build_driver_mobile_read_snapshot(
                     driver_id=driver_id,
                     assignment=assignment,
                 )
-                if op.is_active or (op.has_active_offer and op.reason != "scheduled_reservation"):
+                if service._driver_mobile_offer_visible(
+                    db,
+                    ride=fallback,
+                    driver_id=driver_id,
+                    assignment=assignment,
+                ):
                     ride = fallback
 
         if ride:
             assignment = assignment or service._authoritative_assignment_for_ride(db, ride, driver_id=driver_id)
-            op = service.evaluate_driver_ride_operational_state(
+            if not service._driver_mobile_offer_visible(
                 db,
                 ride=ride,
                 driver_id=driver_id,
                 assignment=assignment,
-            )
-            ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-            if ride_state in terminal_ride_states or not (op.is_active or op.has_active_offer):
+            ):
                 ride = None
                 assignment = None
+            else:
+                op = service.evaluate_driver_ride_operational_state(
+                    db,
+                    ride=ride,
+                    driver_id=driver_id,
+                    assignment=assignment,
+                )
+                ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+                if ride_state in terminal_ride_states or not (op.is_active or op.has_active_offer):
+                    ride = None
+                    assignment = None
 
         provider_name = ""
         if ride and ride.provider_id:
@@ -218,9 +233,9 @@ def build_driver_mobile_read_snapshot(
                 driver_id=driver_id,
                 assignment=assignment,
             )
-            active_for_driver = op.is_active
-            if op.reason != "scheduled_reservation":
-                active_for_driver = op.is_active or op.has_active_offer
+            active_for_driver = op.is_active or op.has_active_offer
+            if op.reason in {"scheduled_reservation", "group_scheduled_reservation"}:
+                active_for_driver = False
             assignment_state = op.effective_assignment_state or (
                 str(assignment.assignment_state) if assignment and assignment.assignment_state else ""
             )
@@ -279,6 +294,16 @@ def build_driver_mobile_read_snapshot(
             organization_id=organization_id,
             driver_id=driver_id,
         )
+
+    if active_offer:
+        offer_ride = rides_by_id.get(str(active_offer.ride_id or ""))
+        if offer_ride and not service._driver_mobile_offer_visible(
+            db,
+            ride=offer_ride,
+            driver_id=driver_id,
+            assignment=active_offer,
+        ):
+            active_offer = None
 
     return {
         "driver": driver,
