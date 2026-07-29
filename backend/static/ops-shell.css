@@ -1195,9 +1195,12 @@ body {
   cursor: pointer;
 }
 
-.preview-action:disabled {
-  opacity: 0.82;
+.preview-action:disabled,
+.preview-action.driver-action:disabled,
+button.driver-action:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .driver-action.active {
@@ -1619,6 +1622,16 @@ body {
 
 .driver-action:disabled {
   cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.driver-no-immediate-workflow {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
 }
 
 .driver-emergency {

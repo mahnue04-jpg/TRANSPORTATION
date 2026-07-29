@@ -6778,17 +6778,18 @@
             '<div><strong>Current Trip</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
             '<span class="status-dot">' + escapeHtml(activeTrip ? titleizeWords(safeText(activeTrip.status, appState.activeStage)) : waitingLabels.statusLabel) + '</span>' +
           '</header>' +
-          (!activeTrip
-            ? '<p class="muted driver-awaiting-assignment">Awaiting Assignment</p>'
-            : '') +
+          (activeTrip
+            ? ''
+            : '<p class="muted driver-awaiting-assignment">Awaiting Assignment — no immediate trip is loaded. Reserved rides stay in <strong>Upcoming Schedule</strong>; immediate offers appear under <strong>Available Offers</strong>.</p>') +
           '<article class="driver-workflow-card">' +
             '<h4>Primary Workflow</h4>' +
-            '<div class="table-wrap"><table class="ops-table"><tbody>' +
-              '<tr><th>Ride ID</th><td>' + escapeHtml(activeTrip ? shortOperationalId(activeTrip.tripId, "n/a") : waitingLabels.rideId) + '</td></tr>' +
+            (activeTrip
+              ? ('<div class="table-wrap"><table class="ops-table"><tbody>' +
+              '<tr><th>Ride ID</th><td>' + escapeHtml(shortOperationalId(activeTrip.tripId, "n/a")) + '</td></tr>' +
               '<tr><th>Rider Name</th><td>' + escapeHtml(riderName) + '</td></tr>' +
               '<tr><th>Pickup Address</th><td>' + escapeHtml(routePickup) + '</td></tr>' +
               '<tr><th>Destination Address</th><td>' + escapeHtml(routeDropoff) + '</td></tr>' +
-              (activeTrip && safeText(activeTrip.schedulingSummary, "")
+              (safeText(activeTrip.schedulingSummary, "")
                 ? '<tr><th>Scheduling</th><td>' + escapeHtml(safeText(activeTrip.schedulingSummary, "")) + (safeText(activeTrip.tripLeg, "") ? (' (' + escapeHtml(titleizeWords(safeText(activeTrip.tripLeg, ""))) + ')') : '') + '</td></tr>'
                 : '') +
               '<tr><th>Provider</th><td>' + escapeHtml(providerName) + '</td></tr>' +
@@ -6796,18 +6797,19 @@
               '<tr><th>ETA</th><td>' + escapeHtml(etaText) + '</td></tr>' +
             '</tbody></table></div>' +
             '<div class="command-actions">' +
-              '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
-              '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
-              '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
-              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
+              '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
+              '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
+              '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
+              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
               (riderPhone
-                ? '<button class="preview-action driver-action" data-driver-action="call_rider" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (!activeTrip ? ' disabled' : '') + '>Call Rider</button>'
+                ? '<button class="preview-action driver-action" data-driver-action="call_rider" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Call Rider</button>'
                 : '<button class="preview-action" disabled>Call Rider</button>') +
-              '<button class="preview-action driver-action" data-driver-action="decline_trip" data-trip-id="' + escapeHtml(safeText(activeTrip && activeTrip.tripId, "")) + '"' + (disableNoShow ? ' disabled' : '') + '>No Show</button>' +
-            '</div>' +
+              '<button class="preview-action driver-action" data-driver-action="decline_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableNoShow ? ' disabled' : '') + '>No Show</button>' +
+            '</div>')
+              : '<p class="muted driver-no-immediate-workflow">Trip workflow controls appear here when an immediate offer or active assignment is loaded from the server.</p>') +
             '<p class="muted">Latest update: ' + escapeHtml(safeText(appState.lastStatusUpdate, 'None')) + '</p>' +
             (function () {
               var syncWarning = safeText(appState.syncWarning, "");
