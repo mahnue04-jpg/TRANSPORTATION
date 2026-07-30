@@ -16538,8 +16538,16 @@ window._amiHandleDriverStartRoute = async function(tripId) {
       frontend_state_transition: "active_ride->active_ride",
       extra: { action: "Start Route / En Route to Pickup", target_state: "en_route_pickup" }
     });
-  } catch (_) {
-    window.alert("Unable to start route for " + tripId + ".");
+  } catch (err) {
+    var errMsg = safeText(err && err.message, "start_route_failed");
+    window.alert("Unable to start route for " + tripId + ". " + errMsg);
+    _amiLogDriverMobileSync({
+      event: "route_progress_failed",
+      requested_ride_id: tripId,
+      route: "/api/health-isf/drivers/" + driverId + "/route-progress",
+      api_response: { error: errMsg },
+      extra: { action: "Start Route / En Route to Pickup", target_state: "en_route_pickup" }
+    });
     return false;
   }
   try {

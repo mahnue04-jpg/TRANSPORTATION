@@ -239,6 +239,7 @@ logger = logging.getLogger("amicor.health_isf.routes")
 
 def _ride_response_base(db: Session, ride: HealthISFRide) -> dict[str, Any]:
     from app.modules.health_isf.scheduling import format_scheduling_summary
+    from app.modules.health_isf.timezone_utils import attach_local_time_fields, ride_client_timezone
 
     payload = RideResponse.model_validate(ride).model_dump()
     payload["scheduling_summary"] = format_scheduling_summary(ride)
@@ -250,6 +251,7 @@ def _ride_response_base(db: Session, ride: HealthISFRide) -> dict[str, Any]:
     payload["dispatch_eligible_at"] = getattr(ride, "dispatch_eligible_at", None)
     payload["call_when_ready"] = bool(getattr(ride, "call_when_ready", False))
     payload["scheduling_series_id"] = getattr(ride, "scheduling_series_id", None)
+    payload = attach_local_time_fields(payload, client_timezone=ride_client_timezone(ride))
     if ride.driver_id:
         driver = service.get_driver_by_id(db, str(ride.driver_id))
         if driver:
@@ -1058,6 +1060,43 @@ def _sync_driver_progress_action(db: Session, ride_id: str, action):
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
     return ride
+
+
+async def _safe_emit_dispatch_changed(emitter, **kwargs) -> None:
+    try:
+        await emitter.emit_dispatch_changed(**kwargs)
+    except Exception as exc:
+        logger.warning({"event": "dispatch_changed_emit_failed", "error": str(exc), **kwargs})
+
+
+def _driver_live_workspace_response_from_snapshot(
+    db: Session,
+    *,
+    snapshot: dict,
+    effective_driver_id: str,
+    effective_org_id: str,
+    driver_mobile_session: bool,
+) -> DriverLiveWorkspaceResponse:
+    assignment = snapshot.get("assignment")
+    ride = snapshot.get("ride")
+    ride_response = None
+    if ride:
+        ride_response = (
+            RideResponse(**_ride_response_base(db, ride))
+            if driver_mobile_session
+            else _ride_response_with_financials(db, ride)
+        )
+    return DriverLiveWorkspaceResponse(
+        driver_id=effective_driver_id,
+        organization_id=effective_org_id,
+        safety_status=str(snapshot.get("safety_status") or "ok"),
+        reconnect_safe=bool(snapshot.get("reconnect_safe")),
+        active_assignment=_serialize_active_assignment(assignment) if assignment else None,
+        active_ride=ride_response,
+        assignment_countdown_seconds=snapshot.get("countdown"),
+        eta_minutes=snapshot.get("eta_minutes"),
+        timeline_states=list(snapshot.get("timeline_states") or []),
+    )
 
 
 async def _emit_driver_trip_completion_events(
@@ -5796,6 +5835,7 @@ def create_customer_ride_request(
             return_pickup_address=payload.return_pickup_address,
             return_dropoff_address=payload.return_dropoff_address,
             same_driver_preference=payload.same_driver_preference,
+            client_timezone=payload.client_timezone,
         )
     except ValueError as exc:
         if idempotency_key:
@@ -6615,22 +6655,17 @@ async def progress_driver_route(
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
+    driver_mobile_session = auth.actor_user_id is None
 
-    workspace = service.get_driver_live_workspace_data(
-        db,
-        organization_id=effective_org_id,
-        driver_id=effective_driver_id,
-    )
-    assignment = workspace.get("assignment")
-    ride = workspace.get("ride")
-    ride_id = payload.ride_id or (ride.id if ride else None) or (assignment.ride_id if assignment else None)
+    ride_id = _sync_safe_text(payload.ride_id, "")
     if not ride_id:
-        raise HTTPException(status_code=400, detail="No active ride found for route progression")
+        raise HTTPException(status_code=400, detail="ride_id is required for route progression")
 
     ride_for_guard = service.get_ride_by_id(db, ride_id)
     if not ride_for_guard:
         raise HTTPException(status_code=404, detail="Ride not found")
-    lifecycle_state = RideLifecycleManager.normalize_state(getattr(ride_for_guard, "lifecycle_state", None) or ride_for_guard.status)
+    if str(ride_for_guard.driver_id or "") != str(effective_driver_id):
+        raise HTTPException(status_code=400, detail="Ride is not assigned to this driver")
 
     emitter = get_emitter()
 
@@ -6643,7 +6678,8 @@ async def progress_driver_route(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="assignment-accepted",
             actor_user_id=actor_user_id,
@@ -6658,7 +6694,8 @@ async def progress_driver_route(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="pickup-arrived",
             actor_user_id=actor_user_id,
@@ -6673,13 +6710,15 @@ async def progress_driver_route(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="rider-loaded",
             actor_user_id=actor_user_id,
             details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="trip-started",
             actor_user_id=actor_user_id,
@@ -6694,13 +6733,15 @@ async def progress_driver_route(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="location-updated",
             actor_user_id=actor_user_id,
             details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="trip-progress",
             actor_user_id=actor_user_id,
@@ -6715,13 +6756,15 @@ async def progress_driver_route(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="location-updated",
             actor_user_id=actor_user_id,
             details={"ride_id": ride_id, "driver_id": effective_driver_id, "target_state": payload.target_state},
         )
-        await emitter.emit_dispatch_changed(
+        await _safe_emit_dispatch_changed(
+            emitter,
             organization_id=effective_org_id,
             event_name="trip-progress",
             actor_user_id=actor_user_id,
@@ -6754,23 +6797,18 @@ async def progress_driver_route(
             raise HTTPException(status_code=404, detail="Ride not found")
 
     increment_metric(f"health_isf.route_progress.{payload.target_state}")
-    refreshed = service.get_driver_live_workspace_data(
+    snapshot = build_driver_mobile_read_snapshot(
         db,
         organization_id=effective_org_id,
         driver_id=effective_driver_id,
     )
-    refreshed_assignment = refreshed.get("assignment")
-    refreshed_ride = refreshed.get("ride")
-    response = DriverLiveWorkspaceResponse(
-        driver_id=effective_driver_id,
-        organization_id=effective_org_id,
-        safety_status=str(refreshed.get("safety_status") or "ok"),
-        reconnect_safe=bool(refreshed.get("reconnect_safe")),
-        active_assignment=_serialize_active_assignment(refreshed_assignment) if refreshed_assignment else None,
-        active_ride=RideResponse.model_validate(refreshed_ride) if refreshed_ride else None,
-        assignment_countdown_seconds=refreshed.get("countdown"),
-        eta_minutes=refreshed.get("eta_minutes"),
-        timeline_states=list(refreshed.get("timeline_states") or []),
+    refreshed_ride = snapshot.get("ride")
+    response = _driver_live_workspace_response_from_snapshot(
+        db,
+        snapshot=snapshot,
+        effective_driver_id=effective_driver_id,
+        effective_org_id=effective_org_id,
+        driver_mobile_session=driver_mobile_session,
     )
     record_backend_assignment_sync(
         db,
