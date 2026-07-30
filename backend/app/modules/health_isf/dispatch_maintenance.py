@@ -83,11 +83,17 @@ def maybe_run_organization_dispatch_maintenance(
     try:
         from app.modules.health_isf.advance_scheduling import (
             promote_scheduled_reservations,
+            reconcile_same_driver_return_reservations,
             reconcile_scheduled_reservation_ownership,
             send_scheduled_reminders,
             sweep_pending_advance_scheduling,
         )
 
+        report["same_driver_return_reservations"] = reconcile_same_driver_return_reservations(
+            db,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
         report["scheduled_ownership_reconciled"] = reconcile_scheduled_reservation_ownership(
             db,
             organization_id=organization_id,

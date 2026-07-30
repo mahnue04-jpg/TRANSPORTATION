@@ -219,6 +219,316 @@ def _ride_ids_in_round_trip_group(db: Session, ride: HealthISFRide) -> set[str]:
     return ride_ids
 
 
+def find_paired_return_leg(db: Session, outbound_ride: HealthISFRide) -> Optional[HealthISFRide]:
+    """Locate the fixed-time return leg paired with a completed outbound ride."""
+    from app.modules.health_isf.service import get_ride_by_id
+
+    group_id = str(getattr(outbound_ride, "round_trip_group_id", "") or "")
+    if group_id:
+        return_leg = (
+            db.query(HealthISFRide)
+            .filter(
+                HealthISFRide.round_trip_group_id == group_id,
+                HealthISFRide.trip_leg == "return",
+            )
+            .order_by(HealthISFRide.pickup_time.asc())
+            .first()
+        )
+        if return_leg:
+            return return_leg
+
+    raw = getattr(outbound_ride, "linked_ride_ids_json", None)
+    if raw:
+        try:
+            linked = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            linked = []
+        if isinstance(linked, list):
+            for ride_id in linked:
+                candidate = get_ride_by_id(db, str(ride_id or ""))
+                if candidate and str(getattr(candidate, "trip_leg", "") or "") == "return":
+                    return candidate
+    return None
+
+
+def _return_leg_has_active_scheduled_reservation(
+    db: Session,
+    return_leg: HealthISFRide,
+    *,
+    driver_id: Optional[str] = None,
+) -> Optional[HealthISFDispatchAssignment]:
+    query = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.ride_id == return_leg.id,
+            HealthISFDispatchAssignment.assignment_state.in_(list(SCHEDULED_DISPATCH_ASSIGNMENT_STATES)),
+        )
+        .order_by(desc(HealthISFDispatchAssignment.updated_at))
+    )
+    if driver_id:
+        query = query.filter(HealthISFDispatchAssignment.driver_id == driver_id)
+    return query.first()
+
+
+def mark_return_leg_needs_reassignment(
+    db: Session,
+    *,
+    return_leg: HealthISFRide,
+    reason: str,
+    preferred_driver_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+) -> None:
+    """Surface same-driver return reservation failures for dispatcher intervention."""
+    from app.modules.health_isf.service import _commit_or_rollback, now, sync_customer_request_from_ride
+
+    now_ts = now()
+    marker = f"same_driver_return_reservation_failed: {reason}"
+    notes = str(return_leg.notes or "")
+    if marker not in notes:
+        return_leg.notes = (notes + f"\n{marker}").strip()
+    return_leg.lifecycle_state = "reassignment_pending"
+    return_leg.status = RideStatus.PENDING
+    return_leg.driver_id = None
+    return_leg.updated_at = now_ts
+    _record_scheduled_audit(
+        db,
+        ride_id=str(return_leg.id),
+        action="return_reservation_needs_reassignment",
+        actor_user_id=actor_user_id,
+        driver_id=preferred_driver_id,
+        note=reason[:512],
+    )
+    sync_customer_request_from_ride(db, return_leg, explicit_status=CustomerRequestStatus.DISPATCHABLE.value)
+    _commit_or_rollback(db)
+
+
+def reserve_paired_return_leg_after_outbound_complete(
+    db: Session,
+    *,
+    outbound_ride: HealthISFRide,
+    driver_id: str,
+    actor_user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    When an outbound leg completes with same_driver_preference, reserve the paired
+    return leg for the outbound driver as a protected scheduled reservation.
+    """
+    from app.modules.health_isf.service import (
+        _commit_or_rollback,
+        _driver_active_workload_count,
+        _ride_is_terminal,
+        get_driver_by_id,
+        get_ride_by_id,
+        is_operational_excluded_ride,
+    )
+    from app.modules.health_isf.scheduling import driver_has_schedule_conflict
+
+    if str(getattr(outbound_ride, "trip_leg", "") or "") != "outbound":
+        return {"mode": "skipped", "reason": "not_outbound"}
+    if not bool(getattr(outbound_ride, "same_driver_preference", False)):
+        return {"mode": "skipped", "reason": "same_driver_preference_false"}
+
+    return_leg = find_paired_return_leg(db, outbound_ride)
+    if not return_leg:
+        return {"mode": "skipped", "reason": "no_paired_return_leg"}
+    if bool(getattr(return_leg, "call_when_ready", False)):
+        return {"mode": "skipped", "reason": "call_when_ready_return"}
+    if _ride_is_terminal(return_leg) or is_operational_excluded_ride(return_leg):
+        return {"mode": "skipped", "reason": "return_leg_terminal"}
+
+    owner_id = scheduled_reservation_owner_for_ride(db, return_leg)
+    if owner_id and str(owner_id) != str(driver_id):
+        return {
+            "mode": "skipped",
+            "reason": "return_reserved_for_other_driver",
+            "return_ride_id": str(return_leg.id),
+            "owner_driver_id": owner_id,
+        }
+
+    existing = _return_leg_has_active_scheduled_reservation(db, return_leg, driver_id=driver_id)
+    if existing and str(existing.assignment_state or "") == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        result = {
+            "mode": "existing",
+            "return_ride_id": str(return_leg.id),
+            "assignment_id": str(existing.id),
+            "assignment_state": str(existing.assignment_state),
+        }
+    elif existing and str(existing.assignment_state or "") == DispatchAssignmentState.SCHEDULED_OFFERED.value:
+        try:
+            accepted = accept_scheduled_ride(
+                db,
+                driver_id=str(driver_id),
+                ride_id=str(return_leg.id),
+                actor_user_id=actor_user_id,
+            )
+            result = {
+                "mode": "reserved",
+                "return_ride_id": str(return_leg.id),
+                "assignment_id": str(accepted.id),
+                "assignment_state": str(accepted.assignment_state),
+            }
+        except ValueError as exc:
+            mark_return_leg_needs_reassignment(
+                db,
+                return_leg=get_ride_by_id(db, str(return_leg.id)) or return_leg,
+                reason=str(exc),
+                preferred_driver_id=driver_id,
+                actor_user_id=actor_user_id,
+            )
+            return {
+                "mode": "reassignment_required",
+                "reason": str(exc),
+                "return_ride_id": str(return_leg.id),
+            }
+    else:
+        driver = get_driver_by_id(db, driver_id)
+        if not driver:
+            mark_return_leg_needs_reassignment(
+                db,
+                return_leg=return_leg,
+                reason="preferred_driver_not_found",
+                preferred_driver_id=driver_id,
+                actor_user_id=actor_user_id,
+            )
+            return {"mode": "reassignment_required", "reason": "preferred_driver_not_found"}
+
+        conflict_reason: Optional[str] = None
+        if _driver_active_workload_count(db, driver_id) > 0:
+            conflict_reason = "preferred_driver_has_active_ride"
+        elif driver_has_schedule_conflict(
+            db,
+            str(driver_id),
+            return_leg,
+            exclude_ride_ids={str(return_leg.id), str(outbound_ride.id)},
+        ):
+            conflict_reason = "preferred_driver_schedule_conflict"
+
+        if conflict_reason:
+            mark_return_leg_needs_reassignment(
+                db,
+                return_leg=return_leg,
+                reason=conflict_reason,
+                preferred_driver_id=driver_id,
+                actor_user_id=actor_user_id,
+            )
+            return {
+                "mode": "reassignment_required",
+                "reason": conflict_reason,
+                "return_ride_id": str(return_leg.id),
+            }
+
+        try:
+            _, offer = assign_driver_to_scheduled_ride(
+                db,
+                ride_id=str(return_leg.id),
+                driver_id=str(driver_id),
+                actor_user_id=actor_user_id,
+                score_breakdown={"preferred_same_driver": True, "source": "outbound_complete"},
+            )
+            accepted = accept_scheduled_ride(
+                db,
+                driver_id=str(driver_id),
+                ride_id=str(return_leg.id),
+                actor_user_id=actor_user_id,
+            )
+            result = {
+                "mode": "reserved",
+                "return_ride_id": str(return_leg.id),
+                "assignment_id": str(accepted.id),
+                "assignment_state": str(accepted.assignment_state),
+            }
+            _record_scheduled_audit(
+                db,
+                ride_id=str(return_leg.id),
+                action="return_leg_reserved_after_outbound_complete",
+                actor_user_id=actor_user_id,
+                driver_id=str(driver_id),
+                assignment_id=str(accepted.id),
+                note=json.dumps(
+                    {
+                        "outbound_ride_id": str(outbound_ride.id),
+                        "round_trip_group_id": str(getattr(outbound_ride, "round_trip_group_id", "") or ""),
+                    }
+                )[:512],
+            )
+        except ValueError as exc:
+            mark_return_leg_needs_reassignment(
+                db,
+                return_leg=get_ride_by_id(db, str(return_leg.id)) or return_leg,
+                reason=str(exc),
+                preferred_driver_id=driver_id,
+                actor_user_id=actor_user_id,
+            )
+            return {
+                "mode": "reassignment_required",
+                "reason": str(exc),
+                "return_ride_id": str(return_leg.id),
+            }
+
+    return_leg = get_ride_by_id(db, str(return_leg.id)) or return_leg
+    if return_leg and is_dispatch_eligible(return_leg):
+        activated = promote_scheduled_reservations(
+            db,
+            organization_id=str(return_leg.organization_id),
+            actor_user_id=actor_user_id,
+        )
+        result["promoted"] = any(
+            str(item.get("ride_id") or "") == str(return_leg.id) for item in activated
+        )
+    _commit_or_rollback(db)
+    return result
+
+
+def reconcile_same_driver_return_reservations(
+    db: Session,
+    *,
+    organization_id: str,
+    actor_user_id: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Backfill return-leg reservations for completed same-driver outbounds."""
+    from app.modules.health_isf.service import _ride_is_terminal, is_operational_excluded_ride
+
+    rows = (
+        db.query(HealthISFRide)
+        .filter(
+            HealthISFRide.organization_id == organization_id,
+            HealthISFRide.trip_leg == "outbound",
+            HealthISFRide.same_driver_preference.is_(True),
+            HealthISFRide.driver_id.isnot(None),
+            HealthISFRide.round_trip_group_id.isnot(None),
+            HealthISFRide.lifecycle_state == RideStatus.COMPLETED.value,
+        )
+        .order_by(desc(HealthISFRide.completed_at))
+        .limit(max(1, int(limit)))
+        .all()
+    )
+    outcomes: list[dict[str, Any]] = []
+    for outbound in rows:
+        return_leg = find_paired_return_leg(db, outbound)
+        if not return_leg or _ride_is_terminal(return_leg) or is_operational_excluded_ride(return_leg):
+            continue
+        if bool(getattr(return_leg, "call_when_ready", False)):
+            continue
+        if _return_leg_has_active_scheduled_reservation(
+            db,
+            return_leg,
+            driver_id=str(outbound.driver_id or ""),
+        ):
+            continue
+        if scheduled_reservation_owner_for_ride(db, return_leg):
+            continue
+        outcomes.append(
+            reserve_paired_return_leg_after_outbound_complete(
+                db,
+                outbound_ride=outbound,
+                driver_id=str(outbound.driver_id or ""),
+                actor_user_id=actor_user_id,
+            )
+        )
+    return outcomes
+
+
 def scheduled_reservation_owner_for_ride(
     db: Session,
     ride: HealthISFRide,

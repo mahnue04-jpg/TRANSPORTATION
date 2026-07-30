@@ -8543,6 +8543,31 @@ def driver_arrived_destination(
     return ride
 
 
+def _maybe_reserve_paired_return_leg(
+    db: Session,
+    *,
+    outbound_ride: HealthISFRide,
+    driver_id: str,
+    actor_user_id: Optional[str] = None,
+) -> None:
+    try:
+        from app.modules.health_isf.advance_scheduling import reserve_paired_return_leg_after_outbound_complete
+
+        reserve_paired_return_leg_after_outbound_complete(
+            db,
+            outbound_ride=outbound_ride,
+            driver_id=driver_id,
+            actor_user_id=actor_user_id,
+        )
+    except Exception:
+        logger.warning(
+            "return_leg_reservation_failed outbound=%s driver=%s",
+            outbound_ride.id,
+            driver_id,
+            exc_info=True,
+        )
+
+
 def driver_dropoff_complete(
     db: Session,
     driver_id: str,
@@ -8574,6 +8599,12 @@ def driver_dropoff_complete(
         db.refresh(ride)
         db.refresh(driver)
         _safe_runtime_unregister(ride_id=ride.id, reason="driver_dropoff_complete")
+        _maybe_reserve_paired_return_leg(
+            db,
+            outbound_ride=ride,
+            driver_id=str(driver.id),
+            actor_user_id=actor_user_id,
+        )
         maybe_assign_next_pending_ride_to_available_driver(
             db,
             organization_id=ride.organization_id,
@@ -8675,6 +8706,12 @@ def driver_dropoff_complete(
     db.refresh(ride)
     db.refresh(driver)
     _safe_runtime_unregister(ride_id=ride.id, reason="driver_dropoff_complete")
+    _maybe_reserve_paired_return_leg(
+        db,
+        outbound_ride=ride,
+        driver_id=str(driver.id),
+        actor_user_id=actor_user_id,
+    )
     maybe_assign_next_pending_ride_to_available_driver(
         db,
         organization_id=ride.organization_id,
