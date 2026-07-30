@@ -236,6 +236,8 @@ def build_driver_mobile_read_snapshot(
             active_for_driver = op.is_active or op.has_active_offer
             if op.reason in {"scheduled_reservation", "group_scheduled_reservation"}:
                 active_for_driver = False
+            if op.reason == "scheduled_route_ready":
+                active_for_driver = True
             assignment_state = op.effective_assignment_state or (
                 str(assignment.assignment_state) if assignment and assignment.assignment_state else ""
             )
@@ -305,6 +307,21 @@ def build_driver_mobile_read_snapshot(
         ):
             active_offer = None
 
+    op_reason = ""
+    if ride:
+        op_reason = str(
+            service.evaluate_driver_ride_operational_state(
+                db,
+                ride=ride,
+                driver_id=driver_id,
+                assignment=assignment,
+            ).reason
+            or ""
+        )
+    scheduled_pre_window = (
+        assignment_state in service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES
+        and op_reason == "scheduled_reservation"
+    )
     return {
         "driver": driver,
         "organization_id": organization_id,
@@ -312,7 +329,7 @@ def build_driver_mobile_read_snapshot(
         "ride": ride if active_for_driver else None,
         "assignment": assignment if active_for_driver else None,
         "active_offer": active_offer,
-        "has_active_ride": bool(ride and active_for_driver and assignment_state not in service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES),
+        "has_active_ride": bool(ride and active_for_driver and not scheduled_pre_window),
         "assignment_state": assignment_state,
         "driver_name": str(getattr(driver, "name", None) or ""),
         "provider_name": provider_name,

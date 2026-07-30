@@ -333,9 +333,20 @@ def evaluate_driver_ride_operational_state(
     }
 
     if row and assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
-        from app.modules.health_isf.scheduling import is_dispatch_eligible
+        from app.modules.health_isf.scheduling import is_route_start_eligible
 
-        if not is_dispatch_eligible(ride):
+        if assignment_state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value and is_route_start_eligible(
+            ride
+        ):
+            return DriverRideOperationalState(
+                is_active=True,
+                has_active_offer=False,
+                is_dispatch_eligible=True,
+                effective_assignment_state=assignment_state,
+                reason="scheduled_route_ready",
+                assignment=row,
+            )
+        if not is_route_start_eligible(ride):
             return DriverRideOperationalState(
                 is_active=False,
                 has_active_offer=False,
@@ -7012,6 +7023,8 @@ def _driver_mobile_offer_visible(
     )
     if op.reason in {"scheduled_reservation", "group_scheduled_reservation", "driver_mismatch"}:
         return False
+    if op.reason == "scheduled_route_ready":
+        return True
     return op.is_active or op.has_active_offer
 
 
@@ -7928,16 +7941,51 @@ def _ensure_driver_bound_ride_workflow_ready(
     return ride
 
 
+def _resolve_driver_accept_ride(
+    db: Session,
+    *,
+    driver_id: str,
+    ride_id: str,
+) -> tuple[Optional[HealthISFRide], Optional[HealthISFDispatchAssignment]]:
+    """Resolve ride/assignment for accept when clients send ride_id or assignment_id."""
+    ride = get_ride_by_id(db, ride_id)
+    assignment = None
+    if ride:
+        assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver_id)
+        return ride, assignment
+
+    assignment = get_dispatch_offer_by_id(db, ride_id)
+    if assignment and str(assignment.driver_id or "") == str(driver_id):
+        ride = get_ride_by_id(db, str(assignment.ride_id or ""))
+        if ride:
+            return ride, assignment
+
+    assignment = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.ride_id == ride_id,
+            HealthISFDispatchAssignment.driver_id == driver_id,
+        )
+        .order_by(desc(HealthISFDispatchAssignment.updated_at))
+        .first()
+    )
+    if assignment:
+        ride = get_ride_by_id(db, str(assignment.ride_id or ""))
+        if ride:
+            return ride, assignment
+    return None, None
+
+
 def accept_driver_ride(
     db: Session,
     driver_id: str,
     ride_id: str,
     actor_user_id: Optional[str] = None,
-) -> Optional[HealthISFRide]:
+) -> tuple[Optional[HealthISFRide], bool]:
     driver = get_driver_by_id(db, driver_id)
-    ride = get_ride_by_id(db, ride_id)
+    ride, assignment_hint = _resolve_driver_accept_ride(db, driver_id=driver_id, ride_id=ride_id)
     if not driver or not ride:
-        return None
+        return None, False
     if RideStatus(ride.status) in (RideStatus.COMPLETED, RideStatus.CANCELLED):
         raise ValueError("Cannot accept a terminal ride")
 
@@ -7986,7 +8034,7 @@ def accept_driver_ride(
     ):
         # Idempotent accept: driver/mobile clients may retry after hydration lag.
         db.refresh(ride)
-        return ride
+        return ride, True
     if assignment_state in post_accept_assignment_states:
         # Post-activation scheduled rides keep lifecycle queued until immediate accept
         # promotes the bound ride into assigned workflow state.
@@ -7998,7 +8046,39 @@ def accept_driver_ride(
                 actor_user_id=actor_user_id,
             )
         db.refresh(ride)
-        return ride
+        return ride, True
+    if assignment_state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        if str(getattr(assignment, "driver_id", "") or "") == str(driver.id) or str(
+            ride.driver_id or ""
+        ) == str(driver.id):
+            from app.modules.health_isf.advance_scheduling import (
+                promote_scheduled_reservations_for_driver,
+            )
+            from app.modules.health_isf.scheduling import is_route_start_eligible
+
+            if is_route_start_eligible(ride):
+                promote_scheduled_reservations_for_driver(
+                    db,
+                    organization_id=str(ride.organization_id),
+                    driver_id=str(driver.id),
+                    actor_user_id=actor_user_id,
+                )
+                db.refresh(ride)
+                assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
+                assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
+                lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+                if (
+                    assignment_state == DispatchAssignmentState.ACCEPTED.value
+                    and lifecycle_state == RideStatus.QUEUED.value
+                ):
+                    ride = _ensure_driver_bound_ride_workflow_ready(
+                        db,
+                        ride,
+                        driver,
+                        actor_user_id=actor_user_id,
+                    )
+            db.refresh(ride)
+            return ride, True
     if assignment_state and assignment_state not in {
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.ASSIGNED.value,
@@ -8093,7 +8173,7 @@ def accept_driver_ride(
         source="driver_accept_ride",
         driver_id=driver.id,
     )
-    return ride
+    return ride, False
 
 
 def driver_en_route_pickup(
@@ -8224,6 +8304,46 @@ def decline_driver_ride(
         source="driver_decline_ride",
         driver_id=None,
     )
+    return ride
+
+
+def request_driver_cancellation(
+    db: Session,
+    driver_id: str,
+    ride_id: str,
+    *,
+    reason: str,
+    actor_user_id: Optional[str] = None,
+) -> Optional[HealthISFRide]:
+    """Driver requests dispatcher review; does not cancel the ride."""
+    driver = get_driver_by_id(db, driver_id)
+    ride = get_ride_by_id(db, ride_id)
+    if not driver or not ride:
+        return None
+    if str(ride.driver_id or "") != str(driver.id):
+        raise ValueError("Ride is not assigned to this driver")
+    lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle_state in {
+        RideStatus.COMPLETED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    }:
+        raise ValueError("Cannot request cancellation for a terminal ride")
+    if lifecycle_state in {RideStatus.RIDER_ONBOARD.value, RideStatus.IN_PROGRESS.value}:
+        raise ValueError("Use dispatcher escalation after the rider is onboard")
+    trimmed = str(reason or "").strip()
+    if not trimmed:
+        raise ValueError("Cancellation reason is required")
+    _record_dispatch(
+        db,
+        ride_id=ride.id,
+        action="driver_cancellation_requested",
+        acted_by_user_id=actor_user_id,
+        driver_id=driver.id,
+        note=trimmed[:512],
+    )
+    _commit_or_rollback(db)
+    db.refresh(ride)
     return ride
 
 

@@ -1175,14 +1175,15 @@ def _execute_workspace_action(
             ride_id=ride_id,
             actor_user_id=user.user_id,
         )
-        if updated is None:
+        if updated[0] is None:
             raise HTTPException(status_code=404, detail="ride not found")
         return {
             "workflow": "driver_accept_assignment",
             "trip_id": ride_id,
             "driver_id": driver_id,
-            "trip_state": _trip_state_from_ride(updated),
+            "trip_state": _trip_state_from_ride(updated[0]),
             "authority_source": "health_isf.accept_driver_ride",
+            "already_accepted": updated[1],
         }
 
     if action == "driver.arrive":

@@ -20,10 +20,12 @@ from app.modules.health_isf.models import (
     RideStatus,
 )
 from app.modules.health_isf.scheduling import (
+    compute_route_start_eligible_at,
     format_scheduling_summary,
     is_dispatch_eligible,
     is_immediate_ride,
     is_protected_scheduled_reservation,
+    is_route_start_eligible,
 )
 
 SCHEDULED_DISPATCH_ASSIGNMENT_STATES = {
@@ -466,7 +468,7 @@ def reserve_paired_return_leg_after_outbound_complete(
             }
 
     return_leg = get_ride_by_id(db, str(return_leg.id)) or return_leg
-    if return_leg and is_dispatch_eligible(return_leg):
+    if return_leg and is_route_start_eligible(return_leg):
         activated = promote_scheduled_reservations(
             db,
             organization_id=str(return_leg.organization_id),
@@ -1170,7 +1172,40 @@ def serialize_upcoming_schedule_entry(
             if getattr(ride, "dispatch_eligible_at", None)
             else None
         ),
+        "route_activation_at": (
+            _as_utc_datetime(
+                compute_route_start_eligible_at(pickup_time=getattr(ride, "pickup_time", None))
+            ).isoformat()
+            if compute_route_start_eligible_at(pickup_time=getattr(ride, "pickup_time", None))
+            else None
+        ),
+        "status_label": _scheduled_status_label(state=state, ride=ride),
+        "activation_message": _scheduled_activation_message(state=state, ride=ride),
     }
+
+
+def _scheduled_status_label(*, state: str, ride: HealthISFRide) -> str:
+    if state == DispatchAssignmentState.SCHEDULED_OFFERED.value:
+        return "Pending Assignment"
+    if state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        if is_route_start_eligible(ride):
+            return "Ready to Start Route"
+        return "Reserved for You"
+    return "Pending Assignment"
+
+
+def _scheduled_activation_message(*, state: str, ride: HealthISFRide) -> Optional[str]:
+    if state != DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        return None
+    if is_route_start_eligible(ride):
+        return "Start Route is available now"
+    route_start_at = compute_route_start_eligible_at(pickup_time=getattr(ride, "pickup_time", None))
+    if not route_start_at:
+        return None
+    from app.modules.health_isf.timezone_utils import format_local_datetime, ride_client_timezone
+
+    local_label = format_local_datetime(route_start_at, client_timezone=ride_client_timezone(ride))
+    return f"Reserved for you — Start Route becomes available at {local_label}"
 
 
 def list_upcoming_schedule_for_driver(
@@ -1215,7 +1250,7 @@ def list_upcoming_schedule_for_driver(
             reserved_owner = scheduled_reservation_owner_for_ride(db, ride)
             if reserved_owner and str(reserved_owner) != str(driver_id):
                 continue
-        if is_dispatch_eligible(ride):
+        if is_route_start_eligible(ride):
             continue
         ride_id = str(ride.id)
         if ride_id in seen:
@@ -1243,19 +1278,100 @@ def list_scheduled_offers_for_driver(
     ]
 
 
+def _activate_scheduled_assignment_row(
+    db: Session,
+    *,
+    row: HealthISFDispatchAssignment,
+    ride: HealthISFRide,
+    actor_user_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Promote one scheduled_accepted row into immediate workflow (idempotent)."""
+    from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
+    from app.modules.health_isf.service import _commit_or_rollback, now
+
+    if str(row.assignment_state or "") != DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        return None
+    if not is_route_start_eligible(ride):
+        return None
+
+    now_ts = now()
+    if str(row.assignment_state or "") == DispatchAssignmentState.ACCEPTED.value:
+        return {"ride_id": str(ride.id), "assignment_id": str(row.id), "already_active": True}
+
+    row.assignment_state = DispatchAssignmentState.ACCEPTED.value
+    row.accepted_at = row.accepted_at or now_ts
+    row.updated_at = now_ts
+    if not ride.driver_id:
+        ride.driver_id = row.driver_id
+    RideLifecycleManager.transition_ride(
+        db,
+        ride,
+        target_state=RideStatus.QUEUED.value,
+        action_type="scheduled_ride_activated",
+        actor_user_id=actor_user_id,
+        note="Scheduled reservation entered route-start activation window",
+    )
+    ride.lifecycle_state = RideStatus.QUEUED.value
+    ride.status = RideStatus.PENDING
+    ride.updated_at = now_ts
+    _record_scheduled_audit(
+        db,
+        ride_id=str(ride.id),
+        action="scheduled_ride_activated",
+        actor_user_id=actor_user_id,
+        driver_id=str(row.driver_id or ""),
+        assignment_id=str(row.id),
+    )
+    return {"ride_id": str(ride.id), "assignment_id": str(row.id)}
+
+
+def promote_scheduled_reservations_for_driver(
+    db: Session,
+    *,
+    organization_id: str,
+    driver_id: str,
+    actor_user_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Idempotently activate one driver's reservations at route-start window."""
+    from app.modules.health_isf.service import _commit_or_rollback, get_ride_by_id
+
+    rows = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.organization_id == organization_id,
+            HealthISFDispatchAssignment.driver_id == driver_id,
+            HealthISFDispatchAssignment.assignment_state
+            == DispatchAssignmentState.SCHEDULED_ACCEPTED.value,
+        )
+        .limit(50)
+        .all()
+    )
+    activated: list[dict[str, Any]] = []
+    for row in rows:
+        ride = get_ride_by_id(db, str(row.ride_id or ""))
+        if not ride:
+            continue
+        outcome = _activate_scheduled_assignment_row(
+            db,
+            row=row,
+            ride=ride,
+            actor_user_id=actor_user_id,
+        )
+        if outcome:
+            activated.append(outcome)
+    if activated:
+        _commit_or_rollback(db)
+    return activated
+
+
 def promote_scheduled_reservations(
     db: Session,
     *,
     organization_id: str,
     actor_user_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Activate accepted future reservations when inside the dispatch window."""
-    from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
-    from app.modules.health_isf.service import (
-        _commit_or_rollback,
-        get_ride_by_id,
-        now,
-    )
+    """Activate accepted future reservations when inside the route-start window."""
+    from app.modules.health_isf.service import _commit_or_rollback, get_ride_by_id
 
     rows = (
         db.query(HealthISFDispatchAssignment)
@@ -1267,34 +1383,18 @@ def promote_scheduled_reservations(
         .all()
     )
     activated: list[dict[str, Any]] = []
-    now_ts = now()
     for row in rows:
         ride = get_ride_by_id(db, str(row.ride_id or ""))
-        if not ride or not is_dispatch_eligible(ride):
+        if not ride:
             continue
-        row.assignment_state = DispatchAssignmentState.ACCEPTED.value
-        row.accepted_at = row.accepted_at or now_ts
-        row.updated_at = now_ts
-        RideLifecycleManager.transition_ride(
+        outcome = _activate_scheduled_assignment_row(
             db,
-            ride,
-            target_state=RideStatus.QUEUED.value,
-            action_type="scheduled_ride_activated",
+            row=row,
+            ride=ride,
             actor_user_id=actor_user_id,
-            note="Scheduled reservation entered dispatch activation window",
         )
-        ride.lifecycle_state = RideStatus.QUEUED.value
-        ride.status = RideStatus.PENDING
-        ride.updated_at = now_ts
-        _record_scheduled_audit(
-            db,
-            ride_id=str(ride.id),
-            action="scheduled_ride_activated",
-            actor_user_id=actor_user_id,
-            driver_id=str(row.driver_id or ""),
-            assignment_id=str(row.id),
-        )
-        activated.append({"ride_id": str(ride.id), "assignment_id": str(row.id)})
+        if outcome:
+            activated.append(outcome)
     if activated:
         _commit_or_rollback(db)
     return activated

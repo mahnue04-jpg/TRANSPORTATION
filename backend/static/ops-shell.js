@@ -6111,7 +6111,8 @@
       routePickup: "No pickup",
       routeDropoff: "No dropoff",
       rideId: "n/a",
-      statusLabel: "Awaiting Assignment"
+      statusLabel: "Awaiting Assignment",
+      statusMessage: "Awaiting Assignment — no immediate trip is loaded. Reserved rides stay in Upcoming Schedule; immediate offers appear under Available Offers."
     };
   }
 
@@ -6676,6 +6677,20 @@
       appState.shiftOnline = true;
     }
     var waitingLabels = driverMobileWaitingLabels();
+    if (!activeTrip && upcomingSchedule.length) {
+      var reservedEntry = upcomingSchedule.find(function (item) {
+        var row = safeObject(item);
+        return safeText(row.assignment_state, "").toLowerCase() === "scheduled_accepted"
+          || safeText(row.status_label, "").toLowerCase().indexOf("reserved") >= 0;
+      });
+      if (reservedEntry) {
+        waitingLabels.statusLabel = safeText(reservedEntry.status_label, "Reserved for You");
+        waitingLabels.statusMessage = safeText(
+          reservedEntry.activation_message,
+          "Reserved ride listed in Upcoming Schedule until the Start Route window opens."
+        );
+      }
+    }
     var riderName = activeTrip ? safeText(activeTrip.patient, "Rider pending") : waitingLabels.riderName;
     var routePickup = activeTrip ? safeText(activeTrip.pickup, "Pickup pending") : waitingLabels.routePickup;
     var routeDropoff = activeTrip ? safeText(activeTrip.dropoff, "Destination pending") : waitingLabels.routeDropoff;
@@ -6876,13 +6891,16 @@
                   var row = safeObject(item);
                   var acceptBtn = row.can_accept
                     ? '<button class="preview-action driver-action" data-driver-action="accept_scheduled_ride" data-trip-id="' + escapeHtml(safeText(row.ride_id, "")) + '">Accept Scheduled Ride</button>'
-                    : '<span class="muted">Reserved</span>';
+                    : '<span class="muted">' + escapeHtml(safeText(row.status_label, "Reserved for You")) + '</span>';
+                  var activationMsg = safeText(row.activation_message, "");
                   return '<div class="driver-schedule-row" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #e5e7eb;">' +
                     '<p><strong>' + escapeHtml(safeText(row.rider_name, "Rider")) + '</strong> • ' + escapeHtml(titleizeWords(safeText(row.trip_leg, "one_way"))) + '</p>' +
                     '<p class="muted">' + escapeHtml(safeText(row.pickup_address, "Pickup")) + ' → ' + escapeHtml(safeText(row.dropoff_address, "Dropoff")) + '</p>' +
                     '<p class="muted">Pickup: ' + escapeHtml(formatSchedulingTime(row.pickup_time, row.pickup_time_local_display)) +
                     (safeText(row.return_pickup_time, "") ? (' • Return: ' + escapeHtml(formatSchedulingTime(row.return_pickup_time, row.return_pickup_time_local_display))) : '') + '</p>' +
-                    '<p class="muted">Reminder: ' + escapeHtml(safeText(row.reminder_status, "pending")) + '</p>' +
+                    (activationMsg
+                      ? '<p class="muted">' + escapeHtml(activationMsg) + '</p>'
+                      : '<p class="muted">Status: ' + escapeHtml(safeText(row.status_label, "Reserved for You")) + '</p>') +
                     acceptBtn +
                   '</div>';
                 }).join("")
@@ -6894,7 +6912,7 @@
           '</header>' +
           (activeTrip
             ? ''
-            : '<p class="muted driver-awaiting-assignment">Awaiting Assignment — no immediate trip is loaded. Reserved rides stay in <strong>Upcoming Schedule</strong>; immediate offers appear under <strong>Available Offers</strong>.</p>') +
+            : '<p class="muted driver-awaiting-assignment">' + escapeHtml(waitingLabels.statusMessage) + '</p>') +
           '<article class="driver-workflow-card">' +
             '<h4>Primary Workflow</h4>' +
             (activeTrip
@@ -6912,6 +6930,9 @@
             '</tbody></table></div>' +
             '<div class="command-actions">' +
               '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
+              (["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0 && ["driver_en_route", "en_route_pickup", "arrived", "rider_onboard", "in_progress"].indexOf(tripStatus) < 0
+                ? '<button class="preview-action driver-action" data-driver-action="request_cancellation" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Request Cancellation</button>'
+                : '') +
               '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
@@ -10526,6 +10547,15 @@
         return;
       }
       if (!(await window._amiHandleDriverDeclineTrip(safeText(activeTrip.tripId, "")))) {
+        return;
+      }
+      updated = true;
+    } else if (action === "request_cancellation" && activeTrip) {
+      if (!currentDriverId) {
+        window.alert("Driver profile is not bound yet.");
+        return;
+      }
+      if (!(await window._amiHandleDriverRequestCancellation(safeText(activeTrip.tripId, "")))) {
         return;
       }
       updated = true;
@@ -15850,6 +15880,14 @@ function _amiDriverAcceptVerification(workspace, tripId, mode) {
     };
   }
   if (mode === "immediate") {
+    if (assignmentState === "scheduled_accepted") {
+      return {
+        ok: true,
+        assignment_state: assignmentState,
+        lifecycle_state: lifecycleState,
+        display_status: "accepted"
+      };
+    }
     var lifecycleReady = ["assigned", "accepted"].indexOf(lifecycleState) >= 0
       || !!ride.accepted_at;
     if (!lifecycleReady) {
@@ -16968,17 +17006,47 @@ window._amiHandleDriverDeclineTrip = async function(tripId) {
     }
   }
 
+  var declineReason = window.prompt("Decline reason (required):", "Unable to accept offer");
+  if (!declineReason || !String(declineReason).trim()) {
+    window.alert("A decline reason is required.");
+    return false;
+  }
+
   if (!offerId) {
     window.alert("No active assignment offer is available to decline for " + tripId + ".");
     return false;
   }
   try {
-    await _amiSendJson("/api/health-isf/dispatch/offers/" + encodeURIComponent(offerId) + "/reject?reason=" + encodeURIComponent("driver_declined_in_workspace"), "POST", {});
+    await _amiSendJson("/api/health-isf/dispatch/offers/" + encodeURIComponent(offerId) + "/reject?reason=" + encodeURIComponent(String(declineReason).trim()), "POST", {});
     _amiLockDriverHydration(3500);
     await _amiAfterDriverWorkflowRefresh("Declined trip " + tripId);
     return true;
   } catch (_) {
     window.alert("Unable to decline the assignment for " + tripId + ".");
+    return false;
+  }
+};
+
+window._amiHandleDriverRequestCancellation = async function(tripId) {
+  var driverId = _amiCanonicalMobileDriverId();
+  if (!driverId || !tripId) return false;
+  var reason = window.prompt("Request cancellation reason (required):", "");
+  if (!reason || !String(reason).trim()) {
+    window.alert("A cancellation reason is required.");
+    return false;
+  }
+  try {
+    await _amiSendJson(
+      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/request-cancellation",
+      "POST",
+      { ride_id: tripId, note: String(reason).trim() }
+    );
+    _amiLockDriverHydration(3500);
+    await _amiAfterDriverWorkflowRefresh("Cancellation request sent for " + tripId);
+    window.alert("Cancellation request submitted to dispatch.");
+    return true;
+  } catch (err) {
+    window.alert("Unable to request cancellation: " + safeText(err && err.message, "unknown error"));
     return false;
   }
 };
@@ -17129,13 +17197,22 @@ window._amiHandleDispatchReassign = async function(tripId) {
 };
 
 window._amiHandleDispatchCancel = async function(tripId) {
-  var actionResult = await _amiSubmitWorkspaceAction(
-    "dispatch.cancel_ride",
-    { trip_id: tripId },
-    "dispatcher"
-  );
-  if (!actionResult || actionResult.ok === false) {
-    _amiDispatcherError("Cancel Ride failed", safeText(actionResult && actionResult.detail, "workspace action failed"));
+  if (!window.confirm("Cancel this ride? This action preserves history but removes it from the active queue.")) {
+    return;
+  }
+  var reason = window.prompt("Cancellation reason (required):", "");
+  if (!reason || !String(reason).trim()) {
+    window.alert("A cancellation reason is required.");
+    return;
+  }
+  try {
+    await _amiRequestJson(
+      "/api/health-isf/dispatcher/rides/" + encodeURIComponent(tripId) + "/cancel?reason=" + encodeURIComponent(String(reason).trim()),
+      "PATCH",
+      null
+    );
+  } catch (err) {
+    _amiDispatcherError("Cancel Ride failed", safeText(err && err.message, "backend request failed"));
     window.alert("Unable to submit cancellation for " + tripId + ".");
     return;
   }

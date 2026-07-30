@@ -62,6 +62,22 @@ from app.modules.health_isf.driver_mobile_read_path import (
     build_driver_mobile_read_snapshot,
     list_driver_assigned_rides_readonly,
 )
+
+def _promote_driver_scheduled_reservations_before_read(
+    db: Session,
+    *,
+    organization_id: str,
+    driver_id: str,
+    actor_user_id: str | None = None,
+) -> None:
+    from app.modules.health_isf.advance_scheduling import promote_scheduled_reservations_for_driver
+
+    promote_scheduled_reservations_for_driver(
+        db,
+        organization_id=organization_id,
+        driver_id=driver_id,
+        actor_user_id=actor_user_id,
+    )
 from app.modules.health_isf.driver_request_timing_log import (
     DriverReadStageTimer,
     record_driver_read_timing,
@@ -3322,7 +3338,7 @@ async def execute_phase52_lifecycle_action(
                 driver_id = str(getattr(resulting_ride, "driver_id", "") or "")
             if not driver_id:
                 raise HTTPException(status_code=400, detail="driver_id required for accept_assignment")
-            resulting_ride = service.accept_driver_ride(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
+            resulting_ride, _already = service.accept_driver_ride(db, driver_id=driver_id, ride_id=ride_id, actor_user_id=user.user_id)
         elif action == "driver_arrived":
             if not driver_id:
                 driver_id = str(getattr(resulting_ride, "driver_id", "") or "")
@@ -6430,6 +6446,12 @@ def get_driver_active_offer(
     effective_org_id = enforce_tenant_scope(user, organization_id or driver.organization_id)
     timer = DriverReadStageTimer()
     with timer.stage("db_connection"):
+        _promote_driver_scheduled_reservations_before_read(
+            db,
+            organization_id=effective_org_id,
+            driver_id=effective_driver_id,
+            actor_user_id=auth.actor_user_id,
+        )
         snapshot = build_driver_mobile_read_snapshot(
             db,
             organization_id=effective_org_id,
@@ -6513,6 +6535,12 @@ def get_driver_active_ride(
     timer = DriverReadStageTimer()
     try:
         with timer.stage("db_connection"):
+            _promote_driver_scheduled_reservations_before_read(
+                db,
+                organization_id=effective_org_id,
+                driver_id=effective_driver_id,
+                actor_user_id=auth.actor_user_id,
+            )
             snapshot = build_driver_mobile_read_snapshot(
                 db,
                 organization_id=effective_org_id,
@@ -6590,6 +6618,12 @@ def get_driver_live_workspace(
     timer = DriverReadStageTimer()
     try:
         with timer.stage("db_connection"):
+            _promote_driver_scheduled_reservations_before_read(
+                db,
+                organization_id=effective_org_id,
+                driver_id=effective_driver_id,
+                actor_user_id=auth.actor_user_id,
+            )
             snapshot = build_driver_mobile_read_snapshot(
                 db,
                 organization_id=effective_org_id,
@@ -9454,7 +9488,7 @@ def patch_driver(
     return driver
 
 
-@router.post("/drivers/{driver_id}/accept-ride", response_model=RideResponse)
+@router.post("/drivers/{driver_id}/accept-ride")
 async def driver_accept_ride(
     driver_id: str,
     payload: DriverRideActionRequest,
@@ -9469,7 +9503,7 @@ async def driver_accept_ride(
         raise HTTPException(status_code=404, detail="Driver not found")
     enforce_entity_tenant(user, driver.organization_id)
     try:
-        ride = service.accept_driver_ride(
+        ride, already_accepted = service.accept_driver_ride(
             db,
             driver_id=effective_driver_id,
             ride_id=payload.ride_id,
@@ -9486,32 +9520,33 @@ async def driver_accept_ride(
         getattr(ride, "lifecycle_state", None) or ride.status
     )
     emitter = get_emitter()
-    await emitter.emit_ride_status_changed(
-        organization_id=ride.organization_id,
-        ride_id=ride.id,
-        from_status=RideStatus.ASSIGNED.value,
-        to_status=accepted_lifecycle or RideStatus.ASSIGNED.value,
-        actor_user_id=auth.actor_user_id,
-    )
+    if not already_accepted:
+        await emitter.emit_ride_status_changed(
+            organization_id=ride.organization_id,
+            ride_id=ride.id,
+            from_status=RideStatus.ASSIGNED.value,
+            to_status=accepted_lifecycle or RideStatus.ASSIGNED.value,
+            actor_user_id=auth.actor_user_id,
+        )
+        await emitter.emit_dispatch_changed(
+            organization_id=ride.organization_id,
+            event_name="assignment-accepted",
+            actor_user_id=auth.actor_user_id,
+            details={"ride_id": ride.id, "driver_id": effective_driver_id},
+        )
+        await emitter.emit_dispatch_changed(
+            organization_id=ride.organization_id,
+            event_name="driver-offer-accepted",
+            actor_user_id=auth.actor_user_id,
+            details={"ride_id": ride.id, "driver_id": effective_driver_id},
+        )
     await emitter.emit_driver_active_ride_state(
         organization_id=ride.organization_id,
         driver_id=effective_driver_id,
         active_ride_id=ride.id,
         state=accepted_lifecycle or RideStatus.ASSIGNED.value,
         actor_user_id=auth.actor_user_id,
-        details={"source": "driver_accept_route"},
-    )
-    await emitter.emit_dispatch_changed(
-        organization_id=ride.organization_id,
-        event_name="assignment-accepted",
-        actor_user_id=auth.actor_user_id,
-        details={"ride_id": ride.id, "driver_id": effective_driver_id},
-    )
-    await emitter.emit_dispatch_changed(
-        organization_id=ride.organization_id,
-        event_name="driver-offer-accepted",
-        actor_user_id=auth.actor_user_id,
-        details={"ride_id": ride.id, "driver_id": effective_driver_id},
+        details={"source": "driver_accept_route", "already_accepted": already_accepted},
     )
     record_backend_assignment_sync(
         db,
@@ -9525,9 +9560,48 @@ async def driver_accept_ride(
             "status": str(getattr(ride, "lifecycle_state", None) or getattr(ride, "status", None) or ""),
             "requested_driver_id": driver_id,
             "effective_driver_id": effective_driver_id,
+            "already_accepted": already_accepted,
         },
     )
-    return ride
+    body = RideResponse.model_validate(ride).model_dump()
+    body["already_accepted"] = already_accepted
+    return body
+
+
+@router.post("/drivers/{driver_id}/request-cancellation")
+async def driver_request_cancellation(
+    driver_id: str,
+    payload: DriverRideActionRequest,
+    auth: DriverEndpointAuth = Depends(require_driver_mobile_or_platform(workflow_only=True)),
+    db: Session = Depends(get_db),
+):
+    user = auth.user
+    effective_driver_id = effective_driver_id_from_auth(driver_id, auth)
+    driver = service.get_driver_by_id(db, effective_driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    enforce_entity_tenant(user, driver.organization_id)
+    reason = str(payload.note or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Cancellation reason is required")
+    try:
+        ride = service.request_driver_cancellation(
+            db,
+            driver_id=effective_driver_id,
+            ride_id=payload.ride_id,
+            reason=reason,
+            actor_user_id=auth.actor_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    return {
+        "ride_id": str(ride.id),
+        "status": str(getattr(ride, "lifecycle_state", None) or ride.status or ""),
+        "cancellation_requested": True,
+        "reason": reason,
+    }
 
 
 @router.post("/drivers/{driver_id}/decline-ride", response_model=RideResponse)

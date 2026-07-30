@@ -277,7 +277,7 @@ def test_future_assignment_survives_unrelated_completion(client: TestClient) -> 
         service.assign_driver_to_ride(db, today_ride_id, driver_id, actor_user_id=None)
 
     with SessionLocal() as db:
-        service.accept_driver_ride(db, driver_id, today_ride_id, actor_user_id=None)
+        service.accept_driver_ride(db, driver_id, today_ride_id, actor_user_id=None)[0]
         service.driver_en_route_pickup(db, driver_id, today_ride_id)
         service.driver_arrived_pickup(db, driver_id, today_ride_id)
         service.driver_pickup_complete(db, driver_id, today_ride_id)
