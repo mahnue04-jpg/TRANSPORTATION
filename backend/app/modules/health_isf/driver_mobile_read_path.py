@@ -211,7 +211,9 @@ def build_driver_mobile_read_snapshot(
                     assignment=assignment,
                 )
                 ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-                if ride_state in terminal_ride_states or not (op.is_active or op.has_active_offer):
+                if ride_state in terminal_ride_states or not (
+                    op.is_active or op.has_active_offer or op.reason == "scheduled_route_ready"
+                ):
                     ride = None
                     assignment = None
 

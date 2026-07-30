@@ -1202,9 +1202,13 @@ def _scheduled_activation_message(*, state: str, ride: HealthISFRide) -> Optiona
     route_start_at = compute_route_start_eligible_at(pickup_time=getattr(ride, "pickup_time", None))
     if not route_start_at:
         return None
-    from app.modules.health_isf.timezone_utils import format_local_datetime, ride_client_timezone
+    local_label = route_start_at.isoformat()
+    try:
+        from app.modules.health_isf.timezone_utils import format_local_datetime, ride_client_timezone
 
-    local_label = format_local_datetime(route_start_at, client_timezone=ride_client_timezone(ride))
+        local_label = format_local_datetime(route_start_at, client_timezone=ride_client_timezone(ride))
+    except Exception:
+        pass
     return f"Reserved for you — Start Route becomes available at {local_label}"
 
 
