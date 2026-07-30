@@ -1543,6 +1543,22 @@
     }
   }
 
+  function riderClientTimezone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
+    } catch (_err) {
+      return "America/Chicago";
+    }
+  }
+
+  function formatSchedulingTime(value, localDisplay) {
+    var display = safeText(localDisplay, "");
+    if (display) {
+      return display;
+    }
+    return formatOperationalTime(value);
+  }
+
   function operationalTimeValue(value) {
     var raw = safeText(value, "");
     if (!raw) {
@@ -6666,7 +6682,16 @@
     var providerName = "Unassigned Provider";
     var assignedDriverLabel = "Unassigned Driver";
     var riderPhone = activeTrip ? safeText(activeTrip.riderPhone || activeTrip.phone, "") : "";
-    var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
+    var activeRidePayload = safeObject((safeObject(state.driverWorkflow)).activeRide);
+    var assignmentStateForTrip = safeText(activeRidePayload.assignment_state, "");
+    if (activeTrip && !assignmentStateForTrip) {
+      assignmentStateForTrip = safeText(activeTrip.coordinationStatus, "");
+    }
+    var tripStatus = activeTrip
+      ? normalizeDriverTripStatus(
+        resolveDriverTripLifecycleStatus(assignmentStateForTrip, activeTrip.status)
+      )
+      : "none";
     var shiftOnline = asBoolean(appState.shiftOnline, false);
     var isTerminal = ["completed", "cancelled", "declined"].indexOf(tripStatus) >= 0;
     var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
@@ -6855,8 +6880,8 @@
                   return '<div class="driver-schedule-row" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #e5e7eb;">' +
                     '<p><strong>' + escapeHtml(safeText(row.rider_name, "Rider")) + '</strong> • ' + escapeHtml(titleizeWords(safeText(row.trip_leg, "one_way"))) + '</p>' +
                     '<p class="muted">' + escapeHtml(safeText(row.pickup_address, "Pickup")) + ' → ' + escapeHtml(safeText(row.dropoff_address, "Dropoff")) + '</p>' +
-                    '<p class="muted">Pickup: ' + escapeHtml(safeText(row.pickup_time, "pending")) +
-                    (safeText(row.return_pickup_time, "") ? (' • Return: ' + escapeHtml(safeText(row.return_pickup_time, ""))) : '') + '</p>' +
+                    '<p class="muted">Pickup: ' + escapeHtml(formatSchedulingTime(row.pickup_time, row.pickup_time_local_display)) +
+                    (safeText(row.return_pickup_time, "") ? (' • Return: ' + escapeHtml(formatSchedulingTime(row.return_pickup_time, row.return_pickup_time_local_display))) : '') + '</p>' +
                     '<p class="muted">Reminder: ' + escapeHtml(safeText(row.reminder_status, "pending")) + '</p>' +
                     acceptBtn +
                   '</div>';
@@ -7604,7 +7629,7 @@
           var actionBtn = needsAssign
             ? '<button class="btn-action btn-assign" onclick="window._amiHandleNEMTAssign(\'' + escapeHtml(tripId) + '\')">Assign Driver</button>'
             : '<button class="btn-action" onclick="window._amiHandleNEMTView(\'' + escapeHtml(tripId) + '\')">Track</button>';
-          return '<tr><td>' + escapeHtml(tripId) + '</td><td>' + escapeHtml(safeText(item.patient_name || item.title, "patient")) + '</td><td>' + escapeHtml(safeText(item.pickup_time || item.start_time || item.created_at, "pending")) + '</td><td>' + escapeHtml(safeText(item.destination || item.facility || item.title, "facility")) + '</td><td>' + escapeHtml(safeText(item.assignee_user_id || item.driver_id, needsAssign ? "Unassigned" : "Assigned")) + '</td><td><span class="' + sc + '">' + escapeHtml(status) + '</span></td><td><span class="' + pc + '">' + escapeHtml(priority) + '</span></td><td>' + actionBtn + '</td></tr>';
+          return '<tr><td>' + escapeHtml(tripId) + '</td><td>' + escapeHtml(safeText(item.patient_name || item.title, "patient")) + '</td><td>' + escapeHtml(formatSchedulingTime(item.pickup_time || item.start_time || item.created_at, item.pickup_time_local_display || item.start_time_local_display)) + '</td><td>' + escapeHtml(safeText(item.destination || item.facility || item.title, "facility")) + '</td><td>' + escapeHtml(safeText(item.assignee_user_id || item.driver_id, needsAssign ? "Unassigned" : "Assigned")) + '</td><td><span class="' + sc + '">' + escapeHtml(status) + '</span></td><td><span class="' + pc + '">' + escapeHtml(priority) + '</span></td><td>' + actionBtn + '</td></tr>';
         }).join("");
         return [
           renderRoleIdentityPanel("medical_coordinator", medicalSlice, "medical coordination mode"),
@@ -10465,10 +10490,17 @@
       }
       try {
         await _amiAcceptScheduledRideWithRecovery(currentDriverId, scheduledTripId);
-        appState.lastStatusUpdate = "Scheduled ride reserved: " + scheduledTripId;
-        addDriverNotification("medium", "Scheduled ride accepted and added to Upcoming Schedule.");
+        var scheduledVerified = await _amiFinalizeDriverAcceptTrip(
+          scheduledTripId,
+          null,
+          currentDriverId,
+          false,
+          "scheduled"
+        );
+        if (!scheduledVerified) {
+          return;
+        }
         updated = true;
-        await refreshDriverWorkflowData({ forceReset: false });
       } catch (err) {
         window.alert("Unable to accept scheduled ride: " + safeText(err && err.message, "unknown error"));
       }
@@ -11297,6 +11329,7 @@
       return_pickup_address: safeText(formValues.returnPickupAddress, formValues.dropoff) || null,
       return_dropoff_address: safeText(formValues.returnDropoffAddress, formValues.pickup) || null,
       same_driver_preference: formValues.sameDriverPreference === true,
+      client_timezone: riderClientTimezone(),
       recurring: recurrence === "weekly",
       recurring_pattern: recurrence === "weekly"
         ? { type: "weekly", days: Array.isArray(formValues.recurrenceWeekdays) ? formValues.recurrenceWeekdays : [] }
@@ -15728,6 +15761,114 @@ window._amiHandleMedicalFacilityCoordination = async function(taskId) {
   window.alert("Facility coordination action submitted for supervised workflow.");
 };
 
+function _amiIsScheduledAssignmentState(raw) {
+  var token = safeText(raw, "").toLowerCase().replace(/^ridestatus\./, "").replace(/^driverstatus\./, "");
+  return token === "scheduled_offered" || token === "scheduled_accepted";
+}
+
+function _amiDriverAcceptPersistedStates(mode) {
+  if (mode === "scheduled") {
+    return ["scheduled_accepted", "accepted"];
+  }
+  return ["accepted", "assigned"];
+}
+
+function _amiResolveDriverAcceptContext(driverId, tripId) {
+  var shell = _amiDriverShellState();
+  var driverWorkflow = safeObject(shell.driverWorkflow);
+  var activeRidePayload = safeObject(driverWorkflow.activeRide);
+  var activeOfferEnvelope = safeObject(driverWorkflow.activeOffer);
+  var activeOffer = safeObject(activeOfferEnvelope.offer);
+  var activeAssignment = safeObject(activeRidePayload.active_assignment);
+  var ride = safeObject(activeRidePayload.ride);
+  var offerRideId = safeText(activeOffer.ride_id, "");
+  var tripMatches = function (rowRideId) {
+    return safeText(rowRideId, "") === safeText(tripId, "");
+  };
+  var assignmentState = "";
+  if (tripMatches(ride.id)) {
+    assignmentState = safeText(
+      activeRidePayload.assignment_state || activeAssignment.assignment_state,
+      ""
+    ).toLowerCase();
+  } else if (tripMatches(offerRideId)) {
+    assignmentState = safeText(activeOffer.assignment_state, "").toLowerCase();
+  }
+  var lifecycleState = tripMatches(ride.id)
+    ? safeText(ride.lifecycle_state || ride.status, "").toLowerCase()
+    : safeText(activeOffer.ride_status, "").toLowerCase();
+  var schedulingSummary = tripMatches(ride.id)
+    ? safeText(ride.scheduling_summary, "")
+    : "";
+  var dispatchEligibleAt = tripMatches(ride.id) ? safeText(ride.dispatch_eligible_at, "") : "";
+  var isScheduledOffer = _amiIsScheduledAssignmentState(assignmentState)
+    || (assignmentState === "offered" && (!!schedulingSummary || !!dispatchEligibleAt));
+  return {
+    assignmentState: assignmentState,
+    lifecycleState: lifecycleState,
+    isScheduledOffer: isScheduledOffer,
+    acceptMode: isScheduledOffer ? "scheduled" : "immediate"
+  };
+}
+
+async function _amiFetchDriverActiveRideWorkspace(driverId, tripId) {
+  var workspace = safeObject(await _amiSendJson(
+    "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/active-ride",
+    "GET",
+    null
+  ));
+  var ride = safeObject(workspace.ride);
+  var rideId = safeText(ride.id || ride.ride_id, "");
+  if (rideId !== safeText(tripId, "")) {
+    return null;
+  }
+  return workspace;
+}
+
+function _amiDriverAcceptVerification(workspace, tripId, mode) {
+  var payload = safeObject(workspace);
+  if (!payload || safeText(tripId, "") === "") {
+    return { ok: false, reason: "missing_workspace" };
+  }
+  var ride = safeObject(payload.ride);
+  var rideId = safeText(ride.id || ride.ride_id, "");
+  if (rideId !== safeText(tripId, "")) {
+    return { ok: false, reason: "ride_mismatch" };
+  }
+  var assignmentState = safeText(
+    payload.assignment_state || (safeObject(payload.active_assignment)).assignment_state,
+    ""
+  ).toLowerCase();
+  var lifecycleState = safeText(ride.lifecycle_state || ride.status, "").toLowerCase();
+  var allowedAssignment = _amiDriverAcceptPersistedStates(mode);
+  if (allowedAssignment.indexOf(assignmentState) < 0) {
+    return {
+      ok: false,
+      reason: "assignment_not_accepted",
+      assignment_state: assignmentState,
+      lifecycle_state: lifecycleState
+    };
+  }
+  if (mode === "immediate") {
+    var lifecycleReady = ["assigned", "accepted"].indexOf(lifecycleState) >= 0
+      || !!ride.accepted_at;
+    if (!lifecycleReady) {
+      return {
+        ok: false,
+        reason: "ride_not_assigned",
+        assignment_state: assignmentState,
+        lifecycle_state: lifecycleState
+      };
+    }
+  }
+  return {
+    ok: true,
+    assignment_state: assignmentState,
+    lifecycle_state: lifecycleState,
+    display_status: resolveDriverTripLifecycleStatus(assignmentState, lifecycleState)
+  };
+}
+
 async function _amiAcceptScheduledRideWithRecovery(driverId, rideId) {
   var acceptUrl = "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-scheduled-ride";
   var scheduleUrl = "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/upcoming-schedule";
@@ -16028,39 +16169,59 @@ function _amiDriverMobileSessionStillActive() {
   return false;
 }
 
-async function _amiRecoverAcceptedDriverTrip(driverId, tripId) {
+async function _amiRecoverAcceptedDriverTrip(driverId, tripId, acceptMode) {
   if (!driverId || !tripId) {
     return null;
   }
   try {
-    var workspace = safeObject(await _amiSendJson(
-      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/active-ride",
-      "GET",
-      null
-    ));
-    var ride = safeObject(workspace.ride || workspace.active_ride);
-    var rideId = safeText(ride.id || ride.ride_id || workspace.ride_id, "");
-    if (rideId !== safeText(tripId, "")) {
+    var workspace = await _amiFetchDriverActiveRideWorkspace(driverId, tripId);
+    if (!workspace) {
       return null;
     }
-    var assignmentState = safeText(workspace.assignment_state, "").toLowerCase();
-    var lifecycle = safeText(ride.lifecycle_state || ride.status, "").toLowerCase();
-    var acceptedStates = ["accepted", "en_route_pickup", "driver_en_route", "arrived", "arrived_pickup", "pickup_complete", "rider_loaded", "in_progress", "trip_in_progress"];
-    if (ride.accepted_at || acceptedStates.indexOf(assignmentState) >= 0 || acceptedStates.indexOf(lifecycle) >= 0) {
-      return {
-        active_ride: ride,
-        assignment_state: assignmentState || lifecycle || "accepted",
-        recovered: true
-      };
+    var verification = _amiDriverAcceptVerification(workspace, tripId, acceptMode || "immediate");
+    if (!verification.ok) {
+      return null;
     }
+    return {
+      active_ride: safeObject(workspace.ride),
+      assignment_state: verification.assignment_state,
+      recovered: true
+    };
   } catch (_) {}
   return null;
 }
 
-async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAccepted) {
+async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAccepted, acceptMode) {
+  var workspace = await _amiFetchDriverActiveRideWorkspace(driverId, tripId);
+  var verification = workspace
+    ? _amiDriverAcceptVerification(workspace, tripId, acceptMode || "immediate")
+    : { ok: false, reason: "missing_workspace" };
+  if (!verification.ok) {
+    _amiLogDriverMobileSync({
+      event: "accept_ride_unverified",
+      requested_ride_id: tripId,
+      route: acceptMode === "scheduled"
+        ? "/api/health-isf/drivers/" + driverId + "/accept-scheduled-ride"
+        : "/api/health-isf/drivers/" + driverId + "/accept-ride",
+      api_response: {
+        verification: verification,
+        payload: payload || null
+      },
+      frontend_state_transition: "active_ride->active_ride",
+      extra: { action: "Accept Trip", already_accepted: !!alreadyAccepted, accept_mode: acceptMode || "immediate" }
+    });
+    window.alert(
+      "Acceptance was not confirmed by the server yet. "
+      + "Assignment state: " + safeText(verification.assignment_state, "unknown")
+      + "; ride state: " + safeText(verification.lifecycle_state, "unknown")
+      + ". Refresh and try again."
+    );
+    return false;
+  }
+
   var shell = _amiDriverShellState();
-  var activeRide = safeObject(payload.active_ride || payload);
-  var displayStatus = _amiStatusFromRouteProgressPayload(payload, "accepted");
+  var activeRide = safeObject((workspace && workspace.ride) || (safeObject(payload).active_ride) || payload);
+  var displayStatus = safeText(verification.display_status, "accepted");
   shell = _amiPatchDriverTripStatus(tripId, displayStatus);
   shell.driverApp.lastActionResult = {
     last_action: "Accept Trip",
@@ -16073,18 +16234,24 @@ async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAc
   window.AmiOpsShellState = shell;
   _amiScheduleRenderPage();
   _amiLogDriverMobileSync({
-    event: "accept_ride",
+    event: acceptMode === "scheduled" ? "accept_scheduled_ride" : "accept_ride",
     requested_ride_id: tripId,
-    assignment_state: safeText(activeRide.lifecycle_state || activeRide.status, "accepted"),
-    api_response: activeRide,
+    assignment_state: verification.assignment_state,
+    api_response: workspace || payload,
     http_status: 200,
-    route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+    route: acceptMode === "scheduled"
+      ? "/api/health-isf/drivers/" + driverId + "/accept-scheduled-ride"
+      : "/api/health-isf/drivers/" + driverId + "/accept-ride",
     frontend_state_transition: "active_ride->active_ride",
-    extra: { action: "Accept Trip", already_accepted: !!alreadyAccepted }
+    extra: { action: "Accept Trip", already_accepted: !!alreadyAccepted, accept_mode: acceptMode || "immediate" }
   });
   try {
     _amiLockDriverHydration(3500);
-    await _amiAfterDriverWorkflowRefresh("Accepted trip " + tripId);
+    await _amiAfterDriverWorkflowRefresh(
+      acceptMode === "scheduled"
+        ? "Scheduled ride reserved: " + tripId
+        : "Accepted trip " + tripId
+    );
   } catch (_) {}
   return true;
 }
@@ -16093,14 +16260,17 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
   var shell = _amiDriverShellState();
   var driverId = _amiCanonicalMobileDriverId(shell);
   if (!driverId || !tripId) return false;
+  var acceptContext = _amiResolveDriverAcceptContext(driverId, tripId);
+  var acceptMode = acceptContext.acceptMode;
+  var acceptRoute = acceptMode === "scheduled"
+    ? "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-scheduled-ride"
+    : "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-ride";
   var payload = null;
   var acceptErr = null;
   try {
-    payload = await _amiSendJson(
-      "/api/health-isf/drivers/" + encodeURIComponent(driverId) + "/accept-ride",
-      "POST",
-      { ride_id: tripId }
-    );
+    payload = acceptMode === "scheduled"
+      ? await _amiAcceptScheduledRideWithRecovery(driverId, tripId)
+      : await _amiSendJson(acceptRoute, "POST", { ride_id: tripId });
   } catch (err) {
     acceptErr = err;
     if (_amiDriverAcceptHttpStatus(err, 401) && typeof window._amiClearDriverSession === "function" && !_amiDriverMobileSessionStillActive()) {
@@ -16108,31 +16278,35 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     }
     if (_amiDriverAcceptHttpStatus(acceptErr, 409)) {
       _amiLogDriverMobileSync({
-        event: "accept_ride_denied_reserved",
+        event: acceptMode === "scheduled" ? "accept_scheduled_ride_denied" : "accept_ride_denied_reserved",
         requested_ride_id: tripId,
-        route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+        route: acceptRoute,
         api_response: {
-          error: safeText(acceptErr && acceptErr.message, "reserved_for_other_driver")
+          error: safeText(acceptErr && acceptErr.message, "accept_conflict")
         },
         frontend_state_transition: "active_ride->active_ride",
-        extra: { action: "Accept Trip", denied: true }
+        extra: { action: "Accept Trip", denied: true, accept_mode: acceptMode }
       });
-      window.alert("This ride is reserved for another driver.");
+      window.alert(
+        acceptMode === "scheduled"
+          ? "Unable to accept scheduled ride: " + safeText(acceptErr && acceptErr.message, "conflict")
+          : "This ride is reserved for another driver."
+      );
       return false;
     }
-    var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+    var recovered = await _amiRecoverAcceptedDriverTrip(driverId, tripId, acceptMode);
     if (recovered) {
-      return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true);
+      return await _amiFinalizeDriverAcceptTrip(tripId, recovered, driverId, true, acceptMode);
     }
     _amiLogDriverMobileSync({
-      event: "accept_ride_failed",
+      event: acceptMode === "scheduled" ? "accept_scheduled_ride_failed" : "accept_ride_failed",
       requested_ride_id: tripId,
-      route: "/api/health-isf/drivers/" + driverId + "/accept-ride",
+      route: acceptRoute,
       api_response: {
         error: safeText(acceptErr && acceptErr.message, "accept_failed")
       },
       frontend_state_transition: "active_ride->active_ride",
-      extra: { action: "Accept Trip" }
+      extra: { action: "Accept Trip", accept_mode: acceptMode }
     });
     if (_amiDriverAcceptHttpStatus(acceptErr, 401)) {
       window.alert("Driver session expired. Sign in again, then tap Accept Trip.");
@@ -16156,14 +16330,14 @@ window._amiHandleDriverAcceptTrip = async function(tripId) {
     return false;
   }
   if (!payload) {
-    var recoveredEmpty = await _amiRecoverAcceptedDriverTrip(driverId, tripId);
+    var recoveredEmpty = await _amiRecoverAcceptedDriverTrip(driverId, tripId, acceptMode);
     if (recoveredEmpty) {
-      return await _amiFinalizeDriverAcceptTrip(tripId, recoveredEmpty, driverId, true);
+      return await _amiFinalizeDriverAcceptTrip(tripId, recoveredEmpty, driverId, true, acceptMode);
     }
     window.alert("Unable to submit driver accept action for " + tripId + ".");
     return false;
   }
-  return await _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, false);
+  return await _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, false, acceptMode);
 };
 
 window._amiHandleDriverArriveTrip = async function(tripId) {

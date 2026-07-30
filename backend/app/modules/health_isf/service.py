@@ -1175,17 +1175,15 @@ def _coerce_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
-def _combine_date_with_pickup_time(day: datetime, pickup_time_local: str) -> datetime:
-    hour, minute = _parse_pickup_time_local(pickup_time_local)
-    base = _coerce_utc(day) or now()
-    return datetime(
-        year=base.year,
-        month=base.month,
-        day=base.day,
-        hour=hour,
-        minute=minute,
-        tzinfo=timezone.utc,
-    )
+def _combine_date_with_pickup_time(
+    day: datetime,
+    pickup_time_local: str,
+    *,
+    client_timezone: Optional[str] = None,
+) -> datetime:
+    from app.modules.health_isf.timezone_utils import combine_local_date_and_hhmm
+
+    return combine_local_date_and_hhmm(day, pickup_time_local, client_timezone=client_timezone)
 
 
 def _matches_schedule_date(schedule: HealthISFRecurringRideSchedule, current_day: datetime) -> bool:
@@ -4153,10 +4151,11 @@ def get_dispatch_queue(
         elif assignment_state == "pending_assignment":
             dispatcher_message = "No available driver"
         from app.modules.health_isf.scheduling import format_scheduling_summary
+        from app.modules.health_isf.timezone_utils import attach_local_time_fields, ride_client_timezone
 
         scheduling_summary = format_scheduling_summary(ride)
         appointment_window = scheduling_summary if scheduling_summary != "Immediate ride" else None
-        rows.append(
+        row_payload = attach_local_time_fields(
             {
                 "ride_id": str(ride.id),
                 "organization_id": str(ride.organization_id),
@@ -4193,8 +4192,10 @@ def get_dispatch_queue(
                 "reassignment_reason": assignment.reassignment_reason if assignment else None,
                 "reassignment_chain_id": assignment.reassignment_chain_id if assignment else None,
                 "dispatcher_message": dispatcher_message,
-            }
+            },
+            client_timezone=ride_client_timezone(ride),
         )
+        rows.append(row_payload)
     return rows
 
 
@@ -6753,6 +6754,7 @@ def create_customer_ride_request(
     return_pickup_address: Optional[str] = None,
     return_dropoff_address: Optional[str] = None,
     same_driver_preference: bool = False,
+    client_timezone: Optional[str] = None,
 ) -> tuple[HealthISFCustomerRideRequest, HealthISFRide]:
     from app.modules.health_isf.scheduling import (
         apply_scheduling_fields_to_ride,
@@ -6778,6 +6780,7 @@ def create_customer_ride_request(
             "same_driver_preference": same_driver_preference,
             "recurring": recurring,
             "recurring_pattern": recurring_pattern,
+            "client_timezone": client_timezone,
         }
     )
     use_scheduling = (
@@ -7973,12 +7976,22 @@ def accept_driver_ride(
         DispatchAssignmentState.ARRIVED_DESTINATION.value,
         DispatchAssignmentState.DROPOFF_COMPLETE.value,
     }
-    if (
-        lifecycle_state in post_accept_states
-        or (ride.accepted_at and lifecycle_state == RideStatus.ASSIGNED.value)
-        or assignment_state in post_accept_assignment_states
+    if lifecycle_state in post_accept_states or (
+        ride.accepted_at and lifecycle_state == RideStatus.ASSIGNED.value
     ):
         # Idempotent accept: driver/mobile clients may retry after hydration lag.
+        db.refresh(ride)
+        return ride
+    if assignment_state in post_accept_assignment_states:
+        # Post-activation scheduled rides keep lifecycle queued until immediate accept
+        # promotes the bound ride into assigned workflow state.
+        if lifecycle_state == RideStatus.QUEUED.value:
+            ride = _ensure_driver_bound_ride_workflow_ready(
+                db,
+                ride,
+                driver,
+                actor_user_id=actor_user_id,
+            )
         db.refresh(ride)
         return ride
     if assignment_state and assignment_state not in {
