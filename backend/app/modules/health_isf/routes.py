@@ -239,7 +239,6 @@ logger = logging.getLogger("amicor.health_isf.routes")
 
 def _ride_response_base(db: Session, ride: HealthISFRide) -> dict[str, Any]:
     from app.modules.health_isf.scheduling import format_scheduling_summary
-    from app.modules.health_isf.timezone_utils import attach_local_time_fields, ride_client_timezone
 
     payload = RideResponse.model_validate(ride).model_dump()
     payload["scheduling_summary"] = format_scheduling_summary(ride)
@@ -251,7 +250,6 @@ def _ride_response_base(db: Session, ride: HealthISFRide) -> dict[str, Any]:
     payload["dispatch_eligible_at"] = getattr(ride, "dispatch_eligible_at", None)
     payload["call_when_ready"] = bool(getattr(ride, "call_when_ready", False))
     payload["scheduling_series_id"] = getattr(ride, "scheduling_series_id", None)
-    payload = attach_local_time_fields(payload, client_timezone=ride_client_timezone(ride))
     if ride.driver_id:
         driver = service.get_driver_by_id(db, str(ride.driver_id))
         if driver:
@@ -5835,7 +5833,6 @@ def create_customer_ride_request(
             return_pickup_address=payload.return_pickup_address,
             return_dropoff_address=payload.return_dropoff_address,
             same_driver_preference=payload.same_driver_preference,
-            client_timezone=payload.client_timezone,
         )
     except ValueError as exc:
         if idempotency_key:
