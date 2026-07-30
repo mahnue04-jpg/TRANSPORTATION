@@ -325,12 +325,19 @@ class CustomerRideRequestCreateRequest(BaseModel):
             raise ValueError("pickup_address and dropoff_address must be different")
 
         if self.scheduled_time is not None:
-            scheduled = self.scheduled_time
-            if scheduled.tzinfo is None:
-                scheduled = scheduled.replace(tzinfo=datetime.now(timezone.utc).tzinfo)
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
-            if scheduled < cutoff:
-                raise ValueError("scheduled_time cannot be in the past")
+            has_advance_scheduling = (
+                self.trip_type == "round_trip"
+                or self.recurrence == "weekly"
+                or self.pickup_time is not None
+                or self.arrival_time is not None
+            )
+            if not has_advance_scheduling:
+                scheduled = self.scheduled_time
+                if scheduled.tzinfo is None:
+                    scheduled = scheduled.replace(tzinfo=datetime.now(timezone.utc).tzinfo)
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+                if scheduled < cutoff:
+                    raise ValueError("scheduled_time cannot be in the past")
         if self.trip_type == "round_trip" and self.return_pickup_type == "scheduled_time":
             if not self.return_pickup_time and not self.arrival_time:
                 raise ValueError("return_pickup_time or arrival_time required for scheduled return")

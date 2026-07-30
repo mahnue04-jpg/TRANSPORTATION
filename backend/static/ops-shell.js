@@ -11308,6 +11308,60 @@
     return payload;
   }
 
+  function parseRiderIsoMs(value) {
+    if (!value) {
+      return null;
+    }
+    var parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed.getTime();
+  }
+
+  function riderIsoFromMs(ms) {
+    return new Date(ms).toISOString();
+  }
+
+  function ensureRiderSchedulingTimes(payload, options) {
+    var opts = options || {};
+    var immediate = opts.immediate === true;
+    var next = Object.assign({}, payload || {});
+    var cutoffMs = Date.now() - (5 * 60 * 1000);
+    var timeKeys = ["pickup_time", "arrival_time", "return_pickup_time", "scheduled_time"];
+
+    if (immediate) {
+      var pickupMs = parseRiderIsoMs(next.pickup_time) || (Date.now() + (10 * 60 * 1000));
+      if (pickupMs < Date.now() + (8 * 60 * 1000)) {
+        pickupMs = Date.now() + (10 * 60 * 1000);
+      }
+      var arrivalMs = parseRiderIsoMs(next.arrival_time) || (pickupMs + (15 * 60 * 1000));
+      if (arrivalMs < pickupMs + (10 * 60 * 1000)) {
+        arrivalMs = pickupMs + (15 * 60 * 1000);
+      }
+      var returnMs = parseRiderIsoMs(next.return_pickup_time) || (arrivalMs + (60 * 60 * 1000));
+      if (next.return_pickup_type !== "call_when_ready" && returnMs < arrivalMs + (30 * 60 * 1000)) {
+        returnMs = arrivalMs + (60 * 60 * 1000);
+      }
+      next.pickup_time = riderIsoFromMs(pickupMs);
+      next.arrival_time = riderIsoFromMs(arrivalMs);
+      if (next.return_pickup_type !== "call_when_ready") {
+        next.return_pickup_time = riderIsoFromMs(returnMs);
+      }
+      next.scheduled_time = riderIsoFromMs(arrivalMs);
+      return { ok: true, payload: next, adjusted: true };
+    }
+
+    var staleKeys = timeKeys.filter(function (key) {
+      var ms = parseRiderIsoMs(next[key]);
+      return ms != null && ms < cutoffMs;
+    });
+    if (staleKeys.length > 0) {
+      return {
+        ok: false,
+        error: "Scheduled pickup, arrival, or return times cannot be in the past. Update the times and try again."
+      };
+    }
+    return { ok: true, payload: next, adjusted: false };
+  }
+
   function mapCustomerRequestToHistoryRow(item) {
     var requestRow = safeObject(item);
     return {
@@ -12616,6 +12670,17 @@
       client_request_key: idempotencyKey
     };
     var schedulingPayload = buildRiderSchedulingPayload(formValues, { forceWeekly: recurring === true });
+    var scheduleGuard = ensureRiderSchedulingTimes(schedulingPayload, { immediate: recurring !== true });
+    if (!scheduleGuard.ok) {
+      state.riderApp.submitInFlight = false;
+      state.riderApp.pendingIdempotencyKey = "";
+      state.riderApp.submitStatus = { level: "error", message: scheduleGuard.error };
+      persistSessionState();
+      renderPage();
+      window.alert(scheduleGuard.error);
+      return { ok: false, error: "schedule_time_past" };
+    }
+    schedulingPayload = scheduleGuard.payload;
     Object.keys(schedulingPayload).forEach(function (key) {
       payload[key] = schedulingPayload[key];
     });

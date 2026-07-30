@@ -381,6 +381,28 @@ def test_customer_request_empty_service_date_coerced() -> None:
     assert payload.service_date is None
 
 
+def test_round_trip_past_scheduled_time_allowed_with_scheduling_fields() -> None:
+    from app.modules.health_isf.schemas import CustomerRideRequestCreateRequest
+
+    past = datetime.now(timezone.utc) - timedelta(hours=3)
+    payload = CustomerRideRequestCreateRequest(
+        rider_name="Test Rider",
+        rider_phone="6129982874",
+        pickup_address="2823 aldrich ave north",
+        dropoff_address="hcmc",
+        service_date=date.today(),
+        trip_type="round_trip",
+        pickup_time=past,
+        arrival_time=past + timedelta(minutes=15),
+        scheduled_time=past + timedelta(minutes=15),
+        return_pickup_type="scheduled_time",
+        return_pickup_time=past + timedelta(hours=2),
+        return_pickup_address="hcmc",
+        return_dropoff_address="2823 aldrich ave north",
+    )
+    assert payload.trip_type == "round_trip"
+
+
 def test_scheduling_test_marker_cleanup(client: TestClient) -> None:
     rider_auth = _login(client, "rider@amicor.local")
     headers = {"Authorization": f"Bearer {rider_auth['access_token']}"}
