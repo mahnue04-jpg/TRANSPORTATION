@@ -4229,6 +4229,11 @@ def get_newest_unassigned_queue_ride(
 
         if not is_dispatch_eligible(ride):
             continue
+        from app.modules.health_isf.scheduling import is_protected_scheduled_reservation
+
+        assignment = _latest_assignment_for_ride(db, ride.id)
+        if is_protected_scheduled_reservation(ride, assignment):
+            continue
         candidates.append((ride, row))
     if not candidates:
         return None

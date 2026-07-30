@@ -34,7 +34,7 @@ from scripts.production_back_to_back_and_schedule_validation import (  # noqa: E
 
 BASE = pa.BASE
 ORG = "308dc05a-6781-4ef7-91fc-ff22606937e3"
-DRIVER_PHONE = "917-555-1004"
+DRIVER_PHONE = "917-555-1003"
 RUN_TS = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 OUT = REPO / "PRODUCTION_QA_EVIDENCE" / f"PRODUCTION_ROUNDTRIP_RESERVATION_E2E_{RUN_TS}.json"
 
@@ -59,11 +59,54 @@ def find_return_leg(token: str, group_id: str) -> str:
     return ""
 
 
+def select_available_driver(dispatcher_token: str) -> dict[str, Any] | None:
+    drivers = resolve_four_drivers(dispatcher_token)
+    preferred = next((d for d in drivers if d["phone"] == DRIVER_PHONE), None)
+    candidates = [preferred] if preferred else []
+    candidates.extend(d for d in drivers if d not in candidates)
+    for driver in candidates:
+        if not driver:
+            continue
+        login = mobile_login(driver["phone"])
+        session_token = str((login.get("body") or {}).get("session_token") or "")
+        org_id = str((login.get("body") or {}).get("organization_id") or ORG)
+        set_driver_available(session_token, driver["id"], org_id)
+        active = driver_get(session_token, f"/api/health-isf/drivers/{driver['id']}/active-ride", org_id)
+        active_body = unwrap(active.get("body") or {}) or {}
+        if not active_body.get("has_active_ride"):
+            driver["session_token"] = session_token
+            driver["organization_id"] = org_id
+            return driver
+    return None
+
+
+def reassign_ride_driver(dispatcher_token: str, ride_id: str, driver_id: str) -> dict[str, Any]:
+    resp = requests.patch(
+        f"{BASE}/api/health-isf/dispatcher/rides/{ride_id}/reassign-driver",
+        headers=dispatcher_headers(dispatcher_token),
+        json={"driver_id": driver_id},
+        timeout=120,
+    )
+    body = unwrap(resp.json()) if resp.content else {}
+    return {"status": resp.status_code, "body": body, "ok": resp.status_code == 200}
+
+
+def ensure_outbound_assigned(dispatcher_token: str, request_id: str, ride_id: str, driver_id: str) -> dict[str, Any]:
+    snap = fetch_ride(dispatcher_token, ride_id, ORG)
+    if str(snap.get("driver_id") or "") == driver_id:
+        return {"ok": True, "mode": "already_assigned"}
+    manual = manual_assign(dispatcher_token, request_id, driver_id)
+    if manual.get("ok"):
+        return {"ok": True, "mode": "manual_assign", "manual": manual}
+    reassigned = reassign_ride_driver(dispatcher_token, ride_id, driver_id)
+    return {"ok": reassigned.get("ok"), "mode": "reassign", "manual": manual, "reassign": reassigned}
+
+
 def create_round_trip(rider_token: str) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    outbound_pickup = now + timedelta(minutes=8)
-    outbound_arrival = now + timedelta(minutes=23)
-    return_pickup = now + timedelta(minutes=83)
+    outbound_pickup = now + timedelta(minutes=5)
+    outbound_arrival = now + timedelta(minutes=20)
+    return_pickup = now + timedelta(minutes=75)
     suffix = uuid.uuid4().hex[:6]
     payload = {
         "rider_name": f"RT Reservation E2E {RUN_TS}",
@@ -242,19 +285,27 @@ def main() -> int:
         return 1
 
     drivers = resolve_four_drivers(dispatcher_token)
-    driver = next((d for d in drivers if d["phone"] == DRIVER_PHONE), None)
+    driver = select_available_driver(dispatcher_token)
     if not driver:
         report["failed_step"] = "driver_lookup"
+        report["steps"]["driver_lookup"] = {"ok": False, "candidates": [d["phone"] for d in drivers]}
         OUT.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
         return 1
 
-    prep_ok, prep_rows, org_id, _ = prep_driver_sessions([driver], dispatcher_token, resolve_stale_blockers=True)
+    prep_ok, prep_rows, org_id, _ = prep_driver_sessions([driver], dispatcher_token, resolve_stale_blockers=False)
     driver = prep_rows[0] if prep_rows else driver
     driver["organization_id"] = org_id or ORG
-    login = mobile_login(driver["phone"])
-    driver["session_token"] = str((login.get("body") or {}).get("session_token") or "")
+    if not driver.get("session_token"):
+        login = mobile_login(driver["phone"])
+        driver["session_token"] = str((login.get("body") or {}).get("session_token") or "")
     set_driver_available(driver["session_token"], driver["id"], driver["organization_id"])
-    report["steps"]["driver_prep"] = {"ok": bool(driver.get("session_token")), "driver_id": driver["id"]}
+    report["steps"]["driver_prep"] = {
+        "ok": bool(driver.get("session_token")),
+        "driver_id": driver["id"],
+        "driver_phone": driver.get("phone"),
+        "driver_name": driver.get("name"),
+        "prep_ok": prep_ok,
+    }
 
     created = create_round_trip(rider_token)
     report["steps"]["create_round_trip"] = created
@@ -269,12 +320,23 @@ def main() -> int:
         headers=dispatcher_headers(dispatcher_token),
         timeout=120,
     )
-    assign = manual_assign(dispatcher_token, created["request_id"], driver["id"])
+    assign = ensure_outbound_assigned(
+        dispatcher_token,
+        created["request_id"],
+        created["outbound_ride_id"],
+        driver["id"],
+    )
     report["steps"]["dispatch_outbound"] = {
         "ok": approve.status_code == 200 and assign.get("ok"),
         "approve_status": approve.status_code,
-        "assign_status": assign.get("status"),
+        "assign": assign,
     }
+    if not report["steps"]["dispatch_outbound"]["ok"]:
+        report["failed_step"] = "dispatch_outbound"
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        OUT.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        print(json.dumps(report, indent=2))
+        return 1
 
     assignment = {
         "session_token": driver["session_token"],

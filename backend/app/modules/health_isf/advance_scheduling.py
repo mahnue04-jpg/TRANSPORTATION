@@ -947,9 +947,30 @@ def run_advance_scheduling_for_customer_request(
     preferred_driver_id: Optional[str] = None
     outcomes: list[dict[str, Any]] = []
     same_driver = any(bool(getattr(r, "same_driver_preference", False)) for r in rides)
+    outbound_leg = next(
+        (row for row in rides if str(getattr(row, "trip_leg", "") or "") == "outbound"),
+        None,
+    )
     for ride in rides:
         if str(getattr(ride, "trip_leg", "") or "") == "return" and bool(getattr(ride, "call_when_ready", False)):
             continue
+        if (
+            same_driver
+            and str(getattr(ride, "trip_leg", "") or "") == "return"
+            and outbound_leg is not None
+        ):
+            from app.modules.health_isf.service import _ride_is_terminal
+
+            if not _ride_is_terminal(outbound_leg):
+                outcomes.append(
+                    {
+                        "ride": ride,
+                        "offer": None,
+                        "selected_driver": None,
+                        "mode": "deferred_until_outbound_complete",
+                    }
+                )
+                continue
         result = run_advance_scheduling_for_ride(
             db,
             ride_id=str(ride.id),
