@@ -4049,6 +4049,9 @@ def get_dispatch_queue(
         from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
 
         promote_dispatch_eligible_rides(db, organization_id=organization_id)
+        from app.modules.health_isf.advance_scheduling import promote_scheduled_reservations
+
+        promote_scheduled_reservations(db, organization_id=organization_id)
         promote_pending_immediate_customer_requests(db, organization_id=organization_id)
     active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
     active_lifecycle_states = [
@@ -4151,11 +4154,10 @@ def get_dispatch_queue(
         elif assignment_state == "pending_assignment":
             dispatcher_message = "No available driver"
         from app.modules.health_isf.scheduling import format_scheduling_summary
-        from app.modules.health_isf.timezone_utils import attach_local_time_fields, ride_client_timezone
 
         scheduling_summary = format_scheduling_summary(ride)
         appointment_window = scheduling_summary if scheduling_summary != "Immediate ride" else None
-        row_payload = attach_local_time_fields(
+        rows.append(
             {
                 "ride_id": str(ride.id),
                 "organization_id": str(ride.organization_id),
@@ -4192,10 +4194,8 @@ def get_dispatch_queue(
                 "reassignment_reason": assignment.reassignment_reason if assignment else None,
                 "reassignment_chain_id": assignment.reassignment_chain_id if assignment else None,
                 "dispatcher_message": dispatcher_message,
-            },
-            client_timezone=ride_client_timezone(ride),
+            }
         )
-        rows.append(row_payload)
     return rows
 
 
