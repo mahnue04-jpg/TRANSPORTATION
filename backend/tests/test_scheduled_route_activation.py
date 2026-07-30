@@ -94,7 +94,6 @@ def _create_scheduled_ride(
         trip_leg="return",
         pickup_time=pickup_time,
         arrival_time=pickup_time + timedelta(minutes=30),
-        client_timezone="America/Chicago",
     )
     db.add(ride)
     db.commit()

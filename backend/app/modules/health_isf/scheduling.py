@@ -148,10 +148,7 @@ def rides_time_overlap(ride_a: HealthISFRide, ride_b: HealthISFRide) -> bool:
     return a0 < b1 and b0 < a1
 
 
-def format_scheduling_summary(ride: HealthISFRide, *, client_timezone: Optional[str] = None) -> str:
-    from app.modules.health_isf.timezone_utils import format_local_datetime, ride_client_timezone
-
-    tz = client_timezone or ride_client_timezone(ride)
+def format_scheduling_summary(ride: HealthISFRide) -> str:
     leg = str(getattr(ride, "trip_leg", "") or "one_way")
     pickup = _coerce_utc(getattr(ride, "pickup_time", None))
     arrival = _coerce_utc(getattr(ride, "appointment_time", None))
@@ -159,20 +156,20 @@ def format_scheduling_summary(ride: HealthISFRide, *, client_timezone: Optional[
     if leg != "one_way":
         parts.append(leg.replace("_", " ").title())
     if pickup:
-        parts.append(f"Pickup {format_local_datetime(pickup, client_timezone=tz)}")
+        parts.append(f"Pickup {pickup.strftime('%Y-%m-%d %H:%M')} UTC")
     if arrival:
-        parts.append(f"Arrival {format_local_datetime(arrival, client_timezone=tz)}")
+        parts.append(f"Arrival {arrival.strftime('%Y-%m-%d %H:%M')} UTC")
     if bool(getattr(ride, "call_when_ready", False)):
         parts.append("Return: Call when ready")
     elif str(getattr(ride, "return_pickup_type", "") or "") == "call_when_ready":
         parts.append("Return: Call when ready")
     eligible = _coerce_utc(getattr(ride, "dispatch_eligible_at", None))
     if eligible and not is_dispatch_eligible(ride):
-        parts.append(f"Dispatch opens {format_local_datetime(eligible, client_timezone=tz)}")
+        parts.append(f"Dispatch opens {eligible.strftime('%Y-%m-%d %H:%M')} UTC")
     group = str(getattr(ride, "round_trip_group_id", "") or "")
     if group:
         parts.append(f"Group {group[:8]}")
-    return " · ".join(parts) if parts else "Immediate ride"
+    return " | ".join(parts) if parts else "Immediate ride"
 
 
 def expand_weekly_instances(
@@ -206,10 +203,7 @@ def apply_scheduling_fields_to_ride(
     return_pickup_type: Optional[str] = None,
     same_driver_preference: bool = False,
     call_when_ready: bool = False,
-    client_timezone: Optional[str] = None,
 ) -> None:
-    from app.modules.health_isf.timezone_utils import store_ride_client_timezone
-
     ride.trip_leg = trip_leg
     ride.round_trip_group_id = round_trip_group_id
     ride.scheduling_series_id = scheduling_series_id
@@ -219,7 +213,6 @@ def apply_scheduling_fields_to_ride(
     ride.return_pickup_type = return_pickup_type
     ride.same_driver_preference = bool(same_driver_preference)
     ride.call_when_ready = bool(call_when_ready)
-    store_ride_client_timezone(ride, client_timezone)
     if call_when_ready and trip_leg == "return":
         ride.dispatch_eligible_at = None
         ride.pickup_time = None
@@ -379,7 +372,6 @@ def build_scheduling_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         "return_pickup_address",
         "return_dropoff_address",
         "same_driver_preference",
-        "client_timezone",
     ):
         value = payload.get(key)
         if value is None:
@@ -395,11 +387,8 @@ def build_scheduling_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 def parse_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Normalize rider scheduling fields from API payload."""
-    from app.modules.health_isf.timezone_utils import normalize_timezone_name, parse_scheduling_datetime
-
     trip_type = str(payload.get("trip_type") or "one_way").lower()
     recurrence = str(payload.get("recurrence") or ("weekly" if payload.get("recurring") else "none")).lower()
-    client_timezone = normalize_timezone_name(payload.get("client_timezone"))
     arrival = payload.get("arrival_time") or payload.get("scheduled_time")
     pickup = payload.get("pickup_time")
     service_date_raw = payload.get("service_date")
@@ -413,15 +402,11 @@ def parse_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "trip_type": trip_type if trip_type in {"one_way", "round_trip"} else "one_way",
         "recurrence": recurrence if recurrence in {"none", "weekly"} else "none",
-        "client_timezone": client_timezone,
-        "pickup_time": parse_scheduling_datetime(pickup, client_timezone=client_timezone),
-        "arrival_time": parse_scheduling_datetime(arrival, client_timezone=client_timezone),
+        "pickup_time": _parse_dt(pickup),
+        "arrival_time": _parse_dt(arrival),
         "service_date": service_date,
         "return_pickup_type": str(payload.get("return_pickup_type") or "scheduled_time"),
-        "return_pickup_time": parse_scheduling_datetime(
-            payload.get("return_pickup_time"),
-            client_timezone=client_timezone,
-        ),
+        "return_pickup_time": _parse_dt(payload.get("return_pickup_time")),
         "return_pickup_address": str(payload.get("return_pickup_address") or "").strip() or None,
         "return_dropoff_address": str(payload.get("return_dropoff_address") or "").strip() or None,
         "recurrence_weekdays": [str(d).lower()[:3] for d in weekdays],
@@ -432,9 +417,19 @@ def parse_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
-    from app.modules.health_isf.timezone_utils import parse_scheduling_datetime
-
-    return parse_scheduling_datetime(value)
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return _coerce_utc(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return _coerce_utc(datetime.fromisoformat(text))
+    except ValueError:
+        return None
 
 
 def _parse_date(value: Any) -> Optional[date]:
@@ -488,7 +483,6 @@ def create_scheduled_ride_request(
     return_type = scheduling["return_pickup_type"]
     return_time = combine_date_time(service_date, scheduling["return_pickup_time"])
     end_date = scheduling["recurrence_end_date"] or service_date
-    client_timezone = scheduling.get("client_timezone")
 
     dates = [service_date]
     if recurrence == "weekly":
@@ -499,30 +493,16 @@ def create_scheduled_ride_request(
     series_id = str(uuid4()) if len(dates) > 1 or recurrence == "weekly" else None
     all_rides: list[HealthISFRide] = []
 
-    from app.modules.health_isf.timezone_utils import shift_instance_date_preserving_local_time
-
     for instance_date in dates:
         inst_pickup = pickup_time
         inst_arrival = arrival_time
         if inst_pickup and instance_date != inst_pickup.date():
-            inst_pickup = shift_instance_date_preserving_local_time(
-                inst_pickup,
-                instance_date,
-                client_timezone=client_timezone,
-            )
+            inst_pickup = datetime.combine(instance_date, inst_pickup.timetz(), tzinfo=timezone.utc)
         if inst_arrival and instance_date != inst_arrival.date():
-            inst_arrival = shift_instance_date_preserving_local_time(
-                inst_arrival,
-                instance_date,
-                client_timezone=client_timezone,
-            )
+            inst_arrival = datetime.combine(instance_date, inst_arrival.timetz(), tzinfo=timezone.utc)
         inst_return = return_time
         if inst_return and instance_date != inst_return.date() and trip_type == "round_trip":
-            inst_return = shift_instance_date_preserving_local_time(
-                inst_return,
-                instance_date,
-                client_timezone=client_timezone,
-            )
+            inst_return = datetime.combine(instance_date, inst_return.timetz(), tzinfo=timezone.utc)
 
         group_id = str(uuid4()) if trip_type == "round_trip" else None
 
@@ -546,7 +526,6 @@ def create_scheduled_ride_request(
             pickup_time=inst_pickup,
             arrival_time=inst_arrival,
             same_driver_preference=same_driver,
-            client_timezone=client_timezone,
         )
         all_rides.append(outbound)
         db.add(outbound)
@@ -577,7 +556,6 @@ def create_scheduled_ride_request(
                 return_pickup_type=return_type,
                 same_driver_preference=same_driver,
                 call_when_ready=call_ready,
-                client_timezone=client_timezone,
             )
             all_rides.append(return_leg)
             linked.append(str(return_leg.id))
