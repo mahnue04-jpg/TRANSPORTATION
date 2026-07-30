@@ -308,6 +308,15 @@ class CustomerRideRequestCreateRequest(BaseModel):
     def sanitize_customer_notes(cls, value: Any) -> Optional[str]:
         return _sanitize_text(value, max_len=1000)
 
+    @field_validator("service_date", "recurrence_start_date", "recurrence_end_date", mode="before")
+    @classmethod
+    def normalize_optional_date(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_request_contract(self) -> "CustomerRideRequestCreateRequest":
         pickup = (self.pickup_address or "").strip().lower()

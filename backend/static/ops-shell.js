@@ -11109,7 +11109,7 @@
       try {
         var errBody = await response.json();
         if (errBody && errBody.detail) {
-          errDetail = String(errBody.detail) + " :http_" + postStatus;
+          errDetail = formatApiErrorDetail(errBody.detail) + " :http_" + postStatus;
         }
       } catch (_) {}
       throw new Error(errDetail);
@@ -11135,7 +11135,7 @@
       try {
         var errBody = await response.json();
         if (errBody && errBody.detail) {
-          errDetail = String(errBody.detail) + " :http_" + sendStatus;
+          errDetail = formatApiErrorDetail(errBody.detail) + " :http_" + sendStatus;
         }
       } catch (_) {}
       throw new Error(errDetail);
@@ -11150,6 +11150,72 @@
     return safeText(phone, "").replace(/[^\d+]/g, "").slice(0, 20);
   }
 
+  function formatApiErrorDetail(detail) {
+    if (detail == null) {
+      return "unknown error";
+    }
+    if (typeof detail === "string") {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      return detail.map(function (item) {
+        if (!item || typeof item !== "object") {
+          return String(item);
+        }
+        var field = Array.isArray(item.loc) ? item.loc.filter(function (part) {
+          return part !== "body";
+        }).join(".") : "";
+        var message = safeText(item.msg, safeText(item.message, "Validation error"));
+        return field ? (field + ": " + message) : message;
+      }).join("; ");
+    }
+    if (typeof detail === "object") {
+      return safeText(detail.message || detail.msg || detail.detail, JSON.stringify(detail));
+    }
+    return String(detail);
+  }
+
+  function riderLocalDateIso(dateValue) {
+    var base = dateValue instanceof Date ? dateValue : new Date();
+    if (isNaN(base.getTime())) {
+      base = new Date();
+    }
+    var year = base.getFullYear();
+    var month = String(base.getMonth() + 1).padStart(2, "0");
+    var day = String(base.getDate()).padStart(2, "0");
+    return String(year) + "-" + month + "-" + day;
+  }
+
+  function normalizeRiderServiceDate(dateStr) {
+    var raw = safeText(dateStr, "").trim();
+    if (!raw) {
+      return riderLocalDateIso();
+    }
+    var isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      var year = parseInt(isoMatch[1], 10);
+      if (year >= 2020 && year <= 2100) {
+        return raw;
+      }
+      return riderLocalDateIso();
+    }
+    var usMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (usMatch) {
+      var usYear = parseInt(usMatch[3], 10);
+      if (usYear < 100) {
+        usYear += 2000;
+      }
+      if (usYear >= 2020 && usYear <= 2100) {
+        return String(usYear) + "-" + String(usMatch[1]).padStart(2, "0") + "-" + String(usMatch[2]).padStart(2, "0");
+      }
+    }
+    var parsed = new Date(raw);
+    if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 2020 && parsed.getFullYear() <= 2100) {
+      return riderLocalDateIso(parsed);
+    }
+    return riderLocalDateIso();
+  }
+
   function riderProfileDefaults() {
     var existing = safeObject(state.riderApp);
     var profile = safeObject(existing.profile);
@@ -11161,7 +11227,7 @@
       dropoff: safeText(profile.dropoff, ""),
       notes: safeText(profile.notes, ""),
       rideType: safeText(profile.rideType, "healthcare"),
-      serviceDate: safeText(profile.serviceDate, ""),
+      serviceDate: normalizeRiderServiceDate(safeText(profile.serviceDate, "")),
       pickupTime: safeText(profile.pickupTime, ""),
       arrivalTime: safeText(profile.arrivalTime, ""),
       tripType: safeText(profile.tripType, "one_way"),
@@ -11184,8 +11250,8 @@
   }
 
   function riderDateTimeToIso(dateStr, timeStr) {
-    var datePart = safeText(dateStr, "");
-    var timePart = safeText(timeStr, "");
+    var datePart = normalizeRiderServiceDate(dateStr);
+    var timePart = safeText(timeStr, "").trim();
     if (!datePart && !timePart) {
       return null;
     }
@@ -11193,7 +11259,7 @@
       var parsed = new Date(timePart);
       return isNaN(parsed.getTime()) ? null : parsed.toISOString();
     }
-    if (datePart && timePart) {
+    if (timePart) {
       var combined = new Date(datePart + "T" + timePart);
       return isNaN(combined.getTime()) ? null : combined.toISOString();
     }
@@ -11213,18 +11279,20 @@
     }
     var tripType = safeText(formValues.tripType, "one_way");
     var returnType = safeText(formValues.returnPickupType, "scheduled_time");
+    var serviceDate = normalizeRiderServiceDate(formValues.serviceDate);
+    var recurrenceStart = normalizeRiderServiceDate(formValues.recurrenceStartDate || serviceDate);
     var payload = {
-      service_date: safeText(formValues.serviceDate, "") || null,
-      pickup_time: riderDateTimeToIso(formValues.serviceDate, formValues.pickupTime),
-      arrival_time: riderDateTimeToIso(formValues.serviceDate, formValues.arrivalTime),
+      service_date: serviceDate,
+      pickup_time: riderDateTimeToIso(serviceDate, formValues.pickupTime),
+      arrival_time: riderDateTimeToIso(serviceDate, formValues.arrivalTime),
       trip_type: tripType === "round_trip" ? "round_trip" : "one_way",
       return_pickup_type: returnType === "call_when_ready" ? "call_when_ready" : "scheduled_time",
       return_pickup_time: returnType === "call_when_ready"
         ? null
-        : riderDateTimeToIso(formValues.serviceDate, formValues.returnPickupTime),
+        : riderDateTimeToIso(serviceDate, formValues.returnPickupTime),
       recurrence: recurrence,
       recurrence_weekdays: Array.isArray(formValues.recurrenceWeekdays) ? formValues.recurrenceWeekdays : [],
-      recurrence_start_date: safeText(formValues.recurrenceStartDate, formValues.serviceDate) || null,
+      recurrence_start_date: recurrenceStart,
       recurrence_end_date: safeText(formValues.recurrenceEndDate, "") || null,
       return_pickup_address: safeText(formValues.returnPickupAddress, formValues.dropoff) || null,
       return_dropoff_address: safeText(formValues.returnDropoffAddress, formValues.pickup) || null,
@@ -12303,7 +12371,7 @@
       dropoff: safeText(dropoffInput && dropoffInput.value, currentProfile.dropoff),
       notes: safeText(notesInput && notesInput.value, currentProfile.notes),
       rideType: safeText(rideTypeInput && rideTypeInput.value, currentProfile.rideType),
-      serviceDate: safeText(serviceDateInput && serviceDateInput.value, currentProfile.serviceDate),
+      serviceDate: normalizeRiderServiceDate(safeText(serviceDateInput && serviceDateInput.value, currentProfile.serviceDate)),
       pickupTime: safeText(pickupTimeInput && pickupTimeInput.value, currentProfile.pickupTime),
       arrivalTime: safeText(arrivalTimeInput && arrivalTimeInput.value, currentProfile.arrivalTime),
       tripType: safeText(tripTypeInput && tripTypeInput.value, currentProfile.tripType),
@@ -12508,6 +12576,19 @@
       renderPage();
       window.alert("Pickup and dropoff must be different addresses.");
       return { ok: false };
+    }
+
+    formValues.serviceDate = normalizeRiderServiceDate(formValues.serviceDate);
+    if (formValues.tripType === "round_trip" && safeText(formValues.returnPickupType, "scheduled_time") === "scheduled_time") {
+      var schedulingPreview = buildRiderSchedulingPayload(formValues, { forceWeekly: recurring === true });
+      if (!schedulingPreview.arrival_time && !schedulingPreview.return_pickup_time) {
+        var scheduleError = "Round-trip rides need a valid service date plus arrival or return pickup time.";
+        state.riderApp.submitStatus = { level: "error", message: scheduleError };
+        persistSessionState();
+        renderPage();
+        window.alert(scheduleError);
+        return { ok: false };
+      }
     }
 
     var idempotencyKey = safeText(state.riderApp.pendingIdempotencyKey, "") || makeRiderIdempotencyKey();

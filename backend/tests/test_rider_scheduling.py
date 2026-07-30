@@ -361,6 +361,26 @@ def test_round_trip_group_billing_view(client: TestClient) -> None:
     assert len(payload["rides"]) == 2
 
 
+def test_customer_request_empty_service_date_coerced() -> None:
+    from app.modules.health_isf.schemas import CustomerRideRequestCreateRequest
+
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    payload = CustomerRideRequestCreateRequest(
+        rider_name="Test Rider",
+        rider_phone="6129982874",
+        pickup_address="2823 aldrich ave north",
+        dropoff_address="hcmc",
+        service_date="",
+        trip_type="round_trip",
+        return_pickup_type="scheduled_time",
+        arrival_time=future,
+        return_pickup_time=future + timedelta(hours=2),
+        return_pickup_address="hcmc",
+        return_dropoff_address="2823 aldrich ave north",
+    )
+    assert payload.service_date is None
+
+
 def test_scheduling_test_marker_cleanup(client: TestClient) -> None:
     rider_auth = _login(client, "rider@amicor.local")
     headers = {"Authorization": f"Bearer {rider_auth['access_token']}"}
