@@ -10294,7 +10294,14 @@ async def dispatch_auto_assign(
             assignment_transition_source="dispatch_auto_assign",
         )
 
-        expired_rows = service.expire_stale_dispatch_offers(db, organization_id=ride.organization_id, ride_id=ride.id)
+        expired_rows = service.expire_stale_dispatch_offers(
+            db,
+            organization_id=ride.organization_id,
+            ride_id=ride.id,
+            auto_reassign_immediate=True,
+            actor_user_id=_user.id,
+            offer_timeout_seconds=payload.offer_timeout_seconds,
+        )
         for row in expired_rows:
             details = {"ride_id": row.ride_id, "offer_id": row.id, "driver_id": row.driver_id, "request_id": request_id}
             await _emit_dispatch_lifecycle_event(
@@ -10898,13 +10905,50 @@ def dispatch_queue(
 
 
 @router.get("/dispatch/active-assignments", response_model=list[DispatchActiveAssignmentItemResponse])
-def dispatch_active_assignments(
+async def dispatch_active_assignments(
     organization_id: str | None = Query(None),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    service.expire_stale_dispatch_offers(db, organization_id=effective_org_id)
+    reassign_outcomes: list[dict[str, Any]] = []
+    service.expire_stale_dispatch_offers(
+        db,
+        organization_id=effective_org_id,
+        auto_reassign_immediate=True,
+        actor_user_id=user.user_id,
+        reassign_outcomes=reassign_outcomes,
+    )
+    for outcome in reassign_outcomes:
+        if str(outcome.get("mode") or "") != "reassigned":
+            continue
+        offer_id = str(outcome.get("offer_id") or "")
+        ride_id = str(outcome.get("ride_id") or "")
+        if not offer_id or not ride_id:
+            continue
+        offer = service.get_dispatch_offer_by_id(db, offer_id)
+        if not offer:
+            continue
+        await _emit_dispatch_lifecycle_event(
+            db=db,
+            organization_id=effective_org_id,
+            ride_id=ride_id,
+            event_name="driver-offer-issued",
+            actor_user_id=user.user_id,
+            details={
+                "ride_id": ride_id,
+                "offer_id": offer.id,
+                "driver_id": offer.driver_id,
+                "offer_expires_at": offer.offer_expires_at.isoformat() if offer.offer_expires_at else None,
+                "reassign_mode": "offer_timeout_auto",
+            },
+            request_id=ride_id,
+            assignment_id=str(offer.id),
+            driver_id=str(offer.driver_id) if offer.driver_id else None,
+            lifecycle_state=str(offer.assignment_state),
+            transition_reason="offer_timeout_auto",
+            assignment_transition_source="expire_stale_dispatch_offers",
+        )
     rows = service.get_dispatch_active_assignments(db, organization_id=effective_org_id)
     current_user_id = str(user.user_id or "")
     normalized_rows: list[dict[str, Any]] = []

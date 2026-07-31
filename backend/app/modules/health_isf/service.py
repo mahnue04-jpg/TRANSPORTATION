@@ -2974,11 +2974,87 @@ def approve_dispatch_recommendation(
     }
 
 
+def reassign_immediate_offers_after_expiry(
+    db: Session,
+    *,
+    organization_id: str,
+    expired_assignments: list[HealthISFDispatchAssignment],
+    actor_user_id: Optional[str] = None,
+    offer_timeout_seconds: int = 90,
+) -> list[dict[str, Any]]:
+    """Offer immediate rides to the next driver after timed-out offers (idempotent per ride)."""
+    from app.modules.health_isf.scheduling import is_immediate_ride
+
+    outcomes: list[dict[str, Any]] = []
+    processed_ride_ids: set[str] = set()
+    now_ts = now()
+
+    for row in expired_assignments:
+        ride_id = str(row.ride_id or "")
+        if not ride_id or ride_id in processed_ride_ids:
+            continue
+        processed_ride_ids.add(ride_id)
+
+        ride = get_ride_by_id(db, ride_id)
+        if not ride or str(ride.organization_id) != str(organization_id):
+            continue
+        if _ride_is_terminal(ride) or ride.accepted_at:
+            continue
+        if not is_immediate_ride(ride):
+            continue
+
+        active_offer = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(
+                HealthISFDispatchAssignment.ride_id == ride.id,
+                HealthISFDispatchAssignment.assignment_state == DispatchAssignmentState.OFFERED.value,
+                HealthISFDispatchAssignment.offer_expires_at.is_not(None),
+                HealthISFDispatchAssignment.offer_expires_at >= now_ts,
+            )
+            .first()
+        )
+        if active_offer:
+            outcomes.append(
+                {
+                    "ride_id": ride_id,
+                    "mode": "skipped_active_offer",
+                    "offer_id": str(active_offer.id),
+                }
+            )
+            continue
+
+        try:
+            result = reassign_expired_request(
+                db,
+                ride_id=ride_id,
+                actor_user_id=actor_user_id,
+                offer_timeout_seconds=offer_timeout_seconds,
+                reason="offer_timeout_auto",
+            )
+            new_offer = result.get("offer")
+            selected_driver = result.get("selected_driver")
+            outcomes.append(
+                {
+                    "ride_id": ride_id,
+                    "mode": "reassigned" if new_offer else "no_candidates",
+                    "offer_id": str(new_offer.id) if new_offer else None,
+                    "driver_id": str(selected_driver.id) if selected_driver else None,
+                }
+            )
+        except ValueError:
+            outcomes.append({"ride_id": ride_id, "mode": "reassign_failed"})
+    return outcomes
+
+
 def expire_stale_dispatch_offers(
     db: Session,
     *,
     organization_id: str,
     ride_id: Optional[str] = None,
+    auto_reassign_immediate: bool = False,
+    actor_user_id: Optional[str] = None,
+    offer_timeout_seconds: int = 90,
+    reassign_outcomes: Optional[list[dict[str, Any]]] = None,
 ) -> list[HealthISFDispatchAssignment]:
     now_ts = now()
     query = db.query(HealthISFDispatchAssignment).filter(
@@ -3027,6 +3103,16 @@ def expire_stale_dispatch_offers(
         expired.append(row)
     if expired:
         _commit_or_rollback(db)
+    if auto_reassign_immediate and expired:
+        outcomes = reassign_immediate_offers_after_expiry(
+            db,
+            organization_id=organization_id,
+            expired_assignments=expired,
+            actor_user_id=actor_user_id,
+            offer_timeout_seconds=offer_timeout_seconds,
+        )
+        if reassign_outcomes is not None:
+            reassign_outcomes.extend(outcomes)
     return expired
 
 

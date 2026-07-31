@@ -46,7 +46,12 @@ def maybe_run_organization_dispatch_maintenance(
         "interval_seconds": interval,
     }
     try:
-        expired = service.expire_stale_dispatch_offers(db, organization_id=organization_id)
+        expired = service.expire_stale_dispatch_offers(
+            db,
+            organization_id=organization_id,
+            auto_reassign_immediate=True,
+            actor_user_id=actor_user_id,
+        )
         report["expired_offers"] = len(expired)
     except Exception:
         logger.warning("expire_stale_dispatch_offers failed org=%s", organization_id, exc_info=True)
