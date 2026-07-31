@@ -6312,7 +6312,7 @@
     var tripStatus = activeTrip ? normalizeDriverTripStatus(activeTrip.status) : "none";
     var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
       && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
-    var canStartRoute = ["accepted", "assigned"].indexOf(tripStatus) >= 0;
+    var canStartRoute = ["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0;
     var canArrive = ["driver_en_route", "en_route_pickup"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
@@ -6711,7 +6711,7 @@
     var isTerminal = ["completed", "cancelled", "declined"].indexOf(tripStatus) >= 0;
     var canAccept = ["queued", "assigned", "offered", "pending"].indexOf(tripStatus) >= 0
       && ["accepted", "en_route_pickup", "driver_en_route", "arrived", "rider_onboard", "in_progress", "in_transit", "arrived_destination"].indexOf(tripStatus) < 0;
-    var canStartRoute = ["accepted", "assigned"].indexOf(tripStatus) >= 0;
+    var canStartRoute = ["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0;
     var canArrive = ["driver_en_route", "en_route_pickup"].indexOf(tripStatus) >= 0;
     var canPickup = ["arrived", "at_pickup", "arrived_pickup", "waiting_at_pickup"].indexOf(tripStatus) >= 0;
     var canStartTransport = ["rider_onboard", "rider_loaded"].indexOf(tripStatus) >= 0;
@@ -6893,6 +6893,9 @@
                     ? '<button class="preview-action driver-action" data-driver-action="accept_scheduled_ride" data-trip-id="' + escapeHtml(safeText(row.ride_id, "")) + '">Accept Scheduled Ride</button>'
                     : '<span class="muted">' + escapeHtml(safeText(row.status_label, "Reserved for You")) + '</span>';
                   var activationMsg = safeText(row.activation_message, "");
+                  var startRouteBtn = row.can_start_route
+                    ? '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(row.ride_id, "")) + '">Start Route / En Route to Pickup</button>'
+                    : "";
                   return '<div class="driver-schedule-row" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #e5e7eb;">' +
                     '<p><strong>' + escapeHtml(safeText(row.rider_name, "Rider")) + '</strong> • ' + escapeHtml(titleizeWords(safeText(row.trip_leg, "one_way"))) + '</p>' +
                     '<p class="muted">' + escapeHtml(safeText(row.pickup_address, "Pickup")) + ' → ' + escapeHtml(safeText(row.dropoff_address, "Dropoff")) + '</p>' +
@@ -6902,6 +6905,7 @@
                       ? '<p class="muted">' + escapeHtml(activationMsg) + '</p>'
                       : '<p class="muted">Status: ' + escapeHtml(safeText(row.status_label, "Reserved for You")) + '</p>') +
                     acceptBtn +
+                    startRouteBtn +
                   '</div>';
                 }).join("")
               : '<p class="muted">No upcoming scheduled rides.</p>') +
@@ -10479,6 +10483,12 @@
       }
       appState.activeTripId = startRouteTripId;
       activeTrip = resolveDriverActiveTrip(startRouteTripId) || getDriverTripById(startRouteTripId);
+      if (!activeTrip) {
+        activeTrip = {
+          tripId: startRouteTripId,
+          status: "scheduled_accepted"
+        };
+      }
     }
 
     if (action === "toggle_shift") {
@@ -10568,12 +10578,17 @@
         return;
       }
       updated = true;
-    } else if (action === "start_route" && activeTrip) {
+    } else if (action === "start_route") {
       if (!currentDriverId) {
         window.alert("Driver profile is not bound yet.");
         return;
       }
-      if (!(await window._amiHandleDriverStartRoute(safeText(activeTrip.tripId, "")))) {
+      var startRouteId = safeText(activeTrip && activeTrip.tripId, "") || safeText(tripId, "");
+      if (!startRouteId) {
+        window.alert("Select a scheduled ride to start route.");
+        return;
+      }
+      if (!(await window._amiHandleDriverStartRoute(startRouteId))) {
         return;
       }
       handlerMutatedApp = true;

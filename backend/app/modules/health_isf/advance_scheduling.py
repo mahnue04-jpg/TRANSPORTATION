@@ -19,6 +19,7 @@ from app.modules.health_isf.models import (
     HealthISFRide,
     RideStatus,
 )
+from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
 from app.modules.health_isf.scheduling import (
     compute_route_start_eligible_at,
     format_scheduling_summary,
@@ -468,15 +469,6 @@ def reserve_paired_return_leg_after_outbound_complete(
             }
 
     return_leg = get_ride_by_id(db, str(return_leg.id)) or return_leg
-    if return_leg and is_route_start_eligible(return_leg):
-        activated = promote_scheduled_reservations(
-            db,
-            organization_id=str(return_leg.organization_id),
-            actor_user_id=actor_user_id,
-        )
-        result["promoted"] = any(
-            str(item.get("ride_id") or "") == str(return_leg.id) for item in activated
-        )
     _commit_or_rollback(db)
     return result
 
@@ -1149,6 +1141,13 @@ def serialize_upcoming_schedule_entry(
                 accepted_by_driver_id = str(parsed.get("accepted_by_driver_id"))
         except (TypeError, json.JSONDecodeError):
             pass
+    driver_id = str(assignment.driver_id or "")
+    can_start_route = can_driver_start_scheduled_route(
+        db,
+        driver_id=driver_id,
+        ride=ride,
+        assignment=assignment,
+    )
     return {
         "ride_id": str(ride.id),
         "assignment_id": str(assignment.id),
@@ -1167,6 +1166,7 @@ def serialize_upcoming_schedule_entry(
         "scheduling_summary": format_scheduling_summary(ride),
         "reminder_status": "pending" if state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value else "offer_pending",
         "can_accept": state == DispatchAssignmentState.SCHEDULED_OFFERED.value,
+        "can_start_route": can_start_route,
         "dispatch_eligible_at": (
             _as_utc_datetime(getattr(ride, "dispatch_eligible_at", None)).isoformat()
             if getattr(ride, "dispatch_eligible_at", None)
@@ -1184,32 +1184,48 @@ def serialize_upcoming_schedule_entry(
     }
 
 
+def can_driver_start_scheduled_route(
+    db: Session,
+    *,
+    driver_id: str,
+    ride: HealthISFRide,
+    assignment: HealthISFDispatchAssignment,
+) -> bool:
+    """True when a reserved ride may press Start Route without an active in-progress trip."""
+    from app.modules.health_isf.service import _driver_active_workload_count
+
+    if str(assignment.assignment_state or "") != DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        return False
+    if str(assignment.driver_id or "") != str(driver_id):
+        return False
+    if _driver_active_workload_count(db, driver_id) > 0:
+        return False
+    lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle in {
+        RideStatus.DRIVER_EN_ROUTE.value,
+        RideStatus.ARRIVED.value,
+        RideStatus.RIDER_ONBOARD.value,
+        RideStatus.IN_PROGRESS.value,
+        RideStatus.IN_TRANSIT.value,
+        RideStatus.ARRIVED_DESTINATION.value,
+        RideStatus.COMPLETED.value,
+    }:
+        return False
+    return True
+
+
 def _scheduled_status_label(*, state: str, ride: HealthISFRide) -> str:
     if state == DispatchAssignmentState.SCHEDULED_OFFERED.value:
         return "Pending Assignment"
     if state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
-        if is_route_start_eligible(ride):
-            return "Ready to Start Route"
-        return "Reserved for You"
+        return "Ready to Start Route"
     return "Pending Assignment"
 
 
 def _scheduled_activation_message(*, state: str, ride: HealthISFRide) -> Optional[str]:
     if state != DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
         return None
-    if is_route_start_eligible(ride):
-        return "Start Route is available now"
-    route_start_at = compute_route_start_eligible_at(pickup_time=getattr(ride, "pickup_time", None))
-    if not route_start_at:
-        return None
-    local_label = route_start_at.isoformat()
-    try:
-        from app.modules.health_isf.timezone_utils import format_local_datetime, ride_client_timezone
-
-        local_label = format_local_datetime(route_start_at, client_timezone=ride_client_timezone(ride))
-    except Exception:
-        pass
-    return f"Reserved for you — Start Route becomes available at {local_label}"
+    return "Start Route is available now"
 
 
 def list_upcoming_schedule_for_driver(
@@ -1254,8 +1270,6 @@ def list_upcoming_schedule_for_driver(
             reserved_owner = scheduled_reservation_owner_for_ride(db, ride)
             if reserved_owner and str(reserved_owner) != str(driver_id):
                 continue
-        if is_route_start_eligible(ride):
-            continue
         ride_id = str(ride.id)
         if ride_id in seen:
             continue
@@ -1289,13 +1303,11 @@ def _activate_scheduled_assignment_row(
     ride: HealthISFRide,
     actor_user_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Promote one scheduled_accepted row into immediate workflow (idempotent)."""
+    """Promote one scheduled_accepted row into immediate workflow when driver starts route."""
     from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
     from app.modules.health_isf.service import _commit_or_rollback, now
 
     if str(row.assignment_state or "") != DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
-        return None
-    if not is_route_start_eligible(ride):
         return None
 
     now_ts = now()
@@ -1313,7 +1325,7 @@ def _activate_scheduled_assignment_row(
         target_state=RideStatus.QUEUED.value,
         action_type="scheduled_ride_activated",
         actor_user_id=actor_user_id,
-        note="Scheduled reservation entered route-start activation window",
+        note="Scheduled reservation activated by driver Start Route",
     )
     ride.lifecycle_state = RideStatus.QUEUED.value
     ride.status = RideStatus.PENDING

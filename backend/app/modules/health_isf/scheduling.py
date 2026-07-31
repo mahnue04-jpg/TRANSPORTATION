@@ -72,12 +72,22 @@ def compute_route_start_eligible_at(*, pickup_time: Optional[datetime]) -> Optio
 
 
 def is_route_start_eligible(ride: HealthISFRide, *, at: Optional[datetime] = None) -> bool:
-    """Return True when an assigned scheduled reservation may enter Current Trip."""
-    pickup = _coerce_utc(getattr(ride, "pickup_time", None))
-    route_start_at = compute_route_start_eligible_at(pickup_time=pickup)
-    if route_start_at is None:
-        return True
-    return _coerce_utc(at or _now()) >= route_start_at
+    """Return True when an accepted scheduled reservation may press Start Route.
+
+    Pickup time is informational only; drivers may start route immediately after
+    scheduled acceptance without waiting for pickup minus lead minutes.
+    """
+    _ = at  # retained for backward-compatible call sites
+    if not ride:
+        return False
+    lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
+    if lifecycle in {
+        RideStatus.COMPLETED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    }:
+        return False
+    return True
 
 
 def is_dispatch_eligible(ride: HealthISFRide, *, at: Optional[datetime] = None) -> bool:

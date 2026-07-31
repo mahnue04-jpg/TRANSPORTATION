@@ -333,28 +333,14 @@ def evaluate_driver_ride_operational_state(
     }
 
     if row and assignment_state in SCHEDULED_DISPATCH_ASSIGNMENT_STATES:
-        from app.modules.health_isf.scheduling import is_route_start_eligible
-
-        if assignment_state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value and is_route_start_eligible(
-            ride
-        ):
-            return DriverRideOperationalState(
-                is_active=True,
-                has_active_offer=False,
-                is_dispatch_eligible=True,
-                effective_assignment_state=assignment_state,
-                reason="scheduled_route_ready",
-                assignment=row,
-            )
-        if not is_route_start_eligible(ride):
-            return DriverRideOperationalState(
-                is_active=False,
-                has_active_offer=False,
-                is_dispatch_eligible=False,
-                effective_assignment_state=assignment_state,
-                reason="scheduled_reservation",
-                assignment=row,
-            )
+        return DriverRideOperationalState(
+            is_active=False,
+            has_active_offer=assignment_state == DispatchAssignmentState.SCHEDULED_OFFERED.value,
+            is_dispatch_eligible=False,
+            effective_assignment_state=assignment_state,
+            reason="scheduled_reservation",
+            assignment=row,
+        )
 
     if row and assignment_state in ACTIVE_DISPATCH_ASSIGNMENT_STATES:
         offer_open = assignment_state in {
@@ -4146,9 +4132,6 @@ def get_dispatch_queue(
         from app.modules.health_isf.scheduling import promote_dispatch_eligible_rides
 
         promote_dispatch_eligible_rides(db, organization_id=organization_id)
-        from app.modules.health_isf.advance_scheduling import promote_scheduled_reservations
-
-        promote_scheduled_reservations(db, organization_id=organization_id)
         promote_pending_immediate_customer_requests(db, organization_id=organization_id)
     active_legacy_statuses = [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.IN_TRANSIT]
     active_lifecycle_states = [
@@ -7109,8 +7092,6 @@ def _driver_mobile_offer_visible(
     )
     if op.reason in {"scheduled_reservation", "group_scheduled_reservation", "driver_mismatch"}:
         return False
-    if op.reason == "scheduled_route_ready":
-        return True
     return op.is_active or op.has_active_offer
 
 
@@ -8137,32 +8118,6 @@ def accept_driver_ride(
         if str(getattr(assignment, "driver_id", "") or "") == str(driver.id) or str(
             ride.driver_id or ""
         ) == str(driver.id):
-            from app.modules.health_isf.advance_scheduling import (
-                promote_scheduled_reservations_for_driver,
-            )
-            from app.modules.health_isf.scheduling import is_route_start_eligible
-
-            if is_route_start_eligible(ride):
-                promote_scheduled_reservations_for_driver(
-                    db,
-                    organization_id=str(ride.organization_id),
-                    driver_id=str(driver.id),
-                    actor_user_id=actor_user_id,
-                )
-                db.refresh(ride)
-                assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
-                assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
-                lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-                if (
-                    assignment_state == DispatchAssignmentState.ACCEPTED.value
-                    and lifecycle_state == RideStatus.QUEUED.value
-                ):
-                    ride = _ensure_driver_bound_ride_workflow_ready(
-                        db,
-                        ride,
-                        driver,
-                        actor_user_id=actor_user_id,
-                    )
             db.refresh(ride)
             return ride, True
     if assignment_state and assignment_state not in {
@@ -8274,6 +8229,26 @@ def driver_en_route_pickup(
         return None
     if ride.driver_id != driver.id:
         raise ValueError("Ride is not assigned to this driver")
+
+    assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
+    assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
+    scheduled_pickup_time = ride.pickup_time
+    if assignment and assignment_state == DispatchAssignmentState.SCHEDULED_ACCEPTED.value:
+        from app.modules.health_isf.advance_scheduling import _activate_scheduled_assignment_row
+
+        _activate_scheduled_assignment_row(
+            db,
+            row=assignment,
+            ride=ride,
+            actor_user_id=actor_user_id,
+        )
+        _commit_or_rollback(db)
+        db.refresh(ride)
+        db.refresh(assignment)
+        assignment = _authoritative_assignment_for_ride(db, ride, driver_id=driver.id)
+        assignment_state = str(getattr(assignment, "assignment_state", "") or "").lower()
+        if scheduled_pickup_time and not ride.pickup_time:
+            ride.pickup_time = scheduled_pickup_time
 
     ride = _ensure_driver_bound_ride_workflow_ready(db, ride, driver, actor_user_id=actor_user_id)
     lifecycle_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)

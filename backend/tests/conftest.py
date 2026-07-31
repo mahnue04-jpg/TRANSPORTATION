@@ -59,6 +59,7 @@ def _reset_health_isf_driver_state_before_test(request):
         driver_test_module_names,
         organization_id_for_dispatcher,
         reset_organization_driver_test_state,
+        reset_scheduling_test_organization,
     )
 
     module_name = request.node.fspath.basename
@@ -68,7 +69,21 @@ def _reset_health_isf_driver_state_before_test(request):
 
     ensure_auth_schema()
     seed_default_users()
-    reset_organization_driver_test_state(organization_id_for_dispatcher())
+    if module_name in {
+        "test_scheduled_route_activation.py",
+        "test_multi_ride_driver_scheduling.py",
+        "test_advance_scheduling.py",
+    }:
+        from app.db.models import User as PlatformUser
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as db:
+            user = db.query(PlatformUser).filter(PlatformUser.email == "rider@amicor.local").first()
+            assert user is not None and user.organization_id is not None
+            rider_org_id = str(user.organization_id)
+        reset_scheduling_test_organization(rider_org_id)
+    else:
+        reset_organization_driver_test_state(organization_id_for_dispatcher())
 
 
 def pytest_pyfunc_call(pyfuncitem): # type: ignore

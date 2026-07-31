@@ -19,6 +19,9 @@ _DRIVER_TEST_RESET_MODULES = {
     "test_driver_dispatch_lifecycle.py",
     "test_driver_mobile_assignment_sync.py",
     "test_immediate_offer_auto_reassign.py",
+    "test_scheduled_route_activation.py",
+    "test_multi_ride_driver_scheduling.py",
+    "test_advance_scheduling.py",
 }
 
 
@@ -128,6 +131,34 @@ def reset_organization_driver_test_state(
                 driver.auth_state = "active"
                 driver.last_seen_at = now_ts
                 driver.updated_at = now_ts
+        db.commit()
+
+
+def reset_scheduling_test_organization(org_id: str) -> None:
+    """Clear open rides and normalize all drivers after scheduling tests."""
+    with SessionLocal() as db:
+        now_ts = hs.now()
+        _finalize_open_org_rides(db, org_id, now_ts)
+        for assignment in db.query(HealthISFDispatchAssignment).filter(
+            HealthISFDispatchAssignment.organization_id == org_id
+        ).all():
+            state = str(assignment.assignment_state or "")
+            if state not in {
+                DispatchAssignmentState.DROPOFF_COMPLETE.value,
+                DispatchAssignmentState.EXPIRED.value,
+                DispatchAssignmentState.REJECTED.value,
+            }:
+                assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
+                assignment.closed_reason = "test_reset"
+                assignment.updated_at = now_ts
+        for driver in db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org_id).all():
+            driver.status = DriverStatus.AVAILABLE
+            driver.availability_state = "available"
+            driver.is_active = True
+            driver.is_online = True
+            driver.auth_state = "active"
+            driver.last_seen_at = now_ts
+            driver.updated_at = now_ts
         db.commit()
 
 

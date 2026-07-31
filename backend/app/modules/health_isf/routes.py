@@ -70,14 +70,8 @@ def _promote_driver_scheduled_reservations_before_read(
     driver_id: str,
     actor_user_id: str | None = None,
 ) -> None:
-    from app.modules.health_isf.advance_scheduling import promote_scheduled_reservations_for_driver
-
-    promote_scheduled_reservations_for_driver(
-        db,
-        organization_id=organization_id,
-        driver_id=driver_id,
-        actor_user_id=actor_user_id,
-    )
+    """Scheduled reservations activate only when the driver presses Start Route."""
+    _ = (db, organization_id, driver_id, actor_user_id)
 from app.modules.health_isf.driver_request_timing_log import (
     DriverReadStageTimer,
     record_driver_read_timing,

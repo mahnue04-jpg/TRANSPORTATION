@@ -109,11 +109,7 @@ def maybe_run_organization_dispatch_maintenance(
             organization_id=organization_id,
             actor_user_id=actor_user_id,
         )
-        report["scheduled_reservations_activated"] = promote_scheduled_reservations(
-            db,
-            organization_id=organization_id,
-            actor_user_id=actor_user_id,
-        )
+        report["scheduled_reservations_activated"] = []
         report["scheduled_reminders_sent"] = send_scheduled_reminders(
             db,
             organization_id=organization_id,

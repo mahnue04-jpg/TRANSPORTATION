@@ -1,4 +1,4 @@
-"""Scheduled route activation at pickup minus lead minutes."""
+"""Scheduled route activation: immediate Start Route after acceptance."""
 from __future__ import annotations
 
 import random
@@ -18,7 +18,6 @@ from app.modules.health_isf.advance_scheduling import (
     accept_scheduled_ride,
     assign_driver_to_scheduled_ride,
     list_upcoming_schedule_for_driver,
-    promote_scheduled_reservations_for_driver,
 )
 from app.modules.health_isf.driver_mobile_read_path import build_driver_mobile_read_snapshot
 from app.modules.health_isf.models import (
@@ -29,6 +28,7 @@ from app.modules.health_isf.models import (
     HealthISFRide,
     RideStatus,
 )
+from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
 from app.modules.health_isf.scheduling import (
     apply_scheduling_fields_to_ride,
     is_route_start_eligible,
@@ -55,7 +55,7 @@ def _ensure_driver(organization_id: str) -> str:
             id=uuid4(),
             organization_id=organization_id,
             name=f"Route Driver {uuid4()[:6]}",
-            phone=f"917555{random.randint(1000, 9999)}",
+            phone=f"917{random.randint(1000000, 9999999)}",
             vehicle_type="sedan",
             vehicle_plate=f"RT-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,
@@ -76,6 +76,7 @@ def _create_scheduled_ride(
     organization_id: str,
     pickup_time: datetime,
     passenger_name: str = "Route Activation Rider",
+    trip_leg: str = "return",
 ) -> HealthISFRide:
     ride = HealthISFRide(
         id=uuid4(),
@@ -91,7 +92,7 @@ def _create_scheduled_ride(
     )
     apply_scheduling_fields_to_ride(
         ride,
-        trip_leg="return",
+        trip_leg=trip_leg,
         pickup_time=pickup_time,
         arrival_time=pickup_time + timedelta(minutes=30),
     )
@@ -101,7 +102,7 @@ def _create_scheduled_ride(
     return ride
 
 
-def test_scheduled_ride_visible_more_than_60_minutes_before_pickup(client: TestClient):
+def test_scheduled_accepted_allows_immediate_start_route(client: TestClient):
     org_id = _org_id_for("rider@amicor.local")
     driver_id = _ensure_driver(org_id)
     pickup = service.now() + timedelta(hours=3)
@@ -114,40 +115,27 @@ def test_scheduled_ride_visible_more_than_60_minutes_before_pickup(client: TestC
             actor_user_id=None,
         )
         accept_scheduled_ride(db, driver_id=driver_id, ride_id=str(ride.id))
+        db.refresh(ride)
+        assert is_route_start_eligible(ride)
         upcoming = list_upcoming_schedule_for_driver(
             db, organization_id=org_id, driver_id=driver_id
         )
-        assert any(str(item["ride_id"]) == str(ride.id) for item in upcoming)
-        assert not is_route_start_eligible(ride)
+        entry = next(item for item in upcoming if str(item["ride_id"]) == str(ride.id))
+        assert entry["can_start_route"] is True
+        assert "Start Route is available now" in str(entry.get("activation_message") or "")
 
 
-def test_activation_exactly_60_minutes_before_pickup(client: TestClient):
+def test_start_route_records_en_route_without_changing_pickup(client: TestClient):
     org_id = _org_id_for("rider@amicor.local")
     driver_id = _ensure_driver(org_id)
-    now = datetime(2026, 7, 30, 22, 47, tzinfo=timezone.utc)  # 5:47 PM Chicago CDT
-    pickup = datetime(2026, 7, 30, 23, 47, tzinfo=timezone.utc)  # 6:47 PM Chicago CDT
-    with SessionLocal() as db, patch.object(service, "now", return_value=now):
-        ride = _create_scheduled_ride(
-            db,
-            organization_id=org_id,
-            pickup_time=pickup,
-            passenger_name="jack doe",
-        )
-        assign_driver_to_scheduled_ride(
-            db,
-            ride_id=str(ride.id),
-            driver_id=driver_id,
-            actor_user_id=None,
-        )
+    pickup = service.now() + timedelta(hours=2)
+    with SessionLocal() as db:
+        ride = _create_scheduled_ride(db, organization_id=org_id, pickup_time=pickup)
+        assign_driver_to_scheduled_ride(db, ride_id=str(ride.id), driver_id=driver_id)
         accept_scheduled_ride(db, driver_id=driver_id, ride_id=str(ride.id))
+        original_pickup = ride.pickup_time
+        service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=str(ride.id))
         db.refresh(ride)
-        assert is_route_start_eligible(ride, at=now)
-        activated = promote_scheduled_reservations_for_driver(
-            db,
-            organization_id=org_id,
-            driver_id=driver_id,
-        )
-        assert len(activated) == 1
         assignment = (
             db.query(HealthISFDispatchAssignment)
             .filter(
@@ -158,64 +146,80 @@ def test_activation_exactly_60_minutes_before_pickup(client: TestClient):
             .first()
         )
         assert assignment is not None
-        assert assignment.assignment_state == DispatchAssignmentState.ACCEPTED.value
-        upcoming = list_upcoming_schedule_for_driver(
-            db, organization_id=org_id, driver_id=driver_id
+        assert assignment.assignment_state == DispatchAssignmentState.EN_ROUTE_PICKUP.value
+        assert assignment.en_route_pickup_at is not None
+        assert ride.pickup_time == original_pickup
+        assert ride.enroute_at is not None
+        assert RideStatus.DRIVER_EN_ROUTE.value == RideLifecycleManager.normalize_state(
+            ride.lifecycle_state or ride.status
         )
-        assert not any(str(item["ride_id"]) == str(ride.id) for item in upcoming)
 
 
-def test_driver_mobile_poll_promotes_missed_window(client: TestClient):
+def test_early_arrival_allowed_without_auto_onboard(client: TestClient):
     org_id = _org_id_for("rider@amicor.local")
     driver_id = _ensure_driver(org_id)
-    now = datetime(2026, 7, 30, 23, 10, tzinfo=timezone.utc)
+    pickup = service.now() + timedelta(hours=4)
+    with SessionLocal() as db:
+        ride = _create_scheduled_ride(db, organization_id=org_id, pickup_time=pickup)
+        assign_driver_to_scheduled_ride(db, ride_id=str(ride.id), driver_id=driver_id)
+        accept_scheduled_ride(db, driver_id=driver_id, ride_id=str(ride.id))
+        service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=str(ride.id))
+        arrived = service.driver_arrived_pickup(db, driver_id=driver_id, ride_id=str(ride.id))
+        assert arrived is not None
+        db.refresh(arrived)
+        lifecycle = RideLifecycleManager.normalize_state(
+            arrived.lifecycle_state or arrived.status
+        )
+        assert lifecycle == RideStatus.ARRIVED.value
+        assert lifecycle != RideStatus.RIDER_ONBOARD.value
+
+
+def test_driver_mobile_does_not_auto_promote_future_reservation(client: TestClient):
+    org_id = _org_id_for("rider@amicor.local")
+    driver_id = _ensure_driver(org_id)
     pickup = datetime(2026, 7, 30, 23, 47, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 22, 0, tzinfo=timezone.utc)
     with SessionLocal() as db, patch.object(service, "now", return_value=now):
         ride = _create_scheduled_ride(db, organization_id=org_id, pickup_time=pickup)
-        assign_driver_to_scheduled_ride(
-            db, ride_id=str(ride.id), driver_id=driver_id
-        )
+        assign_driver_to_scheduled_ride(db, ride_id=str(ride.id), driver_id=driver_id)
         accept_scheduled_ride(db, driver_id=driver_id, ride_id=str(ride.id))
-        promote_scheduled_reservations_for_driver(
-            db, organization_id=org_id, driver_id=driver_id
-        )
         snapshot = build_driver_mobile_read_snapshot(
             db,
             organization_id=org_id,
             driver_id=driver_id,
         )
-        assert snapshot["has_active_ride"] is True
-        assert snapshot["ride"] is not None
-        assert str(snapshot["ride"].id) == str(ride.id)
+        assert snapshot["has_active_ride"] is False
+        assert any(
+            str(item.get("ride_id")) == str(ride.id)
+            for item in (snapshot.get("upcoming_schedule") or [])
+        )
 
 
-def test_repeated_polling_is_idempotent(client: TestClient):
+def test_repeated_start_route_is_idempotent(client: TestClient):
     org_id = _org_id_for("rider@amicor.local")
     driver_id = _ensure_driver(org_id)
-    now = datetime(2026, 7, 30, 23, 0, tzinfo=timezone.utc)
-    pickup = datetime(2026, 7, 30, 23, 47, tzinfo=timezone.utc)
-    with SessionLocal() as db, patch.object(service, "now", return_value=now):
+    pickup = service.now() + timedelta(minutes=90)
+    with SessionLocal() as db:
         ride = _create_scheduled_ride(db, organization_id=org_id, pickup_time=pickup)
         assign_driver_to_scheduled_ride(db, ride_id=str(ride.id), driver_id=driver_id)
         accept_scheduled_ride(db, driver_id=driver_id, ride_id=str(ride.id))
-        first = promote_scheduled_reservations_for_driver(
-            db, organization_id=org_id, driver_id=driver_id
-        )
-        second = promote_scheduled_reservations_for_driver(
-            db, organization_id=org_id, driver_id=driver_id
-        )
-        assert len(first) == 1
-        assert len(second) == 0
-        active_count = (
+        service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=str(ride.id))
+        before_events = (
             db.query(HealthISFDispatchAssignment)
-            .filter(
-                HealthISFDispatchAssignment.ride_id == ride.id,
-                HealthISFDispatchAssignment.assignment_state
-                == DispatchAssignmentState.ACCEPTED.value,
-            )
+            .filter(HealthISFDispatchAssignment.ride_id == ride.id)
             .count()
         )
-        assert active_count == 1
+        service.driver_en_route_pickup(db, driver_id=driver_id, ride_id=str(ride.id))
+        after_events = (
+            db.query(HealthISFDispatchAssignment)
+            .filter(HealthISFDispatchAssignment.ride_id == ride.id)
+            .count()
+        )
+        assert before_events == after_events
+        db.refresh(ride)
+        assert RideStatus.DRIVER_EN_ROUTE.value == RideLifecycleManager.normalize_state(
+            ride.lifecycle_state or ride.status
+        )
 
 
 def test_accept_scheduled_reservation_is_idempotent(client: TestClient):
@@ -237,7 +241,7 @@ def test_accept_resolves_assignment_id(client: TestClient):
     org_id = _org_id_for("rider@amicor.local")
     driver_id = _ensure_driver(org_id)
     pickup = service.now() + timedelta(minutes=20)
-    with SessionLocal() as db, patch.object(service, "now", return_value=service.now()):
+    with SessionLocal() as db:
         ride = _create_scheduled_ride(db, organization_id=org_id, pickup_time=pickup)
         assign_driver_to_scheduled_ride(db, ride_id=str(ride.id), driver_id=driver_id)
         accepted_assignment = accept_scheduled_ride(

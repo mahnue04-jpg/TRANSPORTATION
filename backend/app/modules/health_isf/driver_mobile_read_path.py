@@ -212,7 +212,7 @@ def build_driver_mobile_read_snapshot(
                 )
                 ride_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
                 if ride_state in terminal_ride_states or not (
-                    op.is_active or op.has_active_offer or op.reason == "scheduled_route_ready"
+                    op.is_active or op.has_active_offer
                 ):
                     ride = None
                     assignment = None
@@ -238,8 +238,6 @@ def build_driver_mobile_read_snapshot(
             active_for_driver = op.is_active or op.has_active_offer
             if op.reason in {"scheduled_reservation", "group_scheduled_reservation"}:
                 active_for_driver = False
-            if op.reason == "scheduled_route_ready":
-                active_for_driver = True
             assignment_state = op.effective_assignment_state or (
                 str(assignment.assignment_state) if assignment and assignment.assignment_state else ""
             )
