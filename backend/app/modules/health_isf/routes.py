@@ -9565,6 +9565,34 @@ async def driver_accept_ride(
     )
     body = RideResponse.model_validate(ride).model_dump()
     body["already_accepted"] = already_accepted
+    from app.modules.health_isf.models import DispatchAssignmentState, HealthISFDispatchAssignment
+    from sqlalchemy import desc
+
+    accepted_assignment = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.ride_id == ride.id,
+            HealthISFDispatchAssignment.driver_id == effective_driver_id,
+            HealthISFDispatchAssignment.assignment_state.in_(
+                [
+                    DispatchAssignmentState.ACCEPTED.value,
+                    DispatchAssignmentState.EN_ROUTE_PICKUP.value,
+                    DispatchAssignmentState.PICKUP_COMPLETE.value,
+                    DispatchAssignmentState.ARRIVED_DESTINATION.value,
+                ]
+            ),
+        )
+        .order_by(desc(HealthISFDispatchAssignment.accepted_at), desc(HealthISFDispatchAssignment.updated_at))
+        .first()
+    )
+    if accepted_assignment:
+        body["assignment_state"] = str(accepted_assignment.assignment_state or "")
+    else:
+        winning_assignment = service._authoritative_assignment_for_ride(
+            db, ride, driver_id=effective_driver_id
+        )
+        if winning_assignment:
+            body["assignment_state"] = str(winning_assignment.assignment_state or "")
     return body
 
 

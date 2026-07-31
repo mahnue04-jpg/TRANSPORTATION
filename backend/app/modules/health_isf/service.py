@@ -8871,7 +8871,7 @@ def driver_dropoff_complete(
             db,
             ride,
             actor_user_id=actor_user_id,
-            materialize_payout_row=False,
+            materialize_payout_row=True,
         )
         if not financial or float(financial.get("ride_price_usd") or 0.0) <= 0.0:
             raise ValueError("Financial settlement did not produce a billable trip record")

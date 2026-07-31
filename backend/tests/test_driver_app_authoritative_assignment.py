@@ -142,15 +142,17 @@ def _create_and_assign(client: TestClient, dispatcher_headers: dict[str, str], r
         headers=dispatcher_headers,
     )
     assert approve.status_code == 200, approve.text
-    ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
-    assert ride_before.status_code == 200, ride_before.text
-    if str(ride_before.json().get("driver_id") or "") != driver_id:
-        assign = client.post(
-            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
-            headers=dispatcher_headers,
-            json={"driver_id": driver_id},
-        )
-        assert assign.status_code == 200, assign.text
+    from tests.health_isf_driver_test_helpers import ensure_ride_assigned_to_driver
+
+    admin_headers = _headers(_login(client, "admin@amicor.local")["access_token"])
+    ensure_ride_assigned_to_driver(
+        client,
+        dispatcher_headers=dispatcher_headers,
+        admin_headers=admin_headers,
+        request_id=request_id,
+        ride_id=ride_id,
+        driver_id=driver_id,
+    )
     return ride_id
 
 
@@ -203,13 +205,13 @@ def test_accepted_assignment_not_expired(client: TestClient) -> None:
     assert accept.status_code == 200, accept.text
 
     with SessionLocal() as db:
-        assignment = (
-            db.query(HealthISFDispatchAssignment)
-            .filter(HealthISFDispatchAssignment.ride_id == ride_id)
-            .order_by(HealthISFDispatchAssignment.updated_at.desc())
-            .first()
+        assignment = hs._latest_driver_assignment_for_ride(
+            db,
+            ride_id=ride_id,
+            driver_id=driver_id,
         )
         assert assignment is not None
+        assert str(assignment.assignment_state) == DispatchAssignmentState.ACCEPTED.value
         assignment.offer_expires_at = hs.now() - timedelta(minutes=5)
         db.commit()
         expired = hs.expire_stale_dispatch_offers(db, organization_id=org_id, ride_id=ride_id)
@@ -371,15 +373,17 @@ def test_dispatch_queue_includes_real_passenger_names(client: TestClient) -> Non
         headers=dispatcher_headers,
     )
     assert approve.status_code == 200, approve.text
-    ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
-    assert ride_before.status_code == 200, ride_before.text
-    if str(ride_before.json().get("driver_id") or "") != driver_id:
-        assign = client.post(
-            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
-            headers=dispatcher_headers,
-            json={"driver_id": driver_id},
-        )
-        assert assign.status_code == 200, assign.text
+    from tests.health_isf_driver_test_helpers import ensure_ride_assigned_to_driver
+
+    admin_headers = _headers(_login(client, "admin@amicor.local")["access_token"])
+    ensure_ride_assigned_to_driver(
+        client,
+        dispatcher_headers=dispatcher_headers,
+        admin_headers=admin_headers,
+        request_id=request_id,
+        ride_id=ride_id,
+        driver_id=driver_id,
+    )
 
     queue = client.get("/api/health-isf/dispatch/queue", headers=dispatcher_headers, params={"limit": 200})
     assert queue.status_code == 200, queue.text

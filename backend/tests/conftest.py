@@ -53,6 +53,24 @@ def db():
         session.close()
 
 
+@pytest.fixture(autouse=True)
+def _reset_health_isf_driver_state_before_test(request):
+    from tests.health_isf_driver_test_helpers import (
+        driver_test_module_names,
+        organization_id_for_dispatcher,
+        reset_organization_driver_test_state,
+    )
+
+    module_name = request.node.fspath.basename
+    if module_name not in driver_test_module_names():
+        return
+    from app.auth import ensure_auth_schema, seed_default_users
+
+    ensure_auth_schema()
+    seed_default_users()
+    reset_organization_driver_test_state(organization_id_for_dispatcher())
+
+
 def pytest_pyfunc_call(pyfuncitem): # type: ignore
     test_func = pyfuncitem.obj # type: ignore
     if inspect.iscoroutinefunction(test_func): # type: ignore

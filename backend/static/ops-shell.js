@@ -6930,15 +6930,15 @@
             '</tbody></table></div>' +
             '<div class="command-actions">' +
               '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
-              (["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0 && ["driver_en_route", "en_route_pickup", "arrived", "rider_onboard", "in_progress"].indexOf(tripStatus) < 0
-                ? '<button class="preview-action driver-action" data-driver-action="request_cancellation" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Request Cancellation</button>'
-                : '') +
               '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
               '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
               '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
               '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
+              (["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0 && ["driver_en_route", "en_route_pickup", "arrived", "rider_onboard", "in_progress"].indexOf(tripStatus) < 0
+                ? '<button class="preview-action driver-action driver-action-danger" data-driver-action="request_cancellation" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Request Cancellation</button>'
+                : '') +
               (riderPhone
                 ? '<button class="preview-action driver-action" data-driver-action="call_rider" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Call Rider</button>'
                 : '<button class="preview-action" disabled>Call Rider</button>') +
@@ -15823,16 +15823,18 @@ function _amiResolveDriverAcceptContext(driverId, tripId) {
     ).toLowerCase();
   } else if (tripMatches(offerRideId)) {
     assignmentState = safeText(activeOffer.assignment_state, "").toLowerCase();
+  } else {
+    var queueTrip = (Array.isArray((safeObject(shell.driverApp)).tripQueue) ? shell.driverApp.tripQueue : []).find(function (trip) {
+      return safeText(trip.tripId, "") === safeText(tripId, "");
+    });
+    assignmentState = safeText(queueTrip && queueTrip.coordinationStatus, "").toLowerCase();
   }
   var lifecycleState = tripMatches(ride.id)
     ? safeText(ride.lifecycle_state || ride.status, "").toLowerCase()
-    : safeText(activeOffer.ride_status, "").toLowerCase();
-  var schedulingSummary = tripMatches(ride.id)
-    ? safeText(ride.scheduling_summary, "")
-    : "";
-  var dispatchEligibleAt = tripMatches(ride.id) ? safeText(ride.dispatch_eligible_at, "") : "";
-  var isScheduledOffer = _amiIsScheduledAssignmentState(assignmentState)
-    || (assignmentState === "offered" && (!!schedulingSummary || !!dispatchEligibleAt));
+    : (tripMatches(offerRideId)
+      ? safeText(activeOffer.ride_status, "").toLowerCase()
+      : "");
+  var isScheduledOffer = _amiIsScheduledAssignmentState(assignmentState);
   return {
     assignmentState: assignmentState,
     lifecycleState: lifecycleState,
@@ -15853,6 +15855,39 @@ async function _amiFetchDriverActiveRideWorkspace(driverId, tripId) {
     return null;
   }
   return workspace;
+}
+
+async function _amiFetchDriverActiveRideWorkspaceWithRetry(driverId, tripId, attempts) {
+  var maxAttempts = Math.max(1, safeNumber(attempts, 4));
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    var workspace = await _amiFetchDriverActiveRideWorkspace(driverId, tripId);
+    if (workspace) {
+      return workspace;
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(function (resolve) {
+        setTimeout(resolve, 350 * (attempt + 1));
+      });
+    }
+  }
+  return null;
+}
+
+function _amiAcceptPostIndicatesSuccess(acceptPayload, tripId) {
+  var body = safeObject(acceptPayload);
+  var rideId = safeText(body.id || body.ride_id, "");
+  if (!rideId || rideId !== safeText(tripId, "")) {
+    return false;
+  }
+  if (body.already_accepted === true) {
+    return true;
+  }
+  var assignmentState = safeText(body.assignment_state, "").toLowerCase();
+  if (assignmentState === "accepted" || assignmentState === "scheduled_accepted") {
+    return true;
+  }
+  var lifecycle = safeText(body.lifecycle_state || body.status, "").toLowerCase();
+  return ["assigned", "accepted", "driver_en_route", "en_route_pickup", "queued"].indexOf(lifecycle) >= 0;
 }
 
 function _amiDriverAcceptVerification(workspace, tripId, mode) {
@@ -16230,10 +16265,28 @@ async function _amiRecoverAcceptedDriverTrip(driverId, tripId, acceptMode) {
 }
 
 async function _amiFinalizeDriverAcceptTrip(tripId, payload, driverId, alreadyAccepted, acceptMode) {
-  var workspace = await _amiFetchDriverActiveRideWorkspace(driverId, tripId);
+  var acceptPayload = safeObject(payload);
+  var workspace = await _amiFetchDriverActiveRideWorkspaceWithRetry(driverId, tripId, 4);
   var verification = workspace
     ? _amiDriverAcceptVerification(workspace, tripId, acceptMode || "immediate")
     : { ok: false, reason: "missing_workspace" };
+  if (!verification.ok && (_amiAcceptPostIndicatesSuccess(acceptPayload, tripId) || alreadyAccepted)) {
+    var lifecycleState = safeText(
+      acceptPayload.lifecycle_state || acceptPayload.status,
+      "assigned"
+    ).toLowerCase();
+    verification = {
+      ok: true,
+      assignment_state: "accepted",
+      lifecycle_state: lifecycleState,
+      display_status: "accepted"
+    };
+    workspace = workspace || {
+      ride: acceptPayload,
+      assignment_state: "accepted",
+      active_assignment: { assignment_state: "accepted", ride_id: tripId }
+    };
+  }
   if (!verification.ok) {
     _amiLogDriverMobileSync({
       event: "accept_ride_unverified",
@@ -17030,6 +17083,9 @@ window._amiHandleDriverDeclineTrip = async function(tripId) {
 window._amiHandleDriverRequestCancellation = async function(tripId) {
   var driverId = _amiCanonicalMobileDriverId();
   if (!driverId || !tripId) return false;
+  if (!window.confirm("Request cancellation for this ride? Dispatch must review and approve before the ride is cancelled.")) {
+    return false;
+  }
   var reason = window.prompt("Request cancellation reason (required):", "");
   if (!reason || !String(reason).trim()) {
     window.alert("A cancellation reason is required.");
