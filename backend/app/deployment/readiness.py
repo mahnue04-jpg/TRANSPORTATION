@@ -13,6 +13,8 @@ import logging
 import os
 from typing import Any
 
+from app.deployment.release_version import resolve_app_version
+
 logger = logging.getLogger("amicor.deployment.readiness")
 
 # ─── Required and recommended environment variables ───────────────────────────
@@ -144,7 +146,7 @@ class DeploymentReadinessChecker:
             ),
         }
 
-        app_version = os.environ.get("APP_VERSION", "")
+        app_version = resolve_app_version()
         checks["app_version_set"] = {
             "passed": bool(app_version and app_version not in {"dev", "local"}),
             "detail": (
@@ -336,7 +338,7 @@ def build_health_monitoring_payload(db_ok: bool, ws_stats: dict[str, Any]) -> di
             },
         },
         "environment": {
-            "app_version": os.environ.get("APP_VERSION", "dev"),
+            "app_version": resolve_app_version(),
             "log_level": os.environ.get("LOG_LEVEL", "INFO"),
         },
     }

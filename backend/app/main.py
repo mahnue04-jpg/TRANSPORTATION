@@ -27,6 +27,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 
+from app.deployment.release_version import resolve_app_version
+
 # Guard against Python 3.13 Windows WMI stalls during platform.machine() at import time.
 if os.name == "nt" and os.getenv("AMICOR_SKIP_WMI_PLATFORM_QUERY", "1") == "1":
     _arch_hint = (os.getenv("PROCESSOR_ARCHITEW6432") or os.getenv("PROCESSOR_ARCHITECTURE") or "").upper()
@@ -477,7 +479,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Amicor AI Assistant",
     description="Production AI assistant backend.",
-    version=os.environ.get("APP_VERSION", "dev"),
+    version=resolve_app_version(),
     lifespan=lifespan,
 )
 
@@ -570,7 +572,7 @@ def health_live():
     """Liveness probe — confirms the process is running."""
     return {
         "status": "ok",
-        "version": os.environ.get("APP_VERSION", "dev"),
+        "version": resolve_app_version(),
         "environment": RUNTIME_ENVIRONMENT,
         "frontend_build_version": FRONTEND_BUILD_VERSION,
         "hydration_version": HYDRATION_VERSION,
@@ -583,7 +585,7 @@ def health_live():
 def runtime_topology(request: Request) -> dict[str, str]:
     """Expose canonical runtime topology for frontend diagnostics and verification."""
     topology = dict(build_runtime_contract(request=request))
-    topology["app_version"] = os.environ.get("APP_VERSION", "dev")
+    topology["app_version"] = resolve_app_version()
     topology["deploy_commit"] = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or ""
     topology["deploy_branch"] = os.environ.get("RENDER_GIT_BRANCH") or os.environ.get("GIT_BRANCH") or ""
     return topology
@@ -2806,9 +2808,9 @@ def health():
     return responses_module.normalize_success(
         data={
             "status": "ok",
-            "version": os.environ.get("APP_VERSION", "dev"),
+            "version": resolve_app_version(),
         },
-        version=os.environ.get("APP_VERSION", "dev"),
+        version=resolve_app_version(),
     )
 
 
@@ -2843,13 +2845,13 @@ def health_detail():
         "status": "healthy" if all_ok else "degraded",
         "db": db_check,
         "startup": report,
-        "version": os.environ.get("APP_VERSION", "dev"),
+        "version": resolve_app_version(),
     }
     
     if all_ok:
         response = responses_module.normalize_success(
             data=response_data,
-            version=os.environ.get("APP_VERSION", "dev"),
+            version=resolve_app_version(),
         )
     else:
         response = responses_module.normalize_error(
@@ -3407,9 +3409,9 @@ def provider_diagnostics() -> responses_module.NormalizedResponse:  # type: igno
         return responses_module.normalize_success(
             data={
                 "providers": providers_data,
-                "version": os.environ.get("APP_VERSION", "dev"),
+                "version": resolve_app_version(),
             },
-            version=os.environ.get("APP_VERSION", "dev"),
+            version=resolve_app_version(),
         )
     except Exception as exc:
         logger.exception("Provider diagnostics error")
@@ -3480,7 +3482,7 @@ def admin_dashboard() -> dict[str, Any]:  # type: ignore
         "providers": all_diagnostics(),
         "observability": observability.get_metrics(),
         "recent_provider_logs": recent_logs,
-        "version": os.environ.get("APP_VERSION", "dev"),
+        "version": resolve_app_version(),
     } # type: ignore
 
 

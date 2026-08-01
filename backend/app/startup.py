@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Optional
 
+from app.deployment.release_version import resolve_app_version
+
 logger = logging.getLogger("amicor.startup")
 
 _DEFAULT_DB = os.path.abspath(
@@ -31,7 +33,7 @@ OPTIONAL_VARS: dict[str, str] = {
     "LOG_LEVEL":        "Defaults to INFO.",
     "DB_FILENAME":      f"Defaults to {_DEFAULT_DB}.",
     "MAX_HISTORY":      "Defaults to 10 messages.",
-    "APP_VERSION":      "Defaults to 'dev'.",
+    "APP_VERSION":      "Defaults to backend/release.version, then 'dev'.",
     "AMICOR_BUILD_VERSION": "Canonical runtime version used by frontend build and hydration contract.",
     "AMICOR_FRONTEND_BUILD_VERSION": "Legacy/deprecated split version variable (ignored by runtime contract).",
     "AMICOR_HYDRATION_VERSION": "Legacy/deprecated split version variable (ignored by runtime contract).",
@@ -160,7 +162,7 @@ def run_startup_validation() -> dict: # type: ignore
         "environment": env_result,
         "database":    db_result,
         "ok":          env_result["ok"] and db_result["ok"],
-        "version":     os.environ.get("APP_VERSION", "dev"),
+        "version":     resolve_app_version(),
         "log_level":   os.environ.get("LOG_LEVEL", "INFO"),
     }
 

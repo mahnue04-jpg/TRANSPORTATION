@@ -1,6 +1,8 @@
 import os
 import re
 
+from app.deployment.release_version import resolve_app_version
+
 DEFAULT_RUNTIME_VERSION = "20260607.6"
 
 _LOCAL_FRONTEND = "http://127.0.0.1:8010/app"
@@ -73,12 +75,12 @@ def _resolve_build_version() -> str:
     ).strip()
     if commit:
         return commit[:12]
+    version = resolve_app_version()
+    if version != "dev":
+        return version
     return os.environ.get(
-        "APP_VERSION",
-        os.environ.get(
-            "AMICOR_BUILD_VERSION",
-            os.environ.get("AMICOR_FRONTEND_BUILD_VERSION", DEFAULT_RUNTIME_VERSION),
-        ),
+        "AMICOR_BUILD_VERSION",
+        os.environ.get("AMICOR_FRONTEND_BUILD_VERSION", DEFAULT_RUNTIME_VERSION),
     )
 
 
