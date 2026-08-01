@@ -67,6 +67,9 @@ def _ensure_available_driver(organization_id: str) -> str:
             vehicle_type="sedan",
             vehicle_plate=f"P49-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,
+            availability_state="available",
+            is_online=True,
+            auth_state="active",
             is_active=True,
             rating=4.8,
         )

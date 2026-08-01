@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from app.modules.platform_ops.permissions import (
     user_role,
 )
 from app.modules.platform_ops.readiness import compute_readiness_summary
+from app.modules.platform_ops.storage import get_document_storage
 from app.modules.platform_ops.schemas import (
     ActivationResponse,
     DocumentReviewRequest,
@@ -247,6 +249,45 @@ async def upload_document(
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
     return onboarding_service.document_to_response(document).model_dump()
+
+
+@router.get("/applications/{application_id}/documents/{document_id}/download")
+def download_document(
+    application_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+    user=Depends(_optional_current_user),  # type: ignore
+):
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    _authorize_application_access(
+        application=application,
+        user=user,
+        applicant_token=x_applicant_token,
+    )
+    document = (
+        db.query(PlatformDriverOnboardingDocument)
+        .filter(
+            PlatformDriverOnboardingDocument.id == document_id,
+            PlatformDriverOnboardingDocument.application_id == application_id,
+        )
+        .first()
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if not document.storage_ref:
+        raise HTTPException(status_code=404, detail="Document has no stored file.")
+    storage = get_document_storage()
+    try:
+        payload, _ = storage.retrieve(storage_ref=document.storage_ref)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Stored document file not found.") from exc
+    media_type = document.content_type or "application/octet-stream"
+    filename = document.original_filename or "document.bin"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=payload, media_type=media_type, headers=headers)
 
 
 @router.post("/applications/{application_id}/documents/status-only")

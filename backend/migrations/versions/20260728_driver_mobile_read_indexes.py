@@ -4,7 +4,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "20260728_driver_mobile_read_indexes"
-down_revision = "f6e5d4c3b2a1"
+down_revision = "c0d1e2f3a4b6"
 branch_labels = None
 depends_on = None
 
