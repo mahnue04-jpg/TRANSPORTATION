@@ -283,154 +283,66 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Platform DB init failed: %s", exc)
 
-    # ── Health ISF Module Initialization ───────────────────────────────────
-    try:
-        # Ensure health_isf module is properly discoverable
-        import sys
-        health_isf_dir = os.path.join(os.path.dirname(__file__), "modules", "health_isf")
-        modules_dir = os.path.dirname(health_isf_dir)
-        if modules_dir not in sys.path:
-            sys.path.insert(0, modules_dir)
-        
-        logger.info("Initializing Health ISF module...")
-        
-        # Import health_isf models to register with SQLAlchemy
-        from app.modules.health_isf import models as health_isf_models  # type: ignore
-        from app.modules.health_isf import ai_governance_engine as ai_governance_engine_module  # type: ignore
-        from app.modules.health_isf import approval_contract as approval_contract_module  # type: ignore
-        from app.modules.health_isf import correlation_engine as correlation_engine_module  # type: ignore
-        from app.modules.health_isf import governance_models as governance_models_module  # type: ignore
-        from app.modules.health_isf import governance_registry as governance_registry_module  # type: ignore
-        from app.modules.health_isf import operational_timeline as operational_timeline_module  # type: ignore
-        logger.info("Health ISF models imported")
-        
-        # Create all Health ISF tables
-        from app.db.session import engine, Base  # type: ignore
-        Base.metadata.create_all(bind=engine)
-        logger.info("Health ISF tables created")
-        
-        # Initialize real-time infrastructure
+    from app.deployment.release_version import resolve_app_version
+
+    logger.info(
+        "Amicor accepting traffic. version=%s deferred_init=scheduled",
+        resolve_app_version(),
+    )
+
+    async def _deferred_startup_runner() -> None:
+        from app.deployment.background_startup import run_deferred_platform_startup
+
+        await asyncio.to_thread(run_deferred_platform_startup, runtime_environment=RUNTIME_ENVIRONMENT)
         try:
-            from app.modules.health_isf.realtime import initialize_realtime  # type: ignore
-            initialize_realtime()
-            logger.info("Real-time dispatch operations infrastructure initialized")
-        except Exception as rt_exc:
-            logger.error("Real-time infrastructure init failed: %s", rt_exc)
-        
-        # Initialize sample data
-        from app.db.session import SessionLocal  # type: ignore
-        from app.modules.health_isf import service as health_isf_service  # type: ignore
+            from app.monitoring.runtime_logger import record_supervision_event
 
-        try:
-            governor = initialize_runtime_governor(
-                db_session_factory=SessionLocal,
-                cleanup_interval_seconds=int(os.environ.get("RUNTIME_GOVERNOR_CLEANUP_INTERVAL_SECONDS", "60")),
-                stale_after_seconds=int(os.environ.get("RUNTIME_GOVERNOR_STALE_AFTER_SECONDS", "300")),
+            listener_snapshot = _listener_ownership_snapshot(expected_port)
+            bootstrap_probe = await _bootstrap_health_probe(
+                os.environ.get("DEFAULT_ORGANIZATION_ID", "global"),
             )
-            logger.info("Runtime governor initialized | active_workflows=%s", governor.active_workflow_count)
-        except Exception as governor_exc:
-            logger.error("Runtime governor initialization failed: %s", governor_exc)
-        
-        db = SessionLocal()
-        try:
-            default_org = health_isf_service._get_or_create_default_org(db)  # type: ignore
-            bootstrap_summary = health_isf_service.sync_operational_bootstrap(db)  # type: ignore
-            provider_summary = bootstrap_summary.get("summaries", [{}])[0].get("providers", {}) if bootstrap_summary.get("summaries") else {}
-            driver_summary = bootstrap_summary.get("summaries", [{}])[0].get("drivers", {}) if bootstrap_summary.get("summaries") else {}
-            logger.info(
-                "Operational bootstrap complete: orgs=%s",
-                bootstrap_summary.get("organizations_synced"),
+            _cfg_snapshot: dict = {}
+            try:
+                _cfg_snapshot = validate_runtime_config()
+            except Exception:
+                pass
+            record_supervision_event(
+                subsystem="runtime",
+                event="startup",
+                details={
+                    "version": str(report.get("version", "dev")),
+                    "environment": RUNTIME_ENVIRONMENT,
+                    "runtime_config_status": _cfg_snapshot.get("validation_status", "unknown"),
+                    "missing_required": _cfg_snapshot.get("missing_required", []),
+                    "missing_optional": _cfg_snapshot.get("missing_optional", []),
+                    "process_lineage": process_lineage,
+                    "restart_attribution": {
+                        "reason": os.environ.get("AMICOR_RUNTIME_RECOVERY_REASON", "unspecified"),
+                        "session": os.environ.get("AMICOR_RUNTIME_RECOVERY_SESSION", "none"),
+                    },
+                    "listener_ownership": listener_snapshot,
+                    "bootstrap_probe": bootstrap_probe,
+                    "startup_ms": int((time.perf_counter() - startup_started_at) * 1000),
+                    "deferred_startup": True,
+                },
             )
-            logger.info(
-                "Operational provider seed ensured: org=%s total=%s created=%s",
-                provider_summary.get("organization_id"),
-                provider_summary.get("total"),
-                provider_summary.get("created"),
-            )
-            logger.info(
-                "Operational driver seed ensured: org=%s total=%s created=%s names=%s",
-                driver_summary.get("organization_id"),
-                driver_summary.get("total"),
-                driver_summary.get("created"),
-                driver_summary.get("driver_names"),
-            )
-            seed_sample_data = os.environ.get("AMICOR_SEED_SAMPLE_DATA", "").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-            }
-            if seed_sample_data or RUNTIME_ENVIRONMENT not in {"production", "prod"}:
-                health_isf_service.init_sample_data(db)  # type: ignore
-                logger.info("Health ISF MVP module initialized with sample data.")
-            else:
-                logger.info("Health ISF sample seed skipped (production mode; set AMICOR_SEED_SAMPLE_DATA=1 to enable).")
-        finally:
-            db.close()
-    except Exception as exc:
-        logger.error("Health ISF module init failed: %s", exc)
-        import traceback
-        traceback.print_exc()
-
-    logger.info("Amicor ready. version=%s", report.get("version", "dev")) # type: ignore
-    try:
-        from app.monitoring.runtime_logger import record_supervision_event
-
-        listener_snapshot = _listener_ownership_snapshot(expected_port)
-        bootstrap_probe = await _bootstrap_health_probe(
-            os.environ.get("DEFAULT_ORGANIZATION_ID", "global"),
-        )
-
-        if not listener_snapshot.get("ownership_ok", False):
-            logger.error(
-                "Listener ownership mismatch | expected_pid=%s owner_pid=%s port=%s",
-                listener_snapshot.get("current_pid"),
-                listener_snapshot.get("listener_owner_pid"),
-                listener_snapshot.get("expected_port"),
-            )
-
-        if listener_snapshot.get("stale_worker_detected", False):
-            logger.warning(
-                "Potential stale worker detected on runtime port | owner_pid=%s port=%s",
-                listener_snapshot.get("listener_owner_pid"),
-                listener_snapshot.get("expected_port"),
-            )
-
-        # Phase 7: validate runtime config and include in startup event
-        _cfg_snapshot: dict = {}
-        try:
-            _cfg_snapshot = validate_runtime_config()
         except Exception:
             pass
 
-        record_supervision_event(
-            subsystem="runtime",
-            event="startup",
-            details={
-                "version": str(report.get("version", "dev")),
-                "environment": RUNTIME_ENVIRONMENT,
-                "runtime_config_status": _cfg_snapshot.get("validation_status", "unknown"),
-                "missing_required": _cfg_snapshot.get("missing_required", []),
-                "missing_optional": _cfg_snapshot.get("missing_optional", []),
-                "process_lineage": process_lineage,
-                "restart_attribution": {
-                    "reason": os.environ.get("AMICOR_RUNTIME_RECOVERY_REASON", "unspecified"),
-                    "session": os.environ.get("AMICOR_RUNTIME_RECOVERY_SESSION", "none"),
-                },
-                "listener_ownership": listener_snapshot,
-                "bootstrap_probe": bootstrap_probe,
-                "startup_ms": int((time.perf_counter() - startup_started_at) * 1000),
-            },
-        )
+    from app.deployment.background_startup import deferred_startup_status
 
-        if os.environ.get("AMICOR_FAIL_FAST_STARTUP", "0").strip() == "1":
-            ownership_ok = bool(listener_snapshot.get("ownership_ok", False))
-            hydration_ok = str(bootstrap_probe.get("hydration_status", "unknown")) in {"healthy", "degraded"}
-            if not ownership_ok or not hydration_ok:
-                raise RuntimeError("fail_fast_startup_guard_triggered")
-    except Exception:
-        pass
+    deferred_startup_status()["scheduled"] = True
+    deferred_task = asyncio.create_task(_deferred_startup_runner())
 
     yield  # ── APPLICATION RUNNING ──────────────────────────────────────────
+
+    deferred_task.cancel()
+    try:
+        await deferred_task
+    except asyncio.CancelledError:
+        pass
+    except Exception as deferred_exc:
+        logger.error("Deferred startup task shutdown error: %s", deferred_exc)
 
     # ── SHUTDOWN ─────────────────────────────────────────────────────────────
     try:
@@ -570,6 +482,8 @@ except Exception as exc:
 @app.get("/api/health/live", tags=["health"])
 def health_live():
     """Liveness probe — confirms the process is running."""
+    from app.deployment.background_startup import deferred_startup_status
+
     return {
         "status": "ok",
         "version": resolve_app_version(),
@@ -578,6 +492,7 @@ def health_live():
         "hydration_version": HYDRATION_VERSION,
         "deploy_commit": os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT"),
         "deploy_branch": os.environ.get("RENDER_GIT_BRANCH") or os.environ.get("GIT_BRANCH"),
+        "deferred_startup": deferred_startup_status(),
     }
 
 
