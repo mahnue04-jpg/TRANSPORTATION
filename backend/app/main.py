@@ -2603,8 +2603,21 @@ if os.path.isdir(_static_dir):
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
-    # Keep browser smoke output clean by serving a non-error favicon response.
+    icon_path = os.path.join(_static_dir, "branding", "favicon.ico")
+    if os.path.isfile(icon_path):
+        return FileResponse(icon_path, media_type="image/x-icon")
     return Response(status_code=204)
+
+
+@app.get("/brand-preview", include_in_schema=False)
+def brand_preview_gallery() -> HTMLResponse:
+    """Branded surface gallery for pre-deployment review."""
+    preview_path = os.path.join(_static_dir, "branding", "preview.html")
+    with open(preview_path, "r", encoding="utf-8") as f:
+        html = f.read()
+    response = HTMLResponse(content=html, media_type="text/html")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> list[str]:

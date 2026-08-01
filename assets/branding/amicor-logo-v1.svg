@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Amicor">
+  <defs>
+    <linearGradient id="amicor-mark-gradient" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#19c7ff"/>
+      <stop offset="100%" stop-color="#0b6bcb"/>
+    </linearGradient>
+    <linearGradient id="amicor-route-gradient" x1="128" y1="320" x2="384" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7ee7ff"/>
+      <stop offset="100%" stop-color="#0b6bcb"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#020a16"/>
+  <rect x="56" y="56" width="400" height="400" rx="96" fill="url(#amicor-mark-gradient)" opacity="0.22"/>
+  <path d="M120 332 C 196 188, 316 188, 392 332" fill="none" stroke="url(#amicor-route-gradient)" stroke-width="30" stroke-linecap="round"/>
+  <path d="M256 156 v88 M212 212 h88" fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round"/>
+  <path d="M176 360 L256 248 L336 360 Z" fill="#ffffff"/>
+  <rect x="232" y="308" width="48" height="28" rx="6" fill="#0b6bcb"/>
+</svg>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b6bcb" />
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css?v=20260801.1" />
+  <title>Amicor Brand Preview — All Surfaces</title>
+  <style>
+    :root {
+      --bg: #020a16;
+      --surface: #09192d;
+      --text: #e8f2ff;
+      --muted: #93b4d4;
+      --border: rgba(25, 199, 255, 0.22);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    header h1 { margin: 0; font-size: 1.5rem; }
+    header p { margin: 8px 0 0; color: var(--muted); max-width: 720px; }
+    main { padding: 24px 32px 48px; max-width: 1400px; margin: 0 auto; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .card-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .card-head h2 { margin: 0; font-size: 1rem; }
+    .card-head a {
+      color: #19c7ff;
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    .card-head a:hover { text-decoration: underline; }
+    .shot {
+      display: block;
+      width: 100%;
+      background: #06101f;
+      min-height: 180px;
+      object-fit: cover;
+      object-position: top;
+    }
+    .shot-missing {
+      padding: 48px 16px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .assets {
+      margin-top: 32px;
+      padding: 20px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .assets h2 { margin: 0 0 16px; font-size: 1.1rem; }
+    .asset-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: center;
+    }
+    .asset-row figure { margin: 0; text-align: center; }
+    .asset-row figcaption { margin-top: 8px; font-size: 0.8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="amicor-brand-lockup">
+    <img class="amicor-logo amicor-logo-lg" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="48" height="48" />
+    <div>
+      <h1>Amicor Brand Identity v1 — Surface Preview</h1>
+      <p>Review every branded surface before deployment. Screenshots are generated locally via <code>capture_previews.py</code>; live routes open in a new tab.</p>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid" id="preview-grid"></div>
+
+    <section class="assets">
+      <h2>Icon &amp; PWA Assets</h2>
+      <div class="asset-row">
+        <figure>
+          <img class="amicor-logo amicor-logo-xl" src="/static/branding/amicor-logo-v1.svg" alt="SVG logo" width="72" height="72" />
+          <figcaption>SVG mark</figcaption>
+        </figure>
+        <figure>
+          <img src="/static/branding/favicon.ico" alt="Favicon" width="32" height="32" />
+          <figcaption>favicon.ico</figcaption>
+        </figure>
+        <figure>
+          <img src="/static/branding/apple-touch-icon.png" alt="Apple touch icon" width="120" height="120" />
+          <figcaption>apple-touch-icon</figcaption>
+        </figure>
+        <figure>
+          <img src="/static/branding/android-chrome-192.png" alt="Android 192" width="96" height="96" />
+          <figcaption>android 192</figcaption>
+        </figure>
+        <figure>
+          <img src="/static/branding/android-chrome-512.png" alt="Android 512" width="128" height="128" />
+          <figcaption>android 512</figcaption>
+        </figure>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    var SURFACES = [
+      { slug: "01-landing", title: "Landing Page", href: "/" },
+      { slug: "02-login", title: "Login", href: "/?amicor_preview=login" },
+      { slug: "03-dispatch-dashboard", title: "Dispatch Dashboard", href: "/app/dispatch" },
+      { slug: "04-rider-app", title: "Rider App", href: "/app/riders" },
+      { slug: "05-driver-mobile", title: "Driver App", href: "/app/mobile" },
+      { slug: "06-provider-portal", title: "Provider Portal", href: "/app/providers" },
+      { slug: "07-ai-assistant", title: "AI Assistant", href: "/app/ai-assistant" },
+      { slug: "08-admin-dashboard", title: "Admin Dashboard", href: "/admin" },
+      { slug: "09-driver-apply", title: "Driver Onboarding", href: "/platform-ops/driver-apply" },
+      { slug: "10-ops-dashboard", title: "Operations Dashboard", href: "/app/dashboard" }
+    ];
+
+    var grid = document.getElementById("preview-grid");
+    SURFACES.forEach(function (surface) {
+      var card = document.createElement("article");
+      card.className = "card";
+      var imgSrc = "/static/branding/preview-screenshots/" + surface.slug + ".png";
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<h2>' + surface.title + '</h2>' +
+          '<a href="' + surface.href + '" target="_blank" rel="noopener">Open live</a>' +
+        '</div>' +
+        '<img class="shot" src="' + imgSrc + '" alt="' + surface.title + '" onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'shot-missing\',textContent:\'Run capture_previews.py to generate screenshot\'}))" />';
+      grid.appendChild(card);
+    });
+
+    if (new URLSearchParams(location.search).get("amicor_preview") === "login" && window.AmiCorAuthUI) {
+      window.AmiCorAuthUI.showLogin();
+    }
+  </script>
+  <script src="/static/ux/authUI.js?v=20260801.1"></script>
+</body>
+</html>

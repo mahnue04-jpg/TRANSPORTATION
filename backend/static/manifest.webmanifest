@@ -1,11 +1,30 @@
 {
-  "name": "Amicor AI Assistant",
+  "name": "Amicor Health ISF",
   "short_name": "Amicor",
-  "start_url": "/app",
+  "start_url": "/app/dashboard",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b0b10",
-  "theme_color": "#6c63ff",
-  "description": "Amicor assistant with ecosystem integrations and workflow execution.",
-  "icons": []
+  "background_color": "#020a16",
+  "theme_color": "#0b6bcb",
+  "description": "Healthcare transportation operations, dispatch, and coordinated NEMT workflows.",
+  "icons": [
+    {
+      "src": "/static/branding/android-chrome-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/branding/android-chrome-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/branding/android-chrome-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
 }

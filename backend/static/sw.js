@@ -1,4 +1,4 @@
-const CACHE_NAME = "amicor-pwa-v2";
+const CACHE_NAME = "amicor-pwa-v3";
 const CORE_ASSETS = [
   "/app",
   "/static/index.html",
@@ -6,7 +6,14 @@ const CORE_ASSETS = [
   "/static/streaming.js",
   "/static/orchestrator.js",
   "/static/tools.js",
-  "/static/manifest.webmanifest"
+  "/static/manifest.webmanifest",
+  "/static/branding/brand.css",
+  "/static/branding/brand.js",
+  "/static/branding/amicor-logo-v1.svg",
+  "/static/branding/favicon.ico",
+  "/static/branding/apple-touch-icon.png",
+  "/static/branding/android-chrome-192.png",
+  "/static/branding/android-chrome-512.png"
 ];
 
 self.addEventListener("install", (event) => {

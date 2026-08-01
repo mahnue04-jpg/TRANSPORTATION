@@ -1,0 +1,160 @@
+{
+  "generated_at": "2026-08-01T19:15:04.583304+00:00",
+  "branding_frozen": true,
+  "verdict": "GO",
+  "workflow": {
+    "ride_id": "ec584a52-a19a-4fd9-add1-6264ac5447fe",
+    "request_id": "823b8909-0f2c-4b1a-958b-d9e763a74a1f",
+    "driver_id": "5496f1df-702f-4b9a-b190-e6725656f8c5",
+    "steps": [
+      {
+        "step": "rider_creates_ride",
+        "ok": true,
+        "status": 201
+      },
+      {
+        "step": "dispatch_receives_ride",
+        "ok": true,
+        "status": 200,
+        "assignment_state": "pending_assignment"
+      },
+      {
+        "step": "dispatch_approves_request",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "ai_assigns_ride",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "driver_receives_offer",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "driver_accepts",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "driver_arrives",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "pickup",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "trip_in_progress",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "complete_trip",
+        "ok": true,
+        "status": 200
+      },
+      {
+        "step": "billing_records_generated",
+        "ok": true,
+        "financial_records": 1,
+        "billing_handoffs": 1
+      },
+      {
+        "step": "driver_earnings_update",
+        "ok": true,
+        "driver_pay_usd": 12.96
+      },
+      {
+        "step": "admin_revenue_updates",
+        "ok": true,
+        "platform_revenue_usd": 1.28
+      },
+      {
+        "step": "driver_returns_available",
+        "ok": true,
+        "driver_status": "assigned"
+      },
+      {
+        "step": "dashboard_refreshes",
+        "ok": true,
+        "completed_before": 119,
+        "completed_after": 120
+      }
+    ]
+  },
+  "branding": [
+    {
+      "surface": "favicon",
+      "path": "/favicon.ico",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "pwa_manifest",
+      "path": "/static/manifest.webmanifest",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "landing",
+      "path": "/",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "ops_dashboard",
+      "path": "/app/dashboard",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "dispatch",
+      "path": "/app/dispatch",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "rider_app",
+      "path": "/app/riders",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "driver_app",
+      "path": "/app/mobile",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "provider_portal",
+      "path": "/app/providers",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "ai_assistant",
+      "path": "/app/ai-assistant",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "admin",
+      "path": "/admin",
+      "status": 200,
+      "branded": true
+    },
+    {
+      "surface": "brand_gallery",
+      "path": "/static/branding/preview.html",
+      "status": 200,
+      "branded": true
+    }
+  ],
+  "workflow_pass": true,
+  "branding_pass": true
+}

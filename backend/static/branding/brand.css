@@ -1,0 +1,80 @@
+:root {
+  --amicor-brand-primary: #0b6bcb;
+  --amicor-brand-accent: #19c7ff;
+  --amicor-brand-bg: #020a16;
+  --amicor-brand-surface: #09192d;
+  --amicor-brand-text: #e8f2ff;
+}
+
+.amicor-logo {
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.amicor-logo-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.amicor-logo-lg {
+  width: 48px;
+  height: 48px;
+}
+
+.amicor-logo-xl {
+  width: 72px;
+  height: 72px;
+}
+
+.amicor-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.amicor-brand-lockup strong,
+.amicor-brand-lockup h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  color: inherit;
+}
+
+.amicor-brand-lockup p,
+.amicor-brand-lockup .amicor-brand-tagline {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  opacity: 0.82;
+}
+
+.amicor-surface-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(11, 107, 203, 0.12);
+  border: 1px solid rgba(25, 199, 255, 0.22);
+}
+
+.amicor-auth-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.amicor-auth-logo-wrap .amicor-logo {
+  width: 56px;
+  height: 56px;
+}
+
+.brand-avatar .amicor-logo,
+.welcome-avatar .amicor-logo {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}

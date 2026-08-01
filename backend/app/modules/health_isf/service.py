@@ -4222,15 +4222,21 @@ def get_dispatch_queue(
         recommended_driver_name = None
         recommendation_text = None
         dispatcher_message = None
-        if assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value and recommended_driver_id:
+        if recommended_driver_id and assignment_state in {
+            DispatchAssignmentState.AWAITING_APPROVAL.value,
+            DispatchAssignmentState.OFFERED.value,
+        }:
             recommended_driver = get_driver_by_id(db, recommended_driver_id)
             recommended_driver_name = recommended_driver.name if recommended_driver else None
             metadata = _safe_json_parse(getattr(assignment, "metadata_json", None)) or {}
             recommendation_text = str(metadata.get("intelligence_summary") or "").strip() or None
-            if recommended_driver_name:
-                dispatcher_message = f"AI recommended {recommended_driver_name} — awaiting dispatcher approval"
-            else:
-                dispatcher_message = "AI dispatch recommendation awaiting dispatcher approval"
+            if assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
+                if recommended_driver_name:
+                    dispatcher_message = f"AI recommended {recommended_driver_name} — awaiting dispatcher approval"
+                else:
+                    dispatcher_message = "AI dispatch recommendation awaiting dispatcher approval"
+            elif recommended_driver_name:
+                dispatcher_message = f"Driver offer sent to {recommended_driver_name}"
         elif assignment_state == "pending_assignment":
             dispatcher_message = "No available driver"
         from app.modules.health_isf.scheduling import format_scheduling_summary

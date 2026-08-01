@@ -55,8 +55,8 @@ function injectStyles() {
     }
     .amicor-auth-input:focus {
       outline: none;
-      border-color: #0066cc;
-      box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+      border-color: #0b6bcb;
+      box-shadow: 0 0 0 3px rgba(11, 107, 203, 0.15);
     }
     .amicor-auth-buttons {
       display: flex;
@@ -74,11 +74,11 @@ function injectStyles() {
       transition: all 200ms;
     }
     .amicor-auth-btn-primary {
-      background: #0066cc;
+      background: #0b6bcb;
       color: white;
     }
     .amicor-auth-btn-primary:hover {
-      background: #0052a3;
+      background: #095aa8;
     }
     .amicor-auth-btn-secondary {
       background: #f0f0f0;
@@ -94,7 +94,7 @@ function injectStyles() {
       color: #666;
     }
     .amicor-auth-toggle a {
-      color: #0066cc;
+      color: #0b6bcb;
       cursor: pointer;
       text-decoration: none;
     }
@@ -136,6 +136,14 @@ async function apiPost(path, payload) {
   return data;
 }
 
+function authBrandLogoHtml() {
+  return (
+    '<div class="amicor-auth-logo-wrap">' +
+    '<img class="amicor-logo amicor-logo-xl" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="56" height="56" decoding="async" />' +
+    "</div>"
+  );
+}
+
 function createSignupModal(onSignup, onToggleLogin) {
   const overlay = document.createElement("div");
   overlay.id = "amicor-auth-overlay";
@@ -146,6 +154,7 @@ function createSignupModal(onSignup, onToggleLogin) {
   modal.className = "amicor-auth-modal";
   
   modal.innerHTML = `
+    ${authBrandLogoHtml()}
     <h2>Sign Up</h2>
     <p>Create your Amicor account</p>
     <div class="amicor-auth-error" style="display:none;"></div>
@@ -238,6 +247,7 @@ function createLoginModal(onLogin, onToggleSignup) {
   modal.className = "amicor-auth-modal";
   
   modal.innerHTML = `
+    ${authBrandLogoHtml()}
     <h2>Log In</h2>
     <p>Welcome back to Amicor</p>
     <div class="amicor-auth-error" style="display:none;"></div>

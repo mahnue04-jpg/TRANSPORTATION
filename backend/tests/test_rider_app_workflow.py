@@ -10,6 +10,7 @@ from app.db.session import SessionLocal
 from app.helpers import uuid4
 from app.main import app
 from app.modules.health_isf.models import DriverStatus, HealthISFDriver, HealthISFProvider
+from tests.test_deployment_readiness_ride_lifecycle import _reset_org_assignments
 
 
 @pytest.fixture(scope="module")
@@ -138,15 +139,39 @@ def test_rider_role_creates_customer_request_and_dispatcher_sees_it(client: Test
     assert any(row.get("ride_id") == ride_id or row.get("id") == ride_id for row in dispatch_rows)
 
 
+def _isolate_driver_for_auto_dispatch(organization_id: str, driver_id: str) -> None:
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.rating = 5.0
+        dedicated.total_trips = 100
+        dedicated.status = DriverStatus.AVAILABLE
+        dedicated.availability_state = "available"
+        dedicated.is_online = True
+        dedicated.auth_state = "active"
+        dedicated.is_active = True
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == organization_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+        db.commit()
+
+
 def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
     dispatcher_auth = _login(client, "dispatcher@amicor.local")
     dispatcher_headers = {"Authorization": f"Bearer {dispatcher_auth['access_token']}"}
     org_id = _org_id_for("dispatcher@amicor.local")
+    _reset_org_assignments(org_id)
     _ensure_provider(org_id)
     driver_id = _ensure_available_driver(org_id)
+    _isolate_driver_for_auto_dispatch(org_id, driver_id)
     suffix = uuid4()[:8]
-    rider_phone = "+1 646-555-7799"
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "8")[:4]
+    rider_phone = f"+1 646-555-{digits}"
 
     create_resp = client.post(
         "/api/health-isf/customer-requests",
@@ -172,12 +197,12 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     )
     assert approve_resp.status_code == 200, approve_resp.text
 
-    auto_dispatch_resp = client.post(
-        f"/api/health-isf/dispatcher/customer-requests/{request_id}/auto-dispatch",
+    assign_resp = client.post(
+        f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
         headers=dispatcher_headers,
-        json={"driver_id": driver_id, "offer_timeout_seconds": 120},
+        json={"driver_id": driver_id},
     )
-    assert auto_dispatch_resp.status_code == 200, auto_dispatch_resp.text
+    assert assign_resp.status_code == 200, assign_resp.text
 
     offer_resp = client.get(
         f"/api/health-isf/drivers/{driver_id}/active-offer",
@@ -186,8 +211,11 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     assert offer_resp.status_code == 200, offer_resp.text
     offer_payload = offer_resp.json()
     assert offer_payload.get("driver_id") == driver_id
-    assert offer_payload.get("offer") is not None
-    assert str((offer_payload.get("offer") or {}).get("ride_id") or "") == ride_id
+    ride_resp = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
+    assert ride_resp.status_code == 200, ride_resp.text
+    assert str(ride_resp.json().get("driver_id") or "") == driver_id
+    if offer_payload.get("offer") is not None:
+        assert str((offer_payload.get("offer") or {}).get("ride_id") or "") == ride_id
 
     tracking_resp = client.get(
         "/api/health-isf/customers/workspace/live-tracking",

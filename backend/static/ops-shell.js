@@ -1277,7 +1277,10 @@
   }
 
   function wrapDriverMobilePage(bodyHtml) {
-    return '<div class="driver-mobile-page">' + String(bodyHtml || "") + '</div>';
+    var header = typeof amicorSurfaceBrandHtml === "function"
+      ? amicorSurfaceBrandHtml("Driver Mobile")
+      : "";
+    return '<div class="driver-mobile-page">' + header + String(bodyHtml || "") + "</div>";
   }
 
   function applyDriverMobileShellLayout(enabled) {
@@ -5072,6 +5075,7 @@
     return renderPanelBlock(
       "Rider and Patient App",
       "Request rides, schedule recurring transportation, track live trip ETA, and manage support from a healthcare-first rider surface.",
+      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Rider App") : "") +
       submitBanner + authBanner +
       '<div class="rider-app-grid">' +
         '<section class="rider-card">' +
@@ -7123,6 +7127,7 @@
     var queueHealth = safeObject((((state.ops.orchestration || {}).queue_health || {}).queue_pressure_dashboard));
     var complianceOverview = safeObject(((state.ops.compliance || {}).compliance_overview));
     return [
+      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Provider Portal") : ""),
       renderRoleIdentityPanel("provider", slice, safeText((phase17.supervision || {}).supervision_status, "unknown")),
       renderHydrationStatusPanel("Provider", slice),
       renderOperationalHeartbeatPanel(slice),
@@ -8910,6 +8915,7 @@
     }
 
     return [
+      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Dispatch Dashboard") : ""),
       renderPanelBlock(
         "Amicor Operations Control Center",
         "Create records, execute live ride workflow, and verify backend/UI proof in one screen.",
@@ -9801,10 +9807,11 @@
 
     return [
       '<section class="panel assistant-runtime-banner">' +
-        '<div class="assistant-runtime-copy">' +
-          '<span class="section-eyebrow">controlled interaction layer</span>' +
+        '<div class="assistant-runtime-copy amicor-brand-lockup">' +
+          (typeof amicorBrandMarkHtml === "function" ? amicorBrandMarkHtml("amicor-logo amicor-logo-lg") : "") +
+          '<div><span class="section-eyebrow">controlled interaction layer</span>' +
           '<h3>Assistant operational state: ' + escapeHtml(runtimeState) + '</h3>' +
-          '<p>Conversation stays in the current operational session, with supervision-safe monitoring.</p>' +
+          '<p>Conversation stays in the current operational session, with supervision-safe monitoring.</p></div>' +
         '</div>' +
         '<div class="assistant-runtime-pills">' +
           '<span class="badge badge-' + runtimeTone + '">' + escapeHtml(runtimeState) + '</span>' +

@@ -3,9 +3,13 @@
 <head>
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-            <meta name="theme-color" content="#6c63ff" />
+            <meta name="theme-color" content="#0b6bcb" />
+            <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+            <link rel="icon" href="/static/branding/amicor-logo-v1.svg" type="image/svg+xml" />
+            <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png" />
             <link rel="manifest" href="/static/manifest.webmanifest" />
-            <title>Amicor Health ISF Operations Platform</title>
+            <link rel="stylesheet" href="/static/branding/brand.css?v=20260801.1" />
+            <title>Amicor Health ISF</title>
 
               <!-- Rendering pipeline runs with or without KaTeX. External CDN assets are intentionally avoided
                 because CSP blocks them and can trigger degraded startup telemetry. -->
@@ -33,7 +37,8 @@
             <script src="/static/ux/humanVoiceEngine.js?v=20260517.4"></script>
             <script src="/static/ux/embeddedBrowser.js?v=20260513.1"></script>
             <script src="/static/ux/sessionManager.js?v=20260711.2"></script>
-            <script src="/static/ux/authUI.js?v=20260519.6"></script>
+            <script src="/static/branding/brand.js?v=20260801.1"></script>
+            <script src="/static/ux/authUI.js?v=20260801.1"></script>
             <script src="/static/ux/reconnectHandler.js?v=20260512.1"></script>
             <script src="/static/ux/runtimeDiagnostics.js?v=20260512.1"></script>
             <link rel="stylesheet" href="/static/modules/health_isf/health-isf.css?v=20260519.8" />
@@ -2327,7 +2332,10 @@
 
 <div id="assistant-layout" data-shell="amicor-platform">
   <aside id="left-sidebar">
-    <div class="sidebar-title">Amicor Platform</div>
+    <div class="sidebar-title amicor-brand-lockup">
+      <img class="amicor-logo amicor-logo-sm" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="24" height="24" decoding="async" />
+      <span>Amicor Health ISF</span>
+    </div>
     <div class="module-nav-group" aria-label="Workspace modules">
       <button class="module-nav-item module-nav-parent" type="button" aria-current="page">Health ISF Workspace</button>
       <button class="module-nav-item" type="button" disabled>AI Assistant Tool</button>
@@ -2353,10 +2361,12 @@
     <!-- ── Header ───────────────────────────────────────────── -->
     <header id="app-header">
       <div class="brand">
-        <div class="brand-avatar">A</div>
+        <div class="brand-avatar">
+          <img class="amicor-logo" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="34" height="34" decoding="async" />
+        </div>
         <div class="brand-text">
-          <h1>Amicor Platform</h1>
-          <p>Active workspace: Health ISF transportation operations.</p>
+          <h1>Amicor Health ISF</h1>
+          <p>Healthcare transportation operations platform.</p>
           <div class="assistant-presence-meta">
             <span id="assistant-state-text" class="assistant-state-text">Health ISF workspace active</span>
             <span id="assistant-memory-presence" class="assistant-memory-presence" hidden></span>
@@ -2936,7 +2946,9 @@
       <!-- ── Chat ─────────────────────────────────────────────── -->
       <div id="chat">
         <div id="welcome">
-          <div class="welcome-avatar">🤖</div>
+          <div class="welcome-avatar">
+            <img class="amicor-logo amicor-logo-xl" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="72" height="72" decoding="async" />
+          </div>
           <h2>Hi, I'm Amicor</h2>
           <p>Your personal AI assistant for work, research, news, and everyday tasks.</p>
           <div id="welcome-memory-note" class="welcome-memory-note" hidden></div>
@@ -3112,8 +3124,11 @@
   <aside id="utility-panel">
     <div class="utility-title">Live Operations Rail</div>
     <p class="utility-copy">Real-time activity, urgent alerts, and selected entity context follow the active transportation workflow.</p>
-    <section class="nova-widget" aria-label="Amicor AI assistant">
-      <h3>Amicor AI Assistant</h3>
+    <section class="nova-widget" aria-label="Amicor AI Assistant">
+      <div class="amicor-brand-lockup" style="margin-bottom:12px;">
+        <img class="amicor-logo" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="32" height="32" decoding="async" />
+        <h3 style="margin:0;">Amicor AI Assistant</h3>
+      </div>
       <div class="health-summary">Assistant tools are available as a platform utility panel and are not the primary workspace render.</div>
     </section>
     <section class="nova-widget" aria-label="Live activity feed">
@@ -7898,6 +7913,20 @@
       document.addEventListener("DOMContentLoaded", init);
     } else {
       init();
+    }
+  })();
+</script>
+<script>
+  (function () {
+    if (new URLSearchParams(location.search).get("amicor_preview") !== "login") return;
+    function openLoginPreview() {
+      if (!window.AmiCorAuthUI || typeof window.AmiCorAuthUI.showLogin !== "function") return;
+      window.AmiCorAuthUI.showLogin(function () {}, function () {});
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () { setTimeout(openLoginPreview, 400); });
+    } else {
+      setTimeout(openLoginPreview, 400);
     }
   })();
 </script>
