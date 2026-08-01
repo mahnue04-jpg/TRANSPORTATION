@@ -551,6 +551,17 @@ except Exception as exc:
     import traceback
     traceback.print_exc()
 
+# ── Platform Ops (business operations — separate from frozen ride engine) ─────
+try:
+    from app.modules.platform_ops.routes import router as platform_ops_router  # type: ignore
+
+    app.include_router(platform_ops_router)
+    logger.info("Platform Ops routes registered")
+except Exception as exc:
+    logger.error("Failed to register Platform Ops routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
 
 # ── Health monitoring endpoints ───────────────────────────────────────────────
 
@@ -3496,6 +3507,22 @@ def serve_admin() -> Response:
     if os.path.isfile(admin_html):
         return FileResponse(admin_html, media_type="text/html")
     return JSONResponse({"error": "Admin UI not found"}, status_code=404)
+
+
+@app.get("/platform-ops/driver-apply")
+def serve_driver_onboarding_apply() -> Response:
+    page = os.path.join(_static_dir, "platform-ops", "driver-apply.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Driver application page not found"}, status_code=404)
+
+
+@app.get("/platform-ops/driver-onboarding-admin")
+def serve_driver_onboarding_admin() -> Response:
+    page = os.path.join(_static_dir, "platform-ops", "driver-onboarding-admin.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Driver onboarding admin page not found"}, status_code=404)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

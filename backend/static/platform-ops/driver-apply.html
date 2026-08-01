@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Driver Application | Amicor</title>
+  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css" />
+</head>
+<body>
+  <main class="page">
+    <header>
+      <h1>Driver Application</h1>
+      <p class="subtitle">Complete all sections to submit your application for review.</p>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <form id="application-form" novalidate>
+      <input type="hidden" id="organization_id" name="organization_id" />
+      <input type="hidden" id="application_id" name="application_id" />
+
+      <section>
+        <h2>Personal Information</h2>
+        <div class="grid">
+          <label>Legal first name<input required name="legal_first_name" /></label>
+          <label>Middle name (optional)<input name="legal_middle_name" /></label>
+          <label>Legal last name<input required name="legal_last_name" /></label>
+          <label>Date of birth<input required type="date" name="date_of_birth" /></label>
+          <label>Email<input required type="email" name="email" /></label>
+          <label>Mobile phone<input required name="mobile_phone" placeholder="917-555-0100" /></label>
+          <label class="full">Home address<input required name="home_address" /></label>
+          <label>City<input required name="city" /></label>
+          <label>State<input required name="state" maxlength="2" placeholder="NY" /></label>
+          <label>ZIP code<input required name="zip_code" /></label>
+          <label>Emergency contact name<input required name="emergency_contact_name" /></label>
+          <label>Emergency contact phone<input required name="emergency_contact_phone" /></label>
+          <label>Preferred language<input required name="preferred_language" /></label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Driver Information</h2>
+        <div class="grid">
+          <label>Driver's license number<input required name="drivers_license_number" /></label>
+          <label>Issuing state<input required name="license_issuing_state" maxlength="2" /></label>
+          <label>License expiration<input required type="date" name="license_expiration_date" /></label>
+          <label>Years of driving experience<input required type="number" min="0" name="years_driving_experience" /></label>
+          <label>Employment type
+            <select required name="employment_type">
+              <option value="">Select…</option>
+              <option value="independent_contractor">Independent contractor</option>
+              <option value="employee">Employee</option>
+            </select>
+          </label>
+          <label class="full">Availability days
+            <div class="checks" id="availability_days">
+              <label><input type="checkbox" value="monday" /> Mon</label>
+              <label><input type="checkbox" value="tuesday" /> Tue</label>
+              <label><input type="checkbox" value="wednesday" /> Wed</label>
+              <label><input type="checkbox" value="thursday" /> Thu</label>
+              <label><input type="checkbox" value="friday" /> Fri</label>
+              <label><input type="checkbox" value="saturday" /> Sat</label>
+              <label><input type="checkbox" value="sunday" /> Sun</label>
+            </div>
+          </label>
+          <label>Availability start<input required type="time" name="availability_start_time" /></label>
+          <label>Availability end<input required type="time" name="availability_end_time" /></label>
+          <label>Willing to work weekends?
+            <select required name="willing_weekends"><option value="">Select…</option><option value="true">Yes</option><option value="false">No</option></select>
+          </label>
+          <label>Willing to transport wheelchair passengers?
+            <select required name="willing_wheelchair"><option value="">Select…</option><option value="true">Yes</option><option value="false">No</option></select>
+          </label>
+          <label class="full">Counties / service area<input required name="service_area_counties" /></label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Required Declarations</h2>
+        <div class="declarations">
+          <label><input type="checkbox" name="declaration_valid_license" /> I confirm I hold a valid driver's license.</label>
+          <label><input type="checkbox" name="declaration_mvr_authorization" /> I authorize motor vehicle record review.</label>
+          <label><input type="checkbox" name="declaration_background_authorization" /> I authorize criminal background screening.</label>
+          <label><input type="checkbox" name="declaration_drug_alcohol_policy" /> I acknowledge the drug and alcohol policy.</label>
+          <label><input type="checkbox" name="declaration_truthful_information" /> I certify all information is truthful.</label>
+          <label>Electronic signature (type full legal name)<input required name="electronic_signature" /></label>
+          <label>Signed date<input required type="date" name="signed_date" /></label>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="button" id="save-draft" class="secondary">Save draft</button>
+        <button type="submit" id="submit-application">Submit application</button>
+      </div>
+    </form>
+  </main>
+  <script src="/static/platform-ops/driver-apply.js"></script>
+</body>
+</html>

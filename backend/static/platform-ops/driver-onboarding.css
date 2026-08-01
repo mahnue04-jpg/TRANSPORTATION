@@ -1,0 +1,84 @@
+:root {
+  --bg: #f4f7fb;
+  --card: #ffffff;
+  --text: #142033;
+  --muted: #5b677a;
+  --accent: #0b6bcb;
+  --danger: #b42318;
+  --ok: #067647;
+  --border: #d8dee9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.page { max-width: 920px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+header h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
+.subtitle { color: var(--muted); margin: 0 0 1rem; }
+section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+section h2 { margin-top: 0; font-size: 1.1rem; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.grid label, .declarations label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.grid label.full, .declarations { grid-column: 1 / -1; }
+input, select, textarea, button {
+  font: inherit;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.checks { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.checks label { flex-direction: row; align-items: center; }
+.actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+button.secondary { background: #eef2f8; color: var(--text); }
+.banner {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+.banner.error { background: #fef3f2; color: var(--danger); border: 1px solid #fecdca; }
+.banner.ok { background: #ecfdf3; color: var(--ok); border: 1px solid #abefc6; }
+.hidden { display: none; }
+.admin-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; }
+@media (max-width: 860px) { .admin-layout { grid-template-columns: 1fr; } }
+.list-item {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  background: #fff;
+}
+.list-item.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.meta { color: var(--muted); font-size: 0.85rem; }
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  font-size: 0.75rem;
+}
+.toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }

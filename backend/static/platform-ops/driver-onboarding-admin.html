@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Driver Onboarding Admin | Amicor</title>
+  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css" />
+</head>
+<body>
+  <main class="page">
+    <header>
+      <h1>Driver Onboarding Administration</h1>
+      <p class="subtitle">Review applications, documents, and compliance readiness.</p>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <div class="admin-layout">
+      <section>
+        <div class="toolbar">
+          <button type="button" id="refresh-list">Refresh</button>
+        </div>
+        <div id="application-list"></div>
+      </section>
+      <section id="detail-panel">
+        <p class="meta">Select an application to review.</p>
+      </section>
+    </div>
+  </main>
+  <script src="/static/platform-ops/driver-onboarding-admin.js"></script>
+</body>
+</html>
