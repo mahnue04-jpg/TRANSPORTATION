@@ -139,7 +139,7 @@ async function apiPost(path, payload) {
 function authBrandLogoHtml() {
   return (
     '<div class="amicor-auth-logo-wrap">' +
-    '<img class="amicor-logo amicor-logo-xl" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="56" height="56" decoding="async" />' +
+    '<img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." decoding="async" />' +
     "</div>"
   );
 }
@@ -156,7 +156,7 @@ function createSignupModal(onSignup, onToggleLogin) {
   modal.innerHTML = `
     ${authBrandLogoHtml()}
     <h2>Sign Up</h2>
-    <p>Create your Amicor account</p>
+    <p>Create your AMICOR account</p>
     <div class="amicor-auth-error" style="display:none;"></div>
     <form class="amicor-auth-form">
       <input type="text" class="amicor-auth-input" placeholder="Full name" required>
@@ -249,7 +249,7 @@ function createLoginModal(onLogin, onToggleSignup) {
   modal.innerHTML = `
     ${authBrandLogoHtml()}
     <h2>Log In</h2>
-    <p>Welcome back to Amicor</p>
+    <p>Welcome back to AMICOR</p>
     <div class="amicor-auth-error" style="display:none;"></div>
     <form class="amicor-auth-form">
       <input type="email" class="amicor-auth-input" placeholder="Email" required>

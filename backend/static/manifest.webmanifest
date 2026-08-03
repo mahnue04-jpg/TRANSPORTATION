@@ -1,30 +1,65 @@
 {
-  "name": "Amicor Health ISF",
-  "short_name": "Amicor",
+  "name": "AMICOR",
+  "short_name": "AMICOR",
   "start_url": "/app/dashboard",
   "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#020a16",
   "theme_color": "#0b6bcb",
-  "description": "Healthcare transportation operations, dispatch, and coordinated NEMT workflows.",
+  "description": "AMICOR — Transport. Care. Connect. Healthcare transportation operations, dispatch, and coordinated NEMT workflows.",
   "icons": [
     {
-      "src": "/static/branding/android-chrome-192.png",
+      "src": "/static/branding/android-chrome-192.png?v=20260803.1",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/branding/android-chrome-512.png",
+      "src": "/static/branding/android-chrome-512.png?v=20260803.1",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/branding/android-chrome-512.png",
+      "src": "/static/branding/android-chrome-512.png?v=20260803.1",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/static/branding/apple-touch-icon.png?v=20260803.1",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/branding/amicor-mark.png?v=20260803.1",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/branding/splash-icon.png?v=20260803.1",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/static/branding/splash-1080x1920.png?v=20260803.1",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "AMICOR"
+    },
+    {
+      "src": "/static/branding/splash-1284x2778.png?v=20260803.1",
+      "sizes": "1284x2778",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "AMICOR splash"
     }
   ]
 }

@@ -48,18 +48,6 @@
   max-width: min(240px, 70vw);
 }
 
-.ops-brand .amicor-logo-full,
-.ops-brand .amicor-logo-full-sm {
-  height: 44px;
-  max-width: 210px;
-}
-
-.sidebar-title .amicor-logo-full,
-.sidebar-title .amicor-logo-full-sm {
-  height: 36px;
-  max-width: 200px;
-}
-
 .amicor-brand-lockup {
   display: flex;
   align-items: center;

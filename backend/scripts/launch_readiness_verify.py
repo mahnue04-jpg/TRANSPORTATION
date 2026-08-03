@@ -28,10 +28,12 @@ from app.modules.health_isf.models import (
 from app.modules.health_isf.workflow_engine import WorkflowOrchestrationService
 
 BRAND_MARKERS = (
-    "amicor-logo-v1.svg",
+    "amicor-mark.png",
+    "amicor-logo-full.png",
     "amicor-logo",
     "amicor-surface-brand",
     "amicor-brand-lockup",
+    "AMICOR",
 )
 
 SURFACES = (
@@ -143,7 +145,11 @@ def verify_branding(client: TestClient) -> list[dict]:
         }
     )
     manifest = client.get("/static/manifest.webmanifest")
-    manifest_ok = manifest.status_code == 200 and "Amicor" in manifest.text
+    manifest_ok = (
+        manifest.status_code == 200
+        and ("AMICOR" in manifest.text or "Amicor" in manifest.text)
+        and "android-chrome-512.png" in manifest.text
+    )
     results.append(
         {
             "surface": "pwa_manifest",

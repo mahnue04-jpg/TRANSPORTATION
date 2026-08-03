@@ -143,7 +143,7 @@
     function render() {
       const s      = STEPS[step];
       if (step === 0) {
-        iconEl.innerHTML = '<img class="amicor-logo amicor-logo-xl" src="/static/branding/amicor-logo-v1.svg" alt="Amicor" width="72" height="72" decoding="async" />';
+        iconEl.innerHTML = '<img class="amicor-logo-full amicor-logo-full-lg" src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." decoding="async" />';
       } else {
         iconEl.textContent = s.icon;
       }

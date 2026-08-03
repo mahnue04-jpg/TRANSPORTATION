@@ -15,7 +15,7 @@
     "analytics": { path: APP_BASE_PATH + "/analytics", title: "Reports & Analytics", subtitle: "Operational and financial analytics across dispatch and care delivery." },
     "alerts": { path: APP_BASE_PATH + "/alerts", title: "Alerts", subtitle: "Operational alerts, escalations, and supervision-critical notices." },
     "mobile": { path: APP_BASE_PATH + "/mobile", title: "Driver Mobile", subtitle: "Field driver sign-in, trip workflow, and assignment sync." },
-    "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "AI Assistant", subtitle: "Side operational assistant for guidance, summaries, and supervised recommendations." },
+    "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "Amicor Nova", subtitle: "AMICOR AI assistant for guidance, summaries, and supervised recommendations." },
     "settings": { path: APP_BASE_PATH + "/settings", title: "Settings", subtitle: "Organization, permissions, and platform configuration controls." },
     "system-health": { path: APP_BASE_PATH + "/system-health", title: "Operations Status", subtitle: "Operational readiness and live monitoring posture." }
   };
@@ -8915,9 +8915,9 @@
     }
 
     return [
-      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Dispatch Dashboard") : ""),
+      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml() : ""),
       renderPanelBlock(
-        "Amicor Operations Control Center",
+        "AMICOR Operations Control Center",
         "Create records, execute live ride workflow, and verify backend/UI proof in one screen.",
         '<article class="tile" style="margin-bottom:12px"><h4>Action Results</h4><ul class="list" id="dispatcher-action-results">' + feedbackRows + '</ul></article>' +
         '<div class="grid-2">' +

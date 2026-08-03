@@ -85,7 +85,9 @@ def test_shell_dashboard_and_favicon_smoke(client: TestClient) -> None:
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200, dashboard.text
     body = dashboard.text
-    assert "Amicor Nova" in body
+    assert "AMICOR" in body
+    assert "Transport. Care. Connect." in body
+    assert "amicor-mark.png" in body
     assert "ops-shell.js" in body
     assert 'option value="admin"' in body
     assert 'option value="rider"' in body

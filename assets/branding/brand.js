@@ -6,9 +6,9 @@
     productName: "AMICOR",
     assistantName: "Amicor Nova",
     tagline: "Transport. Care. Connect.",
-    logoSrc: "/static/branding/amicor-mark.png?v=20260803.1",
-    logoFullSrc: "/static/branding/amicor-logo-full.png?v=20260803.1",
-    logoPngSrc: "/static/branding/amicor-logo-primary.png?v=20260803.1",
+    logoSrc: "/static/branding/amicor-mark.png",
+    logoFullSrc: "/static/branding/amicor-logo-full.png",
+    logoPngSrc: "/static/branding/amicor-logo-primary.png",
     themeColor: "#0b6bcb",
     accentColor: "#32CD32",
   };

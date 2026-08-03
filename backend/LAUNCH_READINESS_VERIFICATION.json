@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-08-01T19:15:04.583304+00:00",
+  "generated_at": "2026-08-02T21:54:54.389259+00:00",
   "branding_frozen": true,
   "verdict": "GO",
   "workflow": {
-    "ride_id": "ec584a52-a19a-4fd9-add1-6264ac5447fe",
-    "request_id": "823b8909-0f2c-4b1a-958b-d9e763a74a1f",
-    "driver_id": "5496f1df-702f-4b9a-b190-e6725656f8c5",
+    "ride_id": "3d3479b5-3281-48a3-94bf-fd03cd3cb94e",
+    "request_id": "66e2a430-b1c1-466d-8551-d15b7060d626",
+    "driver_id": "933069cc-4e0f-43bd-953f-3f53ddf520f3",
     "steps": [
       {
         "step": "rider_creates_ride",
@@ -77,13 +77,13 @@
       {
         "step": "driver_returns_available",
         "ok": true,
-        "driver_status": "assigned"
+        "driver_status": "available"
       },
       {
         "step": "dashboard_refreshes",
         "ok": true,
-        "completed_before": 119,
-        "completed_after": 120
+        "completed_before": 121,
+        "completed_after": 122
       }
     ]
   },
