@@ -1,0 +1,78 @@
+<section class="page-hero">
+  <div class="container">
+    <p class="eyebrow">Contact</p>
+    <h1>Let’s connect</h1>
+    <p>Request transportation, ask about partnerships, or reach Amicor about driving opportunities across Minnesota.</p>
+  </div>
+</section>
+
+<section class="section section-tight">
+  <div class="container split-grid">
+    <form
+      class="panel form"
+      data-amicor-form
+      data-lead-type="contact"
+      data-success="Thank you. Your message has been received. An Amicor team member will respond shortly."
+      novalidate
+    >
+      <div class="form-row">
+        <label for="contact-name">Full name
+          <input id="contact-name" name="contact_name" required autocomplete="name" />
+        </label>
+        <label for="contact-email">Email
+          <input id="contact-email" type="email" name="work_email" required autocomplete="email" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="contact-phone">Phone
+          <input id="contact-phone" type="tel" name="phone" autocomplete="tel" />
+        </label>
+        <label for="contact-subject">I am interested in
+          <select id="contact-subject" name="subject" required>
+            <option value="">Select one</option>
+            <option value="transport">Request Transportation</option>
+            <option value="partnership">Provider partnership</option>
+            <option value="driver">Become a driver</option>
+            <option value="general">General question</option>
+          </select>
+        </label>
+      </div>
+      <label for="contact-message">Message
+        <textarea id="contact-message" name="message" required placeholder="Share pickup city, appointment timing, organization name, or your question."></textarea>
+      </label>
+      <label class="checkbox-label" for="contact-consent">
+        <input id="contact-consent" type="checkbox" name="consent" value="true" required />
+        <span>I agree to be contacted by AMICOR HEALTH ISF LLC about my inquiry.</span>
+      </label>
+      <div class="hp-field" aria-hidden="true">
+        <label for="contact-website">Website
+          <input id="contact-website" name="website" tabindex="-1" autocomplete="off" />
+        </label>
+      </div>
+      <p class="form-note">For urgent clinical emergencies, call 911. Amicor provides non-emergency medical transportation only.</p>
+      <p class="form-status" data-form-status role="status" aria-live="polite"></p>
+      <p class="form-error" data-form-error role="alert" hidden></p>
+      <button class="btn btn-teal" type="submit">Send message</button>
+    </form>
+
+    <aside class="contact-meta">
+      <div class="panel panel-blue">
+        <strong>Business</strong>
+        <p>AMICOR HEALTH ISF LLC</p>
+        <p>AI-powered non-emergency medical transportation</p>
+      </div>
+      <div class="panel panel-accent">
+        <strong>Service area</strong>
+        <p>Minnesota</p>
+        <p>Community and healthcare corridor coverage with expanding partner capacity.</p>
+      </div>
+      <div class="panel">
+        <strong>Quick links</strong>
+        <p><a href="/app/riders">Rider App</a></p>
+        <p><a href="/for-providers">Provider partnership</a></p>
+        <p><a href="/platform-ops/driver-apply">Driver application</a></p>
+        <p><a href="/workspace?amicor_preview=login">Platform sign in</a></p>
+      </div>
+    </aside>
+  </div>
+</section>

@@ -18,7 +18,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 SCREENS = [
     ("01-landing", "/", {"width": 1440, "height": 900}),
-    ("02-login", "/?amicor_preview=login", {"width": 1440, "height": 900}),
+    ("02-login", "/workspace?amicor_preview=login", {"width": 1440, "height": 900}),
     ("03-dispatch-dashboard", "/app/dispatch", {"width": 1440, "height": 900}),
     ("04-rider-app", "/app/riders", {"width": 390, "height": 844}),
     ("05-driver-mobile", "/app/mobile", {"width": 390, "height": 844}),

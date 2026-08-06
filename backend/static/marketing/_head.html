@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b6bcb" />
+  <meta name="description" content="{{META_DESCRIPTION}}" />
+  <title>{{PAGE_TITLE}}</title>
+  <link rel="canonical" href="{{CANONICAL_URL}}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="AMICOR" />
+  <meta property="og:title" content="{{PAGE_TITLE}}" />
+  <meta property="og:description" content="{{META_DESCRIPTION}}" />
+  <meta property="og:url" content="{{CANONICAL_URL}}" />
+  <meta property="og:image" content="{{OG_IMAGE}}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{{PAGE_TITLE}}" />
+  <meta name="twitter:description" content="{{META_DESCRIPTION}}" />
+  <meta name="twitter:image" content="{{OG_IMAGE}}" />
+  <link rel="icon" href="/static/branding/favicon.ico?v=20260803.1" sizes="any" />
+  <link rel="icon" href="/static/branding/amicor-mark.png?v=20260803.1" type="image/png" />
+  <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png?v=20260803.1" />
+  <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
+  <link rel="stylesheet" href="/static/marketing/site.css?v=20260805.2" />
+  {{JSON_LD}}
+</head>
+<body>
+  <div class="site-wrap">
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand-link" href="/" aria-label="AMICOR home">
+          <img src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." width="220" height="56" decoding="async" />
+        </a>
+        <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button>
+        <nav id="site-nav" class="site-nav" data-site-nav aria-label="Primary">
+          <a href="/" {{ARIA_HOME}}>Home</a>
+          <a href="/about" {{ARIA_ABOUT}}>About</a>
+          <a href="/services" {{ARIA_SERVICES}}>Services</a>
+          <a href="/for-providers" {{ARIA_PROVIDERS}}>Providers</a>
+          <a href="/for-drivers" {{ARIA_DRIVERS}}>Drivers</a>
+          <a href="/contact" {{ARIA_CONTACT}}>Contact</a>
+          <a class="nav-signin" href="/workspace?amicor_preview=login">Sign In</a>
+          <a class="nav-cta" href="/contact?intent=transport">Request Ride</a>
+        </nav>
+      </div>
+    </header>
+    <main class="site-main" id="main-content">

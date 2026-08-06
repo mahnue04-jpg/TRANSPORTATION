@@ -476,6 +476,19 @@ except Exception as exc:
     import traceback
     traceback.print_exc()
 
+# ── Public marketing lead capture (isolated from ride engine) ─────────────────
+try:
+    from app.modules.marketing.models import ensure_marketing_schema  # type: ignore
+    from app.modules.marketing.routes import router as marketing_router  # type: ignore
+
+    ensure_marketing_schema()
+    app.include_router(marketing_router)
+    logger.info("Marketing lead routes registered")
+except Exception as exc:
+    logger.error("Failed to register Marketing routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
 
 # ── Health monitoring endpoints ───────────────────────────────────────────────
 
@@ -2719,10 +2732,352 @@ def _summarize_document_text(text: str | None, max_len: int = 420) -> str | None
     return summary
 
 
-# ── Health endpoints ──────────────────────────────────────────────────────────
+# ── Public marketing website ──────────────────────────────────────────────────
+_MARKETING_DIR = os.path.join(_static_dir, "marketing")
+_MARKETING_NAV_KEYS = ("home", "about", "services", "providers", "drivers", "contact")
+_MARKETING_SITEMAP_PATHS = (
+    "/",
+    "/about",
+    "/services",
+    "/for-providers",
+    "/for-drivers",
+    "/contact",
+    "/privacy",
+    "/terms",
+)
+
+_PROVIDER_FAQ = [
+    (
+        "What organizations can partner with Amicor?",
+        "Hospitals, clinics, behavioral health providers, assisted living facilities, skilled nursing facilities, dialysis centers, and county or community organizations can request a provider partnership conversation.",
+    ),
+    (
+        "What types of transportation can be coordinated?",
+        "Amicor coordinates non-emergency medical and community care transportation such as medical appointments, behavioral health visits, dialysis, hospital discharge, senior and disability transportation, and recurring treatment rides.",
+    ),
+    (
+        "Can providers request recurring rides?",
+        "Yes. Providers can work with Amicor to coordinate recurring transportation needs such as dialysis and other ongoing treatment schedules.",
+    ),
+    (
+        "How can staff monitor trip progress?",
+        "Authorized staff can use Amicor’s provider and operations workspaces to follow ride status through the documented trip workflow.",
+    ),
+    (
+        "How do we begin a partnership?",
+        "Submit the provider interest form on this page to request a consultation. An Amicor team member will follow up to discuss your organization’s transportation coordination needs.",
+    ),
+]
+
+_DRIVER_FAQ = [
+    (
+        "What documents are required?",
+        "Typical documentation includes a valid driver’s license, current vehicle registration, required vehicle insurance, and other materials requested during onboarding review.",
+    ),
+    (
+        "What type of vehicle can I use?",
+        "You need a reliable vehicle that is properly registered and insured. Final vehicle suitability depends on service type and applicable Amicor requirements.",
+    ),
+    (
+        "Is a background check required?",
+        "Yes. Background screening is part of the Amicor driver review process before a driver becomes eligible for approved trips.",
+    ),
+    (
+        "How are trip opportunities assigned?",
+        "Approved drivers receive trip opportunities through Amicor’s technology-supported coordination tools, with assignment and readiness managed through the platform and operations workflows.",
+    ),
+    (
+        "How do I begin the application?",
+        "Select Start Driver Application on this page to open Amicor’s existing driver application route and submit your information.",
+    ),
+]
+
+
+def _marketing_public_base(request: Request | None) -> str:
+    if request is not None:
+        return str(request.base_url).rstrip("/")
+    return "https://amicor-health-isf-py.onrender.com"
+
+
+def _marketing_json_ld(
+    *,
+    request: Request | None,
+    canonical_url: str,
+    page_title: str,
+    meta_description: str,
+    faq_items: list[tuple[str, str]] | None = None,
+) -> str:
+    base = _marketing_public_base(request)
+    org = {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "AMICOR HEALTH ISF LLC",
+        "url": base + "/",
+        "logo": base + "/static/branding/amicor-logo-full.png",
+        "description": (
+            "AMICOR HEALTH ISF LLC provides AI-powered non-emergency medical "
+            "transportation coordination in Minnesota."
+        ),
+        "areaServed": {"@type": "AdministrativeArea", "name": "Minnesota"},
+        "slogan": "Transport. Care. Connect.",
+    }
+    webpage = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": page_title,
+        "description": meta_description,
+        "url": canonical_url,
+        "isPartOf": {"@type": "WebSite", "name": "AMICOR", "url": base + "/"},
+    }
+    blocks = [org, webpage]
+    if faq_items:
+        blocks.append(
+            {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": question,
+                        "acceptedAnswer": {"@type": "Answer", "text": answer},
+                    }
+                    for question, answer in faq_items
+                ],
+            }
+        )
+    scripts = []
+    for block in blocks:
+        scripts.append(
+            '<script type="application/ld+json">'
+            + json.dumps(block, ensure_ascii=True)
+            + "</script>"
+        )
+    return "\n  ".join(scripts)
+
+
+def _build_marketing_response(
+    body_filename: str,
+    *,
+    page_title: str,
+    meta_description: str,
+    active: str = "home",
+    canonical_path: str = "/",
+    request: Request | None = None,
+    include_trust: bool = False,
+    faq_items: list[tuple[str, str]] | None = None,
+) -> HTMLResponse:
+    """Assemble public marketing pages from shared shell + page body fragments."""
+    head_path = os.path.join(_MARKETING_DIR, "_head.html")
+    foot_path = os.path.join(_MARKETING_DIR, "_foot.html")
+    body_path = os.path.join(_MARKETING_DIR, body_filename)
+    trust_path = os.path.join(_MARKETING_DIR, "_trust.html")
+    with open(head_path, "r", encoding="utf-8") as f:
+        head = f.read()
+    with open(foot_path, "r", encoding="utf-8") as f:
+        foot = f.read()
+    with open(body_path, "r", encoding="utf-8") as f:
+        body = f.read()
+
+    trust_html = ""
+    if include_trust and os.path.isfile(trust_path):
+        with open(trust_path, "r", encoding="utf-8") as f:
+            trust_html = f.read()
+    body = body.replace("{{TRUST_SECTION}}", trust_html)
+
+    for key in _MARKETING_NAV_KEYS:
+        token = f"{{{{ARIA_{key.upper()}}}}}"
+        head = head.replace(token, 'aria-current="page"' if key == active else "")
+
+    base = _marketing_public_base(request)
+    canonical = f"{base}{canonical_path}"
+    og_image = f"{base}/static/branding/amicor-logo-full.png"
+    json_ld = _marketing_json_ld(
+        request=request,
+        canonical_url=canonical,
+        page_title=page_title,
+        meta_description=meta_description,
+        faq_items=faq_items,
+    )
+
+    html = (
+        head.replace("{{PAGE_TITLE}}", page_title)
+        .replace("{{META_DESCRIPTION}}", meta_description)
+        .replace("{{CANONICAL_URL}}", canonical)
+        .replace("{{OG_IMAGE}}", og_image)
+        .replace("{{JSON_LD}}", json_ld)
+        + body
+        + foot.replace("{{YEAR}}", str(datetime.now(timezone.utc).year))
+    )
+    response = HTMLResponse(content=html, media_type="text/html")
+    response.headers["Cache-Control"] = "public, max-age=300"
+    response.headers["X-Amicor-Surface"] = "marketing"
+    return response
+
+
 @app.get("/")
-def frontend(request: Request) -> HTMLResponse:
-    """Serve main application UI."""
+def frontend(request: Request) -> Response:
+    """Serve public AMICOR website; preserve login deep-link to app shell."""
+    if request.query_params.get("amicor_preview") == "login":
+        return RedirectResponse(url="/workspace?amicor_preview=login", status_code=307)
+    return _build_marketing_response(
+        "home.html",
+        page_title="AMICOR — AI-Powered Non-Emergency Medical Transportation",
+        meta_description=(
+            "AMICOR HEALTH ISF LLC connects patients, providers, and drivers through "
+            "an intelligent non-emergency medical transportation platform in Minnesota."
+        ),
+        active="home",
+        canonical_path="/",
+        request=request,
+        include_trust=True,
+    )
+
+
+@app.get("/about")
+def marketing_about(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "about.html",
+        page_title="About AMICOR — Mission, Vision & Values",
+        meta_description=(
+            "Learn why AMICOR HEALTH ISF LLC was created and how AI-powered NEMT "
+            "supports patients, providers, and drivers."
+        ),
+        active="about",
+        canonical_path="/about",
+        request=request,
+    )
+
+
+@app.get("/services")
+def marketing_services(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "services.html",
+        page_title="AMICOR Services — Non-Emergency Medical Transportation",
+        meta_description=(
+            "Explore AMICOR services including NEMT, hospital discharge, dialysis, "
+            "appointment transportation, and provider transportation management."
+        ),
+        active="services",
+        canonical_path="/services",
+        request=request,
+    )
+
+
+@app.get("/for-providers")
+def marketing_providers(request: Request) -> HTMLResponse:
+    """Public providers page. `/providers` remains a legacy redirect to `/app/providers`."""
+    return _build_marketing_response(
+        "providers.html",
+        page_title="Provider Partnerships — AMICOR Minnesota Healthcare Transportation",
+        meta_description=(
+            "Reliable healthcare transportation coordination for Minnesota hospitals, "
+            "clinics, dialysis centers, and community organizations."
+        ),
+        active="providers",
+        canonical_path="/for-providers",
+        request=request,
+        include_trust=True,
+        faq_items=_PROVIDER_FAQ,
+    )
+
+
+@app.get("/for-drivers")
+def marketing_drivers(request: Request) -> HTMLResponse:
+    """Public drivers page. `/drivers` remains a legacy redirect to `/app/drivers`."""
+    return _build_marketing_response(
+        "drivers.html",
+        page_title="Drive With AMICOR — Minnesota Driver Opportunities",
+        meta_description=(
+            "Join Amicor’s transportation network. Learn eligibility, onboarding steps, "
+            "and start the driver application for Minnesota service opportunities."
+        ),
+        active="drivers",
+        canonical_path="/for-drivers",
+        request=request,
+        include_trust=True,
+        faq_items=_DRIVER_FAQ,
+    )
+
+
+@app.get("/contact")
+def marketing_contact(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "contact.html",
+        page_title="Contact AMICOR — Minnesota NEMT",
+        meta_description=(
+            "Contact AMICOR HEALTH ISF LLC for transportation requests, provider "
+            "partnerships, or driver opportunities in Minnesota."
+        ),
+        active="contact",
+        canonical_path="/contact",
+        request=request,
+    )
+
+
+@app.get("/privacy")
+def marketing_privacy(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "privacy.html",
+        page_title="Privacy Policy — AMICOR",
+        meta_description="AMICOR privacy policy placeholder for the public website.",
+        active="home",
+        canonical_path="/privacy",
+        request=request,
+    )
+
+
+@app.get("/terms")
+def marketing_terms(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "terms.html",
+        page_title="Terms of Use — AMICOR",
+        meta_description="AMICOR terms of use placeholder for the public website.",
+        active="home",
+        canonical_path="/terms",
+        request=request,
+    )
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def marketing_robots(request: Request) -> Response:
+    base = _marketing_public_base(request)
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "Disallow: /workspace\n"
+        "Disallow: /admin\n"
+        "Disallow: /app/\n"
+        "Disallow: /platform-ops/\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def marketing_sitemap(request: Request) -> Response:
+    base = _marketing_public_base(request)
+    urls = []
+    for path in _MARKETING_SITEMAP_PATHS:
+        loc = f"{base}{path}"
+        urls.append(
+            "  <url>\n"
+            f"    <loc>{loc}</loc>\n"
+            "    <changefreq>weekly</changefreq>\n"
+            "  </url>"
+        )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls)
+        + "\n</urlset>\n"
+    )
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.get("/workspace")
+def serve_workspace_shell(request: Request) -> HTMLResponse:
+    """Preserve Health ISF / Nova app shell previously served at `/`."""
     return _build_app_shell_response(request)
 
 
