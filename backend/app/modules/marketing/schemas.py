@@ -42,6 +42,7 @@ class MarketingLeadCreate(BaseModel):
     message: str | None = Field(default=None, max_length=4000)
     consent: bool = False
     source_path: str | None = Field(default=None, max_length=256)
+    lead_source: str | None = Field(default=None, max_length=128)
     # Honeypot — must remain empty. Bots that fill it are rejected silently.
     website: str | None = Field(default=None, max_length=200)
 

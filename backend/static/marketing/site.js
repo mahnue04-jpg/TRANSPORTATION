@@ -67,6 +67,7 @@
       message: (data.get("message") || "").toString().trim() || null,
       consent: data.get("consent") === "true" || data.get("consent") === "on",
       source_path: window.location.pathname,
+      lead_source: "website",
       website: (data.get("website") || "").toString(),
     };
     return payload;
