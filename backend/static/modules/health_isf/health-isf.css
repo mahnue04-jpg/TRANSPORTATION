@@ -1941,6 +1941,10 @@
 .grant-pipeline-card {
   margin-bottom: 10px;
 }
+.grant-projection-banner,
+.grant-integrity-banner .health-pill {
+  margin-bottom: 2px;
+}
 @media (max-width: 720px) {
   .grant-budget-row,
   .grant-checklist-row {

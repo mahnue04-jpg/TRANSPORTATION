@@ -265,6 +265,7 @@ class GrantProofSnapshotResponse(BaseModel):
     pipeline: list[dict[str, Any]] = Field(default_factory=list)
     narrative: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    financial_projections: dict[str, Any] = Field(default_factory=dict)
     evidence_pack: dict[str, Any] = Field(default_factory=dict)
     readiness_checklist: list[dict[str, Any]] = Field(default_factory=list)
     data_integrity: dict[str, Any] = Field(default_factory=dict)

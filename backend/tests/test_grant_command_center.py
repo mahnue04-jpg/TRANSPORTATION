@@ -2,59 +2,84 @@
 from types import SimpleNamespace
 
 from app.modules.health_isf.grant_command_center import (
+    FINANCIAL_GRANT_REQUEST,
+    FINANCIAL_PROJECTED,
     INTEGRITY_DEMO,
+    INTEGRITY_PENDING,
     INTEGRITY_VERIFIED,
+    assumptions_are_complete,
     build_command_center_payload,
     build_federal_registration,
+    build_financial_projections,
     build_master_budget,
+    calculate_projection_from_assumptions,
     classify_driver_integrity,
     classify_provider_integrity,
     classify_ride_integrity,
 )
 
 
-def test_demo_seed_rides_are_excluded_from_verified_metrics():
+def test_demo_seed_and_unproven_rides_are_not_verified_grant_evidence():
     rides = [
         SimpleNamespace(
             passenger_name="Patricia Johnson",
-            pickup_address="1000 Park Ave",
-            dropoff_address="456 Care Ave",
+            passenger_phone="646-555-2001",
+            pickup_address="1000 Park Ave, New York, NY 10028",
+            dropoff_address="456 Care Ave, Queens, NY 11375",
             notes="seed ride",
             status="completed",
         ),
         SimpleNamespace(
-            passenger_name="Verified Rider One",
+            passenger_name="Production Demo Rider",
+            passenger_phone="646-555-6123",
+            pickup_address="125 Main St, New York, NY 1005",
+            dropoff_address="250 Health Ave, Brooklyn, NY 1125",
+            notes="",
+            status="completed",
+        ),
+        SimpleNamespace(
+            passenger_name="Unproven Platform Rider",
+            passenger_phone="612-401-7788",
             pickup_address="12 Main St, Minneapolis, MN",
             dropoff_address="88 Clinic Rd, Minneapolis, MN",
             notes="live operational ride",
             status="accepted",
         ),
+        SimpleNamespace(
+            passenger_name="Commercial Verified Rider",
+            passenger_phone="612-401-9000",
+            pickup_address="12 Main St, Minneapolis, MN",
+            dropoff_address="88 Clinic Rd, Minneapolis, MN",
+            notes="grant_verified_commercial completed trip",
+            status="completed",
+            priority_tag=None,
+        ),
     ]
     drivers = [
         SimpleNamespace(name="James Smith", phone="917-555-1001", vehicle_plate="NYC-1001"),
-        SimpleNamespace(name="Live Driver", phone="612-555-9999", vehicle_plate="MN-7788"),
+        SimpleNamespace(name="Live Driver", phone="612-401-7788", vehicle_plate="MN-7788"),
     ]
-    # 612-555-9999 still matches demo phone prefix classifier; use non-555 verified phone
-    drivers[1] = SimpleNamespace(name="Live Driver", phone="612-401-7788", vehicle_plate="MN-7788")
     providers = [
-        SimpleNamespace(name="Fairview Hospital", phone="612-555-0100"),
-        SimpleNamespace(name="Community Care Partners", phone="651-401-2200"),
+        SimpleNamespace(name="Fairview Hospital", phone="612-555-0100", address="2450 Riverside Ave"),
+        SimpleNamespace(name="Lincoln Medical Center", phone="212-555-3100", address="100 Care Blvd, New York, NY 1000"),
+        SimpleNamespace(name="Community Care Partners", phone="651-401-2200", address="Minneapolis, MN"),
     ]
     applications = [
         SimpleNamespace(
             applicant_name="Caleb Morgan",
             applicant_email="caleb.morgan@pilot.example",
+            applicant_phone="917-555-0100",
             review_notes="Phase 43 onboarding seed",
             onboarding_status="approved",
         ),
         SimpleNamespace(
             applicant_name="Alex Rivera",
-            applicant_email="alex.rivera@example-live.org",
+            applicant_email="alex.rivera@communitycare.org",
+            applicant_phone="612-401-3344",
             review_notes="live applicant",
             onboarding_status="pending_review",
         ),
     ]
-    # example-live.org still ends with neither @example.com nor @pilot.example — good
     payload = build_command_center_payload(
         rides=rides,
         drivers=drivers,
@@ -70,36 +95,57 @@ def test_demo_seed_rides_are_excluded_from_verified_metrics():
     )
 
     assert classify_ride_integrity(rides[0]) == INTEGRITY_DEMO
-    assert classify_ride_integrity(rides[1]) == INTEGRITY_VERIFIED
+    assert classify_ride_integrity(rides[1]) == INTEGRITY_DEMO
+    assert classify_ride_integrity(rides[2]) == INTEGRITY_PENDING
+    assert classify_ride_integrity(rides[3]) == INTEGRITY_VERIFIED
     assert classify_driver_integrity(drivers[0]) == INTEGRITY_DEMO
-    assert classify_driver_integrity(drivers[1]) == INTEGRITY_VERIFIED
+    assert classify_driver_integrity(drivers[1]) == INTEGRITY_PENDING
     assert classify_provider_integrity(providers[0]) == INTEGRITY_DEMO
-    assert classify_provider_integrity(providers[1]) == INTEGRITY_VERIFIED
+    assert classify_provider_integrity(providers[1]) == INTEGRITY_DEMO
+    assert classify_provider_integrity(providers[2]) == INTEGRITY_PENDING
 
     metrics = payload["metrics"]
     assert metrics["total_rides"] == 1
     assert metrics["total_rides_verified"] == 1
-    assert metrics["total_rides_demo_test_seeded"] == 1
-    assert metrics["total_rides_all_sources"] == 2
-    assert metrics["drivers_verified"] == 1
-    assert metrics["providers_verified"] == 1
-    assert metrics["driver_applications_total"] == 1
+    assert metrics["total_rides_demo_test_seeded"] == 2
+    assert metrics["total_rides_pending_verification"] == 1
+    assert metrics["total_rides_all_sources"] == 4
+    assert metrics["drivers_verified"] == 0
+    assert metrics["providers_verified"] == 0
+    assert metrics["driver_applications_total"] == 0
     assert metrics["legacy_june15_proof_pack"] == "replaced"
     assert metrics["target_date"] is None
 
     budget = payload["budget"]
     assert budget["total_usd"] == 35000
-    assert "subject to each grant" in budget["label"].lower()
+    assert budget["financial_classification"] == FINANCIAL_GRANT_REQUEST
+    assert budget["not_operating_revenue"] is True
 
-    pipeline = payload["pipeline"]
-    assert pipeline[0]["grant_name"] == "Launch Minnesota Innovation Grant"
-    assert "WATCHLIST" in pipeline[0]["current_status"]
-    assert "verify next open round" in pipeline[0]["deadline"].lower()
+    projections = payload["financial_projections"]
+    assert projections["financial_classification"] == FINANCIAL_PROJECTED
+    assert "NOT HISTORICAL" in projections["banner"]
+    assert projections["uses_demo_seed_rides_as_history"] is False
+    assert projections["grant_request_separate"] is True
+    assert "conservative" in projections["scenarios"]
+    assert "base_case" in projections["scenarios"]
+    assert "growth_case" in projections["scenarios"]
 
-    federal = payload["federal_registration"]
-    assert federal["sam_gov_registration"] == "ACTIVE"
-    assert federal["entity"] == "AMICOR HEALTH ISF LLC"
-    assert federal["sensitive_fields_excluded"] is True
+    checklist = {item["id"]: item for item in payload["readiness_checklist"]}
+    assert checklist["financial_projections"]["status"] == "IN PROGRESS"
+    assert checklist["founder_bio"]["status"] == "READY"
+    assert "Minnesota-based healthcare technology startup" in payload["narrative"]["founder_company_bio"]
+
+
+def test_production_demo_phone_patterns_cannot_become_verified():
+    ride = SimpleNamespace(
+        passenger_name="Any Name",
+        passenger_phone="646-555-6001",
+        pickup_address="500 Main St, New York, NY 1001",
+        dropoff_address="300 Health Ave, Brooklyn, NY 1121",
+        notes="grant_verified_commercial",  # must not override demo seed pattern
+        status="completed",
+    )
+    assert classify_ride_integrity(ride) == INTEGRITY_DEMO
 
 
 def test_federal_registration_reads_uei_cage_from_env(monkeypatch):
@@ -117,3 +163,34 @@ def test_master_budget_totals_thirty_five_thousand():
     assert budget["total_usd"] == 35000
     assert budget["target_total_usd"] == 35000
     assert len(budget["line_items"]) == 8
+    assert budget["financial_classification"] == FINANCIAL_GRANT_REQUEST
+
+
+def test_financial_projection_math_and_classification():
+    assumptions = {
+        "active_providers": 2,
+        "rides_per_provider_per_day": 1.5,
+        "operating_days_per_month": 20,
+        "avg_net_revenue_per_ride": 25.0,
+        "driver_cost_per_ride": 18.0,
+        "monthly_tech_cloud": 450,
+        "monthly_insurance": 300,
+        "monthly_marketing": 250,
+        "monthly_compliance_legal": 200,
+        "monthly_admin_ops": 500,
+        "monthly_other_opex": 150,
+    }
+    assert assumptions_are_complete(assumptions) is True
+    results = calculate_projection_from_assumptions(assumptions)
+    assert results["financial_classification"] == FINANCIAL_PROJECTED
+    assert results["projected_monthly_rides"] == 60.0
+    assert results["projected_monthly_gross_revenue"] == 1500.0
+    assert results["projected_monthly_transportation_driver_costs"] == 1080.0
+    assert results["projected_12_month_gross_revenue"] == 18000.0
+
+    projections = build_financial_projections()
+    grant_budget = build_master_budget()
+    # Grant request must remain separate from projected operating revenue.
+    assert grant_budget["total_usd"] == 35000
+    assert projections["scenarios"]["conservative"]["results"]["projected_12_month_gross_revenue"] != 35000
+    assert projections["scenarios"]["conservative"]["results"]["financial_classification"] == FINANCIAL_PROJECTED

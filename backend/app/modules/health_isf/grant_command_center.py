@@ -8,7 +8,7 @@ identifiers are only surfaced when provided via server environment configuration
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.health_isf.service import (
     DEMO_SEED_PASSENGER_NAMES,
@@ -23,6 +23,16 @@ INTEGRITY_VERIFIED = "VERIFIED LIVE DATA"
 INTEGRITY_DEMO = "DEMO / TEST / SEEDED DATA"
 INTEGRITY_PENDING = "PENDING VERIFICATION"
 
+FINANCIAL_ACTUAL = "ACTUAL"
+FINANCIAL_PROJECTED = "PROJECTED"
+FINANCIAL_GRANT_REQUEST = "GRANT REQUEST"
+
+# Explicit opt-in only. Platform rows alone are not treated as commercial proof.
+_COMMERCIAL_VERIFIED_MARKERS = (
+    "grant_verified_commercial",
+    "commercial_verified_for_grant",
+)
+
 _SAMPLE_DRIVER_PHONES = {
     "".join(ch for ch in str(item.get("phone") or "") if ch.isdigit())
     for item in SAMPLE_DRIVERS
@@ -33,6 +43,19 @@ _SAMPLE_PROVIDER_PHONES = {
     for item in SAMPLE_PROVIDERS
 }
 _SAMPLE_PROVIDER_NAMES = {str(item.get("name") or "").strip().lower() for item in SAMPLE_PROVIDERS}
+
+_PRODUCTION_DEMO_PROVIDER_NAMES = {
+    "lincoln medical center",
+    "queens dialysis facility",
+    "manhattan health hub",
+    "brooklyn community clinic",
+    "bronx care network",
+    "staten island rehab center",
+    "harlem wellness center",
+    "jamaica nemt hub",
+    "flushing medical plaza",
+    "yonkers senior care",
+}
 
 
 def _env_value(*names: str) -> str:
@@ -47,7 +70,44 @@ def _digits(value: Any) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
+def _is_fake_555_phone(phone_digits: str) -> bool:
+    """NANP 555 exchange numbers are reserved/fictional and used by Amicor seeders."""
+    digits = str(phone_digits or "")
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) < 10:
+        return False
+    return digits[-7:-4] == "555"
+
+
+def _looks_like_production_demo_ride(ride: Any) -> bool:
+    """Detect seed_production_demo_data rows (notes are often empty; markers live in phones/addresses)."""
+    phone = _digits(getattr(ride, "passenger_phone", ""))
+    pickup = str(getattr(ride, "pickup_address", "") or "").lower()
+    dropoff = str(getattr(ride, "dropoff_address", "") or "").lower()
+    if _is_fake_555_phone(phone):
+        return True
+    if phone.startswith("646555") or phone.startswith("917555"):
+        return True
+    if "main st, new york, ny" in pickup and "health ave" in dropoff:
+        return True
+    if "new york, ny" in pickup and "brooklyn, ny" in dropoff and "health ave" in dropoff:
+        return True
+    return False
+
+
+def _has_commercial_verification_marker(*parts: Any) -> bool:
+    blob = " ".join(str(part or "") for part in parts).lower()
+    return any(marker in blob for marker in _COMMERCIAL_VERIFIED_MARKERS)
+
+
 def classify_ride_integrity(ride: Any) -> str:
+    """Classify ride evidence for grant use.
+
+    Production demo seed creates hundreds of synthetic NYC/555 rides without notes
+    markers. Those must never appear as VERIFIED grant evidence. Unproven platform
+    rows default to PENDING VERIFICATION rather than commercial verification.
+    """
     if not ride:
         return INTEGRITY_PENDING
     passenger = str(getattr(ride, "passenger_name", "") or "").strip().lower()
@@ -60,9 +120,12 @@ def classify_ride_integrity(ride: Any) -> str:
         or "phase 43" in notes
         or "seed" in notes
         or "demo" in notes
+        or _looks_like_production_demo_ride(ride)
     ):
         return INTEGRITY_DEMO
-    return INTEGRITY_VERIFIED
+    if _has_commercial_verification_marker(notes, getattr(ride, "priority_tag", None)):
+        return INTEGRITY_VERIFIED
+    return INTEGRITY_PENDING
 
 
 def classify_driver_integrity(driver: Any) -> str:
@@ -77,9 +140,12 @@ def classify_driver_integrity(driver: Any) -> str:
         or name.startswith("test driver")
         or plate.startswith("NYC-")
         or phone.startswith("917555")
+        or _is_fake_555_phone(phone)
     ):
         return INTEGRITY_DEMO
-    return INTEGRITY_VERIFIED
+    if _has_commercial_verification_marker(name, getattr(driver, "auth_state", None)):
+        return INTEGRITY_VERIFIED
+    return INTEGRITY_PENDING
 
 
 def classify_provider_integrity(provider: Any) -> str:
@@ -87,16 +153,22 @@ def classify_provider_integrity(provider: Any) -> str:
         return INTEGRITY_PENDING
     name = str(getattr(provider, "name", "") or "").strip().lower()
     phone = _digits(getattr(provider, "phone", ""))
+    address = str(getattr(provider, "address", "") or "").lower()
     if (
         name in _SAMPLE_PROVIDER_NAMES
+        or name in _PRODUCTION_DEMO_PROVIDER_NAMES
         or phone in _SAMPLE_PROVIDER_PHONES
         or "test clinic" in name
         or "demo" in name
         or phone.startswith("612555")
         or phone.startswith("212555")
+        or _is_fake_555_phone(phone)
+        or "care blvd, new york, ny" in address
     ):
         return INTEGRITY_DEMO
-    return INTEGRITY_VERIFIED
+    if _has_commercial_verification_marker(name, address):
+        return INTEGRITY_VERIFIED
+    return INTEGRITY_PENDING
 
 
 def classify_application_integrity(application: Any) -> str:
@@ -105,6 +177,7 @@ def classify_application_integrity(application: Any) -> str:
     email = str(getattr(application, "applicant_email", "") or "").strip().lower()
     name = str(getattr(application, "applicant_name", "") or "").strip().lower()
     notes = str(getattr(application, "review_notes", "") or "").lower()
+    phone = _digits(getattr(application, "applicant_phone", ""))
     if (
         email.endswith("@pilot.example")
         or email.endswith("@example.com")
@@ -113,9 +186,12 @@ def classify_application_integrity(application: Any) -> str:
         or "seed" in notes
         or "demo" in name
         or "test" in name
+        or _is_fake_555_phone(phone)
     ):
         return INTEGRITY_DEMO
-    return INTEGRITY_VERIFIED
+    if _has_commercial_verification_marker(notes, email):
+        return INTEGRITY_VERIFIED
+    return INTEGRITY_PENDING
 
 
 def classify_recurring_integrity(template: Any) -> str:
@@ -187,8 +263,29 @@ def build_master_pipeline() -> list[dict[str, Any]]:
     ]
 
 
+FOUNDER_COMPANY_BIO = (
+    "Amicor Health ISF LLC is a Minnesota-based healthcare technology startup founded to "
+    "improve the coordination and management of non-emergency medical transportation.\n\n"
+    "The company is developing an AI-enabled transportation operations platform designed to "
+    "help healthcare providers, transportation operations teams, and drivers coordinate "
+    "healthcare-related transportation through a centralized digital environment.\n\n"
+    "Amicor's platform is being developed to support provider transportation requests, "
+    "scheduling, dispatch, driver workflows, operational visibility, recurring transportation "
+    "needs, onboarding, reporting, and administrative processes associated with healthcare "
+    "transportation.\n\n"
+    "The company's initial commercialization strategy focuses on Minnesota, where Amicor "
+    "intends to develop provider relationships, establish a qualified transportation network, "
+    "conduct market validation, and progress toward initial operating partnerships and revenue.\n\n"
+    "Amicor Health ISF LLC is an early-stage company. Its current priorities include completing "
+    "operational readiness, recruiting qualified drivers, developing provider partnerships, "
+    "validating the platform with real-world users, and securing non-dilutive capital to "
+    "support commercialization."
+)
+
+
 def build_master_narrative() -> dict[str, str]:
     return {
+        "founder_company_bio": FOUNDER_COMPANY_BIO,
         "company_overview": (
             "Amicor Health ISF LLC is a Minnesota-based healthcare technology company "
             "developing an AI-enabled non-emergency medical transportation coordination "
@@ -261,9 +358,175 @@ def build_master_budget() -> dict[str, Any]:
         "label": "MASTER PROPOSED BUDGET — subject to each grant's eligible-cost rules.",
         "currency": "USD",
         "editable": True,
+        "financial_classification": FINANCIAL_GRANT_REQUEST,
+        "not_operating_revenue": True,
         "line_items": line_items,
         "total_usd": total,
         "target_total_usd": 35000,
+        "disclaimer": (
+            "GRANT REQUEST only. Proposed grant funding and uses of funds. "
+            "This amount is never counted as customer/operating revenue."
+        ),
+    }
+
+
+def _scenario_assumptions() -> dict[str, dict[str, float]]:
+    """Conservative editable placeholders until management approves planning assumptions."""
+    return {
+        "conservative": {
+            "active_providers": 1,
+            "rides_per_provider_per_day": 1.0,
+            "operating_days_per_month": 18,
+            "avg_net_revenue_per_ride": 22.0,
+            "driver_cost_per_ride": 16.0,
+            "monthly_tech_cloud": 350,
+            "monthly_insurance": 250,
+            "monthly_marketing": 150,
+            "monthly_compliance_legal": 150,
+            "monthly_admin_ops": 400,
+            "monthly_other_opex": 100,
+        },
+        "base_case": {
+            "active_providers": 2,
+            "rides_per_provider_per_day": 1.5,
+            "operating_days_per_month": 20,
+            "avg_net_revenue_per_ride": 25.0,
+            "driver_cost_per_ride": 18.0,
+            "monthly_tech_cloud": 450,
+            "monthly_insurance": 300,
+            "monthly_marketing": 250,
+            "monthly_compliance_legal": 200,
+            "monthly_admin_ops": 500,
+            "monthly_other_opex": 150,
+        },
+        "growth_case": {
+            "active_providers": 3,
+            "rides_per_provider_per_day": 2.0,
+            "operating_days_per_month": 22,
+            "avg_net_revenue_per_ride": 28.0,
+            "driver_cost_per_ride": 19.0,
+            "monthly_tech_cloud": 550,
+            "monthly_insurance": 350,
+            "monthly_marketing": 350,
+            "monthly_compliance_legal": 250,
+            "monthly_admin_ops": 650,
+            "monthly_other_opex": 200,
+        },
+    }
+
+
+def calculate_projection_from_assumptions(assumptions: dict[str, Any]) -> dict[str, Any]:
+    providers = float(assumptions.get("active_providers") or 0)
+    rides_per_day = float(assumptions.get("rides_per_provider_per_day") or 0)
+    days = float(assumptions.get("operating_days_per_month") or 0)
+    revenue_per_ride = float(assumptions.get("avg_net_revenue_per_ride") or 0)
+    driver_cost = float(assumptions.get("driver_cost_per_ride") or 0)
+    fixed_opex = sum(
+        float(assumptions.get(key) or 0)
+        for key in (
+            "monthly_tech_cloud",
+            "monthly_insurance",
+            "monthly_marketing",
+            "monthly_compliance_legal",
+            "monthly_admin_ops",
+            "monthly_other_opex",
+        )
+    )
+    monthly_rides = providers * rides_per_day * days
+    monthly_gross_revenue = monthly_rides * revenue_per_ride
+    monthly_driver_costs = monthly_rides * driver_cost
+    monthly_operating_expenses = monthly_driver_costs + fixed_opex
+    monthly_net = monthly_gross_revenue - monthly_operating_expenses
+    return {
+        "financial_classification": FINANCIAL_PROJECTED,
+        "projected_monthly_rides": round(monthly_rides, 2),
+        "projected_monthly_gross_revenue": round(monthly_gross_revenue, 2),
+        "projected_monthly_transportation_driver_costs": round(monthly_driver_costs, 2),
+        "projected_monthly_operating_expenses": round(monthly_operating_expenses, 2),
+        "projected_monthly_net_operating_result": round(monthly_net, 2),
+        "projected_12_month_rides": round(monthly_rides * 12, 2),
+        "projected_12_month_gross_revenue": round(monthly_gross_revenue * 12, 2),
+        "projected_12_month_transportation_driver_costs": round(monthly_driver_costs * 12, 2),
+        "projected_12_month_operating_expenses": round(monthly_operating_expenses * 12, 2),
+        "projected_12_month_net_operating_result": round(monthly_net * 12, 2),
+    }
+
+
+def assumptions_are_complete(assumptions: dict[str, Any] | None) -> bool:
+    if not assumptions or not isinstance(assumptions, dict):
+        return False
+    required = (
+        "active_providers",
+        "rides_per_provider_per_day",
+        "operating_days_per_month",
+        "avg_net_revenue_per_ride",
+        "driver_cost_per_ride",
+        "monthly_tech_cloud",
+        "monthly_insurance",
+        "monthly_marketing",
+        "monthly_compliance_legal",
+        "monthly_admin_ops",
+        "monthly_other_opex",
+    )
+    for key in required:
+        if key not in assumptions:
+            return False
+        try:
+            value = float(assumptions[key])
+        except (TypeError, ValueError):
+            return False
+        if value < 0 or value != value:  # NaN check
+            return False
+    return True
+
+
+def build_financial_projections() -> dict[str, Any]:
+    scenarios: dict[str, Any] = {}
+    for key, assumptions in _scenario_assumptions().items():
+        scenarios[key] = {
+            "label": {
+                "conservative": "CONSERVATIVE",
+                "base_case": "BASE CASE",
+                "growth_case": "GROWTH CASE",
+            }[key],
+            "assumptions": assumptions,
+            "results": calculate_projection_from_assumptions(assumptions),
+            "assumptions_complete": assumptions_are_complete(assumptions),
+            "placeholder_until_management_approval": True,
+        }
+    return {
+        "banner": "PROJECTION — NOT HISTORICAL PERFORMANCE",
+        "financial_classification": FINANCIAL_PROJECTED,
+        "classifications": {
+            "ACTUAL": "Supported by real accounting/operational records.",
+            "PROJECTED": "Planning assumptions and forecasts only.",
+            "GRANT REQUEST": "Proposed grant funding and proposed uses of funds.",
+        },
+        "policy": (
+            "Projected amounts are planning assumptions only and are never represented as "
+            "actual company revenue. Grant request amounts are kept completely separate from "
+            "operating revenue. Demo/test/seeded rides are never used as historical financial evidence."
+        ),
+        "uses_demo_seed_rides_as_history": False,
+        "actual_operating_revenue_usd": None,
+        "actual_operating_revenue_status": "No verified actual operating revenue loaded in Grant Command Center.",
+        "grant_request_separate": True,
+        "default_scenario": "conservative",
+        "editable": True,
+        "scenarios": scenarios,
+        "input_fields": [
+            {"id": "active_providers", "label": "Number of active providers"},
+            {"id": "rides_per_provider_per_day", "label": "Estimated rides per provider per day"},
+            {"id": "operating_days_per_month", "label": "Operating days per month"},
+            {"id": "avg_net_revenue_per_ride", "label": "Estimated average net revenue per completed ride"},
+            {"id": "driver_cost_per_ride", "label": "Estimated transportation/driver cost per ride"},
+            {"id": "monthly_tech_cloud", "label": "Monthly technology/cloud costs"},
+            {"id": "monthly_insurance", "label": "Monthly insurance costs"},
+            {"id": "monthly_marketing", "label": "Monthly marketing/provider outreach"},
+            {"id": "monthly_compliance_legal", "label": "Monthly compliance/accounting/legal costs"},
+            {"id": "monthly_admin_ops", "label": "Monthly administrative/operating costs"},
+            {"id": "monthly_other_opex", "label": "Other documented operating expenses"},
+        ],
     }
 
 
@@ -273,6 +536,7 @@ def build_readiness_checklist(
     verified_providers: int,
     verified_drivers: int,
     verified_applications: int,
+    financial_projections_status: str = "IN PROGRESS",
 ) -> list[dict[str, Any]]:
     def item(item_id: str, label: str, status: str, note: str = "") -> dict[str, Any]:
         return {"id": item_id, "label": label, "status": status, "note": note}
@@ -281,6 +545,9 @@ def build_readiness_checklist(
     cage_status = "READY" if federal.get("cage_configured") else "IN PROGRESS"
     provider_status = "READY" if verified_providers > 0 else "MISSING"
     driver_status = "READY" if (verified_drivers > 0 or verified_applications > 0) else "MISSING"
+    projections_status = financial_projections_status if financial_projections_status in {
+        "READY", "IN PROGRESS", "MISSING", "NOT REQUIRED"
+    } else "IN PROGRESS"
 
     return [
         item("sam_active", "SAM.gov active", "READY", "Entity registration reported Active / Verified"),
@@ -290,13 +557,18 @@ def build_readiness_checklist(
         item("w9", "W-9", "MISSING", "Not displayed in this workspace for privacy"),
         item("business_bank", "Business bank account", "MISSING", "Sensitive banking details are not stored here"),
         item("master_narrative", "Master grant narrative", "READY"),
-        item("master_budget", "Master grant budget", "READY"),
-        item("founder_bio", "Founder/company bio", "IN PROGRESS"),
+        item("master_budget", "Master grant budget", "READY", "Classified as GRANT REQUEST, not operating revenue"),
+        item("founder_bio", "Founder/company bio", "READY", "Approved reusable company bio included in narrative"),
         item("platform_screenshots", "Platform screenshots", "IN PROGRESS"),
         item("provider_pilot", "Provider pilot evidence", provider_status, "Verified providers only"),
         item("driver_readiness", "Driver readiness evidence", driver_status, "Verified drivers/applications only"),
         item("letters_of_support", "Letters of support", "MISSING"),
-        item("financial_projections", "Financial projections", "MISSING"),
+        item(
+            "financial_projections",
+            "Financial projections",
+            projections_status,
+            "READY only after complete assumptions are saved; otherwise IN PROGRESS",
+        ),
         item("grant_attachments", "Grant-specific attachments", "MISSING"),
     ]
 
@@ -425,12 +697,16 @@ def build_grant_metrics(
 
     verified_rides = sum(1 for c in ride_classes if c == INTEGRITY_VERIFIED)
     demo_rides = sum(1 for c in ride_classes if c == INTEGRITY_DEMO)
+    pending_rides = sum(1 for c in ride_classes if c == INTEGRITY_PENDING)
     verified_drivers = sum(1 for c in driver_classes if c == INTEGRITY_VERIFIED)
     demo_drivers = sum(1 for c in driver_classes if c == INTEGRITY_DEMO)
+    pending_drivers = sum(1 for c in driver_classes if c == INTEGRITY_PENDING)
     verified_providers = sum(1 for c in provider_classes if c == INTEGRITY_VERIFIED)
     demo_providers = sum(1 for c in provider_classes if c == INTEGRITY_DEMO)
+    pending_providers = sum(1 for c in provider_classes if c == INTEGRITY_PENDING)
     verified_apps = sum(1 for c in app_classes if c == INTEGRITY_VERIFIED)
     demo_apps = sum(1 for c in app_classes if c == INTEGRITY_DEMO)
+    pending_apps = sum(1 for c in app_classes if c == INTEGRITY_PENDING)
     verified_recurring = sum(1 for c in recurring_classes if c == INTEGRITY_VERIFIED)
     demo_recurring = sum(1 for c in recurring_classes if c == INTEGRITY_DEMO)
     pending_recurring = sum(1 for c in recurring_classes if c == INTEGRITY_PENDING)
@@ -459,17 +735,21 @@ def build_grant_metrics(
         "total_rides_all_sources": len(rides),
         "total_rides_verified": verified_rides,
         "total_rides_demo_test_seeded": demo_rides,
+        "total_rides_pending_verification": pending_rides,
         "active_rides_verified": verified_active_rides,
         "delayed_rides_reported": int(delayed_rides or 0),
         "delayed_rides_integrity": INTEGRITY_PENDING,
         "driver_applications_total_verified": verified_apps,
         "driver_applications_total_demo_test_seeded": demo_apps,
+        "driver_applications_total_pending_verification": pending_apps,
         "driver_applications_pending_verified": verified_pending_apps,
         "driver_applications_approved_verified": verified_approved_apps,
         "drivers_verified": verified_drivers,
         "drivers_demo_test_seeded": demo_drivers,
+        "drivers_pending_verification": pending_drivers,
         "providers_verified": verified_providers,
         "providers_demo_test_seeded": demo_providers,
+        "providers_pending_verification": pending_providers,
         "recurring_templates_verified": verified_recurring,
         "recurring_templates_demo_test_seeded": demo_recurring,
         "recurring_templates_pending_verification": pending_recurring,
@@ -490,14 +770,32 @@ def build_grant_metrics(
         "legend": [INTEGRITY_VERIFIED, INTEGRITY_DEMO, INTEGRITY_PENDING],
         "policy": (
             "Grant-facing metrics default to VERIFIED LIVE DATA only. "
-            "Demo/test/seeded rides, demonstration providers/drivers, test applications, "
-            "and simulated metrics are labeled and excluded from verified grant evidence."
+            "Demo/test/seeded rides (including production demo seed patterns such as 555 phones "
+            "and synthetic NYC seed addresses) are labeled DEMO/TEST/SEEDED and excluded. "
+            "Platform rows that cannot be proven as completed commercial activity remain "
+            "PENDING VERIFICATION and are also excluded from verified grant evidence."
         ),
         "counts": {
-            "rides": {"verified": verified_rides, "demo_test_seeded": demo_rides},
-            "drivers": {"verified": verified_drivers, "demo_test_seeded": demo_drivers},
-            "providers": {"verified": verified_providers, "demo_test_seeded": demo_providers},
-            "driver_applications": {"verified": verified_apps, "demo_test_seeded": demo_apps},
+            "rides": {
+                "verified": verified_rides,
+                "demo_test_seeded": demo_rides,
+                "pending_verification": pending_rides,
+            },
+            "drivers": {
+                "verified": verified_drivers,
+                "demo_test_seeded": demo_drivers,
+                "pending_verification": pending_drivers,
+            },
+            "providers": {
+                "verified": verified_providers,
+                "demo_test_seeded": demo_providers,
+                "pending_verification": pending_providers,
+            },
+            "driver_applications": {
+                "verified": verified_apps,
+                "demo_test_seeded": demo_apps,
+                "pending_verification": pending_apps,
+            },
             "recurring_templates": {
                 "verified": verified_recurring,
                 "demo_test_seeded": demo_recurring,
@@ -505,8 +803,9 @@ def build_grant_metrics(
             },
         },
         "notes": [
-            "If a large historical ride count came from demo/seed/test data, it is labeled DEMO/TEST DATA here.",
-            "Delayed-ride dashboard values are shown as reported operational signals and remain pending verification for grant use.",
+            "Large historical ride counts from production demo seeding are classified DEMO/TEST/SEEDED, not verified commercial activity.",
+            "Financial projections never use demo/test/seeded rides as historical evidence.",
+            "Delayed-ride dashboard values remain pending verification for grant use.",
         ],
     }
     return metrics, data_integrity
@@ -535,11 +834,14 @@ def build_command_center_payload(
         recurring=recurring,
         delayed_rides=delayed_rides,
     )
+    financial_projections = build_financial_projections()
+    # Module ships with complete placeholder assumptions → IN PROGRESS until locally saved/approved.
     checklist = build_readiness_checklist(
         federal=federal,
         verified_providers=int(metrics["providers_verified"]),
         verified_drivers=int(metrics["drivers_verified"]),
         verified_applications=int(metrics["driver_applications_total_verified"]),
+        financial_projections_status="IN PROGRESS",
     )
     evidence = build_evidence_pack(
         federal=federal,
@@ -561,6 +863,7 @@ def build_command_center_payload(
         "pipeline": build_master_pipeline(),
         "narrative": build_master_narrative(),
         "budget": build_master_budget(),
+        "financial_projections": financial_projections,
         "evidence_pack": evidence,
         "readiness_checklist": checklist,
         "data_integrity": data_integrity,

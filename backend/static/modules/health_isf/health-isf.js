@@ -1893,6 +1893,7 @@
       grantPipeline: document.getElementById("health-grant-pipeline"),
       grantNarrative: document.getElementById("health-grant-narrative"),
       grantBudget: document.getElementById("health-grant-budget"),
+      grantProjections: document.getElementById("health-grant-projections"),
       grantChecklist: document.getElementById("health-grant-checklist"),
       grantEvidence: document.getElementById("health-grant-evidence"),
       grantScreenshots: document.getElementById("health-grant-screenshots"),
@@ -1965,6 +1966,7 @@
       grantPipeline: document.getElementById("health-grant-pipeline"),
       grantNarrative: document.getElementById("health-grant-narrative"),
       grantBudget: document.getElementById("health-grant-budget"),
+      grantProjections: document.getElementById("health-grant-projections"),
       grantChecklist: document.getElementById("health-grant-checklist"),
       grantEvidence: document.getElementById("health-grant-evidence"),
       grantScreenshots: document.getElementById("health-grant-screenshots"),
@@ -7553,6 +7555,7 @@
 
   var GRANT_WORKSPACE_STORAGE_KEY = "amicor_grant_command_center_workspace_v1";
   var GRANT_NARRATIVE_SECTIONS = [
+    ["founder_company_bio", "Founder / Company Bio"],
     ["company_overview", "Company Overview"],
     ["problem", "Problem"],
     ["amicor_solution", "Amicor Solution"],
@@ -7565,6 +7568,81 @@
     ["long_term_vision", "Long-Term Vision"],
   ];
   var GRANT_CHECKLIST_STATUSES = ["READY", "IN PROGRESS", "MISSING", "NOT REQUIRED"];
+  var GRANT_PROJECTION_SCENARIOS = [
+    ["conservative", "CONSERVATIVE"],
+    ["base_case", "BASE CASE"],
+    ["growth_case", "GROWTH CASE"],
+  ];
+  var GRANT_PROJECTION_FIELDS = [
+    ["active_providers", "Number of active providers", "1"],
+    ["rides_per_provider_per_day", "Estimated rides per provider per day", "0.1"],
+    ["operating_days_per_month", "Operating days per month", "1"],
+    ["avg_net_revenue_per_ride", "Estimated average net revenue per completed ride", "0.01"],
+    ["driver_cost_per_ride", "Estimated transportation/driver cost per ride", "0.01"],
+    ["monthly_tech_cloud", "Monthly technology/cloud costs", "1"],
+    ["monthly_insurance", "Monthly insurance costs", "1"],
+    ["monthly_marketing", "Monthly marketing/provider outreach", "1"],
+    ["monthly_compliance_legal", "Monthly compliance/accounting/legal costs", "1"],
+    ["monthly_admin_ops", "Monthly administrative/operating costs", "1"],
+    ["monthly_other_opex", "Other documented operating expenses", "1"],
+  ];
+
+  function grantMoney(value) {
+    var num = Number(value || 0);
+    if (!Number.isFinite(num)) return "$0";
+    return "$" + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function calculateGrantProjectionResults(assumptions) {
+    var providers = Number(assumptions.active_providers || 0);
+    var ridesPerDay = Number(assumptions.rides_per_provider_per_day || 0);
+    var days = Number(assumptions.operating_days_per_month || 0);
+    var revenuePerRide = Number(assumptions.avg_net_revenue_per_ride || 0);
+    var driverCost = Number(assumptions.driver_cost_per_ride || 0);
+    var fixed = Number(assumptions.monthly_tech_cloud || 0)
+      + Number(assumptions.monthly_insurance || 0)
+      + Number(assumptions.monthly_marketing || 0)
+      + Number(assumptions.monthly_compliance_legal || 0)
+      + Number(assumptions.monthly_admin_ops || 0)
+      + Number(assumptions.monthly_other_opex || 0);
+    var monthlyRides = providers * ridesPerDay * days;
+    var monthlyGross = monthlyRides * revenuePerRide;
+    var monthlyDriver = monthlyRides * driverCost;
+    var monthlyOpex = monthlyDriver + fixed;
+    var monthlyNet = monthlyGross - monthlyOpex;
+    return {
+      financial_classification: "PROJECTED",
+      projected_monthly_rides: monthlyRides,
+      projected_monthly_gross_revenue: monthlyGross,
+      projected_monthly_transportation_driver_costs: monthlyDriver,
+      projected_monthly_operating_expenses: monthlyOpex,
+      projected_monthly_net_operating_result: monthlyNet,
+      projected_12_month_rides: monthlyRides * 12,
+      projected_12_month_gross_revenue: monthlyGross * 12,
+      projected_12_month_transportation_driver_costs: monthlyDriver * 12,
+      projected_12_month_operating_expenses: monthlyOpex * 12,
+      projected_12_month_net_operating_result: monthlyNet * 12,
+    };
+  }
+
+  function grantProjectionAssumptionsComplete(assumptions) {
+    if (!assumptions || typeof assumptions !== "object") return false;
+    for (var i = 0; i < GRANT_PROJECTION_FIELDS.length; i += 1) {
+      var key = GRANT_PROJECTION_FIELDS[i][0];
+      if (!(key in assumptions)) return false;
+      var value = Number(assumptions[key]);
+      if (!Number.isFinite(value) || value < 0) return false;
+    }
+    return true;
+  }
+
+  function readGrantProjectionAssumptionsFromDom() {
+    var assumptions = {};
+    document.querySelectorAll("[data-grant-projection-field]").forEach(function (node) {
+      assumptions[node.getAttribute("data-grant-projection-field")] = Number(node.value || 0);
+    });
+    return assumptions;
+  }
 
   function loadGrantWorkspaceOverrides() {
     try {
@@ -7610,11 +7688,28 @@
     const pipeline = Array.isArray(snapshot.pipeline) ? snapshot.pipeline : [];
     const narrativeDefaults = snapshot.narrative && typeof snapshot.narrative === "object" ? snapshot.narrative : {};
     const budgetDefaults = snapshot.budget && typeof snapshot.budget === "object" ? snapshot.budget : {};
+    const projectionsDefaults = snapshot.financial_projections && typeof snapshot.financial_projections === "object"
+      ? snapshot.financial_projections
+      : {};
     const evidence = snapshot.evidence_pack && typeof snapshot.evidence_pack === "object" ? snapshot.evidence_pack : {};
     const checklistDefaults = Array.isArray(snapshot.readiness_checklist) ? snapshot.readiness_checklist : [];
     const overrides = loadGrantWorkspaceOverrides();
     const narrative = Object.assign({}, narrativeDefaults, overrides.narrative || {});
     const checklistOverrides = overrides.checklist && typeof overrides.checklist === "object" ? overrides.checklist : {};
+    const projectionOverrides = overrides.financial_projections && typeof overrides.financial_projections === "object"
+      ? overrides.financial_projections
+      : {};
+    const activeScenario = String(projectionOverrides.active_scenario || projectionsDefaults.default_scenario || "conservative");
+    const defaultScenarioBundle = projectionsDefaults.scenarios && projectionsDefaults.scenarios[activeScenario]
+      ? projectionsDefaults.scenarios[activeScenario]
+      : (projectionsDefaults.scenarios && projectionsDefaults.scenarios.conservative) || {};
+    const scenarioAssumptions = Object.assign(
+      {},
+      (defaultScenarioBundle && defaultScenarioBundle.assumptions) || {},
+      (projectionOverrides.scenarios && projectionOverrides.scenarios[activeScenario]) || {}
+    );
+    const scenarioResults = calculateGrantProjectionResults(scenarioAssumptions);
+    const projectionsComplete = !!projectionOverrides.saved_complete && grantProjectionAssumptionsComplete(scenarioAssumptions);
     const budgetLineOverrides = Array.isArray(overrides.budget_line_items) ? overrides.budget_line_items : null;
     const budgetLines = (budgetLineOverrides && budgetLineOverrides.length
       ? budgetLineOverrides
@@ -7642,16 +7737,16 @@
     }
 
     els.grantMetrics.innerHTML = '<div class="enterprise-inline-grid">'
-      + MetricCard("Verified rides", formatNumber(metrics.total_rides_verified != null ? metrics.total_rides_verified : metrics.total_rides), "VERIFIED LIVE DATA only", metrics.total_rides_verified ? "ok" : "warn")
+      + MetricCard("Verified rides", formatNumber(metrics.total_rides_verified != null ? metrics.total_rides_verified : metrics.total_rides), "VERIFIED LIVE DATA only — commercial proof required", metrics.total_rides_verified ? "ok" : "warn")
       + MetricCard("Demo/test/seeded rides", formatNumber(metrics.total_rides_demo_test_seeded || 0), "Excluded from verified grant evidence", metrics.total_rides_demo_test_seeded ? "warn" : "ok")
+      + MetricCard("Pending verification rides", formatNumber(metrics.total_rides_pending_verification || 0), "Not proven commercial — excluded from verified evidence", metrics.total_rides_pending_verification ? "warn" : "ok")
       + MetricCard("Verified drivers", formatNumber(metrics.drivers_verified || 0), "Excludes sample/demo drivers", metrics.drivers_verified ? "ok" : "warn")
       + MetricCard("Verified providers", formatNumber(metrics.providers_verified || 0), "Excludes demonstration providers", metrics.providers_verified ? "ok" : "warn")
       + MetricCard("Verified applications", formatNumber(metrics.driver_applications_total_verified != null ? metrics.driver_applications_total_verified : metrics.driver_applications_total), "Driver onboarding evidence", (metrics.driver_applications_total_verified || metrics.driver_applications_total) ? "ok" : "warn")
-      + MetricCard("Verified recurring", formatNumber(metrics.recurring_templates_verified != null ? metrics.recurring_templates_verified : metrics.recurring_templates), "Pending/demo templates excluded from verified totals", (metrics.recurring_templates_verified || metrics.recurring_templates) ? "ok" : "warn")
       + '</div>'
-      + '<p class="health-summary">All-source ride count (includes demo/test/seeded): '
+      + '<p class="health-summary">All-source ride count (includes demo/test/seeded and pending): '
       + escapeHtml(formatNumber(metrics.total_rides_all_sources || 0))
-      + '. That combined figure is not used as verified grant evidence.</p>';
+      + '. Demo/seeded and pending rows are never used as verified grant evidence or historical financial proof.</p>';
 
     if (els.grantFederal) {
       els.grantFederal.innerHTML = '<div class="enterprise-inline-grid">'
@@ -7690,8 +7785,9 @@
         + GRANT_NARRATIVE_SECTIONS.map(function (pair) {
             const key = pair[0];
             const label = pair[1];
+            const rows = key === "founder_company_bio" ? 8 : 3;
             return '<label class="grant-edit-field"><span>' + escapeHtml(label) + '</span>'
-              + '<textarea data-grant-narrative-key="' + escapeHtml(key) + '" rows="3">'
+              + '<textarea data-grant-narrative-key="' + escapeHtml(key) + '" rows="' + rows + '">'
               + escapeHtml(narrative[key] || "")
               + '</textarea></label>';
           }).join("")
@@ -7704,9 +7800,12 @@
     }
 
     if (els.grantBudget) {
-      els.grantBudget.innerHTML = '<p class="health-summary grant-budget-label">'
+      els.grantBudget.innerHTML = '<div class="health-row"><span class="health-pill warn">GRANT REQUEST</span>'
+        + '<span class="health-summary">Not operating revenue · Not customer revenue</span></div>'
+        + '<p class="health-summary grant-budget-label">'
         + escapeHtml(budgetDefaults.label || "MASTER PROPOSED BUDGET — subject to each grant's eligible-cost rules.")
         + '</p>'
+        + '<p class="health-summary">' + escapeHtml(budgetDefaults.disclaimer || "GRANT REQUEST only. Never counted as customer/operating revenue.") + '</p>'
         + '<div class="grant-budget-list">'
         + budgetLines.map(function (item, index) {
             return '<label class="grant-budget-row">'
@@ -7715,7 +7814,7 @@
               + '</label>';
           }).join("")
         + '</div>'
-        + '<div class="health-row grant-budget-total"><strong>TOTAL</strong><strong>$' + escapeHtml(formatNumber(budgetTotal)) + '</strong></div>'
+        + '<div class="health-row grant-budget-total"><strong>TOTAL (GRANT REQUEST)</strong><strong>$' + escapeHtml(formatNumber(budgetTotal)) + '</strong></div>'
         + '<div class="health-form-actions">'
         + '<button type="button" class="health-row-btn" data-grant-action="save-budget">Save budget locally</button>'
         + '<button type="button" class="health-row-btn secondary" data-grant-action="reset-budget">Reset to $35,000 master budget</button>'
@@ -7723,10 +7822,55 @@
         + '<p class="health-summary" id="health-grant-budget-status">Proposed budget only. Confirm eligible costs against each solicitation.</p>';
     }
 
+    if (els.grantProjections) {
+      const scenarioTabs = GRANT_PROJECTION_SCENARIOS.map(function (pair) {
+        const selected = pair[0] === activeScenario ? " ok" : " secondary";
+        return '<button type="button" class="health-row-btn' + selected + '" data-grant-action="select-projection-scenario" data-grant-scenario="' + escapeHtml(pair[0]) + '">' + escapeHtml(pair[1]) + '</button>';
+      }).join(" ");
+      els.grantProjections.innerHTML = '<div class="grant-integrity-banner">'
+        + '<span class="health-pill warn">PROJECTED</span>'
+        + '<span class="health-pill warn">' + escapeHtml(projectionsDefaults.banner || "PROJECTION — NOT HISTORICAL PERFORMANCE") + '</span>'
+        + '<span class="health-pill ok">GRANT REQUEST separate</span>'
+        + '</div>'
+        + '<p class="health-summary">' + escapeHtml(projectionsDefaults.policy || "Projected amounts are planning assumptions only.") + '</p>'
+        + '<p class="health-summary">Actual operating revenue: ' + escapeHtml(projectionsDefaults.actual_operating_revenue_status || "Not loaded as ACTUAL in Grant Command Center.") + '</p>'
+        + '<div class="health-form-actions">' + scenarioTabs + '</div>'
+        + '<div class="grant-budget-list" style="margin-top:10px">'
+        + GRANT_PROJECTION_FIELDS.map(function (pair) {
+            return '<label class="grant-budget-row"><span>' + escapeHtml(pair[1]) + '</span>'
+              + '<input type="number" min="0" step="' + escapeHtml(pair[2]) + '" data-grant-projection-field="' + escapeHtml(pair[0]) + '" value="' + escapeHtml(String(scenarioAssumptions[pair[0]] != null ? scenarioAssumptions[pair[0]] : 0)) + '" />'
+              + '</label>';
+          }).join("")
+        + '</div>'
+        + '<div class="enterprise-inline-grid">'
+        + MetricCard("Projected monthly rides", formatNumber(scenarioResults.projected_monthly_rides), "PROJECTED", "warn")
+        + MetricCard("Projected monthly gross revenue", grantMoney(scenarioResults.projected_monthly_gross_revenue), "PROJECTED — not actual revenue", "warn")
+        + MetricCard("Projected driver costs", grantMoney(scenarioResults.projected_monthly_transportation_driver_costs), "PROJECTED", "warn")
+        + MetricCard("Projected operating expenses", grantMoney(scenarioResults.projected_monthly_operating_expenses), "PROJECTED", "warn")
+        + MetricCard("Projected monthly net", grantMoney(scenarioResults.projected_monthly_net_operating_result), "PROJECTED", "warn")
+        + MetricCard("Projected 12-month gross revenue", grantMoney(scenarioResults.projected_12_month_gross_revenue), "PROJECTED — not actual revenue", "warn")
+        + MetricCard("Projected 12-month net", grantMoney(scenarioResults.projected_12_month_net_operating_result), "PROJECTED", "warn")
+        + MetricCard("Grant request ($35k budget)", "$35,000", "GRANT REQUEST — excluded from operating revenue", "warn")
+        + '</div>'
+        + '<div class="health-form-actions">'
+        + '<button type="button" class="health-row-btn" data-grant-action="recalc-projections">Recalculate</button>'
+        + '<button type="button" class="health-row-btn" data-grant-action="save-projections">Save assumptions locally</button>'
+        + '<button type="button" class="health-row-btn secondary" data-grant-action="reset-projections">Reset placeholders</button>'
+        + '</div>'
+        + '<p class="health-summary" id="health-grant-projections-status">'
+        + (projectionsComplete
+            ? "Saved complete assumptions on file for this browser workspace. Checklist item can be READY."
+            : "Editable placeholder assumptions until Amicor management enters and approves real planning assumptions. Checklist remains IN PROGRESS until complete assumptions are saved.")
+        + '</p>';
+    }
+
     if (els.grantChecklist) {
       els.grantChecklist.innerHTML = '<div class="grant-checklist">'
         + checklistDefaults.map(function (item) {
-            const status = checklistOverrides[item.id] || item.status || "MISSING";
+            var status = checklistOverrides[item.id] || item.status || "MISSING";
+            if (item.id === "financial_projections" && !checklistOverrides[item.id]) {
+              status = projectionsComplete ? "READY" : "IN PROGRESS";
+            }
             const options = GRANT_CHECKLIST_STATUSES.map(function (option) {
               return '<option value="' + escapeHtml(option) + '"' + (option === status ? " selected" : "") + ">" + escapeHtml(option) + "</option>";
             }).join("");
@@ -7835,7 +7979,84 @@
       const ok = saveGrantWorkspaceOverrides(overrides);
       const status = document.getElementById("health-grant-checklist-status");
       if (status) status.textContent = ok ? "Checklist saved locally in this browser workspace." : "Unable to save checklist locally.";
+      return;
     }
+    if (action === "recalc-projections") {
+      const assumptions = readGrantProjectionAssumptionsFromDom();
+      const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
+        ? overrides.financial_projections
+        : {};
+      const activeScenario = String(current.active_scenario || "conservative");
+      const scenarios = Object.assign({}, current.scenarios || {});
+      scenarios[activeScenario] = assumptions;
+      overrides.financial_projections = Object.assign({}, current, {
+        active_scenario: activeScenario,
+        scenarios: scenarios,
+      });
+      saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      const status = document.getElementById("health-grant-projections-status");
+      if (status) status.textContent = "Recalculated from current inputs. Values remain PROJECTED — not historical performance.";
+      return;
+    }
+    if (action === "save-projections") {
+      const assumptions = readGrantProjectionAssumptionsFromDom();
+      const complete = grantProjectionAssumptionsComplete(assumptions);
+      const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
+        ? overrides.financial_projections
+        : {};
+      const activeScenario = String(current.active_scenario || "conservative");
+      const scenarios = Object.assign({}, current.scenarios || {});
+      scenarios[activeScenario] = assumptions;
+      overrides.financial_projections = {
+        active_scenario: activeScenario,
+        scenarios: scenarios,
+        saved_complete: complete,
+        saved_at: new Date().toISOString(),
+      };
+      if (!overrides.checklist || typeof overrides.checklist !== "object") overrides.checklist = {};
+      overrides.checklist.financial_projections = complete ? "READY" : "IN PROGRESS";
+      const ok = saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      const status = document.getElementById("health-grant-projections-status");
+      if (status) {
+        status.textContent = ok
+          ? (complete
+              ? "Complete projection assumptions saved locally. Financial Projections checklist set to READY. Still PROJECTED — not actual revenue."
+              : "Projection assumptions saved, but incomplete. Financial Projections checklist remains IN PROGRESS.")
+          : "Unable to save projection assumptions locally.";
+      }
+      return;
+    }
+    if (action === "reset-projections") {
+      delete overrides.financial_projections;
+      if (overrides.checklist && typeof overrides.checklist === "object") {
+        overrides.checklist.financial_projections = "IN PROGRESS";
+      }
+      saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      return;
+    }
+  }
+
+  function handleGrantProjectionScenarioSelect(scenarioKey) {
+    const overrides = loadGrantWorkspaceOverrides();
+    const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
+      ? overrides.financial_projections
+      : {};
+    // Preserve in-progress edits for the previous scenario before switching.
+    const previous = String(current.active_scenario || "conservative");
+    const scenarios = Object.assign({}, current.scenarios || {});
+    const liveAssumptions = readGrantProjectionAssumptionsFromDom();
+    if (Object.keys(liveAssumptions).length) {
+      scenarios[previous] = liveAssumptions;
+    }
+    overrides.financial_projections = Object.assign({}, current, {
+      active_scenario: String(scenarioKey || "conservative"),
+      scenarios: scenarios,
+    });
+    saveGrantWorkspaceOverrides(overrides);
+    renderGrantProof();
   }
 
   function renderRideTimeline() {
@@ -9761,7 +9982,12 @@
         ? event.target.closest("[data-grant-action]")
         : null;
       if (!grantActionButton) return;
-      handleGrantWorkspaceAction(grantActionButton.getAttribute("data-grant-action"));
+      const grantAction = grantActionButton.getAttribute("data-grant-action");
+      if (grantAction === "select-projection-scenario") {
+        handleGrantProjectionScenarioSelect(grantActionButton.getAttribute("data-grant-scenario") || "conservative");
+        return;
+      }
+      handleGrantWorkspaceAction(grantAction);
     });
 
     document.addEventListener("change", (event) => {
