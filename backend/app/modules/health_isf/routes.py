@@ -12204,60 +12204,110 @@ def get_grant_proof_snapshot(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
+    from app.modules.health_isf.grant_command_center import (
+        INTEGRITY_DEMO,
+        INTEGRITY_VERIFIED,
+        build_command_center_payload,
+        classify_application_integrity,
+        classify_ride_integrity,
+    )
+
     effective_org_id = enforce_tenant_scope(user, organization_id)
-    rides = [ride for ride in service.get_all_rides(db, skip=0, limit=500) if ride.organization_id == effective_org_id]
+    rides = [
+        ride
+        for ride in service.get_all_rides(db, skip=0, limit=500, organization_id=effective_org_id)
+        if ride.organization_id == effective_org_id
+    ]
+    drivers = service.get_drivers_for_organization(db, organization_id=effective_org_id, limit=500)
+    providers = service.list_providers_for_organization(db, organization_id=effective_org_id, limit=500)
     applications = service.list_driver_applications(db, organization_id=effective_org_id, limit=500)
     recurring = service.get_recurring_ride_templates(db, organization_id=effective_org_id, limit=250)
     dashboard = _build_enterprise_dashboard_payload(db, effective_org_id)
-
-    active_rides = sum(1 for ride in rides if str(ride.status).lower() in {"accepted", "in_transit"})
     delayed = dashboard.get("dispatch_overview", {}).get("delayed_rides", 0)
-    approved_apps = sum(1 for app in applications if str(app.onboarding_status).lower() in {"approved", "active"})
-    pending_apps = sum(1 for app in applications if str(app.onboarding_status).lower() in {"applied", "pending_review"})
 
-    return GrantProofSnapshotResponse(
-        generated_at=now().isoformat(),
+    screenshot_inventory = [
+        {"id": "dispatch_live_queue", "label": "Dispatch Live Queue", "status": "ready"},
+        {
+            "id": "driver_onboarding_review",
+            "label": "Driver Onboarding Review",
+            "status": "ready" if applications else "needs_data",
+        },
+        {
+            "id": "recurring_transportation",
+            "label": "Recurring Transportation Templates",
+            "status": "ready" if recurring else "needs_data",
+        },
+        {"id": "grant_metrics_overview", "label": "Grant Metrics Overview", "status": "ready"},
+        {"id": "grant_command_center", "label": "Grant Command Center", "status": "ready"},
+    ]
+
+    command_center = build_command_center_payload(
+        rides=rides,
+        drivers=drivers,
+        providers=providers,
+        applications=applications,
+        recurring=recurring,
+        delayed_rides=int(delayed or 0),
+        screenshot_inventory=screenshot_inventory,
         transportation_mvp_status="ready" if rides else "needs_data",
         onboarding_mvp_status="ready" if applications else "needs_data",
         recurring_mvp_status="ready" if recurring else "needs_data",
         dashboard_mvp_status="ready" if dashboard else "needs_data",
-        screenshot_inventory=[
-            {"id": "dispatch_live_queue", "label": "Dispatch Live Queue", "status": "ready"},
-            {"id": "driver_onboarding_review", "label": "Driver Onboarding Review", "status": "ready" if applications else "needs_data"},
-            {"id": "recurring_transportation", "label": "Recurring Transportation Templates", "status": "ready" if recurring else "needs_data"},
-            {"id": "grant_metrics_overview", "label": "Grant Metrics Overview", "status": "ready"},
-        ],
-        metrics={
-            "total_rides": len(rides),
-            "active_rides": active_rides,
-            "delayed_rides": delayed,
-            "driver_applications_total": len(applications),
-            "driver_applications_pending": pending_apps,
-            "driver_applications_approved": approved_apps,
-            "recurring_templates": len(recurring),
-            "target_date": "2025-06-15",
-            "target_program": "Rural transportation grant readiness",
-        },
+    )
+
+    verified_ride_preview = [
+        {
+            "id": ride.id,
+            "passenger_name": ride.passenger_name,
+            "service_type": ride.service_type,
+            "status": str(ride.status),
+            "integrity": INTEGRITY_VERIFIED,
+        }
+        for ride in rides
+        if classify_ride_integrity(ride) == INTEGRITY_VERIFIED
+    ][:5]
+    demo_ride_preview = [
+        {
+            "id": ride.id,
+            "passenger_name": ride.passenger_name,
+            "service_type": ride.service_type,
+            "status": str(ride.status),
+            "integrity": INTEGRITY_DEMO,
+        }
+        for ride in rides
+        if classify_ride_integrity(ride) == INTEGRITY_DEMO
+    ][:5]
+
+    return GrantProofSnapshotResponse(
+        generated_at=now().isoformat(),
+        transportation_mvp_status=command_center["transportation_mvp_status"],
+        onboarding_mvp_status=command_center["onboarding_mvp_status"],
+        recurring_mvp_status=command_center["recurring_mvp_status"],
+        dashboard_mvp_status=command_center["dashboard_mvp_status"],
+        screenshot_inventory=screenshot_inventory,
+        metrics=command_center["metrics"],
         sample_entities={
-            "rides_preview": [
-                {
-                    "id": ride.id,
-                    "passenger_name": ride.passenger_name,
-                    "service_type": ride.service_type,
-                    "status": str(ride.status),
-                }
-                for ride in rides[:5]
-            ],
+            "rides_preview_verified": verified_ride_preview,
+            "rides_preview_demo_test_seeded": demo_ride_preview,
             "driver_applications_preview": [
                 {
                     "id": app.id,
                     "applicant_name": app.applicant_name,
                     "status": str(app.onboarding_status),
+                    "integrity": classify_application_integrity(app),
                 }
                 for app in applications[:5]
             ],
             "recurring_preview": recurring[:5],
         },
+        command_center_title=command_center["command_center_title"],
+        federal_registration=command_center["federal_registration"],
+        pipeline=command_center["pipeline"],
+        narrative=command_center["narrative"],
+        budget=command_center["budget"],
+        evidence_pack=command_center["evidence_pack"],
+        readiness_checklist=command_center["readiness_checklist"],
+        data_integrity=command_center["data_integrity"],
     )
 
 

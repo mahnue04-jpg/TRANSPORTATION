@@ -1888,6 +1888,13 @@
       onboardingSummary: document.getElementById("health-driver-applications-summary"),
       onboardingList: document.getElementById("health-driver-applications-list"),
       grantMetrics: document.getElementById("health-grant-metrics"),
+      grantIntegrity: document.getElementById("health-grant-integrity"),
+      grantFederal: document.getElementById("health-grant-federal"),
+      grantPipeline: document.getElementById("health-grant-pipeline"),
+      grantNarrative: document.getElementById("health-grant-narrative"),
+      grantBudget: document.getElementById("health-grant-budget"),
+      grantChecklist: document.getElementById("health-grant-checklist"),
+      grantEvidence: document.getElementById("health-grant-evidence"),
       grantScreenshots: document.getElementById("health-grant-screenshots"),
       recurringTemplates: document.getElementById("health-recurring-templates"),
       rideMix: document.getElementById("health-analytics-ride-mix"),
@@ -1953,6 +1960,13 @@
       onboardingSummary: document.getElementById("health-driver-applications-summary"),
       onboardingList: document.getElementById("health-driver-applications-list"),
       grantMetrics: document.getElementById("health-grant-metrics"),
+      grantIntegrity: document.getElementById("health-grant-integrity"),
+      grantFederal: document.getElementById("health-grant-federal"),
+      grantPipeline: document.getElementById("health-grant-pipeline"),
+      grantNarrative: document.getElementById("health-grant-narrative"),
+      grantBudget: document.getElementById("health-grant-budget"),
+      grantChecklist: document.getElementById("health-grant-checklist"),
+      grantEvidence: document.getElementById("health-grant-evidence"),
       grantScreenshots: document.getElementById("health-grant-screenshots"),
       recurringTemplates: document.getElementById("health-recurring-templates"),
       driverRuntimeId: document.getElementById("health-driver-runtime-id"),
@@ -7537,41 +7551,291 @@
     els.onboardingList.innerHTML = rows;
   }
 
+  var GRANT_WORKSPACE_STORAGE_KEY = "amicor_grant_command_center_workspace_v1";
+  var GRANT_NARRATIVE_SECTIONS = [
+    ["company_overview", "Company Overview"],
+    ["problem", "Problem"],
+    ["amicor_solution", "Amicor Solution"],
+    ["innovation", "Innovation"],
+    ["target_market", "Target Market"],
+    ["current_stage", "Current Stage"],
+    ["minnesota_impact", "Minnesota Impact"],
+    ["use_of_funds", "Use of Funds"],
+    ["commercialization_milestones", "Commercialization Milestones"],
+    ["long_term_vision", "Long-Term Vision"],
+  ];
+  var GRANT_CHECKLIST_STATUSES = ["READY", "IN PROGRESS", "MISSING", "NOT REQUIRED"];
+
+  function loadGrantWorkspaceOverrides() {
+    try {
+      var raw = window.localStorage.getItem(GRANT_WORKSPACE_STORAGE_KEY);
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function saveGrantWorkspaceOverrides(overrides) {
+    try {
+      window.localStorage.setItem(GRANT_WORKSPACE_STORAGE_KEY, JSON.stringify(overrides || {}));
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function grantIntegrityTone(label) {
+    var value = String(label || "").toUpperCase();
+    if (value.indexOf("VERIFIED") >= 0 || value === "READY" || value === "ACTIVE") return "ok";
+    if (value.indexOf("DEMO") >= 0 || value.indexOf("PENDING") >= 0 || value.indexOf("IN PROGRESS") >= 0 || value.indexOf("WATCHLIST") >= 0) return "warn";
+    if (value.indexOf("MISSING") >= 0 || value.indexOf("NEEDS") >= 0) return "danger";
+    return "warn";
+  }
+
   function renderGrantProof() {
     const els = getEls();
     if (!els.grantMetrics || !els.grantScreenshots || !els.recurringTemplates) return;
     const snapshot = state.grantSnapshot || {};
-    const metrics = snapshot.metrics && typeof snapshot.metrics === 'object' ? snapshot.metrics : {};
+    const metrics = snapshot.metrics && typeof snapshot.metrics === "object" ? snapshot.metrics : {};
     const screenshots = Array.isArray(snapshot.screenshot_inventory) ? snapshot.screenshot_inventory : [];
-    const templates = Array.isArray(state.recurringTemplates) ? state.recurringTemplates : [];
+    const templates = Array.isArray(state.recurringTemplates) && state.recurringTemplates.length
+      ? state.recurringTemplates
+      : (snapshot.sample_entities && Array.isArray(snapshot.sample_entities.recurring_preview)
+          ? snapshot.sample_entities.recurring_preview
+          : []);
+    const integrity = snapshot.data_integrity && typeof snapshot.data_integrity === "object" ? snapshot.data_integrity : {};
+    const federal = snapshot.federal_registration && typeof snapshot.federal_registration === "object" ? snapshot.federal_registration : {};
+    const pipeline = Array.isArray(snapshot.pipeline) ? snapshot.pipeline : [];
+    const narrativeDefaults = snapshot.narrative && typeof snapshot.narrative === "object" ? snapshot.narrative : {};
+    const budgetDefaults = snapshot.budget && typeof snapshot.budget === "object" ? snapshot.budget : {};
+    const evidence = snapshot.evidence_pack && typeof snapshot.evidence_pack === "object" ? snapshot.evidence_pack : {};
+    const checklistDefaults = Array.isArray(snapshot.readiness_checklist) ? snapshot.readiness_checklist : [];
+    const overrides = loadGrantWorkspaceOverrides();
+    const narrative = Object.assign({}, narrativeDefaults, overrides.narrative || {});
+    const checklistOverrides = overrides.checklist && typeof overrides.checklist === "object" ? overrides.checklist : {};
+    const budgetLineOverrides = Array.isArray(overrides.budget_line_items) ? overrides.budget_line_items : null;
+    const budgetLines = (budgetLineOverrides && budgetLineOverrides.length
+      ? budgetLineOverrides
+      : (Array.isArray(budgetDefaults.line_items) ? budgetDefaults.line_items : [])).map(function (item) {
+      return {
+        id: item.id,
+        label: item.label,
+        amount_usd: Number(item.amount_usd || 0),
+      };
+    });
+    const budgetTotal = budgetLines.reduce(function (sum, item) { return sum + Number(item.amount_usd || 0); }, 0);
+
+    if (els.grantIntegrity) {
+      const legend = Array.isArray(integrity.legend) ? integrity.legend : [
+        "VERIFIED LIVE DATA",
+        "DEMO / TEST / SEEDED DATA",
+        "PENDING VERIFICATION",
+      ];
+      els.grantIntegrity.innerHTML = '<div class="grant-integrity-banner">'
+        + legend.map(function (label) {
+            return '<span class="health-pill ' + grantIntegrityTone(label) + '">' + escapeHtml(label) + '</span>';
+          }).join(" ")
+        + '</div>'
+        + '<p class="health-summary">' + escapeHtml(integrity.policy || "Grant-facing metrics default to verified live data only.") + '</p>';
+    }
 
     els.grantMetrics.innerHTML = '<div class="enterprise-inline-grid">'
-      + MetricCard('Grant target', escapeHtml(metrics.target_date || '2025-06-15'), 'Rural transportation readiness deadline', 'ok')
-      + MetricCard('Total rides', formatNumber(metrics.total_rides || state.rides.length), 'Operational transportation evidence', 'ok')
-      + MetricCard('Recurring templates', formatNumber(metrics.recurring_templates || templates.length), 'Scheduled recurring route coverage', (metrics.recurring_templates || templates.length) ? 'ok' : 'warn')
-      + MetricCard('Onboarding pipeline', formatNumber(metrics.driver_applications_total || state.driverApplications.length), 'Driver onboarding pipeline evidence', (metrics.driver_applications_total || state.driverApplications.length) ? 'ok' : 'warn')
-      + MetricCard('Pending applications', formatNumber(metrics.driver_applications_pending || 0), 'Review workload for launch readiness', (metrics.driver_applications_pending || 0) ? 'warn' : 'ok')
-      + MetricCard('Approved applications', formatNumber(metrics.driver_applications_approved || 0), 'Activated contractor capacity', (metrics.driver_applications_approved || 0) ? 'ok' : 'warn')
-      + '</div>';
+      + MetricCard("Verified rides", formatNumber(metrics.total_rides_verified != null ? metrics.total_rides_verified : metrics.total_rides), "VERIFIED LIVE DATA only", metrics.total_rides_verified ? "ok" : "warn")
+      + MetricCard("Demo/test/seeded rides", formatNumber(metrics.total_rides_demo_test_seeded || 0), "Excluded from verified grant evidence", metrics.total_rides_demo_test_seeded ? "warn" : "ok")
+      + MetricCard("Verified drivers", formatNumber(metrics.drivers_verified || 0), "Excludes sample/demo drivers", metrics.drivers_verified ? "ok" : "warn")
+      + MetricCard("Verified providers", formatNumber(metrics.providers_verified || 0), "Excludes demonstration providers", metrics.providers_verified ? "ok" : "warn")
+      + MetricCard("Verified applications", formatNumber(metrics.driver_applications_total_verified != null ? metrics.driver_applications_total_verified : metrics.driver_applications_total), "Driver onboarding evidence", (metrics.driver_applications_total_verified || metrics.driver_applications_total) ? "ok" : "warn")
+      + MetricCard("Verified recurring", formatNumber(metrics.recurring_templates_verified != null ? metrics.recurring_templates_verified : metrics.recurring_templates), "Pending/demo templates excluded from verified totals", (metrics.recurring_templates_verified || metrics.recurring_templates) ? "ok" : "warn")
+      + '</div>'
+      + '<p class="health-summary">All-source ride count (includes demo/test/seeded): '
+      + escapeHtml(formatNumber(metrics.total_rides_all_sources || 0))
+      + '. That combined figure is not used as verified grant evidence.</p>';
+
+    if (els.grantFederal) {
+      els.grantFederal.innerHTML = '<div class="enterprise-inline-grid">'
+        + MetricCard("SAM.gov Registration", federal.sam_gov_registration || "ACTIVE", "Federal Assistance Awards", "ok")
+        + MetricCard("Entity", federal.entity || "AMICOR HEALTH ISF LLC", federal.status || "Active / Verified", "ok")
+        + MetricCard("UEI", federal.uei_display || "Pending configuration", federal.uei_configured ? "From entity configuration" : "Not hard-coded in client", federal.uei_configured ? "ok" : "warn")
+        + MetricCard("CAGE", federal.cage_display || "Verify / Pending Data", federal.cage_configured ? "From configured data" : "Do not invent a value", federal.cage_configured ? "ok" : "warn")
+        + MetricCard("SAM evidence", federal.sam_activation_evidence || "Available", "Activation evidence available", "ok")
+        + '</div>'
+        + '<p class="health-summary">' + escapeHtml(federal.privacy_note || "Sensitive banking, tax, and personal contact details are excluded.") + '</p>';
+    }
+
+    if (els.grantPipeline) {
+      els.grantPipeline.innerHTML = pipeline.length
+        ? pipeline.map(function (item) {
+            const docs = Array.isArray(item.required_documents) ? item.required_documents.join("; ") : "";
+            return '<article class="health-item-card grant-pipeline-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(item.grant_name || "Opportunity") + '</strong>'
+              + '<span class="health-pill ' + grantIntegrityTone(item.current_status) + '">' + escapeHtml(item.current_status || "WATCHLIST") + '</span>'
+              + '<span class="health-pill ' + grantIntegrityTone(item.priority) + '">' + escapeHtml(item.priority || "MEDIUM") + '</span></div>'
+              + '<div class="health-summary">Agency: ' + escapeHtml(item.funding_agency || "-") + ' · Type: ' + escapeHtml(item.funding_type || "-") + '</div>'
+              + '<div class="health-summary">Maximum award: ' + escapeHtml(item.maximum_award || "-") + '</div>'
+              + '<div class="health-summary">Eligibility: ' + escapeHtml(item.eligibility || "-") + '</div>'
+              + '<div class="health-summary">Open date: ' + escapeHtml(item.application_open_date || "Verify next open round") + ' · Deadline: ' + escapeHtml(item.deadline || "Not claimed open") + '</div>'
+              + '<div class="health-summary">Required documents: ' + escapeHtml(docs || "n/a") + '</div>'
+              + '<div class="health-summary">Next action: ' + escapeHtml(item.next_action || "-") + '</div>'
+              + '<div class="health-summary">Submission date: ' + escapeHtml(item.submission_date || "—") + ' · Decision/result: ' + escapeHtml(item.decision_result || "—") + '</div>'
+              + '<div class="health-summary">Notes: ' + escapeHtml(item.notes || "") + '</div>'
+              + '</article>';
+          }).join("")
+        : '<p class="health-summary">No grant opportunities tracked yet.</p>';
+    }
+
+    if (els.grantNarrative) {
+      els.grantNarrative.innerHTML = '<div class="grant-narrative-grid">'
+        + GRANT_NARRATIVE_SECTIONS.map(function (pair) {
+            const key = pair[0];
+            const label = pair[1];
+            return '<label class="grant-edit-field"><span>' + escapeHtml(label) + '</span>'
+              + '<textarea data-grant-narrative-key="' + escapeHtml(key) + '" rows="3">'
+              + escapeHtml(narrative[key] || "")
+              + '</textarea></label>';
+          }).join("")
+        + '</div>'
+        + '<div class="health-form-actions">'
+        + '<button type="button" class="health-row-btn" data-grant-action="save-narrative">Save narrative locally</button>'
+        + '<button type="button" class="health-row-btn secondary" data-grant-action="reset-narrative">Reset to master defaults</button>'
+        + '</div>'
+        + '<p class="health-summary" id="health-grant-narrative-status">Edits save in this browser workspace only.</p>';
+    }
+
+    if (els.grantBudget) {
+      els.grantBudget.innerHTML = '<p class="health-summary grant-budget-label">'
+        + escapeHtml(budgetDefaults.label || "MASTER PROPOSED BUDGET — subject to each grant's eligible-cost rules.")
+        + '</p>'
+        + '<div class="grant-budget-list">'
+        + budgetLines.map(function (item, index) {
+            return '<label class="grant-budget-row">'
+              + '<span>' + escapeHtml(item.label || item.id || ("Line " + (index + 1))) + '</span>'
+              + '<input type="number" min="0" step="100" data-grant-budget-id="' + escapeHtml(item.id || ("line_" + index)) + '" data-grant-budget-label="' + escapeHtml(item.label || "") + '" value="' + escapeHtml(String(item.amount_usd || 0)) + '" />'
+              + '</label>';
+          }).join("")
+        + '</div>'
+        + '<div class="health-row grant-budget-total"><strong>TOTAL</strong><strong>$' + escapeHtml(formatNumber(budgetTotal)) + '</strong></div>'
+        + '<div class="health-form-actions">'
+        + '<button type="button" class="health-row-btn" data-grant-action="save-budget">Save budget locally</button>'
+        + '<button type="button" class="health-row-btn secondary" data-grant-action="reset-budget">Reset to $35,000 master budget</button>'
+        + '</div>'
+        + '<p class="health-summary" id="health-grant-budget-status">Proposed budget only. Confirm eligible costs against each solicitation.</p>';
+    }
+
+    if (els.grantChecklist) {
+      els.grantChecklist.innerHTML = '<div class="grant-checklist">'
+        + checklistDefaults.map(function (item) {
+            const status = checklistOverrides[item.id] || item.status || "MISSING";
+            const options = GRANT_CHECKLIST_STATUSES.map(function (option) {
+              return '<option value="' + escapeHtml(option) + '"' + (option === status ? " selected" : "") + ">" + escapeHtml(option) + "</option>";
+            }).join("");
+            return '<div class="grant-checklist-row">'
+              + '<div><strong>' + escapeHtml(item.label || item.id) + '</strong>'
+              + (item.note ? '<div class="health-summary">' + escapeHtml(item.note) + '</div>' : "")
+              + '</div>'
+              + '<select data-grant-checklist-id="' + escapeHtml(item.id || "") + '">' + options + "</select>"
+              + "</div>";
+          }).join("")
+        + '</div>'
+        + '<div class="health-form-actions">'
+        + '<button type="button" class="health-row-btn" data-grant-action="save-checklist">Save checklist locally</button>'
+        + '</div>'
+        + '<p class="health-summary" id="health-grant-checklist-status">Statuses: READY · IN PROGRESS · MISSING · NOT REQUIRED</p>';
+    }
+
+    if (els.grantEvidence) {
+      const categories = evidence.categories && Array.isArray(evidence.categories) ? evidence.categories : [];
+      els.grantEvidence.innerHTML = categories.length
+        ? categories.map(function (category) {
+            const items = Array.isArray(category.items) ? category.items : [];
+            return '<article class="health-item-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(category.label || category.id || "Evidence") + '</strong>'
+              + '<span class="health-pill ' + grantIntegrityTone(category.status) + '">' + escapeHtml(category.status || "IN PROGRESS") + '</span></div>'
+              + '<ul class="grant-evidence-list">'
+              + items.map(function (entry) { return "<li>" + escapeHtml(entry) + "</li>"; }).join("")
+              + "</ul></article>";
+          }).join("")
+        : '<p class="health-summary">Evidence pack categories will appear after snapshot load.</p>';
+    }
 
     els.grantScreenshots.innerHTML = screenshots.length
       ? screenshots.map(function (item) {
-          return '<div class="health-row"><strong>' + escapeHtml(item.label || item.id || 'Capture') + '</strong><span class="health-pill ' + pillClass(item.status) + '">' + escapeHtml(item.status || 'pending') + '</span></div>';
-        }).join('')
+          return '<div class="health-row"><strong>' + escapeHtml(item.label || item.id || "Capture") + '</strong><span class="health-pill ' + pillClass(item.status) + '">' + escapeHtml(item.status || "pending") + '</span></div>';
+        }).join("")
       : '<p class="health-summary">No screenshot checklist generated yet.</p>';
 
     els.recurringTemplates.innerHTML = templates.length
       ? templates.slice(0, 10).map(function (item) {
-          const recur = item.recurrence && typeof item.recurrence === 'object' ? item.recurrence : {};
-          const days = Array.isArray(recur.days) ? recur.days.join(', ') : 'schedule pending';
+          const recur = item.recurrence && typeof item.recurrence === "object" ? item.recurrence : {};
+          const days = Array.isArray(recur.days) ? recur.days.join(", ") : "schedule pending";
+          const notes = String(item.notes || "").toLowerCase();
+          const integrityLabel = (notes.indexOf("seed") >= 0 || notes.indexOf("phase 43") >= 0 || notes.indexOf("demo") >= 0)
+            ? "DEMO / TEST / SEEDED DATA"
+            : "PENDING VERIFICATION";
           return '<article class="health-item-card">'
-            + '<div class="health-row"><strong>' + escapeHtml(item.rider_name || '-') + '</strong><span class="health-pill ' + pillClass(item.last_status) + '">' + escapeHtml(item.last_status || 'pending') + '</span></div>'
-            + '<div class="health-summary">Category: ' + escapeHtml(item.category || item.service_type || 'general') + ' · Pickup: ' + escapeHtml(item.preferred_pickup_time || 'n/a') + '</div>'
-            + '<div class="health-summary">Days: ' + escapeHtml(days) + '</div>'
-            + '<div class="health-summary">Route: ' + escapeHtml(item.pickup_address || '-') + ' → ' + escapeHtml(item.dropoff_address || '-') + '</div>'
-            + '</article>';
-        }).join('')
-      : '<p class="health-summary">No recurring templates yet. Seed Phase 43 data to generate examples.</p>';
+            + '<div class="health-row"><strong>' + escapeHtml(item.rider_name || "-") + '</strong>'
+            + '<span class="health-pill ' + grantIntegrityTone(integrityLabel) + '">' + escapeHtml(integrityLabel) + '</span>'
+            + '<span class="health-pill ' + pillClass(item.last_status) + '">' + escapeHtml(item.last_status || "pending") + '</span></div>'
+            + '<div class="health-summary">Category: ' + escapeHtml(item.category || item.service_type || "general") + " · Pickup: " + escapeHtml(item.preferred_pickup_time || "n/a") + "</div>"
+            + '<div class="health-summary">Days: ' + escapeHtml(days) + "</div>"
+            + '<div class="health-summary">Route: ' + escapeHtml(item.pickup_address || "-") + " → " + escapeHtml(item.dropoff_address || "-") + "</div>"
+            + "</article>";
+        }).join("")
+      : '<p class="health-summary">No recurring templates loaded. Recurring rows are not treated as verified commercial activity by default.</p>';
+  }
+
+  function handleGrantWorkspaceAction(action) {
+    const overrides = loadGrantWorkspaceOverrides();
+    if (action === "save-narrative") {
+      const narrative = {};
+      document.querySelectorAll("[data-grant-narrative-key]").forEach(function (node) {
+        narrative[node.getAttribute("data-grant-narrative-key")] = String(node.value || "");
+      });
+      overrides.narrative = narrative;
+      const ok = saveGrantWorkspaceOverrides(overrides);
+      const status = document.getElementById("health-grant-narrative-status");
+      if (status) status.textContent = ok ? "Narrative saved locally in this browser workspace." : "Unable to save narrative locally.";
+      return;
+    }
+    if (action === "reset-narrative") {
+      delete overrides.narrative;
+      saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      return;
+    }
+    if (action === "save-budget") {
+      const lineItems = [];
+      document.querySelectorAll("[data-grant-budget-id]").forEach(function (node) {
+        lineItems.push({
+          id: node.getAttribute("data-grant-budget-id"),
+          label: node.getAttribute("data-grant-budget-label") || node.getAttribute("data-grant-budget-id"),
+          amount_usd: Number(node.value || 0),
+        });
+      });
+      overrides.budget_line_items = lineItems;
+      const ok = saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      const status = document.getElementById("health-grant-budget-status");
+      if (status) status.textContent = ok ? "Budget saved locally. Still subject to each grant's eligible-cost rules." : "Unable to save budget locally.";
+      return;
+    }
+    if (action === "reset-budget") {
+      delete overrides.budget_line_items;
+      saveGrantWorkspaceOverrides(overrides);
+      renderGrantProof();
+      return;
+    }
+    if (action === "save-checklist") {
+      const checklist = {};
+      document.querySelectorAll("[data-grant-checklist-id]").forEach(function (node) {
+        checklist[node.getAttribute("data-grant-checklist-id")] = String(node.value || "MISSING");
+      });
+      overrides.checklist = checklist;
+      const ok = saveGrantWorkspaceOverrides(overrides);
+      const status = document.getElementById("health-grant-checklist-status");
+      if (status) status.textContent = ok ? "Checklist saved locally in this browser workspace." : "Unable to save checklist locally.";
+    }
   }
 
   function renderRideTimeline() {
@@ -8219,7 +8483,7 @@
       (wantsDispatchBoard || wantsDriverOps) ? fetchJson("/api/health-isf/dispatch/active-assignments", { actionName: "refresh_dispatch_active_assignments" }).catch(() => []) : Promise.resolve([]),
       (wantsStaffOps || wantsDriverOps) ? fetchJson("/api/health-isf/drivers/active/metrics", { actionName: "refresh_driver_pool_metrics" }).catch(() => null) : Promise.resolve(null),
       wantsOnboarding ? fetchJson("/api/health-isf/driver-applications", { actionName: "refresh_driver_applications" }).catch(() => []) : Promise.resolve([]),
-      wantsOnboarding ? fetchJson("/api/health-isf/recurring/templates", { actionName: "refresh_recurring_templates" }).catch(() => []) : Promise.resolve([]),
+      (wantsOnboarding || wantsGrant) ? fetchJson("/api/health-isf/recurring/templates", { actionName: "refresh_recurring_templates" }).catch(() => []) : Promise.resolve([]),
       wantsGrant ? fetchJson("/api/health-isf/grant-proof/snapshot", { actionName: "refresh_grant_snapshot" }).catch(() => null) : Promise.resolve(null),
       wantsDashboardIntelligence ? fetchJson("/api/ai/operations/status", { actionName: "refresh_ai_ops" }).catch(() => null) : Promise.resolve(null),
       wantsDashboardIntelligence ? fetchJson("/api/ai/governance/status", { actionName: "refresh_governance_status" }).catch(() => null) : Promise.resolve(null),
@@ -9490,6 +9754,14 @@
         commitWorkspaceSessionRole(selectedRole, "apply_session_role");
       }
       if (action === "dismiss-modal") closeModal();
+    });
+
+    document.addEventListener("click", (event) => {
+      const grantActionButton = event && event.target
+        ? event.target.closest("[data-grant-action]")
+        : null;
+      if (!grantActionButton) return;
+      handleGrantWorkspaceAction(grantActionButton.getAttribute("data-grant-action"));
     });
 
     document.addEventListener("change", (event) => {

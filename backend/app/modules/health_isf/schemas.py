@@ -260,6 +260,14 @@ class GrantProofSnapshotResponse(BaseModel):
     screenshot_inventory: list[dict[str, str]]
     metrics: dict[str, Any]
     sample_entities: dict[str, Any]
+    command_center_title: str = "Grant Command Center"
+    federal_registration: dict[str, Any] = Field(default_factory=dict)
+    pipeline: list[dict[str, Any]] = Field(default_factory=list)
+    narrative: dict[str, Any] = Field(default_factory=dict)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    evidence_pack: dict[str, Any] = Field(default_factory=dict)
+    readiness_checklist: list[dict[str, Any]] = Field(default_factory=list)
+    data_integrity: dict[str, Any] = Field(default_factory=dict)
 
 
 class CustomerRideRequestCreateRequest(BaseModel):
@@ -286,6 +294,7 @@ class CustomerRideRequestCreateRequest(BaseModel):
     return_pickup_address: Optional[str] = Field(None, max_length=512)
     return_dropoff_address: Optional[str] = Field(None, max_length=512)
     same_driver_preference: bool = False
+    client_timezone: Optional[str] = Field(None, max_length=64)
 
     @field_validator("pickup_address", "dropoff_address", "rider_name", mode="before")
     @classmethod
@@ -608,6 +617,10 @@ class DispatchQueueItemResponse(BaseModel):
     call_when_ready: bool = False
     scheduling_summary: Optional[str] = None
     appointment_window: Optional[str] = None
+    client_timezone: Optional[str] = None
+    pickup_time_local_display: Optional[str] = None
+    appointment_time_local_display: Optional[str] = None
+    dispatch_eligible_at_local_display: Optional[str] = None
 
 
 class DispatchActiveAssignmentItemResponse(BaseModel):
@@ -906,6 +919,10 @@ class RideResponse(RideBase):
     call_when_ready: bool = False
     scheduling_series_id: Optional[str] = None
     scheduling_summary: Optional[str] = None
+    client_timezone: Optional[str] = None
+    pickup_time_local_display: Optional[str] = None
+    appointment_time_local_display: Optional[str] = None
+    dispatch_eligible_at_local_display: Optional[str] = None
 
     class Config:
         from_attributes = True
