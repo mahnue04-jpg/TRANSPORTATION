@@ -7574,17 +7574,17 @@
     ["growth_case", "GROWTH CASE"],
   ];
   var GRANT_PROJECTION_FIELDS = [
-    ["active_providers", "Number of active providers", "1"],
-    ["rides_per_provider_per_day", "Estimated rides per provider per day", "0.1"],
-    ["operating_days_per_month", "Operating days per month", "1"],
-    ["avg_net_revenue_per_ride", "Estimated average net revenue per completed ride", "0.01"],
-    ["driver_cost_per_ride", "Estimated transportation/driver cost per ride", "0.01"],
-    ["monthly_tech_cloud", "Monthly technology/cloud costs", "1"],
-    ["monthly_insurance", "Monthly insurance costs", "1"],
-    ["monthly_marketing", "Monthly marketing/provider outreach", "1"],
-    ["monthly_compliance_legal", "Monthly compliance/accounting/legal costs", "1"],
-    ["monthly_admin_ops", "Monthly administrative/operating costs", "1"],
-    ["monthly_other_opex", "Other documented operating expenses", "1"],
+    ["active_providers", "PROJECTED / ASSUMPTION — Number of active providers", "1"],
+    ["rides_per_provider_per_day", "PROJECTED / ASSUMPTION — Estimated rides per provider per day", "0.1"],
+    ["operating_days_per_month", "PROJECTED / ASSUMPTION — Operating days per month", "1"],
+    ["avg_net_revenue_per_ride", "PROJECTED / ASSUMPTION — Average revenue per completed ride", "0.01"],
+    ["driver_cost_per_ride", "PROJECTED / ASSUMPTION — Driver/transportation direct cost per ride", "0.01"],
+    ["monthly_tech_cloud", "PROJECTED / ASSUMPTION — Monthly software/cloud costs", "1"],
+    ["monthly_insurance", "PROJECTED / ASSUMPTION — Monthly insurance assumptions", "1"],
+    ["monthly_marketing", "PROJECTED / ASSUMPTION — Monthly marketing/provider acquisition expenses", "1"],
+    ["monthly_compliance_legal", "PROJECTED / ASSUMPTION — Monthly professional/compliance expenses", "1"],
+    ["monthly_admin_ops", "PROJECTED / ASSUMPTION — Monthly administrative/operating expenses", "1"],
+    ["monthly_other_opex", "PROJECTED / ASSUMPTION — Other documented operating expenses (incl. payment processing if applicable)", "1"],
   ];
 
   function grantMoney(value) {
@@ -7833,17 +7833,30 @@
         + '<span class="health-pill ok">GRANT REQUEST separate</span>'
         + '</div>'
         + '<p class="health-summary">' + escapeHtml(projectionsDefaults.policy || "Projected amounts are planning assumptions only.") + '</p>'
+        + '<p class="health-summary">' + escapeHtml(projectionsDefaults.management_assumption_guide || "Enter Amicor-approved planning assumptions only. Values are PROJECTED / ASSUMPTION, not historical performance.") + '</p>'
         + '<p class="health-summary">Actual operating revenue: ' + escapeHtml(projectionsDefaults.actual_operating_revenue_status || "Not loaded as ACTUAL in Grant Command Center.") + '</p>'
         + '<div class="health-form-actions">' + scenarioTabs + '</div>'
         + '<div class="grant-budget-list" style="margin-top:10px">'
         + GRANT_PROJECTION_FIELDS.map(function (pair) {
-            return '<label class="grant-budget-row"><span>' + escapeHtml(pair[1]) + '</span>'
+            var fieldLabel = pair[1];
+            if (Array.isArray(projectionsDefaults.input_fields)) {
+              for (var fi = 0; fi < projectionsDefaults.input_fields.length; fi += 1) {
+                if (projectionsDefaults.input_fields[fi] && projectionsDefaults.input_fields[fi].id === pair[0] && projectionsDefaults.input_fields[fi].label) {
+                  fieldLabel = projectionsDefaults.input_fields[fi].label;
+                  break;
+                }
+              }
+            }
+            return '<label class="grant-budget-row"><span>' + escapeHtml(fieldLabel) + '</span>'
               + '<input type="number" min="0" step="' + escapeHtml(pair[2]) + '" data-grant-projection-field="' + escapeHtml(pair[0]) + '" value="' + escapeHtml(String(scenarioAssumptions[pair[0]] != null ? scenarioAssumptions[pair[0]] : 0)) + '" />'
               + '</label>';
           }).join("")
         + '</div>'
+        + '<p class="health-summary">PROJECTED — Expected completed rides by month = active providers × rides/provider/day × operating days/month → '
+        + escapeHtml(formatNumber(scenarioResults.projected_monthly_rides))
+        + ' (calculated; not historical).</p>'
         + '<div class="enterprise-inline-grid">'
-        + MetricCard("Projected monthly rides", formatNumber(scenarioResults.projected_monthly_rides), "PROJECTED", "warn")
+        + MetricCard("Projected monthly rides", formatNumber(scenarioResults.projected_monthly_rides), "PROJECTED — calculated from assumptions", "warn")
         + MetricCard("Projected monthly gross revenue", grantMoney(scenarioResults.projected_monthly_gross_revenue), "PROJECTED — not actual revenue", "warn")
         + MetricCard("Projected driver costs", grantMoney(scenarioResults.projected_monthly_transportation_driver_costs), "PROJECTED", "warn")
         + MetricCard("Projected operating expenses", grantMoney(scenarioResults.projected_monthly_operating_expenses), "PROJECTED", "warn")

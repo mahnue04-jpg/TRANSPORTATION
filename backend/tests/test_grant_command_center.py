@@ -129,6 +129,9 @@ def test_demo_seed_and_unproven_rides_are_not_verified_grant_evidence():
     assert "conservative" in projections["scenarios"]
     assert "base_case" in projections["scenarios"]
     assert "growth_case" in projections["scenarios"]
+    assert "PROJECTED / ASSUMPTION" in projections["management_assumption_guide"]
+    assert any("payment processing" in str(field.get("label") or "").lower() for field in projections["input_fields"])
+    assert projections["derived_fields"][0]["id"] == "projected_monthly_rides"
 
     checklist = {item["id"]: item for item in payload["readiness_checklist"]}
     assert checklist["financial_projections"]["status"] == "IN PROGRESS"

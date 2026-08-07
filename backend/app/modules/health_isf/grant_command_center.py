@@ -514,18 +514,40 @@ def build_financial_projections() -> dict[str, Any]:
         "default_scenario": "conservative",
         "editable": True,
         "scenarios": scenarios,
+        "management_assumption_guide": (
+            "Enter Amicor-approved planning assumptions only. Every input is PROJECTED / ASSUMPTION, "
+            "not historical performance. Expected completed rides per month are calculated as "
+            "active providers × rides per provider per day × operating days per month. "
+            "Payment processing/transaction costs, if applicable, belong in "
+            "'Other documented operating expenses (incl. payment processing if applicable)'. "
+            "The $35,000 Master Proposed Budget remains GRANT REQUEST and is never added to "
+            "projected operating revenue. Financial Projections stays IN PROGRESS until management "
+            "enters and saves complete assumptions."
+        ),
         "input_fields": [
-            {"id": "active_providers", "label": "Number of active providers"},
-            {"id": "rides_per_provider_per_day", "label": "Estimated rides per provider per day"},
-            {"id": "operating_days_per_month", "label": "Operating days per month"},
-            {"id": "avg_net_revenue_per_ride", "label": "Estimated average net revenue per completed ride"},
-            {"id": "driver_cost_per_ride", "label": "Estimated transportation/driver cost per ride"},
-            {"id": "monthly_tech_cloud", "label": "Monthly technology/cloud costs"},
-            {"id": "monthly_insurance", "label": "Monthly insurance costs"},
-            {"id": "monthly_marketing", "label": "Monthly marketing/provider outreach"},
-            {"id": "monthly_compliance_legal", "label": "Monthly compliance/accounting/legal costs"},
-            {"id": "monthly_admin_ops", "label": "Monthly administrative/operating costs"},
-            {"id": "monthly_other_opex", "label": "Other documented operating expenses"},
+            {"id": "active_providers", "label": "PROJECTED / ASSUMPTION — Number of active providers", "classification": FINANCIAL_PROJECTED},
+            {"id": "rides_per_provider_per_day", "label": "PROJECTED / ASSUMPTION — Estimated rides per provider per day", "classification": FINANCIAL_PROJECTED},
+            {"id": "operating_days_per_month", "label": "PROJECTED / ASSUMPTION — Operating days per month", "classification": FINANCIAL_PROJECTED},
+            {"id": "avg_net_revenue_per_ride", "label": "PROJECTED / ASSUMPTION — Average revenue per completed ride", "classification": FINANCIAL_PROJECTED},
+            {"id": "driver_cost_per_ride", "label": "PROJECTED / ASSUMPTION — Driver/transportation direct cost per ride", "classification": FINANCIAL_PROJECTED},
+            {"id": "monthly_tech_cloud", "label": "PROJECTED / ASSUMPTION — Monthly software/cloud costs", "classification": FINANCIAL_PROJECTED},
+            {"id": "monthly_insurance", "label": "PROJECTED / ASSUMPTION — Monthly insurance assumptions", "classification": FINANCIAL_PROJECTED},
+            {"id": "monthly_marketing", "label": "PROJECTED / ASSUMPTION — Monthly marketing/provider acquisition expenses", "classification": FINANCIAL_PROJECTED},
+            {"id": "monthly_compliance_legal", "label": "PROJECTED / ASSUMPTION — Monthly professional/compliance expenses", "classification": FINANCIAL_PROJECTED},
+            {"id": "monthly_admin_ops", "label": "PROJECTED / ASSUMPTION — Monthly administrative/operating expenses", "classification": FINANCIAL_PROJECTED},
+            {
+                "id": "monthly_other_opex",
+                "label": "PROJECTED / ASSUMPTION — Other documented operating expenses (incl. payment processing if applicable)",
+                "classification": FINANCIAL_PROJECTED,
+            },
+        ],
+        "derived_fields": [
+            {
+                "id": "projected_monthly_rides",
+                "label": "PROJECTED — Expected completed rides by month",
+                "formula": "active_providers × rides_per_provider_per_day × operating_days_per_month",
+                "classification": FINANCIAL_PROJECTED,
+            }
         ],
     }
 
