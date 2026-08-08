@@ -1941,6 +1941,16 @@
 .grant-pipeline-card {
   margin-bottom: 10px;
 }
+#health-grant-nih-sbir h4 {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+#health-grant-nih-sbir .grant-budget-row em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
 .grant-projection-banner,
 .grant-integrity-banner .health-pill {
   margin-bottom: 2px;

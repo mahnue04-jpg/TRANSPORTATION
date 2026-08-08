@@ -27,6 +27,13 @@ FINANCIAL_ACTUAL = "ACTUAL"
 FINANCIAL_PROJECTED = "PROJECTED"
 FINANCIAL_GRANT_REQUEST = "GRANT REQUEST"
 
+# Grant #1 NIH SBIR draft dollars — never an approved Amicor request.
+NIH_SBIR_BUDGET_PLACEHOLDER = (
+    "PLANNING PLACEHOLDER — NOT APPROVED REQUEST — "
+    "SUBJECT TO PA-27-100 AND NIH INSTITUTE BUDGET RULES"
+)
+PENDING_MANAGEMENT_VERIFICATION = "PENDING MANAGEMENT / VERIFICATION"
+
 # Explicit opt-in only. Platform rows alone are not treated as commercial proof.
 _COMMERCIAL_VERIFIED_MARKERS = (
     "grant_verified_commercial",
@@ -236,6 +243,52 @@ def build_federal_registration() -> dict[str, Any]:
 def build_master_pipeline() -> list[dict[str, Any]]:
     return [
         {
+            "grant_id": "grant_1_nih_sbir_pa_27_100",
+            "grant_number": 1,
+            "grant_name": "NIH SBIR Parent — PA-27-100",
+            "funding_agency": "NIH / CDC / FDA (Parent SBIR R43/R44)",
+            "funding_type": "Federal SBIR Phase I (Clinical Trial Optional) — institute assignment pending",
+            "maximum_award": (
+                "Verify Phase I budget limits against PA-27-100 and the selected NIH institute; "
+                "do not treat draft budget figures as award eligibility"
+            ),
+            "eligibility": (
+                "U.S. small business concern eligibility must be verified against current SBIR rules; "
+                "NIH institute fit must be confirmed before submission"
+            ),
+            "application_open_date": "August 5, 2026 (earliest submission date per PA-27-100 cycle info)",
+            "deadline": "September 5, 2026 (next standard receipt date)",
+            "target_date": "September 5, 2026",
+            "current_status": "APPLICATION PREPARATION / VERIFY NIH INSTITUTE FIT",
+            "priority": "HIGH",
+            "required_documents": [
+                "Grant #1 NIH SBIR internal application package",
+                "Specific Aims (to be tightened with management)",
+                "Research Strategy / work plan",
+                "Biosketches / key personnel",
+                "Budget and budget justification (NIH forms)",
+                "Commercialization plan elements",
+                "Facilities and resources",
+                "SAM.gov / UEI / eRA Commons / Grants.gov registrations",
+            ],
+            "next_action": (
+                "Select NIH institute fit, tighten Phase I technical research aims, "
+                "then complete forms toward the September 5, 2026 receipt date"
+            ),
+            "submission_date": "",
+            "decision_result": "",
+            "notes": (
+                "Grant #1 readiness package only. Internal preparation — not submitted externally. "
+                "Do not invent customers, revenue, clinical outcomes, partnerships, licenses, "
+                "or regulatory approvals. Use verified Amicor information only."
+            ),
+            "target_request_usd": None,
+            "nofo": "PA-27-100",
+            "mechanism": "R43/R44 Parent SBIR",
+        },
+        {
+            "grant_id": "grant_watchlist_launch_minnesota",
+            "grant_number": None,
             "grant_name": "Launch Minnesota Innovation Grant",
             "funding_agency": "Minnesota DEED",
             "funding_type": "State innovation / commercialization support",
@@ -243,6 +296,7 @@ def build_master_pipeline() -> list[dict[str, Any]]:
             "eligibility": "Verify against the active Launch Minnesota solicitation",
             "application_open_date": "Verify next open round",
             "deadline": "Not claimed open — verify next open round",
+            "target_date": "",
             "current_status": "WATCHLIST / VERIFY NEXT OPEN ROUND",
             "priority": "HIGH",
             "required_documents": [
@@ -256,10 +310,11 @@ def build_master_pipeline() -> list[dict[str, Any]]:
             "decision_result": "",
             "notes": (
                 "Tracked opportunity only. Do not treat as currently open. "
-                "Target request up to $35,000 subject to the active solicitation."
+                "Target request up to $35,000 subject to the active solicitation. "
+                "Screen separately from NIH SBIR Grant #1; do not force-fit Amicor into mismatched programs."
             ),
             "target_request_usd": 35000,
-        }
+        },
     ]
 
 
@@ -281,6 +336,467 @@ FOUNDER_COMPANY_BIO = (
     "validating the platform with real-world users, and securing non-dilutive capital to "
     "support commercialization."
 )
+
+
+def build_nih_sbir_grant1_package() -> dict[str, Any]:
+    """Internal NIH SBIR PA-27-100 readiness package. Not an external submission."""
+    proposed_budget_line_items = [
+        {
+            "id": "personnel",
+            "label": "Personnel (PI / technical / operations contributors)",
+            "amount_usd": 120000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "fringe",
+            "label": "Fringe benefits (if applicable under company payroll policy)",
+            "amount_usd": 24000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "consultants",
+            "label": "Consultants / technical advisors (healthcare ops, evaluation, SBIR writing support)",
+            "amount_usd": 35000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "cloud_software",
+            "label": "Cloud hosting, software, AI/model services, and development tooling",
+            "amount_usd": 28000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "equipment_supplies",
+            "label": "Equipment / supplies for development, testing, and pilot operations readiness",
+            "amount_usd": 12000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "travel",
+            "label": "Travel (Minnesota stakeholder validation / required NIH meetings if applicable)",
+            "amount_usd": 8000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "other_direct",
+            "label": "Other direct costs (security, compliance tooling, usability testing, documentation)",
+            "amount_usd": 18000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+        {
+            "id": "indirect",
+            "label": "Indirect costs (use NIH-approved rate or de minimis rules as applicable)",
+            "amount_usd": 30000,
+            "classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+        },
+    ]
+    proposed_total = sum(int(item["amount_usd"]) for item in proposed_budget_line_items)
+
+    return {
+        "grant_number": 1,
+        "package_title": "Grant #1 — NIH SBIR Application Readiness Package",
+        "nofo": "PA-27-100",
+        "nofo_title": (
+            "NIH, CDC and FDA Small Business Innovation Research Grant "
+            "(Parent SBIR [R43/R44] Clinical Trial Optional)"
+        ),
+        "mechanism": "R43 Phase I (Parent SBIR)",
+        "target_receipt_date": "September 5, 2026",
+        "status": "APPLICATION PREPARATION / VERIFY NIH INSTITUTE FIT",
+        "priority": "HIGH",
+        "integrity_policy": (
+            "Internal preparation package only. Uses verified Amicor company positioning and "
+            "existing Grant Command Center integrity rules. Do not invent revenue, customers, "
+            "contracts, completed rides, clinical outcomes, partnerships, licenses, research "
+            "results, or regulatory approvals. Demo/test/seeded and pending-verification platform "
+            "rows remain excluded from verified commercial evidence."
+        ),
+        "external_submission": False,
+        "project_title_options": [
+            {
+                "id": "title_a",
+                "title": (
+                    "AI-Enabled Coordination Platform for Non-Emergency Medical Transportation "
+                    "Operations"
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "title_b",
+                "title": (
+                    "Integrated Healthcare Transportation Operations System with AI-Assisted "
+                    "Dispatch and Provider Workflows"
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "title_c",
+                "title": (
+                    "Amicor Health ISF: Digital NEMT Coordination Platform to Improve Access "
+                    "and Operational Reliability"
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "title_d",
+                "title": (
+                    "Phase I Feasibility of an AI-Supported NEMT Scheduling, Dispatch, and "
+                    "Readiness Platform for Healthcare Transportation"
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+        ],
+        "one_page_project_summary": (
+            "Amicor Health ISF LLC is a Minnesota-based healthcare technology company developing "
+            "an AI-enabled non-emergency medical transportation (NEMT) coordination and operations "
+            "platform. Fragmented scheduling, dispatch, driver readiness, and provider communication "
+            "tools can delay or complicate healthcare-related transportation. Amicor is building a "
+            "centralized digital environment intended to connect healthcare providers, transportation "
+            "operations teams, drivers, and administrative users for request intake, scheduling, "
+            "dispatch coordination, driver workflows, operational visibility, recurring transportation "
+            "needs, onboarding, reporting, and related administrative processes.\n\n"
+            "This Phase I SBIR concept proposes research and development to define, implement, and "
+            "evaluate core technical capabilities for AI-assisted coordination and operational "
+            "decision support within a healthcare transportation workflow. Proposed Phase I work "
+            "focuses on feasibility, prototype refinement, measurable workflow metrics, and "
+            "Minnesota market validation planning — not on claiming completed clinical outcomes, "
+            "customer contracts, or verified commercial ride volume.\n\n"
+            "Commercialization potential depends on successful technical feasibility, provider and "
+            "driver readiness, and later market adoption. NIH institute assignment and final Specific "
+            "Aims remain pending management review. This package is an internal readiness artifact "
+            "and is not an external grant submission."
+        ),
+        "problem_unmet_need": (
+            "Healthcare providers, transportation operators, drivers, and administrative teams often "
+            "rely on fragmented tools when coordinating non-emergency medical transportation. Manual "
+            "or disconnected scheduling, dispatch, communication, and readiness processes can create "
+            "operational uncertainty, delayed coordination, and incomplete visibility across the "
+            "transportation workflow. Amicor’s unmet-need framing is operational and coordination-"
+            "focused: improving digital coordination for healthcare-related transportation — without "
+            "claiming verified clinical outcome improvements, completed commercial volume, or "
+            "existing customer contracts unless separately verified."
+        ),
+        "technical_innovation": (
+            "Proposed technical innovation centers on an integrated AI-enabled NEMT coordination "
+            "and healthcare transportation operations platform that combines provider request "
+            "workflows, scheduling, dispatch coordination, driver readiness/onboarding support, "
+            "recurring trip handling, operational visibility, and administrative reporting in one "
+            "product environment. Phase I research would evaluate AI-assisted operational support "
+            "(for example, assignment decision support, exception handling signals, and workflow "
+            "prioritization) against measurable feasibility milestones. Innovation claims in this "
+            "package are developmental/proposed; they are not presented as completed research "
+            "results, peer-reviewed findings, licenses, or regulatory clearances."
+        ),
+        "phase_i_rd_objectives": [
+            {
+                "id": "aim1",
+                "label": "Aim 1 — Workflow architecture feasibility",
+                "text": (
+                    "Define and implement a Phase I reference architecture for provider request "
+                    "intake, scheduling, dispatch coordination, and driver workflow states suitable "
+                    "for NEMT operations testing."
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "aim2",
+                "label": "Aim 2 — AI-assisted operational decision support",
+                "text": (
+                    "Prototype and evaluate AI-assisted operational decision-support functions "
+                    "(assignment/exception/prioritization support) with measurable accuracy, "
+                    "latency, and operator-usability criteria defined before testing."
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "aim3",
+                "label": "Aim 3 — Readiness, integrity, and evaluation framework",
+                "text": (
+                    "Establish evaluation methods for operational readiness, data integrity labeling "
+                    "(verified vs demo/test/seeded vs pending), and pilot-readiness metrics that can "
+                    "support later commercialization without overstating evidence."
+                ),
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+        ],
+        "technical_work_plan_and_milestones": [
+            {
+                "id": "m1",
+                "milestone": "M1 — Specific Aims and institute fit locked",
+                "measure": (
+                    "Selected NIH institute/program officer path documented; Specific Aims revised "
+                    "and approved internally"
+                ),
+                "target_window": "Before mid-application cycle (management-driven)",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "m2",
+                "milestone": "M2 — Core workflow prototype scope freeze",
+                "measure": (
+                    "Documented Phase I scope covering request → schedule → dispatch → driver "
+                    "workflow states with acceptance criteria"
+                ),
+                "target_window": "Phase I months 0–2 (proposed)",
+                "status": "PROPOSED",
+            },
+            {
+                "id": "m3",
+                "milestone": "M3 — AI decision-support prototype evaluation",
+                "measure": (
+                    "Defined test set and metrics for assignment/exception support; evaluation "
+                    "report with pass/fail thresholds"
+                ),
+                "target_window": "Phase I months 2–4 (proposed)",
+                "status": "PROPOSED",
+            },
+            {
+                "id": "m4",
+                "milestone": "M4 — Integrity and readiness measurement pack",
+                "measure": (
+                    "Grant/operations integrity labels retained; pilot-readiness checklist with "
+                    "verified-only evidence rules"
+                ),
+                "target_window": "Phase I months 3–5 (proposed)",
+                "status": "PROPOSED",
+            },
+            {
+                "id": "m5",
+                "milestone": "M5 — Minnesota validation plan and Phase II gate",
+                "measure": (
+                    "Written Minnesota stakeholder validation plan and go/no-go criteria for Phase II "
+                    "proposal development (no fabricated LOIs or outcomes)"
+                ),
+                "target_window": "Phase I months 5–6 (proposed)",
+                "status": "PROPOSED",
+            },
+        ],
+        "commercialization_potential": (
+            "Amicor’s commercialization strategy, as already stated in the master narrative, focuses "
+            "initially on Minnesota: develop provider relationships, establish a qualified "
+            "transportation network, conduct market validation, and progress toward initial operating "
+            "partnerships and revenue. This SBIR package does not claim existing customers, signed "
+            "contracts, verified commercial ride volume, or current operating revenue. Financial "
+            "projections in Grant Command Center remain PROJECTED planning assumptions and are "
+            "separate from any NIH budget request. Commercialization potential is therefore framed "
+            "as a pathway contingent on technical feasibility, readiness, and later market adoption."
+        ),
+        "minnesota_healthcare_impact": (
+            "As a Minnesota-based company, Amicor is focused on improving coordination tools for "
+            "healthcare-related transportation operations and supporting provider, driver, and "
+            "administrative readiness in the state. Potential impact areas for Phase I are "
+            "operational: clearer request handling, improved dispatch coordination tooling, and "
+            "stronger readiness workflows. This package does not claim measured reductions in missed "
+            "appointments, clinical outcome improvements, or statewide deployment results."
+        ),
+        "founder_company_capability_summary": FOUNDER_COMPANY_BIO,
+        "verified_company_facts_used": [
+            "Legal entity positioning: AMICOR HEALTH ISF LLC",
+            "Minnesota-based healthcare technology startup / company",
+            "Developing AI-enabled NEMT coordination and operations platform",
+            "Platform intended to support provider requests, scheduling, dispatch, driver workflows, "
+            "operational visibility, recurring transportation, onboarding, reporting, and admin processes",
+            "Initial commercialization focus: Minnesota market validation and readiness",
+            "Early-stage priorities: operational readiness, driver recruitment, provider partnerships, "
+            "platform validation, non-dilutive capital",
+            "SAM.gov registration surfaced in Grant Command Center as ACTIVE for Federal Assistance Awards "
+            "(sensitive banking/tax/personal details excluded)",
+        ],
+        "phase_i_budget_draft": {
+            "label": (
+                "Phase I budget category planning figures only — "
+                + NIH_SBIR_BUDGET_PLACEHOLDER
+            ),
+            "currency": "USD",
+            "financial_classification": NIH_SBIR_BUDGET_PLACEHOLDER,
+            "not_award_commitment": True,
+            "not_approved_request": True,
+            "not_operating_revenue": True,
+            "line_items": proposed_budget_line_items,
+            "total_usd": proposed_total,
+            "disclaimer": (
+                f"TOTAL ${proposed_total:,.0f} is a PLANNING PLACEHOLDER only. "
+                "It is NOT an approved Amicor request, NOT an award commitment, and NOT operating revenue. "
+                "All line amounts are "
+                f"{NIH_SBIR_BUDGET_PLACEHOLDER}. "
+                "Final request authority remains "
+                f"{PENDING_MANAGEMENT_VERIFICATION}."
+            ),
+        },
+        "nih_sbir_application_checklist": [
+            {
+                "id": "institute_fit",
+                "label": "Select / verify NIH institute fit and program officer path",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": "Blocking management decision — do not invent institute assignment",
+            },
+            {
+                "id": "specific_aims",
+                "label": "Tighten Phase I Specific Aims (management + technical review)",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": "Draft aims included for discussion only; final aims/metrics not filled",
+            },
+            {
+                "id": "project_title",
+                "label": "Select final project title from options",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": "Title options are drafts only",
+            },
+            {
+                "id": "research_strategy",
+                "label": "Complete Research Strategy narrative for NIH forms",
+                "status": "IN PROGRESS",
+                "note": "Internal package sections prepared; NIH-format write-up pending",
+            },
+            {
+                "id": "biosketches",
+                "label": "PI and key personnel biosketches (SciENcv / NIH format)",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": "Blocking — PI/key personnel not designated in this package",
+            },
+            {
+                "id": "budget_forms",
+                "label": "NIH budget forms + budget justification",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": (
+                    "Category planning figures only; "
+                    + NIH_SBIR_BUDGET_PLACEHOLDER
+                ),
+            },
+            {
+                "id": "commercialization_plan",
+                "label": "Commercialization plan elements aligned to SBIR expectations",
+                "status": "IN PROGRESS",
+                "note": "Use verified strategy language only; no invented traction",
+            },
+            {
+                "id": "facilities",
+                "label": "Facilities and other resources statement",
+                "status": "MISSING",
+            },
+            {
+                "id": "human_subjects",
+                "label": "Human subjects / clinical trial determination for this concept",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": "Blocking — PA-27-100 is Clinical Trial Optional; determination not made here",
+            },
+            {
+                "id": "registrations",
+                "label": "Confirm SAM.gov, UEI, Grants.gov, and eRA Commons / AOR readiness",
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+                "note": (
+                    "SAM ACTIVE may appear in workspace; eRA Commons / AOR submitter roles remain "
+                    + PENDING_MANAGEMENT_VERIFICATION
+                ),
+            },
+            {
+                "id": "letters_support",
+                "label": "Letters of support / consultant letters (only if real and obtained)",
+                "status": "MISSING",
+                "note": "Do not fabricate",
+            },
+            {
+                "id": "applicant_assistance",
+                "label": "Optional: NIH SBIR/STTR applicant assistance resources after concept shaped",
+                "status": "NOT REQUIRED",
+                "note": "Useful after institute fit and aims are selected",
+            },
+            {
+                "id": "final_internal_review",
+                "label": "Final internal integrity review (no unsupported claims)",
+                "status": "IN PROGRESS",
+            },
+            {
+                "id": "external_submit",
+                "label": "External submission to NIH",
+                "status": "NOT REQUIRED",
+                "note": "Explicitly out of scope for this readiness package",
+            },
+        ],
+        "missing_information_for_management": [
+            {
+                "id": "nih_institute",
+                "item": "Preferred NIH institute(s) and rationale for mission fit",
+                "owner": "Management + technical lead",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "pi_designation",
+                "item": "Named Principal Investigator and key personnel roles",
+                "owner": "Management",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "aims_lock",
+                "item": "Final Phase I Specific Aims language and success metrics",
+                "owner": "Management + technical lead",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "title_lock",
+                "item": "Selected project title",
+                "owner": "Management",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "budget_authority",
+                "item": (
+                    "Final Phase I budget authority (planning placeholder dollars are not an "
+                    "approved Amicor request)"
+                ),
+                "owner": "Management",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "era_commons",
+                "item": "eRA Commons organization / PI account status and AOR submitter readiness",
+                "owner": "Management",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "human_subjects_call",
+                "item": "Human subjects / clinical trial determination for proposed aims",
+                "owner": "Management + technical lead",
+                "blocking": True,
+                "status": PENDING_MANAGEMENT_VERIFICATION,
+            },
+            {
+                "id": "facilities_desc",
+                "item": "Facilities/resources description suitable for NIH forms",
+                "owner": "Management",
+                "blocking": False,
+                "status": "MISSING",
+            },
+            {
+                "id": "real_los",
+                "item": "Any authentic letters of support or consultant commitments (optional; never invent)",
+                "owner": "Management",
+                "blocking": False,
+                "status": "MISSING",
+            },
+            {
+                "id": "grant2_screen",
+                "item": "Grant #2 screening remains separate after Grant #1 is moving",
+                "owner": "Management",
+                "blocking": False,
+                "status": "NOT REQUIRED",
+            },
+        ],
+        "next_internal_steps": [
+            "Resolve the seven PENDING MANAGEMENT / VERIFICATION decisions with management",
+            "Pick NIH institute fit",
+            "Tighten technical research aims",
+            "Replace planning-placeholder budget with an approved request only after authority is set",
+            "Consider NIH SBIR/STTR applicant assistance resources once concept is shaped",
+            "Work toward September 5, 2026 receipt date without external submission from this package alone",
+        ],
+    }
 
 
 def build_master_narrative() -> dict[str, str]:
@@ -591,6 +1107,18 @@ def build_readiness_checklist(
             projections_status,
             "READY only after complete assumptions are saved; otherwise IN PROGRESS",
         ),
+        item(
+            "nih_sbir_grant1_package",
+            "Grant #1 NIH SBIR readiness package (PA-27-100)",
+            "IN PROGRESS",
+            "Internal package prepared; institute fit, aims lock, and NIH forms still required",
+        ),
+        item(
+            "nih_institute_fit",
+            "NIH institute fit confirmed",
+            PENDING_MANAGEMENT_VERIFICATION,
+            "Blocking management decision — required before finalizing Specific Aims for September 5, 2026",
+        ),
         item("grant_attachments", "Grant-specific attachments", "MISSING"),
     ]
 
@@ -683,8 +1211,9 @@ def build_evidence_pack(
                 "status": "IN PROGRESS",
                 "items": [
                     "Master grant narrative prepared",
-                    "Master proposed $35,000 budget prepared",
-                    "Launch Minnesota Innovation Grant on watchlist",
+                    "Master proposed $35,000 budget prepared (GRANT REQUEST; not operating revenue)",
+                    "Grant #1 NIH SBIR Parent PA-27-100 internal readiness package prepared",
+                    "Launch Minnesota Innovation Grant on watchlist (separate from Grant #1)",
                 ],
             },
             {
@@ -695,7 +1224,8 @@ def build_evidence_pack(
                     "Master narrative",
                     "Master budget",
                     "Federal registration readiness summary",
-                    "Solicitation-specific attachments still required per opportunity",
+                    "Grant #1 NIH SBIR internal application package (not externally submitted)",
+                    "Solicitation-specific NIH forms and institute-fit decisions still required",
                 ],
             },
         ]
@@ -857,6 +1387,7 @@ def build_command_center_payload(
         delayed_rides=delayed_rides,
     )
     financial_projections = build_financial_projections()
+    nih_sbir_grant1 = build_nih_sbir_grant1_package()
     # Module ships with complete placeholder assumptions → IN PROGRESS until locally saved/approved.
     checklist = build_readiness_checklist(
         federal=federal,
@@ -886,6 +1417,7 @@ def build_command_center_payload(
         "narrative": build_master_narrative(),
         "budget": build_master_budget(),
         "financial_projections": financial_projections,
+        "nih_sbir_grant1": nih_sbir_grant1,
         "evidence_pack": evidence,
         "readiness_checklist": checklist,
         "data_integrity": data_integrity,

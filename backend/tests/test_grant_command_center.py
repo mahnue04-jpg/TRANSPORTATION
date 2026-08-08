@@ -7,11 +7,15 @@ from app.modules.health_isf.grant_command_center import (
     INTEGRITY_DEMO,
     INTEGRITY_PENDING,
     INTEGRITY_VERIFIED,
+    NIH_SBIR_BUDGET_PLACEHOLDER,
+    PENDING_MANAGEMENT_VERIFICATION,
     assumptions_are_complete,
     build_command_center_payload,
     build_federal_registration,
     build_financial_projections,
     build_master_budget,
+    build_master_pipeline,
+    build_nih_sbir_grant1_package,
     calculate_projection_from_assumptions,
     classify_driver_integrity,
     classify_provider_integrity,
@@ -226,3 +230,87 @@ def test_conservative_placeholders_match_management_planning_targets():
     assert results["financial_classification"] == FINANCIAL_PROJECTED
     assert build_master_budget()["total_usd"] == 35000
     assert results["projected_monthly_gross_revenue"] != 35000
+
+
+def test_grant1_nih_sbir_pipeline_and_readiness_package():
+    pipeline = build_master_pipeline()
+    grant1 = next(item for item in pipeline if item.get("grant_number") == 1)
+    assert grant1["grant_name"] == "NIH SBIR Parent — PA-27-100"
+    assert grant1["current_status"] == "APPLICATION PREPARATION / VERIFY NIH INSTITUTE FIT"
+    assert grant1["target_date"] == "September 5, 2026"
+    assert grant1["priority"] == "HIGH"
+    assert grant1["nofo"] == "PA-27-100"
+    assert any(item.get("grant_name") == "Launch Minnesota Innovation Grant" for item in pipeline)
+
+    package = build_nih_sbir_grant1_package()
+    assert package["external_submission"] is False
+    assert package["nofo"] == "PA-27-100"
+    assert package["target_receipt_date"] == "September 5, 2026"
+    assert package["status"] == "APPLICATION PREPARATION / VERIFY NIH INSTITUTE FIT"
+    assert len(package["project_title_options"]) >= 3
+    assert package["one_page_project_summary"]
+    assert package["problem_unmet_need"]
+    assert package["technical_innovation"]
+    assert len(package["phase_i_rd_objectives"]) == 3
+    assert len(package["technical_work_plan_and_milestones"]) >= 4
+    assert package["commercialization_potential"]
+    assert package["minnesota_healthcare_impact"]
+    assert "Minnesota-based healthcare technology startup" in package["founder_company_capability_summary"]
+    budget = package["phase_i_budget_draft"]
+    assert budget["financial_classification"] == NIH_SBIR_BUDGET_PLACEHOLDER
+    assert "NOT APPROVED REQUEST" in budget["financial_classification"]
+    assert "PA-27-100" in budget["financial_classification"]
+    assert budget["not_operating_revenue"] is True
+    assert budget["not_approved_request"] is True
+    assert budget["total_usd"] == 275000
+    assert "PLANNING PLACEHOLDER" in budget["disclaimer"]
+    assert "NOT an approved Amicor request" in budget["disclaimer"]
+    assert all(item["classification"] == NIH_SBIR_BUDGET_PLACEHOLDER for item in budget["line_items"])
+    assert any(item["id"] == "institute_fit" for item in package["nih_sbir_application_checklist"])
+    blocking = [item for item in package["missing_information_for_management"] if item.get("blocking")]
+    assert len(blocking) == 7
+    assert all(item["status"] == PENDING_MANAGEMENT_VERIFICATION for item in blocking)
+    for required_id in (
+        "nih_institute",
+        "pi_designation",
+        "aims_lock",
+        "title_lock",
+        "budget_authority",
+        "era_commons",
+        "human_subjects_call",
+    ):
+        assert any(item["id"] == required_id for item in blocking)
+    # Integrity: package must not invent commercial traction claims.
+    banned = ("signed customer contract", "verified clinical outcome", "fda approval", "$1,000,000 revenue")
+    blob = " ".join(
+        [
+            package["one_page_project_summary"],
+            package["commercialization_potential"],
+            package["minnesota_healthcare_impact"],
+        ]
+    ).lower()
+    for phrase in banned:
+        assert phrase not in blob
+
+    payload = build_command_center_payload(
+        rides=[],
+        drivers=[],
+        providers=[],
+        applications=[],
+        recurring=[],
+        delayed_rides=0,
+        screenshot_inventory=[],
+        transportation_mvp_status="needs_data",
+        onboarding_mvp_status="needs_data",
+        recurring_mvp_status="needs_data",
+        dashboard_mvp_status="needs_data",
+    )
+    assert payload["nih_sbir_grant1"]["nofo"] == "PA-27-100"
+    checklist = {item["id"]: item for item in payload["readiness_checklist"]}
+    assert checklist["nih_sbir_grant1_package"]["status"] == "IN PROGRESS"
+    assert checklist["nih_institute_fit"]["status"] == PENDING_MANAGEMENT_VERIFICATION
+    assert payload["data_integrity"]["legend"] == [
+        INTEGRITY_VERIFIED,
+        INTEGRITY_DEMO,
+        INTEGRITY_PENDING,
+    ]

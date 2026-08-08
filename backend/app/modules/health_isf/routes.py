@@ -12306,10 +12306,11 @@ def get_grant_proof_snapshot(
         narrative=command_center["narrative"],
         budget=command_center["budget"],
         financial_projections=command_center.get("financial_projections") or {},
+        nih_sbir_grant1=command_center.get("nih_sbir_grant1") or {},
         evidence_pack=command_center["evidence_pack"],
         readiness_checklist=command_center["readiness_checklist"],
         data_integrity=command_center["data_integrity"],
-    )
+    }
 
 
 @router.post("/ops/seed-phase43")

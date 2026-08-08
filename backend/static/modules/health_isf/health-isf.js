@@ -1891,6 +1891,7 @@
       grantIntegrity: document.getElementById("health-grant-integrity"),
       grantFederal: document.getElementById("health-grant-federal"),
       grantPipeline: document.getElementById("health-grant-pipeline"),
+      grantNihSbir: document.getElementById("health-grant-nih-sbir"),
       grantNarrative: document.getElementById("health-grant-narrative"),
       grantBudget: document.getElementById("health-grant-budget"),
       grantProjections: document.getElementById("health-grant-projections"),
@@ -1964,6 +1965,7 @@
       grantIntegrity: document.getElementById("health-grant-integrity"),
       grantFederal: document.getElementById("health-grant-federal"),
       grantPipeline: document.getElementById("health-grant-pipeline"),
+      grantNihSbir: document.getElementById("health-grant-nih-sbir"),
       grantNarrative: document.getElementById("health-grant-narrative"),
       grantBudget: document.getElementById("health-grant-budget"),
       grantProjections: document.getElementById("health-grant-projections"),
@@ -7567,7 +7569,7 @@
     ["commercialization_milestones", "Commercialization Milestones"],
     ["long_term_vision", "Long-Term Vision"],
   ];
-  var GRANT_CHECKLIST_STATUSES = ["READY", "IN PROGRESS", "MISSING", "NOT REQUIRED"];
+  var GRANT_CHECKLIST_STATUSES = ["READY", "IN PROGRESS", "MISSING", "NOT REQUIRED", "PENDING MANAGEMENT / VERIFICATION"];
   var GRANT_PROJECTION_SCENARIOS = [
     ["conservative", "CONSERVATIVE"],
     ["base_case", "BASE CASE"],
@@ -7724,10 +7726,151 @@
 
   function grantIntegrityTone(label) {
     var value = String(label || "").toUpperCase();
-    if (value.indexOf("VERIFIED") >= 0 || value === "READY" || value === "ACTIVE") return "ok";
-    if (value.indexOf("DEMO") >= 0 || value.indexOf("PENDING") >= 0 || value.indexOf("IN PROGRESS") >= 0 || value.indexOf("WATCHLIST") >= 0) return "warn";
+    if (value.indexOf("VERIFIED") >= 0 || value === "READY" || value === "ACTIVE" || value === "HIGH") return "ok";
+    if (
+      value.indexOf("DEMO") >= 0
+      || value.indexOf("PENDING") >= 0
+      || value.indexOf("IN PROGRESS") >= 0
+      || value.indexOf("WATCHLIST") >= 0
+      || value.indexOf("APPLICATION PREPARATION") >= 0
+      || value.indexOf("PROPOSED") >= 0
+      || value.indexOf("DRAFT") >= 0
+    ) return "warn";
     if (value.indexOf("MISSING") >= 0 || value.indexOf("NEEDS") >= 0) return "danger";
     return "warn";
+  }
+
+  function renderNihSbirGrant1Package(packageData) {
+    var pkg = packageData && typeof packageData === "object" ? packageData : {};
+    var titles = Array.isArray(pkg.project_title_options) ? pkg.project_title_options : [];
+    var aims = Array.isArray(pkg.phase_i_rd_objectives) ? pkg.phase_i_rd_objectives : [];
+    var milestones = Array.isArray(pkg.technical_work_plan_and_milestones) ? pkg.technical_work_plan_and_milestones : [];
+    var budget = pkg.phase_i_budget_draft && typeof pkg.phase_i_budget_draft === "object" ? pkg.phase_i_budget_draft : {};
+    var budgetLines = Array.isArray(budget.line_items) ? budget.line_items : [];
+    var nihChecklist = Array.isArray(pkg.nih_sbir_application_checklist) ? pkg.nih_sbir_application_checklist : [];
+    var missing = Array.isArray(pkg.missing_information_for_management) ? pkg.missing_information_for_management : [];
+    var facts = Array.isArray(pkg.verified_company_facts_used) ? pkg.verified_company_facts_used : [];
+    var nextSteps = Array.isArray(pkg.next_internal_steps) ? pkg.next_internal_steps : [];
+
+    return ''
+      + '<div class="grant-integrity-banner">'
+      + '<span class="health-pill ' + grantIntegrityTone(pkg.status) + '">' + escapeHtml(pkg.status || "APPLICATION PREPARATION") + '</span>'
+      + '<span class="health-pill ' + grantIntegrityTone(pkg.priority) + '">' + escapeHtml(pkg.priority || "HIGH") + '</span>'
+      + '<span class="health-pill warn">INTERNAL ONLY — NOT SUBMITTED</span>'
+      + '<span class="health-pill warn">PLANNING PLACEHOLDER — NOT APPROVED REQUEST</span>'
+      + '</div>'
+      + '<div class="enterprise-inline-grid">'
+      + MetricCard("NOFO", pkg.nofo || "PA-27-100", pkg.mechanism || "R43 Phase I", "ok")
+      + MetricCard("Target receipt date", pkg.target_receipt_date || "September 5, 2026", "Next standard SBIR date", "warn")
+      + MetricCard("External submission", pkg.external_submission ? "Yes" : "No", "Readiness package only", "ok")
+      + MetricCard("Planning placeholder total", grantMoney(budget.total_usd || 0), budget.financial_classification || "PLANNING PLACEHOLDER — NOT APPROVED REQUEST", "warn")
+      + '</div>'
+      + '<p class="health-summary">' + escapeHtml(pkg.integrity_policy || "") + '</p>'
+      + '<p class="health-summary"><strong>NOFO:</strong> ' + escapeHtml(pkg.nofo_title || "") + '</p>'
+
+      + '<h4>Project title options</h4>'
+      + (titles.length
+        ? titles.map(function (item) {
+            return '<article class="health-item-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(item.title || "") + '</strong>'
+              + '<span class="health-pill ' + grantIntegrityTone(item.status) + '">' + escapeHtml(item.status || "DRAFT") + '</span></div>'
+              + '</article>';
+          }).join("")
+        : '<p class="health-summary">No title options loaded.</p>')
+
+      + '<h4>One-page SBIR project summary</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.one_page_project_summary || "") + '</div>'
+
+      + '<h4>Problem / unmet need</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.problem_unmet_need || "") + '</div>'
+
+      + '<h4>Technical innovation</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.technical_innovation || "") + '</div>'
+
+      + '<h4>Phase I research and development objectives</h4>'
+      + (aims.length
+        ? aims.map(function (aim) {
+            return '<article class="health-item-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(aim.label || aim.id || "Aim") + '</strong>'
+              + '<span class="health-pill ' + grantIntegrityTone(aim.status) + '">' + escapeHtml(aim.status || "DRAFT") + '</span></div>'
+              + '<div class="health-summary">' + escapeHtml(aim.text || "") + '</div>'
+              + '</article>';
+          }).join("")
+        : '<p class="health-summary">No Phase I objectives loaded.</p>')
+
+      + '<h4>Proposed technical work plan and measurable milestones</h4>'
+      + (milestones.length
+        ? milestones.map(function (item) {
+            return '<article class="health-item-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(item.milestone || item.id || "Milestone") + '</strong>'
+              + '<span class="health-pill ' + grantIntegrityTone(item.status) + '">' + escapeHtml(item.status || "PROPOSED") + '</span></div>'
+              + '<div class="health-summary">Measure: ' + escapeHtml(item.measure || "") + '</div>'
+              + '<div class="health-summary">Target window: ' + escapeHtml(item.target_window || "") + '</div>'
+              + '</article>';
+          }).join("")
+        : '<p class="health-summary">No milestones loaded.</p>')
+
+      + '<h4>Commercialization potential</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.commercialization_potential || "") + '</div>'
+
+      + '<h4>Minnesota and healthcare impact</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.minnesota_healthcare_impact || "") + '</div>'
+
+      + '<h4>Founder / company capability summary</h4>'
+      + '<div class="health-summary" style="white-space:pre-wrap">' + escapeHtml(pkg.founder_company_capability_summary || "") + '</div>'
+      + '<ul class="grant-evidence-list">'
+      + facts.map(function (fact) { return '<li>' + escapeHtml(fact) + '</li>'; }).join("")
+      + '</ul>'
+
+      + '<h4>Draft Phase I budget categories</h4>'
+      + '<div class="health-row"><span class="health-pill warn">PLANNING PLACEHOLDER — NOT APPROVED REQUEST</span>'
+      + '<span class="health-summary">Not an award commitment · Not operating revenue · Subject to PA-27-100 and NIH institute budget rules</span></div>'
+      + '<p class="health-summary">' + escapeHtml(budget.label || "") + '</p>'
+      + '<div class="grant-budget-list">'
+      + budgetLines.map(function (item) {
+          return '<div class="grant-budget-row">'
+            + '<span>' + escapeHtml(item.label || item.id || "Category")
+            + ' <em>(' + escapeHtml(item.classification || budget.financial_classification || "PLANNING PLACEHOLDER — NOT APPROVED REQUEST") + ')</em></span>'
+            + '<strong>' + escapeHtml(grantMoney(item.amount_usd || 0)) + '</strong>'
+            + '</div>';
+        }).join("")
+      + '</div>'
+      + '<div class="health-row grant-budget-total"><strong>TOTAL (PLANNING PLACEHOLDER — NOT APPROVED REQUEST)</strong><strong>'
+      + escapeHtml(grantMoney(budget.total_usd || 0))
+      + '</strong></div>'
+      + '<p class="health-summary">' + escapeHtml(budget.disclaimer || "") + '</p>'
+
+      + '<h4>NIH / SBIR application checklist</h4>'
+      + '<div class="grant-checklist">'
+      + nihChecklist.map(function (item) {
+          return '<div class="grant-checklist-row">'
+            + '<div><strong>' + escapeHtml(item.label || item.id || "Item") + '</strong>'
+            + (item.note ? '<div class="health-summary">' + escapeHtml(item.note) + '</div>' : '')
+            + '</div>'
+            + '<span class="health-pill ' + grantIntegrityTone(item.status) + '">' + escapeHtml(item.status || "MISSING") + '</span>'
+            + '</div>';
+        }).join("")
+      + '</div>'
+
+      + '<h4>Missing information requiring management input</h4>'
+      + (missing.length
+        ? missing.map(function (item) {
+            var itemStatus = item.status || (item.blocking ? "PENDING MANAGEMENT / VERIFICATION" : "MISSING");
+            return '<article class="health-item-card">'
+              + '<div class="health-row"><strong>' + escapeHtml(item.item || item.id || "Item") + '</strong>'
+              + '<span class="health-pill ' + (item.blocking ? "danger" : "warn") + '">'
+              + escapeHtml(item.blocking ? "BLOCKING" : "NON-BLOCKING")
+              + '</span>'
+              + '<span class="health-pill ' + grantIntegrityTone(itemStatus) + '">' + escapeHtml(itemStatus) + '</span></div>'
+              + '<div class="health-summary">Owner: ' + escapeHtml(item.owner || "Management") + '</div>'
+              + '</article>';
+          }).join("")
+        : '<p class="health-summary">No missing-information list loaded.</p>')
+
+      + '<h4>Next internal steps</h4>'
+      + '<ul class="grant-evidence-list">'
+      + nextSteps.map(function (step) { return '<li>' + escapeHtml(step) + '</li>'; }).join("")
+      + '</ul>';
   }
 
   function renderGrantProof() {
@@ -7839,6 +7982,7 @@
               + '<div class="health-summary">Maximum award: ' + escapeHtml(item.maximum_award || "-") + '</div>'
               + '<div class="health-summary">Eligibility: ' + escapeHtml(item.eligibility || "-") + '</div>'
               + '<div class="health-summary">Open date: ' + escapeHtml(item.application_open_date || "Verify next open round") + ' · Deadline: ' + escapeHtml(item.deadline || "Not claimed open") + '</div>'
+              + (item.target_date ? '<div class="health-summary">Target date: ' + escapeHtml(item.target_date) + '</div>' : '')
               + '<div class="health-summary">Required documents: ' + escapeHtml(docs || "n/a") + '</div>'
               + '<div class="health-summary">Next action: ' + escapeHtml(item.next_action || "-") + '</div>'
               + '<div class="health-summary">Submission date: ' + escapeHtml(item.submission_date || "—") + ' · Decision/result: ' + escapeHtml(item.decision_result || "—") + '</div>'
@@ -7846,6 +7990,10 @@
               + '</article>';
           }).join("")
         : '<p class="health-summary">No grant opportunities tracked yet.</p>';
+    }
+
+    if (els.grantNihSbir) {
+      els.grantNihSbir.innerHTML = renderNihSbirGrant1Package(snapshot.nih_sbir_grant1);
     }
 
     if (els.grantNarrative) {
