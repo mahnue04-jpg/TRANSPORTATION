@@ -195,5 +195,34 @@ def test_financial_projection_math_and_classification():
     grant_budget = build_master_budget()
     # Grant request must remain separate from projected operating revenue.
     assert grant_budget["total_usd"] == 35000
+    assert grant_budget["financial_classification"] == FINANCIAL_GRANT_REQUEST
     assert projections["scenarios"]["conservative"]["results"]["projected_12_month_gross_revenue"] != 35000
     assert projections["scenarios"]["conservative"]["results"]["financial_classification"] == FINANCIAL_PROJECTED
+
+
+def test_conservative_placeholders_match_management_planning_targets():
+    projections = build_financial_projections()
+    conservative = projections["scenarios"]["conservative"]["assumptions"]
+    assert conservative == {
+        "active_providers": 1,
+        "rides_per_provider_per_day": 3.0,
+        "operating_days_per_month": 20,
+        "avg_net_revenue_per_ride": 30.0,
+        "driver_cost_per_ride": 20.0,
+        "monthly_tech_cloud": 300,
+        "monthly_insurance": 500,
+        "monthly_marketing": 300,
+        "monthly_compliance_legal": 250,
+        "monthly_admin_ops": 500,
+        "monthly_other_opex": 150,
+    }
+    results = projections["scenarios"]["conservative"]["results"]
+    assert results["projected_monthly_rides"] == 60.0
+    assert results["projected_monthly_gross_revenue"] == 1800.0
+    assert results["projected_monthly_transportation_driver_costs"] == 1200.0
+    # fixed opex = 300+500+300+250+500+150 = 2000; total opex = 1200+2000 = 3200; net = 1800-3200
+    assert results["projected_monthly_operating_expenses"] == 3200.0
+    assert results["projected_monthly_net_operating_result"] == -1400.0
+    assert results["financial_classification"] == FINANCIAL_PROJECTED
+    assert build_master_budget()["total_usd"] == 35000
+    assert results["projected_monthly_gross_revenue"] != 35000

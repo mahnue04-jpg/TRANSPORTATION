@@ -7644,6 +7644,64 @@
     return assumptions;
   }
 
+  function grantProjectionDraftApi() {
+    return (typeof window !== "undefined" && window.AmicorGrantProjectionDraft)
+      ? window.AmicorGrantProjectionDraft
+      : null;
+  }
+
+  function syncGrantProjectionDraftFromDom(options) {
+    options = options || {};
+    if (!document.querySelector("[data-grant-projection-field]")) return loadGrantWorkspaceOverrides().financial_projections || null;
+    var overrides = loadGrantWorkspaceOverrides();
+    var current = overrides.financial_projections && typeof overrides.financial_projections === "object"
+      ? overrides.financial_projections
+      : {};
+    var activeScenario = String(current.active_scenario || "conservative");
+    var assumptions = readGrantProjectionAssumptionsFromDom();
+    var api = grantProjectionDraftApi();
+    var nextDraft = api
+      ? api.upsertScenarioDraft(current, activeScenario, assumptions, {
+          activeScenario: activeScenario,
+          markSaved: !!options.markSaved,
+          savedComplete: !!options.savedComplete,
+          savedAt: options.savedAt,
+        })
+      : (function () {
+          var scenarios = Object.assign({}, current.scenarios || {});
+          scenarios[activeScenario] = assumptions;
+          var next = Object.assign({}, current, {
+            active_scenario: activeScenario,
+            scenarios: scenarios,
+          });
+          if (options.markSaved) {
+            next.saved_complete = !!options.savedComplete;
+            next.saved_at = options.savedAt || new Date().toISOString();
+          }
+          return next;
+        })();
+    overrides.financial_projections = nextDraft;
+    if (options.markSaved) {
+      if (!overrides.checklist || typeof overrides.checklist !== "object") overrides.checklist = {};
+      overrides.checklist.financial_projections = options.savedComplete ? "READY" : "IN PROGRESS";
+    }
+    saveGrantWorkspaceOverrides(overrides);
+    return nextDraft;
+  }
+
+  function ensureGrantProjectionDraftBindings() {
+    var els = getEls();
+    if (!els.grantProjections || els.grantProjections.__grantProjectionDraftBound) return;
+    els.grantProjections.__grantProjectionDraftBound = true;
+    function onProjectionFieldEdit(event) {
+      var target = event && event.target ? event.target : null;
+      if (!target || !target.getAttribute || !target.getAttribute("data-grant-projection-field")) return;
+      syncGrantProjectionDraftFromDom({ draftOnly: true });
+    }
+    els.grantProjections.addEventListener("input", onProjectionFieldEdit);
+    els.grantProjections.addEventListener("change", onProjectionFieldEdit);
+  }
+
   function loadGrantWorkspaceOverrides() {
     try {
       var raw = window.localStorage.getItem(GRANT_WORKSPACE_STORAGE_KEY);
@@ -7675,6 +7733,16 @@
   function renderGrantProof() {
     const els = getEls();
     if (!els.grantMetrics || !els.grantScreenshots || !els.recurringTemplates) return;
+    // Persist in-progress projection edits before any full re-render (auto-refresh must not wipe fields).
+    if (document.querySelector("[data-grant-projection-field]")) {
+      syncGrantProjectionDraftFromDom({ draftOnly: true });
+    }
+    const focusedProjectionField = document.activeElement
+      && document.activeElement.getAttribute
+      && document.activeElement.getAttribute("data-grant-projection-field");
+    const focusedProjectionValue = focusedProjectionField && document.activeElement
+      ? String(document.activeElement.value || "")
+      : null;
     const snapshot = state.grantSnapshot || {};
     const metrics = snapshot.metrics && typeof snapshot.metrics === "object" ? snapshot.metrics : {};
     const screenshots = Array.isArray(snapshot.screenshot_inventory) ? snapshot.screenshot_inventory : [];
@@ -7700,14 +7768,14 @@
       ? overrides.financial_projections
       : {};
     const activeScenario = String(projectionOverrides.active_scenario || projectionsDefaults.default_scenario || "conservative");
-    const defaultScenarioBundle = projectionsDefaults.scenarios && projectionsDefaults.scenarios[activeScenario]
-      ? projectionsDefaults.scenarios[activeScenario]
-      : (projectionsDefaults.scenarios && projectionsDefaults.scenarios.conservative) || {};
-    const scenarioAssumptions = Object.assign(
-      {},
-      (defaultScenarioBundle && defaultScenarioBundle.assumptions) || {},
-      (projectionOverrides.scenarios && projectionOverrides.scenarios[activeScenario]) || {}
-    );
+    const draftApi = grantProjectionDraftApi();
+    const scenarioAssumptions = draftApi
+      ? draftApi.resolveAssumptions(projectionsDefaults.scenarios || {}, projectionOverrides, activeScenario)
+      : Object.assign(
+          {},
+          ((projectionsDefaults.scenarios && projectionsDefaults.scenarios[activeScenario] && projectionsDefaults.scenarios[activeScenario].assumptions) || {}),
+          (projectionOverrides.scenarios && projectionOverrides.scenarios[activeScenario]) || {}
+        );
     const scenarioResults = calculateGrantProjectionResults(scenarioAssumptions);
     const projectionsComplete = !!projectionOverrides.saved_complete && grantProjectionAssumptionsComplete(scenarioAssumptions);
     const budgetLineOverrides = Array.isArray(overrides.budget_line_items) ? overrides.budget_line_items : null;
@@ -7875,6 +7943,20 @@
             ? "Saved complete assumptions on file for this browser workspace. Checklist item can be READY."
             : "Editable placeholder assumptions until Amicor management enters and approves real planning assumptions. Checklist remains IN PROGRESS until complete assumptions are saved.")
         + '</p>';
+      ensureGrantProjectionDraftBindings();
+      if (focusedProjectionField) {
+        var restoreInput = els.grantProjections.querySelector('[data-grant-projection-field="' + focusedProjectionField + '"]');
+        if (restoreInput) {
+          if (focusedProjectionValue != null) restoreInput.value = focusedProjectionValue;
+          try {
+            restoreInput.focus();
+            if (typeof restoreInput.setSelectionRange === "function") {
+              var cursor = String(restoreInput.value || "").length;
+              restoreInput.setSelectionRange(cursor, cursor);
+            }
+          } catch (_focusError) { /* ignore focus restore failures */ }
+        }
+      }
     }
 
     if (els.grantChecklist) {
@@ -7995,18 +8077,7 @@
       return;
     }
     if (action === "recalc-projections") {
-      const assumptions = readGrantProjectionAssumptionsFromDom();
-      const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
-        ? overrides.financial_projections
-        : {};
-      const activeScenario = String(current.active_scenario || "conservative");
-      const scenarios = Object.assign({}, current.scenarios || {});
-      scenarios[activeScenario] = assumptions;
-      overrides.financial_projections = Object.assign({}, current, {
-        active_scenario: activeScenario,
-        scenarios: scenarios,
-      });
-      saveGrantWorkspaceOverrides(overrides);
+      syncGrantProjectionDraftFromDom({ draftOnly: true });
       renderGrantProof();
       const status = document.getElementById("health-grant-projections-status");
       if (status) status.textContent = "Recalculated from current inputs. Values remain PROJECTED — not historical performance.";
@@ -8015,21 +8086,11 @@
     if (action === "save-projections") {
       const assumptions = readGrantProjectionAssumptionsFromDom();
       const complete = grantProjectionAssumptionsComplete(assumptions);
-      const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
-        ? overrides.financial_projections
-        : {};
-      const activeScenario = String(current.active_scenario || "conservative");
-      const scenarios = Object.assign({}, current.scenarios || {});
-      scenarios[activeScenario] = assumptions;
-      overrides.financial_projections = {
-        active_scenario: activeScenario,
-        scenarios: scenarios,
-        saved_complete: complete,
-        saved_at: new Date().toISOString(),
-      };
-      if (!overrides.checklist || typeof overrides.checklist !== "object") overrides.checklist = {};
-      overrides.checklist.financial_projections = complete ? "READY" : "IN PROGRESS";
-      const ok = saveGrantWorkspaceOverrides(overrides);
+      const ok = !!syncGrantProjectionDraftFromDom({
+        markSaved: true,
+        savedComplete: complete,
+        savedAt: new Date().toISOString(),
+      });
       renderGrantProof();
       const status = document.getElementById("health-grant-projections-status");
       if (status) {
@@ -8042,6 +8103,7 @@
       return;
     }
     if (action === "reset-projections") {
+      // Reset placeholders is the only intentional restore of defaults.
       delete overrides.financial_projections;
       if (overrides.checklist && typeof overrides.checklist === "object") {
         overrides.checklist.financial_projections = "IN PROGRESS";
@@ -8057,17 +8119,19 @@
     const current = overrides.financial_projections && typeof overrides.financial_projections === "object"
       ? overrides.financial_projections
       : {};
-    // Preserve in-progress edits for the previous scenario before switching.
     const previous = String(current.active_scenario || "conservative");
-    const scenarios = Object.assign({}, current.scenarios || {});
     const liveAssumptions = readGrantProjectionAssumptionsFromDom();
-    if (Object.keys(liveAssumptions).length) {
-      scenarios[previous] = liveAssumptions;
-    }
-    overrides.financial_projections = Object.assign({}, current, {
-      active_scenario: String(scenarioKey || "conservative"),
-      scenarios: scenarios,
-    });
+    const api = grantProjectionDraftApi();
+    overrides.financial_projections = api
+      ? api.switchScenarioPreservingDraft(current, previous, scenarioKey, liveAssumptions)
+      : (function () {
+          const scenarios = Object.assign({}, current.scenarios || {});
+          if (Object.keys(liveAssumptions).length) scenarios[previous] = liveAssumptions;
+          return Object.assign({}, current, {
+            active_scenario: String(scenarioKey || "conservative"),
+            scenarios: scenarios,
+          });
+        })();
     saveGrantWorkspaceOverrides(overrides);
     renderGrantProof();
   }
