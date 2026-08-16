@@ -18,6 +18,44 @@ DEFAULT_LOCAL_ROOT = Path(__file__).resolve().parents[3] / "data" / "onboarding_
 DEFAULT_RENDER_DISK_ROOT = Path(os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE_PATH", "/data/onboarding_docs"))
 
 
+def assert_safe_storage_ref(storage_ref: str) -> str:
+    """Reject path traversal and absolute/object-key manipulation."""
+    raw = str(storage_ref or "").strip()
+    if not raw:
+        raise ValueError("Invalid storage reference.")
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/") or normalized.startswith("~") or ":" in normalized:
+        raise ValueError("Invalid storage reference.")
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if not parts or any(part == ".." for part in parts):
+        raise ValueError("Invalid storage reference.")
+    return "/".join(parts)
+
+
+def object_key_for_upload(
+    *,
+    organization_id: str,
+    application_id: str,
+    category: str,
+    filename: str,
+) -> str:
+    """Unique non-guessable object key. Never includes a public URL or raw user path."""
+    safe_name = os.path.basename((filename or "upload.bin").replace("\\", "/"))
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".txt", ".bin"}:
+        ext = ".bin"
+    def _safe_part(value: str) -> str:
+        cleaned = os.path.basename(str(value or "unknown").replace("\\", "/"))
+        cleaned = cleaned.replace("..", "_")
+        return cleaned or "unknown"
+
+    digest = hashlib.sha256(f"{organization_id}:{application_id}:{category}:{uuid4()}".encode()).hexdigest()
+    return (
+        f"{_safe_part(organization_id)}/{_safe_part(application_id)}/"
+        f"{_safe_part(category)}/{digest}{ext}"
+    )
+
+
 class DocumentStorageBackend(ABC):
     backend_name: str
 
@@ -52,14 +90,19 @@ class _FilesystemDocumentStorage(DocumentStorageBackend):
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _target_path(self, organization_id: str, application_id: str, category: str, filename: str) -> Path:
-        safe_name = os.path.basename(filename).replace("..", "_")
-        digest = hashlib.sha256(f"{application_id}:{category}:{safe_name}".encode()).hexdigest()[:12]
-        folder = self.base_dir / organization_id / application_id / category
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder / f"{digest}_{safe_name}"
+        key = object_key_for_upload(
+            organization_id=organization_id,
+            application_id=application_id,
+            category=category,
+            filename=filename,
+        )
+        target = self.base_dir.joinpath(*key.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target
 
     def _resolve_ref(self, storage_ref: str) -> Path:
-        candidate = (self.base_dir / storage_ref).resolve()
+        safe = assert_safe_storage_ref(storage_ref)
+        candidate = (self.base_dir / safe).resolve()
         base = self.base_dir.resolve()
         if base not in candidate.parents and candidate != base:
             raise ValueError("Invalid storage reference.")
@@ -78,7 +121,7 @@ class _FilesystemDocumentStorage(DocumentStorageBackend):
         target = self._target_path(organization_id, application_id, category, filename)
         data = stream.read()
         target.write_bytes(data)
-        storage_ref = str(target.relative_to(self.base_dir))
+        storage_ref = str(target.relative_to(self.base_dir)).replace("\\", "/")
         return self.backend_name, storage_ref, len(data)
 
     def retrieve(self, *, storage_ref: str) -> tuple[bytes, str | None]:
@@ -108,12 +151,30 @@ class RenderDiskDocumentStorage(_FilesystemDocumentStorage):
 
 
 def get_document_storage() -> DocumentStorageBackend:
-    backend = os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", STORAGE_BACKEND_LOCAL_DEV).strip().lower()
+    from app.modules.platform_ops.secure_storage import (
+        STORAGE_BACKEND_ENCRYPTED_PRIVATE,
+        STORAGE_BACKEND_S3_PRIVATE,
+        EncryptedPrivateDocumentStorage,
+        S3PrivateDocumentStorage,
+        SecureStorageNotConfigured,
+        assert_production_storage_allowed,
+        configured_storage_backend,
+    )
+
+    backend = configured_storage_backend()
+    assert_production_storage_allowed(backend)
+    if backend == STORAGE_BACKEND_S3_PRIVATE:
+        return S3PrivateDocumentStorage()
+    if backend == STORAGE_BACKEND_ENCRYPTED_PRIVATE:
+        return EncryptedPrivateDocumentStorage()
     if backend == STORAGE_BACKEND_RENDER_DISK:
         return RenderDiskDocumentStorage()
     if backend in {STORAGE_BACKEND_LOCAL_DEV, STORAGE_BACKEND_PENDING_PRODUCTION}:
         return LocalDocumentStorage()
-    return LocalDocumentStorage()
+    raise SecureStorageNotConfigured(
+        f"Unknown document storage backend '{backend}'. "
+        "Use local_dev (development only), encrypted_private, or s3_private."
+    )
 
 
 def store_bytes_for_test(

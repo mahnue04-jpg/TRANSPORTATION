@@ -14,3 +14,4 @@ alembic
 psutil
 redis>=5.0
 pytest-asyncio
+boto3>=1.34

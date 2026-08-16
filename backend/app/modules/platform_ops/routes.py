@@ -25,6 +25,7 @@ from app.modules.platform_ops.permissions import (
     user_role,
 )
 from app.modules.platform_ops.readiness import compute_readiness_summary
+from app.modules.platform_ops.secure_storage import SecureStorageNotConfigured
 from app.modules.platform_ops.storage import get_document_storage
 from app.modules.platform_ops.schemas import (
     ActivationResponse,
@@ -56,6 +57,12 @@ require_onboarding_reviewer = require_any_role(
 )
 
 require_onboarding_admin = require_any_role("admin", "super_admin_support", "supervisor")
+require_onboarding_compliance = require_any_role(
+    "admin",
+    "super_admin_support",
+    "supervisor",
+    "compliance_officer",
+)
 
 
 def _optional_current_user(
@@ -121,6 +128,14 @@ ensure_platform_ops_schema()
 @router.get("/document-categories")
 def get_document_categories() -> list[dict[str, Any]]:
     return [item.model_dump() for item in onboarding_service.list_document_categories()]
+
+
+@router.get("/storage-status")
+def get_secure_storage_status(user=Depends(require_onboarding_compliance)):  # type: ignore
+    from app.modules.platform_ops.secure_storage import secure_document_storage_readiness
+
+    _ = user
+    return secure_document_storage_readiness()
 
 
 @router.post("/applications", response_model=DriverApplicationCreateResponse)
@@ -246,6 +261,8 @@ async def upload_document(
             file_bytes=content,
             expires_at=parsed_expires,
         )
+    except SecureStorageNotConfigured as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
     return onboarding_service.document_to_response(document).model_dump()
@@ -279,9 +296,13 @@ def download_document(
         raise HTTPException(status_code=404, detail="Document not found.")
     if not document.storage_ref:
         raise HTTPException(status_code=404, detail="Document has no stored file.")
-    storage = get_document_storage()
     try:
+        storage = get_document_storage()
         payload, _ = storage.retrieve(storage_ref=document.storage_ref)
+    except SecureStorageNotConfigured as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid storage reference.") from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Stored document file not found.") from exc
     media_type = document.content_type or "application/octet-stream"

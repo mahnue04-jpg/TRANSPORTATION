@@ -508,7 +508,17 @@ def upload_document(
     if category in STATUS_ONLY_DOCUMENT_CATEGORIES:
         raise ValueError("Use status-only endpoint for this document category.")
 
-    storage = get_document_storage()
+    from app.modules.platform_ops.secure_storage import (
+        SecureStorageNotConfigured,
+        validate_document_upload,
+    )
+
+    validate_document_upload(filename=filename, content_type=content_type, file_bytes=file_bytes)
+
+    try:
+        storage = get_document_storage()
+    except SecureStorageNotConfigured:
+        raise
     backend, storage_ref, byte_size = storage.store(
         organization_id=application.organization_id,
         application_id=application.id,
