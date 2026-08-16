@@ -231,11 +231,18 @@ class PlatformDriverOnboardingInternalNote(Base):
     application: Mapped["PlatformDriverOnboardingApplication"] = relationship(back_populates="internal_notes")
 
 
+def _platform_ops_datetime_sql(dialect_name: str) -> str:
+    if dialect_name == "postgresql":
+        return "TIMESTAMP WITH TIME ZONE"
+    return "DATETIME"
+
+
 def _ensure_platform_ops_columns(inspector) -> None:
     from sqlalchemy import text
 
     from app.db.session import engine
 
+    datetime_sql = _platform_ops_datetime_sql(engine.dialect.name)
     application_cols = {
         "vehicle_year": "INTEGER",
         "vehicle_make": "VARCHAR(64)",
@@ -249,15 +256,15 @@ def _ensure_platform_ops_columns(inspector) -> None:
         "insurance_vehicle_association": "VARCHAR(128)",
         "insurance_review_status": "VARCHAR(32)",
         "insurance_reviewed_by": "VARCHAR(36)",
-        "insurance_reviewed_at": "DATETIME",
+        "insurance_reviewed_at": datetime_sql,
         "insurance_review_notes": "TEXT",
         "insurance_evidence_ref": "VARCHAR(512)",
         "agreement_version": "VARCHAR(64)",
         "agreement_status": "VARCHAR(32)",
-        "agreement_accepted_at": "DATETIME",
+        "agreement_accepted_at": datetime_sql,
         "agreement_evidence_document_id": "VARCHAR(36)",
         "w9_workflow_status": "VARCHAR(32)",
-        "w9_workflow_updated_at": "DATETIME",
+        "w9_workflow_updated_at": datetime_sql,
         "w9_external_reference": "VARCHAR(128)",
         "w9_external_provider": "VARCHAR(128)",
     }
