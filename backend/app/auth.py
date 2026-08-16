@@ -21,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, inspect, or_, text
@@ -596,29 +596,68 @@ def rate_limit_ip(request: Request, limit: int = _RATE_LIMIT_CHAT) -> None:
 
 # ── Bearer token extractor ─────────────────────────────────────────────────────
 _bearer = HTTPBearer(auto_error=False)
+ADMIN_SESSION_COOKIE = "amicor_admin_session"
+
+
+def _cookie_secure(request: Request) -> bool:
+    forwarded = str(request.headers.get("x-forwarded-proto", "") or "").split(",")[0].strip().lower()
+    return forwarded == "https" or str(request.url.scheme).lower() == "https"
+
+
+def set_admin_session_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=_cookie_secure(request),
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+
+
+def clear_admin_session_cookie(response: Response) -> None:
+    response.delete_cookie(key=ADMIN_SESSION_COOKIE, path="/")
+
+
+def extract_access_token(
+    creds: HTTPAuthorizationCredentials | None,
+    request: Request | None = None,
+) -> str | None:
+    if creds and creds.credentials:
+        return creds.credentials
+    if request is not None:
+        cookie = request.cookies.get(ADMIN_SESSION_COOKIE)
+        if cookie:
+            return cookie
+    return None
 
 
 def get_current_user_id(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> str | None:
-    """Return user_id from JWT Bearer token, or None if not provided."""
-    if not creds:
+    """Return user_id from JWT Bearer token or HttpOnly session cookie."""
+    token = extract_access_token(creds, request)
+    if not token:
         return None
-    payload = _jwt_verify(creds.credentials) # type: ignore
+    payload = _jwt_verify(token) # type: ignore
     return payload.get("sub") # type: ignore
 
 
 def get_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
     """Strict auth: resolve and return the current active user object."""
-    if not creds:
+    token = extract_access_token(creds, request)
+    if not token:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     from app.db.models import User as UserModel
 
-    payload = _jwt_verify(creds.credentials) # type: ignore
+    payload = _jwt_verify(token) # type: ignore
     user_id = payload.get("sub") # type: ignore
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing subject")
@@ -638,12 +677,14 @@ def require_any_role(*allowed_roles: str):
     expected = {normalize_role(role) for role in allowed_roles} or {DEFAULT_ROLE}
 
     def _dependency(
+        request: Request,
         user = Depends(get_current_user),  # type: ignore
         creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     ):
-        if not creds:
+        token = extract_access_token(creds, request)
+        if not token:
             raise HTTPException(status_code=401, detail="Authentication required")
-        payload = _jwt_verify(creds.credentials)
+        payload = _jwt_verify(token)
         current_role = resolve_session_role(user, payload)
         authorized = get_user_authorized_roles(user)
         token_role = normalize_role(payload.get("role"))
@@ -724,7 +765,7 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -996,7 +1037,7 @@ def _fetch_login_user(db: Session, email: str) -> Any | None:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     """Password login — returns access + refresh tokens."""
     from app.db.models import User as UserModel, RefreshToken as RefreshTokenModel
 
@@ -1094,6 +1135,8 @@ def refresh_token(req: RefreshRequest, request: Request, db: Session = Depends(g
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
     check_rate_limit(f"refresh:{ip}", limit=30)
 
+    if not req.refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token invalid or revoked")
     hashed = _hash_token(req.refresh_token)
     rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
     if not rt or rt.revoked:
@@ -1145,25 +1188,59 @@ def switch_role(
 
 
 @router.post("/logout")
-def logout(req: RefreshRequest, db: Session = Depends(get_db)):
-    """Revoke a refresh token."""
+def logout(
+    response: Response,
+    req: RefreshRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """Revoke a refresh token and clear the HttpOnly admin session cookie."""
     from app.db.models import RefreshToken as RefreshTokenModel
 
-    hashed = _hash_token(req.refresh_token)
-    rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
-    if rt:
-        rt.revoked = True
-        db.commit()
+    clear_admin_session_cookie(response)
+    token = req.refresh_token if req is not None else None
+    if token:
+        hashed = _hash_token(token)
+        rt = db.query(RefreshTokenModel).filter(RefreshTokenModel.token_hash == hashed).first()
+        if rt:
+            rt.revoked = True
+            db.commit()
     return {"status": "logged out"}
+
+
+@router.post("/admin-session")
+def admin_session_login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Browser admin login: HttpOnly cookie only — JWT is not returned to JavaScript."""
+    result = login(req, request, response, db)
+    set_admin_session_cookie(response, request, result.access_token)
+    return {
+        "status": "ok",
+        "session": "cookie",
+        "user_id": result.user_id,
+        "email": result.email,
+        "display_name": result.display_name,
+        "role": result.role,
+        "session_role": result.session_role,
+        "authorized_roles": result.authorized_roles,
+        "organization_id": result.organization_id,
+        "organization_name": result.organization_name,
+    }
+
+
+@router.post("/admin-session/logout")
+def admin_session_logout(response: Response):
+    clear_admin_session_cookie(response)
+    return {"status": "logged out", "session": "cookie"}
 
 
 @router.get("/me")
 def me(
+    request: Request,
     user = Depends(get_current_user),  # type: ignore
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ):
     """Return the current authenticated user's profile."""
-    payload = _jwt_verify(creds.credentials) if creds else {}
+    token = extract_access_token(creds, request)
+    payload = _jwt_verify(token) if token else {}
     session_role = resolve_session_role(user, payload)
     authorized = sorted(get_user_authorized_roles(user))
     return {
@@ -1185,13 +1262,15 @@ def me(
 
 @router.get("/session")
 def session_info(
+    request: Request,
     user = Depends(get_current_user),  # type: ignore
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ):
     """Return active JWT session role claims for workspace verification."""
-    if not creds:
+    token = extract_access_token(creds, request)
+    if not token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    payload = _jwt_verify(creds.credentials)
+    payload = _jwt_verify(token)
     session_role = resolve_session_role(user, payload)
     return {
         "session_valid": True,

@@ -55,5 +55,10 @@ def can_activate(user, token_payload: dict | None = None) -> bool:
     return user_role(user, token_payload) in ACTIVATION_ROLES
 
 
+def can_view_full_identity(user, token_payload: dict | None = None) -> bool:
+    """Owner/compliance/supervisor only — not dispatcher or driver_support."""
+    return user_role(user, token_payload) in COMPLIANCE_ROLES
+
+
 def is_driver_role(user, token_payload: dict | None = None) -> bool:
     return user_role(user, token_payload) == ROLE_DRIVER

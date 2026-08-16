@@ -65,6 +65,15 @@ SENSITIVE_CATEGORIES = frozenset(
     }
 )
 
+# Simple applicant flow — required uploads before submit (TEST placeholders OK locally).
+SIMPLE_REQUIRED_UPLOAD_CATEGORIES = (
+    "drivers_license_front",
+    "drivers_license_back",
+    "vehicle_registration",
+    "proof_of_auto_insurance",
+    "independent_contractor_agreement",
+)
+
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -150,6 +159,11 @@ def _apply_draft_fields(
         "willing_weekends",
         "willing_wheelchair",
         "service_area_counties",
+        "vehicle_year",
+        "vehicle_make",
+        "vehicle_model",
+        "vehicle_license_plate",
+        "vehicle_vin",
         "declaration_valid_license",
         "declaration_mvr_authorization",
         "declaration_background_authorization",
@@ -163,11 +177,44 @@ def _apply_draft_fields(
             setattr(application, field, value)
     if payload.availability_days is not None:
         application.availability_days_json = _serialize_availability_days(payload.availability_days)
+    # Simplified apply: one authorization maps to applicable compliance consents.
+    if getattr(payload, "authorize_qualification_checks", None):
+        application.declaration_valid_license = True
+        application.declaration_mvr_authorization = True
+        application.declaration_background_authorization = True
+        application.declaration_drug_alcohol_policy = True
+        application.declaration_truthful_information = True
     application.updated_at = now()
+
+
+def apply_simple_application_defaults(application: PlatformDriverOnboardingApplication) -> None:
+    """Fill operational defaults so the driver-facing form can stay minimal."""
+    if not application.preferred_language:
+        application.preferred_language = "English"
+    if not application.employment_type:
+        application.employment_type = "independent_contractor"
+    if not _deserialize_availability_days(application.availability_days_json):
+        application.availability_days_json = _serialize_availability_days(
+            ["monday", "tuesday", "wednesday", "thursday", "friday"]
+        )
+    if not application.availability_start_time:
+        application.availability_start_time = "08:00"
+    if not application.availability_end_time:
+        application.availability_end_time = "18:00"
+    if application.willing_weekends is None:
+        application.willing_weekends = True
+    if application.willing_wheelchair is None:
+        # BASE default — STS wheelchair eligibility remains a later tier decision.
+        application.willing_wheelchair = False
+    if not application.service_area_counties:
+        application.service_area_counties = application.state or "TBD"
+    if not application.signed_date and application.electronic_signature:
+        application.signed_date = date.today()
 
 
 def validate_complete_application(application: PlatformDriverOnboardingApplication) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
+    # Driver-minimum required fields. Operational scheduling details are defaulted.
     required_fields = {
         "legal_first_name": "Legal first name is required.",
         "legal_last_name": "Legal last name is required.",
@@ -180,15 +227,9 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
         "zip_code": "ZIP code is required.",
         "emergency_contact_name": "Emergency contact name is required.",
         "emergency_contact_phone": "Emergency contact phone is required.",
-        "preferred_language": "Preferred language is required.",
         "drivers_license_number": "Driver's license number is required.",
         "license_issuing_state": "License issuing state is required.",
         "license_expiration_date": "License expiration date is required.",
-        "years_driving_experience": "Years of driving experience is required.",
-        "employment_type": "Employment type is required.",
-        "availability_start_time": "Availability start time is required.",
-        "availability_end_time": "Availability end time is required.",
-        "service_area_counties": "Service area or counties is required.",
         "electronic_signature": "Electronic signature is required.",
         "signed_date": "Signed date is required.",
     }
@@ -196,18 +237,9 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
         if getattr(application, field) in (None, ""):
             errors.append({"field": field, "message": message})
 
-    if not _deserialize_availability_days(application.availability_days_json):
-        errors.append({"field": "availability_days", "message": "Select at least one availability day."})
-    if application.willing_weekends is None:
-        errors.append({"field": "willing_weekends", "message": "Weekend availability preference is required."})
-    if application.willing_wheelchair is None:
-        errors.append({"field": "willing_wheelchair", "message": "Wheelchair transport preference is required."})
-
     declarations = {
         "declaration_valid_license": "You must confirm a valid driver's license.",
-        "declaration_mvr_authorization": "Motor vehicle record authorization is required.",
-        "declaration_background_authorization": "Background screening authorization is required.",
-        "declaration_drug_alcohol_policy": "Drug and alcohol policy acknowledgment is required.",
+        "declaration_mvr_authorization": "Driving-record authorization is required.",
         "declaration_truthful_information": "Truthful information certification is required.",
     }
     for field, message in declarations.items():
@@ -216,6 +248,22 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
 
     if application.license_expiration_date and application.license_expiration_date < date.today():
         errors.append({"field": "license_expiration_date", "message": "Driver's license must not be expired."})
+
+    documents = list(application.documents or [])
+    present_categories = {
+        str(doc.category)
+        for doc in documents
+        if doc.review_status in {"pending", "accepted"}
+    }
+    for category in SIMPLE_REQUIRED_UPLOAD_CATEGORIES:
+        if category not in present_categories:
+            label = DOCUMENT_LABELS.get(category, category)
+            errors.append(
+                {
+                    "field": category,
+                    "message": f"{label} upload is required before submit.",
+                }
+            )
 
     return errors
 
@@ -283,6 +331,12 @@ def update_draft_application(
     )
     db.commit()
     db.refresh(application)
+    # Secure workflows: record status-only markers without collecting SSN/bank details here.
+    if getattr(payload, "w9_secure_workflow_started", None):
+        upsert_status_only_document(
+            db, application=application, category="w9_status", status_only_value="provided"
+        )
+        db.refresh(application)
     return application
 
 
@@ -294,6 +348,7 @@ def submit_application(
 ) -> PlatformDriverOnboardingApplication:
     if application.status != "draft":
         raise ValueError("Only draft applications can be submitted.")
+    apply_simple_application_defaults(application)
     errors = validate_complete_application(application)
     if errors:
         raise ValueError(json.dumps({"detail": "Application is incomplete.", "errors": errors}))
@@ -313,6 +368,17 @@ def submit_application(
     )
     db.commit()
     db.refresh(application)
+    # AI Approval Engine: create/sync case and run automated review (non-breaking).
+    try:
+        from app.modules.approval_engine.workflow import create_or_sync_case_from_platform_ops
+
+        create_or_sync_case_from_platform_ops(
+            db,
+            application=application,
+            run_review=True,
+        )
+    except Exception as exc:  # pragma: no cover - never block applicant submit
+        logger.warning("approval_engine sync after submit skipped: %s", exc)
     return application
 
 
@@ -329,6 +395,31 @@ def transition_application_status(
     previous = application.status
     target = normalize_status(to_status)
     assert_transition_allowed(previous, target)
+    if target == "activated":
+        from app.modules.platform_ops.onboarding.activation import (
+            COMPLIANCE_ACTIVATION_BLOCKED,
+            assert_approval_engine_allows_activation,
+        )
+
+        try:
+            assert_approval_engine_allows_activation(db, application=application)
+        except ValueError as exc:
+            _record_audit(
+                db,
+                application=application,
+                event_type="application_activation_blocked",
+                from_status=previous,
+                to_status=previous,
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
+                reason=str(exc),
+            )
+            db.commit()
+            raise
+        raise ValueError(
+            COMPLIANCE_ACTIVATION_BLOCKED
+            + " Status cannot be set to activated directly. Use the compliance-gated activate endpoint."
+        )
 
     application.status = target
     application.status_reason = reason
@@ -457,12 +548,14 @@ def add_internal_note(
     application: PlatformDriverOnboardingApplication,
     author_user_id: str,
     note_text: str,
+    category: str | None = None,
 ) -> PlatformDriverOnboardingInternalNote:
     note = PlatformDriverOnboardingInternalNote(
         id=uuid4(),
         application_id=application.id,
         author_user_id=author_user_id,
         note_text=note_text.strip(),
+        category=(category or "").strip() or None,
         created_at=now(),
     )
     db.add(note)
@@ -515,6 +608,23 @@ def upload_document(
 
     validate_document_upload(filename=filename, content_type=content_type, file_bytes=file_bytes)
 
+    incoming_size = len(file_bytes)
+    # Idempotent: Continue/Save/Submit often re-posts the same selected file.
+    identical = (
+        db.query(PlatformDriverOnboardingDocument)
+        .filter(
+            PlatformDriverOnboardingDocument.application_id == application.id,
+            PlatformDriverOnboardingDocument.category == category,
+            PlatformDriverOnboardingDocument.original_filename == filename,
+            PlatformDriverOnboardingDocument.byte_size == incoming_size,
+            PlatformDriverOnboardingDocument.review_status.in_(("pending", "accepted")),
+        )
+        .order_by(PlatformDriverOnboardingDocument.created_at.desc())
+        .first()
+    )
+    if identical is not None:
+        return identical
+
     try:
         storage = get_document_storage()
     except SecureStorageNotConfigured:
@@ -527,6 +637,46 @@ def upload_document(
         content_type=content_type,
         stream=BytesIO(file_bytes),
     )
+
+    # Replace the latest pending row for this category instead of stacking duplicates.
+    latest_pending = (
+        db.query(PlatformDriverOnboardingDocument)
+        .filter(
+            PlatformDriverOnboardingDocument.application_id == application.id,
+            PlatformDriverOnboardingDocument.category == category,
+            PlatformDriverOnboardingDocument.review_status == "pending",
+        )
+        .order_by(PlatformDriverOnboardingDocument.created_at.desc())
+        .first()
+    )
+    if latest_pending is not None:
+        previous_ref = latest_pending.storage_ref
+        latest_pending.storage_backend = backend
+        latest_pending.storage_ref = storage_ref
+        latest_pending.original_filename = filename
+        latest_pending.content_type = content_type
+        latest_pending.byte_size = byte_size
+        latest_pending.expires_at = expires_at
+        latest_pending.updated_at = now()
+        if previous_ref and previous_ref != storage_ref:
+            try:
+                storage.delete(storage_ref=previous_ref)
+            except Exception:
+                logger.warning(
+                    "document_replace_cleanup_failed application_id=%s document_id=%s",
+                    application.id,
+                    latest_pending.id,
+                )
+        _record_audit(
+            db,
+            application=application,
+            event_type="document_replaced",
+            metadata={"category": category, "document_id": latest_pending.id},
+        )
+        db.commit()
+        db.refresh(latest_pending)
+        return latest_pending
+
     document = PlatformDriverOnboardingDocument(
         id=uuid4(),
         application_id=application.id,
@@ -700,6 +850,21 @@ def application_to_detail(
         willing_weekends=application.willing_weekends,
         willing_wheelchair=application.willing_wheelchair,
         service_area_counties=application.service_area_counties,
+        vehicle_year=getattr(application, "vehicle_year", None),
+        vehicle_make=getattr(application, "vehicle_make", None),
+        vehicle_model=getattr(application, "vehicle_model", None),
+        vehicle_license_plate=getattr(application, "vehicle_license_plate", None),
+        vehicle_vin=getattr(application, "vehicle_vin", None),
+        insurance_carrier=getattr(application, "insurance_carrier", None),
+        insurance_policy_ref_masked=getattr(application, "insurance_policy_ref_masked", None),
+        insurance_effective_date=getattr(application, "insurance_effective_date", None),
+        insurance_expiration_date=getattr(application, "insurance_expiration_date", None),
+        insurance_review_status=getattr(application, "insurance_review_status", None),
+        agreement_version=getattr(application, "agreement_version", None),
+        agreement_status=getattr(application, "agreement_status", None),
+        agreement_accepted_at=getattr(application, "agreement_accepted_at", None),
+        w9_workflow_status=getattr(application, "w9_workflow_status", None),
+        w9_workflow_updated_at=getattr(application, "w9_workflow_updated_at", None),
         declaration_valid_license=application.declaration_valid_license,
         declaration_mvr_authorization=application.declaration_mvr_authorization,
         declaration_background_authorization=application.declaration_background_authorization,

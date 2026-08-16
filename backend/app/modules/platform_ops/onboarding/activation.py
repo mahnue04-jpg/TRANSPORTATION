@@ -15,6 +15,53 @@ from app.modules.platform_ops.status_machine import ACTIVATION_SOURCE_STATUSES
 
 logger = logging.getLogger("amicor.platform_ops.onboarding.activation")
 
+COMPLIANCE_ACTIVATION_BLOCKED = (
+    "COMPLIANCE_ACTIVATION_BLOCKED: Platform Ops cannot create or activate an "
+    "is_active HealthISFDriver until the Approval Engine case is APPROVED or ACTIVE "
+    "and blocking requirements are satisfied. Do not bypass compliance."
+)
+
+
+def _approval_case_for_application(db: Session, application: PlatformDriverOnboardingApplication):
+    from app.modules.approval_engine.models import ApprovalCase
+
+    return (
+        db.query(ApprovalCase)
+        .filter(
+            ApprovalCase.organization_id == application.organization_id,
+            ApprovalCase.platform_ops_application_id == application.id,
+        )
+        .order_by(ApprovalCase.updated_at.desc())
+        .first()
+    )
+
+
+def assert_approval_engine_allows_activation(
+    db: Session,
+    *,
+    application: PlatformDriverOnboardingApplication,
+) -> object:
+    """Server-side gate: Platform Ops approve is not enough."""
+    from app.modules.approval_engine.workflow import blocking_requirements
+
+    case = _approval_case_for_application(db, application)
+    if case is None:
+        raise ValueError(COMPLIANCE_ACTIVATION_BLOCKED + " No Approval Engine case is on file.")
+    status = str(case.workflow_status or "").strip().upper()
+    if status not in {"APPROVED", "OWNER_APPROVED", "ACTIVE"}:
+        raise ValueError(
+            COMPLIANCE_ACTIVATION_BLOCKED
+            + f" Approval Engine status is {status or 'UNKNOWN'}, not APPROVED/ACTIVE."
+        )
+    blockers = blocking_requirements(case)
+    if blockers:
+        keys = ", ".join(str(item.requirement_key) for item in blockers)
+        raise ValueError(
+            COMPLIANCE_ACTIVATION_BLOCKED
+            + f" Blocking requirements remain: {keys}."
+        )
+    return case
+
 
 def activate_application(
     db: Session,
@@ -30,6 +77,21 @@ def activate_application(
             return driver, True
     if application.status not in ACTIVATION_SOURCE_STATUSES:
         raise ValueError("Application must be approved before activation.")
+    try:
+        case = assert_approval_engine_allows_activation(db, application=application)
+    except ValueError as exc:
+        onboarding_service._record_audit(
+            db,
+            application=application,
+            event_type="application_activation_blocked",
+            from_status=application.status,
+            to_status=application.status,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            reason=str(exc),
+        )
+        db.commit()
+        raise
 
     if application.activated_driver_id:
         driver = health_isf_service.get_driver_by_id(db, application.activated_driver_id)
@@ -85,6 +147,16 @@ def activate_application(
         vehicle_type="pending_assignment",
         vehicle_plate=placeholder_plate,
     )
+    # Onboarding-created drivers stay inactive unless Approval Engine is already ACTIVE.
+    # They remain ineligible for live dispatch while the production gate is off.
+    ae_active = str(getattr(case, "workflow_status", "") or "").strip().upper() == "ACTIVE"
+    if not ae_active:
+        driver.is_active = False
+        db.add(driver)
+        db.flush()
+    if getattr(case, "health_isf_driver_id", None) in {None, ""}:
+        case.health_isf_driver_id = driver.id
+        case.entity_id = case.entity_id or driver.id
 
     previous = application.status
     application.activated_driver_id = driver.id

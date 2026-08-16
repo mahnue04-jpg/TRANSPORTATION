@@ -36,6 +36,11 @@ class DriverApplicationDraftRequest(BaseModel):
     willing_weekends: bool | None = None
     willing_wheelchair: bool | None = None
     service_area_counties: str | None = None
+    vehicle_year: int | None = Field(default=None, ge=1980, le=2100)
+    vehicle_make: str | None = None
+    vehicle_model: str | None = None
+    vehicle_license_plate: str | None = None
+    vehicle_vin: str | None = None
     declaration_valid_license: bool = False
     declaration_mvr_authorization: bool = False
     declaration_background_authorization: bool = False
@@ -43,10 +48,16 @@ class DriverApplicationDraftRequest(BaseModel):
     declaration_truthful_information: bool = False
     electronic_signature: str | None = None
     signed_date: date | None = None
+    # Simplified apply: applicant authorizes Amicor to run applicable qualification checks.
+    authorize_qualification_checks: bool | None = None
+    payout_setup_started: bool | None = None
+    w9_secure_workflow_started: bool | None = None
 
 
 class DriverApplicationSubmitRequest(BaseModel):
     confirmation: bool = True
+    # Applicant-facing: keep response free of internal compliance jargon when true.
+    simple_confirmation_message: bool = True
 
 
 class DriverApplicationStatusTransitionRequest(BaseModel):
@@ -67,6 +78,7 @@ class DriverApplicationAssignReviewerRequest(BaseModel):
 
 class DriverApplicationInternalNoteRequest(BaseModel):
     note_text: str = Field(min_length=1, max_length=4000)
+    category: str | None = Field(default=None, max_length=64)
 
 
 class DocumentReviewRequest(BaseModel):
@@ -149,6 +161,21 @@ class DriverApplicationDetailResponse(BaseModel):
     willing_weekends: bool | None = None
     willing_wheelchair: bool | None = None
     service_area_counties: str | None = None
+    vehicle_year: int | None = None
+    vehicle_make: str | None = None
+    vehicle_model: str | None = None
+    vehicle_license_plate: str | None = None
+    vehicle_vin: str | None = None
+    insurance_carrier: str | None = None
+    insurance_policy_ref_masked: str | None = None
+    insurance_effective_date: date | None = None
+    insurance_expiration_date: date | None = None
+    insurance_review_status: str | None = None
+    agreement_version: str | None = None
+    agreement_status: str | None = None
+    agreement_accepted_at: datetime | None = None
+    w9_workflow_status: str | None = None
+    w9_workflow_updated_at: datetime | None = None
     declaration_valid_license: bool = False
     declaration_mvr_authorization: bool = False
     declaration_background_authorization: bool = False
@@ -171,6 +198,8 @@ class DriverApplicationDetailResponse(BaseModel):
     documents: list[DocumentMetadataResponse] = Field(default_factory=list)
     readiness: ReadinessSummaryResponse | None = None
     allowed_next_statuses: list[str] = Field(default_factory=list)
+    applicant_message: str | None = None
+    applicant_follow_up_messages: list[str] = Field(default_factory=list)
 
 
 class DriverApplicationCreateResponse(BaseModel):

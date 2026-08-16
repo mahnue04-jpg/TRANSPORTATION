@@ -100,6 +100,32 @@ def _applicant_headers(token: str) -> dict[str, str]:
     return {"X-Applicant-Token": token}
 
 
+def _upload_required_placeholders(client: TestClient, app_id: str, applicant_token: str) -> None:
+    placeholder = ("placeholder-not-real-pii", "placeholder.txt", "text/plain")
+    for category in (
+        "drivers_license_front",
+        "drivers_license_back",
+        "vehicle_registration",
+        "proof_of_auto_insurance",
+        "independent_contractor_agreement",
+    ):
+        upload = client.post(
+            f"/api/platform-ops/driver-onboarding/applications/{app_id}/documents?category={category}",
+            headers=_applicant_headers(applicant_token),
+            files={"file": placeholder},
+        )
+        assert upload.status_code == 200, upload.text
+
+
+def _submit_complete(client: TestClient, app_id: str, applicant_token: str):
+    _upload_required_placeholders(client, app_id, applicant_token)
+    return client.post(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
+        headers=_applicant_headers(applicant_token),
+        json={"confirmation": True},
+    )
+
+
 def test_driver_can_save_draft(client: TestClient) -> None:
     org_id = _org_id()
     app_id, applicant_token = _create_draft(client, org_id)
@@ -118,11 +144,7 @@ def test_driver_can_save_draft(client: TestClient) -> None:
 def test_driver_can_submit_complete_application(client: TestClient) -> None:
     org_id = _org_id()
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id))
-    response = client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    response = _submit_complete(client, app_id, applicant_token)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "submitted"
@@ -153,11 +175,7 @@ def test_applicant_cannot_approve_themselves(client: TestClient) -> None:
         headers=_applicant_headers(applicant_token),
         json=payload,
     )
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     admin_token = _login(client, admin_email)
     for status in ("under_review", "background_review"):
         client.post(
@@ -213,11 +231,7 @@ def test_invalid_status_transition_rejected(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     response = client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
         headers=_auth(admin_token),
@@ -230,11 +244,7 @@ def test_approval_does_not_automatically_activate(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
         headers=_auth(admin_token),
@@ -256,16 +266,12 @@ def test_approval_does_not_automatically_activate(client: TestClient) -> None:
     assert body["activated_driver_id"] is None
 
 
-def test_activation_creates_one_linked_driver_and_is_idempotent(client: TestClient) -> None:
+def test_activation_blocked_without_approval_engine_ready(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     phone = _unique_phone()
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id, phone=phone))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     for status in ("under_review", "background_review"):
         client.post(
             f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
@@ -282,32 +288,19 @@ def test_activation_creates_one_linked_driver_and_is_idempotent(client: TestClie
         headers=_auth(admin_token),
         json={"confirm": True},
     )
-    assert first.status_code == 200, first.text
-    driver_id = first.json()["driver_id"]
-    second = client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/activate",
-        headers=_auth(admin_token),
-        json={"confirm": True},
-    )
-    assert second.status_code == 200, second.text
-    assert second.json()["driver_id"] == driver_id
-    assert second.json()["idempotent"] is True
-
+    assert first.status_code in {400, 409}, first.text
+    assert "COMPLIANCE_ACTIVATION_BLOCKED" in first.text
     with SessionLocal() as db:
         drivers = db.query(HealthISFDriver).filter(HealthISFDriver.phone == phone).all()
-        assert len(drivers) == 1
+        assert drivers == []
 
 
-def test_newly_activated_driver_starts_offline(client: TestClient) -> None:
+def test_platform_ops_approve_does_not_create_active_driver(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     phone = _unique_phone()
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id, phone=phone))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     for status in ("under_review", "background_review"):
         client.post(
             f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
@@ -324,13 +317,10 @@ def test_newly_activated_driver_starts_offline(client: TestClient) -> None:
         headers=_auth(admin_token),
         json={"confirm": True},
     )
-    assert activated.status_code == 200, activated.text
-    driver_id = activated.json()["driver_id"]
+    assert activated.status_code in {400, 409}, activated.text
+    assert "COMPLIANCE_ACTIVATION_BLOCKED" in activated.text
     with SessionLocal() as db:
-        driver = hs.get_driver_by_id(db, driver_id)
-        assert driver is not None
-        status_value = getattr(driver.status, "value", str(driver.status))
-        assert str(status_value).lower().endswith("offline") or str(status_value).lower() == "unavailable"
+        assert db.query(HealthISFDriver).filter(HealthISFDriver.phone == phone).first() is None
 
 
 def test_existing_production_drivers_unaffected(client: TestClient) -> None:
@@ -349,11 +339,7 @@ def test_existing_production_drivers_unaffected(client: TestClient) -> None:
     admin_token = _login(client, "admin@amicor.local")
     phone = _unique_phone()
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id, phone=phone))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     for status in ("under_review", "background_review"):
         client.post(
             f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
@@ -389,11 +375,7 @@ def test_status_change_creates_audit_record(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/status",
         headers=_auth(admin_token),
@@ -413,11 +395,7 @@ def test_license_masked_in_admin_list(client: TestClient) -> None:
     org_id = _org_id()
     admin_token = _login(client, "admin@amicor.local")
     app_id, applicant_token = _create_draft(client, org_id, _complete_payload(org_id))
-    client.post(
-        f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
-        headers=_applicant_headers(applicant_token),
-        json={"confirmation": True},
-    )
+    _submit_complete(client, app_id, applicant_token)
     listed = client.get("/api/platform-ops/driver-onboarding/applications", headers=_auth(admin_token))
     assert listed.status_code == 200
     row = next(item for item in listed.json() if item["id"] == app_id)

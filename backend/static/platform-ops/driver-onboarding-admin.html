@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png?v=20260803.1" />
   <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
   <title>Driver Onboarding Admin | AMICOR</title>
-  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css" />
+  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css?v=20260814.2b" />
 </head>
 <body>
   <main class="page">
@@ -21,11 +21,24 @@
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
+    <form id="admin-login-form" class="admin-login" autocomplete="on">
+      <label>Admin email
+        <input id="admin-email" type="email" name="email" required />
+      </label>
+      <label>Password
+        <input id="admin-password" type="password" name="password" required />
+      </label>
+      <button type="submit" id="admin-sign-in">Sign in</button>
+    </form>
     <div class="admin-layout">
       <section>
         <div class="toolbar">
+          <button type="button" id="admin-sign-out" class="secondary hidden">Sign out</button>
           <button type="button" id="refresh-list">Refresh</button>
+          <button type="button" id="prepare-driver-001">Prepare Driver #001 (BASE)</button>
         </div>
+        <p class="meta">Driver #001 uses the same Platform Ops apply flow. AI Approval Engine tracks BASE ambulatory requirements only. Dispatch gate stays off. No fabricated verifications.</p>
+        <div id="driver-001-panel" class="meta"></div>
         <div id="application-list"></div>
       </section>
       <section id="detail-panel">
@@ -33,6 +46,6 @@
       </section>
     </div>
   </main>
-  <script src="/static/platform-ops/driver-onboarding-admin.js"></script>
+  <script src="/static/platform-ops/driver-onboarding-admin.js?v=20260814.2b"></script>
 </body>
 </html>

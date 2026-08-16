@@ -468,8 +468,15 @@ except Exception as exc:
 # ── Platform Ops (business operations — separate from frozen ride engine) ─────
 try:
     from app.modules.platform_ops.routes import router as platform_ops_router  # type: ignore
+    from app.modules.approval_engine.routes import router as approval_engine_router  # type: ignore
+    from app.modules.approval_engine.models import ensure_approval_engine_schema  # type: ignore
 
     app.include_router(platform_ops_router)
+    app.include_router(approval_engine_router)
+    try:
+        ensure_approval_engine_schema()
+    except Exception:
+        pass
     logger.info("Platform Ops routes registered")
 except Exception as exc:
     logger.error("Failed to register Platform Ops routes: %s", exc)

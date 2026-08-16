@@ -12,91 +12,141 @@
   <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css" />
 </head>
 <body>
-  <main class="page">
+  <main class="page apply-page">
     <header class="amicor-brand-lockup">
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." decoding="async" />
       <div>
-        <h1>Driver Application</h1>
-        <p class="subtitle">Transport. Care. Connect.</p>
+        <h1>Become an Amicor Driver</h1>
+        <p class="subtitle">A few short steps. Amicor handles the rest.</p>
       </div>
     </header>
+
     <div id="banner" class="banner hidden"></div>
+
+    <div id="success-panel" class="success-panel hidden">
+      <h2>Application submitted</h2>
+      <p>Amicor is reviewing your information.</p>
+      <p>We will notify you if anything else is needed.</p>
+      <button type="button" id="start-new-application">Start a new application</button>
+    </div>
+
     <form id="application-form" novalidate>
       <input type="hidden" id="organization_id" name="organization_id" />
       <input type="hidden" id="application_id" name="application_id" />
 
-      <section>
-        <h2>Personal Information</h2>
+      <nav class="step-nav" aria-label="Application steps">
+        <button type="button" class="step-dot active" data-step="1">1 · About you</button>
+        <button type="button" class="step-dot" data-step="2">2 · Driving</button>
+        <button type="button" class="step-dot" data-step="3">3 · Vehicle</button>
+        <button type="button" class="step-dot" data-step="4">4 · Authorization</button>
+        <button type="button" class="step-dot" data-step="5">5 · Work setup</button>
+      </nav>
+
+      <section class="step-panel" data-step-panel="1">
+        <h2>About you</h2>
+        <p class="step-help">Tell us how to reach you.</p>
         <div class="grid">
-          <label>Legal first name<input required name="legal_first_name" /></label>
-          <label>Middle name (optional)<input name="legal_middle_name" /></label>
-          <label>Legal last name<input required name="legal_last_name" /></label>
+          <label>Legal first name<input required name="legal_first_name" autocomplete="given-name" /></label>
+          <label>Legal last name<input required name="legal_last_name" autocomplete="family-name" /></label>
+          <label>Email<input required type="email" name="email" autocomplete="email" /></label>
+          <label>Phone<input required name="mobile_phone" placeholder="612-555-0100" autocomplete="tel" /></label>
+          <label class="full">Home address<input required name="home_address" autocomplete="street-address" /></label>
+          <label>City<input required name="city" autocomplete="address-level2" /></label>
+          <label>State<input required name="state" maxlength="2" placeholder="MN" autocomplete="address-level1" /></label>
+          <label>ZIP<input required name="zip_code" autocomplete="postal-code" /></label>
           <label>Date of birth<input required type="date" name="date_of_birth" /></label>
-          <label>Email<input required type="email" name="email" /></label>
-          <label>Mobile phone<input required name="mobile_phone" placeholder="917-555-0100" /></label>
-          <label class="full">Home address<input required name="home_address" /></label>
-          <label>City<input required name="city" /></label>
-          <label>State<input required name="state" maxlength="2" placeholder="NY" /></label>
-          <label>ZIP code<input required name="zip_code" /></label>
           <label>Emergency contact name<input required name="emergency_contact_name" /></label>
           <label>Emergency contact phone<input required name="emergency_contact_phone" /></label>
-          <label>Preferred language<input required name="preferred_language" /></label>
         </div>
       </section>
 
-      <section>
-        <h2>Driver Information</h2>
+      <section class="step-panel hidden" data-step-panel="2">
+        <h2>Driving</h2>
+        <p class="step-help">Your license details and photos.</p>
         <div class="grid">
-          <label>Driver's license number<input required name="drivers_license_number" /></label>
-          <label>Issuing state<input required name="license_issuing_state" maxlength="2" /></label>
+          <label>Driver license number<input required name="drivers_license_number" autocomplete="off" /></label>
+          <label>License state<input required name="license_issuing_state" maxlength="2" /></label>
           <label>License expiration<input required type="date" name="license_expiration_date" /></label>
-          <label>Years of driving experience<input required type="number" min="0" name="years_driving_experience" /></label>
-          <label>Employment type
-            <select required name="employment_type">
-              <option value="">Select…</option>
-              <option value="independent_contractor">Independent contractor</option>
-              <option value="employee">Employee</option>
-            </select>
+          <label class="full">Upload front of driver license
+            <input type="file" id="file_license_front" accept="image/*,.pdf" required />
           </label>
-          <label class="full">Availability days
-            <div class="checks" id="availability_days">
-              <label><input type="checkbox" value="monday" /> Mon</label>
-              <label><input type="checkbox" value="tuesday" /> Tue</label>
-              <label><input type="checkbox" value="wednesday" /> Wed</label>
-              <label><input type="checkbox" value="thursday" /> Thu</label>
-              <label><input type="checkbox" value="friday" /> Fri</label>
-              <label><input type="checkbox" value="saturday" /> Sat</label>
-              <label><input type="checkbox" value="sunday" /> Sun</label>
-            </div>
+          <label class="full">Upload back of driver license
+            <input type="file" id="file_license_back" accept="image/*,.pdf" required />
           </label>
-          <label>Availability start<input required type="time" name="availability_start_time" /></label>
-          <label>Availability end<input required type="time" name="availability_end_time" /></label>
-          <label>Willing to work weekends?
-            <select required name="willing_weekends"><option value="">Select…</option><option value="true">Yes</option><option value="false">No</option></select>
+          <label class="full check-row">
+            <input type="checkbox" name="declaration_mvr_authorization" />
+            I authorize Amicor to review my driving record as part of driver qualification.
           </label>
-          <label>Willing to transport wheelchair passengers?
-            <select required name="willing_wheelchair"><option value="">Select…</option><option value="true">Yes</option><option value="false">No</option></select>
-          </label>
-          <label class="full">Counties / service area<input required name="service_area_counties" /></label>
         </div>
       </section>
 
-      <section>
-        <h2>Required Declarations</h2>
+      <section class="step-panel hidden" data-step-panel="3">
+        <h2>Vehicle</h2>
+        <p class="step-help">The vehicle you will use for Amicor trips.</p>
+        <div class="grid">
+          <label>Year<input required type="number" name="vehicle_year" min="1980" max="2100" /></label>
+          <label>Make<input required name="vehicle_make" placeholder="Toyota" /></label>
+          <label>Model<input required name="vehicle_model" placeholder="Camry" /></label>
+          <label>License plate<input required name="vehicle_license_plate" /></label>
+          <label class="full">VIN <span class="optional">(if available)</span>
+            <input name="vehicle_vin" autocomplete="off" />
+          </label>
+          <label class="full">Upload vehicle registration
+            <input type="file" id="file_registration" accept="image/*,.pdf" required />
+          </label>
+          <label class="full">Upload proof of insurance
+            <input type="file" id="file_insurance" accept="image/*,.pdf" required />
+          </label>
+        </div>
+      </section>
+
+      <section class="step-panel hidden" data-step-panel="4">
+        <h2>Authorization</h2>
+        <p class="step-help">
+          Amicor will complete required driver qualification and compliance checks for the services you provide.
+          You do not need to manage those details here.
+        </p>
         <div class="declarations">
-          <label><input type="checkbox" name="declaration_valid_license" /> I confirm I hold a valid driver's license.</label>
-          <label><input type="checkbox" name="declaration_mvr_authorization" /> I authorize motor vehicle record review.</label>
-          <label><input type="checkbox" name="declaration_background_authorization" /> I authorize criminal background screening.</label>
-          <label><input type="checkbox" name="declaration_drug_alcohol_policy" /> I acknowledge the drug and alcohol policy.</label>
-          <label><input type="checkbox" name="declaration_truthful_information" /> I certify all information is truthful.</label>
-          <label>Electronic signature (type full legal name)<input required name="electronic_signature" /></label>
-          <label>Signed date<input required type="date" name="signed_date" /></label>
+          <label class="check-row">
+            <input type="checkbox" name="authorize_qualification_checks" />
+            I authorize Amicor to initiate applicable driver qualification and compliance checks using the information I provide.
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="declaration_valid_license" />
+            I confirm I hold a valid driver's license.
+          </label>
+          <label>Type your full legal name to sign
+            <input required name="electronic_signature" autocomplete="name" />
+          </label>
+          <label>Today's date
+            <input required type="date" name="signed_date" />
+          </label>
         </div>
       </section>
 
-      <div class="actions">
+      <section class="step-panel hidden" data-step-panel="5">
+        <h2>Work setup</h2>
+        <p class="step-help">Complete these items so you can get paid. Sensitive tax and banking details use secure workflows — not this form.</p>
+        <div class="grid">
+          <label class="full">Independent contractor agreement
+            <input type="file" id="file_contractor" accept="image/*,.pdf" required />
+          </label>
+          <label class="full check-row">
+            <input type="checkbox" name="w9_secure_workflow_started" />
+            I will complete W-9 / tax information through Amicor's secure process (do not enter SSN here).
+          </label>
+          <label class="full check-row">
+            <input type="checkbox" name="payout_setup_started" />
+            I understand I need to finish secure payout setup before I can be paid for trips.
+          </label>
+        </div>
+      </section>
+
+      <div class="actions step-actions">
+        <button type="button" id="prev-step" class="secondary hidden">Back</button>
         <button type="button" id="save-draft" class="secondary">Save draft</button>
-        <button type="submit" id="submit-application">Submit application</button>
+        <button type="button" id="next-step">Continue</button>
+        <button type="submit" id="submit-application" class="hidden">Submit application</button>
       </div>
     </form>
   </main>

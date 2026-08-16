@@ -5,12 +5,12 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.auth import _bearer, _jwt_verify, get_current_user, require_any_role
+from app.auth import _bearer, extract_access_token, _jwt_verify, get_current_user, require_any_role
 from app.db.models import User as UserModel
 from app.db.session import get_db
 from app.modules.platform_ops.models import PlatformDriverOnboardingDocument, ensure_platform_ops_schema
@@ -21,6 +21,7 @@ from app.modules.platform_ops.permissions import (
     can_approve,
     can_review,
     can_view_compliance,
+    can_view_full_identity,
     is_driver_role,
     user_role,
 )
@@ -66,12 +67,14 @@ require_onboarding_compliance = require_any_role(
 
 
 def _optional_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
-    if not creds:
+    token = extract_access_token(creds, request)
+    if not token:
         return None
-    payload = _jwt_verify(creds.credentials)
+    payload = _jwt_verify(token)
     user_id = payload.get("sub")
     if not user_id:
         return None
@@ -79,6 +82,32 @@ def _optional_current_user(
     if not user or not user.is_active:
         return None
     return user
+
+
+def _include_full_identity(user) -> bool:
+    return bool(user and can_view_full_identity(user))
+
+
+def _audit_identity_reveal(db, *, application, user) -> None:
+    if user is None or application is None:
+        return
+    onboarding_service._record_audit(
+        db,
+        application=application,
+        event_type="sensitive_identity_revealed",
+        actor_user_id=str(user.id),
+        actor_role=user_role(user),
+        reason="Full driver-license number returned to compliance-authorized reviewer",
+        metadata={"fields": ["drivers_license_number"], "masked": False},
+    )
+
+
+def _detail_for_user(db, application, user):
+    include_full = _include_full_identity(user)
+    if include_full:
+        _audit_identity_reveal(db, application=application, user=user)
+        db.commit()
+    return onboarding_service.application_to_detail(db, application, include_full_license=include_full)
 
 
 def _resolve_org_id(explicit_org_id: str | None, user) -> str:
@@ -102,6 +131,8 @@ def _parse_service_error(exc: Exception) -> HTTPException:
                 )
         except json.JSONDecodeError:
             pass
+    if "COMPLIANCE_STORAGE_BLOCKED" in message:
+        return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=message)
     if "not allowed" in message.lower() or "cannot" in message.lower():
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
     if "not found" in message.lower():
@@ -173,8 +204,31 @@ def get_application(
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found.")
     _authorize_application_access(application=application, user=user, applicant_token=x_applicant_token)
-    include_full = bool(user and can_review(user))
-    return onboarding_service.application_to_detail(db, application, include_full_license=include_full)
+    return _detail_for_user(db, application, user)
+
+
+@router.get("/applications/{application_id}/applicant-status")
+def get_applicant_status(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    """Simple applicant-facing status — no internal adapter/status jargon."""
+    from app.modules.approval_engine.driver_messages import applicant_facing_status
+    from app.modules.approval_engine.models import ApprovalCase
+
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise HTTPException(status_code=403, detail="Applicant token required.")
+    case = (
+        db.query(ApprovalCase)
+        .filter(ApprovalCase.platform_ops_application_id == application.id)
+        .order_by(ApprovalCase.created_at.desc())
+        .first()
+    )
+    return applicant_facing_status(case, application_status=application.status)
 
 
 @router.put("/applications/{application_id}", response_model=DriverApplicationDetailResponse)
@@ -201,7 +255,7 @@ def update_application(
         )
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    return _detail_for_user(db, updated, user)
 
 
 @router.post("/applications/{application_id}/submit", response_model=DriverApplicationDetailResponse)
@@ -225,7 +279,13 @@ def submit_application(
         )
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    detail = onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    if payload.simple_confirmation_message:
+        from app.modules.approval_engine.driver_messages import render_template
+
+        detail.applicant_message = render_template("application_submitted")
+        detail.applicant_follow_up_messages = [detail.applicant_message]
+    return detail
 
 
 @router.post("/applications/{application_id}/documents")
@@ -279,11 +339,23 @@ def download_document(
     application = onboarding_service.get_application_by_id(db, application_id)
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found.")
-    _authorize_application_access(
-        application=application,
-        user=user,
-        applicant_token=x_applicant_token,
-    )
+    applicant_ok = onboarding_service.verify_applicant_token(application, x_applicant_token)
+    staff_ok = bool(user and can_view_full_identity(user))
+    if not applicant_ok and not staff_ok:
+        onboarding_service._record_audit(
+            db,
+            application=application,
+            event_type="document_inspect_denied",
+            actor_user_id=str(user.id) if user is not None else None,
+            actor_role=user_role(user) if user is not None else "anonymous",
+            reason="Unauthorized document retrieval attempt",
+            metadata={"document_id": document_id, "result": "denied"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Document inspect requires owner/compliance role or the applicant token.",
+        )
     document = (
         db.query(PlatformDriverOnboardingDocument)
         .filter(
@@ -296,6 +368,27 @@ def download_document(
         raise HTTPException(status_code=404, detail="Document not found.")
     if not document.storage_ref:
         raise HTTPException(status_code=404, detail="Document has no stored file.")
+    onboarding_service._record_audit(
+        db,
+        application=application,
+        event_type="document_inspected",
+        actor_user_id=str(user.id) if user is not None else None,
+        actor_role=user_role(user) if user is not None else "applicant",
+        reason="Authorized document retrieval",
+        metadata={
+            "document_id": document_id,
+            "category": document.category,
+            "result": "allowed",
+            "actor": "staff" if staff_ok else "applicant",
+        },
+    )
+    db.commit()
+    logger.info(
+        "document_download application_id=%s document_id=%s category=%s result=allowed",
+        application_id,
+        document_id,
+        document.category,
+    )
     try:
         storage = get_document_storage()
         payload, _ = storage.retrieve(storage_ref=document.storage_ref)
@@ -342,7 +435,7 @@ def review_document(
     document_id: str,
     payload: DocumentReviewRequest,
     db: Session = Depends(get_db),
-    user=Depends(require_onboarding_reviewer),  # type: ignore
+    user=Depends(require_onboarding_compliance),  # type: ignore
 ):
     application = onboarding_service.get_application_by_id(db, application_id)
     if application is None:
@@ -393,7 +486,7 @@ def transition_status(
         )
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    return _detail_for_user(db, updated, user)
 
 
 @router.post("/applications/{application_id}/approve", response_model=DriverApplicationDetailResponse)
@@ -422,7 +515,7 @@ def approve_application(
         )
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    return _detail_for_user(db, updated, user)
 
 
 @router.post("/applications/{application_id}/reject", response_model=DriverApplicationDetailResponse)
@@ -446,7 +539,7 @@ def reject_application(
         actor_role=user_role(user),
         reason=payload.reason,
     )
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    return _detail_for_user(db, updated, user)
 
 
 @router.post("/applications/{application_id}/suspend", response_model=DriverApplicationDetailResponse)
@@ -470,7 +563,7 @@ def suspend_application(
         actor_role=user_role(user),
         reason=payload.reason,
     )
-    return onboarding_service.application_to_detail(db, updated, include_full_license=True)
+    return _detail_for_user(db, updated, user)
 
 
 @router.post("/applications/{application_id}/activate", response_model=ActivationResponse)
@@ -523,8 +616,29 @@ def add_internal_note(
         application=application,
         author_user_id=str(user.id),
         note_text=payload.note_text,
+        category=payload.category,
     )
-    return {"id": note.id, "note_text": note.note_text, "created_at": note.created_at}
+    return {
+        "id": note.id,
+        "note_text": note.note_text,
+        "category": getattr(note, "category", None),
+        "author_user_id": note.author_user_id,
+        "created_at": note.created_at,
+    }
+
+
+@router.get("/applications/{application_id}/notes")
+def list_internal_notes(
+    application_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_onboarding_reviewer),  # type: ignore
+):
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    from app.modules.approval_engine.phase2b import list_internal_notes as _list_notes
+
+    return _list_notes(db, application)
 
 
 @router.post("/applications/{application_id}/assign-reviewer", response_model=DriverApplicationDetailResponse)
@@ -548,7 +662,7 @@ def assign_reviewer(
     )
     db.commit()
     db.refresh(application)
-    return onboarding_service.application_to_detail(db, application, include_full_license=True)
+    return _detail_for_user(db, application, user)
 
 
 @router.get("/applications/{application_id}/readiness", response_model=ReadinessSummaryResponse)

@@ -2685,6 +2685,33 @@ def evaluate_dispatch_candidates(
 
         if driver_has_schedule_conflict(db, str(driver.id), ride):
             continue
+        # Onboarding/STS holds always apply. Full dispatch gate stays off by default.
+        try:
+            from app.modules.approval_engine.eligibility import (
+                dispatch_gate_enabled,
+                driver_blocked_from_live_dispatch,
+                evaluate_driver_ride_eligibility,
+            )
+
+            hold = driver_blocked_from_live_dispatch(
+                db,
+                organization_id=organization_id,
+                driver_id=str(driver.id),
+                ride=ride,
+            )
+            if hold.get("blocked"):
+                continue
+            if dispatch_gate_enabled():
+                eligibility = evaluate_driver_ride_eligibility(
+                    db,
+                    organization_id=organization_id,
+                    driver_id=str(driver.id),
+                    ride=ride,
+                )
+                if not eligibility.get("eligible"):
+                    continue
+        except Exception:
+            continue
 
         active_workload = _driver_active_workload_count(db, driver.id)
         mobile_ready = _driver_mobile_dispatch_ready(driver)
