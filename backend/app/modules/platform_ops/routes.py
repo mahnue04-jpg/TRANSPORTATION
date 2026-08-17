@@ -30,6 +30,7 @@ from app.modules.platform_ops.secure_storage import SecureStorageNotConfigured
 from app.modules.platform_ops.storage import get_document_storage
 from app.modules.platform_ops.schemas import (
     ActivationResponse,
+    ApplicantTokenReissueResponse,
     DocumentReviewRequest,
     DocumentStatusOnlyRequest,
     DriverApplicationAssignReviewerRequest,
@@ -205,6 +206,48 @@ def get_application(
         raise HTTPException(status_code=404, detail="Application not found.")
     _authorize_application_access(application=application, user=user, applicant_token=x_applicant_token)
     return _detail_for_user(db, application, user)
+
+
+@router.post(
+    "/applications/{application_id}/applicant-token/reissue",
+    response_model=ApplicantTokenReissueResponse,
+)
+def reissue_applicant_token(
+    application_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_onboarding_reviewer),  # type: ignore
+) -> ApplicantTokenReissueResponse:
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    try:
+        token = onboarding_service.reissue_applicant_access_token(
+            db,
+            application=application,
+            actor_user_id=str(user.id),
+            actor_role=user_role(user),
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+    apply_path = (
+        "/platform-ops/driver-apply"
+        f"?organization_id={application.organization_id}"
+        f"&application_id={application.id}"
+        f"&token={token}"
+    )
+    logger.info(
+        "applicant_access_reissued application_id=%s actor_user_id=%s",
+        application.id,
+        user.id,
+    )
+    return ApplicantTokenReissueResponse(
+        application_id=str(application.id),
+        organization_id=str(application.organization_id),
+        status=application.status,
+        applicant_access_token=token,
+        apply_path=apply_path,
+        previous_token_revoked=True,
+    )
 
 
 @router.get("/applications/{application_id}/applicant-status")

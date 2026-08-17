@@ -257,6 +257,58 @@
     meta.textContent = `Platform Ops status: ${app.status} · License exp: ${app.license_expiration_date || "n/a"} · Activated driver: ${app.activated_driver_id || "not activated"}`;
     detailEl.appendChild(meta);
 
+    const linkBox = document.createElement("section");
+    linkBox.className = "owner-card";
+    linkBox.innerHTML = "<h3>Applicant access</h3><p class='meta'>Reissue rotates the applicant token for this existing application only. The new link is shown once and is not stored here.</p>";
+    const linkToolbar = document.createElement("div");
+    linkToolbar.className = "toolbar";
+    if (app.status !== "activated" && !app.activated_driver_id) {
+      linkToolbar.appendChild(actionButton("Reissue applicant link", async function () {
+        try {
+          const issued = await api("/applications/" + id + "/applicant-token/reissue", { method: "POST", body: "{}" });
+          const applyPath = issued.apply_path || (
+            "/platform-ops/driver-apply?organization_id=" + encodeURIComponent(issued.organization_id || app.organization_id || "")
+            + "&application_id=" + encodeURIComponent(issued.application_id || id)
+            + "&token=" + encodeURIComponent(issued.applicant_access_token || "")
+          );
+          const abs = window.location.origin + applyPath;
+          const once = document.createElement("div");
+          once.className = "review-row";
+          once.innerHTML = "<p class='meta'>New applicant link (shown once). Previous applicant token is revoked.</p>";
+          const urlBox = document.createElement("input");
+          urlBox.type = "text";
+          urlBox.readOnly = true;
+          urlBox.value = abs;
+          once.appendChild(urlBox);
+          const onceToolbar = document.createElement("div");
+          onceToolbar.className = "toolbar";
+          onceToolbar.appendChild(actionButton("Open application", function () {
+            window.open(abs, "_blank", "noopener");
+          }));
+          onceToolbar.appendChild(actionButton("Copy link", function () {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(abs).then(function () {
+                showBanner("Applicant link copied. It is not saved in this workspace.", true);
+              }).catch(function () {
+                urlBox.select();
+                showBanner("Select the link and copy it manually.", false);
+              });
+            } else {
+              urlBox.select();
+              showBanner("Select the link and copy it manually.", false);
+            }
+          }, true));
+          once.appendChild(onceToolbar);
+          linkBox.appendChild(once);
+          showBanner("Applicant access reissued for this application. Token is shown once.", true);
+        } catch (err) { showBanner(err.message, false); }
+      }));
+    } else {
+      linkBox.innerHTML += "<p class='meta'>Applicant link reissue is locked after activation.</p>";
+    }
+    linkBox.appendChild(linkToolbar);
+    detailEl.appendChild(linkBox);
+
     const docs = document.createElement("section");
     docs.className = "owner-card";
     docs.innerHTML = "<h3>Admin document review</h3><p class='meta'>Inspect uses an authenticated download. Raw public document URLs are not exposed.</p>";

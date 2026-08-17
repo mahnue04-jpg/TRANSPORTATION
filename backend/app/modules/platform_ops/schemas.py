@@ -207,6 +207,15 @@ class DriverApplicationCreateResponse(BaseModel):
     applicant_access_token: str
 
 
+class ApplicantTokenReissueResponse(BaseModel):
+    application_id: str
+    organization_id: str
+    status: str
+    applicant_access_token: str
+    apply_path: str
+    previous_token_revoked: bool = True
+
+
 class AuditEventResponse(BaseModel):
     id: str
     event_type: str

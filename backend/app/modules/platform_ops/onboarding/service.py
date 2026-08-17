@@ -311,6 +311,35 @@ def verify_applicant_token(application: PlatformDriverOnboardingApplication, tok
     return _hash_token(token) == application.applicant_access_token_hash
 
 
+def reissue_applicant_access_token(
+    db: Session,
+    *,
+    application: PlatformDriverOnboardingApplication,
+    actor_user_id: str,
+    actor_role: str,
+) -> str:
+    """Rotate the applicant token hash. Returns plaintext once; never persist or log it."""
+    if application.status == "activated" or application.activated_driver_id:
+        raise ValueError("Cannot reissue applicant access for an activated application.")
+    token, token_hash = _generate_applicant_token()
+    application.applicant_access_token_hash = token_hash
+    application.updated_at = now()
+    _record_audit(
+        db,
+        application=application,
+        event_type="applicant_access_reissued",
+        from_status=application.status,
+        to_status=application.status,
+        actor_user_id=actor_user_id,
+        actor_role=actor_role,
+        reason="Applicant access link reissued. Previous applicant token revoked.",
+        metadata={"rotated": True, "token_included": False},
+    )
+    db.commit()
+    db.refresh(application)
+    return token
+
+
 def update_draft_application(
     db: Session,
     *,
