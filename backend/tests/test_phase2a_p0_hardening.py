@@ -8,7 +8,15 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import ADMIN_SESSION_COOKIE, SEED_PASSWORD, ensure_auth_schema, seed_default_users
+from app.auth import (
+    ADMIN_SESSION_COOKIE,
+    ROLE_ADMIN,
+    ROLE_STAFF,
+    SEED_PASSWORD,
+    ensure_auth_schema,
+    seed_default_users,
+)
+from app.modules.platform_ops.permissions import REVIEW_ROLES, can_review
 from app.db.models import User as PlatformUser
 from app.db.session import SessionLocal
 from app.helpers import now, uuid4 as make_uuid
@@ -459,6 +467,81 @@ def test_bearer_login_still_works_for_development(client: TestClient) -> None:
     assert me.status_code == 200
     cats = client.get("/api/platform-ops/driver-onboarding/document-categories")
     assert cats.status_code == 200
+
+
+def _review_probe(client: TestClient, **kwargs):
+    """can_review-gated route that does not create Driver #001."""
+    return client.post(
+        "/api/approval-engine/cases",
+        json={"platform_ops_application_id": "00000000-0000-0000-0000-000000000099"},
+        **kwargs,
+    )
+
+
+def test_review_roles_do_not_include_staff() -> None:
+    assert ROLE_ADMIN in REVIEW_ROLES
+    assert ROLE_STAFF not in REVIEW_ROLES
+    assert can_review(SimpleNamespace(role=ROLE_ADMIN, session_role=ROLE_ADMIN)) is True
+    assert can_review(SimpleNamespace(role=ROLE_STAFF, session_role=ROLE_STAFF)) is False
+
+
+def test_admin_session_cookie_resolves_as_admin_for_review_context(client: TestClient) -> None:
+    login = client.post(
+        "/api/auth/admin-session",
+        json={"email": "admin@amicor.local", "password": SEED_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    assert "access_token" not in login.json()
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["role"] == ROLE_ADMIN
+    assert me.json()["session_role"] == ROLE_ADMIN
+    assert ROLE_STAFF in (me.json().get("authorized_roles") or [])
+    probe = _review_probe(client)
+    assert probe.status_code != 403, probe.text
+    assert "Review role required" not in probe.text
+    assert probe.status_code == 404
+
+
+def test_bearer_admin_still_passes_review_context(client: TestClient) -> None:
+    token = _login(client, "admin@amicor.local")
+    me = client.get("/api/auth/me", headers=_auth(token))
+    assert me.status_code == 200
+    assert me.json()["role"] == ROLE_ADMIN
+    probe = _review_probe(client, headers=_auth(token))
+    assert probe.status_code == 404, probe.text
+    assert "Review role required" not in probe.text
+
+
+def test_staff_cannot_perform_review_only_actions(client: TestClient) -> None:
+    token = _login(client, "staff@amicor.local")
+    me = client.get("/api/auth/me", headers=_auth(token))
+    assert me.status_code == 200
+    assert me.json()["role"] == ROLE_STAFF
+    walkthrough = client.get("/api/approval-engine/walkthrough/base", headers=_auth(token))
+    assert walkthrough.status_code == 200, walkthrough.text
+    probe = _review_probe(client, headers=_auth(token))
+    assert probe.status_code == 403, probe.text
+    assert "Review role required" in probe.text
+    staff_cookie = client.post(
+        "/api/auth/admin-session",
+        json={"email": "staff@amicor.local", "password": SEED_PASSWORD},
+    )
+    assert staff_cookie.status_code == 200, staff_cookie.text
+    cookie_probe = _review_probe(client)
+    assert cookie_probe.status_code == 403, cookie_probe.text
+    assert "Review role required" in cookie_probe.text
+    client.cookies.clear()
+
+
+def test_unauthenticated_review_context_is_denied(client: TestClient) -> None:
+    client.cookies.clear()
+    me = client.get("/api/auth/me")
+    assert me.status_code == 401
+    probe = _review_probe(client)
+    assert probe.status_code == 401
+    prepare = client.post("/api/approval-engine/driver-001/prepare", json={"reuse_existing": True})
+    assert prepare.status_code == 401
 
 
 def test_sensitive_providers_reject_ssn_and_bank_fields():

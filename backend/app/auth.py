@@ -1292,10 +1292,12 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 
 def get_current_user_context(
+    request: Request,
     user = Depends(get_current_user),  # type: ignore
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> UserContext:
-    payload = _jwt_verify(creds.credentials) if creds else {}
+    token = extract_access_token(creds, request)
+    payload = _jwt_verify(token) if token else {}
     session_role = resolve_session_role(user, payload)
     return UserContext(
         user_id=user.id,
