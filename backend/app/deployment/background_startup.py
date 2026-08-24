@@ -59,7 +59,10 @@ def run_deferred_platform_startup(*, runtime_environment: str) -> None:
 
         from app.db.session import Base, SessionLocal, engine  # type: ignore
 
-        Base.metadata.create_all(bind=engine)
+        # Payment ledger is Alembic-only. Do not create those tables at startup.
+        payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
+        tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
+        Base.metadata.create_all(bind=engine, tables=tables)
         logger.info("Deferred Health ISF tables verified.")
 
         try:

@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from app.db.session import Base, DATABASE_URL  # noqa: E402
 import app.db.models  # noqa: F401, E402 — registers all ORM models with Base
 import app.modules.health_isf.models  # noqa: F401, E402 — include Health ISF metadata
+import app.modules.payments.models  # noqa: F401, E402 — Ride + Deliver payment ledger
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
@@ -34,7 +35,11 @@ def include_object(object_, name, type_, reflected, compare_to):
     if type_ == "table":
         if name == "alembic_version":
             return True
-        return name.startswith("platform_") or name.startswith("health_isf_")
+        return (
+            name.startswith("platform_")
+            or name.startswith("health_isf_")
+            or name.startswith("amicor_")
+        )
     return True
 
 

@@ -62,10 +62,15 @@ def get_db():
 
 
 def init_platform_db() -> None:
-    """Create all SQLAlchemy-managed tables (idempotent, safe to run on startup)."""
+    """Create SQLAlchemy-managed tables (idempotent, safe to run on startup).
+
+    Customer-payment ledger tables are Alembic-only and are never created here.
+    """
     from app.db import models  # noqa: F401 — registers models with Base.metadata
     os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
-    Base.metadata.create_all(bind=engine)
+    payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
+    tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
+    Base.metadata.create_all(bind=engine, tables=tables)
 
 
 def _classify_db_connection_error(exc: Exception) -> str:

@@ -496,6 +496,18 @@ except Exception as exc:
     import traceback
     traceback.print_exc()
 
+# ── Customer payments (Ride + Deliver webhook; isolated from Connect) ─────────
+# Schema is Alembic-only in production. Do not create_all here.
+try:
+    from app.modules.payments.routes import router as payments_router  # type: ignore
+
+    app.include_router(payments_router)
+    logger.info("Customer payment routes registered")
+except Exception as exc:
+    logger.error("Failed to register customer payment routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
 
 # ── Health monitoring endpoints ───────────────────────────────────────────────
 
