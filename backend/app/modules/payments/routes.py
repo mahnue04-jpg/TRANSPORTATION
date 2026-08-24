@@ -2,6 +2,8 @@
 
 Kept separate from POST /api/platform-ops/driver-onboarding/stripe/webhook
 so Connect account.updated handling stays unchanged.
+
+Does not create or alter database tables. Production schema is Alembic-only.
 """
 from __future__ import annotations
 
@@ -12,7 +14,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.modules.payments.models import ensure_payments_schema
 from app.modules.payments.stripe_payments import (
     StripePaymentWebhookNotConfigured,
     process_verified_payment_event,
@@ -22,11 +23,6 @@ from app.modules.payments.stripe_payments import (
 logger = logging.getLogger("amicor.payments.routes")
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
-
-try:
-    ensure_payments_schema()
-except Exception:
-    pass
 
 
 @router.post("/stripe/webhook")

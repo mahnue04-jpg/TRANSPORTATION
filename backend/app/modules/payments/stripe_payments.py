@@ -208,7 +208,7 @@ def _event_response(
     if event_row.amount_minor is not None and event_row.currency:
         amount = amount_major_from_minor(event_row.amount_minor, event_row.currency)
     elif payment is not None:
-        amount = payment.gross_customer_charge_usd
+        amount = amount_major_from_minor(int(payment.amount_minor or 0), payment.currency or "usd")
     return {
         "handled": event_row.processing_result in {RESULT_PAID, RESULT_PAYMENT_FAILED},
         "duplicate": duplicate,
@@ -317,8 +317,8 @@ def _maybe_sync_health_isf_transaction(db: Session, payment: AmicorCustomerPayme
         tx.gateway = "stripe"
         tx.gateway_payment_intent_id = payment.stripe_payment_intent_id
         tx.currency = payment.currency or tx.currency
-        if payment.gross_customer_charge_usd:
-            tx.amount_usd = payment.gross_customer_charge_usd
+        if payment.amount_minor:
+            tx.amount_usd = amount_major_from_minor(int(payment.amount_minor), payment.currency or "usd")
         if payment.payment_status == PAYMENT_SUCCEEDED:
             tx.status = "succeeded"
             tx.failure_reason = None
@@ -350,7 +350,6 @@ def _upsert_payment(
 ) -> AmicorCustomerPayment:
     payment = _get_payment_by_intent(db, payment_intent_id)
     stamp = now()
-    amount_major = amount_major_from_minor(amount_minor, currency)
     if payment is None:
         payment = AmicorCustomerPayment(
             id=uuid4(),
@@ -366,11 +365,10 @@ def _upsert_payment(
             last_stripe_event_id=event_id,
             currency=currency,
             amount_minor=amount_minor,
-            gross_customer_charge_usd=amount_major,
-            driver_earning_usd=None,
-            amicor_share_usd=None,
-            processing_fee_usd=None,
-            refund_amount_usd=0.0,
+            driver_earning_minor=None,
+            amicor_share_minor=None,
+            processing_fee_minor=None,
+            refund_amount_minor=0,
             payment_status=PAYMENT_PENDING,
             payout_status=PAYOUT_NOT_STARTED,
             created_at=stamp,
@@ -390,7 +388,6 @@ def _upsert_payment(
             payment.pricing_version = metadata.pricing_version
         if amount_minor:
             payment.amount_minor = amount_minor
-            payment.gross_customer_charge_usd = amount_major
         if currency:
             payment.currency = currency
 
