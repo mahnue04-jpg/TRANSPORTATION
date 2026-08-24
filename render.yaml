@@ -65,6 +65,8 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      - key: STRIPE_PAYMENT_WEBHOOK_SECRET
+        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
