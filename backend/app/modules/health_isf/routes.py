@@ -735,7 +735,7 @@ def _serialize_customer_request(row: Any, db: Session | None = None) -> Customer
         recurring_pattern=recurring_pattern,
         notes=row.notes,
         dispatch_status=row.dispatch_status,
-        pending_at=row.pending_at,
+        pending_at=row.pending_at or row.created_at,
         broadcasted_at=row.broadcasted_at,
         accepted_at=row.accepted_at,
         assigned_at=row.assigned_at,
@@ -12310,7 +12310,7 @@ def get_grant_proof_snapshot(
         evidence_pack=command_center["evidence_pack"],
         readiness_checklist=command_center["readiness_checklist"],
         data_integrity=command_center["data_integrity"],
-    }
+    )
 
 
 @router.post("/ops/seed-phase43")

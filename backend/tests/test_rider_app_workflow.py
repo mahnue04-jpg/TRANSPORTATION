@@ -1,6 +1,8 @@
 """End-to-end rider app workflow: request → dispatcher queue → assign → driver offer."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -137,6 +139,71 @@ def test_rider_role_creates_customer_request_and_dispatcher_sees_it(client: Test
     assert dispatch_queue_resp.status_code == 200, dispatch_queue_resp.text
     dispatch_rows = dispatch_queue_resp.json()
     assert any(row.get("ride_id") == ride_id or row.get("id") == ride_id for row in dispatch_rows)
+
+
+def test_rider_app_request_ride_now_with_live_tracking_payload(client: TestClient) -> None:
+    """Mirrors Request Ride Now: scheduling fields + organization_id query."""
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_org_id = _org_id_for("rider@amicor.local")
+    rider_headers = {
+        "Authorization": f"Bearer {rider_auth['access_token']}",
+        "X-Idempotency-Key": f"rider-submit-{uuid4()}",
+    }
+    _ensure_provider(rider_org_id)
+    rider_phone = "+1 646-555-7799"
+    suffix = uuid4()[:8]
+    now = datetime.now(timezone.utc)
+    pickup = now + timedelta(minutes=10)
+    arrival = pickup + timedelta(minutes=15)
+
+    create_resp = client.post(
+        f"/api/health-isf/customer-requests?organization_id={rider_org_id}",
+        headers=rider_headers,
+        json={
+            "rider_name": f"Rider App {suffix}",
+            "rider_phone": rider_phone,
+            "pickup_address": f"10 Now Pickup {suffix}, New York, NY 10001",
+            "dropoff_address": f"20 Now Dropoff {suffix}, New York, NY 10002",
+            "ride_type": "healthcare",
+            "notes": "Request Ride Now verification",
+            "client_request_key": rider_headers["X-Idempotency-Key"],
+            "service_date": now.date().isoformat(),
+            "pickup_time": pickup.isoformat(),
+            "arrival_time": arrival.isoformat(),
+            "trip_type": "one_way",
+            "return_pickup_type": "scheduled_time",
+            "return_pickup_time": (arrival + timedelta(hours=1)).isoformat(),
+            "recurrence": "none",
+            "recurrence_weekdays": [],
+            "recurrence_start_date": now.date().isoformat(),
+            "recurrence_end_date": None,
+            "same_driver_preference": False,
+            "client_timezone": "America/Chicago",
+            "recurring": False,
+            "scheduled_time": arrival.isoformat(),
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    created = create_resp.json()
+    assert created["id"]
+    assert created["ride_id"]
+    assert created["dispatch_status"] in {"pending", "approved", "dispatchable", "assigned"}
+
+    list_resp = client.get(
+        f"/api/health-isf/customer-requests?organization_id={rider_org_id}",
+        headers={"Authorization": f"Bearer {rider_auth['access_token']}"},
+        params={"limit": 80},
+    )
+    assert list_resp.status_code == 200, list_resp.text
+    assert isinstance(list_resp.json(), list)
+
+    history_resp = client.get(
+        "/api/health-isf/customers/workspace/history",
+        headers={"Authorization": f"Bearer {rider_auth['access_token']}"},
+        params={"rider_phone": rider_phone, "limit": 20},
+    )
+    assert history_resp.status_code == 200, history_resp.text
+    assert any(row.get("ride_id") == created["ride_id"] for row in history_resp.json()["history"])
 
 
 def _isolate_driver_for_auto_dispatch(organization_id: str, driver_id: str) -> None:
