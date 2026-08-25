@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import (
     ROLE_ADMIN,
@@ -751,6 +751,52 @@ def _serialize_customer_request(row: Any, db: Session | None = None) -> Customer
         round_trip_group_id=str(group_id) if group_id else None,
         created_ride_count=len(linked_ride_ids) if linked_ride_ids else 1,
     )
+
+
+def _recover_created_customer_request(
+    db: Session,
+    *,
+    user: UserContext,
+    organization_id: str,
+    idempotency_key: str,
+    rider_phone: str,
+    pickup_address: str,
+    dropoff_address: str,
+) -> Any | None:
+    """Return a request that was committed before a post-create exception."""
+    key = (idempotency_key or "").strip()
+    if key:
+        existing_key = IdempotencyService.get_key(db, key)
+        if existing_key and existing_key.resource_id:
+            existing = service.get_customer_ride_request_by_id(db, existing_key.resource_id)
+            if existing:
+                return existing
+    pickup_norm = (pickup_address or "").strip().lower()
+    dropoff_norm = (dropoff_address or "").strip().lower()
+    if not pickup_norm or not dropoff_norm:
+        return None
+    rows = service.list_customer_ride_requests_by_phone(
+        db,
+        organization_id=organization_id,
+        rider_phone=rider_phone,
+        limit=15,
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+    for row in rows:
+        if str(getattr(row, "submitted_by_user_id", "") or "") != str(user.user_id):
+            continue
+        if (row.pickup_address or "").strip().lower() != pickup_norm:
+            continue
+        if (row.dropoff_address or "").strip().lower() != dropoff_norm:
+            continue
+        created_at = getattr(row, "created_at", None)
+        if created_at is not None:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if created_at < cutoff:
+                continue
+        return row
+    return None
 
 
 def _assert_request_dispatch_authorized(
@@ -5742,6 +5788,7 @@ async def run_operational_cleanup(
 def create_customer_ride_request(
     payload: CustomerRideRequestCreateRequest,
     request: Request,
+    organization_id: str | None = Query(None),
     _: None = Depends(require_health_isf_access),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
@@ -5751,7 +5798,7 @@ def create_customer_ride_request(
     from app.modules.health_isf.rider_request_timing_log import record_rider_request_timing
 
     route_started = time.perf_counter()
-    organization_id = enforce_tenant_scope(user, user.organization_id)
+    organization_id = enforce_tenant_scope(user, user.organization_id or organization_id)
     auth_started = time.perf_counter()
     auth_decision = evaluate_customer_request_authorization(
         organization_id=organization_id,
@@ -5843,6 +5890,7 @@ def create_customer_ride_request(
             return_pickup_address=payload.return_pickup_address,
             return_dropoff_address=payload.return_dropoff_address,
             same_driver_preference=payload.same_driver_preference,
+            client_timezone=payload.client_timezone,
         )
     except ValueError as exc:
         if idempotency_key:
@@ -5856,6 +5904,65 @@ def create_customer_ride_request(
             http_status=400,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "customer_ride_request_create_failed org=%s rider=%s",
+            organization_id,
+            user.user_id,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("customer_ride_request_create_rollback_failed")
+        recovered = None
+        try:
+            recovered = _recover_created_customer_request(
+                db,
+                user=user,
+                organization_id=organization_id,
+                idempotency_key=idempotency_key,
+                rider_phone=payload.rider_phone,
+                pickup_address=payload.pickup_address,
+                dropoff_address=payload.dropoff_address,
+            )
+        except Exception:
+            logger.exception("customer_ride_request_recovery_failed")
+        if recovered is not None:
+            enforce_entity_tenant(user, recovered.organization_id)
+            if idempotency_key:
+                try:
+                    IdempotencyService.bind_resource(db, idempotency_key, str(recovered.id))
+                except Exception:
+                    logger.exception("customer_ride_request_idempotency_bind_failed")
+            record_rider_request_timing(
+                stage="create_ride_transaction_recovered",
+                duration_ms=int((time.perf_counter() - create_started) * 1000),
+                idempotency_key=idempotency_key or None,
+                ride_id=str(recovered.ride_id),
+                request_id=str(recovered.id),
+                organization_id=organization_id,
+                error=str(exc),
+                http_status=201,
+            )
+            return _serialize_customer_request(recovered, db=db)
+        if idempotency_key:
+            try:
+                IdempotencyService.delete_key(db, idempotency_key)
+            except Exception:
+                logger.exception("customer_ride_request_idempotency_delete_failed")
+        http_status = 409 if isinstance(exc, IntegrityError) else 500
+        record_rider_request_timing(
+            stage="create_ride_transaction_failed",
+            duration_ms=int((time.perf_counter() - create_started) * 1000),
+            idempotency_key=idempotency_key or None,
+            organization_id=organization_id,
+            error=str(exc),
+            http_status=http_status,
+        )
+        raise HTTPException(
+            status_code=http_status,
+            detail=str(exc) or exc.__class__.__name__,
+        ) from exc
 
     record_rider_request_timing(
         stage="create_ride_transaction",
@@ -5888,7 +5995,10 @@ def create_customer_ride_request(
         provider_id=str(ride.provider_id) if ride.provider_id else None,
     )
 
-    db.refresh(request_row)
+    try:
+        db.refresh(request_row)
+    except Exception:
+        logger.exception("customer_ride_request_refresh_failed request_id=%s", request_row.id)
     record_rider_request_timing(
         stage="http_response_ready",
         duration_ms=int((time.perf_counter() - route_started) * 1000),
@@ -5898,7 +6008,11 @@ def create_customer_ride_request(
         organization_id=organization_id,
         http_status=201,
     )
-    return _serialize_customer_request(request_row, db=db)
+    try:
+        return _serialize_customer_request(request_row, db=db)
+    except Exception:
+        logger.exception("customer_ride_request_serialize_failed request_id=%s", request_row.id)
+        return _serialize_customer_request(request_row)
 
 
 @router.post("/customer-requests/{request_id}/patient-ready", response_model=CustomerRideRequestResponse)

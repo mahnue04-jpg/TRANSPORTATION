@@ -9,6 +9,7 @@ execution semantics.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -28,6 +29,8 @@ from app.modules.health_isf.operational_event_bus import get_operational_event_b
 from app.modules.health_isf.operational_event_models import OperationalEventType
 from app.modules.health_isf.operational_map_service import OperationalMapService
 from app.modules.health_isf.operational_sync_engine import OperationalSynchronizationEngine
+
+_PHASE16_LOGGER = logging.getLogger("amicor.health_isf.phase16")
 
 PHASE16_RIDE_STATES: tuple[str, ...] = (
     "REQUESTED",
@@ -169,7 +172,14 @@ def _queue_phase16_operational_event(
 def _flush_phase16_operational_events_after_commit(db: Session) -> None:
     queued = list(db.info.pop(_PHASE16_DEFERRED_EVENT_QUEUE_KEY, []))
     for item in queued:
-        _publish_phase16_operational_event_now(**item)
+        try:
+            _publish_phase16_operational_event_now(**item)
+        except Exception:
+            _PHASE16_LOGGER.exception(
+                "phase16 after_commit publish failed org=%s event=%s",
+                item.get("organization_id"),
+                item.get("event_name"),
+            )
 
 
 @event.listens_for(Session, "after_rollback")

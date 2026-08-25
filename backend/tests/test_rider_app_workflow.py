@@ -11,7 +11,12 @@ from app.db.models import User as PlatformUser
 from app.db.session import SessionLocal
 from app.helpers import uuid4
 from app.main import app
-from app.modules.health_isf.models import DriverStatus, HealthISFDriver, HealthISFProvider
+from app.modules.health_isf.models import (
+    DriverStatus,
+    HealthISFCustomerRideRequest,
+    HealthISFDriver,
+    HealthISFProvider,
+)
 from tests.test_deployment_readiness_ride_lifecycle import _reset_org_assignments
 
 
@@ -292,3 +297,165 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     assert tracking_resp.status_code == 200, tracking_resp.text
     tracking = tracking_resp.json()
     assert tracking.get("rider_phone") == rider_phone
+
+
+def _count_customer_requests(organization_id: str, rider_phone: str | None = None) -> int:
+    with SessionLocal() as db:
+        query = db.query(HealthISFCustomerRideRequest).filter(
+            HealthISFCustomerRideRequest.organization_id == organization_id
+        )
+        if rider_phone:
+            query = query.filter(HealthISFCustomerRideRequest.rider_phone == rider_phone)
+        return int(query.count())
+
+
+def _immediate_rider_app_payload(suffix: str, rider_phone: str, idempotency_key: str) -> dict:
+    now = datetime.now(timezone.utc)
+    pickup = now + timedelta(minutes=10)
+    arrival = pickup + timedelta(minutes=15)
+    return {
+        "rider_name": f"Immediate Rider {suffix}",
+        "rider_phone": rider_phone,
+        "pickup_address": f"100 N 6th St {suffix}, Minneapolis, MN",
+        "dropoff_address": f"800 E 28th St {suffix}, Minneapolis, MN",
+        "ride_type": "healthcare",
+        "notes": "Request Ride Now regression",
+        "client_request_key": idempotency_key,
+        "service_date": now.date().isoformat(),
+        "pickup_time": pickup.isoformat().replace("+00:00", "Z"),
+        "arrival_time": arrival.isoformat().replace("+00:00", "Z"),
+        "trip_type": "one_way",
+        "return_pickup_type": "scheduled_time",
+        "return_pickup_time": (arrival + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+        "recurrence": "none",
+        "recurrence_weekdays": [],
+        "recurrence_start_date": now.date().isoformat(),
+        "recurrence_end_date": None,
+        "return_pickup_address": f"800 E 28th St {suffix}, Minneapolis, MN",
+        "return_dropoff_address": f"100 N 6th St {suffix}, Minneapolis, MN",
+        "same_driver_preference": False,
+        "client_timezone": "America/Chicago",
+        "recurring": False,
+        "recurring_pattern": None,
+        "scheduled_time": arrival.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def test_immediate_rider_app_request_creates_one_dispatch_visible_request(client: TestClient) -> None:
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_org_id = _org_id_for("rider@amicor.local")
+    _ensure_provider(rider_org_id)
+    suffix = uuid4()[:8]
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "8")[:4]
+    rider_phone = f"+1612555{digits}"
+    idempotency_key = f"rider-submit-{uuid4()}"
+    before = _count_customer_requests(rider_org_id, rider_phone)
+
+    create_resp = client.post(
+        f"/api/health-isf/customer-requests?organization_id={rider_org_id}",
+        headers={
+            "Authorization": f"Bearer {rider_auth['access_token']}",
+            "X-Idempotency-Key": idempotency_key,
+        },
+        json=_immediate_rider_app_payload(suffix, rider_phone, idempotency_key),
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    assert "application/json" in (create_resp.headers.get("content-type") or "")
+    created = create_resp.json()
+    assert created["id"]
+    assert created["ride_id"]
+    assert created["dispatch_status"] in {"pending", "approved", "dispatchable", "assigned"}
+    assert _count_customer_requests(rider_org_id, rider_phone) == before + 1
+
+    retry_resp = client.post(
+        f"/api/health-isf/customer-requests?organization_id={rider_org_id}",
+        headers={
+            "Authorization": f"Bearer {rider_auth['access_token']}",
+            "X-Idempotency-Key": idempotency_key,
+        },
+        json=_immediate_rider_app_payload(suffix, rider_phone, idempotency_key),
+    )
+    assert retry_resp.status_code == 201, retry_resp.text
+    assert retry_resp.json()["id"] == created["id"]
+    assert _count_customer_requests(rider_org_id, rider_phone) == before + 1
+
+    dispatcher_auth = _login(client, "dispatcher@amicor.local")
+    dispatcher_headers = {"Authorization": f"Bearer {dispatcher_auth['access_token']}"}
+    queue_resp = client.get(
+        "/api/health-isf/customer-requests",
+        headers=dispatcher_headers,
+        params={"limit": 200},
+    )
+    assert queue_resp.status_code == 200, queue_resp.text
+    assert any(row.get("id") == created["id"] for row in queue_resp.json())
+
+    dispatch_queue_resp = client.get(
+        "/api/health-isf/dispatch/queue",
+        headers=dispatcher_headers,
+        params={"limit": 200, "read_only": True},
+    )
+    assert dispatch_queue_resp.status_code == 200, dispatch_queue_resp.text
+    assert any(
+        row.get("ride_id") == created["ride_id"] or row.get("id") == created["ride_id"]
+        for row in dispatch_queue_resp.json()
+    )
+
+
+def test_failed_rider_submissions_do_not_create_duplicate_rides(client: TestClient) -> None:
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_org_id = _org_id_for("rider@amicor.local")
+    _ensure_provider(rider_org_id)
+    suffix = uuid4()[:8]
+    rider_phone = f"+1612555{''.join(ch for ch in suffix if ch.isdigit()).ljust(4, '7')[:4]}"
+    before = _count_customer_requests(rider_org_id, rider_phone)
+    headers = {"Authorization": f"Bearer {rider_auth['access_token']}"}
+    url = f"/api/health-isf/customer-requests?organization_id={rider_org_id}"
+    invalid_payload = {
+        "rider_name": f"Invalid Rider {suffix}",
+        "rider_phone": rider_phone,
+        "pickup_address": "100 N 6th St, Minneapolis, MN",
+        "dropoff_address": "100 N 6th St, Minneapolis, MN",
+        "ride_type": "healthcare",
+    }
+
+    first = client.post(url, headers=headers, json=invalid_payload)
+    second = client.post(url, headers=headers, json=invalid_payload)
+    assert first.status_code == 422, first.text
+    assert second.status_code == 422, second.text
+    assert "application/json" in (first.headers.get("content-type") or "")
+    assert _count_customer_requests(rider_org_id, rider_phone) == before
+
+
+def test_rider_create_backend_exception_returns_json_not_html(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.modules.health_isf.routes as health_routes
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated rider create failure")
+
+    monkeypatch.setattr(health_routes.service, "create_customer_ride_request", _boom)
+    rider_auth = _login(client, "rider@amicor.local")
+    rider_org_id = _org_id_for("rider@amicor.local")
+    _ensure_provider(rider_org_id)
+    suffix = uuid4()[:8]
+    rider_phone = f"+1612555{''.join(ch for ch in suffix if ch.isdigit()).ljust(4, '6')[:4]}"
+    before = _count_customer_requests(rider_org_id, rider_phone)
+
+    response = client.post(
+        f"/api/health-isf/customer-requests?organization_id={rider_org_id}",
+        headers={"Authorization": f"Bearer {rider_auth['access_token']}"},
+        json={
+            "rider_name": f"Boom Rider {suffix}",
+            "rider_phone": rider_phone,
+            "pickup_address": f"10 Boom Pickup {suffix}",
+            "dropoff_address": f"20 Boom Dropoff {suffix}",
+            "ride_type": "healthcare",
+        },
+    )
+    assert response.status_code == 500, response.text
+    assert "application/json" in (response.headers.get("content-type") or "")
+    body = response.json()
+    assert "simulated rider create failure" in str(body.get("detail"))
+    assert _count_customer_requests(rider_org_id, rider_phone) == before
