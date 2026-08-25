@@ -18,6 +18,10 @@ from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
 
 _DRIVER_ASSIGNMENT_ROW_LIMIT = 30
 _DRIVER_RIDE_ROW_LIMIT = 30
+_OPEN_OFFER_STATES = (
+    DispatchAssignmentState.OFFERED.value,
+    DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+)
 
 
 def _load_rides_by_ids(db: Session, ride_ids: list[str]) -> dict[str, HealthISFRide]:
@@ -53,6 +57,64 @@ def _offer_is_readable(
     return True
 
 
+def _load_driver_assignment_rows(
+    db: Session,
+    *,
+    organization_id: str,
+    driver_id: str,
+):
+    """Load recent driver assignments and always include current open offers.
+
+    The mixed recency window is capped. Production sample drivers accumulate
+    accepted/scheduled rows that would otherwise hide a new offered assignment.
+    """
+    from app.modules.health_isf import service
+
+    states = (
+        list(service.DRIVER_APP_ASSIGNMENT_STATES)
+        + list(service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES)
+        + [
+            DispatchAssignmentState.OFFERED.value,
+            DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+            DispatchAssignmentState.AWAITING_APPROVAL.value,
+        ]
+    )
+    assignment_rows = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.organization_id == organization_id,
+            HealthISFDispatchAssignment.driver_id == driver_id,
+            HealthISFDispatchAssignment.assignment_state.in_(list(dict.fromkeys(states))),
+        )
+        .order_by(
+            desc(HealthISFDispatchAssignment.updated_at),
+            desc(HealthISFDispatchAssignment.created_at),
+        )
+        .limit(_DRIVER_ASSIGNMENT_ROW_LIMIT)
+        .all()
+    )
+    offer_rows = (
+        db.query(HealthISFDispatchAssignment)
+        .filter(
+            HealthISFDispatchAssignment.organization_id == organization_id,
+            HealthISFDispatchAssignment.driver_id == driver_id,
+            HealthISFDispatchAssignment.assignment_state.in_(list(_OPEN_OFFER_STATES)),
+        )
+        .order_by(
+            desc(HealthISFDispatchAssignment.updated_at),
+            desc(HealthISFDispatchAssignment.created_at),
+        )
+        .limit(_DRIVER_ASSIGNMENT_ROW_LIMIT)
+        .all()
+    )
+    seen_assignment_ids = {str(row.id) for row in assignment_rows}
+    for row in offer_rows:
+        if str(row.id) not in seen_assignment_ids:
+            assignment_rows.append(row)
+            seen_assignment_ids.add(str(row.id))
+    return assignment_rows
+
+
 def build_driver_mobile_read_snapshot(
     db: Session,
     *,
@@ -75,27 +137,10 @@ def build_driver_mobile_read_snapshot(
         )
 
     with stages.stage("assignment_query"):
-        assignment_rows = (
-            db.query(HealthISFDispatchAssignment)
-            .filter(
-                HealthISFDispatchAssignment.organization_id == organization_id,
-                HealthISFDispatchAssignment.driver_id == driver_id,
-                HealthISFDispatchAssignment.assignment_state.in_(
-                    list(service.DRIVER_APP_ASSIGNMENT_STATES)
-                    + list(service.SCHEDULED_DISPATCH_ASSIGNMENT_STATES)
-                    + [
-                        DispatchAssignmentState.OFFERED.value,
-                        DispatchAssignmentState.REASSIGNMENT_PENDING.value,
-                        DispatchAssignmentState.AWAITING_APPROVAL.value,
-                    ]
-                ),
-            )
-            .order_by(
-                desc(HealthISFDispatchAssignment.updated_at),
-                desc(HealthISFDispatchAssignment.created_at),
-            )
-            .limit(_DRIVER_ASSIGNMENT_ROW_LIMIT)
-            .all()
+        assignment_rows = _load_driver_assignment_rows(
+            db,
+            organization_id=organization_id,
+            driver_id=driver_id,
         )
 
     ride_ids = [str(row.ride_id) for row in assignment_rows if row.ride_id]
@@ -374,19 +419,10 @@ def list_driver_assigned_rides_readonly(
 
     assignment_rows = preloaded_assignments
     if assignment_rows is None:
-        assignment_rows = (
-            db.query(HealthISFDispatchAssignment)
-            .filter(
-                HealthISFDispatchAssignment.organization_id == organization_id,
-                HealthISFDispatchAssignment.driver_id == driver_id,
-                HealthISFDispatchAssignment.assignment_state.in_(list(service.DRIVER_APP_ASSIGNMENT_STATES)),
-            )
-            .order_by(
-                desc(HealthISFDispatchAssignment.updated_at),
-                desc(HealthISFDispatchAssignment.created_at),
-            )
-            .limit(_DRIVER_ASSIGNMENT_ROW_LIMIT)
-            .all()
+        assignment_rows = _load_driver_assignment_rows(
+            db,
+            organization_id=organization_id,
+            driver_id=driver_id,
         )
 
     ride_ids = [str(row.ride_id) for row in assignment_rows if row.ride_id]

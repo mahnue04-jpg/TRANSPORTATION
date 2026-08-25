@@ -6452,7 +6452,15 @@ def get_driver_active_offer(
             driver_id=effective_driver_id,
             timer=timer,
         )
-    offer = snapshot.get("active_offer") or snapshot.get("assignment")
+    offer = snapshot.get("active_offer")
+    if not offer:
+        assignment_fallback = snapshot.get("assignment")
+        fallback_state = str(getattr(assignment_fallback, "assignment_state", "") or "").lower()
+        if fallback_state in {
+            DispatchAssignmentState.OFFERED.value,
+            DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+        }:
+            offer = assignment_fallback
     offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None
     ride = snapshot.get("ride")
     if offer and offer_payload:
