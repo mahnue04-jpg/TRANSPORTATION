@@ -342,6 +342,17 @@ def evaluate_driver_ride_operational_state(
             assignment=row,
         )
 
+    if row and assignment_state == DispatchAssignmentState.AWAITING_APPROVAL.value:
+        if str(row.driver_id or "") == target_driver:
+            return DriverRideOperationalState(
+                is_active=True,
+                has_active_offer=True,
+                is_dispatch_eligible=lifecycle in pre_accept_lifecycle and not ride.accepted_at,
+                effective_assignment_state=assignment_state,
+                reason="bound_awaiting_approval_recommendation",
+                assignment=row,
+            )
+
     if row and assignment_state in ACTIVE_DISPATCH_ASSIGNMENT_STATES:
         offer_open = assignment_state in {
             DispatchAssignmentState.OFFERED.value,
@@ -4011,7 +4022,10 @@ def accept_assignment_offer(
         raise ValueError("Offer not found")
     if offer.assignment_state == DispatchAssignmentState.ACCEPTED.value:
         return offer
-    if offer.assignment_state != DispatchAssignmentState.OFFERED.value:
+    if offer.assignment_state not in {
+        DispatchAssignmentState.OFFERED.value,
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
+    }:
         raise ValueError("Offer is not active")
     if offer.offer_expires_at and _as_utc_datetime(offer.offer_expires_at) < _as_utc_datetime(now()):
         release_driver_assignment(db, offer_id=offer.id, reason="offer_timeout", actor_user_id=actor_user_id)
@@ -4112,7 +4126,10 @@ def reject_assignment_offer(
         raise ValueError("Offer not found")
     if offer.assignment_state == DispatchAssignmentState.REASSIGNMENT_PENDING.value and offer.closed_reason in {"driver_rejected", "offer_timeout"}:
         return offer
-    if offer.assignment_state != DispatchAssignmentState.OFFERED.value:
+    if offer.assignment_state not in {
+        DispatchAssignmentState.OFFERED.value,
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
+    }:
         raise ValueError("Offer is not active")
     released = release_driver_assignment(
         db,
@@ -8157,6 +8174,7 @@ def accept_driver_ride(
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.ASSIGNED.value,
         DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
     }:
         raise RideLifecycleConflictError(f"Cannot accept ride from assignment state '{assignment_state}'")
 

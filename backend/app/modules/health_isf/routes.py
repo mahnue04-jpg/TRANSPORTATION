@@ -6459,6 +6459,7 @@ def get_driver_active_offer(
         if fallback_state in {
             DispatchAssignmentState.OFFERED.value,
             DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+            DispatchAssignmentState.AWAITING_APPROVAL.value,
         }:
             offer = assignment_fallback
     offer_payload = _serialize_dispatch_offer(offer).model_dump() if offer else None

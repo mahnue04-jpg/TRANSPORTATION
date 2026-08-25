@@ -21,6 +21,7 @@ _DRIVER_RIDE_ROW_LIMIT = 30
 _OPEN_OFFER_STATES = (
     DispatchAssignmentState.OFFERED.value,
     DispatchAssignmentState.REASSIGNMENT_PENDING.value,
+    DispatchAssignmentState.AWAITING_APPROVAL.value,
 )
 
 
@@ -50,6 +51,7 @@ def _offer_is_readable(
         DispatchAssignmentState.OFFERED.value,
         DispatchAssignmentState.REASSIGNMENT_PENDING.value,
         DispatchAssignmentState.SCHEDULED_OFFERED.value,
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
     }:
         return False
     if assignment.offer_expires_at and as_utc_datetime(assignment.offer_expires_at) < as_utc_datetime(now_ts):

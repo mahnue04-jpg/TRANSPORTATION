@@ -367,3 +367,116 @@ def test_offered_assignment_not_crowded_out_by_older_driver_rows(client: TestCli
     )
     assert assigned.status_code == 200, assigned.text
     assert target_ride_id in {str(row.get("id") or "") for row in assigned.json()}
+
+
+def test_maria_sees_awaiting_approval_recommendation_shown_as_dispatch_offer(
+    client: TestClient,
+) -> None:
+    """Reproduce live TEST ONLY _ AMORE: AI recommendation bound to Maria, never issued as offered."""
+    org_id = _org_id_for("dispatcher@amicor.local")
+    reset_organization_driver_test_state(
+        org_id, driver_names=(MARIA_NAME, "James Smith", "David Chen", "Test Driver Four")
+    )
+    maria_id = prepare_driver(org_id, MARIA_NAME)
+    _ensure_provider(org_id)
+    _isolate_maria(org_id, maria_id)
+
+    now_ts = hs.now()
+    with SessionLocal() as db:
+        ride = HealthISFRide(
+            id=uuid4(),
+            organization_id=org_id,
+            passenger_name="TEST ONLY _ AMORE",
+            passenger_phone="612-998-2874",
+            pickup_address="100 n 6th st, minneapolis. MN",
+            dropoff_address="800 E 28th st, minneapolis, MN",
+            notes="we are testing rider app",
+            service_type="healthcare",
+            status=RideStatus.PENDING.value,
+            lifecycle_state=RideStatus.QUEUED.value,
+            driver_id=maria_id,
+            requested_at=now_ts,
+            pickup_time=now_ts + timedelta(minutes=10),
+            appointment_time=now_ts + timedelta(minutes=50),
+            dispatch_eligible_at=now_ts - timedelta(minutes=1),
+            updated_at=now_ts,
+        )
+        db.add(ride)
+        db.flush()
+        assignment = HealthISFDispatchAssignment(
+            id=uuid4(),
+            organization_id=org_id,
+            ride_id=ride.id,
+            driver_id=maria_id,
+            assignment_state=DispatchAssignmentState.AWAITING_APPROVAL.value,
+            attempt_index=1,
+            timeout_seconds=0,
+            queued_at=now_ts,
+            search_started_at=now_ts,
+            offered_at=None,
+            offer_expires_at=None,
+            created_at=now_ts,
+            updated_at=now_ts,
+        )
+        db.add(assignment)
+        db.commit()
+        ride_id = str(ride.id)
+        assignment_id = str(assignment.id)
+
+    diag = _assignment_diag(ride_id)
+    assert diag["assignment_state"] == DispatchAssignmentState.AWAITING_APPROVAL.value, diag
+    assert diag["ride_driver_id"] == maria_id, diag
+    assert diag["eligible"] is True, diag
+    assert diag["excluded"] is False, diag
+
+    login_driver_id, driver_headers, login_body = _maria_login(client)
+    assert login_driver_id == maria_id
+    assert str(login_body.get("organization_id") or "") == org_id
+
+    offer = client.get(
+        f"/api/health-isf/drivers/{login_driver_id}/active-offer",
+        headers=driver_headers,
+        params={"organization_id": org_id},
+    )
+    assert offer.status_code == 200, offer.text
+    offer_body = offer.json()
+    offer_row = offer_body.get("offer") or {}
+    assert str(offer_row.get("ride_id") or "") == ride_id, {
+        "msg": "awaiting_approval recommendation bound to Maria must surface on Driver Mobile",
+        "offer": offer_body,
+        "diag": diag,
+    }
+    assert str(offer_row.get("driver_id") or "") == maria_id
+    assert str(offer_row.get("id") or offer_row.get("offer_id") or "") == assignment_id
+    assert str(offer_row.get("assignment_state") or "").lower() in {
+        DispatchAssignmentState.AWAITING_APPROVAL.value,
+        DispatchAssignmentState.OFFERED.value,
+    }
+
+    assigned = client.get(
+        f"/api/health-isf/drivers/{login_driver_id}/assigned-rides",
+        headers=driver_headers,
+        params={"organization_id": org_id, "limit": 15},
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert ride_id in {str(row.get("id") or "") for row in assigned.json()}, assigned.json()
+
+    workspace = client.get(
+        f"/api/health-isf/drivers/{login_driver_id}/live-workspace",
+        headers=driver_headers,
+        params={"organization_id": org_id},
+    )
+    assert workspace.status_code == 200, workspace.text
+    workspace_body = workspace.json()
+    workspace_ride = workspace_body.get("active_ride") or workspace_body.get("ride") or {}
+    workspace_assignment = workspace_body.get("active_assignment") or workspace_body.get("assignment") or {}
+    assert str(workspace_ride.get("id") or workspace_assignment.get("ride_id") or "") == ride_id, workspace_body
+
+    accepted = client.post(
+        f"/api/health-isf/drivers/{login_driver_id}/accept-ride",
+        headers=driver_headers,
+        json={"ride_id": ride_id},
+    )
+    assert accepted.status_code == 200, accepted.text
+    after = _assignment_diag(ride_id)
+    assert after["assignment_state"] == DispatchAssignmentState.ACCEPTED.value, after
