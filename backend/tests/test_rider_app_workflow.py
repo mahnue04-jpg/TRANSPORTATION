@@ -276,6 +276,17 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     )
     assert assign_resp.status_code == 200, assign_resp.text
 
+    from app.modules.health_isf import service as hs
+    from app.modules.health_isf.models import DispatchAssignmentState
+
+    with SessionLocal() as db:
+        assignment = hs._latest_assignment_for_ride(db, ride_id)
+        assert assignment is not None
+        assert str(assignment.assignment_state) == DispatchAssignmentState.OFFERED.value
+        assert str(assignment.driver_id) == driver_id
+        assert assignment.offer_expires_at is None
+        assert int(assignment.timeout_seconds or 0) == 0
+
     offer_resp = client.get(
         f"/api/health-isf/drivers/{driver_id}/active-offer",
         headers=dispatcher_headers,
@@ -288,6 +299,7 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     assert str(ride_resp.json().get("driver_id") or "") == driver_id
     if offer_payload.get("offer") is not None:
         assert str((offer_payload.get("offer") or {}).get("ride_id") or "") == ride_id
+        assert str((offer_payload.get("offer") or {}).get("driver_id") or "") == driver_id
 
     tracking_resp = client.get(
         "/api/health-isf/customers/workspace/live-tracking",

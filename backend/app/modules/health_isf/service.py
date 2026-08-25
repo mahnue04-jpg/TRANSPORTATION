@@ -360,7 +360,11 @@ def evaluate_driver_ride_operational_state(
             DispatchAssignmentState.REASSIGNMENT_PENDING.value,
         }
         offer_expired = False
-        if row.offer_expires_at and assignment_state == DispatchAssignmentState.OFFERED.value:
+        if (
+            row.offer_expires_at
+            and assignment_state == DispatchAssignmentState.OFFERED.value
+            and int(getattr(row, "timeout_seconds", 0) or 0) > 0
+        ):
             if _as_utc_datetime(row.offer_expires_at) < _as_utc_datetime(now()):
                 offer_open = False
                 offer_expired = True
@@ -3095,6 +3099,9 @@ def expire_stale_dispatch_offers(
         ride = get_ride_by_id(db, row.ride_id) if row.ride_id else None
         if not ride or _ride_is_terminal(ride):
             continue
+        if str(ride.driver_id or "") and str(ride.driver_id or "") == str(row.driver_id or ""):
+            # Dispatcher-bound offers stay offered until accept/reject/reassign.
+            continue
         if ride.accepted_at or RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status) not in {
             RideStatus.QUEUED.value,
             RideStatus.PENDING.value,
@@ -3780,14 +3787,17 @@ def run_intake_dispatch_automation(
                     "candidates": [],
                 }
             _commit_or_rollback(db)
-            return {
-                "ride": ride,
-                "mode": "awaiting_dispatcher_approval",
-                "recommendation": None,
-                "offer": None,
-                "selected_driver": None,
-                "candidates": [],
-            }
+            # Auto-assign is disabled, but the ride must still persist an assignment
+            # row. Otherwise Dispatch shows PENDING while Driver Mobile has nothing
+            # durable to poll after login/refresh.
+            recommendation_result = recommend_driver_for_ride(
+                db,
+                ride_id=ride_id,
+                actor_user_id=actor_user_id,
+            )
+            recommendation_result["mode"] = "recommendation"
+            recommendation_result["offer"] = None
+            return recommendation_result
         db.refresh(request_obj)
 
     if ride.driver_id:
@@ -9668,16 +9678,37 @@ TEST_RIDE_MARKERS = (
 )
 
 
+_TEST_RIDE_IDENTITY_MARKERS = (
+    "test rider",
+    "manual rider",
+)
+
+
 def _is_test_ride_row(ride: HealthISFRide) -> bool:
-    haystack = " ".join(
+    """Detect synthetic fixture rides without hiding real Rider App passengers.
+
+    Markers like "test rider" match production rider names such as
+    "Amicor Test Rider Sherita". Those rides must remain visible to Dispatch
+    and Driver Mobile. Only treat identity markers as synthetic when they
+    appear in notes/addresses, or when the passenger name is exactly the marker.
+    """
+    name = str(ride.passenger_name or "").strip().lower()
+    context = " ".join(
         [
-            str(ride.passenger_name or ""),
             str(ride.pickup_address or ""),
             str(ride.dropoff_address or ""),
             str(ride.notes or ""),
         ]
     ).lower()
-    return any(marker in haystack for marker in TEST_RIDE_MARKERS) or _is_ai_proof_ride(ride)
+    haystack = " ".join([name, context]).strip()
+    for marker in TEST_RIDE_MARKERS:
+        if marker in _TEST_RIDE_IDENTITY_MARKERS:
+            if marker in context or name == marker:
+                return True
+            continue
+        if marker in haystack:
+            return True
+    return _is_ai_proof_ride(ride)
 
 
 def purge_test_operational_artifacts(db: Session, organization_id: str) -> dict[str, Any]:
@@ -11408,9 +11439,9 @@ def assign_driver_to_ride(
             and not (existing_closed and any(marker in existing_closed for marker in _superseded_closed_markers))
         ):
             now_ts = now()
-            existing_assignment.timeout_seconds = max(90, int(existing_assignment.timeout_seconds or 90))
+            existing_assignment.timeout_seconds = 0
             existing_assignment.offered_at = existing_assignment.offered_at or now_ts
-            existing_assignment.offer_expires_at = now_ts + timedelta(seconds=existing_assignment.timeout_seconds)
+            existing_assignment.offer_expires_at = None
             existing_assignment.assignment_state = DispatchAssignmentState.OFFERED.value
             existing_assignment.expired_at = None
             existing_assignment.closed_reason = None
@@ -11567,9 +11598,11 @@ def assign_driver_to_ride(
             }
         )
 
-    active_assignment.timeout_seconds = max(90, int(active_assignment.timeout_seconds or 90))
+    # Direct dispatcher/automation assignment is durable until accept/reject/reassign.
+    # Broadcast auto-offers use reserve_driver_assignment() which sets a timeout.
+    active_assignment.timeout_seconds = 0
     active_assignment.offered_at = active_assignment.offered_at or now_ts
-    active_assignment.offer_expires_at = now_ts + timedelta(seconds=active_assignment.timeout_seconds)
+    active_assignment.offer_expires_at = None
     active_assignment.expired_at = None
     active_assignment.closed_reason = None
 

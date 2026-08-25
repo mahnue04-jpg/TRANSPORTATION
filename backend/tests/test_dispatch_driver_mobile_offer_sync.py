@@ -480,3 +480,176 @@ def test_maria_sees_awaiting_approval_recommendation_shown_as_dispatch_offer(
     assert accepted.status_code == 200, accepted.text
     after = _assignment_diag(ride_id)
     assert after["assignment_state"] == DispatchAssignmentState.ACCEPTED.value, after
+
+
+DRIVER_SIX_PHONE = "917-555-1006"
+DRIVER_SIX_NAME = "Test Driver Six"
+SHERITA_RIDER_NAME = "Amicor Test Rider Sherita"
+
+
+def _isolate_driver(organization_id: str, driver_id: str, phone: str) -> None:
+    with SessionLocal() as db:
+        driver = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert driver is not None
+        driver.rating = 5.0
+        driver.total_trips = 100
+        driver.status = DriverStatus.AVAILABLE
+        driver.availability_state = "available"
+        driver.is_online = True
+        driver.auth_state = "active"
+        driver.is_active = True
+        driver.phone = phone
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == organization_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,  # noqa: E712
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+            row.is_online = False
+        db.commit()
+
+
+def _driver_login(client: TestClient, phone: str) -> tuple[str, dict[str, str], dict]:
+    login = client.post("/api/health-isf/drivers/mobile-login", json={"phone": phone})
+    assert login.status_code == 200, login.text
+    body = login.json()
+    driver_id = str(body["driver_id"])
+    headers = {"X-Driver-Session-Token": str(body["session_token"])}
+    return driver_id, headers, body
+
+
+def test_production_test_rider_name_is_not_operationally_excluded() -> None:
+    ride = HealthISFRide(
+        passenger_name=SHERITA_RIDER_NAME,
+        pickup_address="300 n 6th st, minneapolis. MN",
+        dropoff_address="1200 E 28th st, minneapolis, MN",
+        notes="Test ONLY - AMICOR RIDER APP end to end for Sherita",
+        status=RideStatus.PENDING,
+        lifecycle_state=RideStatus.QUEUED.value,
+    )
+    assert hs._is_test_ride_row(ride) is False
+    assert hs.is_operational_excluded_ride(ride) is False
+    fixture = HealthISFRide(
+        passenger_name="Lifecycle Test Rider A",
+        pickup_address="1 Proof Ave",
+        dropoff_address="2 Proof Ave",
+        notes="lifecycle test",
+        status=RideStatus.PENDING,
+        lifecycle_state=RideStatus.QUEUED.value,
+    )
+    assert hs._is_test_ride_row(fixture) is True
+
+
+def test_direct_assign_persists_durable_offer_for_driver_mobile(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    org_id = _org_id_for("dispatcher@amicor.local")
+    reset_organization_driver_test_state(org_id, driver_names=(DRIVER_SIX_NAME,))
+    six_id = prepare_driver(org_id, DRIVER_SIX_NAME)
+    _isolate_driver(org_id, six_id, DRIVER_SIX_PHONE)
+    provider_id = _ensure_provider(org_id)
+    dispatcher_headers = {"Authorization": f"Bearer {_login(client, 'dispatcher@amicor.local')['access_token']}"}
+
+    now_ts = hs.now()
+    with SessionLocal() as db:
+        ride = HealthISFRide(
+            id=uuid4(),
+            organization_id=org_id,
+            provider_id=provider_id,
+            passenger_name=SHERITA_RIDER_NAME,
+            passenger_phone="6129982874",
+            pickup_address="300 n 6th st, minneapolis. MN",
+            dropoff_address="1200 E 28th st, minneapolis, MN",
+            notes="Test ONLY - AMICOR RIDER APP end to end for Sherita",
+            service_type="healthcare",
+            status=RideStatus.PENDING.value,
+            lifecycle_state=RideStatus.QUEUED.value,
+            requested_at=now_ts,
+            pickup_time=now_ts + timedelta(minutes=10),
+            appointment_time=now_ts + timedelta(minutes=25),
+            dispatch_eligible_at=now_ts - timedelta(minutes=1),
+            created_at=now_ts,
+            updated_at=now_ts,
+        )
+        db.add(ride)
+        db.commit()
+        ride_id = str(ride.id)
+
+    assign = client.patch(
+        f"/api/health-isf/rides/{ride_id}/assign-driver",
+        headers=dispatcher_headers,
+        json={"driver_id": six_id},
+    )
+    assert assign.status_code == 200, assign.text
+    assert str(assign.json().get("driver_id") or "") == six_id
+
+    diag = _assignment_diag(ride_id)
+    assert diag["excluded"] is False, diag
+    assert diag["eligible"] is True, diag
+    assert diag["assignment_state"] == DispatchAssignmentState.OFFERED.value, diag
+    assert diag["assignment_driver_id"] == six_id, diag
+    assert not diag["offer_expires_at"], diag
+
+    with SessionLocal() as db:
+        assignment = hs._latest_assignment_for_ride(db, ride_id)
+        assert assignment is not None
+        assert int(assignment.timeout_seconds or 0) == 0
+        assert assignment.offer_expires_at is None
+        hs.expire_stale_dispatch_offers(db, organization_id=org_id, ride_id=ride_id)
+        db.refresh(assignment)
+        assert str(assignment.assignment_state) == DispatchAssignmentState.OFFERED.value
+        assert assignment.offer_expires_at is None
+
+    login_driver_id, driver_headers, login_body = _driver_login(client, DRIVER_SIX_PHONE)
+    assert login_driver_id == six_id, login_body
+    offer = client.get(
+        f"/api/health-isf/drivers/{login_driver_id}/active-offer",
+        headers=driver_headers,
+        params={"organization_id": org_id},
+    )
+    assert offer.status_code == 200, offer.text
+    offer_row = (offer.json().get("offer") or {})
+    assert str(offer_row.get("ride_id") or "") == ride_id, offer.json()
+    assert str(offer_row.get("driver_id") or "") == six_id
+    assert str(offer_row.get("assignment_state") or "").lower() == DispatchAssignmentState.OFFERED.value
+    assert offer_row.get("offer_expires_at") in {None, ""}
+
+
+def test_intake_disabled_persists_recommendation_assignment(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    org_id = _org_id_for("dispatcher@amicor.local")
+    reset_organization_driver_test_state(org_id, driver_names=(DRIVER_SIX_NAME,))
+    six_id = prepare_driver(org_id, DRIVER_SIX_NAME)
+    _isolate_driver(org_id, six_id, DRIVER_SIX_PHONE)
+    _ensure_provider(org_id)
+    dispatcher_headers = {"Authorization": f"Bearer {_login(client, 'dispatcher@amicor.local')['access_token']}"}
+    suffix = uuid4()[:8]
+
+    create = client.post(
+        "/api/health-isf/customer-requests",
+        headers=dispatcher_headers,
+        json=_request_ride_now_payload(suffix),
+    )
+    assert create.status_code == 201, create.text
+    ride_id = str(create.json()["ride_id"])
+
+    import time
+
+    assignment = None
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        with SessionLocal() as db:
+            assignment = hs._latest_assignment_for_ride(db, ride_id)
+        if assignment is not None:
+            break
+        time.sleep(0.4)
+
+    assert assignment is not None, "intake must persist a recommendation when auto-dispatch is disabled"
+    assert str(assignment.assignment_state) == DispatchAssignmentState.AWAITING_APPROVAL.value
+    assert str(assignment.driver_id) == six_id

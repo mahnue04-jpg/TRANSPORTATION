@@ -54,6 +54,8 @@ def _offer_is_readable(
         DispatchAssignmentState.AWAITING_APPROVAL.value,
     }:
         return False
+    if int(getattr(assignment, "timeout_seconds", 0) or 0) <= 0:
+        return True
     if assignment.offer_expires_at and as_utc_datetime(assignment.offer_expires_at) < as_utc_datetime(now_ts):
         return False
     return True
