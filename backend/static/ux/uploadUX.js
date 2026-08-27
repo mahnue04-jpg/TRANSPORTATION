@@ -107,8 +107,19 @@
   let _attachments = [];     // { file, id, status, extractedText }
   let _stripEl     = null;
   let _inputEl     = null;   // the hidden <input type="file">
+  let _buttonEl    = null;
   let _dropZone    = null;
   let _onAttach    = null;   // callback(attachments)
+  let _onError     = null;   // callback(message)
+  let _authFetch   = null;   // optional authenticated fetch (Nova / AmiCorSession)
+
+  function resolveAuthFetch() {
+    if (typeof _authFetch === "function") return _authFetch;
+    if (global.AmiCorSession && typeof global.AmiCorSession.authFetch === "function") {
+      return global.AmiCorSession.authFetch.bind(global.AmiCorSession);
+    }
+    return fetch;
+  }
 
   function nextId() {
     return "uf_" + Math.random().toString(36).slice(2, 9);
@@ -175,13 +186,25 @@
       try {
         const form = new FormData();
         form.append("file", att.file);
-        const res = await fetch("/api/upload", { method: "POST", body: form });
+        const res = await resolveAuthFetch()("/api/upload", { method: "POST", body: form });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         att.status        = "done";
         att.extractedText = data.extracted_text || null;
         att.chunkCount    = data.chunk_count || 0;
         att.diagnostics   = data.diagnostics || null;
+        att.ocrResult     = data.ocr || null;
+        att.metadata      = {
+          filename: data.filename || att.file.name,
+          content_type: data.content_type || att.file.type || "",
+          size_bytes: data.size_bytes || att.file.size || 0,
+          chunk_count: data.chunk_count || 0,
+          status: data.status || "uploaded",
+          upload_category: data.upload_category || "",
+          document_summary: data.document_summary || "",
+          parser: data.diagnostics && data.diagnostics.parser ? data.diagnostics.parser : "",
+          text_length: data.diagnostics && data.diagnostics.text_length ? data.diagnostics.text_length : 0,
+        };
         renderStrip();
         return;
       } catch (err) {
@@ -203,6 +226,7 @@
       const err = validateFile(file);
       if (err) {
         // Surface validation error — delegate to AmiCorErrorRecovery if available
+        if (typeof _onError === "function") _onError(err);
         if (global.AmiCorErrorRecovery) {
           global.AmiCorErrorRecovery.notify(err, "warn");
         } else {
@@ -232,19 +256,29 @@
   // ── Public API ───────────────────────────────────────────────────────────────
   const AmiCorUpload = {
     /**
-     * init({ stripContainer, dropZoneEl, onAttach })
+     * init({ stripContainer, dropZoneEl, onAttach, onError, authFetch })
      *   stripContainer — Element to render the file-chip preview strip into.
      *   dropZoneEl     — Element that accepts drag-and-drop (e.g. the input box).
      *   onAttach(list) — Called whenever the attachments list changes.
+     *   onError(msg)   — Optional validation/upload error callback.
+     *   authFetch      — Optional authenticated fetch; defaults to AmiCorSession.authFetch.
      *
      * Returns the upload-trigger button element (caller appends it to the toolbar).
+     * Re-init rebinds containers without creating a second upload engine.
      */
-    init({ stripContainer, dropZoneEl, onAttach } = {}) {
+    init({ stripContainer, dropZoneEl, onAttach, onError, authFetch } = {}) {
       injectStyles();
 
-      _stripEl  = stripContainer || null;
-      _onAttach = onAttach       || null;
-      if (dropZoneEl) setupDropZone(dropZoneEl);
+      _stripEl  = stripContainer || _stripEl;
+      _onAttach = onAttach       || _onAttach;
+      if (typeof onError === "function") _onError = onError;
+      if (typeof authFetch === "function") _authFetch = authFetch;
+      if (dropZoneEl && dropZoneEl !== _dropZone) setupDropZone(dropZoneEl);
+
+      if (_inputEl && _buttonEl) {
+        renderStrip();
+        return _buttonEl;
+      }
 
       // Hidden file input
       _inputEl = document.createElement("input");
@@ -271,6 +305,7 @@
         <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83L15.07 6.1"/>
       </svg>`;
       btn.addEventListener("click", () => _inputEl.click());
+      _buttonEl = btn;
       return btn;
     },
 

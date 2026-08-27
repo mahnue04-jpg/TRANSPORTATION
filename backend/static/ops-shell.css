@@ -1621,6 +1621,20 @@ button.driver-action:disabled {
   margin: 0 0 6px;
 }
 
+#driver-operational-map {
+  height: 220px;
+  width: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: #eef5ff;
+}
+
+#driver-operational-map .leaflet-container {
+  height: 100%;
+  width: 100%;
+  border-radius: 12px;
+}
+
 .driver-action {
   cursor: pointer;
 }
@@ -2141,4 +2155,508 @@ body.rider-app-surface .rider-card label.muted {
   .rider-card .grid-2 {
     grid-template-columns: 1fr;
   }
+}
+
+.ops-launcher-session {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ops-launcher-actions {
+  margin-top: 12px;
+}
+
+.ops-launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.ops-launcher-tile {
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+  text-decoration: none;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #0f2a45 0%, #113455 100%);
+  color: #dff0ff;
+  box-shadow: 0 4px 14px rgba(18, 43, 86, 0.06);
+}
+
+.ops-launcher-tile:hover,
+.ops-launcher-tile:focus {
+  border-color: #7eb6ff;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.ops-launcher-kicker {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6cb9f9;
+}
+
+.ops-launcher-tile strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.ops-launcher-tile span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (max-width: 960px) {
+  .ops-launcher-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .ops-nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .ops-nav a {
+    flex: 1 1 auto;
+  }
+
+  .ops-launcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-launcher-tile {
+    min-height: 96px;
+  }
+}
+
+.nova-shell-chrome h3 {
+  margin: 4px 0 8px;
+}
+
+.nova-shell-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.nova-shell-tab {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  min-height: 72px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #0f2a45 0%, #113455 100%);
+  color: #dff0ff;
+  cursor: pointer;
+}
+
+.nova-shell-tab:hover,
+.nova-shell-tab:focus-visible {
+  border-color: #7eb6ff;
+  outline: 2px solid #7eb6ff;
+  outline-offset: 2px;
+}
+
+.nova-shell-tab.is-active {
+  border-color: #7eb6ff;
+  box-shadow: 0 0 0 1px rgba(126, 182, 255, 0.35);
+}
+
+.nova-shell-tab .ops-launcher-kicker {
+  color: #6cb9f9;
+}
+
+@media (max-width: 960px) {
+  .nova-shell-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .nova-shell-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .nova-shell-tab {
+    min-height: 56px;
+    padding: 10px 12px;
+  }
+}
+
+.nova-conversation-thread {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.nova-conversation-msg {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #0f2a45;
+}
+
+.nova-conversation-msg-user {
+  background: #113455;
+}
+
+.nova-conversation-msg strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6cb9f9;
+}
+
+.nova-conversation-msg p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.nova-conversation-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nova-conversation-error {
+  color: #fecaca;
+  margin: 8px 0;
+}
+
+.nova-voice-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.nova-voice-error {
+  color: #fecaca;
+  margin: 8px 0;
+}
+
+.nova-voice-diagnostics {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #0f2a45;
+  margin: 12px 0;
+}
+
+.nova-voice-diagnostics p {
+  margin: 0 0 8px;
+}
+
+.nova-voice-persona {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6cb9f9;
+}
+
+#nova-voice-persona {
+  width: 100%;
+  max-width: 320px;
+  margin: 6px 0 12px;
+}
+
+.nova-voice-transcript {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #113455;
+  white-space: pre-wrap;
+}
+
+.nova-voice-actions {
+  margin-top: 12px;
+}
+
+.nova-files-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-files-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-files-dropzone {
+  border: 1px dashed #d0d5dd;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 0 12px;
+  background: #f8fafc;
+}
+
+.nova-files-dropzone.amicor-drag-over {
+  border-color: #0b6bcb;
+  box-shadow: 0 0 0 3px rgba(11, 107, 203, 0.18);
+}
+
+.nova-files-strip {
+  min-height: 8px;
+  margin-top: 8px;
+}
+
+.nova-files-actions {
+  align-items: center;
+  gap: 8px;
+}
+
+.nova-files-meta {
+  margin-top: 12px;
+}
+
+.nova-files-meta-card {
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+}
+
+.nova-files-meta-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.nova-memory-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-memory-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-memory-section {
+  margin: 0 0 16px;
+}
+
+.nova-memory-section h4 {
+  margin: 0 0 8px;
+}
+
+.nova-memory-prefs {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.nova-memory-prefs dt {
+  font-weight: 600;
+}
+
+.nova-memory-prefs dd {
+  margin: 0;
+}
+
+.nova-memory-history-item {
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+}
+
+.nova-memory-history-item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.nova-memory-actions {
+  margin-top: 8px;
+}
+
+.nova-tools-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-tools-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-tools-section {
+  margin: 0 0 16px;
+}
+
+.nova-tools-section h4 {
+  margin: 0 0 8px;
+}
+
+.nova-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.nova-tool-card {
+  border: 1px solid var(--ops-border, #d0d5dd);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nova-tools-result {
+  border: 1px solid var(--ops-border, #d0d5dd);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.nova-tools-result strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.nova-approvals-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-approvals-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-approvals-section {
+  margin: 0 0 16px;
+}
+
+.nova-approvals-section h4 {
+  margin: 0 0 8px;
+}
+
+.nova-approvals-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nova-approval-card {
+  border: 1px solid var(--ops-border, #d0d5dd);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.nova-approvals-actions {
+  margin-top: 8px;
+}
+
+.nova-workflows-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-workflows-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-workflows-section {
+  margin: 0 0 16px;
+}
+
+.nova-workflows-section h4 {
+  margin: 0 0 8px;
+}
+
+.nova-workflow-card {
+  border: 1px solid var(--ops-border, #d0d5dd);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.nova-workflow-steps {
+  margin: 8px 0 12px 20px;
+}
+
+.nova-workflows-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nova-workflows-actions {
+  margin-top: 8px;
+}
+
+.nova-health-isf-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.nova-health-isf-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.nova-health-isf-section {
+  margin: 0 0 16px;
+}
+
+.nova-health-isf-section h4 {
+  margin: 0 0 8px;
+}
+
+.nova-health-isf-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.nova-health-isf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nova-health-isf-actions {
+  margin-top: 8px;
 }

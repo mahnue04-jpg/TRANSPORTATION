@@ -19,9 +19,10 @@ from email.message import EmailMessage
 from typing import Any
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.auth import bind_authenticated_user_id, get_current_user
 from app.database import get_chat_history, get_memory_summary, save_memory_summary # type: ignore
 from app.db.models import (
     CalendarEventRecord,
@@ -1093,8 +1094,8 @@ def _chunk_text(text: str, chunk_size: int = 700, overlap: int = 120) -> list[st
 
 
 @router.post("/memory/index")
-def memory_index(req: MemoryIndexRequest): # type: ignore
-    uid = _ensure_user_id(req.user_id)
+def memory_index(req: MemoryIndexRequest, user=Depends(get_current_user)): # type: ignore
+    uid = bind_authenticated_user_id(user.id, req.user_id)
     chunks = _chunk_text(req.text)
     if not chunks:
         raise HTTPException(status_code=422, detail="text must contain at least one non-whitespace character")
@@ -1121,8 +1122,8 @@ def memory_index(req: MemoryIndexRequest): # type: ignore
 
 
 @router.get("/memory/retrieve")
-def memory_retrieve(user_id: str, query: str, top_k: int = 5): # type: ignore
-    uid = _ensure_user_id(user_id)
+def memory_retrieve(user_id: str, query: str, user=Depends(get_current_user), top_k: int = 5): # type: ignore
+    uid = bind_authenticated_user_id(user.id, user_id)
     if not query.strip():
         raise HTTPException(status_code=422, detail="query is required")
     k = max(1, min(top_k, 20))
@@ -1158,8 +1159,8 @@ def memory_retrieve(user_id: str, query: str, top_k: int = 5): # type: ignore
 
 
 @router.post("/memory/compress")
-def memory_compress(req: MemoryCompressRequest): # type: ignore
-    uid = _ensure_user_id(req.user_id)
+def memory_compress(req: MemoryCompressRequest, user=Depends(get_current_user)): # type: ignore
+    uid = bind_authenticated_user_id(user.id, req.user_id)
     history = get_chat_history(uid, limit=120) # type: ignore
     if not history:
         return {"status": "ok", "summary": get_memory_summary(uid), "messages": 0} # type: ignore
@@ -1190,8 +1191,8 @@ def memory_compress(req: MemoryCompressRequest): # type: ignore
 # ── Workflow system ───────────────────────────────────────────────────────────
 
 @router.post("/workflows")
-def create_workflow(req: WorkflowCreateRequest):
-    uid = _ensure_user_id(req.user_id)
+def create_workflow(req: WorkflowCreateRequest, user=Depends(get_current_user)):
+    uid = bind_authenticated_user_id(user.id, req.user_id)
     with SessionLocal() as db:
         row = WorkflowTemplate(
             id=str(uuid.uuid4()),
@@ -1210,8 +1211,8 @@ def create_workflow(req: WorkflowCreateRequest):
 
 
 @router.get("/workflows")
-def list_workflows(user_id: str): # type: ignore
-    uid = _ensure_user_id(user_id)
+def list_workflows(user_id: str, user=Depends(get_current_user)): # type: ignore
+    uid = bind_authenticated_user_id(user.id, user_id)
     with SessionLocal() as db:
         rows = (
             db.query(WorkflowTemplate)
@@ -1237,8 +1238,8 @@ def list_workflows(user_id: str): # type: ignore
 
 
 @router.post("/workflows/{workflow_id}/execute")
-def execute_workflow(workflow_id: str, req: WorkflowExecuteRequest): # type: ignore
-    uid = _ensure_user_id(req.user_id)
+def execute_workflow(workflow_id: str, req: WorkflowExecuteRequest, user=Depends(get_current_user)): # type: ignore
+    uid = bind_authenticated_user_id(user.id, req.user_id)
     with SessionLocal() as db:
         wf = (
             db.query(WorkflowTemplate)
@@ -1335,8 +1336,8 @@ def execute_workflow(workflow_id: str, req: WorkflowExecuteRequest): # type: ign
 
 
 @router.get("/workflows/{workflow_id}/history")
-def workflow_history(workflow_id: str, user_id: str, limit: int = 20): # type: ignore
-    uid = _ensure_user_id(user_id)
+def workflow_history(workflow_id: str, user_id: str, user=Depends(get_current_user), limit: int = 20): # type: ignore
+    uid = bind_authenticated_user_id(user.id, user_id)
     limit = max(1, min(limit, 100))
     with SessionLocal() as db:
         rows = (

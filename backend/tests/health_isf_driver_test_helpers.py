@@ -9,7 +9,9 @@ from app.modules.health_isf.models import (
     DriverStatus,
     HealthISFDispatchAssignment,
     HealthISFDriver,
+    HealthISFDriverLocationPing,
     HealthISFRide,
+    HealthISFRideRoutePlan,
     RideStatus,
 )
 
@@ -22,6 +24,7 @@ _DRIVER_TEST_RESET_MODULES = {
     "test_scheduled_route_activation.py",
     "test_multi_ride_driver_scheduling.py",
     "test_advance_scheduling.py",
+    "test_driver_mobile_routing_lifecycle_guard.py",
 }
 
 
@@ -142,10 +145,11 @@ def reset_scheduling_test_organization(org_id: str) -> None:
         for assignment in db.query(HealthISFDispatchAssignment).filter(
             HealthISFDispatchAssignment.organization_id == org_id
         ).all():
+            # Close leftover EXPIRED/open assignments in TEST isolation only so a
+            # later accept is not blocked by shared-org assignment state.
             state = str(assignment.assignment_state or "")
             if state not in {
                 DispatchAssignmentState.DROPOFF_COMPLETE.value,
-                DispatchAssignmentState.EXPIRED.value,
                 DispatchAssignmentState.REJECTED.value,
             }:
                 assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
@@ -159,6 +163,49 @@ def reset_scheduling_test_organization(org_id: str) -> None:
             driver.auth_state = "active"
             driver.last_seen_at = now_ts
             driver.updated_at = now_ts
+        db.commit()
+
+
+def close_competing_assignments_for_ride(ride_id: str, driver_id: str) -> None:
+    """TEST-ONLY: close leftover auto-dispatch rows for other drivers on this ride.
+
+    Immediate intake can leave a second awaiting_approval/offered assignment on the
+    same ride. That leftover does not change production assignment rules; it only
+    pollutes later Driver Mobile reads/progress in a shared test org.
+    """
+    with SessionLocal() as db:
+        now_ts = hs.now()
+        for assignment in db.query(HealthISFDispatchAssignment).filter(
+            HealthISFDispatchAssignment.ride_id == ride_id
+        ).all():
+            if str(assignment.driver_id or "") == str(driver_id):
+                continue
+            state = str(assignment.assignment_state or "")
+            if state in {
+                DispatchAssignmentState.DROPOFF_COMPLETE.value,
+                DispatchAssignmentState.REJECTED.value,
+            }:
+                continue
+            assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
+            assignment.closed_reason = "test_competing_assignment_close"
+            assignment.updated_at = now_ts
+        db.commit()
+
+
+def clear_routing_sidecar_test_artifacts(org_id: str) -> None:
+    """TEST-ONLY: drop GPS pings, route plans, and geocode cache for one org."""
+    with SessionLocal() as db:
+        driver_ids = [
+            str(row.id)
+            for row in db.query(HealthISFDriver).filter(HealthISFDriver.organization_id == org_id).all()
+        ]
+        db.query(HealthISFRideRoutePlan).filter(HealthISFRideRoutePlan.organization_id == org_id).delete(
+            synchronize_session=False
+        )
+        if driver_ids:
+            db.query(HealthISFDriverLocationPing).filter(
+                HealthISFDriverLocationPing.driver_id.in_(driver_ids)
+            ).delete(synchronize_session=False)
         db.commit()
 
 
@@ -188,12 +235,12 @@ def ensure_ride_assigned_to_driver(
     ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
     assert ride_before.status_code == 200, ride_before.text
     assigned_driver = str(ride_before.json().get("driver_id") or "")
-    if assigned_driver == driver_id:
-        return
-    assert admin_headers is not None, "admin headers required to assign auto-dispatched rides"
-    reassign = client.post(
-        "/api/health-isf/admin/reassign-driver",
-        headers=admin_headers,
-        json={"ride_id": ride_id, "driver_id": driver_id, "reason": "test_setup"},
-    )
-    assert reassign.status_code == 200, reassign.text
+    if assigned_driver != driver_id:
+        assert admin_headers is not None, "admin headers required to assign auto-dispatched rides"
+        reassign = client.post(
+            "/api/health-isf/admin/reassign-driver",
+            headers=admin_headers,
+            json={"ride_id": ride_id, "driver_id": driver_id, "reason": "test_setup"},
+        )
+        assert reassign.status_code == 200, reassign.text
+    close_competing_assignments_for_ride(ride_id, driver_id)

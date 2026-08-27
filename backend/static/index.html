@@ -3609,6 +3609,14 @@
     console.info("[AmiCorDiag]", payload);
   }
 
+  function assistantApiFetch(url, options) {
+    const opts = options || {};
+    if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+      return window.AmiCorSession.authFetch(url, opts);
+    }
+    return fetch(url, opts);
+  }
+
   function emitRuntimeEvent(type, payload = {}) {
     const eventPayload = Object.assign({
       userId: UID || null,
@@ -3860,7 +3868,7 @@
       let committed = false;
       let historyCount = 0;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const res = await fetch(`${API}/api/history/${encodeURIComponent(UID)}?limit=3`);
+        const res = await assistantApiFetch(`${API}/api/history/${encodeURIComponent(UID)}?limit=3`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const list = Array.isArray(data.messages) ? data.messages : [];
@@ -4551,16 +4559,16 @@
     }
     result.checks.localhostOrigin = true;
 
-    const testUser = "live_verify_" + Date.now();
+    const testUser = UID || (window.AmiCorSession && typeof window.AmiCorSession.getUserId === "function" && window.AmiCorSession.getUserId()) || "";
     try {
-      const resetRes = await fetch(`${API}/api/reset`, {
+      const resetRes = await assistantApiFetch(`${API}/api/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: testUser }),
       });
       result.checks.resetApi = resetRes.ok;
 
-      const seedRes = await fetch(`${API}/api/chat`, {
+      const seedRes = await assistantApiFetch(`${API}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: testUser, message: "my name is Saye and I prefer concise replies" }),
@@ -4568,7 +4576,7 @@
       const seedData = await seedRes.json();
       result.checks.memorySeeded = !!(seedRes.ok && seedData && seedData.ok);
 
-      const selfRefRes = await fetch(`${API}/api/chat`, {
+      const selfRefRes = await assistantApiFetch(`${API}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: testUser, message: "what do you know about Saye" }),
@@ -4577,7 +4585,7 @@
       const selfRefReply = String(selfRefData && selfRefData.data && selfRefData.data.reply || "");
       result.checks.selfReferenceRouting = /your\s+name\s+is\s+saye/i.test(selfRefReply) && !/refer\s+to\s+various\s+subjects/i.test(selfRefReply);
 
-      const streamRes = await fetch(`${API}/api/chat/stream`, {
+      const streamRes = await assistantApiFetch(`${API}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: testUser, message: "say hello in one sentence" }),
@@ -4585,7 +4593,7 @@
       const streamText = await streamRes.text();
       result.checks.streamingReplies = !!(streamRes.ok && /data:\s*\{\"type\":\s*\"token\"/i.test(streamText));
 
-      const historyRes = await fetch(`${API}/api/history/${encodeURIComponent(testUser)}?limit=20`);
+      const historyRes = await assistantApiFetch(`${API}/api/history/${encodeURIComponent(testUser)}?limit=20`);
       const historyData = await historyRes.json();
       const historyMessages = Array.isArray(historyData && historyData.messages) ? historyData.messages : [];
       result.checks.replayRestoration = historyMessages.length >= 3;
@@ -5442,7 +5450,7 @@
     if (!UID) return;
     emitRuntimeEvent("REPLAY_RESTORE_BEGIN", { userId: UID });
     try {
-      const res = await fetch(`${API}/api/history/${encodeURIComponent(UID)}?limit=40`);
+      const res = await assistantApiFetch(`${API}/api/history/${encodeURIComponent(UID)}?limit=40`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const messages = Array.isArray(data.messages) ? data.messages : [];
@@ -6249,7 +6257,7 @@
     });
     const requestTimer = setTimeout(() => controller.abort("request-timeout"), REQUEST_TIMEOUT_MS);
     try {
-      const res = await fetch(`${API}/api/chat/stream`, {
+      const res = await assistantApiFetch(`${API}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: UID, message: fullText }),
@@ -6544,7 +6552,7 @@
     }
 
     const spoken = text.length > 420 ? text.slice(0, 420) + "..." : text;
-    fetch(API + "/api/voice/speak", {
+    assistantApiFetch(API + "/api/voice/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -7318,7 +7326,7 @@
     resetConversationFrontendState();
     AppState.state.memoryStatus.synced = false;
     try {
-      const res  = await fetch(`${API}/api/reset`, {
+      const res  = await assistantApiFetch(`${API}/api/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: UID }),

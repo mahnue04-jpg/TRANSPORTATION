@@ -3,7 +3,7 @@ import re
 
 from app.deployment.release_version import resolve_app_version
 
-DEFAULT_RUNTIME_VERSION = "20260607.6"
+DEFAULT_RUNTIME_VERSION = "20260827.9"
 
 _LOCAL_FRONTEND = "http://127.0.0.1:8010/app"
 _LOCAL_BACKEND = "http://127.0.0.1:8010"
@@ -129,8 +129,16 @@ def inject_runtime_contract(index_html: str, *, request=None) -> str:
 
     # Keep static asset versions aligned with the canonical runtime version so
     # a single build bump invalidates every JS/CSS URL in the app shell.
-    return re.sub(
+    injected = re.sub(
         r"([?&]v=)[^\"'&\s>]+",
         lambda match: f"{match.group(1)}{contract['build_version']}",
+        injected,
+    )
+    # Ops-shell JS/CSS also stamp DEFAULT_RUNTIME_VERSION so local Nova shell
+    # edits cache-bust even when the app release version is unchanged.
+    shell_stamp = f"{contract['build_version']}-{DEFAULT_RUNTIME_VERSION}"
+    return re.sub(
+        r"(ops-shell\.(?:js|css)\?v=)[^\"'&\s>]+",
+        lambda match: f"{match.group(1)}{shell_stamp}",
         injected,
     )

@@ -56,7 +56,18 @@ from app.middleware import SecurityHeadersMiddleware, RequestTracingMiddleware, 
 from app.core.error_boundary import ErrorBoundaryMiddleware  # type: ignore
 from app.core.runtime_config import validate_runtime_config  # type: ignore
 from app import auth as auth_module               # type: ignore
-from app.auth import UserContext, get_current_user_context, ROLE_ADMIN, ROLE_ANALYTICS_READONLY, ROLE_DISPATCHER, ROLE_STAFF, ROLE_SUPER_ADMIN_SUPPORT  # type: ignore
+from app.auth import (  # type: ignore
+    UserContext,
+    bind_authenticated_user_id,
+    get_current_user,
+    get_current_user_context,
+    require_any_role,
+    ROLE_ADMIN,
+    ROLE_ANALYTICS_READONLY,
+    ROLE_DISPATCHER,
+    ROLE_STAFF,
+    ROLE_SUPER_ADMIN_SUPPORT,
+)
 from app import observability                     # type: ignore
 from app.tenant_auth_middleware import TenantAuthValidationMiddleware  # type: ignore
 from app import ecosystem as ecosystem_module     # type: ignore
@@ -3175,6 +3186,7 @@ def serve_app(request: Request) -> HTMLResponse:
     return _build_ops_shell_response(request)
 
 
+@app.get("/app/home")
 @app.get("/app/dashboard")
 @app.get("/app/rides")
 @app.get("/app/providers")
@@ -3254,9 +3266,15 @@ def _build_ops_shell_response(request: Request | None = None) -> HTMLResponse:
     return response
 
 
+_require_admin_ops = require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
-async def chat(request: ChatRequest) -> responses_module.NormalizedResponse:
+async def chat(
+    request: ChatRequest,
+    user=Depends(get_current_user),
+) -> responses_module.NormalizedResponse:
     """Process a chat message and return AI response.
     
     Normalized response format:
@@ -3273,9 +3291,10 @@ async def chat(request: ChatRequest) -> responses_module.NormalizedResponse:
     Raises:
         HTTPException 422 if validation fails
     """
-    logger.debug("Chat from user=%s: %r", request.user_id, request.message[:80])
+    user_id = bind_authenticated_user_id(user.id, request.user_id)
+    logger.debug("Chat from user=%s: %r", user_id, request.message[:80])
     try:
-        result: dict[str, Any] = route_message(request.message, user_id=request.user_id)  # type: ignore
+        result: dict[str, Any] = route_message(request.message, user_id=user_id)  # type: ignore
         # Sanitize meta to remove internal provider diagnostics from user-facing response
         user_meta = _sanitize_tool_meta(result.get("meta", {})) # type: ignore
         response_data = { # type: ignore
@@ -3290,7 +3309,7 @@ async def chat(request: ChatRequest) -> responses_module.NormalizedResponse:
             data=response_data,
         )
     except Exception as exc:
-        logger.exception("Router error for user=%s", request.user_id)
+        logger.exception("Router error for user=%s", user_id)
         error_response = responses_module.normalize_error(
             error_msg=f"Chat processing failed: {str(exc)}"
         )
@@ -3301,7 +3320,11 @@ async def chat(request: ChatRequest) -> responses_module.NormalizedResponse:
 
 
 @app.get("/api/history/{user_id}")
-def history(user_id: str, limit: int = 50) -> dict[str, Any]:
+def history(
+    user_id: str,
+    user=Depends(get_current_user),
+    limit: int = 50,
+) -> dict[str, Any]:
     """Retrieve chat history and memory for user.
     
     Args:
@@ -3311,7 +3334,8 @@ def history(user_id: str, limit: int = 50) -> dict[str, Any]:
     Returns:
         Dict with user_id, messages, and memory summary
     """
-    validated_user_id = validation_module.validate_user_id(user_id)
+    bound_user_id = bind_authenticated_user_id(user.id, user_id)
+    validated_user_id = validation_module.validate_user_id(bound_user_id)
     validated_limit = max(1, min(int(limit), 100))
     
     return {
@@ -3326,7 +3350,7 @@ def history(user_id: str, limit: int = 50) -> dict[str, Any]:
 
 # ── Memory reset ──────────────────────────────────────────────────────────────
 @app.post("/api/reset")
-def reset_chat(req: ResetRequest) -> dict[str, bool]:
+def reset_chat(req: ResetRequest, user=Depends(get_current_user)) -> dict[str, bool]:
     """Clear user memory and reset conversation state.
     
     Args:
@@ -3339,7 +3363,7 @@ def reset_chat(req: ResetRequest) -> dict[str, bool]:
         HTTPException 422 if validation fails
         HTTPException 500 if reset fails
     """
-    user_id = req.user_id
+    user_id = bind_authenticated_user_id(user.id, req.user_id)
     try:
         clear_user_memory(user_id)
         logging_utils.log_event(
@@ -3369,7 +3393,10 @@ def reset_chat(req: ResetRequest) -> dict[str, bool]:
 
 # ── File upload ───────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:  # type: ignore
+async def upload_file(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+) -> dict[str, Any]:  # type: ignore
     """Accept a user-uploaded document for context injection.
 
     - Max 10 MB.
@@ -3647,7 +3674,10 @@ def _sanitize_tool_meta(meta: dict) -> dict: # type: ignore
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest) -> StreamingResponse:  # type: ignore
+async def chat_stream(
+    request: ChatRequest,
+    user=Depends(get_current_user),
+) -> StreamingResponse:  # type: ignore
     """
     Streaming variant of /api/chat.
     Returns text/event-stream with SSE chunks:
@@ -3655,6 +3685,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:  # type: ignor
       data: [DONE]\n\n
     Falls back to non-streaming for tool calls (weather, search, etc.)
     """
+    user_id = bind_authenticated_user_id(user.id, request.user_id)
     lower = request.message.lower()
     from app.router import CAPABILITIES  # type: ignore
 
@@ -3662,7 +3693,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:  # type: ignor
     for name, cap in CAPABILITIES.items(): # type: ignore
         if any(t in lower for t in cap["triggers"]): # type: ignore
             try:
-                result = route_message(request.message, user_id=request.user_id) # type: ignore
+                result = route_message(request.message, user_id=user_id) # type: ignore
                 # Sanitize meta to remove internal diagnostics
                 user_meta = _sanitize_tool_meta(result.get("meta", {})) # type: ignore
                 payload = json.dumps({
@@ -3679,12 +3710,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:  # type: ignor
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(_tool_stream(), media_type="text/event-stream")
             except Exception as exc:
-                logger.exception("Tool stream error for user=%s", request.user_id)
+                logger.exception("Tool stream error for user=%s", user_id)
                 raise HTTPException(status_code=500, detail=str(exc))
 
     # OpenAI streaming
     return StreamingResponse(
-        _stream_openai(request.message, request.user_id),
+        _stream_openai(request.message, user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -3730,10 +3761,9 @@ def provider_diagnostics() -> responses_module.NormalizedResponse:  # type: igno
 # ── Admin dashboard ───────────────────────────────────────────────────────────
 
 @app.get("/api/admin/dashboard")
-def admin_dashboard() -> dict[str, Any]:  # type: ignore
+def admin_dashboard(_admin=Depends(_require_admin_ops)) -> dict[str, Any]:  # type: ignore
     """Aggregated platform status: DB health, provider states, session counters,
-    upload stats, observability metrics.
-    Not auth-protected in dev mode; add require_auth in production.
+    upload stats, observability metrics. Requires admin or super_admin_support.
     
     Returns:
         Dict with comprehensive platform status
@@ -3789,8 +3819,9 @@ def admin_dashboard() -> dict[str, Any]:  # type: ignore
 
 
 @app.get("/api/admin/metrics")
-def admin_metrics() -> dict[str, Any]:
+def admin_metrics(_admin=Depends(_require_admin_ops)) -> dict[str, Any]:
     """Lightweight metrics endpoint — counters, latencies, recent errors.
+    Requires admin or super_admin_support.
     
     Returns:
         Dict with observability metrics

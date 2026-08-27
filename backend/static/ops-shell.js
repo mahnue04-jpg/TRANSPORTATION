@@ -4,6 +4,7 @@
   var APP_BASE_PATH = "/app";
 
   var ROUTES = {
+    "home": { path: APP_BASE_PATH, title: "Home", subtitle: "Open the AMICOR apps allowed for your signed-in role." },
     "dashboard": { path: APP_BASE_PATH + "/dashboard", title: "Dashboard", subtitle: "Healthcare transportation command center with live operational intelligence." },
     "dispatch": { path: APP_BASE_PATH + "/dispatch", title: "Dispatch Board", subtitle: "Live fleet dispatch, assignment coordination, and escalation control." },
     "trips": { path: APP_BASE_PATH + "/trips", title: "Trips", subtitle: "Trip lifecycle monitoring across rider, driver, and provider flows." },
@@ -15,7 +16,7 @@
     "analytics": { path: APP_BASE_PATH + "/analytics", title: "Reports & Analytics", subtitle: "Operational and financial analytics across dispatch and care delivery." },
     "alerts": { path: APP_BASE_PATH + "/alerts", title: "Alerts", subtitle: "Operational alerts, escalations, and supervision-critical notices." },
     "mobile": { path: APP_BASE_PATH + "/mobile", title: "Driver Mobile", subtitle: "Field driver sign-in, trip workflow, and assignment sync." },
-    "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "Amicor Nova", subtitle: "AMICOR AI assistant for guidance, summaries, and supervised recommendations." },
+    "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "Amicor Nova", subtitle: "Unified AMICOR NOVA home. Governance, authenticated conversation, and voice are live here. /workspace remains the live conversation source as fallback." },
     "settings": { path: APP_BASE_PATH + "/settings", title: "Settings", subtitle: "Organization, permissions, and platform configuration controls." },
     "system-health": { path: APP_BASE_PATH + "/system-health", title: "Operations Status", subtitle: "Operational readiness and live monitoring posture." }
   };
@@ -34,6 +35,7 @@
     "/settings": APP_BASE_PATH + "/settings",
     "/providers": APP_BASE_PATH + "/providers",
     "/drivers": APP_BASE_PATH + "/drivers",
+    [APP_BASE_PATH + "/home"]: APP_BASE_PATH,
     [APP_BASE_PATH + "/patients"]: APP_BASE_PATH + "/riders",
     "/rides": APP_BASE_PATH + "/trips",
     "/operations": APP_BASE_PATH + "/dispatch",
@@ -51,28 +53,167 @@
   };
 
   var ROLE_ACCESS = {
-    admin: ["dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "analytics", "alerts", "mobile", "ai-assistant", "settings", "system-health"],
-    dispatcher: ["dashboard", "dispatch", "trips", "drivers", "riders", "vehicles", "billing", "alerts", "mobile", "ai-assistant", "system-health"],
-    rider: ["dashboard", "trips", "riders", "mobile", "ai-assistant", "system-health"],
-    provider: ["dashboard", "dispatch", "trips", "riders", "providers", "billing", "analytics", "mobile", "ai-assistant", "system-health"],
-    driver: ["dashboard", "trips", "drivers", "billing", "mobile", "ai-assistant", "system-health"],
-    compliance_officer: ["dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "analytics", "alerts", "system-health"],
-    supervisor: ["dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "alerts", "analytics", "system-health", "ai-assistant"],
-    driver_support: ["dashboard", "dispatch", "trips", "drivers", "riders", "billing", "alerts", "mobile", "ai-assistant", "system-health"],
-    medical_coordinator: ["dashboard", "trips", "riders", "providers", "billing", "analytics", "mobile", "system-health", "ai-assistant"]
+    admin: ["home", "dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "analytics", "alerts", "mobile", "ai-assistant", "settings", "system-health"],
+    dispatcher: ["home", "dashboard", "dispatch", "trips", "drivers", "riders", "vehicles", "billing", "alerts", "mobile", "ai-assistant", "system-health"],
+    rider: ["home", "dashboard", "trips", "riders", "mobile", "ai-assistant", "system-health"],
+    provider: ["home", "dashboard", "dispatch", "trips", "riders", "providers", "billing", "analytics", "mobile", "ai-assistant", "system-health"],
+    driver: ["home", "dashboard", "trips", "drivers", "billing", "mobile", "ai-assistant", "system-health"],
+    compliance_officer: ["home", "dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "analytics", "alerts", "system-health"],
+    supervisor: ["home", "dashboard", "dispatch", "trips", "drivers", "riders", "providers", "vehicles", "billing", "alerts", "analytics", "system-health", "ai-assistant"],
+    driver_support: ["home", "dashboard", "dispatch", "trips", "drivers", "riders", "billing", "alerts", "mobile", "ai-assistant", "system-health"],
+    medical_coordinator: ["home", "dashboard", "trips", "riders", "providers", "billing", "analytics", "mobile", "system-health", "ai-assistant"]
   };
 
   var ROLE_DEFAULT_ROUTE = {
-    admin: "dashboard",
-    dispatcher: "dispatch",
+    admin: "home",
+    dispatcher: "home",
     rider: "riders",
-    provider: "providers",
+    provider: "home",
     driver: "mobile",
-    compliance_officer: "dashboard",
-    supervisor: "dashboard",
-    driver_support: "dashboard",
-    medical_coordinator: "dashboard"
+    compliance_officer: "home",
+    supervisor: "home",
+    driver_support: "home",
+    medical_coordinator: "home"
   };
+
+  var LAUNCHER_CORE_TILES = [
+    { route: "dashboard", title: "Dashboard", description: "Operational command center and live intelligence." },
+    { route: "riders", title: "Rider", description: "Request rides, track trips, and contact support." },
+    { route: "dispatch", title: "Dispatch", description: "Live fleet assignment and escalation control." },
+    { route: "trips", title: "Trips", description: "Trip lifecycle across rider, driver, and provider flows." },
+    { route: "mobile", title: "Driver Mobile", description: "Field driver sign-in, offers, and trip workflow." },
+    { route: "drivers", title: "Drivers / Fleet Desk", description: "Driver operations, readiness, and compliance state." },
+    { route: "providers", title: "Providers", description: "Facility and provider transport operations portal." },
+    { route: "vehicles", title: "Vehicles", description: "Fleet inventory, availability, and maintenance." },
+    { route: "billing", title: "Billing", description: "Completed-trip revenue, claims, and payouts." },
+    { route: "analytics", title: "Analytics", description: "Operational and financial reports." },
+    { route: "ai-assistant", title: "AI Assistant / Amicor Nova", description: "Unified Nova home: supervised governance now, later capability areas in this shell." },
+    { route: "alerts", title: "Alerts", description: "Operational alerts, escalations, and notices." },
+    { route: "system-health", title: "System Health", description: "Operational readiness and monitoring posture." },
+    { route: "settings", title: "Settings / Admin", description: "Organization, permissions, and platform controls." }
+  ];
+
+  var LAUNCHER_EXTRA_TILES = [
+    {
+      id: "supervisor",
+      href: APP_BASE_PATH + "/operations/supervisor",
+      title: "Supervisor",
+      description: "Supervisor approval, recovery, and audit workspace.",
+      roles: ["supervisor"]
+    },
+    {
+      id: "compliance",
+      href: APP_BASE_PATH + "/operations/compliance",
+      title: "Compliance",
+      description: "Document review, expirations, and compliance posture.",
+      roles: ["compliance_officer"]
+    },
+    {
+      id: "medical_coordinator",
+      href: APP_BASE_PATH + "/operations/medical-coordinator",
+      title: "Medical Coordinator",
+      description: "Medical transport coordination workspace.",
+      roles: ["medical_coordinator"]
+    },
+    {
+      id: "driver_support",
+      href: APP_BASE_PATH + "/operations/driver-support",
+      title: "Driver Support",
+      description: "Driver support and onboarding assistance.",
+      roles: ["driver_support"]
+    },
+    {
+      id: "driver_onboarding",
+      href: "/platform-ops/driver-onboarding-admin",
+      title: "Driver Onboarding",
+      description: "Review driver applications in Platform Ops.",
+      roles: ["admin", "super_admin_support", "supervisor", "dispatcher", "driver_support", "compliance_officer"],
+      external: true
+    },
+    {
+      id: "grants",
+      href: "/workspace#/health-isf/grant",
+      title: "Grants",
+      description: "Health ISF grant readiness workspace.",
+      roles: ["admin", "dispatcher", "staff"],
+      external: true
+    }
+  ];
+
+  var NOVA_SHELL_PANES = [
+    {
+      id: "governance",
+      kicker: "Live",
+      title: "Governance",
+      subtitle: "Existing preview, inspect, simulate, confirm, cancel, execution history, and guardrails.",
+      live: true
+    },
+    {
+      id: "conversation",
+      kicker: "Live",
+      title: "Conversation",
+      subtitle: "Authenticated Nova conversation using the existing chat engine. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "health-isf",
+      kicker: "Live",
+      title: "Health ISF intelligence",
+      subtitle: "Authenticated read-only Health ISF intelligence using existing GET dashboard, dispatch queue (read_only), rides, command-center, alerts, billing-handoffs, schedules, map-preview, intelligence/summary, and GET /api/nova/intelligence. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "memory",
+      kicker: "Live",
+      title: "Memory / continuity",
+      subtitle: "Authenticated Nova memory, preferences, and conversation continuity using GET /api/history/{user_id}. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "files",
+      kicker: "Live",
+      title: "Files",
+      subtitle: "Authenticated Nova file upload using the existing /api/upload path and AmiCorUpload. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "tools",
+      kicker: "Live",
+      title: "Business tools",
+      subtitle: "Authenticated Nova business tools using the existing CAPABILITIES router, business.py advisor, and registered tools via POST /api/chat. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "workflows",
+      kicker: "Live",
+      title: "Workflows / tasks",
+      subtitle: "Authenticated Nova workflows using the existing workflow_runner via POST /api/chat after Governance confirmation. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "voice",
+      kicker: "Live",
+      title: "Voice",
+      subtitle: "Authenticated Nova voice using the existing voice runtime, human voice engine, and /api/voice endpoints. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    },
+    {
+      id: "approvals",
+      kicker: "Live",
+      title: "Approval Center",
+      subtitle: "Authenticated Nova approvals using the existing Governance pending-intent, confirm/cancel, and /api/assistant/executions history. /workspace remains available as fallback.",
+      live: true,
+      source: "/workspace"
+    }
+  ];
+  var NOVA_SHELL_PANE_IDS = NOVA_SHELL_PANES.map(function (pane) { return pane.id; });
 
   var SEED_DRIVER_PHONE_BY_EMAIL = {
     "driver@amicor.local": "917-555-1001",
@@ -402,6 +543,32 @@
       executionHistory: [],
       memoryEntries: [],
       sessionNonce: "",
+      novaShellPane: "governance",
+      novaConversation: {
+        userId: "",
+        messages: [],
+        draft: "",
+        streaming: false,
+        error: "",
+        historyLoaded: false,
+        status: "idle"
+      },
+      novaVoice: {
+        persona: "Warm Conversational",
+        muted: false,
+        transcript: "",
+        status: "idle",
+        runtimeState: "idle",
+        permission: "unknown",
+        speaking: false,
+        error: "",
+        lastError: "",
+        providers: null,
+        providersLoaded: false,
+        fallback: false,
+        provider: "",
+        latencyMs: 0
+      },
       securityState: {
         verifiedPreview: false,
         signedConfirmation: false,
@@ -1475,6 +1642,13 @@
       safeText((state.supervision || {}).supervision_status, ""),
       safeText((state.health || {}).status, ""),
       String(liveEvents.length),
+      safeText((state.assistant || {}).novaShellPane, "governance"),
+      String((((state.assistant || {}).novaConversation || {}).messages || []).length),
+      safeText((((state.assistant || {}).novaConversation || {}).status), "idle"),
+      safeText((((state.assistant || {}).novaConversation || {}).error), ""),
+      safeText((((state.assistant || {}).novaVoice || {}).status), "idle"),
+      safeText((((state.assistant || {}).novaVoice || {}).runtimeState), "idle"),
+      safeText((((state.assistant || {}).novaVoice || {}).error), ""),
     ].join("§");
   }
 
@@ -1507,6 +1681,43 @@
       return numeric;
     }
     return fallback;
+  }
+
+  function finiteEtaMinutes(value) {
+    if (value == null || value === "") return null;
+    var numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function finiteCoordinate(value) {
+    if (value == null || value === "") return null;
+    var numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function formatDriverEtaDisplay(value) {
+    var eta = finiteEtaMinutes(value);
+    return eta == null ? "—" : String(eta) + " min";
+  }
+
+  function routingFieldsFromPayload(payload) {
+    var row = safeObject(payload);
+    return {
+      etaMin: row.eta_minutes,
+      pickupEtaMin: row.pickup_eta_minutes,
+      destinationEtaMin: row.destination_eta_minutes,
+      routeLeg: row.route_leg,
+      routePolyline: Array.isArray(row.route_polyline) ? row.route_polyline : [],
+      pickupLat: row.pickup_latitude,
+      pickupLng: row.pickup_longitude,
+      dropoffLat: row.dropoff_latitude,
+      dropoffLng: row.dropoff_longitude,
+      driverLat: row.driver_latitude,
+      driverLng: row.driver_longitude,
+      driverGpsAvailable: row.driver_gps_available === true,
+      etaUnavailableReason: row.eta_unavailable_reason,
+      routingProvider: row.routing_provider
+    };
   }
 
   function safeText(value, fallback) {
@@ -1652,7 +1863,8 @@
       started_at: safeText(item.started_at, ""),
       completed_at: safeText(item.completed_at, safeText(item.updated_at, "")),
       failed_at: safeText(item.failed_at, ""),
-      error_message: safeText(item.error_message, safeText(item.error, ""))
+      error_message: safeText(item.error_message, safeText(item.error, "")),
+      result: safeObject(item.result)
     };
   }
 
@@ -2187,6 +2399,35 @@
         state.assistant.pendingIntent = null;
       }
       state.assistant.sessionNonce = safeText(assistantState.sessionNonce, state.assistant.sessionNonce || ("sess-" + Date.now()));
+      state.assistant.novaShellPane = normalizeNovaPane(assistantState.novaShellPane || novaPaneFromHash());
+      var novaConversation = assistantState.novaConversation || {};
+      state.assistant.novaConversation = {
+        userId: safeText(novaConversation.userId, ""),
+        messages: Array.isArray(novaConversation.messages) ? novaConversation.messages.slice(-80) : [],
+        draft: safeText(novaConversation.draft, ""),
+        streaming: false,
+        error: "",
+        historyLoaded: false,
+        status: "idle"
+      };
+      var novaVoice = assistantState.novaVoice || {};
+      state.assistant.novaVoice = {
+        persona: safeText(novaVoice.persona, "Warm Conversational") || "Warm Conversational",
+        muted: Boolean(novaVoice.muted),
+        transcript: "",
+        status: "idle",
+        runtimeState: "idle",
+        permission: "unknown",
+        speaking: false,
+        error: "",
+        lastError: "",
+        providers: null,
+        providersLoaded: false,
+        fallback: false,
+        provider: "",
+        latencyMs: 0
+      };
+      restoreNovaPaneSessionSlices(assistantState);
       var collapsible = assistantState.collapsible || {};
       state.assistant.collapsible = {
         memory: Boolean(collapsible.memory),
@@ -2209,8 +2450,177 @@
     }
   }
 
+  function novaSessionIdentity() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.getUserId === "function") {
+        return safeText(window.AmiCorSession.getUserId(), "");
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  function resetNovaIdentityScopedState() {
+    state.assistant.pendingIntent = null;
+    state.assistant.pendingPrompt = "";
+    state.assistant.draft = "";
+    state.assistant.executionHistory = [];
+    state.assistant.previewCards = [];
+    if (state.assistant.novaConversation && typeof state.assistant.novaConversation === "object") {
+      state.assistant.novaConversation.userId = "";
+      state.assistant.novaConversation.messages = [];
+      state.assistant.novaConversation.draft = "";
+      state.assistant.novaConversation.historyLoaded = false;
+      state.assistant.novaConversation.status = "idle";
+      state.assistant.novaConversation.error = "";
+      state.assistant.novaConversation.streaming = false;
+    }
+    state.assistant.novaApprovals = { status: "idle", error: "", loaded: false, lastCancelled: null, inspected: null };
+    state.assistant.novaWorkflows = {
+      status: "idle",
+      error: "",
+      awaitingRunner: false,
+      steps: [],
+      lastResult: "",
+      toolId: "",
+      card: null,
+      history: []
+    };
+    state.assistant.novaHealthIsf = { status: "idle", error: "", loaded: false, sources: {} };
+    state.assistant.novaMemory = {
+      userId: "",
+      summary: "",
+      preferences: {},
+      messages: [],
+      loaded: false,
+      status: "idle",
+      error: ""
+    };
+    state.assistant.novaTools = { activeId: "", lastTitle: "", lastResult: "", status: "idle", error: "" };
+  }
+
+  async function signOutNovaShellSession() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.logout === "function") {
+        await window.AmiCorSession.logout();
+      } else if (window.AmiCorSession && typeof window.AmiCorSession.clear === "function") {
+        window.AmiCorSession.clear();
+      }
+    } catch (_) {}
+    resetNovaIdentityScopedState();
+    persistSessionState();
+    renderPage();
+  }
+
+  function snapshotNovaPaneSessionSlices() {
+    var workflows = state.assistant.novaWorkflows || {};
+    var approvals = state.assistant.novaApprovals || {};
+    var memory = state.assistant.novaMemory || {};
+    var tools = state.assistant.novaTools || {};
+    var health = state.assistant.novaHealthIsf || {};
+    return {
+      novaPaneUserId: novaSessionIdentity(),
+      novaWorkflows: {
+        status: safeText(workflows.status, "idle"),
+        error: safeText(workflows.error, ""),
+        awaitingRunner: Boolean(workflows.awaitingRunner),
+        steps: Array.isArray(workflows.steps) ? workflows.steps.slice(0, 8) : [],
+        lastResult: safeText(workflows.lastResult, "").slice(0, 4000),
+        toolId: safeText(workflows.toolId, ""),
+        history: Array.isArray(workflows.history) ? workflows.history.slice(0, 8) : []
+      },
+      novaApprovals: {
+        loaded: Boolean(approvals.loaded),
+        lastCancelled: approvals.lastCancelled && typeof approvals.lastCancelled === "object" ? approvals.lastCancelled : null
+      },
+      novaMemory: {
+        userId: safeText(memory.userId, ""),
+        summary: safeText(memory.summary, "").slice(0, 4000),
+        preferences: memory.preferences && typeof memory.preferences === "object" ? memory.preferences : {},
+        messages: Array.isArray(memory.messages) ? memory.messages.slice(-16) : [],
+        loaded: Boolean(memory.loaded)
+      },
+      novaTools: {
+        activeId: safeText(tools.activeId, ""),
+        lastTitle: safeText(tools.lastTitle, ""),
+        lastResult: safeText(tools.lastResult, "").slice(0, 4000)
+      },
+      novaHealthIsf: {
+        loaded: Boolean(health.loaded),
+        status: safeText(health.status, "idle"),
+        error: safeText(health.error, ""),
+        sources: health.sources && typeof health.sources === "object" ? health.sources : {}
+      }
+    };
+  }
+
+  function restoreNovaPaneSessionSlices(assistantState) {
+    var payload = assistantState && typeof assistantState === "object" ? assistantState : {};
+    var persistedUserId = safeText(payload.novaPaneUserId, "");
+    var currentUserId = novaSessionIdentity();
+    if (persistedUserId && currentUserId && persistedUserId !== currentUserId) {
+      resetNovaIdentityScopedState();
+      return;
+    }
+    if (payload.novaWorkflows && typeof payload.novaWorkflows === "object") {
+      state.assistant.novaWorkflows = {
+        status: safeText(payload.novaWorkflows.status, "idle"),
+        error: safeText(payload.novaWorkflows.error, ""),
+        awaitingRunner: Boolean(payload.novaWorkflows.awaitingRunner),
+        steps: Array.isArray(payload.novaWorkflows.steps) ? payload.novaWorkflows.steps.slice(0, 8) : [],
+        lastResult: safeText(payload.novaWorkflows.lastResult, ""),
+        toolId: safeText(payload.novaWorkflows.toolId, ""),
+        card: null,
+        history: Array.isArray(payload.novaWorkflows.history) ? payload.novaWorkflows.history.slice(0, 8) : []
+      };
+    }
+    if (payload.novaApprovals && typeof payload.novaApprovals === "object") {
+      state.assistant.novaApprovals = {
+        status: "idle",
+        error: "",
+        loaded: Boolean(payload.novaApprovals.loaded),
+        lastCancelled: payload.novaApprovals.lastCancelled && typeof payload.novaApprovals.lastCancelled === "object"
+          ? payload.novaApprovals.lastCancelled
+          : null,
+        inspected: null
+      };
+    }
+    if (payload.novaMemory && typeof payload.novaMemory === "object") {
+      state.assistant.novaMemory = {
+        userId: safeText(payload.novaMemory.userId, ""),
+        summary: safeText(payload.novaMemory.summary, ""),
+        preferences: payload.novaMemory.preferences && typeof payload.novaMemory.preferences === "object"
+          ? payload.novaMemory.preferences
+          : {},
+        messages: Array.isArray(payload.novaMemory.messages) ? payload.novaMemory.messages.slice(-16) : [],
+        loaded: Boolean(payload.novaMemory.loaded),
+        status: "idle",
+        error: ""
+      };
+    }
+    if (payload.novaTools && typeof payload.novaTools === "object") {
+      state.assistant.novaTools = {
+        activeId: safeText(payload.novaTools.activeId, ""),
+        lastTitle: safeText(payload.novaTools.lastTitle, ""),
+        lastResult: safeText(payload.novaTools.lastResult, ""),
+        status: "idle",
+        error: ""
+      };
+    }
+    if (payload.novaHealthIsf && typeof payload.novaHealthIsf === "object") {
+      state.assistant.novaHealthIsf = {
+        status: safeText(payload.novaHealthIsf.status, "idle"),
+        error: safeText(payload.novaHealthIsf.error, ""),
+        loaded: Boolean(payload.novaHealthIsf.loaded),
+        sources: payload.novaHealthIsf.sources && typeof payload.novaHealthIsf.sources === "object"
+          ? payload.novaHealthIsf.sources
+          : {}
+      };
+    }
+  }
+
   function persistSessionState() {
     try {
+      var novaSlices = snapshotNovaPaneSessionSlices();
       var payload = {
         role: getPlatformRole(),
         platformRole: getPlatformRole(),
@@ -2234,6 +2644,22 @@
           executionHistory: state.assistant.executionHistory.slice(-16),
           memoryEntries: state.assistant.memoryEntries.slice(-20),
           sessionNonce: state.assistant.sessionNonce,
+          novaShellPane: state.assistant.novaShellPane,
+          novaPaneUserId: novaSlices.novaPaneUserId,
+          novaConversation: {
+            userId: safeText((state.assistant.novaConversation || {}).userId, ""),
+            messages: ((state.assistant.novaConversation || {}).messages || []).slice(-80),
+            draft: safeText((state.assistant.novaConversation || {}).draft, "")
+          },
+          novaVoice: {
+            persona: safeText((state.assistant.novaVoice || {}).persona, "Warm Conversational"),
+            muted: Boolean((state.assistant.novaVoice || {}).muted)
+          },
+          novaWorkflows: novaSlices.novaWorkflows,
+          novaApprovals: novaSlices.novaApprovals,
+          novaMemory: novaSlices.novaMemory,
+          novaTools: novaSlices.novaTools,
+          novaHealthIsf: novaSlices.novaHealthIsf,
           securityState: state.assistant.securityState,
           collapsible: state.assistant.collapsible,
           messages: state.assistant.messages.slice(-24),
@@ -2274,6 +2700,135 @@
   function routeAllowed(role, route) {
     var allowed = ROLE_ACCESS[role] || ROLE_ACCESS.admin;
     return allowed.indexOf(route) >= 0;
+  }
+
+  function getSessionAuthorizedRoles() {
+    var roles = [];
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.getSessionProfile === "function") {
+        var profile = window.AmiCorSession.getSessionProfile() || {};
+        if (Array.isArray(profile.authorizedRoles)) {
+          roles = profile.authorizedRoles.slice();
+        }
+      }
+    } catch (_) {}
+    if (!roles.length) {
+      try {
+        if (window.AmiCorSession && typeof window.AmiCorSession.getCurrent === "function") {
+          var identity = ((window.AmiCorSession.getCurrent() || {}).identity) || {};
+          if (Array.isArray(identity.authorizedRoles)) {
+            roles = identity.authorizedRoles.slice();
+          }
+        }
+      } catch (_) {}
+    }
+    var jwtRole = getJwtSessionRole();
+    if (jwtRole && roles.indexOf(jwtRole) < 0) {
+      roles.push(jwtRole);
+    }
+    return roles.map(function (role) {
+      return safeText(role, "").toLowerCase();
+    }).filter(Boolean);
+  }
+
+  function sessionHasAnyRole(roleList) {
+    var authorized = getSessionAuthorizedRoles();
+    return (roleList || []).some(function (role) {
+      return authorized.indexOf(String(role || "").toLowerCase()) >= 0;
+    });
+  }
+
+  function launcherAllowedRouteMap() {
+    var allowed = {};
+    getSessionAuthorizedRoles().forEach(function (role) {
+      var routes = ROLE_ACCESS[role];
+      if (!routes) {
+        return;
+      }
+      routes.forEach(function (route) {
+        allowed[route] = true;
+      });
+    });
+    return allowed;
+  }
+
+  function renderLauncherTile(tile) {
+    var href = escapeHtml(tile.href);
+    var routeAttr = tile.route ? ' data-launcher-route="' + escapeHtml(tile.route) + '"' : "";
+    var kicker = tile.kicker ? '<span class="ops-launcher-kicker">' + escapeHtml(tile.kicker) + "</span>" : "";
+    return '<a class="ops-launcher-tile" href="' + href + '"' + routeAttr + '>' +
+      kicker +
+      "<strong>" + escapeHtml(tile.title) + "</strong>" +
+      "<span>" + escapeHtml(tile.description) + "</span>" +
+      "</a>";
+  }
+
+  function renderOperationsHome() {
+    var authenticated = !!getAccessToken();
+    var sessionRoles = getSessionAuthorizedRoles();
+    var allowedRoutes = launcherAllowedRouteMap();
+    var coreTiles = LAUNCHER_CORE_TILES.filter(function (tile) {
+      return !!allowedRoutes[tile.route];
+    }).map(function (tile) {
+      return {
+        route: tile.route,
+        href: safeText((ROUTES[tile.route] || {}).path, APP_BASE_PATH),
+        title: tile.title,
+        description: tile.description,
+        kicker: "App"
+      };
+    });
+    var extraTiles = LAUNCHER_EXTRA_TILES.filter(function (tile) {
+      return sessionHasAnyRole(tile.roles);
+    }).map(function (tile) {
+      return {
+        href: tile.href,
+        title: tile.title,
+        description: tile.description,
+        kicker: tile.external ? "Tool" : "Workspace"
+      };
+    });
+
+    if (!authenticated) {
+      return renderPanelBlock(
+        "AMICOR Operations",
+        "Sign in to open the apps allowed for your role.",
+        '<p class="muted">This launcher uses your authenticated session. The role selector is a view lens only and does not grant extra apps.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>",
+        "home"
+      );
+    }
+
+    var coreHtml = coreTiles.length
+      ? '<div class="ops-launcher-grid">' + coreTiles.map(renderLauncherTile).join("") + "</div>"
+      : '<p class="muted">No mapped AMICOR apps for this account. Backend roles such as staff, analytics_readonly, or super_admin_support are not in the ops-shell ROLE_ACCESS matrix.</p>';
+    var extraHtml = extraTiles.length
+      ? '<div class="ops-launcher-grid">' + extraTiles.map(renderLauncherTile).join("") + "</div>"
+      : '<p class="muted">No additional operational tools are authorized for this session.</p>';
+    var roleLabel = sessionRoles.length ? sessionRoles.join(", ") : "unknown";
+
+    return [
+      renderPanelBlock(
+        "AMICOR Operations",
+        "Choose an application. Each tile opens an existing AMICOR surface — nothing here replaces Driver Mobile, Rider, Dispatch, Billing, or Nova.",
+        '<div class="ops-launcher-session">' +
+          '<span class="badge badge-soft">session roles: ' + escapeHtml(roleLabel) + "</span>" +
+        "</div>" +
+        coreHtml +
+        '<div class="ops-launcher-actions">' +
+          '<button type="button" class="preview-action secondary" data-launcher-action="sign-out">Sign out</button>' +
+        "</div>",
+        "home"
+      ),
+      renderPanelBlock(
+        "Authorized tools",
+        "Hidden or deep-linked operational tools already in the repository.",
+        extraHtml,
+        "tools"
+      )
+    ].join("");
   }
 
   function switchRoleView(role, pushHistory) {
@@ -2962,7 +3517,7 @@
       head += '<p class="section-subtitle">' + escapeHtml(subtitle) + '</p>';
     }
     head += '</div></div>';
-    return '<section class="' + classes + '">' + head + body + '</section>';
+    return '<section class="' + classes + '"' + (eyebrow ? ' id="' + escapeHtml(eyebrow) + '"' : "") + '>' + head + body + '</section>';
   }
 
   function renderQuickLinks(items) {
@@ -5430,7 +5985,20 @@
       riderPhone: safeText(payload.riderPhone, ""),
       pickup: safeText(payload.pickup, "Pickup pending"),
       dropoff: safeText(payload.dropoff, "Dropoff pending"),
-      etaMin: safeNumber(payload.etaMin, 0),
+      etaMin: finiteEtaMinutes(payload.etaMin),
+      pickupEtaMin: finiteEtaMinutes(payload.pickupEtaMin),
+      destinationEtaMin: finiteEtaMinutes(payload.destinationEtaMin),
+      routeLeg: safeText(payload.routeLeg, ""),
+      routePolyline: Array.isArray(payload.routePolyline) ? payload.routePolyline : [],
+      pickupLat: finiteCoordinate(payload.pickupLat),
+      pickupLng: finiteCoordinate(payload.pickupLng),
+      dropoffLat: finiteCoordinate(payload.dropoffLat),
+      dropoffLng: finiteCoordinate(payload.dropoffLng),
+      driverLat: finiteCoordinate(payload.driverLat),
+      driverLng: finiteCoordinate(payload.driverLng),
+      driverGpsAvailable: payload.driverGpsAvailable === true,
+      etaUnavailableReason: safeText(payload.etaUnavailableReason, ""),
+      routingProvider: safeText(payload.routingProvider, ""),
       priority: safeText(payload.priority, "standard"),
       fare: safeNumber(payload.fare, 0),
       status: normalizeDriverTripStatus(payload.status || "queued"),
@@ -5795,7 +6363,6 @@
           riderPhone: canonicalRide.passenger_phone || canonicalRide.rider_phone,
           pickup: canonicalRide.pickup_address || canonicalRide.pickup,
           dropoff: canonicalRide.dropoff_address || canonicalRide.dropoff,
-          etaMin: activeRidePayload.eta_minutes,
           priority: canonicalRide.priority_tag,
           fare: canonicalRide.estimated_fare_usd,
           status: canonicalStatus,
@@ -5805,7 +6372,8 @@
           assignedDriver: resolveAssignmentDriverId(canonicalAssignment) || resolveRideDriverId(canonicalRide) || workflowDriverId,
           assignedDriverName: activeRidePayload.driver_name,
           offerId: canonicalAssignment.offer_id || canonicalAssignment.id,
-          trustedFromBackend: true
+          trustedFromBackend: true,
+          ...routingFieldsFromPayload(activeRidePayload)
         }),
           canonicalRide,
           activeOffer,
@@ -5882,6 +6450,19 @@
             pickup: activeRide.pickup_address || activeRide.pickup,
             dropoff: activeRide.dropoff_address || activeRide.dropoff,
             etaMin: liveWorkspace.eta_minutes,
+            pickupEtaMin: liveWorkspace.pickup_eta_minutes,
+            destinationEtaMin: liveWorkspace.destination_eta_minutes,
+            routeLeg: liveWorkspace.route_leg,
+            routePolyline: liveWorkspace.route_polyline,
+            pickupLat: liveWorkspace.pickup_latitude,
+            pickupLng: liveWorkspace.pickup_longitude,
+            dropoffLat: liveWorkspace.dropoff_latitude,
+            dropoffLng: liveWorkspace.dropoff_longitude,
+            driverLat: liveWorkspace.driver_latitude,
+            driverLng: liveWorkspace.driver_longitude,
+            driverGpsAvailable: liveWorkspace.driver_gps_available === true,
+            etaUnavailableReason: liveWorkspace.eta_unavailable_reason,
+            routingProvider: liveWorkspace.routing_provider,
             priority: activeRide.priority_tag,
             fare: activeRide.estimated_fare_usd,
             status: workspaceAssignmentState || workspaceRideStatus,
@@ -6171,6 +6752,19 @@
       pickup: ride.pickup_address || ride.pickup,
       dropoff: ride.dropoff_address || ride.dropoff,
       etaMin: activeRidePayload.eta_minutes,
+      pickupEtaMin: activeRidePayload.pickup_eta_minutes,
+      destinationEtaMin: activeRidePayload.destination_eta_minutes,
+      routeLeg: activeRidePayload.route_leg,
+      routePolyline: activeRidePayload.route_polyline,
+      pickupLat: activeRidePayload.pickup_latitude,
+      pickupLng: activeRidePayload.pickup_longitude,
+      dropoffLat: activeRidePayload.dropoff_latitude,
+      dropoffLng: activeRidePayload.dropoff_longitude,
+      driverLat: activeRidePayload.driver_latitude,
+      driverLng: activeRidePayload.driver_longitude,
+      driverGpsAvailable: activeRidePayload.driver_gps_available === true,
+      etaUnavailableReason: activeRidePayload.eta_unavailable_reason,
+      routingProvider: activeRidePayload.routing_provider,
       priority: ride.priority_tag,
       fare: ride.estimated_fare_usd,
       status: status,
@@ -6206,7 +6800,7 @@
           '<p><strong>' + escapeHtml(safeText(trip.patient, 'patient')) + '</strong> • ' + escapeHtml(titleizeWords(safeText(trip.type, 'ride'))) + '</p>' +
           '<p class="muted">Pickup Facility: ' + escapeHtml(safeText(trip.pickup, 'pickup')) + ' → Destination Facility: ' + escapeHtml(safeText(trip.dropoff, 'dropoff')) + '</p>' +
           '<div class="driver-trip-meta">' +
-            '<span>ETA ' + escapeHtml(String(safeNumber(trip.etaMin, 0))) + ' min</span>' +
+            '<span>ETA ' + escapeHtml(formatDriverEtaDisplay(trip.etaMin)) + '</span>' +
             '<span>Window ' + escapeHtml(scheduledWindow) + '</span>' +
             '<span>Coordination ' + escapeHtml(titleizeWords(coordinationStatus)) + '</span>' +
             '<span>$' + escapeHtml(String(safeNumber(trip.fare, 0).toFixed(2))) + '</span>' +
@@ -6254,19 +6848,79 @@
     return '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Reference</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
-  function driverMapPointFromAddress(address, xShift, yShift) {
-    var text = safeText(address, "");
-    var hash = 0;
-    for (var i = 0; i < text.length; i += 1) {
-      hash = ((hash << 5) - hash) + text.charCodeAt(i);
-      hash |= 0;
+  var driverLeafletMap = null;
+  var lastDriverMapTrip = null;
+
+  function destroyDriverLeafletMap() {
+    if (driverLeafletMap) {
+      driverLeafletMap.remove();
+      driverLeafletMap = null;
     }
-    var x = 48 + ((Math.abs(hash) % 180) + safeNumber(xShift, 0));
-    var y = 44 + ((Math.abs(hash >> 3) % 100) + safeNumber(yShift, 0));
-    return {
-      x: Math.max(26, Math.min(270, x)),
-      y: Math.max(24, Math.min(154, y))
-    };
+  }
+
+  function mountDriverOperationalMap() {
+    var host = document.getElementById("driver-operational-map");
+    if (!host) {
+      destroyDriverLeafletMap();
+      return;
+    }
+    var trip = lastDriverMapTrip;
+    if (!trip || typeof window.L === "undefined") {
+      host.innerHTML = '<p class="muted" style="padding:12px;">Map tiles load when Leaflet is available and pickup coordinates exist.</p>';
+      return;
+    }
+    var pickupLat = finiteCoordinate(trip.pickupLat);
+    var pickupLng = finiteCoordinate(trip.pickupLng);
+    var dropoffLat = finiteCoordinate(trip.dropoffLat);
+    var dropoffLng = finiteCoordinate(trip.dropoffLng);
+    var driverLat = finiteCoordinate(trip.driverLat);
+    var driverLng = finiteCoordinate(trip.driverLng);
+    var bounds = [];
+    if (pickupLat != null && pickupLng != null) bounds.push([pickupLat, pickupLng]);
+    if (dropoffLat != null && dropoffLng != null) bounds.push([dropoffLat, dropoffLng]);
+    if (trip.driverGpsAvailable && driverLat != null && driverLng != null) bounds.push([driverLat, driverLng]);
+    var polyline = Array.isArray(trip.routePolyline) ? trip.routePolyline.filter(function (pair) {
+      return Array.isArray(pair) && pair.length >= 2 && Number.isFinite(Number(pair[0])) && Number.isFinite(Number(pair[1]));
+    }).map(function (pair) { return [Number(pair[0]), Number(pair[1])]; }) : [];
+    polyline.forEach(function (pair) { bounds.push(pair); });
+    if (!bounds.length) {
+      destroyDriverLeafletMap();
+      host.innerHTML = '<p class="muted" style="padding:12px;">No geographic coordinates yet. ETA stays unavailable until pickup/dropoff geocode succeeds.</p>';
+      return;
+    }
+    if (driverLeafletMap && driverLeafletMap._amicorHost !== host) {
+      destroyDriverLeafletMap();
+    }
+    if (!driverLeafletMap) {
+      driverLeafletMap = window.L.map(host, { zoomControl: true, attributionControl: true });
+      driverLeafletMap._amicorHost = host;
+      window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(driverLeafletMap);
+    } else {
+      driverLeafletMap.eachLayer(function (layer) {
+        if (layer instanceof window.L.Marker || layer instanceof window.L.Polyline || layer instanceof window.L.CircleMarker) {
+          driverLeafletMap.removeLayer(layer);
+        }
+      });
+    }
+    if (polyline.length >= 2) {
+      window.L.polyline(polyline, { color: "#2563eb", weight: 4 }).addTo(driverLeafletMap);
+    }
+    if (pickupLat != null && pickupLng != null) {
+      window.L.circleMarker([pickupLat, pickupLng], { radius: 7, color: "#16a34a", fillColor: "#16a34a", fillOpacity: 1 }).addTo(driverLeafletMap).bindTooltip("Pickup");
+    }
+    if (dropoffLat != null && dropoffLng != null) {
+      window.L.circleMarker([dropoffLat, dropoffLng], { radius: 7, color: "#dc2626", fillColor: "#dc2626", fillOpacity: 1 }).addTo(driverLeafletMap).bindTooltip("Dropoff");
+    }
+    if (trip.driverGpsAvailable && driverLat != null && driverLng != null) {
+      window.L.marker([driverLat, driverLng]).addTo(driverLeafletMap).bindTooltip("Driver");
+    }
+    driverLeafletMap.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+    setTimeout(function () {
+      if (driverLeafletMap) driverLeafletMap.invalidateSize();
+    }, 50);
   }
 
   function renderDriverOperationalMap(activeTrip) {
@@ -6276,33 +6930,28 @@
     var pickupAddress = safeText(activeTrip.pickup, "Pickup pending");
     var dropoffAddress = safeText(activeTrip.dropoff, "Dropoff pending");
     var tripStatus = titleizeWords(safeText(activeTrip.status, "queued"));
-    var etaText = String(safeNumber(activeTrip.etaMin, 0)) + " min";
-    var pickupPoint = driverMapPointFromAddress(pickupAddress, 0, 0);
-    var dropoffPoint = driverMapPointFromAddress(dropoffAddress, 22, 16);
-    var driverPoint = {
-      x: Math.round((pickupPoint.x + dropoffPoint.x) / 2),
-      y: Math.round((pickupPoint.y + dropoffPoint.y) / 2)
-    };
-    var routeDistance = Math.round(Math.hypot(dropoffPoint.x - pickupPoint.x, dropoffPoint.y - pickupPoint.y));
-
+    var etaText = formatDriverEtaDisplay(
+      safeText(activeTrip.routeLeg, "") === "pickup_to_destination"
+        ? activeTrip.destinationEtaMin
+        : (activeTrip.pickupEtaMin != null ? activeTrip.pickupEtaMin : activeTrip.etaMin)
+    );
+    var pickupLat = finiteCoordinate(activeTrip.pickupLat);
+    var pickupLng = finiteCoordinate(activeTrip.pickupLng);
+    var dropoffLat = finiteCoordinate(activeTrip.dropoffLat);
+    var dropoffLng = finiteCoordinate(activeTrip.dropoffLng);
+    var hasGeo = pickupLat != null && pickupLng != null;
+    lastDriverMapTrip = activeTrip;
+    var caption = hasGeo
+      ? "Road route from geocoded pickup/dropoff. Driver marker appears only with a real GPS ping."
+      : "Waiting for geocoded coordinates. Addresses are shown below; the map stays empty until Nominatim returns a result.";
     return '' +
       '<article class="driver-workflow-card">' +
         '<h4>Driver Map Panel</h4>' +
-        '<p class="muted">Live operational route generated from current trip pickup/dropoff values.</p>' +
-        '<svg viewBox="0 0 320 190" width="100%" height="220" aria-label="Driver route map" style="background:linear-gradient(180deg,#f8fbff 0%,#eef5ff 100%);border:1px solid rgba(15,23,42,0.12);border-radius:12px;">' +
-          '<path d="M18 160 L302 160" stroke="#d4ddea" stroke-width="8" fill="none"></path>' +
-          '<path d="M26 20 L26 170" stroke="#e4ebf6" stroke-width="6" fill="none"></path>' +
-          '<line x1="' + String(pickupPoint.x) + '" y1="' + String(pickupPoint.y) + '" x2="' + String(dropoffPoint.x) + '" y2="' + String(dropoffPoint.y) + '" stroke="#2563eb" stroke-width="4" stroke-dasharray="6 4"></line>' +
-          '<circle cx="' + String(pickupPoint.x) + '" cy="' + String(pickupPoint.y) + '" r="7" fill="#16a34a"></circle>' +
-          '<circle cx="' + String(dropoffPoint.x) + '" cy="' + String(dropoffPoint.y) + '" r="7" fill="#dc2626"></circle>' +
-          '<rect x="' + String(driverPoint.x - 6) + '" y="' + String(driverPoint.y - 6) + '" width="12" height="12" rx="3" fill="#0f172a"></rect>' +
-          '<text x="' + String(pickupPoint.x + 10) + '" y="' + String(pickupPoint.y - 10) + '" font-size="11" fill="#0f172a">Pickup</text>' +
-          '<text x="' + String(dropoffPoint.x + 10) + '" y="' + String(dropoffPoint.y - 10) + '" font-size="11" fill="#0f172a">Dropoff</text>' +
-          '<text x="' + String(driverPoint.x + 10) + '" y="' + String(driverPoint.y + 20) + '" font-size="11" fill="#0f172a">Driver</text>' +
-        '</svg>' +
+        '<p class="muted">' + escapeHtml(caption) + '</p>' +
+        '<div id="driver-operational-map" role="img" aria-label="Driver route map"></div>' +
         '<div class="grid-3" style="margin-top:10px;">' +
           renderMetric('Route ETA', etaText, 'status') +
-          renderMetric('Route Length', String(routeDistance), 'status') +
+          renderMetric('Route Leg', titleizeWords(safeText(activeTrip.routeLeg, "unavailable")), 'status') +
           renderMetric('Trip Status', tripStatus, 'status') +
         '</div>' +
         '<p class="muted">Pickup: ' + escapeHtml(pickupAddress) + '<br>Dropoff: ' + escapeHtml(dropoffAddress) + '</p>' +
@@ -6730,7 +7379,7 @@
     var disableArriveDestination = !shiftOnline || !activeTrip || !canArriveDestination || isTerminal;
     var disableComplete = !shiftOnline || !activeTrip || !canComplete || isTerminal;
     var secondaryTab = safeText(appState.secondaryTab, "earnings").toLowerCase();
-    var etaText = String(activeTrip ? safeNumber(activeTrip.etaMin, 0) : 0) + " min";
+    var etaText = formatDriverEtaDisplay(activeTrip ? activeTrip.etaMin : null);
     var notifications = Array.isArray(appState.notifications) ? appState.notifications : [];
     var allRides = Array.isArray((safeObject(state.liveWorkflow)).rides) ? state.liveWorkflow.rides : [];
     var providers = Array.isArray((safeObject(state.liveWorkflow)).providers) ? state.liveWorkflow.providers : [];
@@ -9601,8 +10250,10 @@
         execution_id: safeText((verifiedPayload.workflow_execution || {}).execution_id, "")
       }, "");
       await refreshAssistantPersistence();
+      await maybeLaunchNovaWorkflowRunner(promptText, normalizedIntent);
     } catch (error) {
       state.assistant.pendingIntent = null;
+      markNovaWorkflowConfirmFailed(promptText, safeText(error && error.message, "unknown_error"));
       addToolEvent("failed", "Workflow request failed", "Workflow preview failed: " + safeText(error && error.message, "unknown_error") + ".");
       addAssistantMessage("assistant", "Assistant", "Workflow request ended safely. No operational state change path was triggered.");
       await safeLogAssistantEvent("workflow", "assistant_execution_failed", "failed", { intent: normalizedIntent }, safeText(error && error.message, "unknown_error"));
@@ -9791,7 +10442,98 @@
     '</div>';
   }
 
-  function renderAssistant() {
+  function normalizeNovaPane(pane) {
+    var key = String(pane || "").replace(/^nova-/, "").toLowerCase();
+    return NOVA_SHELL_PANE_IDS.indexOf(key) >= 0 ? key : "governance";
+  }
+
+  function novaPaneFromHash() {
+    var hash = String((window.location && window.location.hash) || "").replace(/^#/, "");
+    if (!hash) return "governance";
+    return normalizeNovaPane(hash);
+  }
+
+  function novaPaneMeta(paneId) {
+    var key = normalizeNovaPane(paneId);
+    var found = null;
+    NOVA_SHELL_PANES.forEach(function (pane) {
+      if (pane.id === key) found = pane;
+    });
+    return found || NOVA_SHELL_PANES[0];
+  }
+
+  function setNovaShellPane(pane, updateHash) {
+    var next = normalizeNovaPane(pane);
+    state.assistant.novaShellPane = next;
+    if (updateHash !== false && state.route === "ai-assistant") {
+      var nextHash = "#nova-" + next;
+      if (String(window.location.hash || "") !== nextHash) {
+        history.replaceState(
+          { route: "ai-assistant", role: state.role, novaPane: next },
+          "",
+          safeText((ROUTES["ai-assistant"] || {}).path, APP_BASE_PATH + "/ai-assistant") + nextHash
+        );
+      }
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant") {
+      renderPage();
+    }
+  }
+
+  function renderNovaShellNav() {
+    var current = normalizeNovaPane(state.assistant.novaShellPane);
+    return '<nav class="nova-shell-nav" role="tablist" aria-label="Amicor Nova areas">' +
+      NOVA_SHELL_PANES.map(function (pane) {
+        var selected = pane.id === current;
+        var active = selected ? " is-active" : "";
+        return '<button type="button" class="nova-shell-tab' + active + '" role="tab" data-nova-pane="' + escapeHtml(pane.id) + '" aria-selected="' + (selected ? "true" : "false") + '" aria-controls="nova-' + escapeHtml(pane.id) + '">' +
+          '<span class="ops-launcher-kicker">' + escapeHtml(pane.kicker) + "</span>" +
+          "<strong>" + escapeHtml(pane.title) + "</strong>" +
+        "</button>";
+      }).join("") +
+      "</nav>";
+  }
+
+  function renderNovaPreparedPane(pane) {
+    var sourceNote = pane.source
+      ? '<p>Live source remains <a href="' + escapeHtml(pane.source) + '">' + escapeHtml(pane.source) + "</a> during this phase. This shell does not duplicate that engine.</p>"
+      : '<p class="muted">Current live capability for this concern stays on the Governance pane until a later phase.</p>';
+    return renderPanelBlock(
+      pane.title,
+      pane.subtitle,
+      '<p class="muted">Prepared area only. This later pane is not wired yet. The shell does not duplicate a live engine here.</p>' +
+        sourceNote +
+        '<p class="muted">This pane does not call unauthenticated legacy endpoints and does not use /api/ops/workspace/action as a Nova execution backend.</p>',
+      "nova-" + pane.id
+    );
+  }
+
+  function renderNovaShellChrome() {
+    return '<section class="panel nova-shell-chrome" data-nova-shell="true">' +
+      '<div class="ops-launcher-session">' +
+        '<span class="badge badge-soft">AMICOR NOVA home</span>' +
+        '<span class="badge badge-soft">governance live</span>' +
+        '<span class="badge badge-soft">conversation live</span>' +
+        '<span class="badge badge-soft">voice live</span>' +
+        '<span class="badge badge-soft">files live</span>' +
+        '<span class="badge badge-soft">memory live</span>' +
+        '<span class="badge badge-soft">tools live</span>' +
+        '<span class="badge badge-soft">approvals live</span>' +
+        '<span class="badge badge-soft">workflows live</span>' +
+        '<span class="badge badge-soft">health-isf live</span>' +
+        '<span class="badge badge-soft">/workspace remains the live conversation source</span>' +
+      "</div>" +
+      "<h3>Amicor Nova</h3>" +
+      '<p class="section-subtitle">Unified Nova shell inside /app/ai-assistant. Supervised governance, authenticated conversation, voice, files, memory/continuity, business tools, Approval Center, workflows/tasks, and Health ISF intelligence are live here. /workspace stays available as fallback.</p>' +
+      (getAccessToken()
+        ? '<div class="ops-launcher-actions"><button type="button" class="preview-action secondary" data-launcher-action="sign-out">Sign out</button></div>'
+        : '<div class="ops-launcher-actions"><button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button></div>') +
+      renderNovaShellNav() +
+    "</section>";
+  }
+
+  function renderNovaGovernanceChassis() {
     var supervision = state.supervision || {};
     var health = state.health || {};
     var events = Array.isArray(supervision.recent_events) ? supervision.recent_events : [];
@@ -9924,6 +10666,2411 @@
         "session"
       )
     ].join("");
+  }
+
+  var novaConversationAbort = null;
+
+  function novaConversationState() {
+    if (!state.assistant.novaConversation || typeof state.assistant.novaConversation !== "object") {
+      state.assistant.novaConversation = {
+        userId: "",
+        messages: [],
+        draft: "",
+        streaming: false,
+        error: "",
+        historyLoaded: false,
+        status: "idle"
+      };
+    }
+    return state.assistant.novaConversation;
+  }
+
+  function novaAuthenticatedUserId() {
+    try {
+      if (window.AmiCorSession && typeof window.AmiCorSession.getUserId === "function") {
+        return safeText(window.AmiCorSession.getUserId(), "");
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  function novaConversationAuthFetch(url, options) {
+    var opts = options || {};
+    if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+      return window.AmiCorSession.authFetch(url, opts);
+    }
+    var headers = Object.assign({}, opts.headers || {});
+    var token = getAccessToken();
+    if (token && !headers.Authorization && !headers.authorization) {
+      headers.Authorization = "Bearer " + token;
+    }
+    return fetch(url, Object.assign({}, opts, { headers: headers }));
+  }
+
+  function renderNovaConversationMessages(messages, streaming) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return '<p class="muted" id="nova-conversation-empty">No messages yet. Ask Nova a question to start this authenticated conversation.</p>';
+    }
+    return '<div class="nova-conversation-thread" id="nova-conversation-thread">' + messages.map(function (message, index) {
+      var role = safeText(message.role, "assistant") === "user" ? "user" : "assistant";
+      var isLastAssistant = streaming && index === messages.length - 1 && role === "assistant";
+      return '<article class="nova-conversation-msg nova-conversation-msg-' + role + '"' + (isLastAssistant ? ' id="nova-conversation-stream"' : "") + ">" +
+        "<strong>" + (role === "user" ? "You" : "Nova") + "</strong>" +
+        "<p>" + escapeHtml(safeText(message.content, "")).replace(/\n/g, "<br>") + "</p>" +
+      "</article>";
+    }).join("") + "</div>";
+  }
+
+  function renderNovaConversationPane() {
+    var convo = novaConversationState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var streaming = Boolean(convo.streaming);
+    var status = safeText(convo.status, "idle");
+    var errorText = safeText(convo.error, "");
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Conversation",
+        "Authenticated Nova conversation using POST /api/chat, POST /api/chat/stream, GET /api/history/{user_id}, and POST /api/reset.",
+        '<p class="muted">Sign in to use Nova conversation. Identity comes from the verified JWT/session, not a client-supplied user_id.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-conversation"
+      );
+    }
+    return renderPanelBlock(
+      "Conversation",
+      "Native Nova conversation in /app/ai-assistant. Uses the existing authenticated chat engine.",
+      '<p class="muted">Endpoints: /api/chat/stream, /api/chat, /api/history/{user_id}, /api/reset. Auth: AmiCorSession.authFetch. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-conversation-status">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-conversation-error">' + escapeHtml(errorText) + "</p>" : "") +
+        renderNovaConversationMessages(convo.messages, streaming) +
+        (streaming ? '<div class="assistant-loading"><span class="dot-flash"></span><span>Nova is responding...</span></div>' : "") +
+        '<form id="nova-conversation-form" class="assistant-form" novalidate>' +
+          '<label for="nova-conversation-input" class="sr-only">Nova conversation input</label>' +
+          '<textarea id="nova-conversation-input" rows="4" maxlength="8000" placeholder="Message Nova...">' + escapeHtml(safeText(convo.draft, "")) + "</textarea>" +
+          '<div class="assistant-form-actions">' +
+            '<button type="button" class="assistant-submit secondary" data-nova-conversation-reset="true" ' + (streaming ? "disabled" : "") + ">New conversation</button>" +
+            '<button type="submit" class="assistant-submit" ' + (streaming ? "disabled" : "") + ">Send</button>" +
+          "</div>" +
+        "</form>",
+      "nova-conversation"
+    );
+  }
+
+  function updateNovaConversationStreamDom(content) {
+    var el = document.getElementById("nova-conversation-stream");
+    if (el) {
+      var paragraph = el.querySelector("p");
+      if (paragraph) {
+        paragraph.innerHTML = escapeHtml(safeText(content, "")).replace(/\n/g, "<br>");
+      }
+    }
+    var toolsResult = document.getElementById("nova-tools-result-body");
+    if (toolsResult) {
+      toolsResult.innerHTML = escapeHtml(safeText(content, "")).replace(/\n/g, "<br>");
+    }
+  }
+
+  function novaMemoryState() {
+    if (!state.assistant.novaMemory || typeof state.assistant.novaMemory !== "object") {
+      state.assistant.novaMemory = {
+        userId: "",
+        summary: "",
+        preferences: {},
+        messages: [],
+        loaded: false,
+        status: "idle",
+        error: ""
+      };
+    }
+    if (!state.assistant.novaMemory.preferences || typeof state.assistant.novaMemory.preferences !== "object") {
+      state.assistant.novaMemory.preferences = {};
+    }
+    if (!Array.isArray(state.assistant.novaMemory.messages)) {
+      state.assistant.novaMemory.messages = [];
+    }
+    return state.assistant.novaMemory;
+  }
+
+  function applyNovaHistoryPayload(payload, userId) {
+    var convo = novaConversationState();
+    var memory = novaMemoryState();
+    var body = payload && typeof payload === "object" ? payload : {};
+    var memoryBody = body.memory && typeof body.memory === "object" ? body.memory : {};
+    var rows = Array.isArray(body.messages) ? body.messages : [];
+    var messages = rows.map(function (row) {
+      return {
+        role: safeText(row.role, "assistant") === "user" ? "user" : "assistant",
+        content: safeText(row.content, "")
+      };
+    }).filter(function (row) {
+      return !!row.content;
+    });
+    var preferences = memoryBody.preferences && typeof memoryBody.preferences === "object" ? memoryBody.preferences : {};
+    convo.userId = userId;
+    convo.messages = messages;
+    convo.historyLoaded = true;
+    memory.userId = userId;
+    memory.summary = safeText(memoryBody.summary, "");
+    memory.preferences = preferences;
+    memory.messages = messages;
+    memory.loaded = true;
+    memory.status = "idle";
+    memory.error = "";
+  }
+
+  async function loadNovaConversationHistory() {
+    var convo = novaConversationState();
+    var userId = novaAuthenticatedUserId();
+    if (!getAccessToken() || !userId) {
+      convo.historyLoaded = false;
+      return;
+    }
+    convo.status = "loading";
+    convo.error = "";
+    convo.userId = userId;
+    try {
+      var response = await novaConversationAuthFetch("/api/history/" + encodeURIComponent(userId) + "?limit=40", {
+        method: "GET"
+      });
+      if (response.status === 401) {
+        convo.error = "Sign in required to load conversation history.";
+        convo.status = "error";
+        novaMemoryState().status = "error";
+        novaMemoryState().error = "Sign in required to load memory/continuity.";
+        renderPage();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("history_http_" + response.status);
+      }
+      var payload = await response.json();
+      applyNovaHistoryPayload(payload, userId);
+      convo.status = "idle";
+    } catch (error) {
+      convo.error = "Could not load conversation history.";
+      convo.status = "error";
+      novaMemoryState().status = "error";
+      novaMemoryState().error = "Could not load memory/continuity.";
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant") {
+      var pane = normalizeNovaPane(state.assistant.novaShellPane);
+      if (pane === "conversation" || pane === "memory") {
+        renderPage();
+      }
+    }
+  }
+
+  function ensureNovaConversationHydrated() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "conversation") return;
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    var convo = novaConversationState();
+    if (convo.streaming || convo.status === "loading") return;
+    if (convo.historyLoaded && convo.userId === novaAuthenticatedUserId()) return;
+    if (convo.status === "error" && convo.userId === novaAuthenticatedUserId()) return;
+    void loadNovaConversationHistory();
+  }
+
+  async function consumeNovaChatStream(response, onToken) {
+    if (!response || !response.body || typeof response.body.getReader !== "function") {
+      return { usedStream: false, reply: "" };
+    }
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = "";
+    var fullContent = "";
+    var completeReply = "";
+    var completeMeta = null;
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      var lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (var i = 0; i < lines.length; i += 1) {
+        var line = lines[i];
+        if (line.indexOf("data: ") !== 0) continue;
+        var raw = line.slice(6).trim();
+        if (raw === "[DONE]") {
+          return { usedStream: true, reply: completeReply || fullContent, meta: completeMeta };
+        }
+        try {
+          var evt = JSON.parse(raw);
+          if (evt.type === "token") {
+            fullContent += safeText(evt.content, "");
+            onToken(fullContent);
+          } else if (evt.type === "complete") {
+            completeReply = safeText(evt.reply, fullContent);
+            if (evt.meta && typeof evt.meta === "object") completeMeta = evt.meta;
+            onToken(completeReply);
+          } else if (evt.type === "error") {
+            throw new Error(safeText(evt.content, "stream_error"));
+          }
+        } catch (parseError) {
+          if (parseError && parseError.message && parseError.message !== "stream_error" && String(parseError.message).indexOf("JSON") < 0) {
+            throw parseError;
+          }
+        }
+      }
+    }
+    return { usedStream: true, reply: completeReply || fullContent, meta: completeMeta };
+  }
+
+  async function sendNovaConversationMessage(promptText) {
+    var convo = novaConversationState();
+    var userId = novaAuthenticatedUserId();
+    var message = safeText(promptText, "").trim();
+    if (!message || convo.streaming) return;
+    if (!getAccessToken() || !userId) {
+      convo.error = "Sign in required to send a Nova message.";
+      convo.status = "error";
+      renderPage();
+      return;
+    }
+    if (novaConversationAbort && typeof novaConversationAbort.abort === "function") {
+      try { novaConversationAbort.abort("replaced"); } catch (_) {}
+    }
+    novaConversationAbort = typeof AbortController === "function" ? new AbortController() : null;
+    convo.draft = "";
+    convo.error = "";
+    convo.streaming = true;
+    convo.status = "streaming";
+    convo.userId = userId;
+    convo.messages.push({ role: "user", content: message });
+    convo.messages.push({ role: "assistant", content: "" });
+    persistSessionState();
+    renderPage();
+    try {
+      var streamRes = await novaConversationAuthFetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, message: message }),
+        signal: novaConversationAbort ? novaConversationAbort.signal : undefined
+      });
+      if (streamRes.status === 401) {
+        throw new Error("sign_in_required");
+      }
+      if (streamRes.status === 403) {
+        throw new Error("identity_mismatch");
+      }
+      var reply = "";
+      var chatMeta = null;
+      if (streamRes.ok) {
+        var streamed = await consumeNovaChatStream(streamRes, function (content) {
+          var last = convo.messages[convo.messages.length - 1];
+          if (last && last.role === "assistant") {
+            last.content = content;
+          }
+          updateNovaConversationStreamDom(content);
+        });
+        reply = streamed.reply;
+        chatMeta = streamed.meta || null;
+        if (!streamed.usedStream || !reply) {
+          var fallbackRes = await novaConversationAuthFetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: userId, message: message })
+          });
+          if (!fallbackRes.ok) {
+            throw new Error("chat_http_" + fallbackRes.status);
+          }
+          var fallbackJson = await fallbackRes.json();
+          reply = safeText(((fallbackJson.data || {}).reply), safeText(fallbackJson.reply, ""));
+          chatMeta = ((fallbackJson.data || {}).meta) || fallbackJson.meta || chatMeta;
+        }
+      } else {
+        var chatRes = await novaConversationAuthFetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, message: message })
+        });
+        if (chatRes.status === 401) {
+          throw new Error("sign_in_required");
+        }
+        if (!chatRes.ok) {
+          throw new Error("chat_http_" + chatRes.status);
+        }
+        var chatJson = await chatRes.json();
+        reply = safeText(((chatJson.data || {}).reply), safeText(chatJson.reply, ""));
+        chatMeta = ((chatJson.data || {}).meta) || chatJson.meta || null;
+      }
+      var lastMessage = convo.messages[convo.messages.length - 1];
+      if (lastMessage && lastMessage.role === "assistant") {
+        lastMessage.content = reply || lastMessage.content || "Nova did not return a reply.";
+      }
+      convo.status = "idle";
+      convo.streaming = false;
+      applyNovaWorkflowChatMeta(chatMeta, reply, false);
+    } catch (error) {
+      var detail = safeText(error && error.message, "conversation_error");
+      if (detail === "sign_in_required") {
+        convo.error = "Sign in required to use Nova conversation.";
+      } else if (detail === "identity_mismatch") {
+        convo.error = "Authenticated identity could not be replaced by another user_id.";
+      } else {
+        convo.error = "Nova conversation request failed. /workspace remains available as fallback.";
+      }
+      convo.status = "error";
+      convo.streaming = false;
+      var failed = convo.messages[convo.messages.length - 1];
+      if (failed && failed.role === "assistant" && !failed.content) {
+        failed.content = "Nova could not complete that reply.";
+      }
+      applyNovaWorkflowChatMeta(null, "", true);
+    }
+    persistSessionState();
+    var pane = normalizeNovaPane(state.assistant.novaShellPane);
+    if (state.route === "ai-assistant" && (pane === "conversation" || pane === "tools" || pane === "workflows")) {
+      if (pane === "tools") {
+        syncNovaToolsResultFromConversation();
+      }
+      renderPage();
+    }
+  }
+
+  async function resetNovaConversation() {
+    var convo = novaConversationState();
+    var userId = novaAuthenticatedUserId();
+    if (convo.streaming) return;
+    if (!getAccessToken() || !userId) {
+      convo.error = "Sign in required to reset Nova conversation.";
+      convo.status = "error";
+      renderPage();
+      return;
+    }
+    convo.status = "loading";
+    convo.error = "";
+    try {
+      var response = await novaConversationAuthFetch("/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId })
+      });
+      if (response.status === 401) {
+        throw new Error("sign_in_required");
+      }
+      if (response.status === 403) {
+        throw new Error("identity_mismatch");
+      }
+      if (!response.ok) {
+        throw new Error("reset_http_" + response.status);
+      }
+      convo.messages = [];
+      convo.draft = "";
+      convo.historyLoaded = true;
+      convo.userId = userId;
+      convo.status = "idle";
+      var memory = novaMemoryState();
+      memory.userId = userId;
+      memory.summary = "";
+      memory.preferences = {};
+      memory.messages = [];
+      memory.loaded = true;
+      memory.status = "idle";
+      memory.error = "";
+    } catch (error) {
+      var detail = safeText(error && error.message, "reset_error");
+      if (detail === "sign_in_required") {
+        convo.error = "Sign in required to reset Nova conversation.";
+      } else if (detail === "identity_mismatch") {
+        convo.error = "Authenticated identity could not be replaced by another user_id.";
+      } else {
+        convo.error = "Could not reset this conversation.";
+      }
+      convo.status = "error";
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant") {
+      var pane = normalizeNovaPane(state.assistant.novaShellPane);
+      if (pane === "conversation" || pane === "memory") {
+        renderPage();
+      }
+    }
+  }
+
+  function bindNovaConversationEvents() {
+    var form = document.getElementById("nova-conversation-form");
+    var input = document.getElementById("nova-conversation-input");
+    var resetButton = document.querySelector("[data-nova-conversation-reset]");
+    if (!form) return;
+    if (form.getAttribute("data-ami-nova-conversation-bound") === "1") {
+      return;
+    }
+    form.setAttribute("data-ami-nova-conversation-bound", "1");
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var text = input ? String(input.value || "").trim() : safeText(novaConversationState().draft, "").trim();
+      void sendNovaConversationMessage(text);
+    });
+    if (input) {
+      input.addEventListener("input", function () {
+        novaConversationState().draft = String(input.value || "");
+        persistSessionState();
+      });
+    }
+    if (resetButton) {
+      resetButton.addEventListener("click", function () {
+        void resetNovaConversation();
+      });
+    }
+  }
+
+  var novaVoiceRuntime = null;
+  var novaHumanVoiceEngine = null;
+  var novaVoiceRecognition = null;
+  var novaVoiceMicStream = null;
+  var novaVoiceShouldSubmitOnEnd = false;
+  var novaVoiceLastRenderKey = "";
+
+  function novaVoiceState() {
+    if (!state.assistant.novaVoice || typeof state.assistant.novaVoice !== "object") {
+      state.assistant.novaVoice = {
+        persona: "Warm Conversational",
+        muted: false,
+        transcript: "",
+        status: "idle",
+        runtimeState: "idle",
+        permission: "unknown",
+        speaking: false,
+        error: "",
+        lastError: "",
+        providers: null,
+        providersLoaded: false,
+        fallback: false,
+        provider: "",
+        latencyMs: 0
+      };
+    }
+    return state.assistant.novaVoice;
+  }
+
+  function syncNovaVoiceFromRuntime(snapshot) {
+    var voice = novaVoiceState();
+    var view = snapshot || (novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" ? novaVoiceRuntime.getSnapshot() : {});
+    voice.runtimeState = safeText(view.runtimeState, voice.runtimeState || "idle");
+    voice.permission = safeText(view.permission, voice.permission || "unknown");
+    voice.muted = Boolean(view.muted);
+    voice.speaking = Boolean(view.speaking);
+    voice.lastError = view.lastError ? String(view.lastError) : "";
+    if (voice.lastError && !voice.error) {
+      voice.error = voice.lastError;
+    }
+  }
+
+  function maybeRenderNovaVoicePane() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "voice") return;
+    var voice = novaVoiceState();
+    var key = [
+      safeText(voice.status, "idle"),
+      safeText(voice.runtimeState, "idle"),
+      safeText(voice.error, ""),
+      safeText(voice.permission, "unknown"),
+      voice.muted ? "1" : "0",
+      voice.speaking ? "1" : "0",
+      voice.fallback ? "1" : "0",
+      safeText(voice.provider, "")
+    ].join("|");
+    if (key === novaVoiceLastRenderKey) return;
+    novaVoiceLastRenderKey = key;
+    renderPage();
+  }
+
+  function updateNovaVoiceDiagnosticsDom() {
+    var voice = novaVoiceState();
+    var providerEl = document.getElementById("nova-voice-active-provider");
+    var fallbackEl = document.getElementById("nova-voice-fallback");
+    var latencyEl = document.getElementById("nova-voice-latency");
+    var transcriptEl = document.getElementById("nova-voice-transcript");
+    if (providerEl) providerEl.textContent = safeText(voice.provider, "none");
+    if (fallbackEl) fallbackEl.textContent = voice.fallback ? "browser fallback" : "provider";
+    if (latencyEl) latencyEl.textContent = String(voice.latencyMs || 0) + " ms";
+    if (transcriptEl) transcriptEl.textContent = safeText(voice.transcript, "Listening will capture speech here.");
+  }
+
+  function novaVoicePersonas() {
+    if (window.AmiCorHumanVoice && Array.isArray(window.AmiCorHumanVoice.personas) && window.AmiCorHumanVoice.personas.length) {
+      return window.AmiCorHumanVoice.personas.slice();
+    }
+    return ["Warm Conversational", "ChatGPT Neutral", "Professional", "Friendly"];
+  }
+
+  function ensureNovaVoiceEngines() {
+    if (!novaVoiceRuntime && window.AmiCorVoiceRuntime && typeof window.AmiCorVoiceRuntime.createVoiceRuntimeController === "function") {
+      novaVoiceRuntime = window.AmiCorVoiceRuntime.createVoiceRuntimeController({
+        onChange: function (snapshot) {
+          syncNovaVoiceFromRuntime(snapshot);
+          maybeRenderNovaVoicePane();
+        }
+      });
+      syncNovaVoiceFromRuntime(novaVoiceRuntime.getSnapshot());
+    }
+    if (!novaHumanVoiceEngine && window.AmiCorHumanVoice && typeof window.AmiCorHumanVoice.createEngine === "function") {
+      novaHumanVoiceEngine = window.AmiCorHumanVoice.createEngine({
+        apiBase: "",
+        browserFallbackEnabled: true,
+        authFetch: novaConversationAuthFetch,
+        onState: function (payload) {
+          var voice = novaVoiceState();
+          var speaking = !!(payload && payload.speaking);
+          voice.speaking = speaking;
+          if (speaking && novaVoiceRuntime && typeof novaVoiceRuntime.setSpeaking === "function") {
+            novaVoiceRuntime.setSpeaking(payload && payload.reason ? payload.reason : "human-voice-speaking");
+            voice.status = "speaking";
+          } else if (!speaking && novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" && novaVoiceRuntime.getSnapshot().runtimeState === "speaking") {
+            novaVoiceRuntime.setIdle(payload && payload.reason ? payload.reason : "human-voice-idle");
+            if (voice.status === "speaking") voice.status = "idle";
+          }
+          maybeRenderNovaVoicePane();
+        },
+        onDebug: function (details) {
+          var voice = novaVoiceState();
+          if (details && details.type === "voice-providers" && details.providers) {
+            voice.providers = details.providers;
+          }
+          if (details && details.type === "voice-chunk") {
+            voice.provider = safeText(details.provider, voice.provider);
+            voice.fallback = !!details.fallback;
+            voice.latencyMs = Number(details.latencyMs || 0);
+          }
+          if (details && details.type === "voice-fallback") {
+            voice.fallback = true;
+            voice.provider = "browser_native";
+          }
+          updateNovaVoiceDiagnosticsDom();
+        }
+      });
+    }
+  }
+
+  function renderNovaVoiceProviderSummary(providers) {
+    var available = (providers && providers.available) ? providers.available : {};
+    var keys = ["openai_realtime_voice", "elevenlabs_conversational", "azure_neural_voice", "browser_native"];
+    return keys.map(function (key) {
+      var on = !!available[key];
+      return '<span class="badge badge-soft">' + escapeHtml(key) + ": " + (on ? "available" : "unavailable") + "</span>";
+    }).join("");
+  }
+
+  function renderNovaVoicePane() {
+    ensureNovaVoiceEngines();
+    var voice = novaVoiceState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var snapshot = novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" ? novaVoiceRuntime.getSnapshot() : {};
+    var runtimeState = safeText(snapshot.runtimeState || voice.runtimeState, "idle");
+    var listening = runtimeState === "listening";
+    var speaking = runtimeState === "speaking" || Boolean(voice.speaking);
+    var processing = runtimeState === "processing" || voice.status === "processing";
+    var muted = Boolean(snapshot.muted || voice.muted);
+    var errorText = safeText(voice.error || snapshot.lastError, "");
+    var personas = novaVoicePersonas();
+    var selectedPersona = personas.indexOf(voice.persona) >= 0 ? voice.persona : "Warm Conversational";
+    var providers = voice.providers || {};
+    var browserOnly = !providers.available || !(providers.available.openai_realtime_voice || providers.available.elevenlabs_conversational || providers.available.azure_neural_voice);
+    novaVoiceLastRenderKey = [
+      safeText(voice.status, "idle"),
+      runtimeState,
+      errorText,
+      safeText(snapshot.permission || voice.permission, "unknown"),
+      muted ? "1" : "0",
+      speaking ? "1" : "0",
+      voice.fallback ? "1" : "0",
+      safeText(voice.provider, "")
+    ].join("|");
+
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Voice",
+        "Authenticated Nova voice using AmiCorVoiceRuntime, AmiCorHumanVoice, GET /api/voice/providers, and POST /api/voice/speak.",
+        '<p class="muted">Sign in to use Nova voice. Identity comes from the verified JWT/session. Voice replies use the same Nova conversation as the Conversation pane.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-voice"
+      );
+    }
+
+    return renderPanelBlock(
+      "Voice",
+      "Native Nova voice in /app/ai-assistant. Reuses the existing voice runtime, human voice engine, and authenticated /api/voice endpoints.",
+      '<p class="muted">Mic speech is sent through the same authenticated Nova conversation (POST /api/chat/stream and POST /api/chat). TTS uses POST /api/voice/speak. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-voice-status" id="nova-voice-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(safeText(voice.status || runtimeState, "idle")) + "</span>" +
+          '<span class="badge badge-soft">runtime: ' + escapeHtml(runtimeState) + "</span>" +
+          '<span class="badge badge-soft">permission: ' + escapeHtml(safeText(snapshot.permission || voice.permission, "unknown")) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          (muted ? '<span class="badge badge-warn">muted</span>' : "") +
+        "</div>" +
+        (errorText ? '<p class="nova-voice-error">' + escapeHtml(errorText) + "</p>" : "") +
+        (browserOnly ? '<p class="muted">No cloud voice provider key is available. Browser speech synthesis remains the fallback.</p>' : "") +
+        '<div class="nova-voice-diagnostics">' +
+          '<p><strong>Providers</strong></p>' +
+          '<div class="nova-voice-status">' + renderNovaVoiceProviderSummary(providers) + "</div>" +
+          '<p class="muted">Active provider: <span id="nova-voice-active-provider">' + escapeHtml(safeText(voice.provider, "none")) + "</span> · Path: <span id=\"nova-voice-fallback\">" + (voice.fallback ? "browser fallback" : "provider") + "</span> · Latency: <span id=\"nova-voice-latency\">" + escapeHtml(String(voice.latencyMs || 0)) + " ms</span></p>" +
+        "</div>" +
+        '<label class="nova-voice-persona" for="nova-voice-persona">Voice persona</label>' +
+        '<select id="nova-voice-persona"' + (listening || speaking || processing ? " disabled" : "") + ">" +
+          personas.map(function (persona) {
+            return '<option value="' + escapeHtml(persona) + '"' + (persona === selectedPersona ? " selected" : "") + ">" + escapeHtml(persona) + "</option>";
+          }).join("") +
+        "</select>" +
+        '<p class="nova-voice-transcript" id="nova-voice-transcript">' + escapeHtml(safeText(voice.transcript, "Listening will capture speech here.")) + "</p>" +
+        (listening || processing || speaking ? '<div class="assistant-loading"><span class="dot-flash"></span><span>' + (listening ? "Listening..." : processing ? "Nova is responding..." : "Nova is speaking...") + "</span></div>" : "") +
+        '<div class="assistant-form-actions nova-voice-actions">' +
+          '<button type="button" class="assistant-submit" data-nova-voice-listen="true" ' + (listening || processing || muted ? "disabled" : "") + ">Start microphone</button>" +
+          '<button type="button" class="assistant-submit secondary" data-nova-voice-stop="true" ' + (!(listening || speaking || processing) ? "disabled" : "") + ">Stop</button>" +
+          '<button type="button" class="assistant-submit secondary" data-nova-voice-mute="true">' + (muted ? "Unmute" : "Mute") + "</button>" +
+          '<button type="button" class="assistant-submit secondary" data-nova-voice-interrupt="true" ' + (!speaking ? "disabled" : "") + ">Interrupt speech</button>" +
+        "</div>",
+      "nova-voice"
+    );
+  }
+
+  function stopNovaVoiceMicTracks() {
+    if (!novaVoiceMicStream) return;
+    try {
+      novaVoiceMicStream.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (_) {}
+      });
+    } catch (_) {}
+    novaVoiceMicStream = null;
+  }
+
+  function teardownNovaVoiceRecognition() {
+    if (!novaVoiceRecognition) return;
+    try { novaVoiceRecognition.onstart = null; } catch (_) {}
+    try { novaVoiceRecognition.onresult = null; } catch (_) {}
+    try { novaVoiceRecognition.onerror = null; } catch (_) {}
+    try { novaVoiceRecognition.onend = null; } catch (_) {}
+    try { novaVoiceRecognition.stop(); } catch (_) {}
+    novaVoiceRecognition = null;
+  }
+
+  async function sendNovaVoiceUtterance(promptText) {
+    var voice = novaVoiceState();
+    var message = safeText(promptText, "").trim();
+    if (!message) return;
+    ensureNovaVoiceEngines();
+    voice.status = "processing";
+    voice.error = "";
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.setProcessing === "function") {
+      novaVoiceRuntime.setProcessing("voice-submit");
+    }
+    persistSessionState();
+    maybeRenderNovaVoicePane();
+    await sendNovaConversationMessage(message);
+    var convo = novaConversationState();
+    var last = (convo.messages || [])[(convo.messages || []).length - 1];
+    var reply = last && last.role === "assistant" ? safeText(last.content, "") : "";
+    if (reply && novaHumanVoiceEngine && typeof novaHumanVoiceEngine.speak === "function") {
+      voice.status = "speaking";
+      maybeRenderNovaVoicePane();
+      try {
+        await novaHumanVoiceEngine.speak(reply, { persona: voice.persona || "Warm Conversational" });
+      } catch (_) {
+        voice.error = "Voice provider unavailable. Browser fallback was attempted.";
+        voice.fallback = true;
+      }
+    }
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" && novaVoiceRuntime.getSnapshot().runtimeState === "processing") {
+      novaVoiceRuntime.setIdle("voice-submit-complete");
+    }
+    voice.status = "idle";
+    persistSessionState();
+    maybeRenderNovaVoicePane();
+  }
+
+  async function startNovaVoiceListening() {
+    var voice = novaVoiceState();
+    ensureNovaVoiceEngines();
+    var snapshot = novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" ? novaVoiceRuntime.getSnapshot() : {};
+    if (snapshot.muted || voice.muted) {
+      voice.error = "Microphone is muted. Unmute it before starting voice.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      voice.error = "Sign in required to use Nova voice.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+    if (novaHumanVoiceEngine && typeof novaHumanVoiceEngine.stop === "function") {
+      novaHumanVoiceEngine.stop("user-interruption-start-recognition");
+    }
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.markInterrupted === "function") {
+      novaVoiceRuntime.markInterrupted("user-interruption-start-recognition");
+    }
+    teardownNovaVoiceRecognition();
+    stopNovaVoiceMicTracks();
+
+    if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+      if (novaVoiceRuntime) {
+        novaVoiceRuntime.setPermission("blocked", "mic-insecure-context");
+        novaVoiceRuntime.setError("insecure_context", "mic-insecure-context");
+      }
+      voice.error = "Voice input requires HTTPS or localhost.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (novaVoiceRuntime) novaVoiceRuntime.setError("mediaDevices_unavailable", "mic-media-devices-unavailable");
+      voice.error = "Microphone access unavailable in this browser.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+
+    try {
+      novaVoiceMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (novaVoiceRuntime && typeof novaVoiceRuntime.setPermission === "function") {
+        novaVoiceRuntime.setPermission("granted", "mic-permission-granted");
+      }
+    } catch (_) {
+      if (novaVoiceRuntime) {
+        novaVoiceRuntime.setPermission("denied", "mic-permission-denied");
+        novaVoiceRuntime.setError("MIC_BLOCKED_BY_BROWSER_OR_OS", "mic-permission-denied");
+      }
+      voice.error = "Microphone permission was blocked. Allow access, then try again.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+
+    var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      stopNovaVoiceMicTracks();
+      voice.error = "Speech recognition is not supported in this browser. Use Chrome, or type in Conversation.";
+      maybeRenderNovaVoicePane();
+      return;
+    }
+
+    var recognition = new SpeechRecognitionCtor();
+    novaVoiceRecognition = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    novaVoiceShouldSubmitOnEnd = true;
+    voice.transcript = "";
+    voice.error = "";
+
+    recognition.onstart = function () {
+      if (novaVoiceRuntime && typeof novaVoiceRuntime.setListening === "function") {
+        novaVoiceRuntime.setListening("speech-recognition-start");
+      }
+      voice.status = "listening";
+      maybeRenderNovaVoicePane();
+    };
+    recognition.onresult = function (event) {
+      var text = Array.prototype.slice.call(event.results || []).map(function (result) {
+        return result && result[0] ? result[0].transcript : "";
+      }).join("");
+      voice.transcript = text;
+      var live = document.getElementById("nova-voice-transcript");
+      if (live) live.textContent = text || "Listening will capture speech here.";
+    };
+    recognition.onerror = function (event) {
+      var code = event && event.error ? String(event.error) : "speech_recognition_error";
+      if (code === "not-allowed") {
+        if (novaVoiceRuntime) {
+          novaVoiceRuntime.setPermission("denied", "mic-permission-denied");
+          novaVoiceRuntime.setError("MIC_BLOCKED_BY_BROWSER_OR_OS", "mic-permission-denied");
+        }
+        voice.error = "Microphone permission was blocked.";
+      } else if (code !== "no-speech") {
+        if (novaVoiceRuntime) novaVoiceRuntime.setError(code, "speech-recognition-error");
+        voice.error = "Mic error: " + code;
+      }
+    };
+    recognition.onend = function () {
+      stopNovaVoiceMicTracks();
+      if (novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" && novaVoiceRuntime.getSnapshot().runtimeState === "listening") {
+        novaVoiceRuntime.setIdle("speech-recognition-end");
+      }
+      var text = safeText(voice.transcript, "").trim();
+      if (novaVoiceShouldSubmitOnEnd && text) {
+        novaVoiceShouldSubmitOnEnd = false;
+        void sendNovaVoiceUtterance(text);
+      } else {
+        voice.status = "idle";
+        maybeRenderNovaVoicePane();
+      }
+    };
+
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.clearInterrupted === "function") {
+      novaVoiceRuntime.clearInterrupted("voice-start");
+    }
+    try {
+      recognition.start();
+    } catch (_) {
+      if (novaVoiceRuntime) novaVoiceRuntime.setError("recognition_start_error", "recognition-start-error");
+      voice.error = "Could not start speech recognition.";
+      stopNovaVoiceMicTracks();
+      maybeRenderNovaVoicePane();
+    }
+  }
+
+  function stopNovaVoiceSession() {
+    novaVoiceShouldSubmitOnEnd = false;
+    teardownNovaVoiceRecognition();
+    stopNovaVoiceMicTracks();
+    if (novaHumanVoiceEngine && typeof novaHumanVoiceEngine.stop === "function") {
+      novaHumanVoiceEngine.stop("voice-stop");
+    }
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.setIdle === "function") {
+      var snap = novaVoiceRuntime.getSnapshot ? novaVoiceRuntime.getSnapshot() : {};
+      if (snap.runtimeState !== "disconnected") novaVoiceRuntime.setIdle("voice-stop");
+    }
+    novaVoiceState().status = "idle";
+    maybeRenderNovaVoicePane();
+  }
+
+  function toggleNovaVoiceMute() {
+    ensureNovaVoiceEngines();
+    var voice = novaVoiceState();
+    var snapshot = novaVoiceRuntime && typeof novaVoiceRuntime.getSnapshot === "function" ? novaVoiceRuntime.getSnapshot() : {};
+    var nextMuted = !snapshot.muted;
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.setMuted === "function") {
+      novaVoiceRuntime.setMuted(nextMuted, nextMuted ? "voice-muted" : "voice-unmuted");
+    }
+    voice.muted = nextMuted;
+    if (nextMuted) {
+      novaVoiceShouldSubmitOnEnd = false;
+      teardownNovaVoiceRecognition();
+      stopNovaVoiceMicTracks();
+      if (novaHumanVoiceEngine && typeof novaHumanVoiceEngine.stop === "function") {
+        novaHumanVoiceEngine.stop("voice-muted");
+      }
+      voice.status = "idle";
+    }
+    persistSessionState();
+    maybeRenderNovaVoicePane();
+  }
+
+  function interruptNovaVoiceSpeech() {
+    novaVoiceShouldSubmitOnEnd = false;
+    teardownNovaVoiceRecognition();
+    stopNovaVoiceMicTracks();
+    if (novaHumanVoiceEngine && typeof novaHumanVoiceEngine.stop === "function") {
+      novaHumanVoiceEngine.stop("voice-interrupt");
+    }
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.markInterrupted === "function") {
+      novaVoiceRuntime.markInterrupted("voice-interrupt");
+    }
+    if (novaVoiceRuntime && typeof novaVoiceRuntime.setIdle === "function") {
+      var snap = novaVoiceRuntime.getSnapshot ? novaVoiceRuntime.getSnapshot() : {};
+      if (snap.runtimeState !== "disconnected") novaVoiceRuntime.setIdle("voice-interrupt");
+    }
+    novaVoiceState().status = "idle";
+    maybeRenderNovaVoicePane();
+  }
+
+  async function loadNovaVoiceProviders() {
+    var voice = novaVoiceState();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    if (voice.providersLoaded) return;
+    try {
+      var response = await novaConversationAuthFetch("/api/voice/providers", { method: "GET" });
+      if (response.status === 401) {
+        voice.error = "Sign in required to load voice providers.";
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("providers_http_" + response.status);
+      }
+      voice.providers = await response.json();
+      voice.providersLoaded = true;
+    } catch (_) {
+      voice.error = "Could not load voice provider status. Browser TTS fallback remains available.";
+      voice.fallback = true;
+    }
+    persistSessionState();
+    maybeRenderNovaVoicePane();
+  }
+
+  function ensureNovaVoiceHydrated() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "voice") return;
+    ensureNovaVoiceEngines();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    void loadNovaVoiceProviders();
+  }
+
+  function bindNovaVoiceEvents() {
+    var host = document.getElementById("nova-voice-controls");
+    if (!host || host.getAttribute("data-ami-nova-voice-bound") === "1") return;
+    host.setAttribute("data-ami-nova-voice-bound", "1");
+    var listenButton = document.querySelector("[data-nova-voice-listen]");
+    var stopButton = document.querySelector("[data-nova-voice-stop]");
+    var muteButton = document.querySelector("[data-nova-voice-mute]");
+    var interruptButton = document.querySelector("[data-nova-voice-interrupt]");
+    var personaSelect = document.getElementById("nova-voice-persona");
+    if (listenButton) {
+      listenButton.addEventListener("click", function () {
+        void startNovaVoiceListening();
+      });
+    }
+    if (stopButton) {
+      stopButton.addEventListener("click", function () {
+        stopNovaVoiceSession();
+      });
+    }
+    if (muteButton) {
+      muteButton.addEventListener("click", function () {
+        toggleNovaVoiceMute();
+      });
+    }
+    if (interruptButton) {
+      interruptButton.addEventListener("click", function () {
+        interruptNovaVoiceSpeech();
+      });
+    }
+    if (personaSelect) {
+      personaSelect.addEventListener("change", function () {
+        novaVoiceState().persona = String(personaSelect.value || "Warm Conversational");
+        persistSessionState();
+      });
+    }
+  }
+
+  function novaFilesAuthFetch(url, options) {
+    return novaConversationAuthFetch(url, options);
+  }
+
+  function formatNovaFilesBytes(n) {
+    var size = Number(n || 0);
+    if (size < 1024) return String(size) + " B";
+    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + " KB";
+    return (size / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function updateNovaFilesStatusFromAttachments(list) {
+    var items = Array.isArray(list) ? list : [];
+    var statusEl = document.getElementById("nova-files-status-label");
+    var errorEl = document.getElementById("nova-files-error");
+    var metaEl = document.getElementById("nova-files-meta");
+    var uploading = items.some(function (item) { return item.status === "uploading"; });
+    var failed = items.filter(function (item) { return item.status === "error"; });
+    var done = items.filter(function (item) { return item.status === "done"; });
+    var label = "idle";
+    if (uploading) label = "uploading";
+    else if (failed.length && !done.length) label = "error";
+    else if (done.length) label = "uploaded";
+    if (statusEl) statusEl.textContent = "status: " + label;
+    if (errorEl) {
+      if (failed.length) {
+        errorEl.hidden = false;
+        errorEl.textContent = failed.map(function (item) {
+          return safeText(item.file && item.file.name, "file") + ": " + safeText(item.error, "upload failed");
+        }).join(" ");
+      } else {
+        errorEl.hidden = true;
+        errorEl.textContent = "";
+      }
+    }
+    if (metaEl) {
+      if (!items.length) {
+        metaEl.innerHTML = '<p class="muted">No file selected. Choose a file or drop it here. Uploads use POST /api/upload with the signed-in JWT/session.</p>';
+      } else {
+        metaEl.innerHTML = items.map(function (item) {
+          var meta = item.metadata || {};
+          var name = safeText(meta.filename || (item.file && item.file.name), "file");
+          var type = safeText(meta.content_type || (item.file && item.file.type), "");
+          var bytes = meta.size_bytes || (item.file && item.file.size) || 0;
+          var chunks = meta.chunk_count || item.chunkCount || 0;
+          var parser = safeText(meta.parser || (item.diagnostics && item.diagnostics.parser), "");
+          var summary = safeText(meta.document_summary, "");
+          var category = safeText(meta.upload_category, "");
+          var fileStatus = safeText(item.status, "idle");
+          return '<article class="nova-files-meta-card">' +
+            "<strong>" + escapeHtml(name) + "</strong>" +
+            '<p class="muted">status: ' + escapeHtml(fileStatus) +
+              (type ? " · " + escapeHtml(type) : "") +
+              " · " + escapeHtml(formatNovaFilesBytes(bytes)) +
+              (chunks ? " · chunks: " + escapeHtml(String(chunks)) : "") +
+              (parser ? " · parser: " + escapeHtml(parser) : "") +
+              (category ? " · " + escapeHtml(category) : "") +
+            "</p>" +
+            (summary ? "<p>" + escapeHtml(summary) + "</p>" : "") +
+          "</article>";
+        }).join("");
+      }
+    }
+  }
+
+  function mountNovaFilesUpload() {
+    var strip = document.getElementById("nova-files-strip");
+    var dropZone = document.getElementById("nova-files-dropzone");
+    var pickHost = document.getElementById("nova-files-pick-host");
+    if (!strip || !pickHost || !window.AmiCorUpload || typeof window.AmiCorUpload.init !== "function") return;
+    var button = window.AmiCorUpload.init({
+      stripContainer: strip,
+      dropZoneEl: dropZone,
+      authFetch: novaFilesAuthFetch,
+      onAttach: updateNovaFilesStatusFromAttachments,
+      onError: function (message) {
+        var errorEl = document.getElementById("nova-files-error");
+        if (!errorEl) return;
+        errorEl.hidden = false;
+        errorEl.textContent = String(message || "Upload failed");
+      }
+    });
+    if (button && button.parentNode !== pickHost) {
+      pickHost.appendChild(button);
+    }
+    if (typeof window.AmiCorUpload.getAttachments === "function") {
+      updateNovaFilesStatusFromAttachments(window.AmiCorUpload.getAttachments());
+    }
+  }
+
+  function renderNovaFilesPane() {
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Files",
+        "Authenticated Nova file upload using AmiCorUpload and POST /api/upload.",
+        '<p class="muted">Sign in to upload files. Identity comes from the verified JWT/session. Client-supplied user_id is not used for authorization.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-files"
+      );
+    }
+    return renderPanelBlock(
+      "Files",
+      "Native Nova files in /app/ai-assistant. Reuses AmiCorUpload and the existing JWT-protected POST /api/upload path.",
+      '<p class="muted">Auth: AmiCorSession.authFetch via novaFilesAuthFetch. /workspace remains the live conversation source as fallback and is not duplicated here.</p>' +
+        '<div class="nova-files-status" id="nova-files-controls">' +
+          '<span class="badge badge-soft" id="nova-files-status-label">status: idle</span>' +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">POST /api/upload</span>' +
+        "</div>" +
+        '<p class="nova-files-error" id="nova-files-error" hidden></p>' +
+        '<div class="nova-files-dropzone" id="nova-files-dropzone">' +
+          "<p>Drop a file here, or use Attach file. Text, PDF, CSV, JSON, Word, PNG, JPEG, and WebP up to 10 MB.</p>" +
+          '<div id="nova-files-strip" class="nova-files-strip" aria-live="polite"></div>' +
+        "</div>" +
+        '<div class="assistant-form-actions nova-files-actions" id="nova-files-actions">' +
+          '<span id="nova-files-pick-host"></span>' +
+          '<button type="button" class="assistant-submit secondary" data-nova-files-clear="true">Clear selection</button>' +
+        "</div>" +
+        '<div class="nova-files-meta" id="nova-files-meta">' +
+          '<p class="muted">No file selected. Choose a file or drop it here. Uploads use POST /api/upload with the signed-in JWT/session.</p>' +
+        "</div>",
+      "nova-files"
+    );
+  }
+
+  function bindNovaFilesEvents() {
+    var host = document.getElementById("nova-files-controls");
+    if (!host) return;
+    mountNovaFilesUpload();
+    if (host.getAttribute("data-ami-nova-files-bound") === "1") return;
+    host.setAttribute("data-ami-nova-files-bound", "1");
+    var clearButton = document.querySelector("[data-nova-files-clear]");
+    if (clearButton) {
+      clearButton.addEventListener("click", function () {
+        if (window.AmiCorUpload && typeof window.AmiCorUpload.clear === "function") {
+          window.AmiCorUpload.clear();
+        }
+        var errorEl = document.getElementById("nova-files-error");
+        if (errorEl) {
+          errorEl.hidden = true;
+          errorEl.textContent = "";
+        }
+        updateNovaFilesStatusFromAttachments(
+          window.AmiCorUpload && typeof window.AmiCorUpload.getAttachments === "function"
+            ? window.AmiCorUpload.getAttachments()
+            : []
+        );
+      });
+    }
+  }
+
+  function novaMemoryAuthFetch(url, options) {
+    return novaConversationAuthFetch(url, options);
+  }
+
+  function novaMemoryPreferenceEntries(preferences) {
+    var prefs = preferences && typeof preferences === "object" ? preferences : {};
+    return Object.keys(prefs).sort().map(function (key) {
+      return { key: key, value: safeText(prefs[key], "") };
+    }).filter(function (entry) {
+      return !!entry.key;
+    });
+  }
+
+  function novaMemoryIsEmpty(memory) {
+    var view = memory || novaMemoryState();
+    var prefs = novaMemoryPreferenceEntries(view.preferences);
+    return !safeText(view.summary, "") && !prefs.length && !(view.messages || []).length;
+  }
+
+  function renderNovaMemoryPreferenceList(preferences) {
+    var entries = novaMemoryPreferenceEntries(preferences);
+    if (!entries.length) {
+      return '<p class="muted" id="nova-memory-preferences-empty">No stored preferences yet.</p>';
+    }
+    return '<dl class="nova-memory-prefs" id="nova-memory-preferences">' + entries.map(function (entry) {
+      return "<dt>" + escapeHtml(entry.key) + "</dt><dd>" + escapeHtml(entry.value) + "</dd>";
+    }).join("") + "</dl>";
+  }
+
+  function renderNovaMemoryHistoryPreview(messages) {
+    var rows = Array.isArray(messages) ? messages.slice(-8) : [];
+    if (!rows.length) {
+      return '<p class="muted" id="nova-memory-history-empty">No conversation history yet.</p>';
+    }
+    return '<div class="nova-memory-history" id="nova-memory-history">' + rows.map(function (message) {
+      var role = safeText(message.role, "assistant") === "user" ? "user" : "assistant";
+      return '<article class="nova-memory-history-item nova-memory-history-' + role + '">' +
+        "<strong>" + (role === "user" ? "You" : "Nova") + "</strong>" +
+        "<p>" + escapeHtml(safeText(message.content, "")).replace(/\n/g, "<br>") + "</p>" +
+      "</article>";
+    }).join("") + "</div>";
+  }
+
+  function renderNovaMemoryPane() {
+    var memory = novaMemoryState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var status = safeText(memory.status, "idle");
+    var errorText = safeText(memory.error, "");
+    var empty = memory.loaded && novaMemoryIsEmpty(memory);
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Memory / continuity",
+        "Authenticated Nova memory, preferences, and conversation continuity using GET /api/history/{user_id}.",
+        '<p class="muted">Sign in to view Nova memory. Identity comes from the verified JWT/session. A client-supplied user_id cannot load another account.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-memory"
+      );
+    }
+    return renderPanelBlock(
+      "Memory / continuity",
+      "Native Nova memory in /app/ai-assistant. Reuses the existing authenticated history/memory store already used by Conversation.",
+      '<p class="muted">Endpoints: GET /api/history/{user_id}, POST /api/reset. Auth: AmiCorSession.authFetch via novaMemoryAuthFetch. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-memory-status" id="nova-memory-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">GET /api/history</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-memory-error" id="nova-memory-error">' + escapeHtml(errorText) + "</p>" : '<p class="nova-memory-error" id="nova-memory-error" hidden></p>') +
+        (empty ? '<p class="muted" id="nova-memory-empty">No memory, preferences, or conversation continuity stored yet for this signed-in identity.</p>' : "") +
+        '<section class="nova-memory-section">' +
+          "<h4>Continuity summary</h4>" +
+          (safeText(memory.summary, "")
+            ? '<p id="nova-memory-summary">' + escapeHtml(memory.summary) + "</p>"
+            : '<p class="muted" id="nova-memory-summary-empty">No continuity summary yet.</p>') +
+        "</section>" +
+        '<section class="nova-memory-section">' +
+          "<h4>Preferences</h4>" +
+          renderNovaMemoryPreferenceList(memory.preferences) +
+        "</section>" +
+        '<section class="nova-memory-section">' +
+          "<h4>Recent conversation continuity</h4>" +
+          renderNovaMemoryHistoryPreview(memory.messages) +
+        "</section>" +
+        '<div class="assistant-form-actions nova-memory-actions">' +
+          '<button type="button" class="assistant-submit" data-nova-memory-refresh="true" ' + (status === "loading" ? "disabled" : "") + ">Refresh memory</button>" +
+          '<button type="button" class="assistant-submit secondary" data-nova-memory-reset="true" ' + (status === "loading" ? "disabled" : "") + ">Clear continuity</button>" +
+        "</div>",
+      "nova-memory"
+    );
+  }
+
+  function ensureNovaMemoryHydrated() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "memory") return;
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    var memory = novaMemoryState();
+    var convo = novaConversationState();
+    if (convo.streaming || memory.status === "loading" || convo.status === "loading") return;
+    if (memory.loaded && memory.userId === novaAuthenticatedUserId()) return;
+    if (memory.status === "error" && memory.userId === novaAuthenticatedUserId()) return;
+    void loadNovaConversationHistory();
+  }
+
+  function bindNovaMemoryEvents() {
+    var host = document.getElementById("nova-memory-controls");
+    if (!host || host.getAttribute("data-ami-nova-memory-bound") === "1") return;
+    host.setAttribute("data-ami-nova-memory-bound", "1");
+    var refreshButton = document.querySelector("[data-nova-memory-refresh]");
+    var resetButton = document.querySelector("[data-nova-memory-reset]");
+    if (refreshButton) {
+      refreshButton.addEventListener("click", function () {
+        novaMemoryState().loaded = false;
+        novaConversationState().historyLoaded = false;
+        void loadNovaConversationHistory();
+      });
+    }
+    if (resetButton) {
+      resetButton.addEventListener("click", function () {
+        void resetNovaConversation();
+      });
+    }
+  }
+
+  var NOVA_BUSINESS_CAPABILITIES = [
+    { id: "business", title: "Business advisor", permission: "business.advice", group: "capability", prompt: "Help me with a business plan checklist for a small transportation company." },
+    { id: "education", title: "Education tutor", permission: "education.tutor", group: "capability", prompt: "Tutor me on a simple algebra concept." },
+    { id: "email", title: "Email composer", permission: "email.compose", group: "capability", prompt: "Draft a professional follow up email." },
+    { id: "weather", title: "Weather", permission: "weather.read", group: "capability", prompt: "What's the weather forecast?" },
+    { id: "news", title: "News", permission: "search.read", group: "capability", prompt: "What happened in today's news headlines?" },
+    { id: "search", title: "Search", permission: "search.read", group: "capability", prompt: "Look up the capital of Minnesota." },
+    { id: "time", title: "Time", permission: "time.read", group: "capability", prompt: "What time is it?" }
+  ];
+  var NOVA_REGISTERED_BUSINESS_TOOLS = [
+    { id: "business_plan", title: "Business Plan Generator", group: "tool", prompt: "Create a business plan outline for a startup transportation company." },
+    { id: "proposal", title: "Proposal Generator", group: "tool", prompt: "Write a client proposal for non-emergency medical transportation." },
+    { id: "invoice", title: "Invoice Generator", group: "tool", prompt: "Create an invoice template for a transportation service." },
+    { id: "marketing", title: "Marketing Strategy Generator", group: "tool", prompt: "Give me marketing ideas for a local salon." },
+    { id: "research_collector", title: "Research Collector", group: "tool", prompt: "Research collector: analyze local demand for NEMT." },
+    { id: "email_draft_builder", title: "Email Draft Builder", group: "tool", prompt: "Draft an email to a prospective client about our transportation services." },
+    { id: "memory_lookup", title: "Memory Lookup", group: "tool", invoke: false, reason: "Memory lookup stays on the Memory pane." },
+    { id: "browser_open", title: "Embedded Browser Opener", group: "tool", invoke: false, reason: "Browser open is not launched from this pane." },
+    { id: "workflow_runner", title: "Workflow Runner", group: "tool", invoke: false, reason: "Start workflows from the Workflows pane. Governance confirmation is required." }
+  ];
+
+  function novaToolsState() {
+    if (!state.assistant.novaTools || typeof state.assistant.novaTools !== "object") {
+      state.assistant.novaTools = {
+        activeId: "",
+        lastTitle: "",
+        lastResult: "",
+        status: "idle",
+        error: ""
+      };
+    }
+    return state.assistant.novaTools;
+  }
+
+  function novaToolsAuthFetch(url, options) {
+    return novaConversationAuthFetch(url, options);
+  }
+
+  function novaBusinessToolCatalog() {
+    return NOVA_BUSINESS_CAPABILITIES.concat(NOVA_REGISTERED_BUSINESS_TOOLS);
+  }
+
+  function novaBusinessToolById(toolId) {
+    var wanted = safeText(toolId, "");
+    var found = null;
+    novaBusinessToolCatalog().forEach(function (item) {
+      if (item.id === wanted) found = item;
+    });
+    return found;
+  }
+
+  function syncNovaToolsResultFromConversation() {
+    var tools = novaToolsState();
+    var convo = novaConversationState();
+    if (tools.status !== "running" && !tools.activeId) return;
+    var last = null;
+    (convo.messages || []).forEach(function (row) {
+      if (row && row.role === "assistant") last = row;
+    });
+    tools.lastResult = last ? safeText(last.content, "") : "";
+    if (convo.status === "error") {
+      tools.status = "error";
+      tools.error = safeText(convo.error, "Business tool request failed.");
+      return;
+    }
+    if (convo.streaming) {
+      tools.status = "running";
+      tools.error = "";
+      return;
+    }
+    tools.status = "idle";
+    tools.error = "";
+  }
+
+  function renderNovaToolCards(items, heading) {
+    var rows = Array.isArray(items) ? items : [];
+    return '<section class="nova-tools-section">' +
+      "<h4>" + escapeHtml(heading) + "</h4>" +
+      '<div class="nova-tools-grid">' + rows.map(function (item) {
+        var runnable = item.invoke !== false;
+        var permission = item.permission ? '<span class="badge badge-soft">' + escapeHtml(item.permission) + "</span>" : "";
+        var action = runnable
+          ? '<button type="button" class="assistant-submit" data-nova-tool-id="' + escapeHtml(item.id) + '">Run</button>'
+          : '<p class="muted">' + escapeHtml(safeText(item.reason, "Not launched from this pane.")) + "</p>";
+        return '<article class="nova-tool-card" data-nova-tool-card="' + escapeHtml(item.id) + '">' +
+          "<strong>" + escapeHtml(item.title) + "</strong>" +
+          '<p class="muted">id: ' + escapeHtml(item.id) + "</p>" +
+          permission +
+          action +
+        "</article>";
+      }).join("") + "</div>" +
+    "</section>";
+  }
+
+  function renderNovaToolsPane() {
+    var tools = novaToolsState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var status = safeText(tools.status, "idle");
+    var errorText = safeText(tools.error, "");
+    var lastResult = safeText(tools.lastResult, "");
+    var empty = authenticated && status === "idle" && !lastResult && !errorText;
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Business tools",
+        "Authenticated Nova business tools using the existing CAPABILITIES router and POST /api/chat.",
+        '<p class="muted">Sign in to use Nova business tools. Identity comes from the verified JWT/session. A client-supplied user_id cannot run tools as another account.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-tools"
+      );
+    }
+    return renderPanelBlock(
+      "Business tools",
+      "Safe interface over Nova capabilities already registered in app/router.py and app/business.py. Invocation uses the existing authenticated chat path.",
+      '<p class="muted">Discovery matches existing CAPABILITIES and the registered business tool catalog. Run uses POST /api/chat and POST /api/chat/stream through sendNovaConversationMessage. Auth: AmiCorSession.authFetch via novaToolsAuthFetch. Health ISF operational actions stay on Governance. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-tools-status" id="nova-tools-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">POST /api/chat</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-tools-error" id="nova-tools-error">' + escapeHtml(errorText) + "</p>" : '<p class="nova-tools-error" id="nova-tools-error" hidden></p>') +
+        (empty ? '<p class="muted" id="nova-tools-empty">No business-tool result yet for this signed-in identity. Choose a capability or tool below.</p>' : "") +
+        renderNovaToolCards(NOVA_BUSINESS_CAPABILITIES, "Router capabilities") +
+        renderNovaToolCards(NOVA_REGISTERED_BUSINESS_TOOLS, "Registered business tools") +
+        '<section class="nova-tools-section">' +
+          "<h4>Last result</h4>" +
+          (lastResult
+            ? '<article class="nova-tools-result" id="nova-tools-result"><strong>' + escapeHtml(safeText(tools.lastTitle, "Nova")) + '</strong><p id="nova-tools-result-body">' + escapeHtml(lastResult).replace(/\n/g, "<br>") + "</p></article>"
+            : '<p class="muted" id="nova-tools-result-empty">No result yet. Running a live capability uses the existing authenticated chat engine.</p>') +
+        "</section>",
+      "nova-tools"
+    );
+  }
+
+  async function invokeNovaBusinessTool(toolId) {
+    var tools = novaToolsState();
+    var spec = novaBusinessToolById(toolId);
+    var convo = novaConversationState();
+    if (!spec) {
+      tools.status = "error";
+      tools.error = "Unknown Nova business tool.";
+      renderPage();
+      return;
+    }
+    if (spec.invoke === false) {
+      tools.status = "error";
+      tools.activeId = spec.id;
+      tools.lastTitle = spec.title;
+      tools.error = safeText(spec.reason, "This capability is not launched from Business Tools.");
+      persistSessionState();
+      renderPage();
+      return;
+    }
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      tools.status = "error";
+      tools.error = "Sign in required to run Nova business tools.";
+      renderPage();
+      return;
+    }
+    if (convo.streaming || tools.status === "running") return;
+    tools.status = "running";
+    tools.activeId = spec.id;
+    tools.lastTitle = spec.title;
+    tools.error = "";
+    persistSessionState();
+    renderPage();
+    await sendNovaConversationMessage(spec.prompt);
+    syncNovaToolsResultFromConversation();
+    if (state.route === "ai-assistant" && normalizeNovaPane(state.assistant.novaShellPane) === "tools") {
+      renderPage();
+    }
+  }
+
+  function bindNovaToolsEvents() {
+    var host = document.getElementById("nova-tools-controls");
+    if (!host || host.getAttribute("data-ami-nova-tools-bound") === "1") return;
+    host.setAttribute("data-ami-nova-tools-bound", "1");
+    var buttons = document.querySelectorAll("[data-nova-tool-id]");
+    Array.prototype.forEach.call(buttons, function (button) {
+      button.addEventListener("click", function () {
+        void invokeNovaBusinessTool(button.getAttribute("data-nova-tool-id"));
+      });
+    });
+  }
+
+  function novaApprovalsState() {
+    if (!state.assistant.novaApprovals || typeof state.assistant.novaApprovals !== "object") {
+      state.assistant.novaApprovals = {
+        status: "idle",
+        error: "",
+        loaded: false,
+        lastCancelled: null,
+        inspected: null
+      };
+    }
+    return state.assistant.novaApprovals;
+  }
+
+  function novaApprovalsAuthFetch(url, options) {
+    return novaConversationAuthFetch(url, options);
+  }
+
+  function novaApprovalStatusLabel(status) {
+    var key = String(status || "").toLowerCase();
+    if (key === "awaiting_confirmation" || key === "running" || key === "queued") return "pending";
+    if (key === "canceled" || key === "cancelled" || key === "rejected") return "cancelled";
+    if (key === "approved" || key === "verified" || key === "confirmation_accepted") return "approved";
+    if (key === "completed") return "completed";
+    if (key === "failed") return "failed";
+    if (key === "pending") return "pending";
+    return key || "pending";
+  }
+
+  function novaApprovalHasItems() {
+    var approvals = novaApprovalsState();
+    var pending = state.assistant.pendingIntent;
+    var history = state.assistant.executionHistory || [];
+    return !!(pending || approvals.lastCancelled || history.length || approvals.inspected);
+  }
+
+  function renderNovaApprovalResult(result) {
+    var payload = result && typeof result === "object" ? result : {};
+    var message = safeText(payload.message, safeText(payload.operational_summary, ""));
+    if (!message && !Object.keys(payload).length) {
+      return '<p class="muted">No execution result payload.</p>';
+    }
+    return '<p>' + escapeHtml(message || "Verified governance result recorded.") + "</p>" +
+      (payload.execution_mode ? '<p class="muted">mode: ' + escapeHtml(safeText(payload.execution_mode, "")) + "</p>" : "") +
+      (payload.action_outcome ? '<p class="muted">outcome: ' + escapeHtml(safeText(payload.action_outcome, "")) + "</p>" : "");
+  }
+
+  function renderNovaApprovalsPane() {
+    var approvals = novaApprovalsState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var status = safeText(approvals.status, "idle");
+    var errorText = safeText(approvals.error, "");
+    var pending = state.assistant.pendingIntent;
+    var history = Array.isArray(state.assistant.executionHistory) ? state.assistant.executionHistory : [];
+    var empty = authenticated && !novaApprovalHasItems() && status !== "loading";
+    var pendingPolicy = pending && pending.policy ? pending.policy : { state: "REQUIRES_CONFIRMATION", reasons: [] };
+    var blocked = !pending || safeText(pendingPolicy.state, "") === "BLOCKED" || Boolean(state.assistant.isResponding);
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Approval Center",
+        "Authenticated Nova approvals using existing Governance confirm/cancel and GET /api/assistant/executions.",
+        '<p class="muted">Sign in to review Nova approvals. Identity comes from the verified JWT/session. A client-supplied user_id cannot load another account\'s execution history.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane. Confirm and cancel remain the existing Governance handlers.</p>',
+        "nova-approvals"
+      );
+    }
+    return renderPanelBlock(
+      "Approval Center",
+      "Safe interface over the existing Governance pending-intent, signed confirm, cancel, and assistant execution-history store.",
+      '<p class="muted">Pending actions reuse state.assistant.pendingIntent. Review/Inspect uses POST /api/assistant/inspect. Confirm/Approve uses POST /api/assistant/confirm via handleIntentConfirmation. Cancel/Reject uses handleIntentCancel. History uses GET /api/assistant/executions. Auth: AmiCorSession.authFetch via novaApprovalsAuthFetch. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-approvals-status" id="nova-approvals-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">GET /api/assistant/executions</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-approvals-error" id="nova-approvals-error">' + escapeHtml(errorText) + "</p>" : '<p class="nova-approvals-error" id="nova-approvals-error" hidden></p>') +
+        (empty ? '<p class="muted" id="nova-approvals-empty">No pending approvals or execution history for this signed-in identity. Create a preview, inspect, or simulate intent on Governance, then confirm or cancel it here.</p>' : "") +
+        '<section class="nova-approvals-section">' +
+          "<h4>Pending action requiring approval</h4>" +
+          (pending
+            ? '<article class="nova-approval-card" id="nova-approvals-pending">' +
+                "<strong>" + escapeHtml(safeText(pending.intent, "preview")) + "</strong>" +
+                '<p class="muted">Safe description: supervised Governance ' + escapeHtml(safeText(pending.intent, "preview")) + " dry-run. No Health ISF operational mutation from this pane.</p>" +
+                "<p><strong>Status:</strong> <span class=\"badge badge-warn\">" + escapeHtml(novaApprovalStatusLabel(pending.status)) + "</span></p>" +
+                "<p><strong>Requested action details:</strong> " + escapeHtml(safeText(pending.prompt, "No prompt captured.")) + "</p>" +
+                "<p><strong>Policy:</strong> " + escapeHtml(safeText((pending.policy || {}).state, "REQUIRES_CONFIRMATION")) + " — " + escapeHtml(((pending.policy || {}).reasons || []).join(", ") || "CONFIRMATION_REQUIRED") + "</p>" +
+                '<div class="assistant-form-actions nova-approvals-actions">' +
+                  '<button type="button" class="assistant-submit" data-nova-approval-inspect="true" ' + (state.assistant.isResponding ? "disabled" : "") + ">Review / Inspect</button>" +
+                  '<button type="button" class="assistant-submit" data-nova-approval-confirm="true" ' + (blocked ? "disabled" : "") + ">Confirm / Approve</button>" +
+                  '<button type="button" class="assistant-submit secondary" data-nova-approval-cancel="true" ' + (state.assistant.isResponding ? "disabled" : "") + ">Cancel / Reject</button>" +
+                "</div>" +
+              "</article>"
+            : '<p class="muted" id="nova-approvals-pending-empty">No pending Governance intent is waiting for confirmation.</p>') +
+        "</section>" +
+        (approvals.lastCancelled
+          ? '<section class="nova-approvals-section">' +
+              "<h4>Cancelled / rejected</h4>" +
+              '<article class="nova-approval-card" id="nova-approvals-cancelled">' +
+                "<strong>" + escapeHtml(safeText(approvals.lastCancelled.intent, "preview")) + "</strong>" +
+                '<p><strong>Status:</strong> <span class="badge badge-warn">cancelled</span></p>' +
+                "<p><strong>Requested action details:</strong> " + escapeHtml(safeText(approvals.lastCancelled.prompt, "")) + "</p>" +
+              "</article>" +
+            "</section>"
+          : "") +
+        '<section class="nova-approvals-section">' +
+          "<h4>Execution result / history</h4>" +
+          (history.length
+            ? '<ul class="nova-approvals-history" id="nova-approvals-history">' + history.slice(0, 16).map(function (item) {
+                var execStatus = novaApprovalStatusLabel(item.status);
+                var result = item.result && typeof item.result === "object" ? item.result : {};
+                return '<li class="nova-approval-card" data-nova-execution-id="' + escapeHtml(safeText(item.execution_id, "")) + '">' +
+                  "<strong>" + escapeHtml(safeText(item.action_type, "preview")) + "</strong>" +
+                  '<p class="muted">id: ' + escapeHtml(safeText(item.execution_id, "n/a")) + " | intent: " + escapeHtml(safeText(item.intent_id, "n/a")) + "</p>" +
+                  "<p><strong>Status:</strong> <span class=\"badge badge-" + (execStatus === "failed" ? "bad" : execStatus === "completed" || execStatus === "approved" ? "good" : "warn") + "\">" + escapeHtml(execStatus) + "</span></p>" +
+                  "<p><strong>Requested action details:</strong> correlation " + escapeHtml(safeText(item.correlation_id, "n/a")) + "</p>" +
+                  renderNovaApprovalResult(result) +
+                  (item.error_message ? '<p class="nova-approvals-error">' + escapeHtml(item.error_message) + "</p>" : "") +
+                  '<button type="button" class="ghost-chip" data-nova-approval-inspect-execution="' + escapeHtml(safeText(item.execution_id, "")) + '">Review / Inspect</button>' +
+                "</li>";
+              }).join("") + "</ul>"
+            : '<p class="muted" id="nova-approvals-history-empty">No assistant execution history loaded yet for this identity.</p>') +
+        "</section>" +
+        (approvals.inspected
+          ? '<section class="nova-approvals-section">' +
+              "<h4>Inspected execution</h4>" +
+              '<article class="nova-approval-card" id="nova-approvals-inspected">' +
+                "<strong>" + escapeHtml(safeText(approvals.inspected.action_type, "preview")) + "</strong>" +
+                "<p><strong>Status:</strong> " + escapeHtml(novaApprovalStatusLabel(approvals.inspected.status)) + "</p>" +
+                "<p><strong>Execution id:</strong> " + escapeHtml(safeText(approvals.inspected.execution_id, "")) + "</p>" +
+                renderNovaApprovalResult(approvals.inspected.result) +
+              "</article>" +
+            "</section>"
+          : "") +
+        '<div class="assistant-form-actions nova-approvals-actions">' +
+          '<button type="button" class="assistant-submit secondary" data-nova-approval-refresh="true" ' + (status === "loading" ? "disabled" : "") + ">Refresh</button>" +
+        "</div>",
+      "nova-approvals"
+    );
+  }
+
+  async function refreshNovaApprovals() {
+    var approvals = novaApprovalsState();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      approvals.status = "error";
+      approvals.error = "Sign in required to load Nova approvals.";
+      renderPage();
+      return;
+    }
+    approvals.status = "loading";
+    approvals.error = "";
+    persistSessionState();
+    renderPage();
+    try {
+      await refreshAssistantPersistence();
+      approvals.loaded = true;
+      approvals.status = "idle";
+      approvals.error = "";
+    } catch (error) {
+      approvals.status = "error";
+      approvals.error = "Could not load approval history.";
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant" && normalizeNovaPane(state.assistant.novaShellPane) === "approvals") {
+      renderPage();
+    }
+  }
+
+  async function inspectNovaApproval() {
+    var approvals = novaApprovalsState();
+    var pending = state.assistant.pendingIntent;
+    var prompt = safeText((pending && pending.prompt) || state.assistant.pendingPrompt, "").trim();
+    if (!prompt) {
+      approvals.status = "error";
+      approvals.error = "No requested action details to inspect.";
+      renderPage();
+      return;
+    }
+    if (state.assistant.isResponding) return;
+    approvals.status = "loading";
+    approvals.error = "";
+    state.assistant.pendingPrompt = prompt;
+    persistSessionState();
+    setPendingIntent("inspect");
+    await handleIntentConfirmation();
+    void refreshNovaApprovals();
+  }
+
+  async function confirmNovaApproval() {
+    var approvals = novaApprovalsState();
+    if (!state.assistant.pendingIntent) {
+      approvals.status = "error";
+      approvals.error = "No pending action requires approval.";
+      renderPage();
+      return;
+    }
+    if (state.assistant.isResponding) return;
+    approvals.status = "loading";
+    approvals.error = "";
+    persistSessionState();
+    await handleIntentConfirmation();
+    void refreshNovaApprovals();
+  }
+
+  function cancelNovaApproval() {
+    var approvals = novaApprovalsState();
+    var pending = state.assistant.pendingIntent;
+    if (!pending) {
+      approvals.status = "error";
+      approvals.error = "No pending action to cancel.";
+      renderPage();
+      return;
+    }
+    approvals.lastCancelled = {
+      intent: safeText(pending.intent, "preview"),
+      prompt: safeText(pending.prompt, ""),
+      status: "cancelled"
+    };
+    approvals.error = "";
+    approvals.status = "idle";
+    handleIntentCancel();
+  }
+
+  async function inspectNovaExecution(executionId) {
+    var approvals = novaApprovalsState();
+    var id = safeText(executionId, "").trim();
+    if (!id) {
+      approvals.status = "error";
+      approvals.error = "Missing execution id.";
+      renderPage();
+      return;
+    }
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      approvals.status = "error";
+      approvals.error = "Sign in required to inspect Nova approvals.";
+      renderPage();
+      return;
+    }
+    approvals.status = "loading";
+    approvals.error = "";
+    persistSessionState();
+    renderPage();
+    try {
+      var payload = await fetchJson("/api/assistant/executions/" + encodeURIComponent(id));
+      approvals.inspected = normalizeExecutionRecord(payload);
+      approvals.status = "idle";
+      approvals.error = "";
+    } catch (error) {
+      approvals.status = "error";
+      approvals.error = "Could not inspect that execution for this signed-in identity.";
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant" && normalizeNovaPane(state.assistant.novaShellPane) === "approvals") {
+      renderPage();
+    }
+  }
+
+  function ensureNovaApprovalsHydrated() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "approvals") return;
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    var approvals = novaApprovalsState();
+    if (approvals.status === "loading" || state.assistant.isResponding) return;
+    if (approvals.loaded) return;
+    void refreshNovaApprovals();
+  }
+
+  function bindNovaApprovalsEvents() {
+    var host = document.getElementById("nova-approvals-controls");
+    if (!host || host.getAttribute("data-ami-nova-approvals-bound") === "1") return;
+    host.setAttribute("data-ami-nova-approvals-bound", "1");
+    var inspectButton = document.querySelector("[data-nova-approval-inspect]");
+    var confirmButton = document.querySelector("[data-nova-approval-confirm]");
+    var cancelButton = document.querySelector("[data-nova-approval-cancel]");
+    var refreshButton = document.querySelector("[data-nova-approval-refresh]");
+    var inspectExecutionButtons = document.querySelectorAll("[data-nova-approval-inspect-execution]");
+    if (inspectButton) {
+      inspectButton.addEventListener("click", function () {
+        void inspectNovaApproval();
+      });
+    }
+    if (confirmButton) {
+      confirmButton.addEventListener("click", function () {
+        void confirmNovaApproval();
+      });
+    }
+    if (cancelButton) {
+      cancelButton.addEventListener("click", function () {
+        cancelNovaApproval();
+      });
+    }
+    if (refreshButton) {
+      refreshButton.addEventListener("click", function () {
+        novaApprovalsState().loaded = false;
+        void refreshNovaApprovals();
+      });
+    }
+    Array.prototype.forEach.call(inspectExecutionButtons, function (button) {
+      button.addEventListener("click", function () {
+        void inspectNovaExecution(button.getAttribute("data-nova-approval-inspect-execution"));
+      });
+    });
+  }
+
+  var NOVA_WORKFLOW_PROMPT = "Run workflow. Orchestrate the existing assistant 5-step workflow plan.";
+  var NOVA_WORKFLOW_STEPS = [
+    "Generate startup checklist",
+    "Generate pricing ideas",
+    "Generate marketing suggestions",
+    "Generate business plan summary",
+    "Recommend next steps"
+  ];
+
+  function novaWorkflowsState() {
+    if (!state.assistant.novaWorkflows || typeof state.assistant.novaWorkflows !== "object") {
+      state.assistant.novaWorkflows = {
+        status: "idle",
+        error: "",
+        awaitingRunner: false,
+        steps: [],
+        lastResult: "",
+        toolId: "",
+        card: null,
+        history: []
+      };
+    }
+    if (!Array.isArray(state.assistant.novaWorkflows.history)) {
+      state.assistant.novaWorkflows.history = [];
+    }
+    if (!Array.isArray(state.assistant.novaWorkflows.steps)) {
+      state.assistant.novaWorkflows.steps = [];
+    }
+    return state.assistant.novaWorkflows;
+  }
+
+  function isNovaWorkflowPrompt(promptText) {
+    return safeText(promptText, "").trim() === NOVA_WORKFLOW_PROMPT;
+  }
+
+  function markNovaWorkflowCancelled(promptText) {
+    if (!isNovaWorkflowPrompt(promptText) && !novaWorkflowsState().awaitingRunner) return;
+    var workflows = novaWorkflowsState();
+    workflows.awaitingRunner = false;
+    workflows.status = "cancelled";
+    workflows.error = "";
+    workflows.history = [{ status: "cancelled", steps: [], result: "", at: new Date().toISOString() }].concat(workflows.history).slice(0, 8);
+  }
+
+  function markNovaWorkflowConfirmFailed(promptText, detail) {
+    var workflows = novaWorkflowsState();
+    if (!workflows.awaitingRunner && !isNovaWorkflowPrompt(promptText)) return;
+    workflows.awaitingRunner = false;
+    workflows.status = "failed";
+    workflows.error = "Governance confirmation failed. The workflow_runner was not started.";
+  }
+
+  function applyNovaWorkflowChatMeta(meta, reply, failed) {
+    var workflows = novaWorkflowsState();
+    if (failed) {
+      if (workflows.status === "running" || workflows.awaitingRunner) {
+        workflows.status = "failed";
+        workflows.error = "Workflow runner request failed.";
+      }
+      return;
+    }
+    var payload = meta && typeof meta === "object" ? meta : {};
+    var steps = Array.isArray(payload.workflow_steps) ? payload.workflow_steps.slice() : [];
+    var toolId = safeText(payload.tool_id, "");
+    if (toolId !== "workflow_runner" && !steps.length && workflows.status !== "running") return;
+    workflows.steps = steps.length ? steps : NOVA_WORKFLOW_STEPS.slice();
+    workflows.toolId = toolId || "workflow_runner";
+    workflows.card = payload.tool_card && typeof payload.tool_card === "object" ? payload.tool_card : workflows.card;
+    workflows.lastResult = safeText(reply, "");
+    workflows.status = "completed";
+    workflows.error = "";
+    workflows.awaitingRunner = false;
+    workflows.history = [{
+      status: "completed",
+      steps: workflows.steps.slice(),
+      result: workflows.lastResult,
+      at: new Date().toISOString()
+    }].concat(workflows.history).slice(0, 8);
+  }
+
+  async function maybeLaunchNovaWorkflowRunner(promptText, intent) {
+    var workflows = novaWorkflowsState();
+    var normalizedIntent = String(intent || "").toLowerCase();
+    if (!workflows.awaitingRunner) return;
+    if (normalizedIntent !== "preview" && normalizedIntent !== "simulate") return;
+    if (!isNovaWorkflowPrompt(promptText)) return;
+    workflows.awaitingRunner = false;
+    workflows.status = "running";
+    workflows.error = "";
+    persistSessionState();
+    await sendNovaConversationMessage(promptText);
+  }
+
+  function renderNovaWorkflowsPane() {
+    var workflows = novaWorkflowsState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var status = safeText(workflows.status, "idle");
+    var errorText = safeText(workflows.error, "");
+    var pending = state.assistant.pendingIntent;
+    var pendingIsWorkflow = pending && isNovaWorkflowPrompt(pending.prompt);
+    var steps = (workflows.steps && workflows.steps.length) ? workflows.steps : NOVA_WORKFLOW_STEPS;
+    var empty = authenticated && status === "idle" && !pendingIsWorkflow && !(workflows.history || []).length;
+    var blocked = Boolean(state.assistant.isResponding) || novaConversationState().streaming;
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Workflows / tasks",
+        "Authenticated Nova workflows using the existing workflow_runner via POST /api/chat after Governance confirmation.",
+        '<p class="muted">Sign in to request Nova workflows. Identity comes from the verified JWT/session. A client-supplied user_id cannot run another account\'s workflow_runner.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane. Prompts containing workflow require existing Governance confirmation.</p>',
+        "nova-workflows"
+      );
+    }
+    return renderPanelBlock(
+      "Workflows / tasks",
+      "Safe interface over the existing workflow_runner registered in app/tool_actions.py and invoked through POST /api/chat after Governance confirm/cancel.",
+      '<p class="muted">Available task: workflow_runner. Start/request creates a Governance pending intent (evaluateGuardrailPolicy requires confirmation for workflow). Confirm/Approve uses handleIntentConfirmation then POST /api/chat. Cancel/Reject uses handleIntentCancel. This pane does not call ToolExecutionEngine.execute_workflow chained jobs, a scheduler, or Health ISF operational engines. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-workflows-status" id="nova-workflows-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">workflow_runner</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-workflows-error" id="nova-workflows-error">' + escapeHtml(errorText) + "</p>" : '<p class="nova-workflows-error" id="nova-workflows-error" hidden></p>') +
+        (empty ? '<p class="muted" id="nova-workflows-empty">No workflow has been requested for this signed-in identity. Start the existing assistant workflow plan, then confirm it in Governance/Approval Center.</p>' : "") +
+        '<section class="nova-workflows-section">' +
+          "<h4>Available workflows / tasks</h4>" +
+          '<article class="nova-workflow-card" data-nova-workflow-id="workflow_runner">' +
+            "<strong>Workflow Runner</strong>" +
+            '<p class="muted">id: workflow_runner. Safe description: prepares a 5-step assistant workflow plan. It does not queue, schedule, or mutate Health ISF rides.</p>' +
+            "<ol class=\"nova-workflow-steps\" id=\"nova-workflows-catalog-steps\">" + NOVA_WORKFLOW_STEPS.map(function (step) {
+              return "<li>" + escapeHtml(step) + "</li>";
+            }).join("") + "</ol>" +
+            '<button type="button" class="assistant-submit" data-nova-workflow-start="true" ' + (blocked || pendingIsWorkflow || status === "running" ? "disabled" : "") + ">Start / request workflow</button>" +
+          "</article>" +
+        "</section>" +
+        '<section class="nova-workflows-section">' +
+          "<h4>Current status</h4>" +
+          (pendingIsWorkflow
+            ? '<article class="nova-workflow-card" id="nova-workflows-pending">' +
+                "<p><strong>Status:</strong> <span class=\"badge badge-warn\">pending</span></p>" +
+                "<p><strong>Requested action:</strong> " + escapeHtml(pending.prompt) + "</p>" +
+                "<p class=\"muted\">Governance policy: " + escapeHtml(safeText((pending.policy || {}).state, "REQUIRES_CONFIRMATION")) + ". Confirm/Approve uses the existing Approval Center handlers. The workflow_runner is not started until confirmation succeeds.</p>" +
+                '<div class="assistant-form-actions nova-workflows-actions">' +
+                  '<button type="button" class="assistant-submit" data-nova-workflow-confirm="true" ' + (blocked || safeText((pending.policy || {}).state, "") === "BLOCKED" ? "disabled" : "") + ">Confirm / Approve</button>" +
+                  '<button type="button" class="assistant-submit secondary" data-nova-workflow-cancel="true" ' + (blocked ? "disabled" : "") + ">Cancel / Reject</button>" +
+                "</div>" +
+              "</article>"
+            : '<p class="muted" id="nova-workflows-pending-empty">No workflow is waiting for Governance confirmation.</p>') +
+        "</section>" +
+        '<section class="nova-workflows-section">' +
+          "<h4>Steps / progress</h4>" +
+          (status === "running"
+            ? '<p class="muted" id="nova-workflows-running">Workflow runner request in progress through the existing authenticated chat path.</p>'
+            : "") +
+          '<ol class="nova-workflow-steps" id="nova-workflows-steps">' + steps.map(function (step) {
+            return "<li>" + escapeHtml(safeText(step, "")) + "</li>";
+          }).join("") + "</ol>" +
+          (workflows.lastResult ? '<article class="nova-workflow-card" id="nova-workflows-result"><strong>Execution result</strong><p>' + escapeHtml(workflows.lastResult).replace(/\n/g, "<br>") + "</p></article>" : '<p class="muted" id="nova-workflows-result-empty">No workflow_runner result yet.</p>') +
+        "</section>" +
+        '<section class="nova-workflows-section">' +
+          "<h4>Completed / failed / cancelled history</h4>" +
+          ((workflows.history || []).length
+            ? '<ul class="nova-workflows-history" id="nova-workflows-history">' + workflows.history.map(function (item) {
+                return '<li class="nova-workflow-card"><strong>' + escapeHtml(safeText(item.status, "completed")) + "</strong><p class=\"muted\">" + escapeHtml(safeText(item.at, "")) + "</p></li>";
+              }).join("") + "</ul>"
+            : '<p class="muted" id="nova-workflows-history-empty">No workflow execution history in this session yet.</p>') +
+        "</section>" +
+        '<div class="assistant-form-actions nova-workflows-actions">' +
+          '<button type="button" class="assistant-submit secondary" data-nova-workflow-refresh="true">Refresh</button>' +
+        "</div>",
+      "nova-workflows"
+    );
+  }
+
+  function requestNovaWorkflow() {
+    var workflows = novaWorkflowsState();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      workflows.status = "error";
+      workflows.error = "Sign in required to request Nova workflows.";
+      renderPage();
+      return;
+    }
+    if (state.assistant.isResponding || novaConversationState().streaming) return;
+    workflows.awaitingRunner = true;
+    workflows.status = "pending";
+    workflows.error = "";
+    state.assistant.pendingPrompt = NOVA_WORKFLOW_PROMPT;
+    persistSessionState();
+    setPendingIntent("preview");
+  }
+
+  async function confirmNovaWorkflow() {
+    var workflows = novaWorkflowsState();
+    if (!state.assistant.pendingIntent || !isNovaWorkflowPrompt(state.assistant.pendingIntent.prompt)) {
+      workflows.status = "error";
+      workflows.error = "No workflow is waiting for Governance confirmation.";
+      renderPage();
+      return;
+    }
+    await handleIntentConfirmation();
+  }
+
+  function cancelNovaWorkflow() {
+    var workflows = novaWorkflowsState();
+    if (!state.assistant.pendingIntent || !isNovaWorkflowPrompt(state.assistant.pendingIntent.prompt)) {
+      workflows.status = "error";
+      workflows.error = "No workflow is waiting to cancel.";
+      renderPage();
+      return;
+    }
+    handleIntentCancel();
+  }
+
+  async function refreshNovaWorkflows() {
+    var workflows = novaWorkflowsState();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      workflows.status = "error";
+      workflows.error = "Sign in required to refresh Nova workflows.";
+      renderPage();
+      return;
+    }
+    try {
+      await refreshAssistantPersistence();
+      if (workflows.status === "error") workflows.status = "idle";
+      workflows.error = "";
+    } catch (error) {
+      workflows.status = "error";
+      workflows.error = "Could not refresh workflow history.";
+    }
+    persistSessionState();
+    if (state.route === "ai-assistant" && normalizeNovaPane(state.assistant.novaShellPane) === "workflows") {
+      renderPage();
+    }
+  }
+
+  function bindNovaWorkflowsEvents() {
+    var host = document.getElementById("nova-workflows-controls");
+    if (!host || host.getAttribute("data-ami-nova-workflows-bound") === "1") return;
+    host.setAttribute("data-ami-nova-workflows-bound", "1");
+    var startButton = document.querySelector("[data-nova-workflow-start]");
+    var confirmButton = document.querySelector("[data-nova-workflow-confirm]");
+    var cancelButton = document.querySelector("[data-nova-workflow-cancel]");
+    var refreshButton = document.querySelector("[data-nova-workflow-refresh]");
+    if (startButton) {
+      startButton.addEventListener("click", function () {
+        requestNovaWorkflow();
+      });
+    }
+    if (confirmButton) {
+      confirmButton.addEventListener("click", function () {
+        void confirmNovaWorkflow();
+      });
+    }
+    if (cancelButton) {
+      cancelButton.addEventListener("click", function () {
+        cancelNovaWorkflow();
+      });
+    }
+    if (refreshButton) {
+      refreshButton.addEventListener("click", function () {
+        void refreshNovaWorkflows();
+      });
+    }
+  }
+
+  function renderAssistant() {
+    var pane = novaPaneMeta(state.assistant.novaShellPane);
+    var paneHtml;
+    if (pane.id === "conversation") {
+      paneHtml = renderNovaConversationPane();
+    } else if (pane.id === "voice") {
+      paneHtml = renderNovaVoicePane();
+    } else if (pane.id === "files") {
+      paneHtml = renderNovaFilesPane();
+    } else if (pane.id === "memory") {
+      paneHtml = renderNovaMemoryPane();
+    } else if (pane.id === "tools") {
+      paneHtml = renderNovaToolsPane();
+    } else if (pane.id === "approvals") {
+      paneHtml = renderNovaApprovalsPane();
+    } else if (pane.id === "workflows") {
+      paneHtml = renderNovaWorkflowsPane();
+    } else if (pane.id === "health-isf") {
+      paneHtml = renderNovaHealthIsfIntelligencePane();
+    } else if (pane.live) {
+      paneHtml = renderNovaGovernanceChassis();
+    } else {
+      paneHtml = renderNovaPreparedPane(pane);
+    }
+    return renderNovaShellChrome() + paneHtml;
+  }
+
+  var NOVA_HEALTH_ISF_READ_SOURCES = [
+    { id: "dashboard", path: "/api/health-isf/dashboard", title: "Current ride/transportation status", kind: "metrics" },
+    { id: "queue", path: "/api/health-isf/dispatch/queue?limit=80&read_only=true", title: "Pending/unassigned rides", kind: "queue" },
+    { id: "activeRides", path: "/api/health-isf/rides?limit=80&active_only=true&exclude_test=true", title: "Assigned/active rides", kind: "rides" },
+    { id: "completedRides", path: "/api/health-isf/rides?limit=40&history_only=true&exclude_test=true", title: "Completed rides", kind: "rides" },
+    { id: "commandCenter", path: "/api/health-isf/operations/command-center", title: "Dispatch/governance snapshot", kind: "snapshot" },
+    { id: "alerts", path: "/api/health-isf/operations/alerts", title: "Warnings and operational conditions", kind: "snapshot" },
+    { id: "billing", path: "/api/health-isf/operations/billing-handoffs?limit=40", title: "Billing/payment status", kind: "billing" },
+    { id: "schedules", path: "/api/health-isf/recurring/schedules?active_only=true&limit=40", title: "Scheduling information", kind: "schedules" },
+    { id: "mapPreview", path: "/api/health-isf/operations/map-preview", title: "Routing/ETA preview already available", kind: "snapshot" },
+    { id: "intelligence", path: "/api/health-isf/intelligence/summary", title: "Health ISF operational intelligence summary", kind: "summary" },
+    { id: "novaIntelligence", path: "/api/nova/intelligence", title: "Nova operational intelligence overlay", kind: "summary" }
+  ];
+  var NOVA_HEALTH_ISF_UNSUPPORTED = [
+    "GET /api/health-isf/dispatch/active-assignments expires stale offers and can auto-reassign, so this pane does not call it",
+    "GET /api/health-isf/drivers can seed sample drivers on read, so driver counts come from dashboard and command-center instead",
+    "GET /api/health-isf/dispatch/workspace can bootstrap operational state on read, so this pane does not call it",
+    "Live Driver Mobile GPS routing writes, accept/arrive/dropoff, assign/reassign, schedule mutations, billing/payout/Stripe writes, and provider record writes"
+  ];
+
+  function novaHealthIsfState() {
+    if (!state.assistant.novaHealthIsf || typeof state.assistant.novaHealthIsf !== "object") {
+      state.assistant.novaHealthIsf = {
+        status: "idle",
+        error: "",
+        loaded: false,
+        sources: {}
+      };
+    }
+    if (!state.assistant.novaHealthIsf.sources || typeof state.assistant.novaHealthIsf.sources !== "object") {
+      state.assistant.novaHealthIsf.sources = {};
+    }
+    return state.assistant.novaHealthIsf;
+  }
+
+  function novaHealthIsfAuthFetch(url, options) {
+    var opts = options || {};
+    opts.method = "GET";
+    return novaConversationAuthFetch(url, opts);
+  }
+
+  function novaHealthIsfSlice(items, limit) {
+    return Array.isArray(items) ? items.slice(0, limit || 8) : [];
+  }
+
+  function trimNovaHealthIsfPayload(kind, data) {
+    if (data == null) return null;
+    if (kind === "metrics" && data && typeof data === "object") {
+      return {
+        total_rides: data.total_rides,
+        pending_rides: data.pending_rides,
+        assigned_rides: data.assigned_rides,
+        active_rides: data.active_rides,
+        completed_rides: data.completed_rides,
+        cancelled_rides: data.cancelled_rides,
+        total_drivers: data.total_drivers,
+        available_drivers: data.available_drivers,
+        busy_drivers: data.busy_drivers,
+        offline_drivers: data.offline_drivers,
+        total_providers: data.total_providers,
+        pending_payouts_usd: data.pending_payouts_usd,
+        total_payouts_usd: data.total_payouts_usd
+      };
+    }
+    if (kind === "queue") {
+      return novaHealthIsfSlice(data, 8).map(function (item) {
+        return {
+          ride_id: item && item.ride_id,
+          passenger_name: item && item.passenger_name,
+          ride_status: item && item.ride_status,
+          assignment_state: item && item.assignment_state,
+          pickup_address: item && item.pickup_address,
+          appointment_time: item && item.appointment_time
+        };
+      });
+    }
+    if (kind === "rides") {
+      return novaHealthIsfSlice(data, 8).map(function (item) {
+        return {
+          id: item && item.id,
+          passenger_name: item && item.passenger_name,
+          status: item && item.status,
+          lifecycle_state: item && item.lifecycle_state,
+          driver_id: item && item.driver_id,
+          estimated_duration_minutes: item && item.estimated_duration_minutes,
+          estimated_distance_miles: item && item.estimated_distance_miles,
+          fare_amount: item && item.fare_amount,
+          scheduling_summary: item && item.scheduling_summary
+        };
+      });
+    }
+    if (kind === "billing") {
+      return novaHealthIsfSlice(data, 8).map(function (item) {
+        return {
+          handoff_id: item && item.handoff_id,
+          ride_id: item && item.ride_id,
+          billing_status: item && item.billing_status,
+          fare_amount: item && item.fare_amount,
+          passenger_name: item && item.passenger_name
+        };
+      });
+    }
+    if (kind === "schedules") {
+      return novaHealthIsfSlice(data, 8).map(function (item) {
+        return {
+          id: item && item.id,
+          passenger_name: item && item.passenger_name,
+          frequency: item && item.frequency,
+          pickup_time_local: item && item.pickup_time_local,
+          is_active: item && item.is_active,
+          service_type: item && item.service_type
+        };
+      });
+    }
+    if (kind === "summary" && data && typeof data === "object") {
+      return {
+        summary: data.summary,
+        operational_health_score: data.operational_health_score,
+        risk_score: data.risk_score,
+        anomaly_count: data.anomaly_count,
+        composite_score: data.composite_score,
+        composite_label: data.composite_label,
+        recommended_actions: novaHealthIsfSlice(data.recommended_actions, 5),
+        anomaly_explanations: novaHealthIsfSlice(data.anomaly_explanations, 5)
+      };
+    }
+    if (kind === "snapshot" && data && typeof data === "object") {
+      var commandCenter = data.command_center && typeof data.command_center === "object" ? data.command_center : {};
+      var driverStates = ((commandCenter.driver_state_registry || {}).states) || {};
+      var providerStates = ((commandCenter.provider_state_registry || {}).states) || data.command_center_summary;
+      return {
+        organization_id: data.organization_id,
+        safety: data.safety || {},
+        alerts: data.alerts || {},
+        driver_states: driverStates,
+        provider_summary: providerStates || {},
+        map_preview: data.map_preview ? { safety: (data.safety || {}), routing_engine_enabled: !!(data.safety || {}).routing_engine_enabled } : null,
+        command_center_summary: data.command_center_summary || null
+      };
+    }
+    return data;
+  }
+
+  function novaHealthIsfHasVisibleData(intelligence) {
+    var sources = intelligence.sources || {};
+    return NOVA_HEALTH_ISF_READ_SOURCES.some(function (source) {
+      var entry = sources[source.id];
+      if (!entry || !entry.ok) return false;
+      var payload = entry.data;
+      if (Array.isArray(payload)) return payload.length > 0;
+      if (payload && typeof payload === "object") return Object.keys(payload).length > 0;
+      return payload != null && payload !== "";
+    });
+  }
+
+  function renderNovaHealthIsfMetric(label, value) {
+    return '<span class="badge badge-soft">' + escapeHtml(label) + ": " + escapeHtml(String(value == null ? "n/a" : value)) + "</span>";
+  }
+
+  function renderNovaHealthIsfList(items, emptyText, renderItem) {
+    if (!Array.isArray(items) || !items.length) {
+      return '<p class="muted">' + escapeHtml(emptyText) + "</p>";
+    }
+    return "<ul class=\"nova-health-isf-list\">" + items.map(renderItem).join("") + "</ul>";
+  }
+
+  function renderNovaHealthIsfSourceSection(source, entry) {
+    var status = entry && entry.ok ? "available" : (entry && entry.status ? "unavailable " + entry.status : "unavailable");
+    var reason = entry && entry.reason ? entry.reason : "Existing source did not return authorized data for this identity.";
+    var body;
+    if (!entry || !entry.ok) {
+      body = '<p class="muted">Unavailable from existing source for this signed-in identity: ' + escapeHtml(reason) + "</p>";
+    } else if (source.kind === "metrics") {
+      var metrics = entry.data || {};
+      body = '<div class="nova-health-isf-metrics">' +
+        renderNovaHealthIsfMetric("pending", metrics.pending_rides) +
+        renderNovaHealthIsfMetric("assigned", metrics.assigned_rides) +
+        renderNovaHealthIsfMetric("active", metrics.active_rides) +
+        renderNovaHealthIsfMetric("completed", metrics.completed_rides) +
+        renderNovaHealthIsfMetric("cancelled", metrics.cancelled_rides) +
+        renderNovaHealthIsfMetric("available drivers", metrics.available_drivers) +
+        renderNovaHealthIsfMetric("busy drivers", metrics.busy_drivers) +
+        renderNovaHealthIsfMetric("offline drivers", metrics.offline_drivers) +
+        renderNovaHealthIsfMetric("providers", metrics.total_providers) +
+        renderNovaHealthIsfMetric("pending payouts", metrics.pending_payouts_usd) +
+        "</div>";
+    } else if (source.kind === "queue" || source.kind === "rides") {
+      body = renderNovaHealthIsfList(entry.data, "No rides in this existing read source.", function (item) {
+        return "<li><strong>" + escapeHtml(safeText(item.passenger_name || item.id || item.ride_id, "ride")) + "</strong>" +
+          '<p class="muted">' + escapeHtml(safeText(item.ride_status || item.status || item.lifecycle_state, "unknown")) +
+          (item.assignment_state ? " / " + escapeHtml(safeText(item.assignment_state, "")) : "") +
+          (item.estimated_duration_minutes != null ? " / ETA " + escapeHtml(String(item.estimated_duration_minutes)) + " min" : "") +
+          (item.pickup_address ? " / " + escapeHtml(safeText(item.pickup_address, "")) : "") +
+          "</p></li>";
+      });
+    } else if (source.kind === "billing") {
+      body = renderNovaHealthIsfList(entry.data, "No billing handoffs in this existing read source.", function (item) {
+        return "<li><strong>" + escapeHtml(safeText(item.billing_status, "pending")) + "</strong>" +
+          '<p class="muted">ride ' + escapeHtml(safeText(item.ride_id, "n/a")) +
+          (item.fare_amount != null ? " / " + escapeHtml(String(item.fare_amount)) : "") + "</p></li>";
+      });
+    } else if (source.kind === "schedules") {
+      body = renderNovaHealthIsfList(entry.data, "No recurring schedules in this existing read source.", function (item) {
+        return "<li><strong>" + escapeHtml(safeText(item.passenger_name, "schedule")) + "</strong>" +
+          '<p class="muted">' + escapeHtml(safeText(item.frequency, "")) + " / " + escapeHtml(safeText(item.pickup_time_local, "")) + "</p></li>";
+      });
+    } else if (source.kind === "summary") {
+      var summary = entry.data || {};
+      body = "<p>" + escapeHtml(safeText(summary.summary, "No summary text from this existing intelligence source.")) + "</p>" +
+        (summary.composite_score != null ? '<p class="muted">composite: ' + escapeHtml(String(summary.composite_score)) + "</p>" : "") +
+        (summary.operational_health_score != null ? '<p class="muted">health: ' + escapeHtml(String(summary.operational_health_score)) + "</p>" : "") +
+        (summary.risk_score != null ? '<p class="muted">risk: ' + escapeHtml(String(summary.risk_score)) + "</p>" : "") +
+        renderNovaHealthIsfList(summary.recommended_actions, "No recommended actions from this existing source.", function (item) {
+          return "<li>" + escapeHtml(safeText((item && item.action) || item, "")) + "</li>";
+        }) +
+        renderNovaHealthIsfList(summary.anomaly_explanations, "No anomaly explanations from this existing source.", function (item) {
+          return "<li>" + escapeHtml(safeText(item, "")) + "</li>";
+        });
+    } else {
+      var snapshot = entry.data || {};
+      var safety = snapshot.safety || {};
+      body = '<p class="muted">preview_only: ' + escapeHtml(String(safety.preview_only !== false)) +
+        " / execution_disabled: " + escapeHtml(String(safety.execution_disabled !== false)) +
+        (safety.routing_engine_enabled != null ? " / routing_engine_enabled: " + escapeHtml(String(!!safety.routing_engine_enabled)) : "") +
+        "</p>";
+      if (snapshot.driver_states && typeof snapshot.driver_states === "object" && Object.keys(snapshot.driver_states).length) {
+        body += '<div class="nova-health-isf-metrics">' + Object.keys(snapshot.driver_states).slice(0, 8).map(function (key) {
+          return renderNovaHealthIsfMetric(key, snapshot.driver_states[key]);
+        }).join("") + "</div>";
+      }
+      if (snapshot.alerts && typeof snapshot.alerts === "object") {
+        body += '<p class="muted">alerts: ' + escapeHtml(safeText(snapshot.alerts.supervision_status || snapshot.alerts.status || "attached", "attached")) + "</p>";
+      }
+    }
+    return '<section class="nova-health-isf-section" data-nova-health-isf-source="' + escapeHtml(source.id) + '">' +
+      "<h4>" + escapeHtml(source.title) + "</h4>" +
+      '<p class="muted">GET ' + escapeHtml(source.path) + " — " + escapeHtml(status) + "</p>" +
+      body +
+      "</section>";
+  }
+
+  function renderNovaHealthIsfIntelligencePane() {
+    var intelligence = novaHealthIsfState();
+    var authenticated = !!getAccessToken() && !!novaAuthenticatedUserId();
+    var status = safeText(intelligence.status, "idle");
+    var errorText = safeText(intelligence.error, "");
+    var empty = authenticated && intelligence.loaded && !novaHealthIsfHasVisibleData(intelligence) && status !== "loading";
+    if (!authenticated) {
+      return renderPanelBlock(
+        "Health ISF intelligence",
+        "Authenticated read-only Health ISF intelligence using existing GET operational sources. This pane does not mutate Health ISF.",
+        '<p class="muted">Sign in to view Health ISF intelligence. Identity comes from the verified JWT/session. A client-supplied user_id cannot load another account or tenant. This pane is GET-only.</p>' +
+          '<div class="ops-launcher-actions">' +
+            '<button type="button" class="preview-action" data-launcher-action="sign-in">Sign in</button>' +
+          "</div>" +
+          '<p class="muted">/workspace remains available as fallback and is not copied or embedded into this pane.</p>',
+        "nova-health-isf"
+      );
+    }
+    return renderPanelBlock(
+      "Health ISF intelligence",
+      "Read-only Nova view over existing Health ISF GET APIs, Governance command-center snapshots, and GET /api/nova/intelligence. No second operational engine.",
+      '<p class="muted">This pane only calls existing authenticated GET sources. It does not create or modify rides, assign/reassign drivers, accept rides, change lifecycle, alter schedules, routing/ETA, billing, payouts, Stripe/webhooks, or provider/driver records. Auth: AmiCorSession.authFetch via novaHealthIsfAuthFetch. Tenant scope comes from the JWT, not a client-supplied user_id. /workspace remains the live conversation source as fallback.</p>' +
+        '<div class="nova-health-isf-status" id="nova-health-isf-controls">' +
+          '<span class="badge badge-soft">status: ' + escapeHtml(status) + "</span>" +
+          '<span class="badge badge-soft">identity: session</span>' +
+          '<span class="badge badge-soft">read-only GET</span>' +
+        "</div>" +
+        (errorText ? '<p class="nova-health-isf-error" id="nova-health-isf-error">' + escapeHtml(errorText) + "</p>" : '<p class="nova-health-isf-error" id="nova-health-isf-error" hidden></p>') +
+        (empty ? '<p class="muted" id="nova-health-isf-empty">No authorized Health ISF operational intelligence is available for this signed-in identity yet. Refresh to retry existing GET sources.</p>' : "") +
+        NOVA_HEALTH_ISF_READ_SOURCES.map(function (source) {
+          return renderNovaHealthIsfSourceSection(source, intelligence.sources[source.id]);
+        }).join("") +
+        '<section class="nova-health-isf-section" id="nova-health-isf-unavailable">' +
+          "<h4>Unsupported / not invented</h4>" +
+          "<ul class=\"nova-health-isf-list\">" + NOVA_HEALTH_ISF_UNSUPPORTED.map(function (item) {
+            return "<li>" + escapeHtml(item) + "</li>";
+          }).join("") + "</ul>" +
+        "</section>" +
+        '<div class="assistant-form-actions nova-health-isf-actions">' +
+          '<button type="button" class="assistant-submit secondary" data-nova-health-isf-refresh="true" ' + (status === "loading" ? "disabled" : "") + ">Refresh</button>" +
+        "</div>",
+      "nova-health-isf"
+    );
+  }
+
+  async function refreshNovaHealthIsfIntelligence() {
+    var intelligence = novaHealthIsfState();
+    if (!getAccessToken() || !novaAuthenticatedUserId()) {
+      intelligence.status = "error";
+      intelligence.error = "Sign in required to load Health ISF intelligence.";
+      renderPage();
+      return;
+    }
+    intelligence.status = "loading";
+    intelligence.error = "";
+    persistSessionState();
+    renderPage();
+    var nextSources = {};
+    var failures = 0;
+    await Promise.all(NOVA_HEALTH_ISF_READ_SOURCES.map(async function (source) {
+      try {
+        var response = await novaHealthIsfAuthFetch(source.path, { method: "GET" });
+        var status = response && response.status ? response.status : 0;
+        var payload = null;
+        try {
+          payload = await response.json();
+        } catch (_) {
+          payload = null;
+        }
+        if (!response || !response.ok) {
+          failures += 1;
+          nextSources[source.id] = {
+            ok: false,
+            status: status,
+            reason: status === 401 ? "Sign in required." : status === 403 ? "Not authorized for this identity/role." : "Existing source returned " + status + ".",
+            data: null
+          };
+          return;
+        }
+        nextSources[source.id] = {
+          ok: true,
+          status: status,
+          reason: "",
+          data: trimNovaHealthIsfPayload(source.kind, payload)
+        };
+      } catch (error) {
+        failures += 1;
+        nextSources[source.id] = {
+          ok: false,
+          status: 0,
+          reason: "Existing source could not be read.",
+          data: null
+        };
+      }
+    }));
+    intelligence.sources = nextSources;
+    intelligence.loaded = true;
+    intelligence.status = failures === NOVA_HEALTH_ISF_READ_SOURCES.length ? "error" : "idle";
+    intelligence.error = intelligence.status === "error" ? "Could not load authorized Health ISF intelligence for this identity." : "";
+    persistSessionState();
+    if (state.route === "ai-assistant" && normalizeNovaPane(state.assistant.novaShellPane) === "health-isf") {
+      renderPage();
+    }
+  }
+
+  function ensureNovaHealthIsfHydrated() {
+    if (state.route !== "ai-assistant") return;
+    if (normalizeNovaPane(state.assistant.novaShellPane) !== "health-isf") return;
+    if (!getAccessToken() || !novaAuthenticatedUserId()) return;
+    var intelligence = novaHealthIsfState();
+    if (intelligence.status === "loading") return;
+    if (intelligence.loaded) return;
+    void refreshNovaHealthIsfIntelligence();
+  }
+
+  function bindNovaHealthIsfEvents() {
+    var host = document.getElementById("nova-health-isf-controls");
+    if (!host || host.getAttribute("data-ami-nova-health-isf-bound") === "1") return;
+    host.setAttribute("data-ami-nova-health-isf-bound", "1");
+    var refreshButton = document.querySelector("[data-nova-health-isf-refresh]");
+    if (refreshButton) {
+      refreshButton.addEventListener("click", function () {
+        void refreshNovaHealthIsfIntelligence();
+      });
+    }
   }
 
   function renderSystemHealth() {
@@ -10093,6 +13240,7 @@
     }
     var pending = state.assistant.pendingIntent;
     addAuditEvent("confirmation_canceled", safeText(pending.intent, "preview"), safeText(pending.prompt, ""), "Operator canceled pending intent from confirmation panel.");
+    markNovaWorkflowCancelled(pending.prompt);
     state.assistant.pendingIntent = null;
     addToolEvent("informational", "Confirmation canceled", "Pending intent canceled by operator before dry-run request.");
     persistSessionState();
@@ -10107,6 +13255,13 @@
     var intentButtons = Array.prototype.slice.call(document.querySelectorAll("[data-assistant-intent]"));
     var confirmButton = document.querySelector("[data-confirm-intent]");
     var cancelIntentButton = document.querySelector("[data-cancel-intent]");
+
+    if (form && form.getAttribute("data-ami-assistant-bound") === "1") {
+      return;
+    }
+    if (form) {
+      form.setAttribute("data-ami-assistant-bound", "1");
+    }
 
     if (form) {
       form.addEventListener("submit", handleAssistantSubmit);
@@ -10224,7 +13379,11 @@
     els.pageSubtitle.textContent = routeMeta.subtitle;
     updateTopBadges();
 
-    if (state.loading) {
+    if (state.loading && state.route !== "ai-assistant") {
+      if (state.route === "home") {
+        syncPageContentHtml(els.pageContent, renderOperationsHome());
+        return;
+      }
       if (state.role === "dispatcher" && state.route === "dispatch") {
         syncPageContentHtml(
           els.pageContent,
@@ -10253,13 +13412,15 @@
       return;
     }
 
-    if (state.error && !state.health && !state.supervision) {
+    if (state.error && !state.health && !state.supervision && state.route !== "ai-assistant") {
       els.pageContent.innerHTML = renderErrorPanel();
       return;
     }
 
     var pageHtml = "";
-    if (state.route === "dashboard") {
+    if (state.route === "home") {
+      pageHtml = renderOperationsHome();
+    } else if (state.route === "dashboard") {
       pageHtml = renderDashboard();
     } else if (state.route === "dispatch") {
       pageHtml = renderDispatch();
@@ -10285,7 +13446,6 @@
       pageHtml = renderSettings();
     } else if (state.route === "ai-assistant") {
       pageHtml = renderAssistant();
-      bindAssistantWorkspaceEvents();
     } else {
       pageHtml = renderSystemHealth();
     }
@@ -10325,12 +13485,30 @@
       if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && (state.role === "rider" || state.route === "riders")) {
         bindRiderWorkspaceEvents();
       }
+      if (state.route === "ai-assistant") {
+        bindAssistantWorkspaceEvents();
+        bindNovaConversationEvents();
+        bindNovaVoiceEvents();
+        bindNovaFilesEvents();
+        bindNovaMemoryEvents();
+        bindNovaToolsEvents();
+        bindNovaApprovalsEvents();
+        bindNovaWorkflowsEvents();
+        bindNovaHealthIsfEvents();
+        ensureNovaConversationHydrated();
+        ensureNovaVoiceHydrated();
+        ensureNovaMemoryHydrated();
+        ensureNovaApprovalsHydrated();
+        ensureNovaHealthIsfHydrated();
+      }
+      mountDriverOperationalMap();
       return;
     }
     state.runtime.lastPageDataSignature = dataSig;
     if (els.pageContent && els.pageContent.innerText && els.pageContent.innerText.indexOf("Preparing Command Surface") >= 0) {
       els.pageContent.__stableHtml = "";
     }
+    destroyDriverLeafletMap();
     var domChanged = setHtmlIfChanged(els.pageContent, fullHtml);
     if (!domChanged) {
       traceDispatcherPickupRender("renderPage:skipped-html");
@@ -10353,6 +13531,23 @@
     if ((state.route === "dashboard" || state.route === "mobile" || state.route === "riders") && (state.role === "rider" || state.route === "riders")) {
       bindRiderWorkspaceEvents();
     }
+    if (state.route === "ai-assistant") {
+      bindAssistantWorkspaceEvents();
+      bindNovaConversationEvents();
+      bindNovaVoiceEvents();
+      bindNovaFilesEvents();
+      bindNovaMemoryEvents();
+      bindNovaToolsEvents();
+      bindNovaApprovalsEvents();
+      bindNovaWorkflowsEvents();
+      bindNovaHealthIsfEvents();
+      ensureNovaConversationHydrated();
+      ensureNovaVoiceHydrated();
+      ensureNovaMemoryHydrated();
+      ensureNovaApprovalsHydrated();
+      ensureNovaHealthIsfHydrated();
+    }
+    mountDriverOperationalMap();
     traceDispatcherPickupRender("renderPage:end");
   }
 
@@ -14367,6 +17562,9 @@
       persistMobileSurfacePreference("rider");
     }
     recomputeAssistantRuntimeState();
+    if (target === "ai-assistant") {
+      state.assistant.novaShellPane = novaPaneFromHash();
+    }
     renderNav();
     renderPage();
     if (target === "ai-assistant") {
@@ -14435,6 +17633,16 @@
     windowEventBindings.push({ eventName: "popstate", handler: onPopState });
     window.addEventListener("popstate", onPopState);
 
+    var onNovaHashChange = function () {
+      if (state.route !== "ai-assistant") return;
+      var nextPane = novaPaneFromHash();
+      if (nextPane !== normalizeNovaPane(state.assistant.novaShellPane)) {
+        setNovaShellPane(nextPane, false);
+      }
+    };
+    windowEventBindings.push({ eventName: "hashchange", handler: onNovaHashChange });
+    window.addEventListener("hashchange", onNovaHashChange);
+
     var onFocus = function () {
       requestSilentRefresh("focus");
     };
@@ -14462,6 +17670,48 @@
       };
       documentEventBindings.push({ eventName: "click", handler: riderActionDelegate, element: els.pageContent });
       els.pageContent.addEventListener("click", riderActionDelegate);
+
+      var launcherActionDelegate = function (event) {
+        var target = event && event.target;
+        if (!target || !target.closest) return;
+        var signIn = target.closest("[data-launcher-action=\"sign-in\"]");
+        if (signIn && els.pageContent.contains(signIn)) {
+          event.preventDefault();
+          void ensureAuthenticatedSession("Sign in to open AMICOR Operations.").then(function (ok) {
+            if (ok) {
+              renderPage();
+            }
+          });
+          return;
+        }
+        var signOut = target.closest("[data-launcher-action=\"sign-out\"]");
+        if (signOut && els.pageContent.contains(signOut)) {
+          event.preventDefault();
+          void signOutNovaShellSession();
+          return;
+        }
+        var tile = target.closest("a[data-launcher-route]");
+        if (!tile || !els.pageContent.contains(tile)) return;
+        var route = safeText(tile.getAttribute("data-launcher-route"), "");
+        if (!route || !ROUTES[route]) return;
+        event.preventDefault();
+        markUserActivity("launcher-tile");
+        setRoute(route, true, "launcher-tile");
+      };
+      documentEventBindings.push({ eventName: "click", handler: launcherActionDelegate, element: els.pageContent });
+      els.pageContent.addEventListener("click", launcherActionDelegate);
+
+      var novaPaneDelegate = function (event) {
+        var target = event && event.target;
+        if (!target || !target.closest) return;
+        var paneButton = target.closest("[data-nova-pane]");
+        if (!paneButton || !els.pageContent.contains(paneButton)) return;
+        event.preventDefault();
+        markUserActivity("nova-shell-pane");
+        setNovaShellPane(safeText(paneButton.getAttribute("data-nova-pane"), "governance"), true);
+      };
+      documentEventBindings.push({ eventName: "click", handler: novaPaneDelegate, element: els.pageContent });
+      els.pageContent.addEventListener("click", novaPaneDelegate);
 
       var driverActionDelegate = function (event) {
         var target = event && event.target;

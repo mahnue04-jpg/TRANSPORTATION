@@ -673,6 +673,24 @@ def require_auth(user = Depends(get_current_user)) -> str: # type: ignore
     return user.id
 
 
+def bind_authenticated_user_id(authenticated_user_id: str, requested_user_id: str | None = None) -> str:
+    """Use the verified JWT identity. Never authorize from a client-supplied user_id.
+
+    A compatibility user_id parameter is accepted only when it matches the
+    authenticated identity. Otherwise the request is rejected.
+    """
+    bound = str(authenticated_user_id or "").strip()
+    if not bound:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    requested = str(requested_user_id or "").strip()
+    if requested and requested != bound:
+        raise HTTPException(
+            status_code=403,
+            detail="user_id does not match authenticated identity",
+        )
+    return bound
+
+
 def require_any_role(*allowed_roles: str):
     expected = {normalize_role(role) for role in allowed_roles} or {DEFAULT_ROLE}
 

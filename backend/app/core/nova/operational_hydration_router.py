@@ -2441,6 +2441,17 @@ def ops_workspace_action(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    """Frozen legacy mutation lane (Phase 2A).
+
+    Do not add Nova callers. Do not make this the Nova execution backend.
+    Consolidation into governed Nova actions is a later phase.
+
+    Current Health ISF mutations (via `_execute_workspace_action` / health_isf_service):
+    - assign_driver_to_ride, reassign_expired_request
+    - update_ride_status (cancel, arrive, onboard, complete, escalate, retry, en-route, incident, override)
+    - accept_driver_ride, driver_arrived_pickup, driver_pickup_complete
+    - set_driver_operational_status
+    """
     org_id = _resolve_org(user, organization_id)
     resolved_role_view = _effective_role_view(user.role, role_view)
     actor_user_id = str(user.user_id or "")

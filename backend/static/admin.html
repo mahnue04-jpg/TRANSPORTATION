@@ -126,7 +126,7 @@ function boolBadge(ok) {
 async function load() {
   document.getElementById('ts').textContent = new Date().toLocaleTimeString();
   try {
-    const res = await fetch('/api/admin/dashboard');
+    const res = await fetch('/api/admin/dashboard', { credentials: 'include' });
     const d = await res.json();
 
     // Summary cards

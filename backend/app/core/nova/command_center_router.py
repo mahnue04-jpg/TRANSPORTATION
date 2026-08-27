@@ -51,6 +51,7 @@ require_nova_actions = require_any_role(
 router = APIRouter(
     prefix="/api/nova/command-center",
     tags=["nova-command-center"],
+    dependencies=[Depends(require_nova_actions)],
 )
 
 

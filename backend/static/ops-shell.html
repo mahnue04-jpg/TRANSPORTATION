@@ -10,7 +10,8 @@
   <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png?v=20260803.1" />
   <link rel="manifest" href="/static/manifest.webmanifest?v=20260803.1" />
   <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
-  <link rel="stylesheet" href="/static/ops-shell.css?v=20260824.1" />
+  <link rel="stylesheet" href="/static/ops-shell.css?v=20260827.9" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
   <div id="ops-app" class="ops-app">
@@ -19,6 +20,7 @@
         <img class="amicor-logo-full amicor-logo-full-sm" src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." decoding="async" />
       </div>
       <nav class="ops-nav" aria-label="Primary navigation">
+        <a href="/app" data-route="home">Home</a>
         <a href="/app/dashboard" data-route="dashboard">Dashboard</a>
         <a href="/app/dispatch" data-route="dispatch">Dispatch</a>
         <a href="/app/trips" data-route="trips">Trips</a>
@@ -78,7 +80,7 @@
     </main>
   </div>
 
-  <script src="/static/roles/role-navigation.js?v=20260525.7"></script>
+  <script src="/static/roles/role-navigation.js?v=20260826.1"></script>
   <script src="/static/roles/role-workspaces.js?v=20260723.1"></script>
   <script src="/static/modules/operational-events.js?v=20260525.8"></script>
   <script src="/static/modules/trip-lifecycle.js?v=20260525.8"></script>
@@ -90,7 +92,11 @@
   <script src="/static/modules/mobile-runtime.js?v=20260525.8"></script>
   <script src="/static/ux/sessionManager.js?v=20260604.1"></script>
   <script src="/static/ux/authUI.js?v=20260803.1"></script>
+  <script src="/static/ux/voiceRuntime.js?v=20260512.1"></script>
+  <script src="/static/ux/humanVoiceEngine.js?v=20260826.4"></script>
+  <script src="/static/ux/uploadUX.js?v=20260827.1"></script>
   <script src="/static/branding/brand.js?v=20260803.1"></script>
-  <script src="/static/ops-shell.js?v=20260803.1"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/ops-shell.js?v=20260827.9"></script>
 </body>
 </html>

@@ -4,7 +4,9 @@ import re
 from typing import Optional, Tuple
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth import get_current_user
 from pydantic import BaseModel, Field
 
 try:
@@ -12,7 +14,11 @@ try:
 except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
 
-router = APIRouter(prefix="/api/voice", tags=["voice"])
+router = APIRouter(
+    prefix="/api/voice",
+    tags=["voice"],
+    dependencies=[Depends(get_current_user)],
+)
 
 OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "nova")

@@ -125,9 +125,20 @@
       resumeText: "",
     };
 
+    async function voiceApiFetch(url, options) {
+      const opts = options || {};
+      if (typeof config.authFetch === "function") {
+        return config.authFetch(url, opts);
+      }
+      if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+        return window.AmiCorSession.authFetch(url, opts);
+      }
+      return fetch(url, opts);
+    }
+
     async function loadProviders() {
       try {
-        const res = await fetch(apiBase + "/api/voice/providers", { method: "GET" });
+        const res = await voiceApiFetch(apiBase + "/api/voice/providers", { method: "GET" });
         if (!res.ok) return null;
         return await res.json();
       } catch (_) {
@@ -197,7 +208,7 @@
     async function synthesizeChunk(chunk, personaName) {
       state.controller = new AbortController();
       const startedAt = Date.now();
-      const res = await fetch(apiBase + "/api/voice/speak", {
+      const res = await voiceApiFetch(apiBase + "/api/voice/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: state.controller.signal,
