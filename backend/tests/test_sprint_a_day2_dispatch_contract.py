@@ -78,7 +78,18 @@ def _create_request(client: TestClient, headers: dict, suffix: str) -> dict:
     return response.json()
 
 
-def test_pending_request_blocked_for_manual_assignment_and_auto_dispatch(client: TestClient) -> None:
+def test_pending_request_blocked_for_manual_assignment_and_auto_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    monkeypatch.setattr(
+        "app.modules.health_isf.service._is_intake_auto_dispatch_enabled",
+        lambda db, organization_id: False,
+    )
+    monkeypatch.setattr(
+        "app.modules.health_isf.routes._schedule_customer_request_side_effects",
+        lambda **kwargs: None,
+    )
     auth = _login_dispatcher(client)
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     _, organization_id = _dispatcher_context()
@@ -105,7 +116,18 @@ def test_pending_request_blocked_for_manual_assignment_and_auto_dispatch(client:
     assert auto_response.status_code == 409, auto_response.text
 
 
-def test_customer_request_queue_prioritizes_dispatch_ready_work_over_pending(client: TestClient) -> None:
+def test_customer_request_queue_prioritizes_dispatch_ready_work_over_pending(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    monkeypatch.setattr(
+        "app.modules.health_isf.service._is_intake_auto_dispatch_enabled",
+        lambda db, organization_id: False,
+    )
+    monkeypatch.setattr(
+        "app.modules.health_isf.routes._schedule_customer_request_side_effects",
+        lambda **kwargs: None,
+    )
     auth = _login_dispatcher(client)
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     _, organization_id = _dispatcher_context()

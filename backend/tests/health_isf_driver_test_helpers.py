@@ -1,6 +1,8 @@
 """Shared driver/dispatch test isolation for health-isf acceptance tests."""
 from __future__ import annotations
 
+import time
+
 from app.db.models import User as PlatformUser
 from app.db.session import SessionLocal
 from app.modules.health_isf import service as hs
@@ -25,6 +27,9 @@ _DRIVER_TEST_RESET_MODULES = {
     "test_multi_ride_driver_scheduling.py",
     "test_advance_scheduling.py",
     "test_driver_mobile_routing_lifecycle_guard.py",
+    "test_sprint_a_day2_dispatch_contract.py",
+    "test_sprint_a_day4_completion_contract.py",
+    "test_operational_revenue_workflow_contract.py",
 }
 
 
@@ -87,11 +92,50 @@ def reset_organization_driver_test_state(
     driver_names: tuple[str, ...] = ("James Smith", "Maria Garcia"),
 ) -> None:
     """Reset seeded drivers and open rides so dispatch tests do not cross-pollute."""
+    for _ in range(10):
+        _reset_organization_driver_test_state_once(org_id, driver_names=driver_names)
+        with SessionLocal() as db:
+            open_rides = [
+                ride
+                for ride in db.query(HealthISFRide).filter(HealthISFRide.organization_id == org_id).all()
+                if not hs._ride_is_terminal(ride)
+            ]
+            active_assignments = (
+                db.query(HealthISFDispatchAssignment)
+                .filter(
+                    HealthISFDispatchAssignment.organization_id == org_id,
+                    HealthISFDispatchAssignment.assignment_state.in_(
+                        list(hs.ACTIVE_DISPATCH_ASSIGNMENT_STATES)
+                    ),
+                )
+                .count()
+            )
+        if not open_rides and active_assignments == 0:
+            return
+        time.sleep(0.2)
+
+
+def _reset_organization_driver_test_state_once(
+    org_id: str,
+    *,
+    driver_names: tuple[str, ...],
+) -> None:
     drain_org_dispatch_queue(org_id)
     with SessionLocal() as db:
         hs.ensure_sample_driver_credentials(db, organization_id=org_id)
         now_ts = hs.now()
         _finalize_open_org_rides(db, org_id, now_ts)
+        for assignment in db.query(HealthISFDispatchAssignment).filter(
+            HealthISFDispatchAssignment.organization_id == org_id
+        ).all():
+            state = str(assignment.assignment_state or "")
+            if state not in {
+                DispatchAssignmentState.DROPOFF_COMPLETE.value,
+                DispatchAssignmentState.REJECTED.value,
+            }:
+                assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
+                assignment.closed_reason = "test_reset"
+                assignment.updated_at = now_ts
         for name in driver_names:
             drivers = (
                 db.query(HealthISFDriver)
@@ -102,31 +146,6 @@ def reset_organization_driver_test_state(
                 .all()
             )
             for driver in drivers:
-                active_ride_ids: set[str] = set()
-                for ride in db.query(HealthISFRide).filter(HealthISFRide.driver_id == driver.id).all():
-                    active_ride_ids.add(str(ride.id))
-                    if str(ride.status) not in {RideStatus.COMPLETED.value, RideStatus.CANCELLED.value}:
-                        ride.status = RideStatus.COMPLETED.value
-                        ride.lifecycle_state = RideStatus.COMPLETED.value
-                        ride.completed_at = now_ts
-                        ride.updated_at = now_ts
-                for assignment in db.query(HealthISFDispatchAssignment).filter(
-                    HealthISFDispatchAssignment.driver_id == driver.id
-                ).all():
-                    if assignment.ride_id:
-                        active_ride_ids.add(str(assignment.ride_id))
-                    assignment.assignment_state = DispatchAssignmentState.DROPOFF_COMPLETE.value
-                    assignment.closed_reason = "test_reset"
-                    assignment.updated_at = now_ts
-                for ride_id in active_ride_ids:
-                    ride = hs.get_ride_by_id(db, ride_id)
-                    if not ride or hs._ride_is_terminal(ride):
-                        continue
-                    ride.status = RideStatus.COMPLETED.value
-                    ride.lifecycle_state = RideStatus.COMPLETED.value
-                    ride.completed_at = now_ts
-                    ride.driver_id = driver.id
-                    ride.updated_at = now_ts
                 driver.status = DriverStatus.AVAILABLE
                 driver.availability_state = "available"
                 driver.is_active = True

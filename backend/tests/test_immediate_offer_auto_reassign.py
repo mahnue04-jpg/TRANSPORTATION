@@ -1,6 +1,7 @@
 """Auto-reassignment after immediate dispatch offer expiry."""
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
@@ -57,18 +58,52 @@ def _clear_driver(db, driver: HealthISFDriver) -> None:
 def _prepare_two_drivers(org_id: str) -> tuple[str, str]:
     with SessionLocal() as db:
         hs.ensure_sample_driver_credentials(db, organization_id=org_id)
-        drivers = (
-            db.query(HealthISFDriver)
-            .filter(HealthISFDriver.organization_id == org_id, HealthISFDriver.is_active == True)
-            .order_by(HealthISFDriver.name.asc())
-            .limit(10)
-            .all()
-        )
-        assert len(drivers) >= 2
-        for driver in drivers[:2]:
+        prepared: list[HealthISFDriver] = []
+        for name in ("James Smith", "Maria Garcia"):
+            driver = (
+                db.query(HealthISFDriver)
+                .filter(
+                    HealthISFDriver.organization_id == org_id,
+                    HealthISFDriver.name.ilike(name),
+                )
+                .first()
+            )
+            assert driver is not None, f"missing sample driver {name}"
             _clear_driver(db, driver)
+            prepared.append(driver)
+        keep_ids = {str(row.id) for row in prepared}
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == org_id,
+            HealthISFDriver.is_active == True,
+        ):
+            if str(row.id) in keep_ids:
+                continue
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+            row.is_online = False
         db.commit()
-        return str(drivers[0].id), str(drivers[1].id)
+        return str(prepared[0].id), str(prepared[1].id)
+
+
+def _wait_for_offered_assignment(ride_id: str) -> None:
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        with SessionLocal() as db:
+            if _active_offered_assignment(db, ride_id) is not None:
+                return
+        time.sleep(0.2)
+    raise AssertionError("expected offered assignment after intake automation")
+
+
+def _release_bound_offer_for_expiry(db, ride: HealthISFRide, offer: HealthISFDispatchAssignment) -> None:
+    """TEST-ONLY: bound OFFERED rows are skipped by expire_stale_dispatch_offers.
+
+    Auto-assign writes ride.driver_id before the driver accepts. Clear that binding so
+    this test exercises the real unanswered-offer expiry/reassignment path.
+    """
+    if ride and offer and str(ride.driver_id or "") == str(offer.driver_id or ""):
+        ride.driver_id = None
+        ride.updated_at = hs.now()
 
 
 def _create_immediate_ride(client: TestClient, org_id: str) -> str:
@@ -105,6 +140,7 @@ def _create_immediate_ride(client: TestClient, org_id: str) -> str:
         ride = hs.get_ride_by_id(db, ride_id)
         assert ride is not None
         assert ride.organization_id == org_id
+    _wait_for_offered_assignment(ride_id)
     return ride_id
 
 
@@ -130,6 +166,9 @@ def test_first_offer_expiry_creates_second_driver_offer(client: TestClient) -> N
         assert first is not None
         first_driver = str(first.driver_id)
         first_id = str(first.id)
+        ride = hs.get_ride_by_id(db, ride_id)
+        assert ride is not None
+        _release_bound_offer_for_expiry(db, ride, first)
         first.offer_expires_at = hs.now() - timedelta(seconds=30)
         db.commit()
 
@@ -166,6 +205,9 @@ def test_duplicate_reassign_is_idempotent(client: TestClient) -> None:
     with SessionLocal() as db:
         first = _active_offered_assignment(db, ride_id)
         assert first is not None
+        ride = hs.get_ride_by_id(db, ride_id)
+        assert ride is not None
+        _release_bound_offer_for_expiry(db, ride, first)
         first.offer_expires_at = hs.now() - timedelta(minutes=1)
         db.commit()
 
@@ -215,6 +257,9 @@ def test_second_driver_can_accept_after_auto_reassign(client: TestClient) -> Non
     with SessionLocal() as db:
         first = _active_offered_assignment(db, ride_id)
         assert first is not None
+        ride = hs.get_ride_by_id(db, ride_id)
+        assert ride is not None
+        _release_bound_offer_for_expiry(db, ride, first)
         first.offer_expires_at = hs.now() - timedelta(seconds=5)
         db.commit()
         hs.expire_stale_dispatch_offers(

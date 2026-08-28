@@ -169,7 +169,11 @@ def test_offered_ride_visible_when_ride_driver_id_cleared(client: TestClient) ->
         ride.driver_id = None
         assignment = (
             db.query(HealthISFDispatchAssignment)
-            .filter(HealthISFDispatchAssignment.ride_id == ride_id)
+            .filter(
+                HealthISFDispatchAssignment.ride_id == ride_id,
+                HealthISFDispatchAssignment.driver_id == driver_id,
+                HealthISFDispatchAssignment.assignment_state.in_(list(hs.DRIVER_APP_ASSIGNMENT_STATES)),
+            )
             .order_by(HealthISFDispatchAssignment.updated_at.desc())
             .first()
         )

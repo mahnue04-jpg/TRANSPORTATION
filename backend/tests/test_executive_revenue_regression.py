@@ -1,6 +1,8 @@
 """Executive revenue regression tests — duplicate prevention and reconcile guards."""
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,7 @@ from app.modules.health_isf.models import (
     HealthISFPaymentTransaction,
     HealthISFPayout,
     HealthISFRide,
+    HealthISFTripFinancialRecord,
     RideStatus,
 )
 
@@ -59,6 +62,17 @@ def _driver_by_name(org_id: str, name: str) -> HealthISFDriver:
 
 
 def _create_ride(client: TestClient, rider_headers: dict, dispatcher_headers: dict, driver_id: str) -> str:
+    from app.modules.health_isf.models import DriverStatus
+
+    with SessionLocal() as db:
+        driver = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        if driver:
+            driver.status = DriverStatus.AVAILABLE
+            driver.availability_state = "available"
+            driver.is_online = True
+            driver.auth_state = "active"
+            driver.is_active = True
+            db.commit()
     suffix = uuid4()[:8]
     phone_digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "0")[:4]
     create = client.post(
@@ -81,13 +95,16 @@ def _create_ride(client: TestClient, rider_headers: dict, dispatcher_headers: di
         headers=dispatcher_headers,
     )
     assert approve.status_code == 200, approve.text
-    assign = client.post(
-        f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
-        headers=dispatcher_headers,
-        json={"driver_id": driver_id},
-    )
-    if assign.status_code not in {200, 400}:
-        assert assign.status_code == 200, assign.text
+    ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=dispatcher_headers)
+    assigned = str((ride_before.json() or {}).get("driver_id") or "") if ride_before.status_code == 200 else ""
+    if assigned != driver_id:
+        assign = client.post(
+            f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+            headers=dispatcher_headers,
+            json={"driver_id": driver_id},
+        )
+        if assign.status_code not in {200, 400}:
+            assert assign.status_code == 200, assign.text
     return ride_id
 
 
@@ -124,11 +141,18 @@ def test_duplicate_billing_handoff_payment_payout_prevented(client: TestClient) 
 
         handoffs_after = db.query(HealthISFBillingHandoff).filter(HealthISFBillingHandoff.ride_id == ride_id).count()
         payments_after = db.query(HealthISFPaymentTransaction).filter(HealthISFPaymentTransaction.ride_id == ride_id).count()
-        payouts_after = (
-            db.query(HealthISFPayout)
-            .join(HealthISFPaymentTransaction, HealthISFPaymentTransaction.ride_id == ride_id)
-            .count()
+        financial = (
+            db.query(HealthISFTripFinancialRecord)
+            .filter(HealthISFTripFinancialRecord.ride_id == ride_id)
+            .first()
         )
+        payouts_after = 0
+        if financial and financial.trip_id:
+            payouts_after = (
+                db.query(HealthISFPayout)
+                .filter(HealthISFPayout.trip_id == financial.trip_id)
+                .count()
+            )
         assert handoffs_after == 1
         assert payments_after == 1
         assert payouts_after <= 1
@@ -145,17 +169,26 @@ def test_superseded_expired_assignment_not_reopened(client: TestClient) -> None:
     with SessionLocal() as db:
         ride = hs.get_ride_by_id(db, ride_id)
         assert ride is not None
-        assignment = (
-            db.query(HealthISFDispatchAssignment)
-            .filter(HealthISFDispatchAssignment.ride_id == ride_id)
-            .order_by(HealthISFDispatchAssignment.updated_at.desc())
-            .first()
-        )
-        assert assignment is not None
-        assignment.assignment_state = DispatchAssignmentState.EXPIRED.value
-        assignment.closed_reason = "superseded_by_newer_queue_ride"
-        assignment.expired_at = hs.now()
-        ride.driver_id = driver_id
+        bound_driver = str(ride.driver_id or driver_id)
+        deadline = time.time() + 4
+        assignments = []
+        while time.time() < deadline:
+            assignments = (
+                db.query(HealthISFDispatchAssignment)
+                .filter(HealthISFDispatchAssignment.ride_id == ride_id)
+                .all()
+            )
+            if assignments:
+                break
+            db.expire_all()
+            time.sleep(0.2)
+        assert assignments, "expected an intake/assignment row before superseded-expire"
+        now_ts = hs.now()
+        for assignment in assignments:
+            assignment.assignment_state = DispatchAssignmentState.EXPIRED.value
+            assignment.closed_reason = "superseded_by_newer_queue_ride"
+            assignment.expired_at = now_ts
+        ride.driver_id = bound_driver or str(assignments[0].driver_id)
         ride.lifecycle_state = RideStatus.QUEUED.value
         db.commit()
 

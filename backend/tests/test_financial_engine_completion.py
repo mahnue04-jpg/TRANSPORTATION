@@ -83,6 +83,9 @@ def _ensure_driver(organization_id: str) -> str:
             vehicle_type="sedan",
             vehicle_plate=f"FN-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,
+            availability_state="available",
+            is_online=True,
+            auth_state="active",
             is_active=True,
             rating=4.9,
         )
@@ -92,14 +95,16 @@ def _ensure_driver(organization_id: str) -> str:
 
 
 def _create_healthcare_request(client: TestClient, headers: dict) -> dict:
+    suffix = uuid4()[:8]
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "8")[:4]
     response = client.post(
         "/api/health-isf/customer-requests",
         headers=headers,
         json={
-            "rider_name": f"Financial Rider {uuid4()[:6]}",
-            "rider_phone": "+1 212-555-8800",
-            "pickup_address": "100 Financial Pickup St",
-            "dropoff_address": "200 Financial Dropoff Ave",
+            "rider_name": f"Financial Rider {suffix}",
+            "rider_phone": f"+1 212-555-{digits}",
+            "pickup_address": f"100 Financial Pickup {suffix}",
+            "dropoff_address": f"200 Financial Dropoff {suffix}",
             "ride_type": "healthcare",
         },
     )
@@ -107,15 +112,40 @@ def _create_healthcare_request(client: TestClient, headers: dict) -> dict:
     return response.json()
 
 
-def _assign_and_complete(client: TestClient, headers: dict, request_id: str, driver_id: str, ride_id: str) -> None:
+def _assign_and_complete(client: TestClient, headers: dict, request_id: str, driver_id: str, ride_id: str) -> str:
+    from tests.health_isf_driver_test_helpers import ensure_ride_assigned_to_driver
+
     approve = client.post(f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve", headers=headers)
     assert approve.status_code == 200, approve.text
-    assign = client.post(
-        f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
-        headers=headers,
-        json={"driver_id": driver_id},
-    )
-    assert assign.status_code == 200, assign.text
+    ride_before = client.get(f"/api/health-isf/rides/{ride_id}", headers=headers)
+    assert ride_before.status_code == 200, ride_before.text
+    assigned = str(ride_before.json().get("driver_id") or "")
+    if assigned != driver_id:
+        if assigned:
+            admin = client.post("/api/auth/login", json={"email": "admin@amicor.local", "password": SEED_PASSWORD})
+            assert admin.status_code == 200, admin.text
+            ensure_ride_assigned_to_driver(
+                client,
+                dispatcher_headers=headers,
+                admin_headers={"Authorization": f"Bearer {admin.json()['access_token']}"},
+                request_id=request_id,
+                ride_id=ride_id,
+                driver_id=driver_id,
+            )
+        else:
+            assign = client.post(
+                f"/api/health-isf/dispatcher/customer-requests/{request_id}/assign-driver",
+                headers=headers,
+                json={"driver_id": driver_id},
+            )
+            if assign.status_code != 200:
+                raced = client.get(f"/api/health-isf/rides/{ride_id}", headers=headers)
+                assigned_now = str((raced.json() or {}).get("driver_id") or "") if raced.status_code == 200 else ""
+                assert assigned_now, assign.text
+    ride_after = client.get(f"/api/health-isf/rides/{ride_id}", headers=headers)
+    assert ride_after.status_code == 200, ride_after.text
+    actual_driver_id = str(ride_after.json().get("driver_id") or "")
+    assert actual_driver_id, "expected a bound driver after assign/auto-dispatch"
     for state in [
         "en_route_pickup",
         "arrived_pickup",
@@ -125,22 +155,42 @@ def _assign_and_complete(client: TestClient, headers: dict, request_id: str, dri
         "completed",
     ]:
         step = client.post(
-            f"/api/health-isf/drivers/{driver_id}/route-progress",
+            f"/api/health-isf/drivers/{actual_driver_id}/route-progress",
             headers=headers,
             json={"ride_id": ride_id, "target_state": state},
         )
         assert step.status_code == 200, step.text
+    return actual_driver_id
 
 
-def test_financial_engine_on_trip_completion(client: TestClient) -> None:
+def test_financial_engine_on_trip_completion(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.health_isf_driver_test_helpers import reset_scheduling_test_organization
+
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
     auth = _login_dispatcher(client)
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     org_id = _dispatcher_org_id()
+    reset_scheduling_test_organization(org_id)
     _ensure_provider(org_id)
     driver_id = _ensure_driver(org_id)
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.availability_state = "available"
+        dedicated.is_online = True
+        dedicated.auth_state = "active"
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == org_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+            row.is_online = False
+        db.commit()
 
     req = _create_healthcare_request(client, headers)
-    _assign_and_complete(client, headers, req["id"], driver_id, req["ride_id"])
+    driver_id = _assign_and_complete(client, headers, req["id"], driver_id, req["ride_id"])
 
     summary = client.get(f"/api/health-isf/rides/{req['ride_id']}/financial-summary", headers=headers)
     assert summary.status_code == 200, summary.text

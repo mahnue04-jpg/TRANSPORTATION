@@ -70,6 +70,9 @@ def _ensure_driver(organization_id: str) -> str:
             vehicle_type="sedan",
             vehicle_plate=f"RVC-{uuid4()[:5].upper()}",
             status=DriverStatus.AVAILABLE,
+            availability_state="available",
+            is_online=True,
+            auth_state="active",
             is_active=True,
             rating=4.9,
         )
@@ -140,7 +143,14 @@ def _run_full_operational_flow(client: TestClient, headers: dict, request_id: st
     assert complete.status_code == 200, complete.text
 
 
-def test_revenue_workflow_timeline_contract_and_ordering(client: TestClient) -> None:
+def test_revenue_workflow_timeline_contract_and_ordering(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    monkeypatch.setattr(
+        "app.modules.health_isf.service._is_intake_auto_dispatch_enabled",
+        lambda db, organization_id: False,
+    )
     auth = _login_dispatcher(client)
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     org_id = _dispatcher_org_id()

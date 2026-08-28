@@ -88,6 +88,28 @@ def _ensure_available_driver(organization_id: str) -> str:
         return str(driver.id)
 
 
+def _isolate_driver(organization_id: str, driver_id: str) -> None:
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.rating = 5.0
+        dedicated.total_trips = 100
+        dedicated.status = DriverStatus.AVAILABLE
+        dedicated.availability_state = "available"
+        dedicated.is_online = True
+        dedicated.auth_state = "active"
+        dedicated.is_active = True
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == organization_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+            row.is_online = False
+        db.commit()
+
+
 def test_immediate_customer_request_auto_dispatches_in_background(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "1")
     rider_auth = _login(client, "rider@amicor.local")
@@ -95,14 +117,16 @@ def test_immediate_customer_request_auto_dispatches_in_background(client: TestCl
     org_id = _org_id_for("rider@amicor.local")
     _ensure_provider(org_id)
     driver_id = _ensure_available_driver(org_id)
+    _isolate_driver(org_id, driver_id)
     suffix = uuid4()[:8]
+    digits = "".join(ch for ch in suffix if ch.isdigit()).ljust(4, "8")[:4]
 
     create_resp = client.post(
         "/api/health-isf/customer-requests",
         headers=rider_headers,
         json={
             "rider_name": f"Immediate Auto {suffix}",
-            "rider_phone": f"646-555-{suffix[:4]}",
+            "rider_phone": f"646-555-{digits}",
             "pickup_address": f"10 Immediate Pickup {suffix}, New York, NY",
             "dropoff_address": f"20 Immediate Dropoff {suffix}, New York, NY",
             "ride_type": "healthcare",
@@ -135,8 +159,6 @@ def test_immediate_customer_request_auto_dispatches_in_background(client: TestCl
                 .filter(HealthISFDispatchLog.ride_id == ride_id)
                 .all()
             ]
-        if assignment and str(assignment.assignment_state) == DispatchAssignmentState.OFFERED.value:
-            break
         if "auto_dispatch_completed" in audit_actions:
             break
         time.sleep(0.5)

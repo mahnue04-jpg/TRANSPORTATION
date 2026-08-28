@@ -1,6 +1,7 @@
 """Rider scheduling: round-trip legs, recurrence, dispatch windows, protected reservations."""
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -133,6 +134,57 @@ def _rides_for_request(request_id: str) -> list[HealthISFRide]:
         return [linked]
 
 
+def _isolate_driver(organization_id: str, driver_id: str) -> None:
+    from app.modules.health_isf.models import HealthISFDriver
+
+    with SessionLocal() as db:
+        dedicated = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+        assert dedicated is not None
+        dedicated.rating = 5.0
+        dedicated.total_trips = 100
+        dedicated.status = DriverStatus.AVAILABLE
+        dedicated.availability_state = "available"
+        dedicated.is_online = True
+        dedicated.auth_state = "active"
+        dedicated.is_active = True
+        for row in db.query(HealthISFDriver).filter(
+            HealthISFDriver.organization_id == organization_id,
+            HealthISFDriver.id != driver_id,
+            HealthISFDriver.is_active == True,
+        ):
+            row.status = DriverStatus.OFFLINE
+            row.availability_state = "offline"
+            row.is_online = False
+        db.commit()
+
+
+def _adopt_or_assign_immediate_ride(ride_id: str, driver_id: str) -> str:
+    """Wait for intake auto-dispatch, then assign only if the same-day ride is still open."""
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        with SessionLocal() as db:
+            ride = service.get_ride_by_id(db, ride_id)
+            assigned = str(getattr(ride, "driver_id", "") or "") if ride else ""
+            if assigned:
+                return assigned
+            assignment = service._latest_assignment_for_ride(db, ride_id)
+            assignment_driver = str(getattr(assignment, "driver_id", "") or "") if assignment else ""
+            assignment_state = str(getattr(assignment, "assignment_state", "") or "")
+            if assignment_driver and assignment_state in {
+                "offered",
+                "assigned",
+                "accepted",
+                "scheduled_offered",
+                "scheduled_accepted",
+            }:
+                return assignment_driver
+        time.sleep(0.2)
+    with SessionLocal() as db:
+        ride = service.assign_driver_to_ride(db, ride_id, driver_id, actor_user_id=None)
+        assert ride is not None
+        return str(ride.driver_id)
+
+
 def test_same_day_round_trip_creates_linked_legs(client: TestClient) -> None:
     rider_auth = _login(client, "rider@amicor.local")
     headers = {"Authorization": f"Bearer {rider_auth['access_token']}"}
@@ -233,9 +285,13 @@ def test_weekly_recurring_dialysis_generates_legs(client: TestClient) -> None:
 
 
 def test_future_assignment_survives_unrelated_completion(client: TestClient) -> None:
+    from tests.health_isf_driver_test_helpers import reset_scheduling_test_organization
+
     org_id = _org_id_for("rider@amicor.local")
+    reset_scheduling_test_organization(org_id)
     _ensure_provider(org_id)
     driver_id = _ensure_driver(org_id)
+    _isolate_driver(org_id, driver_id)
     dispatcher_auth = _login(client, "dispatcher@amicor.local")
     dispatcher_headers = {"Authorization": f"Bearer {dispatcher_auth['access_token']}"}
     rider_auth = _login(client, "rider@amicor.local")
@@ -273,17 +329,17 @@ def test_future_assignment_survives_unrelated_completion(client: TestClient) -> 
         payload={"trip_type": "one_way"},
     )
     today_ride_id = today_req["ride_id"]
-    with SessionLocal() as db:
-        service.assign_driver_to_ride(db, today_ride_id, driver_id, actor_user_id=None)
+    today_driver_id = _adopt_or_assign_immediate_ride(today_ride_id, driver_id)
+    assert today_driver_id, "same-day ride must have a driver before completion"
 
     with SessionLocal() as db:
-        service.accept_driver_ride(db, driver_id, today_ride_id, actor_user_id=None)[0]
-        service.driver_en_route_pickup(db, driver_id, today_ride_id)
-        service.driver_arrived_pickup(db, driver_id, today_ride_id)
-        service.driver_pickup_complete(db, driver_id, today_ride_id)
-        service.driver_start_trip(db, driver_id, today_ride_id)
-        service.driver_arrived_destination(db, driver_id, today_ride_id)
-        service.driver_dropoff_complete(db, driver_id, today_ride_id, actor_user_id=None)
+        service.accept_driver_ride(db, today_driver_id, today_ride_id, actor_user_id=None)[0]
+        service.driver_en_route_pickup(db, today_driver_id, today_ride_id)
+        service.driver_arrived_pickup(db, today_driver_id, today_ride_id)
+        service.driver_pickup_complete(db, today_driver_id, today_ride_id)
+        service.driver_start_trip(db, today_driver_id, today_ride_id)
+        service.driver_arrived_destination(db, today_driver_id, today_ride_id)
+        service.driver_dropoff_complete(db, today_driver_id, today_ride_id, actor_user_id=None)
         future = service.get_ride_by_id(db, future_ride_id)
         assert future is not None
         assert str(future.driver_id or "") == driver_id, "Future scheduled assignment must survive unrelated completion"

@@ -1,6 +1,7 @@
 """End-to-end rider app workflow: request → dispatcher queue → assign → driver offer."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -232,6 +233,18 @@ def _isolate_driver_for_auto_dispatch(organization_id: str, driver_id: str) -> N
         db.commit()
 
 
+def _wait_for_intake_assignment(ride_id: str) -> None:
+    """Let deferred intake persist its recommendation/offer before manual assign-driver."""
+    from app.modules.health_isf import service as hs
+
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        with SessionLocal() as db:
+            if hs._latest_assignment_for_ride(db, ride_id) is not None:
+                return
+        time.sleep(0.2)
+
+
 def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
     dispatcher_auth = _login(client, "dispatcher@amicor.local")
@@ -262,6 +275,7 @@ def test_rider_request_full_dispatch_to_driver_offer(client: TestClient, monkeyp
     request_row = create_resp.json()
     request_id = request_row["id"]
     ride_id = request_row["ride_id"]
+    _wait_for_intake_assignment(ride_id)
 
     approve_resp = client.post(
         f"/api/health-isf/dispatcher/customer-requests/{request_id}/approve",
