@@ -677,6 +677,20 @@ class DriverLiveWorkspaceResponse(BaseModel):
     active_ride: Optional["RideResponse"] = None
     assignment_countdown_seconds: Optional[int] = None
     eta_minutes: Optional[int] = None
+    pickup_eta_minutes: Optional[int] = None
+    destination_eta_minutes: Optional[int] = None
+    route_leg: Optional[str] = None
+    route_polyline: list[list[float]] = Field(default_factory=list)
+    pickup_latitude: Optional[float] = None
+    pickup_longitude: Optional[float] = None
+    dropoff_latitude: Optional[float] = None
+    dropoff_longitude: Optional[float] = None
+    driver_latitude: Optional[float] = None
+    driver_longitude: Optional[float] = None
+    driver_gps_available: bool = False
+    eta_unavailable_reason: Optional[str] = None
+    routing_provider: Optional[str] = None
+    geocode_provider: Optional[str] = None
     timeline_states: list[str] = Field(default_factory=list)
 
 
@@ -688,6 +702,20 @@ class DriverActiveRideResponse(BaseModel):
     driver_name: str = ""
     provider_name: str = ""
     eta_minutes: Optional[int] = None
+    pickup_eta_minutes: Optional[int] = None
+    destination_eta_minutes: Optional[int] = None
+    route_leg: Optional[str] = None
+    route_polyline: list[list[float]] = Field(default_factory=list)
+    pickup_latitude: Optional[float] = None
+    pickup_longitude: Optional[float] = None
+    dropoff_latitude: Optional[float] = None
+    dropoff_longitude: Optional[float] = None
+    driver_latitude: Optional[float] = None
+    driver_longitude: Optional[float] = None
+    driver_gps_available: bool = False
+    eta_unavailable_reason: Optional[str] = None
+    routing_provider: Optional[str] = None
+    geocode_provider: Optional[str] = None
     active_assignment: Optional[DispatchActiveAssignmentItemResponse] = None
     ride: Optional["RideResponse"] = None
     upcoming_schedule: list[dict[str, Any]] = Field(default_factory=list)

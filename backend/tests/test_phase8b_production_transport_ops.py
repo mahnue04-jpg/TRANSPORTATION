@@ -93,7 +93,16 @@ def _create_ride(client: TestClient, headers: dict, provider_id: str, suffix: st
     return response.json()
 
 
-def test_phase8b_route_gps_reconnect_flow(client: TestClient):
+def test_phase8b_route_gps_reconnect_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    monkeypatch.setattr(
+        "app.modules.health_isf.service._is_intake_auto_dispatch_enabled",
+        lambda db, organization_id: False,
+    )
+    monkeypatch.setattr(
+        "app.modules.health_isf.routes._schedule_customer_request_side_effects",
+        lambda **kwargs: None,
+    )
     auth = _login(client, "dispatcher@amicor.local")
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     org_id = _org_id()
@@ -163,7 +172,16 @@ def test_phase8b_route_gps_reconnect_flow(client: TestClient):
     assert isinstance(reconnect_payload["queued_location_updates"], list)
 
 
-def test_phase8b_payments_capture_and_settlement(client: TestClient):
+def test_phase8b_payments_capture_and_settlement(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HEALTH_ISF_AUTO_DISPATCH_ENABLED", "0")
+    monkeypatch.setattr(
+        "app.modules.health_isf.service._is_intake_auto_dispatch_enabled",
+        lambda db, organization_id: False,
+    )
+    monkeypatch.setattr(
+        "app.modules.health_isf.routes._schedule_customer_request_side_effects",
+        lambda **kwargs: None,
+    )
     auth = _login(client, "dispatcher@amicor.local")
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     org_id = _org_id()

@@ -292,7 +292,13 @@ def build_driver_mobile_read_snapshot(
             )
             if not assignment_state:
                 assignment_state = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
-            eta_minutes = service._estimated_eta_minutes(ride)
+
+        routing = {}
+        if ride and active_for_driver:
+            from app.modules.health_isf.driver_mobile_routing import routing_snapshot_for_ride
+
+            routing = routing_snapshot_for_ride(db, ride=ride, driver_id=driver_id)
+            eta_minutes = routing.get("eta_minutes")
 
         countdown = None
         if assignment and assignment.offer_expires_at:
@@ -383,6 +389,20 @@ def build_driver_mobile_read_snapshot(
         "driver_name": str(getattr(driver, "name", None) or ""),
         "provider_name": provider_name,
         "eta_minutes": eta_minutes,
+        "pickup_eta_minutes": routing.get("pickup_eta_minutes"),
+        "destination_eta_minutes": routing.get("destination_eta_minutes"),
+        "route_leg": routing.get("route_leg"),
+        "route_polyline": list(routing.get("route_polyline") or []),
+        "pickup_latitude": routing.get("pickup_latitude"),
+        "pickup_longitude": routing.get("pickup_longitude"),
+        "dropoff_latitude": routing.get("dropoff_latitude"),
+        "dropoff_longitude": routing.get("dropoff_longitude"),
+        "driver_latitude": routing.get("driver_latitude"),
+        "driver_longitude": routing.get("driver_longitude"),
+        "driver_gps_available": bool(routing.get("driver_gps_available")),
+        "eta_unavailable_reason": routing.get("eta_unavailable_reason"),
+        "routing_provider": routing.get("routing_provider"),
+        "geocode_provider": routing.get("geocode_provider"),
         "countdown": countdown,
         "safety_status": safety_status,
         "reconnect_safe": bool(runtime and runtime.get("session_valid")),

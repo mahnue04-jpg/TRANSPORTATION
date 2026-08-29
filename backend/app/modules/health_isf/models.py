@@ -800,12 +800,31 @@ class HealthISFRideRoutePlan(Base):
     traffic_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     deviation_threshold_meters: Mapped[float] = mapped_column(Float, nullable=False, default=250.0)
     path_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    route_leg: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    remaining_eta_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eta_unavailable_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
     __table_args__ = (
         Index("idx_route_plan_org_ride", "organization_id", "ride_id"),
     )
+
+
+class HealthISFGeocodeCache(Base):
+    """Cached Nominatim results so Driver Mobile routing respects OSM usage policy."""
+    __tablename__ = "health_isf_geocode_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    address_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True, index=True)
+    query_address: Mapped[str] = mapped_column(String(512), nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="nominatim")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
 class HealthISFPaymentTransaction(Base):
@@ -1749,6 +1768,22 @@ def _ensure_health_isf_schema_impl() -> None:
                 )
             except Exception:
                 pass
+
+        if "health_isf_ride_route_plans" in table_names:
+            datetime_sql = _schema_datetime_sql(conn.dialect.name)
+            for column_name, column_type in {
+                "route_leg": "VARCHAR(32)",
+                "remaining_eta_minutes": "INTEGER",
+                "eta_unavailable_reason": "VARCHAR(64)",
+                "cleared_at": datetime_sql,
+            }.items():
+                _schema_add_column_if_missing(
+                    conn,
+                    inspector,
+                    "health_isf_ride_route_plans",
+                    column_name,
+                    column_type,
+                )
 
 
 # ── AI governance approvals ──────────────────────────────────────────────────

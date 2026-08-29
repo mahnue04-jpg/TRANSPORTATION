@@ -6009,12 +6009,32 @@ def get_driver_live_workspace_data(
     if str(driver.availability_state or "").lower() == "offline":
         safety_status = "offline"
 
+    routing = {}
+    if ride:
+        from app.modules.health_isf.driver_mobile_routing import routing_snapshot_for_ride
+
+        routing = routing_snapshot_for_ride(db, ride=ride, driver_id=driver_id)
+
     return {
         "driver": driver,
         "assignment": assignment,
         "ride": ride,
         "countdown": countdown,
-        "eta_minutes": _estimated_eta_minutes(ride),
+        "eta_minutes": routing.get("eta_minutes"),
+        "pickup_eta_minutes": routing.get("pickup_eta_minutes"),
+        "destination_eta_minutes": routing.get("destination_eta_minutes"),
+        "route_leg": routing.get("route_leg"),
+        "route_polyline": list(routing.get("route_polyline") or []),
+        "pickup_latitude": routing.get("pickup_latitude"),
+        "pickup_longitude": routing.get("pickup_longitude"),
+        "dropoff_latitude": routing.get("dropoff_latitude"),
+        "dropoff_longitude": routing.get("dropoff_longitude"),
+        "driver_latitude": routing.get("driver_latitude"),
+        "driver_longitude": routing.get("driver_longitude"),
+        "driver_gps_available": bool(routing.get("driver_gps_available")),
+        "eta_unavailable_reason": routing.get("eta_unavailable_reason"),
+        "routing_provider": routing.get("routing_provider"),
+        "geocode_provider": routing.get("geocode_provider"),
         "safety_status": safety_status,
         "reconnect_safe": bool(runtime and runtime.get("session_valid")),
         "timeline_states": [
@@ -6072,7 +6092,9 @@ def get_driver_active_ride_data(
             if op.is_active or op.has_active_offer:
                 ride = offer_ride
                 assignment = active_offer
-                eta_minutes = _estimated_eta_minutes(offer_ride)
+                from app.modules.health_isf.driver_mobile_routing import routing_snapshot_for_ride
+
+                eta_minutes = routing_snapshot_for_ride(db, ride=offer_ride, driver_id=driver_id).get("eta_minutes")
 
     if not ride:
         workspace = get_driver_live_workspace_data(

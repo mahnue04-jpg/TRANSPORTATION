@@ -1123,6 +1123,26 @@ async def _safe_emit_dispatch_changed(emitter, **kwargs) -> None:
         logger.warning({"event": "dispatch_changed_emit_failed", "error": str(exc), **kwargs})
 
 
+def _driver_routing_fields(snapshot: dict) -> dict[str, Any]:
+    return {
+        "eta_minutes": snapshot.get("eta_minutes"),
+        "pickup_eta_minutes": snapshot.get("pickup_eta_minutes"),
+        "destination_eta_minutes": snapshot.get("destination_eta_minutes"),
+        "route_leg": snapshot.get("route_leg"),
+        "route_polyline": list(snapshot.get("route_polyline") or []),
+        "pickup_latitude": snapshot.get("pickup_latitude"),
+        "pickup_longitude": snapshot.get("pickup_longitude"),
+        "dropoff_latitude": snapshot.get("dropoff_latitude"),
+        "dropoff_longitude": snapshot.get("dropoff_longitude"),
+        "driver_latitude": snapshot.get("driver_latitude"),
+        "driver_longitude": snapshot.get("driver_longitude"),
+        "driver_gps_available": bool(snapshot.get("driver_gps_available")),
+        "eta_unavailable_reason": snapshot.get("eta_unavailable_reason"),
+        "routing_provider": snapshot.get("routing_provider"),
+        "geocode_provider": snapshot.get("geocode_provider"),
+    }
+
+
 def _driver_live_workspace_response_from_snapshot(
     db: Session,
     *,
@@ -1148,8 +1168,8 @@ def _driver_live_workspace_response_from_snapshot(
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
         active_ride=ride_response,
         assignment_countdown_seconds=snapshot.get("countdown"),
-        eta_minutes=snapshot.get("eta_minutes"),
         timeline_states=list(snapshot.get("timeline_states") or []),
+        **_driver_routing_fields(snapshot),
     )
 
 
@@ -6683,7 +6703,6 @@ def get_driver_active_ride(
         assignment_state=str(snapshot.get("assignment_state") or ""),
         driver_name=str(snapshot.get("driver_name") or ""),
         provider_name=str(snapshot.get("provider_name") or ""),
-        eta_minutes=snapshot.get("eta_minutes"),
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
         ride=ride_response,
         upcoming_schedule=list(snapshot.get("upcoming_schedule") or []),
@@ -6692,6 +6711,7 @@ def get_driver_active_ride(
             for item in list(snapshot.get("upcoming_schedule") or [])
             if item.get("can_accept")
         ],
+        **_driver_routing_fields(snapshot),
     )
     record_driver_read_timing(
         endpoint="active-ride",
@@ -6760,8 +6780,8 @@ def get_driver_live_workspace(
         active_assignment=_serialize_active_assignment(assignment) if assignment else None,
         active_ride=RideResponse.model_validate(ride) if ride else None,
         assignment_countdown_seconds=snapshot.get("countdown"),
-        eta_minutes=snapshot.get("eta_minutes"),
         timeline_states=list(snapshot.get("timeline_states") or []),
+        **_driver_routing_fields(snapshot),
     )
     record_driver_read_timing(
         endpoint="live-workspace",
@@ -6943,6 +6963,15 @@ async def progress_driver_route(
         ride = service.get_ride_by_id(db, ride_id)
         if not ride:
             raise HTTPException(status_code=404, detail="Ride not found")
+
+    from app.modules.health_isf.driver_mobile_routing import safe_apply_lifecycle_routing
+
+    safe_apply_lifecycle_routing(
+        db,
+        ride_id=ride_id,
+        driver_id=effective_driver_id,
+        event=str(payload.target_state or ""),
+    )
 
     increment_metric(f"health_isf.route_progress.{payload.target_state}")
     snapshot = build_driver_mobile_read_snapshot(
@@ -9632,6 +9661,15 @@ async def driver_accept_ride(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
+
+    from app.modules.health_isf.driver_mobile_routing import safe_apply_lifecycle_routing
+
+    safe_apply_lifecycle_routing(
+        db,
+        ride_id=str(ride.id),
+        driver_id=effective_driver_id,
+        event="accepted",
+    )
 
     accepted_lifecycle = RideLifecycleManager.normalize_state(
         getattr(ride, "lifecycle_state", None) or ride.status
