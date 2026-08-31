@@ -274,6 +274,47 @@ def get_applicant_status(
     return applicant_facing_status(case, application_status=application.status)
 
 
+@router.get("/applications/{application_id}/progress")
+def get_applicant_progress(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    """Driver-facing onboarding progress. No admin-only notes or full license numbers."""
+    from app.modules.approval_engine.compliance_summary import (
+        build_compliance_summary,
+        resolve_case_and_application,
+    )
+    from app.modules.approval_engine.models import ApprovalCase
+
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise HTTPException(status_code=403, detail="Applicant token required.")
+    case = (
+        db.query(ApprovalCase)
+        .filter(ApprovalCase.platform_ops_application_id == application.id)
+        .order_by(ApprovalCase.updated_at.desc())
+        .first()
+    )
+    case, application = resolve_case_and_application(db, case=case, application=application)
+    summary = build_compliance_summary(db, application=application, case=case)
+    public_items = []
+    for item in summary.get("items") or []:
+        public_item = dict(item)
+        public_item.pop("notes", None)
+        public_items.append(public_item)
+    summary["items"] = public_items
+    return {
+        "application_id": application.id,
+        "application_status": application.status,
+        "progress_path": "/platform-ops/driver-onboarding",
+        "apply_path": "/platform-ops/driver-apply",
+        **summary,
+    }
+
+
 @router.put("/applications/{application_id}", response_model=DriverApplicationDetailResponse)
 def update_application(
     application_id: str,

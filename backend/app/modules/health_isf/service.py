@@ -2663,6 +2663,14 @@ def _driver_is_dispatch_candidate(
         return False
     if str(driver.auth_state or "inactive").lower() != "active":
         return False
+    try:
+        from app.modules.approval_engine.online_gate import evaluate_online_eligibility
+
+        gate = evaluate_online_eligibility(db, driver_id=str(driver.id))
+        if not gate.get("eligible"):
+            return False
+    except Exception:
+        return True
     return True
 
 
@@ -4042,6 +4050,9 @@ def accept_assignment_offer(
         raise ValueError("Offer expired")
     if not offer.driver_id:
         raise ValueError("Offer has no driver")
+    from app.modules.approval_engine.online_gate import assert_driver_may_go_online
+
+    assert_driver_may_go_online(db, driver_id=str(offer.driver_id))
 
     conflicting = (
         db.query(HealthISFDispatchAssignment)
@@ -4961,6 +4972,16 @@ def driver_login(
     _sanitize_driver_availability_state(driver)
     _reactivate_driver_offers_on_login(db, driver)
     _normalize_driver_auth_state_on_login(db, driver)
+    online_gate = {"eligible": True, "legacy_driver": True, "reason": "ok"}
+    try:
+        from app.modules.approval_engine.online_gate import evaluate_online_eligibility
+
+        online_gate = evaluate_online_eligibility(
+            db, driver_id=str(driver.id), organization_id=str(driver.organization_id)
+        )
+    except Exception:
+        online_gate = {"eligible": True, "legacy_driver": True, "reason": "ok"}
+    compliance_blocks_online = not bool(online_gate.get("eligible"))
 
     existing_sessions = (
         db.query(HealthISFDriverSession)
@@ -4994,10 +5015,13 @@ def driver_login(
     db.add(session)
 
     driver.auth_state = "active"
-    driver.is_online = True
+    driver.is_online = not compliance_blocks_online
     driver.last_seen_at = issued_at
     _sanitize_driver_availability_state(driver)
-    if str(driver.availability_state or "offline").lower() == "offline":
+    if compliance_blocks_online:
+        driver.availability_state = "offline"
+        driver.is_online = False
+    elif str(driver.availability_state or "offline").lower() == "offline":
         driver.availability_state = "available"
     workload = _driver_active_workload_count(db, driver.id)
     current_status = _coerce_driver_status(driver.status)
@@ -5024,6 +5048,7 @@ def driver_login(
         "driver": driver,
         "session": session,
         "session_token": token,
+        "online_gate": online_gate,
     }
 
 
@@ -5073,6 +5098,10 @@ def set_driver_live_availability(
         session.updated_at = now()
 
     normalized = _normalize_driver_availability_state(availability_state)
+    if normalized != "offline":
+        from app.modules.approval_engine.online_gate import assert_driver_may_go_online
+
+        assert_driver_may_go_online(db, driver_id=str(driver.id))
     driver.availability_state = normalized
     driver.is_online = normalized != "offline"
     driver.auth_state = "active" if driver.is_online else "inactive"
@@ -5101,11 +5130,21 @@ def driver_heartbeat(
     session.last_seen_at = now_ts
     session.updated_at = now_ts
     driver.last_seen_at = now_ts
-    driver.is_online = True
-    if str(driver.auth_state or "inactive").lower() != "active":
-        driver.auth_state = "active"
-    if str(driver.availability_state or "offline").lower() == "offline":
-        driver.availability_state = "available"
+    try:
+        from app.modules.approval_engine.online_gate import evaluate_online_eligibility
+
+        online_gate = evaluate_online_eligibility(db, driver_id=str(driver.id))
+    except Exception:
+        online_gate = {"eligible": True}
+    if online_gate.get("eligible"):
+        driver.is_online = True
+        if str(driver.auth_state or "inactive").lower() != "active":
+            driver.auth_state = "active"
+        if str(driver.availability_state or "offline").lower() == "offline":
+            driver.availability_state = "available"
+    else:
+        driver.is_online = False
+        driver.availability_state = "offline"
     _set_driver_status(db, driver, _driver_status_from_availability(driver.availability_state))
 
     _commit_or_rollback(db)
@@ -8135,6 +8174,9 @@ def accept_driver_ride(
     ride, assignment_hint = _resolve_driver_accept_ride(db, driver_id=driver_id, ride_id=ride_id)
     if not driver or not ride:
         return None, False
+    from app.modules.approval_engine.online_gate import assert_driver_may_go_online
+
+    assert_driver_may_go_online(db, driver_id=str(driver.id))
     if RideStatus(ride.status) in (RideStatus.COMPLETED, RideStatus.CANCELLED):
         raise ValueError("Cannot accept a terminal ride")
 

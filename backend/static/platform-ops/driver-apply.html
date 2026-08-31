@@ -27,6 +27,7 @@
       <h2>Application submitted</h2>
       <p>Amicor is reviewing your information.</p>
       <p>We will notify you if anything else is needed.</p>
+      <p><a id="open-progress" href="/platform-ops/driver-onboarding">Open your onboarding progress</a></p>
       <button type="button" id="start-new-application">Start a new application</button>
     </div>
 
@@ -47,6 +48,7 @@
         <p class="step-help">Tell us how to reach you.</p>
         <div class="grid">
           <label>Legal first name<input required name="legal_first_name" autocomplete="given-name" /></label>
+          <label>Middle name <span class="optional">(if applicable)</span><input name="legal_middle_name" autocomplete="additional-name" /></label>
           <label>Legal last name<input required name="legal_last_name" autocomplete="family-name" /></label>
           <label>Email<input required type="email" name="email" autocomplete="email" /></label>
           <label>Phone<input required name="mobile_phone" placeholder="612-555-0100" autocomplete="tel" /></label>
@@ -87,10 +89,17 @@
           <label>Year<input required type="number" name="vehicle_year" min="1980" max="2100" /></label>
           <label>Make<input required name="vehicle_make" placeholder="Toyota" /></label>
           <label>Model<input required name="vehicle_model" placeholder="Camry" /></label>
+          <label>Color<input name="vehicle_color" placeholder="Silver" /></label>
           <label>License plate<input required name="vehicle_license_plate" /></label>
+          <label>Plate state<input name="vehicle_plate_state" maxlength="2" placeholder="MN" /></label>
+          <label>Registration expiration<input type="date" name="vehicle_registration_expiration" /></label>
           <label class="full">VIN <span class="optional">(if available)</span>
             <input name="vehicle_vin" autocomplete="off" />
           </label>
+          <label>Insurance company<input name="insurance_carrier" /></label>
+          <label>Policy number<input name="insurance_policy_number" autocomplete="off" /></label>
+          <label>Insurance effective<input type="date" name="insurance_effective_date" /></label>
+          <label>Insurance expiration<input type="date" name="insurance_expiration_date" /></label>
           <label class="full">Upload vehicle registration
             <input type="file" id="file_registration" accept="image/*,.pdf" required />
           </label>

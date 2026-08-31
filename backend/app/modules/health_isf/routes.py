@@ -9228,22 +9228,24 @@ async def driver_login(
     driver_obj = login_result["driver"]
     session_obj = login_result["session"]
     session_token = login_result["session_token"]
+    online_gate = login_result.get("online_gate") or {}
 
     emitter = get_emitter()
-    await emitter.emit_driver_status_changed(
-        organization_id=driver_obj.organization_id,
-        driver_id=driver_obj.id,
-        from_status="offline",
-        to_status=str(driver_obj.availability_state),
-        actor_user_id=user.user_id,
-        details={"event_name": "driver-online"},
-    )
-    await emitter.emit_dispatch_changed(
-        organization_id=driver_obj.organization_id,
-        event_name="driver-online",
-        actor_user_id=user.user_id,
-        details={"driver_id": driver_obj.id, "availability_state": driver_obj.availability_state},
-    )
+    if bool(driver_obj.is_online):
+        await emitter.emit_driver_status_changed(
+            organization_id=driver_obj.organization_id,
+            driver_id=driver_obj.id,
+            from_status="offline",
+            to_status=str(driver_obj.availability_state),
+            actor_user_id=user.user_id,
+            details={"event_name": "driver-online"},
+        )
+        await emitter.emit_dispatch_changed(
+            organization_id=driver_obj.organization_id,
+            event_name="driver-online",
+            actor_user_id=user.user_id,
+            details={"driver_id": driver_obj.id, "availability_state": driver_obj.availability_state},
+        )
 
     response = DriverLoginResponse(
         driver_id=driver_obj.id,
@@ -9256,6 +9258,8 @@ async def driver_login(
         is_online=bool(driver_obj.is_online),
         issued_at=session_obj.issued_at,
         expires_at=session_obj.expires_at,
+        online_blocked=not bool(online_gate.get("eligible", True)),
+        online_block_reason=None if online_gate.get("eligible", True) else str(online_gate.get("reason") or ""),
     )
     record_backend_assignment_sync(
         db,
@@ -9350,7 +9354,10 @@ async def set_driver_availability(
             session_token=session_token,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detail = str(exc)
+        if "blocked from going online" in detail.lower():
+            raise HTTPException(status_code=409, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
     if not updated:
         raise HTTPException(status_code=404, detail="Driver not found")
 

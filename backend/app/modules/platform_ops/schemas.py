@@ -41,6 +41,13 @@ class DriverApplicationDraftRequest(BaseModel):
     vehicle_model: str | None = None
     vehicle_license_plate: str | None = None
     vehicle_vin: str | None = None
+    vehicle_color: str | None = None
+    vehicle_plate_state: str | None = None
+    vehicle_registration_expiration: date | None = None
+    insurance_carrier: str | None = None
+    insurance_policy_number: str | None = None
+    insurance_effective_date: date | None = None
+    insurance_expiration_date: date | None = None
     declaration_valid_license: bool = False
     declaration_mvr_authorization: bool = False
     declaration_background_authorization: bool = False
@@ -166,6 +173,10 @@ class DriverApplicationDetailResponse(BaseModel):
     vehicle_model: str | None = None
     vehicle_license_plate: str | None = None
     vehicle_vin: str | None = None
+    vehicle_color: str | None = None
+    vehicle_plate_state: str | None = None
+    vehicle_registration_expiration: date | None = None
+    internal_driver_number: str | None = None
     insurance_carrier: str | None = None
     insurance_policy_ref_masked: str | None = None
     insurance_effective_date: date | None = None

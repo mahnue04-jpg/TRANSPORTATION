@@ -70,6 +70,8 @@ class PlatformDriverOnboardingApplication(Base):
     emergency_contact_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     preferred_language: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    internal_driver_number: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    background_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     drivers_license_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     license_issuing_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -89,6 +91,9 @@ class PlatformDriverOnboardingApplication(Base):
     vehicle_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     vehicle_license_plate: Mapped[str | None] = mapped_column(String(32), nullable=True)
     vehicle_vin: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    vehicle_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    vehicle_plate_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    vehicle_registration_expiration: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     insurance_carrier: Mapped[str | None] = mapped_column(String(128), nullable=True)
     insurance_policy_ref_masked: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -249,6 +254,11 @@ def _ensure_platform_ops_columns(inspector) -> None:
         "vehicle_model": "VARCHAR(64)",
         "vehicle_license_plate": "VARCHAR(32)",
         "vehicle_vin": "VARCHAR(64)",
+        "vehicle_color": "VARCHAR(32)",
+        "vehicle_plate_state": "VARCHAR(32)",
+        "vehicle_registration_expiration": "DATE",
+        "internal_driver_number": "VARCHAR(32)",
+        "background_consent_at": datetime_sql,
         "insurance_carrier": "VARCHAR(128)",
         "insurance_policy_ref_masked": "VARCHAR(64)",
         "insurance_effective_date": "DATE",

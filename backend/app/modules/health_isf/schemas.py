@@ -447,6 +447,8 @@ class DriverLoginResponse(BaseModel):
     is_online: bool
     issued_at: datetime
     expires_at: datetime
+    online_blocked: bool = False
+    online_block_reason: str | None = None
 
 
 class DriverMobileAssignmentSyncLogRequest(BaseModel):

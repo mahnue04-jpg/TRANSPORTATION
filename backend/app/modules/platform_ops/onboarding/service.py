@@ -164,6 +164,12 @@ def _apply_draft_fields(
         "vehicle_model",
         "vehicle_license_plate",
         "vehicle_vin",
+        "vehicle_color",
+        "vehicle_plate_state",
+        "vehicle_registration_expiration",
+        "insurance_carrier",
+        "insurance_effective_date",
+        "insurance_expiration_date",
         "declaration_valid_license",
         "declaration_mvr_authorization",
         "declaration_background_authorization",
@@ -184,6 +190,13 @@ def _apply_draft_fields(
         application.declaration_background_authorization = True
         application.declaration_drug_alcohol_policy = True
         application.declaration_truthful_information = True
+    policy_number = getattr(payload, "insurance_policy_number", None)
+    if policy_number:
+        from app.modules.approval_engine.phase2b import mask_policy_reference
+
+        application.insurance_policy_ref_masked = mask_policy_reference(policy_number)
+    if application.declaration_background_authorization and not getattr(application, "background_consent_at", None):
+        application.background_consent_at = now()
     application.updated_at = now()
 
 
@@ -884,6 +897,10 @@ def application_to_detail(
         vehicle_model=getattr(application, "vehicle_model", None),
         vehicle_license_plate=getattr(application, "vehicle_license_plate", None),
         vehicle_vin=getattr(application, "vehicle_vin", None),
+        vehicle_color=getattr(application, "vehicle_color", None),
+        vehicle_plate_state=getattr(application, "vehicle_plate_state", None),
+        vehicle_registration_expiration=getattr(application, "vehicle_registration_expiration", None),
+        internal_driver_number=getattr(application, "internal_driver_number", None),
         insurance_carrier=getattr(application, "insurance_carrier", None),
         insurance_policy_ref_masked=getattr(application, "insurance_policy_ref_masked", None),
         insurance_effective_date=getattr(application, "insurance_effective_date", None),

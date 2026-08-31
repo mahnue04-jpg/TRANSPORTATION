@@ -86,6 +86,24 @@ def test_prepare_driver_001_creates_real_record_without_fabricating(client: Test
             if row.workflow_status == "ACTIVE":
                 row.display_badge = f"DRV-001-ARCHIVED-{row.id[:8]}"
                 row.updated_at = now()
+            # Other modules may have temporarily approved DRV-001; prep must start from a draft file.
+            if row.owner_approval_status == "APPROVED":
+                row.owner_approval_status = "PENDING"
+                row.owner_approval_timestamp = None
+                row.updated_at = now()
+            if row.platform_ops_application_id:
+                from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+
+                application = (
+                    db.query(PlatformDriverOnboardingApplication)
+                    .filter(PlatformDriverOnboardingApplication.id == row.platform_ops_application_id)
+                    .first()
+                )
+                if application is not None and application.status in {"approved", "activated", "suspended"}:
+                    application.status = "draft"
+                    application.approved_at = None
+                    application.activated_at = None
+                    application.updated_at = now()
         db.commit()
 
     response = client.post(

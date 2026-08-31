@@ -177,6 +177,7 @@ button.secondary { background: #eef2f8; color: var(--text); }
 .ready-BLOCKED { background: #fef3f2; color: #b42318; }
 .ready-EXPIRED { background: #fef3f2; color: #b42318; }
 .ready-NOT_REQUIRED { background: #eef2f8; color: #334155; }
+.health-pill.warn { background: #fff7ed; color: #9a3412; }
 .ready-NOT_AVAILABLE_YET { background: #eef2f8; color: #334155; }
 .review-form {
   display: grid;

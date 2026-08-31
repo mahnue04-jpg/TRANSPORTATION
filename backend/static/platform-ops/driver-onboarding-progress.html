@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b6bcb" />
+  <link rel="icon" href="/static/branding/favicon.ico?v=20260803.1" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
+  <title>Driver Onboarding Progress | AMICOR</title>
+  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css?v=20260831.1" />
+</head>
+<body>
+  <main class="page apply-page">
+    <header class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png?v=20260803.1" alt="AMICOR — Transport. Care. Connect." decoding="async" />
+      <div>
+        <h1>Your onboarding progress</h1>
+        <p class="subtitle">Complete each required item. You cannot go online until admin approval is complete.</p>
+      </div>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <section>
+      <p id="overall-status" class="meta">Loading…</p>
+      <p id="next-action" class="meta"></p>
+      <p><a href="/platform-ops/driver-apply">Continue application / uploads</a></p>
+    </section>
+    <section>
+      <h2>Compliance checklist</h2>
+      <div id="item-list"></div>
+    </section>
+  </main>
+  <script src="/static/platform-ops/driver-onboarding-progress.js?v=20260831.1"></script>
+</body>
+</html>

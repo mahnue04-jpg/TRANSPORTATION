@@ -879,3 +879,79 @@ def api_prepare_driver_001(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/compliance-summary")
+def api_case_compliance_summary(
+    case_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    from app.modules.approval_engine.compliance_summary import (
+        build_compliance_summary,
+        resolve_case_and_application,
+    )
+
+    case = db.query(ApprovalCase).filter(ApprovalCase.id == case_id).first()
+    if case is None:
+        raise HTTPException(status_code=404, detail="Approval case not found")
+    if not can_review(user):
+        raise HTTPException(status_code=403, detail="Review role required")
+    case, application = resolve_case_and_application(db, case=case)
+    return build_compliance_summary(db, application=application, case=case)
+
+
+@router.get("/applications/{application_id}/compliance-summary")
+def api_application_compliance_summary(
+    application_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    from app.modules.approval_engine.compliance_summary import (
+        build_compliance_summary,
+        resolve_case_and_application,
+    )
+    from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+
+    if not can_review(user):
+        raise HTTPException(status_code=403, detail="Review role required")
+    application = (
+        db.query(PlatformDriverOnboardingApplication)
+        .filter(PlatformDriverOnboardingApplication.id == application_id)
+        .first()
+    )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    case, application = resolve_case_and_application(db, application=application)
+    return build_compliance_summary(db, application=application, case=case)
+
+
+@router.get("/driver-001/compliance-summary")
+def api_driver_001_compliance_summary(
+    organization_id: str | None = Query(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    from app.modules.approval_engine.compliance_summary import (
+        build_compliance_summary,
+        resolve_case_and_application,
+    )
+    from app.modules.approval_engine.driver_001 import DRIVER_001_BADGE
+    from app.modules.approval_engine.workflow import get_case_by_badge
+
+    if not can_review(user):
+        raise HTTPException(status_code=403, detail="Review role required")
+    org = _org(user, organization_id)
+    case = get_case_by_badge(db, org, DRIVER_001_BADGE)
+    if case is None:
+        return {
+            "exists": False,
+            "overall_status": "NOT_STARTED",
+            "progress_percent": 0,
+            "next_required_action": "Prepare Driver #001 validation record",
+            "items": [],
+        }
+    case, application = resolve_case_and_application(db, case=case)
+    summary = build_compliance_summary(db, application=application, case=case)
+    summary["exists"] = True
+    return summary

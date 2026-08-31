@@ -257,6 +257,14 @@
     meta.textContent = `Platform Ops status: ${app.status} · License exp: ${app.license_expiration_date || "n/a"} · Activated driver: ${app.activated_driver_id || "not activated"}`;
     detailEl.appendChild(meta);
 
+    try {
+      const compliance = await approvalApi("/applications/" + encodeURIComponent(id) + "/compliance-summary");
+      const board = document.createElement("section");
+      board.className = "owner-card";
+      board.innerHTML = renderComplianceBoard(compliance);
+      detailEl.appendChild(board);
+    } catch (_) {}
+
     const linkBox = document.createElement("section");
     linkBox.className = "owner-card";
     linkBox.innerHTML = "<h3>Applicant access</h3><p class='meta'>Reissue rotates the applicant token for this existing application only. The new link is shown once and is not stored here.</p>";
@@ -887,12 +895,34 @@
       + "<p class='meta'>Background study, fingerprinting, STS training, MHCP credentialing — not required for BASE activation.</p>"
       + (payload.readiness_view ? "<h4>Readiness view</h4>" + ((payload.readiness_view.items || []).map(function (item) {
         return "<div class='meta'>" + readinessPill(item.state) + " " + item.label + " · " + (item.status || "—") + "</div>";
-      }).join("")) : "");
+      }).join("")) : "")
+      + (payload.compliance_summary ? renderComplianceBoard(payload.compliance_summary) : "");
+  }
+
+  function renderComplianceBoard(summary) {
+    const items = summary.items || [];
+    const rows = items.map(function (item) {
+      return "<div class='meta'><strong>" + item.light + "</strong> "
+        + item.label + " · " + item.status
+        + (item.missing && item.missing.length ? " · missing: " + item.missing.join(", ") : "")
+        + (item.expiration ? " · expires " + item.expiration : "")
+        + "</div>";
+    }).join("");
+    return "<h4>Master compliance summary</h4>"
+      + "<div class='meta'>Overall: " + (summary.overall_status || "—")
+      + " · Progress: " + (summary.progress_percent != null ? summary.progress_percent : "—") + "%"
+      + " · Online eligible: " + (summary.online_eligible ? "YES" : "NO") + "</div>"
+      + "<div class='meta'>Blocked because: "
+      + ((summary.blocked_from_online_reasons || []).join("; ") || "—") + "</div>"
+      + rows;
   }
 
   async function loadDriver001() {
     try {
       const status = await approvalApi("/driver-001");
+      try {
+        status.compliance_summary = await approvalApi("/driver-001/compliance-summary");
+      } catch (_) {}
       renderDriver001Panel(status);
     } catch (err) {
       const panel = document.getElementById("driver-001-panel");

@@ -52,6 +52,12 @@ class ApprovalCase(Base):
 
     background_study_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     fingerprint_status: Mapped[str] = mapped_column(String(32), nullable=False, default="NOT_REQUIRED")
+    fingerprint_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fingerprint_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fingerprint_appointment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fingerprint_completion_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    fingerprint_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fingerprint_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     medical_qualification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     behind_wheel_eval_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
@@ -195,6 +201,9 @@ class ApprovalTrainingModule(Base):
     organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     module_key: Mapped[str] = mapped_column(String(64), nullable=False)
     label: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acknowledgment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="assigned")
     module_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -300,6 +309,17 @@ def _ensure_approval_engine_columns(inspector) -> None:
     }
     training_cols = {
         "module_version": "VARCHAR(64)",
+        "description": "TEXT",
+        "is_required": "BOOLEAN DEFAULT 0",
+        "acknowledgment": "BOOLEAN DEFAULT 0",
+    }
+    case_cols = {
+        "fingerprint_required": "BOOLEAN DEFAULT 0",
+        "fingerprint_instructions": "TEXT",
+        "fingerprint_appointment_at": "DATETIME",
+        "fingerprint_completion_ref": "VARCHAR(256)",
+        "fingerprint_completed_at": "DATETIME",
+        "fingerprint_notes": "TEXT",
     }
     vehicle_cols = {
         "license_plate": "VARCHAR(32)",
@@ -339,6 +359,15 @@ def _ensure_approval_engine_columns(inspector) -> None:
             if name not in existing_vehicles:
                 statements.append(
                     f"ALTER TABLE approval_engine_vehicles ADD COLUMN {name} {ddl}"
+                )
+    except Exception:
+        pass
+    try:
+        existing_cases = {c["name"] for c in inspector.get_columns("approval_engine_cases")}
+        for name, ddl in case_cols.items():
+            if name not in existing_cases:
+                statements.append(
+                    f"ALTER TABLE approval_engine_cases ADD COLUMN {name} {ddl}"
                 )
     except Exception:
         pass

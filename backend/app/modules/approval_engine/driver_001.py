@@ -106,6 +106,10 @@ def prepare_driver_001_validation(
         )
         created_new_application = True
 
+    if application is not None and not getattr(application, "internal_driver_number", None):
+        application.internal_driver_number = DRIVER_001_BADGE
+        application.updated_at = now()
+
     case = create_or_sync_case_from_platform_ops(
         db,
         application=application,
@@ -335,6 +339,7 @@ def get_driver_001_status(db: Session, *, organization_id: str) -> dict[str, Any
         ai_summary=case.ai_summary,
         workflow_status=case.workflow_status,
     )
+    from app.modules.approval_engine.compliance_summary import build_compliance_summary
     from app.modules.approval_engine.phase2b import build_readiness_view
 
     return {
@@ -349,6 +354,7 @@ def get_driver_001_status(db: Session, *, organization_id: str) -> dict[str, Any
         },
         "approval_card": build_approval_card(case),
         "readiness_view": build_readiness_view(db, case, application),
+        "compliance_summary": build_compliance_summary(db, application=application, case=case),
         "walkthrough": walkthrough,
         "activation_blocked_reason": (
             None

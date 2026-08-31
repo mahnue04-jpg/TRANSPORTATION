@@ -3860,6 +3860,14 @@ def serve_driver_onboarding_admin() -> Response:
     return JSONResponse({"error": "Driver onboarding admin page not found"}, status_code=404)
 
 
+@app.get("/platform-ops/driver-onboarding")
+def serve_driver_onboarding_progress() -> Response:
+    page = os.path.join(_static_dir, "platform-ops", "driver-onboarding-progress.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Driver onboarding progress page not found"}, status_code=404)
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_fallback(full_path: str, request: Request) -> Response:
     """Global SPA fallback registered last to preserve /api and asset route priority."""
