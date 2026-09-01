@@ -88,6 +88,9 @@ def test_applicant_facing_html_is_simple():
     assert "Application submitted" in html
     assert "start-new-application" in html
     assert "clearApplicationSession" in js
+    assert "restoreExistingApplication" in js
+    assert "fillFormFromApplication" in js
+    assert "A new application was not created" in js
     assert "Only draft applications can be edited" in js or "only draft applications can be edited" in js.lower()
     assert "admin-sign-in" in admin_html
     assert "Session expired" in admin_js or "Click Sign in" in admin_js
@@ -308,3 +311,113 @@ def test_owner_approval_gate_and_audit(client: TestClient):
     assert audit.status_code == 200
     actions = [row.get("action") for row in audit.json()]
     assert "owner_approve" in actions
+
+
+def test_applicant_reloads_existing_draft_without_creating_another(client: TestClient):
+    org_id = _org_id()
+    create = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={
+            "organization_id": org_id,
+            "legal_first_name": "Pat",
+            "legal_last_name": "Applicant",
+            "email": "pat.applicant.resume@example.com",
+            "mobile_phone": "612-555-2211",
+            "drivers_license_number": "MN-RESUME-001",
+            "city": "Minneapolis",
+            "state": "MN",
+        },
+    )
+    assert create.status_code == 200, create.text
+    app_id = create.json()["application"]["id"]
+    token = create.json()["applicant_access_token"]
+    headers = {"X-Applicant-Token": token}
+
+    loaded = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers=headers,
+    )
+    assert loaded.status_code == 200, loaded.text
+    body = loaded.json()
+    assert body["id"] == app_id
+    assert body["status"] == "draft"
+    assert body["legal_first_name"] == "Pat"
+    assert body["legal_last_name"] == "Applicant"
+    assert body["email"] == "pat.applicant.resume@example.com"
+    assert body["mobile_phone"] == "612-555-2211"
+    assert body["drivers_license_number_masked"] == "MN-RESUME-001"
+
+    saved = client.put(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers=headers,
+        json={"organization_id": org_id, "vehicle_make": "Honda", "vehicle_model": "Accord"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["legal_first_name"] == "Pat"
+    assert saved.json()["drivers_license_number_masked"] == "MN-RESUME-001"
+    assert saved.json()["vehicle_make"] == "Honda"
+
+    with SessionLocal() as db:
+        from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+
+        rows = (
+            db.query(PlatformDriverOnboardingApplication)
+            .filter(PlatformDriverOnboardingApplication.email == "pat.applicant.resume@example.com")
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].id == app_id
+        assert rows[0].drivers_license_number == "MN-RESUME-001"
+
+
+def test_driver_001_identity_cannot_fork_a_second_application(client: TestClient):
+    org_id = _org_id()
+    from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+    from app.modules.platform_ops.onboarding.service import find_existing_driver_001_application
+
+    with SessionLocal() as db:
+        existing = find_existing_driver_001_application(db, organization_id=org_id)
+        app_id = existing.id if existing is not None else None
+
+    if app_id is None:
+        create = client.post(
+            "/api/platform-ops/driver-onboarding/applications",
+            json={
+                "organization_id": org_id,
+                "legal_first_name": "Driver",
+                "legal_last_name": "001",
+                "email": "driver001.guard@example.com",
+            },
+        )
+        assert create.status_code == 200, create.text
+        app_id = create.json()["application"]["id"]
+        with SessionLocal() as db:
+            row = db.query(PlatformDriverOnboardingApplication).filter_by(id=app_id).one()
+            row.internal_driver_number = "DRV-001"
+            db.commit()
+
+    fork = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={
+            "organization_id": org_id,
+            "legal_first_name": "Driver",
+            "legal_last_name": "001",
+            "email": "driver001.guard@example.com",
+        },
+    )
+    assert fork.status_code == 409, fork.text
+    assert "already exists" in fork.text.lower()
+    assert "was not created" in fork.text.lower()
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(PlatformDriverOnboardingApplication)
+            .filter(
+                PlatformDriverOnboardingApplication.organization_id == org_id,
+                PlatformDriverOnboardingApplication.internal_driver_number == "DRV-001",
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].id == app_id
+

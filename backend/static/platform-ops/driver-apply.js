@@ -13,8 +13,10 @@
   let applicantToken = localStorage.getItem("driver_onboarding_token") || "";
   let currentStep = 1;
   const TOTAL_STEPS = 5;
-  // category -> "name|size" for files already uploaded this session
+  // category -> "name|size" for files already uploaded this session, or "existing|<id>"
   const uploadedSignatures = {};
+  let existingApplicationLoaded = false;
+  let restoreAttempted = false;
 
   orgInput.value = params.get("organization_id") || localStorage.getItem("driver_onboarding_org") || "";
   appInput.value = params.get("application_id") || localStorage.getItem("driver_onboarding_app") || "";
@@ -24,9 +26,6 @@
   }
 
   const signedDate = form.elements.signed_date;
-  if (signedDate && !signedDate.value) {
-    signedDate.value = new Date().toISOString().slice(0, 10);
-  }
 
   function showBanner(message, ok) {
     banner.textContent = message;
@@ -73,13 +72,143 @@
     submitBtn.classList.toggle("hidden", step !== TOTAL_STEPS);
   }
 
+  function persistSession() {
+    if (orgInput.value) localStorage.setItem("driver_onboarding_org", orgInput.value);
+    if (appInput.value) localStorage.setItem("driver_onboarding_app", appInput.value);
+    if (applicantToken) localStorage.setItem("driver_onboarding_token", applicantToken);
+  }
+
+  function setFieldValue(name, value) {
+    const el = form.elements[name];
+    if (!el || value == null || value === "") return;
+    if (el.type === "checkbox") {
+      el.checked = value === true || value === "true" || value === 1 || value === "1";
+      return;
+    }
+    el.value = value;
+  }
+
+  function markExistingUploads(documents) {
+    const inputByCategory = {
+      drivers_license_front: "file_license_front",
+      drivers_license_back: "file_license_back",
+      vehicle_registration: "file_registration",
+      proof_of_auto_insurance: "file_insurance",
+      independent_contractor_agreement: "file_contractor",
+    };
+    (documents || []).forEach(function (doc) {
+      if (!doc || String(doc.review_status || "").toLowerCase() === "rejected") return;
+      uploadedSignatures[doc.category] = "existing|" + (doc.id || doc.category);
+      const input = document.getElementById(inputByCategory[doc.category] || "");
+      if (!input || !input.parentElement) return;
+      input.removeAttribute("required");
+      let hint = input.parentElement.querySelector(".on-file-hint");
+      if (!hint) {
+        hint = document.createElement("span");
+        hint.className = "on-file-hint";
+        input.parentElement.appendChild(hint);
+      }
+      hint.textContent = "Already on file" + (doc.original_filename ? ": " + doc.original_filename : ".");
+    });
+  }
+
+  function fillFormFromApplication(app) {
+    if (!app) return;
+    orgInput.value = app.organization_id || orgInput.value;
+    appInput.value = app.id || appInput.value;
+    setFieldValue("legal_first_name", app.legal_first_name);
+    setFieldValue("legal_middle_name", app.legal_middle_name);
+    setFieldValue("legal_last_name", app.legal_last_name);
+    setFieldValue("email", app.email);
+    setFieldValue("mobile_phone", app.mobile_phone);
+    setFieldValue("home_address", app.home_address);
+    setFieldValue("city", app.city);
+    setFieldValue("state", app.state);
+    setFieldValue("zip_code", app.zip_code);
+    setFieldValue("date_of_birth", app.date_of_birth);
+    setFieldValue("emergency_contact_name", app.emergency_contact_name);
+    setFieldValue("emergency_contact_phone", app.emergency_contact_phone);
+    setFieldValue("drivers_license_number", app.drivers_license_number_masked);
+    setFieldValue("license_issuing_state", app.license_issuing_state);
+    setFieldValue("license_expiration_date", app.license_expiration_date);
+    setFieldValue("vehicle_year", app.vehicle_year);
+    setFieldValue("vehicle_make", app.vehicle_make);
+    setFieldValue("vehicle_model", app.vehicle_model);
+    setFieldValue("vehicle_color", app.vehicle_color);
+    setFieldValue("vehicle_license_plate", app.vehicle_license_plate);
+    setFieldValue("vehicle_plate_state", app.vehicle_plate_state);
+    setFieldValue("vehicle_registration_expiration", app.vehicle_registration_expiration);
+    setFieldValue("vehicle_vin", app.vehicle_vin);
+    setFieldValue("insurance_carrier", app.insurance_carrier);
+    setFieldValue("insurance_effective_date", app.insurance_effective_date);
+    setFieldValue("insurance_expiration_date", app.insurance_expiration_date);
+    setFieldValue("declaration_mvr_authorization", app.declaration_mvr_authorization);
+    setFieldValue("declaration_valid_license", app.declaration_valid_license);
+    setFieldValue("authorize_qualification_checks", app.declaration_background_authorization);
+    setFieldValue("electronic_signature", app.electronic_signature);
+    setFieldValue("signed_date", app.signed_date);
+    if (app.w9_workflow_status) setFieldValue("w9_secure_workflow_started", true);
+    markExistingUploads(app.documents);
+    persistSession();
+    existingApplicationLoaded = true;
+  }
+
+  function showSubmittedState(statusLabel) {
+    form.classList.add("hidden");
+    successPanel.classList.remove("hidden");
+    const progressLink = document.getElementById("open-progress");
+    if (progressLink && appInput.value && applicantToken) {
+      progressLink.setAttribute(
+        "href",
+        "/platform-ops/driver-onboarding?application_id="
+          + encodeURIComponent(appInput.value)
+          + "&token=" + encodeURIComponent(applicantToken)
+      );
+    }
+    showBanner("Your existing application is on file. Status: " + (statusLabel || "submitted") + ".", true);
+  }
+
+  async function restoreExistingApplication() {
+    restoreAttempted = true;
+    if (!appInput.value || !applicantToken) {
+      if (signedDate && !signedDate.value) {
+        signedDate.value = new Date().toISOString().slice(0, 10);
+      }
+      return false;
+    }
+    try {
+      const app = await api("/applications/" + appInput.value);
+      fillFormFromApplication(app);
+      const status = String((app && app.status) || "").toLowerCase();
+      if (status && status !== "draft") {
+        showSubmittedState(app.status);
+        return true;
+      }
+      showBanner("Continuing your existing application. Nothing was reset or duplicated.", true);
+      return true;
+    } catch (err) {
+      showBanner(
+        "Could not open your existing application. Use your original application link. A new application was not created. "
+          + (err.message || ""),
+        false
+      );
+      return false;
+    }
+  }
+
   function payloadFromForm() {
     const data = new FormData(form);
     const body = {
       organization_id: orgInput.value,
-      preferred_language: "English",
-      employment_type: "independent_contractor",
     };
+    if (form.elements.preferred_language && form.elements.preferred_language.value) {
+      body.preferred_language = form.elements.preferred_language.value;
+    } else if (existingApplicationLoaded) {
+      // Keep existing language/employment on partial saves; do not invent empty overwrites.
+    } else {
+      body.preferred_language = "English";
+      body.employment_type = "independent_contractor";
+    }
     for (const [key, value] of data.entries()) {
       if (key === "organization_id" || key === "application_id") continue;
       if (
@@ -88,7 +217,8 @@
         key === "w9_secure_workflow_started" ||
         key === "payout_setup_started"
       ) {
-        body[key] = !!(form.elements[key] && form.elements[key].checked);
+        const checked = !!(form.elements[key] && form.elements[key].checked);
+        if (checked) body[key] = true;
         continue;
       }
       if (key === "vehicle_year") {
@@ -129,29 +259,41 @@
   }
 
   async function ensureApplication() {
-    if (!orgInput.value) throw new Error("Open this page with your Amicor application link (organization required).");
-
-    if (appInput.value && applicantToken) {
-      try {
-        const status = await api("/applications/" + appInput.value + "/applicant-status");
-        const appStatus = (status && (status.application_status || status.status)) || "";
-        if (appStatus && String(appStatus).toLowerCase() !== "draft") {
-          clearApplicationSession();
-        } else {
-          return;
-        }
-      } catch (_) {
-        // Token/app mismatch — start fresh rather than blocking the applicant.
-        clearApplicationSession();
+    if (appInput.value) {
+      if (!applicantToken) {
+        throw new Error(
+          "Your existing application could not be opened because the applicant link token is missing. "
+            + "A new application was not created. Use your original application link."
+        );
       }
+      try {
+        const app = await api("/applications/" + appInput.value);
+        fillFormFromApplication(app);
+        const appStatus = String((app && app.status) || "").toLowerCase();
+        if (appStatus && appStatus !== "draft") {
+          showSubmittedState(app.status);
+          throw new Error("This application is already " + app.status + " and cannot be edited.");
+        }
+        return;
+      } catch (err) {
+        if (isNonDraftError(err.message) || /already/i.test(err.message || "")) {
+          throw err;
+        }
+        throw new Error(
+          "Could not open your existing application. A new application was not created. "
+            + (err.message || "")
+        );
+      }
+    }
+
+    if (!orgInput.value) {
+      throw new Error("Open this page with your Amicor application link (organization required).");
     }
 
     const created = await api("/applications", { method: "POST", body: JSON.stringify({ organization_id: orgInput.value }) });
     appInput.value = created.application.id;
     applicantToken = created.applicant_access_token;
-    localStorage.setItem("driver_onboarding_app", appInput.value);
-    localStorage.setItem("driver_onboarding_org", orgInput.value);
-    localStorage.setItem("driver_onboarding_token", applicantToken);
+    persistSession();
     Object.keys(uploadedSignatures).forEach(function (key) { delete uploadedSignatures[key]; });
   }
 
@@ -254,18 +396,9 @@
     try {
       validateCurrentStep();
       await ensureApplication();
-      try {
-        await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
-      } catch (err) {
-        if (isNonDraftError(err.message)) {
-          clearApplicationSession();
-          await ensureApplication();
-          await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
-        } else {
-          throw err;
-        }
-      }
+      await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
       await uploadStepFiles(false);
+      persistSession();
       showStep(currentStep + 1);
       banner.classList.add("hidden");
     } catch (err) {
@@ -276,19 +409,10 @@
   document.getElementById("save-draft").addEventListener("click", async function () {
     try {
       await ensureApplication();
-      try {
-        await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
-      } catch (err) {
-        if (isNonDraftError(err.message)) {
-          clearApplicationSession();
-          await ensureApplication();
-          await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
-        } else {
-          throw err;
-        }
-      }
+      await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
       await uploadStepFiles(false);
-      showBanner("Draft saved. You can come back anytime.", true);
+      persistSession();
+      showBanner("Draft saved. You can come back anytime. Your existing application was updated, not replaced.", true);
     } catch (err) {
       showBanner(err.message || String(err), false);
     }
@@ -305,9 +429,8 @@
         method: "POST",
         body: JSON.stringify({ confirmation: true, simple_confirmation_message: true }),
       });
-      clearApplicationSession();
-      form.classList.add("hidden");
-      successPanel.classList.remove("hidden");
+      persistSession();
+      showSubmittedState("submitted");
       showBanner("Application submitted. Amicor is reviewing your information.", true);
     } catch (err) {
       showBanner(err.message || String(err), false);
@@ -316,9 +439,11 @@
 
   if (startNewBtn) {
     startNewBtn.addEventListener("click", function () {
+      existingApplicationLoaded = false;
       startNewApplication();
     });
   }
 
   showStep(1);
+  restoreExistingApplication();
 })();

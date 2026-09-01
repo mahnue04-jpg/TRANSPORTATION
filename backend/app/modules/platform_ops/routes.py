@@ -177,7 +177,12 @@ def create_application(
     user=Depends(_optional_current_user),  # type: ignore
 ) -> DriverApplicationCreateResponse:
     organization_id = _resolve_org_id(payload.organization_id, user)
-    application, token = onboarding_service.create_draft_application(db, organization_id=organization_id, payload=payload)
+    try:
+        application, token = onboarding_service.create_draft_application(
+            db, organization_id=organization_id, payload=payload
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
     detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
     return DriverApplicationCreateResponse(application=detail, applicant_access_token=token)
 
@@ -205,6 +210,10 @@ def get_application(
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found.")
     _authorize_application_access(application=application, user=user, applicant_token=x_applicant_token)
+    if onboarding_service.verify_applicant_token(application, x_applicant_token):
+        # Applicant token holders receive their own saved fields so the portal can resume
+        # without writing masked values back over real data.
+        return onboarding_service.application_to_detail(db, application, include_full_license=True)
     return _detail_for_user(db, application, user)
 
 
@@ -339,6 +348,8 @@ def update_application(
         )
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
+    if onboarding_service.verify_applicant_token(updated, x_applicant_token):
+        return onboarding_service.application_to_detail(db, updated, include_full_license=True)
     return _detail_for_user(db, updated, user)
 
 

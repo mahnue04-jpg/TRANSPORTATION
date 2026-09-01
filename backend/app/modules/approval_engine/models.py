@@ -307,18 +307,23 @@ def _ensure_approval_engine_columns(inspector) -> None:
         "expiration_date": "DATE",
         "audit_history_json": "TEXT",
     }
+    dialect_name = str(getattr(engine.dialect, "name", "") or "").lower()
+    datetime_sql = (
+        "TIMESTAMP WITH TIME ZONE" if dialect_name == "postgresql" else "DATETIME"
+    )
+    bool_default_false = "BOOLEAN DEFAULT FALSE" if dialect_name == "postgresql" else "BOOLEAN DEFAULT 0"
     training_cols = {
         "module_version": "VARCHAR(64)",
         "description": "TEXT",
-        "is_required": "BOOLEAN DEFAULT 0",
-        "acknowledgment": "BOOLEAN DEFAULT 0",
+        "is_required": bool_default_false,
+        "acknowledgment": bool_default_false,
     }
     case_cols = {
-        "fingerprint_required": "BOOLEAN DEFAULT 0",
+        "fingerprint_required": bool_default_false,
         "fingerprint_instructions": "TEXT",
-        "fingerprint_appointment_at": "DATETIME",
+        "fingerprint_appointment_at": datetime_sql,
         "fingerprint_completion_ref": "VARCHAR(256)",
-        "fingerprint_completed_at": "DATETIME",
+        "fingerprint_completed_at": datetime_sql,
         "fingerprint_notes": "TEXT",
     }
     vehicle_cols = {
@@ -326,7 +331,7 @@ def _ensure_approval_engine_columns(inspector) -> None:
         "inspection_status": "VARCHAR(32)",
         "insurance_association_ref": "VARCHAR(128)",
         "eligibility_status": "VARCHAR(32) DEFAULT 'PENDING'",
-        "dispatch_activated": "BOOLEAN DEFAULT 0",
+        "dispatch_activated": bool_default_false,
     }
     try:
         existing_req = {c["name"] for c in inspector.get_columns("approval_engine_requirements")}

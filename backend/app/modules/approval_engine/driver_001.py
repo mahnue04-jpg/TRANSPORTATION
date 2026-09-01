@@ -25,6 +25,7 @@ from app.modules.approval_engine.ai_review import run_ai_review
 from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
 from app.modules.platform_ops.onboarding.service import (
     create_draft_application,
+    find_existing_driver_001_application,
     get_application_by_id,
 )
 from app.modules.platform_ops.schemas import DriverApplicationDraftRequest
@@ -88,6 +89,9 @@ def prepare_driver_001_validation(
 
     if case and case.platform_ops_application_id:
         application = get_application_by_id(db, case.platform_ops_application_id)
+
+    if application is None:
+        application = find_existing_driver_001_application(db, organization_id=organization_id)
 
     if application is None:
         # Optional identity seeds help operators recognize the file; driver must still complete

@@ -179,8 +179,12 @@ def _apply_draft_fields(
         "signed_date",
     ):
         value = getattr(payload, field, None)
-        if value is not None:
-            setattr(application, field, value)
+        if value is None:
+            continue
+        # Never wipe an already-true declaration with an omitted/unchecked false from a partial form save.
+        if field.startswith("declaration_") and value is False and bool(getattr(application, field, False)):
+            continue
+        setattr(application, field, value)
     if payload.availability_days is not None:
         application.availability_days_json = _serialize_availability_days(payload.availability_days)
     # Simplified apply: one authorization maps to applicable compliance consents.
@@ -281,12 +285,51 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
     return errors
 
 
+def find_existing_driver_001_application(
+    db: Session,
+    *,
+    organization_id: str,
+) -> PlatformDriverOnboardingApplication | None:
+    return (
+        db.query(PlatformDriverOnboardingApplication)
+        .filter(
+            PlatformDriverOnboardingApplication.organization_id == organization_id,
+            PlatformDriverOnboardingApplication.internal_driver_number == "DRV-001",
+        )
+        .order_by(PlatformDriverOnboardingApplication.created_at.asc())
+        .first()
+    )
+
+
+def _payload_matches_driver_001(
+    payload: DriverApplicationDraftRequest | None,
+    existing: PlatformDriverOnboardingApplication,
+) -> bool:
+    if payload is None:
+        return False
+    email = str(getattr(payload, "email", None) or "").strip().lower()
+    existing_email = str(existing.email or "").strip().lower()
+    first = str(getattr(payload, "legal_first_name", None) or "").strip().lower()
+    last = str(getattr(payload, "legal_last_name", None) or "").strip().lower()
+    if email and existing_email and email == existing_email:
+        return True
+    if first == "driver" and last == "001":
+        return True
+    return False
+
+
 def create_draft_application(
     db: Session,
     *,
     organization_id: str,
     payload: DriverApplicationDraftRequest | None = None,
 ) -> tuple[PlatformDriverOnboardingApplication, str]:
+    existing_driver_001 = find_existing_driver_001_application(db, organization_id=organization_id)
+    if existing_driver_001 and _payload_matches_driver_001(payload, existing_driver_001):
+        raise ValueError(
+            "Cannot create a duplicate Driver 001 application. An application already exists. "
+            "Use the original application link. A new application was not created."
+        )
     token, token_hash = _generate_applicant_token()
     application = PlatformDriverOnboardingApplication(
         id=uuid4(),

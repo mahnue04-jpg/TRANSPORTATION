@@ -128,6 +128,7 @@ button.secondary { background: #eef2f8; color: var(--text); }
 .step-dot.done { background: #dbeafe; }
 .step-help { color: var(--muted); margin: 0 0 0.85rem; font-size: 0.95rem; }
 .optional { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+.on-file-hint { color: var(--ok); font-size: 0.82rem; }
 .check-row {
   flex-direction: row !important;
   align-items: flex-start;
