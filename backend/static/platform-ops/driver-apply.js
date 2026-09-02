@@ -17,6 +17,7 @@
   const uploadedSignatures = {};
   let existingApplicationLoaded = false;
   let restoreAttempted = false;
+  let lastHydratedApplication = null;
 
   orgInput.value = params.get("organization_id") || localStorage.getItem("driver_onboarding_org") || "";
   appInput.value = params.get("application_id") || localStorage.getItem("driver_onboarding_app") || "";
@@ -52,6 +53,8 @@
   }
 
   function startNewApplication() {
+    lastHydratedApplication = null;
+    existingApplicationLoaded = false;
     clearApplicationSession();
     resetFormForNewApplication();
     showBanner("Starting a new application. Previous submission was not changed.", true);
@@ -70,6 +73,9 @@
     prevBtn.classList.toggle("hidden", step === 1);
     nextBtn.classList.toggle("hidden", step === TOTAL_STEPS);
     submitBtn.classList.toggle("hidden", step !== TOTAL_STEPS);
+    if (lastHydratedApplication) {
+      fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
+    }
   }
 
   function persistSession() {
@@ -78,14 +84,65 @@
     if (applicantToken) localStorage.setItem("driver_onboarding_token", applicantToken);
   }
 
-  function setFieldValue(name, value) {
-    const el = form.elements[name];
-    if (!el || value == null || value === "") return;
-    if (el.type === "checkbox") {
-      el.checked = value === true || value === "true" || value === 1 || value === "1";
-      return;
+  function unwrapApplication(payload) {
+    if (!payload || typeof payload !== "object") return payload;
+    if (payload.id || payload.legal_first_name || payload.email) return payload;
+    if (payload.application && typeof payload.application === "object") return payload.application;
+    if (payload.data && typeof payload.data === "object") {
+      if (payload.data.application) return payload.data.application;
+      return payload.data;
     }
-    el.value = value;
+    return payload;
+  }
+
+  function normalizeDateValue(value) {
+    if (value == null || value === "") return "";
+    const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : String(value);
+  }
+
+  function findField(name) {
+    if (!form) return null;
+    return form.querySelector('[name="' + name + '"]') || (form.elements && form.elements[name]) || null;
+  }
+
+  function setFieldValue(name, value, options) {
+    const el = findField(name);
+    if (!el) return false;
+    const onlyIfEmpty = !!(options && options.onlyIfEmpty);
+    if (el.type === "checkbox") {
+      if (onlyIfEmpty && el.checked) return false;
+      el.checked = value === true || value === "true" || value === 1 || value === "1";
+      return true;
+    }
+    if (value == null || value === "") return false;
+    if (onlyIfEmpty && String(el.value || "").trim()) return false;
+    let next = value;
+    if (el.type === "date") next = normalizeDateValue(value);
+    else if (el.type === "number") next = String(value);
+    el.value = next;
+    if ("defaultValue" in el) el.defaultValue = String(next);
+    try { el.setAttribute("value", String(next)); } catch (_) { /* date/number inputs still keep .value */ }
+    el.setAttribute("autocomplete", "off");
+    el.setAttribute("data-hydrated", "1");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
+  function withPanelsVisible(fn) {
+    const hidden = [];
+    document.querySelectorAll("[data-step-panel]").forEach(function (panel) {
+      if (panel.classList.contains("hidden")) {
+        hidden.push(panel);
+        panel.classList.remove("hidden");
+      }
+    });
+    try {
+      fn();
+    } finally {
+      hidden.forEach(function (panel) { panel.classList.add("hidden"); });
+    }
   }
 
   function markExistingUploads(documents) {
@@ -112,45 +169,58 @@
     });
   }
 
-  function fillFormFromApplication(app) {
-    if (!app) return;
-    orgInput.value = app.organization_id || orgInput.value;
-    appInput.value = app.id || appInput.value;
-    setFieldValue("legal_first_name", app.legal_first_name);
-    setFieldValue("legal_middle_name", app.legal_middle_name);
-    setFieldValue("legal_last_name", app.legal_last_name);
-    setFieldValue("email", app.email);
-    setFieldValue("mobile_phone", app.mobile_phone);
-    setFieldValue("home_address", app.home_address);
-    setFieldValue("city", app.city);
-    setFieldValue("state", app.state);
-    setFieldValue("zip_code", app.zip_code);
-    setFieldValue("date_of_birth", app.date_of_birth);
-    setFieldValue("emergency_contact_name", app.emergency_contact_name);
-    setFieldValue("emergency_contact_phone", app.emergency_contact_phone);
-    setFieldValue("drivers_license_number", app.drivers_license_number_masked);
-    setFieldValue("license_issuing_state", app.license_issuing_state);
-    setFieldValue("license_expiration_date", app.license_expiration_date);
-    setFieldValue("vehicle_year", app.vehicle_year);
-    setFieldValue("vehicle_make", app.vehicle_make);
-    setFieldValue("vehicle_model", app.vehicle_model);
-    setFieldValue("vehicle_color", app.vehicle_color);
-    setFieldValue("vehicle_license_plate", app.vehicle_license_plate);
-    setFieldValue("vehicle_plate_state", app.vehicle_plate_state);
-    setFieldValue("vehicle_registration_expiration", app.vehicle_registration_expiration);
-    setFieldValue("vehicle_vin", app.vehicle_vin);
-    setFieldValue("insurance_carrier", app.insurance_carrier);
-    setFieldValue("insurance_effective_date", app.insurance_effective_date);
-    setFieldValue("insurance_expiration_date", app.insurance_expiration_date);
-    setFieldValue("declaration_mvr_authorization", app.declaration_mvr_authorization);
-    setFieldValue("declaration_valid_license", app.declaration_valid_license);
-    setFieldValue("authorize_qualification_checks", app.declaration_background_authorization);
-    setFieldValue("electronic_signature", app.electronic_signature);
-    setFieldValue("signed_date", app.signed_date);
-    if (app.w9_workflow_status) setFieldValue("w9_secure_workflow_started", true);
-    markExistingUploads(app.documents);
+  function fillFormFromApplication(raw, options) {
+    const app = unwrapApplication(raw);
+    if (!app) return false;
+    const opts = options || {};
+    let populated = 0;
+    withPanelsVisible(function () {
+      orgInput.value = app.organization_id || orgInput.value;
+      appInput.value = app.id || appInput.value;
+      const mapped = [
+        ["legal_first_name", app.legal_first_name],
+        ["legal_middle_name", app.legal_middle_name],
+        ["legal_last_name", app.legal_last_name],
+        ["email", app.email],
+        ["mobile_phone", app.mobile_phone],
+        ["home_address", app.home_address],
+        ["city", app.city],
+        ["state", app.state],
+        ["zip_code", app.zip_code],
+        ["date_of_birth", app.date_of_birth],
+        ["emergency_contact_name", app.emergency_contact_name],
+        ["emergency_contact_phone", app.emergency_contact_phone],
+        ["drivers_license_number", app.drivers_license_number || app.drivers_license_number_masked],
+        ["license_issuing_state", app.license_issuing_state],
+        ["license_expiration_date", app.license_expiration_date],
+        ["vehicle_year", app.vehicle_year],
+        ["vehicle_make", app.vehicle_make],
+        ["vehicle_model", app.vehicle_model],
+        ["vehicle_color", app.vehicle_color],
+        ["vehicle_license_plate", app.vehicle_license_plate],
+        ["vehicle_plate_state", app.vehicle_plate_state],
+        ["vehicle_registration_expiration", app.vehicle_registration_expiration],
+        ["vehicle_vin", app.vehicle_vin],
+        ["insurance_carrier", app.insurance_carrier],
+        ["insurance_policy_number", app.insurance_policy_number || app.insurance_policy_ref_masked],
+        ["insurance_effective_date", app.insurance_effective_date],
+        ["insurance_expiration_date", app.insurance_expiration_date],
+        ["declaration_mvr_authorization", app.declaration_mvr_authorization],
+        ["declaration_valid_license", app.declaration_valid_license],
+        ["authorize_qualification_checks", app.declaration_background_authorization || app.authorize_qualification_checks],
+        ["electronic_signature", app.electronic_signature],
+        ["signed_date", app.signed_date],
+      ];
+      mapped.forEach(function (pair) {
+        if (setFieldValue(pair[0], pair[1], opts)) populated += 1;
+      });
+      if (app.w9_workflow_status) setFieldValue("w9_secure_workflow_started", true, opts);
+      markExistingUploads(app.documents);
+    });
     persistSession();
     existingApplicationLoaded = true;
+    lastHydratedApplication = app;
+    return populated > 0 || !!(app.documents && app.documents.length);
   }
 
   function showSubmittedState(statusLabel) {
@@ -178,13 +248,19 @@
     }
     try {
       const app = await api("/applications/" + appInput.value);
-      fillFormFromApplication(app);
-      const status = String((app && app.status) || "").toLowerCase();
+      const hydrated = fillFormFromApplication(app);
+      setTimeout(function () { fillFormFromApplication(app, { onlyIfEmpty: true }); }, 50);
+      setTimeout(function () { fillFormFromApplication(app, { onlyIfEmpty: true }); }, 300);
+      const status = String((unwrapApplication(app) && unwrapApplication(app).status) || "").toLowerCase();
       if (status && status !== "draft") {
-        showSubmittedState(app.status);
+        showSubmittedState(unwrapApplication(app).status);
         return true;
       }
-      showBanner("Continuing your existing application. Nothing was reset or duplicated.", true);
+      if (hydrated) {
+        showBanner("Continuing your existing application. Saved information was loaded. Nothing was reset or duplicated.", true);
+      } else {
+        showBanner("Continuing your existing application. Saved information could not be shown in the form. A new application was not created.", false);
+      }
       return true;
     } catch (err) {
       showBanner(
@@ -222,9 +298,10 @@
         continue;
       }
       if (key === "vehicle_year") {
-        body[key] = value ? Number(value) : null;
+        if (value) body[key] = Number(value);
         continue;
       }
+      if (existingApplicationLoaded && (value == null || value === "")) continue;
       body[key] = value || null;
     }
     if (body.authorize_qualification_checks) {
@@ -269,7 +346,7 @@
       try {
         const app = await api("/applications/" + appInput.value);
         fillFormFromApplication(app);
-        const appStatus = String((app && app.status) || "").toLowerCase();
+        const appStatus = String((unwrapApplication(app) && unwrapApplication(app).status) || "").toLowerCase();
         if (appStatus && appStatus !== "draft") {
           showSubmittedState(app.status);
           throw new Error("This application is already " + app.status + " and cannot be edited.");
@@ -384,7 +461,7 @@
   document.querySelectorAll(".step-dot").forEach(function (dot) {
     dot.addEventListener("click", function () {
       const target = Number(dot.getAttribute("data-step"));
-      if (target < currentStep) showStep(target);
+      if (target < currentStep || existingApplicationLoaded) showStep(target);
     });
   });
 
@@ -396,11 +473,11 @@
     try {
       validateCurrentStep();
       await ensureApplication();
-      await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
+      const savedNext = await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
+      fillFormFromApplication(savedNext, { onlyIfEmpty: true });
       await uploadStepFiles(false);
       persistSession();
       showStep(currentStep + 1);
-      banner.classList.add("hidden");
     } catch (err) {
       showBanner(err.message || String(err), false);
     }
@@ -409,7 +486,8 @@
   document.getElementById("save-draft").addEventListener("click", async function () {
     try {
       await ensureApplication();
-      await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
+      const saved = await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
+      fillFormFromApplication(saved, { onlyIfEmpty: true });
       await uploadStepFiles(false);
       persistSession();
       showBanner("Draft saved. You can come back anytime. Your existing application was updated, not replaced.", true);
@@ -443,6 +521,14 @@
       startNewApplication();
     });
   }
+
+  window.addEventListener("pageshow", function () {
+    if (lastHydratedApplication) {
+      fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
+      return;
+    }
+    if (appInput.value && applicantToken) restoreExistingApplication();
+  });
 
   showStep(1);
   restoreExistingApplication();

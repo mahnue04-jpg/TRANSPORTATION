@@ -79,10 +79,11 @@ def _simple_payload(org_id: str) -> dict:
 
 
 def test_applicant_facing_html_is_simple():
-    html = Path("static/platform-ops/driver-apply.html").read_text(encoding="utf-8")
-    js = Path("static/platform-ops/driver-apply.js").read_text(encoding="utf-8")
-    admin_html = Path("static/platform-ops/driver-onboarding-admin.html").read_text(encoding="utf-8")
-    admin_js = Path("static/platform-ops/driver-onboarding-admin.js").read_text(encoding="utf-8")
+    _static = Path(__file__).resolve().parents[1] / "static" / "platform-ops"
+    html = (_static / "driver-apply.html").read_text(encoding="utf-8")
+    js = (_static / "driver-apply.js").read_text(encoding="utf-8")
+    admin_html = (_static / "driver-onboarding-admin.html").read_text(encoding="utf-8")
+    admin_js = (_static / "driver-onboarding-admin.js").read_text(encoding="utf-8")
     assert "About you" in html
     assert "Become an Amicor Driver" in html
     assert "Application submitted" in html
@@ -90,7 +91,11 @@ def test_applicant_facing_html_is_simple():
     assert "clearApplicationSession" in js
     assert "restoreExistingApplication" in js
     assert "fillFormFromApplication" in js
+    assert "unwrapApplication" in js
+    assert "normalizeDateValue" in js
+    assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
+    assert "driver-apply.js?v=20260901.2" in html
     assert "Only draft applications can be edited" in js or "only draft applications can be edited" in js.lower()
     assert "admin-sign-in" in admin_html
     assert "Session expired" in admin_js or "Click Sign in" in admin_js

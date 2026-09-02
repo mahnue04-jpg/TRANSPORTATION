@@ -50,6 +50,14 @@ input, select, textarea, button {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.apply-page input:not([type="checkbox"]):not([type="file"]),
+.apply-page select,
+.apply-page textarea {
+  color: var(--text);
+  background-color: #fff;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+}
 .checks { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
 .checks label { flex-direction: row; align-items: center; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }

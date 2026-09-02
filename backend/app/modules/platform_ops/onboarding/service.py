@@ -184,6 +184,9 @@ def _apply_draft_fields(
         # Never wipe an already-true declaration with an omitted/unchecked false from a partial form save.
         if field.startswith("declaration_") and value is False and bool(getattr(application, field, False)):
             continue
+        # Blank frontend defaults must not erase values already stored on the draft.
+        if isinstance(value, str) and value.strip() == "" and getattr(application, field, None) not in (None, ""):
+            continue
         setattr(application, field, value)
     if payload.availability_days is not None:
         application.availability_days_json = _serialize_availability_days(payload.availability_days)
