@@ -23,6 +23,7 @@ from app.modules.platform_ops.models import (
 )
 from app.modules.platform_ops.readiness import compute_readiness_summary
 from app.modules.platform_ops.schemas import (
+    ApplicantSectionCompletion,
     DocumentCategoryInfo,
     DocumentMetadataResponse,
     DriverApplicationDetailResponse,
@@ -230,6 +231,134 @@ def apply_simple_application_defaults(application: PlatformDriverOnboardingAppli
         application.service_area_counties = application.state or "TBD"
     if not application.signed_date and application.electronic_signature:
         application.signed_date = date.today()
+
+
+def _has_saved_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _accepted_or_pending_categories(
+    documents: list[PlatformDriverOnboardingDocument] | None,
+) -> set[str]:
+    present: set[str] = set()
+    for doc in documents or []:
+        if str(getattr(doc, "review_status", "") or "").lower() in {"rejected", "missing"}:
+            continue
+        category = str(getattr(doc, "category", "") or "")
+        if category:
+            present.add(category)
+    return present
+
+
+def compute_applicant_resume_progress(
+    application: PlatformDriverOnboardingApplication,
+    documents: list[PlatformDriverOnboardingDocument] | None = None,
+) -> dict[str, Any]:
+    """First unfinished wizard step from the saved application record, not the UI."""
+    docs = documents if documents is not None else list(getattr(application, "documents", None) or [])
+    present = _accepted_or_pending_categories(docs)
+    license_number = getattr(application, "drivers_license_number", None) or getattr(
+        application, "drivers_license_number_masked", None
+    )
+    authorized = bool(
+        getattr(application, "declaration_background_authorization", False)
+        or getattr(application, "declaration_truthful_information", False)
+    )
+    w9_ready = bool(getattr(application, "w9_workflow_status", None)) or "w9_status" in present
+    ica_ready = "independent_contractor_agreement" in present or bool(
+        getattr(application, "agreement_status", None)
+        and str(application.agreement_status).lower() in {"accepted", "signed", "provided"}
+    )
+    sections = [
+        {
+            "step": 1,
+            "key": "about_you",
+            "label": "About you",
+            "complete": all(
+                _has_saved_value(getattr(application, field, None))
+                for field in (
+                    "legal_first_name",
+                    "legal_last_name",
+                    "email",
+                    "mobile_phone",
+                    "home_address",
+                    "city",
+                    "state",
+                    "zip_code",
+                    "date_of_birth",
+                    "emergency_contact_name",
+                    "emergency_contact_phone",
+                )
+            ),
+        },
+        {
+            "step": 2,
+            "key": "driving",
+            "label": "Driving",
+            "complete": all(
+                (
+                    _has_saved_value(license_number),
+                    _has_saved_value(getattr(application, "license_issuing_state", None)),
+                    _has_saved_value(getattr(application, "license_expiration_date", None)),
+                    bool(getattr(application, "declaration_mvr_authorization", False)),
+                    "drivers_license_front" in present,
+                    "drivers_license_back" in present,
+                )
+            ),
+        },
+        {
+            "step": 3,
+            "key": "vehicle",
+            "label": "Vehicle",
+            "complete": all(
+                (
+                    _has_saved_value(getattr(application, "vehicle_year", None)),
+                    _has_saved_value(getattr(application, "vehicle_make", None)),
+                    _has_saved_value(getattr(application, "vehicle_model", None)),
+                    _has_saved_value(getattr(application, "vehicle_license_plate", None)),
+                    "vehicle_registration" in present,
+                    "proof_of_auto_insurance" in present,
+                )
+            ),
+        },
+        {
+            "step": 4,
+            "key": "authorization",
+            "label": "Authorization",
+            "complete": all(
+                (
+                    _has_saved_value(getattr(application, "electronic_signature", None)),
+                    _has_saved_value(getattr(application, "signed_date", None)),
+                    bool(getattr(application, "declaration_valid_license", False)),
+                    authorized,
+                )
+            ),
+        },
+        {
+            "step": 5,
+            "key": "work_setup",
+            "label": "Work setup",
+            "complete": ica_ready and w9_ready,
+        },
+    ]
+    unfinished = next((item for item in sections if not item["complete"]), None)
+    if unfinished is None:
+        resume = sections[-1]
+    else:
+        resume = unfinished
+    return {
+        "resume_step": resume["step"],
+        "resume_section_key": resume["key"],
+        "resume_section_label": resume["label"],
+        "section_completion": sections,
+        "all_required_sections_complete": unfinished is None,
+    }
 
 
 def validate_complete_application(application: PlatformDriverOnboardingApplication) -> list[dict[str, str]]:
@@ -906,11 +1035,16 @@ def application_to_detail(
     license_masked = mask_license_number(application.drivers_license_number)
     if include_full_license:
         license_masked = application.drivers_license_number
+    resume = compute_applicant_resume_progress(application, documents)
 
     return DriverApplicationDetailResponse(
         id=application.id,
         organization_id=application.organization_id,
         status=application.status,
+        resume_step=int(resume["resume_step"]),
+        resume_section_key=str(resume["resume_section_key"]),
+        resume_section_label=str(resume["resume_section_label"]),
+        section_completion=[ApplicantSectionCompletion(**item) for item in resume["section_completion"]],
         status_reason=application.status_reason,
         legal_first_name=application.legal_first_name,
         legal_middle_name=application.legal_middle_name,

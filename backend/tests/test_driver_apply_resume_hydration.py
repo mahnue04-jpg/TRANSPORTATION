@@ -235,8 +235,10 @@ def test_resume_html_js_contract_maps_saved_fields_and_documents():
     assert "existingApplicationLoaded && (value == null" in js
     assert "existingApplicationLoaded) showStep(target)" in js
     assert "pageshow" in js
+    assert "computeApplicantResumeProgress" in js
+    assert "applyResumePosition" in js
     assert "-webkit-text-fill-color" in css
-    assert "driver-apply.js?v=20260901.2" in html
+    assert "driver-apply.js?v=20260901.3" in html
 
 
 def _browser_resume(viewport: dict[str, int]) -> None:
@@ -308,10 +310,15 @@ def _browser_resume(viewport: dict[str, int]) -> None:
             "https://amicor.example/platform-ops/driver-apply"
             "?organization_id=org-resume-001&application_id=app-resume-001&token=synthetic-token"
         )
-        page.wait_for_selector('input[name="legal_first_name"]')
+        page.wait_for_selector('input[name="legal_first_name"]', state="attached")
         page.wait_for_function(
             "() => document.querySelector('[name=legal_first_name]').value === 'Pat'"
         )
+        page.wait_for_function(
+            "() => !document.querySelector('[data-step-panel=\"5\"]').classList.contains('hidden')"
+        )
+        assert page.locator('[data-step-panel="5"]').is_visible()
+        assert page.locator('[data-step-panel="1"]').is_hidden()
         assert page.input_value('input[name="legal_first_name"]') == "Pat"
         assert page.input_value('input[name="legal_last_name"]') == "Resume"
         assert page.input_value('input[name="email"]') == "pat.resume@example.com"
@@ -329,6 +336,10 @@ def _browser_resume(viewport: dict[str, int]) -> None:
         page.wait_for_function(
             "() => document.querySelector('[name=legal_first_name]').value === 'Pat'"
         )
+        page.wait_for_function(
+            "() => !document.querySelector('[data-step-panel=\"5\"]').classList.contains('hidden')"
+        )
+        assert page.locator('[data-step-panel="5"]').is_visible()
         assert page.input_value('input[name="legal_first_name"]') == "Pat"
         assert posts == []
         browser.close()
@@ -343,6 +354,47 @@ def test_apply_page_repopulates_on_mobile_viewport():
         ):
             pytest.skip("Playwright browser not installed")
         raise
+
+
+def test_resume_get_lands_on_first_incomplete_section(client: TestClient):
+    from app.modules.platform_ops.onboarding.service import compute_applicant_resume_progress
+    from app.modules.platform_ops.models import PlatformDriverOnboardingDocument
+
+    app_id, token, payload = _create_resume_draft(client)
+    loaded = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers={"X-Applicant-Token": token},
+    )
+    assert loaded.status_code == 200, loaded.text
+    body = loaded.json()
+    assert body["resume_step"] == 5
+    assert body["resume_section_key"] == "work_setup"
+    complete = {item["key"]: item["complete"] for item in body["section_completion"]}
+    assert complete["about_you"] is True
+    assert complete["driving"] is True
+    assert complete["vehicle"] is True
+    assert complete["authorization"] is True
+    assert complete["work_setup"] is False
+
+    empty = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={"organization_id": payload["organization_id"], "legal_first_name": "Only"},
+    )
+    assert empty.status_code == 200, empty.text
+    empty_detail = empty.json()["application"]
+    assert empty_detail["resume_step"] == 1
+    assert empty_detail["resume_section_key"] == "about_you"
+
+    with SessionLocal() as db:
+        row = db.query(PlatformDriverOnboardingApplication).filter_by(id=app_id).one()
+        docs = (
+            db.query(PlatformDriverOnboardingDocument)
+            .filter(PlatformDriverOnboardingDocument.application_id == app_id)
+            .all()
+        )
+        progress = compute_applicant_resume_progress(row, docs)
+        assert progress["resume_step"] == 5
+        assert progress["resume_section_key"] == "work_setup"
 
 
 def test_apply_page_repopulates_on_desktop_viewport():

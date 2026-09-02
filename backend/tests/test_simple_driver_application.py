@@ -95,7 +95,9 @@ def test_applicant_facing_html_is_simple():
     assert "normalizeDateValue" in js
     assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
-    assert "driver-apply.js?v=20260901.2" in html
+    assert "driver-apply.js?v=20260901.3" in html
+    assert "computeApplicantResumeProgress" in js
+    assert "applyResumePosition" in js
     assert "Only draft applications can be edited" in js or "only draft applications can be edited" in js.lower()
     assert "admin-sign-in" in admin_html
     assert "Session expired" in admin_js or "Click Sign in" in admin_js

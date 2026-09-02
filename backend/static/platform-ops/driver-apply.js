@@ -82,6 +82,96 @@
     if (orgInput.value) localStorage.setItem("driver_onboarding_org", orgInput.value);
     if (appInput.value) localStorage.setItem("driver_onboarding_app", appInput.value);
     if (applicantToken) localStorage.setItem("driver_onboarding_token", applicantToken);
+    if (appInput.value && currentStep) {
+      localStorage.setItem("driver_onboarding_step:" + appInput.value, String(currentStep));
+    }
+  }
+
+  function hasSavedValue(value) {
+    if (value === true) return true;
+    if (value === false || value == null) return false;
+    return String(value).trim() !== "";
+  }
+
+  function documentOnFile(app, category) {
+    return (app.documents || []).some(function (doc) {
+      if (!doc || doc.category !== category) return false;
+      return !/^(rejected|missing)$/i.test(String(doc.review_status || ""));
+    });
+  }
+
+  function computeApplicantResumeProgress(raw) {
+    const app = unwrapApplication(raw) || {};
+    const licenseNumber = app.drivers_license_number || app.drivers_license_number_masked;
+    const authorized = !!(app.declaration_background_authorization || app.declaration_truthful_information || app.authorize_qualification_checks);
+    const w9Ready = !!(app.w9_workflow_status || documentOnFile(app, "w9_status"));
+    const icaReady = !!(
+      documentOnFile(app, "independent_contractor_agreement")
+      || (app.agreement_status && /^(accepted|signed|provided)$/i.test(String(app.agreement_status)))
+    );
+    const sections = [
+      {
+        step: 1,
+        key: "about_you",
+        label: "About you",
+        complete: ["legal_first_name", "legal_last_name", "email", "mobile_phone", "home_address", "city", "state", "zip_code", "date_of_birth", "emergency_contact_name", "emergency_contact_phone"].every(function (field) {
+          return hasSavedValue(app[field]);
+        }),
+      },
+      {
+        step: 2,
+        key: "driving",
+        label: "Driving",
+        complete: hasSavedValue(licenseNumber)
+          && hasSavedValue(app.license_issuing_state)
+          && hasSavedValue(app.license_expiration_date)
+          && !!app.declaration_mvr_authorization
+          && documentOnFile(app, "drivers_license_front")
+          && documentOnFile(app, "drivers_license_back"),
+      },
+      {
+        step: 3,
+        key: "vehicle",
+        label: "Vehicle",
+        complete: hasSavedValue(app.vehicle_year)
+          && hasSavedValue(app.vehicle_make)
+          && hasSavedValue(app.vehicle_model)
+          && hasSavedValue(app.vehicle_license_plate)
+          && documentOnFile(app, "vehicle_registration")
+          && documentOnFile(app, "proof_of_auto_insurance"),
+      },
+      {
+        step: 4,
+        key: "authorization",
+        label: "Authorization",
+        complete: hasSavedValue(app.electronic_signature)
+          && hasSavedValue(app.signed_date)
+          && !!app.declaration_valid_license
+          && authorized,
+      },
+      {
+        step: 5,
+        key: "work_setup",
+        label: "Work setup",
+        complete: icaReady && w9Ready,
+      },
+    ];
+    const unfinished = sections.find(function (item) { return !item.complete; }) || sections[sections.length - 1];
+    const apiStep = Number(app.resume_step);
+    return {
+      resume_step: apiStep >= 1 && apiStep <= TOTAL_STEPS ? apiStep : unfinished.step,
+      resume_section_key: app.resume_section_key || unfinished.key,
+      resume_section_label: app.resume_section_label || unfinished.label,
+      section_completion: app.section_completion && app.section_completion.length ? app.section_completion : sections,
+      all_required_sections_complete: sections.every(function (item) { return item.complete; }),
+    };
+  }
+
+  function applyResumePosition(raw) {
+    const progress = computeApplicantResumeProgress(raw);
+    showStep(progress.resume_step);
+    persistSession();
+    return progress;
   }
 
   function unwrapApplication(payload) {
@@ -256,8 +346,13 @@
         showSubmittedState(unwrapApplication(app).status);
         return true;
       }
+      const progress = applyResumePosition(app);
+      const resumeLabel = progress.resume_section_label || "the next step";
       if (hydrated) {
-        showBanner("Continuing your existing application. Saved information was loaded. Nothing was reset or duplicated.", true);
+        showBanner(
+          "Continuing your existing application at " + resumeLabel + ". Saved information was loaded. Nothing was reset or duplicated.",
+          true
+        );
       } else {
         showBanner("Continuing your existing application. Saved information could not be shown in the form. A new application was not created.", false);
       }
@@ -408,12 +503,12 @@
   }
 
   async function uploadStepFiles(requireAll) {
-    const requireUploads = !!requireAll || currentStep === TOTAL_STEPS;
-    await uploadIfPresent("file_license_front", "drivers_license_front", requireUploads || currentStep === 2);
-    await uploadIfPresent("file_license_back", "drivers_license_back", requireUploads || currentStep === 2);
-    await uploadIfPresent("file_registration", "vehicle_registration", requireUploads || currentStep === 3);
-    await uploadIfPresent("file_insurance", "proof_of_auto_insurance", requireUploads || currentStep === 3);
-    await uploadIfPresent("file_contractor", "independent_contractor_agreement", requireUploads || currentStep === 5);
+    const requireUploads = !!requireAll;
+    await uploadIfPresent("file_license_front", "drivers_license_front", requireUploads);
+    await uploadIfPresent("file_license_back", "drivers_license_back", requireUploads);
+    await uploadIfPresent("file_registration", "vehicle_registration", requireUploads);
+    await uploadIfPresent("file_insurance", "proof_of_auto_insurance", requireUploads);
+    await uploadIfPresent("file_contractor", "independent_contractor_agreement", requireUploads);
   }
 
   function validateCurrentStep() {
@@ -489,6 +584,7 @@
       const saved = await api("/applications/" + appInput.value, { method: "PUT", body: JSON.stringify(payloadFromForm()) });
       fillFormFromApplication(saved, { onlyIfEmpty: true });
       await uploadStepFiles(false);
+      applyResumePosition(saved);
       persistSession();
       showBanner("Draft saved. You can come back anytime. Your existing application was updated, not replaced.", true);
     } catch (err) {
@@ -525,11 +621,19 @@
   window.addEventListener("pageshow", function () {
     if (lastHydratedApplication) {
       fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
+      applyResumePosition(lastHydratedApplication);
       return;
     }
-    if (appInput.value && applicantToken) restoreExistingApplication();
+    if (appInput.value && applicantToken) {
+      restoreExistingApplication();
+      return;
+    }
+    showStep(1);
   });
 
-  showStep(1);
-  restoreExistingApplication();
+  if (appInput.value && applicantToken) {
+    restoreExistingApplication();
+  } else {
+    showStep(1);
+  }
 })();

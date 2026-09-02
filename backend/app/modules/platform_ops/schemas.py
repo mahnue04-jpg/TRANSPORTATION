@@ -139,10 +139,21 @@ class DriverApplicationListItemResponse(BaseModel):
     assigned_reviewer_id: str | None = None
 
 
+class ApplicantSectionCompletion(BaseModel):
+    step: int
+    key: str
+    label: str
+    complete: bool
+
+
 class DriverApplicationDetailResponse(BaseModel):
     id: str
     organization_id: str
     status: str
+    resume_step: int = 1
+    resume_section_key: str = "about_you"
+    resume_section_label: str = "About you"
+    section_completion: list[ApplicantSectionCompletion] = Field(default_factory=list)
     status_reason: str | None = None
     legal_first_name: str | None = None
     legal_middle_name: str | None = None
