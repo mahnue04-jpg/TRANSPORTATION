@@ -146,6 +146,49 @@ class ApplicantSectionCompletion(BaseModel):
     complete: bool
 
 
+class WorkSetupItemStatus(BaseModel):
+    key: str
+    label: str
+    status_key: str
+    status: str
+    complete: bool
+    action_label: str | None = None
+    message: str | None = None
+    agreement_version: str | None = None
+    signed_at: str | None = None
+    tax_classification: str | None = None
+    stores_ssn_tin: bool | None = None
+    configured: bool | None = None
+    onboarding_url: str | None = None
+
+
+class WorkSetupStatusResponse(BaseModel):
+    application_id: str
+    agreement: WorkSetupItemStatus
+    tax: WorkSetupItemStatus
+    payout: WorkSetupItemStatus
+    all_complete: bool
+
+
+class ApplicantAgreementSignRequest(BaseModel):
+    typed_signature: str
+    accepted: bool = False
+    agreement_version: str | None = None
+
+
+class ApplicantW9CompleteRequest(BaseModel):
+    tax_classification: str
+    legal_name: str
+    business_name: str | None = None
+    certify_accurate: bool = False
+    certify_us_person: bool = False
+
+
+class ApplicantPayoutStartRequest(BaseModel):
+    return_url: str | None = None
+    refresh_url: str | None = None
+
+
 class DriverApplicationDetailResponse(BaseModel):
     id: str
     organization_id: str
@@ -198,6 +241,8 @@ class DriverApplicationDetailResponse(BaseModel):
     agreement_accepted_at: datetime | None = None
     w9_workflow_status: str | None = None
     w9_workflow_updated_at: datetime | None = None
+    stripe_onboarding_status: str | None = None
+    work_setup: WorkSetupStatusResponse | None = None
     declaration_valid_license: bool = False
     declaration_mvr_authorization: bool = False
     declaration_background_authorization: bool = False

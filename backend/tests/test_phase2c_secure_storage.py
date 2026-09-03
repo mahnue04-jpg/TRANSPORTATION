@@ -324,6 +324,9 @@ def test_phase2a_activation_dispatch_sts_and_ai_controls_remain(client: TestClie
             headers={"X-Applicant-Token": token},
             files={"file": ("placeholder.txt", BytesIO(b"placeholder-not-real-pii"), "text/plain")},
         )
+    from tests.work_setup_testutil import complete_secure_work_setup
+
+    complete_secure_work_setup(client, app_id, token, legal_name="Taylor Applicant")
     client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
         headers={"X-Applicant-Token": token},

@@ -115,6 +115,13 @@ class PlatformDriverOnboardingApplication(Base):
     w9_workflow_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     w9_external_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
     w9_external_provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    w9_tax_classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    stripe_account_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    stripe_payouts_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stripe_details_submitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stripe_onboarding_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stripe_connect_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     declaration_valid_license: Mapped[bool] = mapped_column(Boolean, default=False)
     declaration_mvr_authorization: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -277,6 +284,16 @@ def _ensure_platform_ops_columns(inspector) -> None:
         "w9_workflow_updated_at": datetime_sql,
         "w9_external_reference": "VARCHAR(128)",
         "w9_external_provider": "VARCHAR(128)",
+        "w9_tax_classification": "VARCHAR(64)",
+        "stripe_account_id": "VARCHAR(128)",
+        "stripe_payouts_enabled": (
+            "BOOLEAN NOT NULL DEFAULT FALSE" if engine.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
+        ),
+        "stripe_details_submitted": (
+            "BOOLEAN NOT NULL DEFAULT FALSE" if engine.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
+        ),
+        "stripe_onboarding_status": "VARCHAR(32)",
+        "stripe_connect_updated_at": datetime_sql,
     }
     note_cols = {
         "category": "VARCHAR(64)",

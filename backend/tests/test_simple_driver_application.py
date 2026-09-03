@@ -95,7 +95,14 @@ def test_applicant_facing_html_is_simple():
     assert "normalizeDateValue" in js
     assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
-    assert "driver-apply.js?v=20260901.3" in html
+    assert "driver-apply.js?v=20260902.1" in html
+    assert "Set Up Payout Account" in html
+    assert "file_contractor" not in html
+    assert "id=\"ica-sign-btn\"" in html
+    assert "id=\"w9-complete-btn\"" in html
+    assert 'name="ssn"' not in html.lower()
+    assert 'name="routing_number"' not in html.lower()
+    assert 'id="file_contractor"' not in html
     assert "computeApplicantResumeProgress" in js
     assert "applyResumePosition" in js
     assert "Only draft applications can be edited" in js or "only draft applications can be edited" in js.lower()
@@ -212,6 +219,10 @@ def test_simple_driver_001_submission_creates_ai_tasks_without_fabricating(clien
         )
         assert upload.status_code == 200, upload.text
         assert upload.json()["review_status"] == "pending"
+
+    from tests.work_setup_testutil import complete_secure_work_setup
+
+    complete_secure_work_setup(client, app_id, token, legal_name="Driver One")
 
     submitted = client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",

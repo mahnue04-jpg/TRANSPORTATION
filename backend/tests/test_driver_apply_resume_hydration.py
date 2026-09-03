@@ -238,7 +238,7 @@ def test_resume_html_js_contract_maps_saved_fields_and_documents():
     assert "computeApplicantResumeProgress" in js
     assert "applyResumePosition" in js
     assert "-webkit-text-fill-color" in css
-    assert "driver-apply.js?v=20260901.3" in html
+    assert "driver-apply.js?v=20260902.1" in html
 
 
 def _browser_resume(viewport: dict[str, int]) -> None:

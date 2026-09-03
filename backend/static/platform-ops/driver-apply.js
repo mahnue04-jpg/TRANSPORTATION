@@ -18,6 +18,8 @@
   let existingApplicationLoaded = false;
   let restoreAttempted = false;
   let lastHydratedApplication = null;
+  let workSetupState = null;
+  let icaVersion = "";
 
   orgInput.value = params.get("organization_id") || localStorage.getItem("driver_onboarding_org") || "";
   appInput.value = params.get("application_id") || localStorage.getItem("driver_onboarding_app") || "";
@@ -73,6 +75,9 @@
     prevBtn.classList.toggle("hidden", step === 1);
     nextBtn.classList.toggle("hidden", step === TOTAL_STEPS);
     submitBtn.classList.toggle("hidden", step !== TOTAL_STEPS);
+    if (step === 5 && appInput.value && applicantToken) {
+      loadWorkSetup().catch(function () { /* status chips stay at last known values */ });
+    }
     if (lastHydratedApplication) {
       fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
     }
@@ -104,10 +109,20 @@
     const app = unwrapApplication(raw) || {};
     const licenseNumber = app.drivers_license_number || app.drivers_license_number_masked;
     const authorized = !!(app.declaration_background_authorization || app.declaration_truthful_information || app.authorize_qualification_checks);
-    const w9Ready = !!(app.w9_workflow_status || documentOnFile(app, "w9_status"));
+    const work = app.work_setup || workSetupState || {};
+    const w9Ready = !!(
+      (work.tax && work.tax.complete)
+      || app.w9_workflow_status
+      || documentOnFile(app, "w9_status")
+    );
     const icaReady = !!(
-      documentOnFile(app, "independent_contractor_agreement")
+      (work.agreement && work.agreement.complete)
+      || documentOnFile(app, "independent_contractor_agreement")
       || (app.agreement_status && /^(accepted|signed|provided)$/i.test(String(app.agreement_status)))
+    );
+    const payoutReady = !!(
+      (work.payout && work.payout.complete)
+      || /^(complete)$/i.test(String(app.stripe_onboarding_status || ""))
     );
     const sections = [
       {
@@ -153,7 +168,7 @@
         step: 5,
         key: "work_setup",
         label: "Work setup",
-        complete: icaReady && w9Ready,
+        complete: icaReady && w9Ready && payoutReady,
       },
     ];
     const unfinished = sections.find(function (item) { return !item.complete; }) || sections[sections.length - 1];
@@ -241,7 +256,6 @@
       drivers_license_back: "file_license_back",
       vehicle_registration: "file_registration",
       proof_of_auto_insurance: "file_insurance",
-      independent_contractor_agreement: "file_contractor",
     };
     (documents || []).forEach(function (doc) {
       if (!doc || String(doc.review_status || "").toLowerCase() === "rejected") return;
@@ -304,8 +318,8 @@
       mapped.forEach(function (pair) {
         if (setFieldValue(pair[0], pair[1], opts)) populated += 1;
       });
-      if (app.w9_workflow_status) setFieldValue("w9_secure_workflow_started", true, opts);
       markExistingUploads(app.documents);
+      if (app.work_setup) applyWorkSetup(app.work_setup);
     });
     persistSession();
     existingApplicationLoaded = true;
@@ -347,6 +361,15 @@
         return true;
       }
       const progress = applyResumePosition(app);
+      const returningFromStripe = /stripe_(return|refresh)/i.test(params.get("work_setup") || "");
+      try {
+        await loadWorkSetup({ refreshPayout: returningFromStripe });
+      } catch (workErr) {
+        if (app.work_setup) applyWorkSetup(app.work_setup);
+        if (returningFromStripe) {
+          showBanner(workErr.message || "Payout setup could not be refreshed.", false);
+        }
+      }
       const resumeLabel = progress.resume_section_label || "the next step";
       if (hydrated) {
         showBanner(
@@ -384,9 +407,7 @@
       if (key === "organization_id" || key === "application_id") continue;
       if (
         key.startsWith("declaration_") ||
-        key === "authorize_qualification_checks" ||
-        key === "w9_secure_workflow_started" ||
-        key === "payout_setup_started"
+        key === "authorize_qualification_checks"
       ) {
         const checked = !!(form.elements[key] && form.elements[key].checked);
         if (checked) body[key] = true;
@@ -508,7 +529,6 @@
     await uploadIfPresent("file_license_back", "drivers_license_back", requireUploads);
     await uploadIfPresent("file_registration", "vehicle_registration", requireUploads);
     await uploadIfPresent("file_insurance", "proof_of_auto_insurance", requireUploads);
-    await uploadIfPresent("file_contractor", "independent_contractor_agreement", requireUploads);
   }
 
   function validateCurrentStep() {
@@ -528,8 +548,7 @@
           (categoryHint.indexOf("license_front") >= 0 && uploadedSignatures.drivers_license_front) ||
           (categoryHint.indexOf("license_back") >= 0 && uploadedSignatures.drivers_license_back) ||
           (categoryHint.indexOf("registration") >= 0 && uploadedSignatures.vehicle_registration) ||
-          (categoryHint.indexOf("insurance") >= 0 && uploadedSignatures.proof_of_auto_insurance) ||
-          (categoryHint.indexOf("contractor") >= 0 && uploadedSignatures.independent_contractor_agreement);
+          (categoryHint.indexOf("insurance") >= 0 && uploadedSignatures.proof_of_auto_insurance);
         if ((!el.files || !el.files[0]) && !already) {
           el.focus();
           throw new Error("Please upload the required document on this step.");
@@ -550,7 +569,191 @@
         throw new Error("Please confirm you hold a valid driver's license.");
       }
     }
+    if (currentStep === 5) {
+      const work = workSetupState || (lastHydratedApplication && lastHydratedApplication.work_setup) || {};
+      if (!(work.agreement && work.agreement.complete)) {
+        throw new Error("Please review and sign the Independent Contractor Agreement.");
+      }
+      if (!(work.tax && work.tax.complete)) {
+        throw new Error("Please complete your secure tax information.");
+      }
+      if (!(work.payout && work.payout.complete)) {
+        throw new Error("Payout setup is not complete.");
+      }
+    }
     return true;
+  }
+
+  function setStatusChip(kind, item) {
+    const chip = document.querySelector('[data-work-status="' + kind + '"]');
+    const copy = document.querySelector('[data-work-copy="' + kind + '"]');
+    if (chip) {
+      chip.textContent = (item && item.status) || chip.textContent;
+      chip.classList.toggle("is-complete", !!(item && item.complete));
+      chip.classList.toggle("is-attention", !!(item && /attention/i.test(String(item.status_key || item.status || ""))));
+    }
+    if (copy && item && item.message) copy.textContent = item.message;
+  }
+
+  function applyWorkSetup(status) {
+    renderWorkSetup(status);
+  }
+
+  function renderWorkSetup(status) {
+    if (!status) return;
+    workSetupState = status;
+    setStatusChip("ica", status.agreement);
+    setStatusChip("w9", status.tax);
+    setStatusChip("payout", status.payout);
+    const signedNote = document.getElementById("ica-signed-note");
+    const icaReview = document.getElementById("ica-review");
+    const icaOpen = document.getElementById("ica-open-btn");
+    if (status.agreement && status.agreement.complete) {
+      if (signedNote) signedNote.classList.remove("hidden");
+      if (icaReview) icaReview.classList.add("hidden");
+      if (icaOpen) icaOpen.classList.add("hidden");
+    } else if (icaOpen) {
+      if (signedNote) signedNote.classList.add("hidden");
+      icaOpen.classList.remove("hidden");
+      icaOpen.textContent = (status.agreement && status.agreement.action_label) || "Review and sign";
+    }
+    const w9Form = document.getElementById("w9-form");
+    const w9Open = document.getElementById("w9-open-btn");
+    if (status.tax && status.tax.complete) {
+      if (w9Form) w9Form.classList.add("hidden");
+      if (w9Open) w9Open.classList.add("hidden");
+    } else if (w9Open) {
+      w9Open.classList.remove("hidden");
+      w9Open.textContent = (status.tax && status.tax.action_label) || "Complete tax information";
+    }
+    const payoutBtn = document.getElementById("payout-setup-btn");
+    if (payoutBtn) {
+      payoutBtn.classList.toggle("hidden", !!(status.payout && status.payout.complete));
+      payoutBtn.textContent = (status.payout && status.payout.action_label) || "Set Up Payout Account";
+    }
+  }
+
+  async function loadWorkSetup(options) {
+    if (!appInput.value || !applicantToken) return null;
+    const refreshPayout = !!(options && options.refreshPayout);
+    if (refreshPayout) {
+      const refreshed = await api("/applications/" + appInput.value + "/work-setup/payout/refresh", { method: "POST", body: "{}" });
+      renderWorkSetup(refreshed);
+      return refreshed;
+    }
+    const status = await api("/applications/" + appInput.value + "/work-setup");
+    renderWorkSetup(status);
+    return status;
+  }
+
+  function stripeReturnUrls() {
+    const url = new URL(window.location.href);
+    url.searchParams.set("work_setup", "stripe_return");
+    url.searchParams.delete("token");
+    const returnUrl = url.toString();
+    url.searchParams.set("work_setup", "stripe_refresh");
+    return { return_url: returnUrl, refresh_url: url.toString() };
+  }
+
+  const icaOpenBtn = document.getElementById("ica-open-btn");
+  if (icaOpenBtn) {
+    icaOpenBtn.addEventListener("click", async function () {
+      try {
+        await ensureApplication();
+        const packet = await api("/applications/" + appInput.value + "/work-setup/agreement");
+        const textEl = document.getElementById("ica-text");
+        if (textEl) textEl.textContent = packet.text || "";
+        icaVersion = packet.agreement_version || "";
+        const review = document.getElementById("ica-review");
+        if (review) review.classList.remove("hidden");
+        const sig = document.getElementById("ica_typed_signature");
+        if (sig && !sig.value && form.elements.electronic_signature) {
+          sig.value = form.elements.electronic_signature.value || "";
+        }
+      } catch (err) {
+        showBanner(err.message || String(err), false);
+      }
+    });
+  }
+
+  const icaSignBtn = document.getElementById("ica-sign-btn");
+  if (icaSignBtn) {
+    icaSignBtn.addEventListener("click", async function () {
+      try {
+        await ensureApplication();
+        const signed = await api("/applications/" + appInput.value + "/work-setup/agreement/sign", {
+          method: "POST",
+          body: JSON.stringify({
+            typed_signature: (document.getElementById("ica_typed_signature") || {}).value || "",
+            accepted: !!(document.getElementById("ica_accepted") && document.getElementById("ica_accepted").checked),
+            agreement_version: icaVersion || undefined,
+          }),
+        });
+        renderWorkSetup(signed);
+        showBanner("Independent contractor agreement signed and on file.", true);
+      } catch (err) {
+        showBanner(err.message || String(err), false);
+      }
+    });
+  }
+
+  const w9OpenBtn = document.getElementById("w9-open-btn");
+  if (w9OpenBtn) {
+    w9OpenBtn.addEventListener("click", function () {
+      const w9Form = document.getElementById("w9-form");
+      if (w9Form) w9Form.classList.remove("hidden");
+      const nameInput = document.getElementById("w9_legal_name");
+      if (nameInput && !nameInput.value) {
+        const first = (form.elements.legal_first_name && form.elements.legal_first_name.value) || "";
+        const last = (form.elements.legal_last_name && form.elements.legal_last_name.value) || "";
+        nameInput.value = (first + " " + last).trim();
+      }
+    });
+  }
+
+  const w9CompleteBtn = document.getElementById("w9-complete-btn");
+  if (w9CompleteBtn) {
+    w9CompleteBtn.addEventListener("click", async function () {
+      try {
+        await ensureApplication();
+        const completed = await api("/applications/" + appInput.value + "/work-setup/w9", {
+          method: "POST",
+          body: JSON.stringify({
+            legal_name: (document.getElementById("w9_legal_name") || {}).value || "",
+            tax_classification: (document.getElementById("w9_tax_classification") || {}).value || "",
+            business_name: (document.getElementById("w9_business_name") || {}).value || "",
+            certify_accurate: !!(document.getElementById("w9_certify_accurate") && document.getElementById("w9_certify_accurate").checked),
+            certify_us_person: !!(document.getElementById("w9_certify_us_person") && document.getElementById("w9_certify_us_person").checked),
+          }),
+        });
+        renderWorkSetup(completed);
+        showBanner("Tax information is complete. Social Security numbers are not stored on this page.", true);
+      } catch (err) {
+        showBanner(err.message || String(err), false);
+      }
+    });
+  }
+
+  const payoutSetupBtn = document.getElementById("payout-setup-btn");
+  if (payoutSetupBtn) {
+    payoutSetupBtn.addEventListener("click", async function () {
+      try {
+        await ensureApplication();
+        const started = await api("/applications/" + appInput.value + "/work-setup/payout/start", {
+          method: "POST",
+          body: JSON.stringify(stripeReturnUrls()),
+        });
+        renderWorkSetup(started);
+        const url = started && started.payout && started.payout.onboarding_url;
+        if (url) {
+          window.location.assign(url);
+          return;
+        }
+        showBanner((started.payout && started.payout.message) || "Payout account setup is not complete.", false);
+      } catch (err) {
+        showBanner(err.message || String(err), false);
+      }
+    });
   }
 
   document.querySelectorAll(".step-dot").forEach(function (dot) {

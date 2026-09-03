@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png?v=20260803.1" />
   <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
   <title>Driver Application | AMICOR</title>
-  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css?v=20260901.3" />
+  <link rel="stylesheet" href="/static/platform-ops/driver-onboarding.css?v=20260902.1" />
 </head>
 <body>
   <main class="page apply-page">
@@ -135,19 +135,75 @@
 
       <section class="step-panel hidden" data-step-panel="5">
         <h2>Work setup</h2>
-        <p class="step-help">Complete these items so you can get paid. Sensitive tax and banking details use secure workflows — not this form.</p>
-        <div class="grid">
-          <label class="full">Independent contractor agreement
-            <input type="file" id="file_contractor" accept="image/*,.pdf" required />
-          </label>
-          <label class="full check-row">
-            <input type="checkbox" name="w9_secure_workflow_started" />
-            I will complete W-9 / tax information through Amicor's secure process (do not enter SSN here).
-          </label>
-          <label class="full check-row">
-            <input type="checkbox" name="payout_setup_started" />
-            I understand I need to finish secure payout setup before I can be paid for trips.
-          </label>
+        <p class="step-help">Complete these items so you can get paid. Tax numbers and bank details are never entered on this page.</p>
+        <div class="work-setup-list">
+          <article class="work-setup-card" id="work-setup-ica">
+            <div class="work-setup-head">
+              <h3>Independent contractor agreement</h3>
+              <span class="work-setup-status" data-work-status="ica">Not signed</span>
+            </div>
+            <p class="work-setup-copy" data-work-copy="ica">Review the agreement and sign electronically. Do not upload a file.</p>
+            <div id="ica-signed-note" class="on-file-hint hidden">Signed / On file</div>
+            <div id="ica-review" class="hidden">
+              <div id="ica-text" class="agreement-text"></div>
+              <label>Type your full legal name to sign
+                <input type="text" id="ica_typed_signature" autocomplete="off" />
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="ica_accepted" />
+                I have read and agree to this Independent Contractor Agreement.
+              </label>
+              <button type="button" id="ica-sign-btn">Sign agreement</button>
+            </div>
+            <button type="button" id="ica-open-btn" class="secondary">Review and sign</button>
+          </article>
+
+          <article class="work-setup-card" id="work-setup-w9">
+            <div class="work-setup-head">
+              <h3>Tax information</h3>
+              <span class="work-setup-status" data-work-status="w9">Incomplete</span>
+            </div>
+            <p class="work-setup-copy" data-work-copy="w9">Complete this electronically. Do not enter a Social Security number or upload a W-9 file.</p>
+            <div id="w9-form" class="hidden">
+              <label>Legal name as it should appear on tax forms
+                <input type="text" id="w9_legal_name" autocomplete="off" />
+              </label>
+              <label>Tax classification
+                <select id="w9_tax_classification">
+                  <option value="">Select</option>
+                  <option value="individual">Individual</option>
+                  <option value="sole_proprietor">Sole proprietor</option>
+                  <option value="single_member_llc">Single-member LLC</option>
+                  <option value="llc">LLC</option>
+                  <option value="c_corporation">C corporation</option>
+                  <option value="s_corporation">S corporation</option>
+                  <option value="partnership">Partnership</option>
+                </select>
+              </label>
+              <label>Business name <span class="optional">(if different)</span>
+                <input type="text" id="w9_business_name" autocomplete="off" />
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="w9_certify_accurate" />
+                I certify that the tax information I am providing is accurate.
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="w9_certify_us_person" />
+                I certify that I am a U.S. person for tax purposes.
+              </label>
+              <button type="button" id="w9-complete-btn">Save tax information</button>
+            </div>
+            <button type="button" id="w9-open-btn" class="secondary">Complete tax information</button>
+          </article>
+
+          <article class="work-setup-card" id="work-setup-payout">
+            <div class="work-setup-head">
+              <h3>Payout account</h3>
+              <span class="work-setup-status" data-work-status="payout">Not started</span>
+            </div>
+            <p class="work-setup-copy" data-work-copy="payout">Set up payouts with Stripe. Amicor never asks for routing or account numbers here.</p>
+            <button type="button" id="payout-setup-btn">Set Up Payout Account</button>
+          </article>
         </div>
       </section>
 
@@ -159,6 +215,6 @@
       </div>
     </form>
   </main>
-  <script src="/static/platform-ops/driver-apply.js?v=20260901.3"></script>
+  <script src="/static/platform-ops/driver-apply.js?v=20260902.1"></script>
 </body>
 </html>

@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.modules.platform_ops.models import PlatformDriverOnboardingDocument, ensure_platform_ops_schema
 from app.modules.platform_ops.onboarding import activation as activation_service
 from app.modules.platform_ops.onboarding import service as onboarding_service
+from app.modules.platform_ops.onboarding import work_setup as work_setup_service
 from app.modules.platform_ops.permissions import (
     can_activate,
     can_approve,
@@ -30,6 +31,8 @@ from app.modules.platform_ops.secure_storage import SecureStorageNotConfigured
 from app.modules.platform_ops.storage import get_document_storage
 from app.modules.platform_ops.schemas import (
     ActivationResponse,
+    ApplicantAgreementSignRequest,
+    ApplicantPayoutStartRequest,
     ApplicantTokenReissueResponse,
     DocumentReviewRequest,
     DocumentStatusOnlyRequest,
@@ -43,6 +46,7 @@ from app.modules.platform_ops.schemas import (
     DriverApplicationStatusTransitionRequest,
     DriverApplicationSubmitRequest,
     ReadinessSummaryResponse,
+    WorkSetupStatusResponse,
 )
 
 logger = logging.getLogger("amicor.platform_ops.routes")
@@ -322,6 +326,118 @@ def get_applicant_progress(
         "apply_path": "/platform-ops/driver-apply",
         **summary,
     }
+
+
+def _require_applicant_draft(
+    db: Session,
+    application_id: str,
+    x_applicant_token: str | None,
+) -> Any:
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise HTTPException(status_code=403, detail="Applicant token required.")
+    return application
+
+
+@router.get("/applications/{application_id}/work-setup", response_model=WorkSetupStatusResponse)
+def get_work_setup(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    return work_setup_service.serialize_work_setup(application)
+
+
+@router.get("/applications/{application_id}/work-setup/agreement")
+def get_work_setup_agreement(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    packet = work_setup_service.agreement_packet()
+    status = work_setup_service.serialize_work_setup(application)
+    return {**packet, "agreement": status["agreement"]}
+
+
+@router.post("/applications/{application_id}/work-setup/agreement/sign", response_model=WorkSetupStatusResponse)
+def sign_work_setup_agreement(
+    application_id: str,
+    payload: ApplicantAgreementSignRequest,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    try:
+        return work_setup_service.sign_independent_contractor_agreement(
+            db,
+            application=application,
+            typed_signature=payload.typed_signature,
+            accepted=payload.accepted,
+            agreement_version=payload.agreement_version,
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+
+
+@router.post("/applications/{application_id}/work-setup/w9", response_model=WorkSetupStatusResponse)
+async def complete_work_setup_w9(
+    application_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid tax information payload.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid tax information payload.")
+    try:
+        return work_setup_service.complete_electronic_w9(
+            db,
+            application=application,
+            payload=payload,
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+
+
+@router.post("/applications/{application_id}/work-setup/payout/start", response_model=WorkSetupStatusResponse)
+def start_work_setup_payout(
+    application_id: str,
+    payload: ApplicantPayoutStartRequest | None = None,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    body = payload or ApplicantPayoutStartRequest()
+    try:
+        return work_setup_service.start_payout_onboarding(
+            db,
+            application=application,
+            return_url=body.return_url,
+            refresh_url=body.refresh_url,
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+
+
+@router.post("/applications/{application_id}/work-setup/payout/refresh", response_model=WorkSetupStatusResponse)
+def refresh_work_setup_payout(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    try:
+        return work_setup_service.refresh_payout_status(db, application=application)
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
 
 
 @router.put("/applications/{application_id}", response_model=DriverApplicationDetailResponse)

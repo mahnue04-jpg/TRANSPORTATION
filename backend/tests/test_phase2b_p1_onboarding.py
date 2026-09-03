@@ -126,6 +126,9 @@ def _create_submitted_app(client: TestClient, org_id: str) -> tuple[str, str]:
             files={"file": placeholder},
         )
         assert upload.status_code == 200, upload.text
+    from tests.work_setup_testutil import complete_secure_work_setup
+
+    complete_secure_work_setup(client, app_id, token, legal_name="Taylor Applicant")
     submitted = client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
         headers={"X-Applicant-Token": token},

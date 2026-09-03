@@ -118,7 +118,10 @@ def _upload_required_placeholders(client: TestClient, app_id: str, applicant_tok
 
 
 def _submit_complete(client: TestClient, app_id: str, applicant_token: str):
+    from tests.work_setup_testutil import complete_secure_work_setup
+
     _upload_required_placeholders(client, app_id, applicant_token)
+    complete_secure_work_setup(client, app_id, applicant_token, legal_name="Taylor Q Applicant")
     return client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/submit",
         headers=_applicant_headers(applicant_token),

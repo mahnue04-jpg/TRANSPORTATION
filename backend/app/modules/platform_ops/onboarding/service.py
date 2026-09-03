@@ -30,6 +30,7 @@ from app.modules.platform_ops.schemas import (
     DriverApplicationDraftRequest,
     DriverApplicationListItemResponse,
     ReadinessSummaryResponse,
+    WorkSetupStatusResponse,
 )
 from app.modules.platform_ops.status_machine import (
     ACTIVATION_SOURCE_STATUSES,
@@ -66,12 +67,15 @@ SENSITIVE_CATEGORIES = frozenset(
     }
 )
 
-# Simple applicant flow — required uploads before submit (TEST placeholders OK locally).
-SIMPLE_REQUIRED_UPLOAD_CATEGORIES = (
+# Simple applicant flow — required file uploads before submit (TEST placeholders OK locally).
+# ICA is completed in-app (e-sign) and is no longer a required file upload.
+SIMPLE_REQUIRED_FILE_CATEGORIES = (
     "drivers_license_front",
     "drivers_license_back",
     "vehicle_registration",
     "proof_of_auto_insurance",
+)
+SIMPLE_REQUIRED_UPLOAD_CATEGORIES = SIMPLE_REQUIRED_FILE_CATEGORIES + (
     "independent_contractor_agreement",
 )
 
@@ -270,11 +274,15 @@ def compute_applicant_resume_progress(
         getattr(application, "declaration_background_authorization", False)
         or getattr(application, "declaration_truthful_information", False)
     )
-    w9_ready = bool(getattr(application, "w9_workflow_status", None)) or "w9_status" in present
-    ica_ready = "independent_contractor_agreement" in present or bool(
-        getattr(application, "agreement_status", None)
-        and str(application.agreement_status).lower() in {"accepted", "signed", "provided"}
+    from app.modules.platform_ops.onboarding.work_setup import (
+        agreement_is_signed,
+        payout_is_complete,
+        tax_information_is_complete,
     )
+
+    w9_ready = tax_information_is_complete(application, docs)
+    ica_ready = agreement_is_signed(application, docs)
+    payout_ready = payout_is_complete(application)
     sections = [
         {
             "step": 1,
@@ -344,7 +352,7 @@ def compute_applicant_resume_progress(
             "step": 5,
             "key": "work_setup",
             "label": "Work setup",
-            "complete": ica_ready and w9_ready,
+            "complete": ica_ready and w9_ready and payout_ready,
         },
     ]
     unfinished = next((item for item in sections if not item["complete"]), None)
@@ -398,13 +406,19 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
     if application.license_expiration_date and application.license_expiration_date < date.today():
         errors.append({"field": "license_expiration_date", "message": "Driver's license must not be expired."})
 
+    from app.modules.platform_ops.onboarding.work_setup import (
+        agreement_is_signed,
+        payout_is_complete,
+        tax_information_is_complete,
+    )
+
     documents = list(application.documents or [])
     present_categories = {
         str(doc.category)
         for doc in documents
         if doc.review_status in {"pending", "accepted"}
     }
-    for category in SIMPLE_REQUIRED_UPLOAD_CATEGORIES:
+    for category in SIMPLE_REQUIRED_FILE_CATEGORIES:
         if category not in present_categories:
             label = DOCUMENT_LABELS.get(category, category)
             errors.append(
@@ -413,6 +427,27 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
                     "message": f"{label} upload is required before submit.",
                 }
             )
+    if not agreement_is_signed(application, documents):
+        errors.append(
+            {
+                "field": "independent_contractor_agreement",
+                "message": "Please review and sign the Independent Contractor Agreement.",
+            }
+        )
+    if not tax_information_is_complete(application, documents):
+        errors.append(
+            {
+                "field": "w9",
+                "message": "Please complete your secure tax information.",
+            }
+        )
+    if not payout_is_complete(application):
+        errors.append(
+            {
+                "field": "payout",
+                "message": "Payout setup is not complete.",
+            }
+        )
 
     return errors
 
@@ -1024,6 +1059,8 @@ def application_to_detail(
     include_full_license: bool = False,
     include_readiness: bool = True,
 ) -> DriverApplicationDetailResponse:
+    from app.modules.platform_ops.onboarding.work_setup import serialize_work_setup
+
     documents = (
         db.query(PlatformDriverOnboardingDocument)
         .filter(PlatformDriverOnboardingDocument.application_id == application.id)
@@ -1091,6 +1128,8 @@ def application_to_detail(
         agreement_accepted_at=getattr(application, "agreement_accepted_at", None),
         w9_workflow_status=getattr(application, "w9_workflow_status", None),
         w9_workflow_updated_at=getattr(application, "w9_workflow_updated_at", None),
+        stripe_onboarding_status=getattr(application, "stripe_onboarding_status", None),
+        work_setup=WorkSetupStatusResponse.model_validate(serialize_work_setup(application, documents)),
         declaration_valid_license=application.declaration_valid_license,
         declaration_mvr_authorization=application.declaration_mvr_authorization,
         declaration_background_authorization=application.declaration_background_authorization,
