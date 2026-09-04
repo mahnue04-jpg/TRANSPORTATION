@@ -1569,6 +1569,16 @@ def _run_customer_request_intake_dispatch_sync(
                 error="missing_rows",
             )
             return
+        if str(request_row.dispatch_status or "").lower() == "awaiting_payment":
+            record_rider_request_timing(
+                stage="background_intake_skipped",
+                idempotency_key=idempotency_key or None,
+                ride_id=ride_id,
+                request_id=request_id,
+                organization_id=organization_id,
+                error="awaiting_payment",
+            )
+            return
         try:
             automation_started = time.perf_counter()
             service._record_auto_dispatch_audit(

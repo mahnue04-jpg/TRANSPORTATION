@@ -24,6 +24,7 @@ from app.modules.health_isf.models import (
 
 CANONICAL_RIDE_STATES: tuple[str, ...] = (
     RideStatus.REQUESTED.value,
+    RideStatus.AWAITING_PAYMENT.value,
     RideStatus.QUEUED.value,
     RideStatus.ASSIGNED.value,
     RideStatus.DRIVER_EN_ROUTE.value,
@@ -57,6 +58,7 @@ LEGACY_TO_CANONICAL: dict[str, str] = {
 
 CANONICAL_TO_LEGACY: dict[str, str] = {
     RideStatus.REQUESTED.value: RideStatus.PENDING.value,
+    RideStatus.AWAITING_PAYMENT.value: RideStatus.PENDING.value,
     RideStatus.QUEUED.value: RideStatus.PENDING.value,
     RideStatus.ASSIGNED.value: RideStatus.ACCEPTED.value,
     RideStatus.DRIVER_EN_ROUTE.value: RideStatus.ACCEPTED.value,
@@ -71,7 +73,17 @@ CANONICAL_TO_LEGACY: dict[str, str] = {
 }
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    RideStatus.REQUESTED.value: {RideStatus.QUEUED.value, RideStatus.CANCELLED.value, RideStatus.FAILED.value},
+    RideStatus.REQUESTED.value: {
+        RideStatus.AWAITING_PAYMENT.value,
+        RideStatus.QUEUED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    },
+    RideStatus.AWAITING_PAYMENT.value: {
+        RideStatus.QUEUED.value,
+        RideStatus.CANCELLED.value,
+        RideStatus.FAILED.value,
+    },
     RideStatus.QUEUED.value: {RideStatus.ASSIGNED.value, RideStatus.CANCELLED.value, RideStatus.ESCALATED.value, RideStatus.FAILED.value},
     RideStatus.ASSIGNED.value: {
         RideStatus.QUEUED.value,

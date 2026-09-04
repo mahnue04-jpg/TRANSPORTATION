@@ -34,6 +34,7 @@ from app.modules.health_isf.models import (
 
 logger = logging.getLogger("amicor.health_isf.financial_engine")
 
+PRICING_VERSION = "trip_financial_engine_v1"
 BASE_FARE_USD = 16.0
 PER_MILE_USD = 3.25
 PER_MINUTE_USD = 0.55
@@ -293,14 +294,33 @@ class TripFinancialEngine:
             .first()
         )
         if not payment:
+            stripe_paid = None
+            try:
+                from app.modules.payments.models import PAYMENT_SUCCEEDED, AmicorCustomerPayment
+
+                stripe_paid = (
+                    db.query(AmicorCustomerPayment)
+                    .filter(
+                        AmicorCustomerPayment.ride_id == ride.id,
+                        AmicorCustomerPayment.payment_status == PAYMENT_SUCCEEDED,
+                    )
+                    .order_by(desc(AmicorCustomerPayment.created_at))
+                    .first()
+                )
+            except Exception:
+                stripe_paid = None
             payment = HealthISFPaymentTransaction(
                 id=uuid4(),
                 organization_id=ride.organization_id,
                 ride_id=ride.id,
                 driver_id=ride.driver_id,
                 provider_id=ride.provider_id,
-                gateway="simulated",
-                gateway_payment_intent_id=f"pi_{uuid4().replace('-', '')[:24]}",
+                gateway="stripe" if stripe_paid is not None else "simulated",
+                gateway_payment_intent_id=(
+                    stripe_paid.stripe_payment_intent_id
+                    if stripe_paid is not None
+                    else f"pi_{uuid4().replace('-', '')[:24]}"
+                ),
                 status="succeeded",
                 currency="usd",
                 amount_usd=breakdown.ride_price_usd,

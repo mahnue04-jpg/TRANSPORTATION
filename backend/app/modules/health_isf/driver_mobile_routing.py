@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -32,12 +33,17 @@ from app.modules.health_isf.ride_execution_engine import RideLifecycleManager
 logger = logging.getLogger("amicor.health_isf.driver_mobile_routing")
 
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+PHOTON_SEARCH_URL = "https://photon.komoot.io/api/"
 OSRM_ROUTE_URL = "https://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
 USER_AGENT = "AMICOR-HealthISF/1.0 (driver-mobile-routing; https://github.com/mahnue04-jpg/TRANSPORTATION)"
 HTTP_TIMEOUT_SECONDS = 4.0
+GEOCODE_TIMEOUT_SECONDS = 12.0
 NOMINATIM_MIN_INTERVAL_SECONDS = 1.1
 HAVERSINE_MPH = 27.0
 EARTH_RADIUS_MILES = 3958.8
+HOUSE_LEVEL_QUALITY = 3
+ROAD_LEVEL_QUALITY = 1
 
 LEG_DRIVER_TO_PICKUP = "driver_to_pickup"
 LEG_PICKUP_TO_DESTINATION = "pickup_to_destination"
@@ -110,6 +116,17 @@ def haversine_route(origin: dict[str, float], destination: dict[str, float]) -> 
     }
 
 
+def _timeout_for_url(url: str) -> float:
+    lowered = str(url or "").lower()
+    if (
+        "nominatim.openstreetmap.org" in lowered
+        or "geocoding.geo.census.gov" in lowered
+        or "photon.komoot.io" in lowered
+    ):
+        return GEOCODE_TIMEOUT_SECONDS
+    return HTTP_TIMEOUT_SECONDS
+
+
 def _fetch_json(url: str) -> Any:
     if _http_disabled():
         raise RoutingHttpDisabled(url)
@@ -121,7 +138,7 @@ def _fetch_json(url: str) -> Any:
         },
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+    with urllib.request.urlopen(request, timeout=_timeout_for_url(url)) as response:
         payload = response.read().decode("utf-8")
     return json.loads(payload)
 
@@ -132,6 +149,261 @@ def _throttle_nominatim() -> None:
     if elapsed < NOMINATIM_MIN_INTERVAL_SECONDS:
         time.sleep(NOMINATIM_MIN_INTERVAL_SECONDS - elapsed)
     _last_nominatim_monotonic = time.monotonic()
+
+
+def _address_query_variants(address: str) -> list[str]:
+    raw = " ".join(str(address or "").split())
+    if not raw:
+        return []
+    variants = [raw]
+    street, sep, remainder = raw.partition(",")
+    expansions = (
+        (r"\bN\b", "North"),
+        (r"\bS\b", "South"),
+        (r"\bE\b", "East"),
+        (r"\bW\b", "West"),
+        (r"\bAve\b", "Avenue"),
+        (r"\bSt\b", "Street"),
+        (r"\bDr\b", "Drive"),
+        (r"\bRd\b", "Road"),
+        (r"\bBlvd\b", "Boulevard"),
+        (r"\bLn\b", "Lane"),
+        (r"\bCt\b", "Court"),
+    )
+    expanded_street = street
+    for pattern, replacement in expansions:
+        expanded_street = re.sub(pattern, replacement, expanded_street)
+    expanded = expanded_street + (sep + remainder if sep else "")
+    if expanded not in variants:
+        variants.append(expanded)
+    if "united states" not in raw.lower() and ", usa" not in raw.lower():
+        variants.append(f"{raw}, United States")
+    return variants
+
+
+def _nominatim_quality(row: dict[str, Any]) -> int:
+    addresstype = str(row.get("addresstype") or "").strip().lower()
+    osm_class = str(row.get("class") or "").strip().lower()
+    osm_type = str(row.get("type") or "").strip().lower()
+    if addresstype in {"house", "building"} or osm_type in {"house", "residential", "apartments", "yes"}:
+        return HOUSE_LEVEL_QUALITY
+    if osm_class in {"building", "place"} and osm_type not in {"city", "town", "state", "county"}:
+        return 2
+    if addresstype in {"road", "street"} or osm_class == "highway":
+        return ROAD_LEVEL_QUALITY
+    return ROAD_LEVEL_QUALITY
+
+
+def _result_from_coords(
+    *,
+    latitude: float,
+    longitude: float,
+    display_name: str | None,
+    provider: str,
+    quality: int,
+) -> dict[str, Any]:
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "display_name": (display_name or "")[:512] or None,
+        "provider": provider,
+        "quality": quality,
+    }
+
+
+def _pick_nominatim_row(rows: Any) -> dict[str, Any] | None:
+    if not isinstance(rows, list):
+        return None
+    best: dict[str, Any] | None = None
+    best_score = -1
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            latitude = float(row.get("lat"))
+            longitude = float(row.get("lon"))
+        except (TypeError, ValueError):
+            continue
+        score = _nominatim_quality(row)
+        if score > best_score:
+            best_score = score
+            best = _result_from_coords(
+                latitude=latitude,
+                longitude=longitude,
+                display_name=str(row.get("display_name") or ""),
+                provider="nominatim",
+                quality=score,
+            )
+        if score >= HOUSE_LEVEL_QUALITY:
+            return best
+    return best
+
+
+def _geocode_via_nominatim(address: str) -> dict[str, Any] | None:
+    best: dict[str, Any] | None = None
+    for query_address in _address_query_variants(address):
+        _throttle_nominatim()
+        query = urllib.parse.urlencode(
+            {
+                "q": query_address,
+                "format": "json",
+                "limit": "5",
+                "countrycodes": "us",
+                "addressdetails": "1",
+            }
+        )
+        rows = _fetch_json(f"{NOMINATIM_SEARCH_URL}?{query}")
+        picked = _pick_nominatim_row(rows)
+        if picked is None:
+            continue
+        if best is None or int(picked.get("quality") or 0) > int(best.get("quality") or 0):
+            best = picked
+        if int(picked.get("quality") or 0) >= HOUSE_LEVEL_QUALITY:
+            return picked
+    return best
+
+
+def _geocode_via_census(address: str) -> dict[str, Any] | None:
+    for query_address in _address_query_variants(address):
+        query = urllib.parse.urlencode(
+            {
+                "address": query_address,
+                "benchmark": "Public_AR_Current",
+                "format": "json",
+            }
+        )
+        payload = _fetch_json(f"{CENSUS_GEOCODER_URL}?{query}")
+        matches = ((payload or {}).get("result") or {}).get("addressMatches") or []
+        if not matches or not isinstance(matches[0], dict):
+            continue
+        coords = matches[0].get("coordinates") or {}
+        try:
+            latitude = float(coords.get("y"))
+            longitude = float(coords.get("x"))
+        except (TypeError, ValueError):
+            continue
+        return _result_from_coords(
+            latitude=latitude,
+            longitude=longitude,
+            display_name=str(matches[0].get("matchedAddress") or query_address),
+            provider="census",
+            quality=HOUSE_LEVEL_QUALITY,
+        )
+    return None
+
+
+def _street_tokens(value: str) -> set[str]:
+    ignore = {
+        "n",
+        "s",
+        "e",
+        "w",
+        "north",
+        "south",
+        "east",
+        "west",
+        "ave",
+        "avenue",
+        "st",
+        "street",
+        "dr",
+        "drive",
+        "rd",
+        "road",
+        "mn",
+        "minnesota",
+        "usa",
+        "united",
+        "states",
+    }
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+        if token not in ignore and not token.isdigit()
+    }
+
+
+def _geocode_via_photon(address: str) -> dict[str, Any] | None:
+    house_match = re.match(r"\s*(\d+[A-Za-z]?)", str(address or ""))
+    house_number = house_match.group(1) if house_match else ""
+    wanted_tokens = _street_tokens(address)
+    query = urllib.parse.urlencode({"q": address, "limit": "5", "lang": "en"})
+    payload = _fetch_json(f"{PHOTON_SEARCH_URL}?{query}")
+    features = (payload or {}).get("features") or []
+    fallback: dict[str, Any] | None = None
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        props = feature.get("properties") or {}
+        coords = ((feature.get("geometry") or {}).get("coordinates") or [])
+        if len(coords) < 2:
+            continue
+        try:
+            longitude = float(coords[0])
+            latitude = float(coords[1])
+        except (TypeError, ValueError):
+            continue
+        country = str(props.get("countrycode") or props.get("country") or "").upper()
+        if country and country not in {"US", "USA", "UNITED STATES"}:
+            continue
+        display = ", ".join(
+            part
+            for part in [
+                " ".join(
+                    piece
+                    for piece in [str(props.get("housenumber") or ""), str(props.get("street") or props.get("name") or "")]
+                    if piece
+                ).strip(),
+                str(props.get("city") or ""),
+                str(props.get("state") or ""),
+            ]
+            if part
+        )
+        result = _result_from_coords(
+            latitude=latitude,
+            longitude=longitude,
+            display_name=display or str(address),
+            provider="photon",
+            quality=HOUSE_LEVEL_QUALITY if str(props.get("housenumber") or "") == house_number else ROAD_LEVEL_QUALITY,
+        )
+        street_value = " ".join(
+            part for part in [str(props.get("street") or ""), str(props.get("name") or "")] if part
+        )
+        if house_number and str(props.get("housenumber") or "") == house_number:
+            if not wanted_tokens or wanted_tokens.intersection(_street_tokens(street_value)):
+                return result
+        if fallback is None:
+            fallback = result
+    return fallback
+
+
+def _persist_geocode(
+    db: Session,
+    *,
+    address: str,
+    key: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    cache_row = HealthISFGeocodeCache(
+        id=uuid4(),
+        address_key=key,
+        query_address=str(address)[:512],
+        latitude=float(result["latitude"]),
+        longitude=float(result["longitude"]),
+        display_name=str(result.get("display_name") or "")[:512] or None,
+        provider=str(result.get("provider") or "nominatim")[:32],
+        created_at=now(),
+        updated_at=now(),
+    )
+    db.add(cache_row)
+    db.commit()
+    return {
+        "latitude": float(cache_row.latitude),
+        "longitude": float(cache_row.longitude),
+        "display_name": cache_row.display_name,
+        "provider": str(cache_row.provider or "nominatim"),
+        "cached": False,
+    }
 
 
 def geocode_address(db: Session, address: str) -> Optional[dict[str, Any]]:
@@ -151,48 +423,47 @@ def geocode_address(db: Session, address: str) -> Optional[dict[str, Any]]:
             "provider": str(cached.provider or "nominatim"),
             "cached": True,
         }
+
+    nominatim_result: dict[str, Any] | None = None
+    transport_error = False
     try:
-        _throttle_nominatim()
-        query = urllib.parse.urlencode({"q": address, "format": "json", "limit": "1"})
-        rows = _fetch_json(f"{NOMINATIM_SEARCH_URL}?{query}")
+        nominatim_result = _geocode_via_nominatim(address)
     except RoutingHttpDisabled:
         return None
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        transport_error = True
         logger.warning("nominatim_unavailable address=%s error=%s", key[:80], exc)
-        return {"error": REASON_NOMINATIM_UNAVAILABLE}
     except Exception as exc:
+        transport_error = True
         logger.warning("nominatim_failed address=%s error=%s", key[:80], exc)
-        return {"error": REASON_NOMINATIM_UNAVAILABLE}
 
-    if not isinstance(rows, list) or not rows:
-        return {"error": REASON_INVALID_ADDRESS}
-    row = rows[0]
+    if nominatim_result and int(nominatim_result.get("quality") or 0) >= HOUSE_LEVEL_QUALITY:
+        return _persist_geocode(db, address=address, key=key, result=nominatim_result)
+
+    census_result: dict[str, Any] | None = None
     try:
-        latitude = float(row.get("lat"))
-        longitude = float(row.get("lon"))
-    except (TypeError, ValueError):
-        return {"error": REASON_INVALID_ADDRESS}
+        census_result = _geocode_via_census(address)
+    except RoutingHttpDisabled:
+        return None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError, Exception) as exc:
+        logger.warning("census_geocode_unavailable address=%s error=%s", key[:80], exc)
 
-    cache_row = HealthISFGeocodeCache(
-        id=uuid4(),
-        address_key=key,
-        query_address=str(address)[:512],
-        latitude=latitude,
-        longitude=longitude,
-        display_name=str(row.get("display_name") or "")[:512] or None,
-        provider="nominatim",
-        created_at=now(),
-        updated_at=now(),
-    )
-    db.add(cache_row)
-    db.commit()
-    return {
-        "latitude": latitude,
-        "longitude": longitude,
-        "display_name": cache_row.display_name,
-        "provider": "nominatim",
-        "cached": False,
-    }
+    if census_result:
+        return _persist_geocode(db, address=address, key=key, result=census_result)
+    if nominatim_result:
+        return _persist_geocode(db, address=address, key=key, result=nominatim_result)
+
+    photon_result: dict[str, Any] | None = None
+    try:
+        photon_result = _geocode_via_photon(address)
+    except RoutingHttpDisabled:
+        return None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError, Exception) as exc:
+        logger.warning("photon_geocode_unavailable address=%s error=%s", key[:80], exc)
+
+    if photon_result:
+        return _persist_geocode(db, address=address, key=key, result=photon_result)
+    return {"error": REASON_NOMINATIM_UNAVAILABLE if transport_error else REASON_INVALID_ADDRESS}
 
 
 def route_between(origin: dict[str, float], destination: dict[str, float]) -> dict[str, Any]:

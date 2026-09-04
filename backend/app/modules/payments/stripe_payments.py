@@ -607,4 +607,13 @@ def process_verified_payment_event(db: Session, event: dict[str, Any]) -> dict[s
         currency=currency,
         result=result,
     )
+    try:
+        from app.modules.payments.rider_checkout import release_ride_after_payment
+
+        release_ride_after_payment(db, payment=payment)
+    except Exception:
+        logger.exception(
+            "customer_payment_dispatch_release_failed payment_intent_id=%s",
+            payment_intent_id,
+        )
     return _event_response(row, payment, duplicate=False)

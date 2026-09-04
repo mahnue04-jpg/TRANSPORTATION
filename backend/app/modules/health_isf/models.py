@@ -52,6 +52,7 @@ class _CaseInsensitiveStatus(TypeDecorator):
 class RideStatus(str, Enum):
     """Ride statuses (legacy-compatible + live execution lifecycle projections)."""
     REQUESTED = "requested"
+    AWAITING_PAYMENT = "awaiting_payment"
     QUEUED = "queued"
     ASSIGNED = "assigned"
     DRIVER_EN_ROUTE = "driver_en_route"
@@ -84,6 +85,7 @@ class DriverStatus(str, Enum):
 
 
 class CustomerRequestStatus(str, Enum):
+    AWAITING_PAYMENT = "awaiting_payment"
     PENDING = "pending"
     APPROVED = "approved"
     DISPATCHABLE = "dispatchable"

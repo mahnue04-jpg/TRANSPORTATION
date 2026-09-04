@@ -500,7 +500,16 @@ def test_geocode_uses_cache_after_first_nominatim_hit(monkeypatch: pytest.Monkey
     def fake_fetch(url: str):
         calls["count"] += 1
         assert "nominatim.openstreetmap.org" in url
-        return [{"lat": "40.7580", "lon": "-73.9855", "display_name": "Times Square"}]
+        return [
+            {
+                "lat": "40.7580",
+                "lon": "-73.9855",
+                "display_name": "Times Square",
+                "addresstype": "house",
+                "class": "place",
+                "type": "house",
+            }
+        ]
 
     monkeypatch.setattr(
         "app.modules.health_isf.driver_mobile_routing._fetch_json",
@@ -513,6 +522,38 @@ def test_geocode_uses_cache_after_first_nominatim_hit(monkeypatch: pytest.Monkey
     assert first is not None and first.get("latitude") == 40.7580
     assert second is not None and second.get("cached") is True
     assert calls["count"] == 1
+
+
+def test_geocode_falls_back_to_census_when_nominatim_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AMICOR_ROUTING_HTTP", "1")
+    calls: list[str] = []
+
+    def fake_fetch(url: str):
+        calls.append(url)
+        if "nominatim.openstreetmap.org" in url:
+            raise TimeoutError("nominatim timeout")
+        if "geocoding.geo.census.gov" in url:
+            return {
+                "result": {
+                    "addressMatches": [
+                        {
+                            "matchedAddress": "2823 ALDRICH AVE N, MINNEAPOLIS, MN, 55411",
+                            "coordinates": {"x": -93.2893438, "y": 45.0088190},
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr("app.modules.health_isf.driver_mobile_routing._fetch_json", fake_fetch)
+    address = f"2823 Aldrich Ave N {uuid4()[:8]}, Minneapolis, MN 55411"
+    with SessionLocal() as db:
+        result = geocode_address(db, address)
+    assert result is not None
+    assert result.get("provider") == "census"
+    assert result.get("latitude") == 45.0088190
+    assert any("nominatim.openstreetmap.org" in url for url in calls)
+    assert any("geocoding.geo.census.gov" in url for url in calls)
 
 
 def test_pickup_eta_requires_real_gps_and_does_not_change_billing_estimates(client: TestClient) -> None:

@@ -3733,6 +3733,17 @@ def run_intake_dispatch_automation(
 
     request_obj = get_customer_request_by_ride_id(db, ride_id)
     request_id = str(request_obj.id) if request_obj else None
+    from app.modules.payments.rider_checkout import ride_is_awaiting_payment
+
+    if ride_is_awaiting_payment(ride, request_obj):
+        return {
+            "ride": ride,
+            "mode": "awaiting_payment",
+            "recommendation": None,
+            "offer": None,
+            "selected_driver": None,
+            "candidates": [],
+        }
     if request_obj and str(request_obj.dispatch_status or "").lower() == CustomerRequestStatus.CANCELLED.value:
         return {
             "ride": ride,
@@ -4231,6 +4242,8 @@ def get_dispatch_queue(
     rows: list[dict[str, Any]] = []
     for ride in rides:
         if _ride_is_terminal(ride) or is_operational_excluded_ride(ride):
+            continue
+        if str(getattr(ride, "lifecycle_state", "") or "").lower() == RideStatus.AWAITING_PAYMENT.value:
             continue
         lifecycle = RideLifecycleManager.normalize_state(ride.lifecycle_state or ride.status)
         if lifecycle in {
@@ -6961,6 +6974,9 @@ def create_customer_ride_request(
     return_dropoff_address: Optional[str] = None,
     same_driver_preference: bool = False,
     client_timezone: Optional[str] = None,
+    hold_for_payment: bool = False,
+    estimated_distance_miles: Optional[float] = None,
+    estimated_duration_minutes: Optional[int] = None,
 ) -> tuple[HealthISFCustomerRideRequest, HealthISFRide]:
     from app.modules.health_isf.scheduling import (
         apply_scheduling_fields_to_ride,
@@ -7012,7 +7028,14 @@ def create_customer_ride_request(
     def _create_ride_wrapper(db_session: Session, **kwargs: Any) -> HealthISFRide:
         kwargs.setdefault("provider_id", provider.id)
         kwargs["service_type"] = serialize_service_category(normalized_ride_type)
-        return create_ride(db_session, skip_intake_automation=True, **kwargs)
+        kwargs.setdefault("estimated_distance_miles", estimated_distance_miles)
+        kwargs.setdefault("estimated_duration_minutes", estimated_duration_minutes)
+        return create_ride(
+            db_session,
+            skip_intake_automation=True,
+            hold_for_payment=hold_for_payment,
+            **kwargs,
+        )
 
     def _create_request_wrapper(db_session: Session, **kwargs: Any) -> HealthISFCustomerRideRequest:
         ride = kwargs["ride"]
@@ -7037,7 +7060,11 @@ def create_customer_ride_request(
             trip_type=str(kwargs.get("trip_type") or "one_way"),
             scheduling_metadata_json=json.dumps(metadata) if metadata else None,
             linked_ride_ids_json=json.dumps(linked),
-            dispatch_status=CustomerRequestStatus.PENDING.value,
+            dispatch_status=(
+                CustomerRequestStatus.AWAITING_PAYMENT.value
+                if hold_for_payment
+                else CustomerRequestStatus.PENDING.value
+            ),
             pending_at=now(),
             created_at=now(),
             updated_at=now(),
@@ -7113,6 +7140,9 @@ def create_customer_ride_request(
         notes=notes,
         actor_user_id=submitted_by_user_id,
         skip_intake_automation=True,
+        hold_for_payment=hold_for_payment,
+        estimated_distance_miles=estimated_distance_miles,
+        estimated_duration_minutes=estimated_duration_minutes,
     )
     from app.modules.health_isf.scheduling import apply_scheduling_fields_to_ride
 
@@ -7139,7 +7169,11 @@ def create_customer_ride_request(
         recurring_pattern_json=json.dumps(recurring_payload) if recurring_payload else None,
         notes=notes,
         trip_type=trip_type or "one_way",
-        dispatch_status=CustomerRequestStatus.PENDING.value,
+        dispatch_status=(
+            CustomerRequestStatus.AWAITING_PAYMENT.value
+            if hold_for_payment
+            else CustomerRequestStatus.PENDING.value
+        ),
         pending_at=now(),
         created_at=now(),
         updated_at=now(),
@@ -11081,6 +11115,7 @@ def create_ride(
     notes: Optional[str] = None,
     actor_user_id: Optional[str] = None,
     skip_intake_automation: bool = False,
+    hold_for_payment: bool = False,
 ) -> HealthISFRide:
     normalized_service_type = serialize_service_category(service_type)
     org = _get_or_create_default_org(db)
@@ -11138,10 +11173,16 @@ def create_ride(
         RideLifecycleManager.transition_ride(
             db,
             ride,
-            target_state=RideStatus.QUEUED.value,
+            target_state=(
+                RideStatus.AWAITING_PAYMENT.value if hold_for_payment else RideStatus.QUEUED.value
+            ),
             action_type="ride_created",
             actor_user_id=actor_user_id,
-            note="Ride created and queued for dispatch",
+            note=(
+                "Ride created and held for sandbox payment"
+                if hold_for_payment
+                else "Ride created and queued for dispatch"
+            ),
             payload={"service_type": normalized_service_type, "is_emergency": is_emergency},
         )
         _commit_or_rollback(db)

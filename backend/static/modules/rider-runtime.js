@@ -48,7 +48,7 @@
         if (typeof window.AmiCorSession.restore === "function") {
           window.AmiCorSession.restore();
         }
-        response = await window.AmiCorSession.authFetch(API_BASE + "/customer-requests", config);
+        response = await window.AmiCorSession.authFetch("/api/payments/rider/checkout", config);
       } else {
         var authToken = localStorage.getItem("amicor_access_token") || sessionStorage.getItem("amicor_access_token") || "";
         if (!authToken) {
@@ -63,7 +63,7 @@
         if (authToken) {
           config.headers["Authorization"] = "Bearer " + authToken;
         }
-        response = await fetch(API_BASE + "/customer-requests", config);
+        response = await fetch("/api/payments/rider/checkout", config);
       }
       
       clearTimeout(timeoutId);

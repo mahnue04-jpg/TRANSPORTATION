@@ -5520,6 +5520,45 @@
     if (!Array.isArray(state.riderApp.notifications)) {
       state.riderApp.notifications = [];
     }
+    if (!state.riderApp.fareQuote || typeof state.riderApp.fareQuote !== "object") {
+      state.riderApp.fareQuote = null;
+    }
+    if (!state.riderApp.checkout || typeof state.riderApp.checkout !== "object") {
+      state.riderApp.checkout = null;
+    }
+  }
+
+  function renderRiderFareAndPaymentPanel(riderState) {
+    var quote = riderState && riderState.fareQuote ? riderState.fareQuote : null;
+    var checkout = riderState && riderState.checkout ? riderState.checkout : null;
+    var quoteHtml = "";
+    if (quote && quote.estimated_ride_fare_usd != null) {
+      quoteHtml =
+        '<div class="rider-fare-summary" style="margin:14px 0;padding:14px;border-radius:12px;background:#f8fafc;border:1px solid #cbd5e1">' +
+          '<h4 style="margin:0 0 8px">Fare summary</h4>' +
+          '<p class="muted" style="margin:0 0 8px">Estimated distance: <strong>' + escapeHtml(String(quote.estimated_distance_miles)) + ' miles</strong></p>' +
+          '<p class="muted" style="margin:0 0 8px">Estimated duration: <strong>' + escapeHtml(String(quote.estimated_duration_minutes)) + ' minutes</strong></p>' +
+          '<p style="margin:0 0 8px;font-size:1.15rem">Estimated ride fare: <strong>$' + escapeHtml(Number(quote.estimated_ride_fare_usd).toFixed(2)) + '</strong></p>' +
+          '<p class="muted" style="margin:0">' + escapeHtml(safeText(quote.sandbox_notice, "This is the amount to be charged in the current sandbox test.")) + '</p>' +
+        '</div>';
+    } else {
+      quoteHtml =
+        '<div class="rider-fare-summary" style="margin:14px 0;padding:14px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
+          '<strong>Fare estimate needed.</strong> Enter pickup and drop-off to calculate the sandbox fare before this ride can be paid and sent to dispatch.' +
+        '</div>';
+    }
+    var payHtml = "";
+    if (checkout && checkout.client_secret) {
+      payHtml =
+        '<div class="rider-payment-panel" style="margin:14px 0;padding:14px;border-radius:12px;background:#eff6ff;border:1px solid #93c5fd">' +
+          '<h4 style="margin:0 0 8px">Sandbox payment</h4>' +
+          '<p class="muted">This ride is held as awaiting payment and is not in the dispatcher queue.</p>' +
+          '<div id="rider-payment-element" style="margin:12px 0;min-height:48px"></div>' +
+          '<p id="rider-payment-message" class="muted">' + escapeHtml(safeText(checkout.message, "Complete sandbox payment to release this ride to dispatch.")) + '</p>' +
+          '<button type="button" class="preview-action rider-action" data-rider-action="pay_sandbox">Pay sandbox fare</button>' +
+        '</div>';
+    }
+    return quoteHtml + payHtml;
   }
 
   function emptyRiderActiveTrip() {
@@ -5671,6 +5710,7 @@
             '<label class="muted" style="display:flex;align-items:center;gap:8px;margin-top:6px"><input id="rider-same-driver-input" type="checkbox"' + (profile.sameDriverPreference ? ' checked' : '') + ' onchange="window._amiUpdateRiderProfileDraft(\'sameDriverPreference\', this.checked)"> Same-Driver Preference</label>' +
             '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
+          renderRiderFareAndPaymentPanel(riderState) +
           '<div class="command-actions">' +
             '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? (safeText(riderState.submitStatus && riderState.submitStatus.message, "").indexOf("Checking status") >= 0 ? 'Checking ride status…' : 'Submitting ride…') : 'Request Ride Now') + '</button>' +
             '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Submit Scheduled Ride</button>' +
@@ -13975,6 +14015,9 @@
       } catch (_) {}
       renderPage();
       return;
+    } else if (action === "pay_sandbox") {
+      await confirmRiderSandboxPayment();
+      return;
     } else if (action === "request_now") {
       var submitResult = await submitRiderRideRequest(false);
       if (submitResult && submitResult.ok === false && submitResult.confirmedFailure) {
@@ -15870,6 +15913,135 @@
     return { ok: true, request: created, rideId: rideId, requestId: requestId };
   }
 
+  var riderFareQuoteTimer = null;
+  var riderStripe = null;
+  var riderStripeElements = null;
+
+  function loadStripeJs() {
+    return new Promise(function (resolve, reject) {
+      if (window.Stripe) {
+        resolve(window.Stripe);
+        return;
+      }
+      var existing = document.querySelector('script[data-amicor-stripe="1"]');
+      if (existing) {
+        existing.addEventListener("load", function () { resolve(window.Stripe); });
+        existing.addEventListener("error", function () { reject(new Error("Stripe.js failed to load")); });
+        return;
+      }
+      var script = document.createElement("script");
+      script.src = "https://js.stripe.com/v3/";
+      script.async = true;
+      script.setAttribute("data-amicor-stripe", "1");
+      script.onload = function () { resolve(window.Stripe); };
+      script.onerror = function () { reject(new Error("Stripe.js failed to load")); };
+      document.head.appendChild(script);
+    });
+  }
+
+  async function refreshRiderFareQuote() {
+    state.riderApp = safeObject(state.riderApp);
+    var formValues = readRiderFormValues();
+    if (!formValues.pickup || !formValues.dropoff || formValues.pickup.trim().toLowerCase() === formValues.dropoff.trim().toLowerCase()) {
+      state.riderApp.fareQuote = null;
+      return null;
+    }
+    try {
+      var quote = await postJson("/api/payments/rider/fare-quote", {
+        pickup_address: formValues.pickup,
+        dropoff_address: formValues.dropoff,
+        ride_type: formValues.rideType || "healthcare"
+      }, 20000);
+      state.riderApp.fareQuote = quote;
+      persistSessionState();
+      var fareBox = document.querySelector(".rider-fare-summary");
+      if (fareBox) {
+        fareBox.outerHTML = renderRiderFareAndPaymentPanel(state.riderApp).split('<div class="rider-payment-panel"')[0];
+      }
+      return quote;
+    } catch (err) {
+      state.riderApp.fareQuote = { error: err && err.message ? err.message : "Fare estimate unavailable" };
+      persistSessionState();
+      return null;
+    }
+  }
+
+  async function mountRiderStripePayment() {
+    var checkout = state.riderApp && state.riderApp.checkout ? state.riderApp.checkout : null;
+    if (!checkout || !checkout.client_secret || !checkout.publishable_key) return;
+    try {
+      var StripeCtor = await loadStripeJs();
+      riderStripe = StripeCtor(checkout.publishable_key);
+      riderStripeElements = riderStripe.elements({ clientSecret: checkout.client_secret });
+      var mount = document.getElementById("rider-payment-element");
+      if (!mount) return;
+      mount.innerHTML = "";
+      riderStripeElements.create("payment").mount("#rider-payment-element");
+    } catch (err) {
+      var msg = document.getElementById("rider-payment-message");
+      if (msg) msg.textContent = err && err.message ? err.message : "Could not load sandbox payment form.";
+    }
+  }
+
+  async function confirmRiderSandboxPayment() {
+    if (!riderStripe || !riderStripeElements) {
+      await mountRiderStripePayment();
+    }
+    if (!riderStripe || !riderStripeElements) {
+      window.alert("Sandbox payment form is not ready yet.");
+      return { ok: false };
+    }
+    var result = await riderStripe.confirmPayment({
+      elements: riderStripeElements,
+      redirect: "if_required",
+      confirmParams: { return_url: window.location.href }
+    });
+    if (result.error) {
+      state.riderApp.submitStatus = { level: "error", message: result.error.message || "Payment failed. This ride is not in the dispatcher queue." };
+      persistSessionState();
+      renderPage();
+      mountRiderStripePayment();
+      return { ok: false };
+    }
+    var checkout = state.riderApp.checkout || {};
+    var requestId = safeText(checkout.request_id, "");
+    var paid = false;
+    for (var attempt = 0; attempt < 8 && requestId; attempt += 1) {
+      try {
+        var status = await fetchJson("/api/payments/rider/payment-status/" + encodeURIComponent(requestId));
+        if (status && status.payment_status === "succeeded") {
+          paid = true;
+          state.riderApp.checkout = null;
+          state.riderApp.submitStatus = {
+            level: "success",
+            message: status.message || "Payment received. Your ride is now in the dispatcher queue.",
+            requestId: status.request_id,
+            rideId: status.ride_id,
+            status: status.dispatch_status
+          };
+          persistSessionState();
+          renderPage();
+          return { ok: true };
+        }
+        if (status && status.payment_status === "failed") {
+          state.riderApp.submitStatus = { level: "error", message: status.message };
+          persistSessionState();
+          renderPage();
+          mountRiderStripePayment();
+          return { ok: false };
+        }
+      } catch (_) {}
+      await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+    }
+    state.riderApp.submitStatus = {
+      level: paid ? "success" : "info",
+      message: "Payment submitted. Waiting for sandbox confirmation before this ride can enter dispatch."
+    };
+    persistSessionState();
+    renderPage();
+    return { ok: true, pendingWebhook: true };
+  }
+
   async function submitRiderRideRequest(recurring) {
     var authed = await ensureAuthenticatedSession("Sign in as a rider before requesting a ride.");
     if (!authed) {
@@ -15969,7 +16141,7 @@
     var recoveredAfterTimeout = false;
     var submitError = "";
     try {
-      created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
+      created = await postJson("/api/payments/rider/checkout", payload, RIDER_SUBMIT_TIMEOUT_MS, {
         idempotencyKey: idempotencyKey
       });
     } catch (err) {
@@ -15983,7 +16155,7 @@
         var refreshed = await window.AmiCorSession.refreshAccessToken(true);
         if (refreshed) {
           try {
-            created = await postJson("/api/health-isf/customer-requests", payload, RIDER_SUBMIT_TIMEOUT_MS, {
+            created = await postJson("/api/payments/rider/checkout", payload, RIDER_SUBMIT_TIMEOUT_MS, {
               idempotencyKey: idempotencyKey
             });
             submitError = "";
@@ -15994,7 +16166,24 @@
       }
     }
 
-    if (created && safeText(created.id, "")) {
+    if (created && (safeText(created.id, "") || safeText(created.request_id, ""))) {
+      if (created.client_secret) {
+        state.riderApp.submitInFlight = false;
+        state.riderApp.pendingIdempotencyKey = "";
+        state.riderApp.fareQuote = created;
+        state.riderApp.checkout = created;
+        state.riderApp.submitStatus = {
+          level: "info",
+          message: "Review the fare and complete sandbox payment. This ride is not in the dispatcher queue yet.",
+          requestId: created.request_id,
+          rideId: created.ride_id,
+          status: "awaiting_payment"
+        };
+        persistSessionState();
+        renderPage();
+        mountRiderStripePayment();
+        return { ok: true, awaitingPayment: true };
+      }
       state.riderApp.submitInFlight = false;
       state.riderApp.pendingIdempotencyKey = "";
       persistSessionState();
@@ -18409,6 +18598,10 @@ window._amiUpdateRiderProfileDraft = function(field, value) {
     shellState.riderApp.profile.sameDriverPreference = value === true || value === "true";
   } else {
     shellState.riderApp.profile[key] = safeText(value, "");
+  }
+  if (key === "pickup" || key === "dropoff" || key === "rideType") {
+    if (riderFareQuoteTimer) clearTimeout(riderFareQuoteTimer);
+    riderFareQuoteTimer = setTimeout(function () { refreshRiderFareQuote(); }, 700);
   }
   try {
     var raw = sessionStorage.getItem("amicor_shell_session_v1");
