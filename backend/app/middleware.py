@@ -70,6 +70,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response # type: ignore
 
 
+# Expected authorization 403s from the ops-shell enterprise monitoring poll.
+# These are role mismatches on protected read surfaces, not security incidents.
+_EXPECTED_OPS_MONITORING_403_PREFIXES = (
+    "/api/ops/governance",
+    "/api/ops/predictive",
+    "/api/ops/replay",
+    "/api/ops/orchestration",
+    "/api/ops/federation",
+)
+
+
+def should_skip_expected_ops_monitoring_audit(path: str, status_code: int) -> bool:
+    """Skip DB audit rows for expected 403s on the enterprise monitoring poll.
+
+    Login failures, 401s, unexpected 403s, and all other 4xx/5xx still audit.
+    """
+    if int(status_code) != 403:
+        return False
+    normalized = str(path or "").split("?", 1)[0]
+    for prefix in _EXPECTED_OPS_MONITORING_403_PREFIXES:
+        if normalized == prefix or normalized.startswith(prefix + "/"):
+            return True
+    return False
+
+
 # ── Request tracing + audit logging ───────────────────────────────────────────
 
 class RequestTracingMiddleware(BaseHTTPMiddleware):
@@ -138,7 +163,8 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             if not is_quiet and response.status_code >= 400: # type: ignore
                 observability.increment("http.requests.errors")
                 observability.record_error(path, response.status_code, "request failed") # type: ignore
-                _write_audit_log(req_id, request, response.status_code, latency_ms) # type: ignore
+                if not should_skip_expected_ops_monitoring_audit(path, response.status_code): # type: ignore
+                    _write_audit_log(req_id, request, response.status_code, latency_ms) # type: ignore
 
             return response # type: ignore
         except Exception as exc:

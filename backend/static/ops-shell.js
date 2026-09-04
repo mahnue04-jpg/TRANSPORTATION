@@ -1557,6 +1557,21 @@
   var USER_ACTIVITY_COOLDOWN_MS = 5000;
   var REFRESH_TRIGGER_COOLDOWN_MS = 2500;
   var STABLE_POLL_INTERVAL_MS = 30000;
+  var ENTERPRISE_OPS_AUTHORIZED_ROLES = {
+    admin: true,
+    supervisor: true,
+    compliance_officer: true,
+    driver_support: true,
+    medical_coordinator: true
+  };
+  var ENTERPRISE_OPS_ALLOWED_ROUTES = {
+    home: true,
+    dashboard: true,
+    analytics: true,
+    alerts: true
+  };
+  var ENTERPRISE_OPS_AUTH_BACKOFF_MS = 120000;
+  var ENTERPRISE_OPS_AUTH_BACKOFF_MAX_MS = 1800000;
   var DRIVER_AWAITING_POLL_INTERVAL_MS = 5000;
   var BACKEND_DOWN_PAUSE_MS = 60000;
   var MAX_BACKEND_DOWN_RETRY_BEFORE_PAUSE = 2;
@@ -16558,6 +16573,9 @@
 
   var hydrationDiagSeq = 0;
   var enterpriseOpsHydrationInFlight = false;
+  var enterpriseOpsAuthBlockedUntilMs = 0;
+  var enterpriseOpsAuthBackoffMs = ENTERPRISE_OPS_AUTH_BACKOFF_MS;
+  var enterpriseOpsAuthBlockedRole = "";
 
   function beginOpsHydrationDiagnostic(route, role, silent) {
     return {
@@ -16646,8 +16664,49 @@
     persistSessionState();
   }
 
+  function currentEnterpriseOpsRole() {
+    return String(state.role || "").trim().toLowerCase();
+  }
+
+  function isEnterpriseOpsRoleAuthorized(role) {
+    return ENTERPRISE_OPS_AUTHORIZED_ROLES[String(role || "").trim().toLowerCase()] === true;
+  }
+
+  function isEnterpriseOpsScreenAuthorized(route) {
+    return ENTERPRISE_OPS_ALLOWED_ROUTES[String(route || "").trim().toLowerCase()] === true;
+  }
+
+  function clearEnterpriseOpsAuthorizationBackoff() {
+    enterpriseOpsAuthBlockedUntilMs = 0;
+    enterpriseOpsAuthBackoffMs = ENTERPRISE_OPS_AUTH_BACKOFF_MS;
+    enterpriseOpsAuthBlockedRole = "";
+  }
+
+  function markEnterpriseOpsAuthorizationBackoff() {
+    enterpriseOpsAuthBlockedRole = currentEnterpriseOpsRole();
+    enterpriseOpsAuthBlockedUntilMs = Date.now() + enterpriseOpsAuthBackoffMs;
+    enterpriseOpsAuthBackoffMs = Math.min(enterpriseOpsAuthBackoffMs * 4, ENTERPRISE_OPS_AUTH_BACKOFF_MAX_MS);
+  }
+
+  function isEnterpriseOpsAuthorizationBlocked() {
+    if (!enterpriseOpsAuthBlockedUntilMs) return false;
+    if (currentEnterpriseOpsRole() !== enterpriseOpsAuthBlockedRole) {
+      clearEnterpriseOpsAuthorizationBackoff();
+      return false;
+    }
+    return Date.now() < enterpriseOpsAuthBlockedUntilMs;
+  }
+
+  function shouldScheduleEnterpriseMonitoringHydration() {
+    if (!isEnterpriseOpsRoleAuthorized(state.role)) return false;
+    if (!isEnterpriseOpsScreenAuthorized(state.route)) return false;
+    if (isEnterpriseOpsAuthorizationBlocked()) return false;
+    return true;
+  }
+
   function scheduleEnterpriseMonitoringHydration(token, timelineCursor, loadGen, diag) {
     if (!token) return;
+    if (!shouldScheduleEnterpriseMonitoringHydration()) return;
     if (enterpriseOpsHydrationInFlight) return;
     enterpriseOpsHydrationInFlight = true;
     state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["enterprise_ops_background_pending"]));
@@ -16801,6 +16860,7 @@
   }
   async function hydrateEnterpriseMonitoringOps(token, timelineCursor, loadGen, diag) {
     if (!token) return;
+    if (!shouldScheduleEnterpriseMonitoringHydration()) return;
     var opsFailures = 0;
     var started = Date.now();
     var opsSettled = await Promise.allSettled([
@@ -16860,6 +16920,19 @@
       fetchJson("/api/ops/governance/frameworks?role_view=" + encodeURIComponent(String(state.role || "admin")), {}, token),
       fetchJson("/api/ops/governance/risk/evaluate", { method: "POST", body: JSON.stringify({ replay_session_id: ((state.ops.replay || {}).timeline || {}).replay_session_id || null }) }, token)
     ]);
+
+    var protectedOpsForbidden = 0;
+    for (var protectedIdx = 6; protectedIdx < opsSettled.length; protectedIdx += 1) {
+      if (opsSettled[protectedIdx].status === "rejected" && isHttpStatusError(opsSettled[protectedIdx].reason, 403)) {
+        protectedOpsForbidden += 1;
+      }
+    }
+    if (protectedOpsForbidden > 0) {
+      markEnterpriseOpsAuthorizationBackoff();
+      state.fetchWarnings = dedupeWarnings((state.fetchWarnings || []).concat(["enterprise_ops_auth_backoff"]));
+    } else {
+      clearEnterpriseOpsAuthorizationBackoff();
+    }
 
     var coreOpsRejectedAsUnauthorized = opsSettled.slice(0, 5).every(function (result) {
       return result.status === "rejected" && isHttpStatusError(result.reason, 401);

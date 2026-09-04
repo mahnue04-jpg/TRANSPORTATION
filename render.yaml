@@ -52,9 +52,9 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: DB_POOL_SIZE
-        value: "10"
+        value: "5"
       - key: DB_MAX_OVERFLOW
-        value: "20"
+        value: "5"
       - key: HEALTH_ISF_WS_MAX_ORG_CONNECTIONS
         value: "500"
       - key: HEALTH_ISF_WS_MAX_USER_CONNECTIONS
