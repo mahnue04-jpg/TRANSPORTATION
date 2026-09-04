@@ -270,11 +270,42 @@ def test_webhook_success_releases_ride_and_failure_keeps_hold(client: TestClient
 
 
 def test_live_stripe_key_is_rejected():
-    from app.modules.payments.rider_checkout import is_live_stripe_key
+    from app.modules.payments.rider_checkout import is_live_stripe_key, sanitize_checkout_error
 
     assert is_live_stripe_key("sk_live_example") is True
     assert is_live_stripe_key("rk_live_example") is True
     assert is_live_stripe_key("sk_test_example") is False
+    redacted = sanitize_checkout_error("boom sk_test_51SECRET pi_abc_secret_xyz")
+    assert "sk_test_51SECRET" not in redacted
+    assert "pi_abc_secret_xyz" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_checkout_unexpected_error_returns_503_without_secrets(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    def _boom(**_kwargs):
+        raise RuntimeError("stripe failed sk_test_51SECRET pi_1_secret_abc")
+
+    monkeypatch.setattr("app.modules.payments.routes.create_rider_checkout", _boom)
+    headers = _login(client)
+    response = client.post(
+        CHECKOUT_PATH,
+        headers=headers,
+        json={
+            "rider_name": "Quote Rider",
+            "rider_phone": "6125550199",
+            "pickup_address": "100 Nicollet Mall, Minneapolis, MN",
+            "dropoff_address": "4300 Glumack Dr, St Paul, MN",
+            "ride_type": "healthcare",
+            "pickup_latitude": PICKUP_LAT,
+            "pickup_longitude": PICKUP_LNG,
+            "dropoff_latitude": DROPOFF_LAT,
+            "dropoff_longitude": DROPOFF_LNG,
+        },
+    )
+    assert response.status_code == 503, response.text
+    assert "sk_test" not in response.text
+    assert "pi_1_secret" not in response.text
+    assert response.json()["detail"] == "Rider checkout is temporarily unavailable."
 
 
 def test_fare_quote_accepts_minneapolis_street_addresses(client: TestClient, monkeypatch: pytest.MonkeyPatch):

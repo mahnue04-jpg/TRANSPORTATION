@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from types import SimpleNamespace
 from typing import Any, Protocol
 
@@ -44,8 +45,15 @@ logger = logging.getLogger("amicor.payments.rider_checkout")
 
 SANDBOX_NOTICE = "This is the amount to be charged in the current sandbox test."
 DEFAULT_TRAFFIC_MODE = "normal"
+STRIPE_HTTP_TIMEOUT_SECONDS = 15.0
 
 _CLIENT_OVERRIDE: "StripePaymentIntentClient | None" = None
+_SECRET_PATTERN = re.compile(
+    r"(?i)(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]+"
+    r"|whsec_[A-Za-z0-9]+"
+    r"|pi_[A-Za-z0-9]+_secret[_A-Za-z0-9]*"
+    r"|Bearer\s+[A-Za-z0-9._\-]+"
+)
 
 
 class StripePaymentIntentClient(Protocol):
@@ -70,6 +78,53 @@ def stripe_publishable_key() -> str:
 def is_live_stripe_key(secret: str) -> bool:
     raw = str(secret or "").strip()
     return raw.startswith("sk_live_") or raw.startswith("rk_live_")
+
+
+def stripe_secret_key_present() -> bool:
+    return bool(stripe_secret_key())
+
+
+def stripe_sdk_available() -> bool:
+    try:
+        from stripe import StripeClient
+
+        return StripeClient is not None
+    except Exception:
+        try:
+            import stripe  # noqa: F401
+
+            return True
+        except Exception:
+            return False
+
+
+def sanitize_checkout_error(message: Any, max_len: int = 240) -> str:
+    text = str(message or "").replace("\n", " ").replace("\r", " ").strip()
+    text = _SECRET_PATTERN.sub("[REDACTED]", text)
+    text = re.sub(r"\b\d{13,19}\b", "[REDACTED]", text)
+    if not text:
+        return "unknown"
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
+def log_checkout_failure(
+    *,
+    stage: str,
+    exc: BaseException | None,
+    payment_intent_attempted: bool,
+) -> None:
+    logger.error(
+        "rider_checkout_failed | stage=%s exception_type=%s error=%s "
+        "stripe_secret_key_present=%s stripe_sdk_available=%s payment_intent_attempted=%s",
+        stage,
+        type(exc).__name__ if exc is not None else "none",
+        sanitize_checkout_error(exc),
+        stripe_secret_key_present(),
+        stripe_sdk_available(),
+        payment_intent_attempted,
+    )
 
 
 def set_stripe_payment_client_override(client: StripePaymentIntentClient | None) -> None:
@@ -99,9 +154,26 @@ class LiveStripePaymentIntentClient:
         currency: str,
         metadata: dict[str, str],
     ) -> dict[str, Any]:
-        from stripe import StripeClient
+        try:
+            from stripe import StripeClient
+        except Exception as exc:
+            raise RuntimeError("Stripe SDK import is unavailable.") from exc
 
-        client = StripeClient(self.api_key)
+        try:
+            import stripe as stripe_mod
+
+            http_client_cls = getattr(stripe_mod, "HTTPXClient", None) or getattr(
+                stripe_mod, "RequestsClient", None
+            )
+            if http_client_cls is not None:
+                client = StripeClient(
+                    self.api_key,
+                    http_client=http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS),
+                )
+            else:
+                client = StripeClient(self.api_key)
+        except TypeError:
+            client = StripeClient(self.api_key)
         created = client.v1.payment_intents.create(
             {
                 "amount": int(amount_minor),
@@ -308,120 +380,141 @@ def create_rider_checkout(
     dropoff_longitude: float | None = None,
     extra_request_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    client = get_stripe_payment_client()
-    if client is None:
-        raise ValueError("Stripe sandbox payment is not configured yet.")
+    stage = "stripe_client"
+    payment_intent_attempted = False
+    try:
+        logger.info(
+            "rider_checkout_started | stage=%s stripe_secret_key_present=%s stripe_sdk_available=%s",
+            stage,
+            stripe_secret_key_present(),
+            stripe_sdk_available(),
+        )
+        client = get_stripe_payment_client()
+        if client is None:
+            raise ValueError("Stripe sandbox payment is not configured yet.")
 
-    quote = quote_rider_fare(
-        db,
-        pickup_address=pickup_address,
-        dropoff_address=dropoff_address,
-        ride_type=ride_type,
-        pickup_latitude=pickup_latitude,
-        pickup_longitude=pickup_longitude,
-        dropoff_latitude=dropoff_latitude,
-        dropoff_longitude=dropoff_longitude,
-    )
+        stage = "fare_quote"
+        quote = quote_rider_fare(
+            db,
+            pickup_address=pickup_address,
+            dropoff_address=dropoff_address,
+            ride_type=ride_type,
+            pickup_latitude=pickup_latitude,
+            pickup_longitude=pickup_longitude,
+            dropoff_latitude=dropoff_latitude,
+            dropoff_longitude=dropoff_longitude,
+        )
 
-    from app.modules.health_isf import service as onboarding_service
+        stage = "create_ride"
+        from app.modules.health_isf import service as onboarding_service
 
-    request_kwargs = dict(extra_request_kwargs or {})
-    request_row, ride = onboarding_service.create_customer_ride_request(
-        db,
-        organization_id=organization_id,
-        rider_name=rider_name,
-        rider_phone=rider_phone,
-        pickup_address=quote["pickup_address"],
-        dropoff_address=quote["dropoff_address"],
-        scheduled_time=scheduled_time,
-        ride_type=ride_type,
-        recurring=bool(request_kwargs.pop("recurring", False)),
-        recurring_pattern=request_kwargs.pop("recurring_pattern", None),
-        notes=notes,
-        submitted_by_user_id=user_id,
-        trip_type=trip_type,
-        hold_for_payment=True,
-        estimated_distance_miles=quote["estimated_distance_miles"],
-        estimated_duration_minutes=quote["estimated_duration_minutes"],
-        **request_kwargs,
-    )
+        request_kwargs = dict(extra_request_kwargs or {})
+        request_row, ride = onboarding_service.create_customer_ride_request(
+            db,
+            organization_id=organization_id,
+            rider_name=rider_name,
+            rider_phone=rider_phone,
+            pickup_address=quote["pickup_address"],
+            dropoff_address=quote["dropoff_address"],
+            scheduled_time=scheduled_time,
+            ride_type=ride_type,
+            recurring=bool(request_kwargs.pop("recurring", False)),
+            recurring_pattern=request_kwargs.pop("recurring_pattern", None),
+            notes=notes,
+            submitted_by_user_id=user_id,
+            trip_type=trip_type,
+            hold_for_payment=True,
+            estimated_distance_miles=quote["estimated_distance_miles"],
+            estimated_duration_minutes=quote["estimated_duration_minutes"],
+            **request_kwargs,
+        )
 
-    metadata = {
-        "service_type": SERVICE_RIDE,
-        "ride_id": str(ride.id),
-        "request_id": str(request_row.id),
-        "internal_service_id": str(ride.id),
-        "organization_id": str(organization_id),
-        "pricing_version": PRICING_VERSION,
-        "sandbox": "true",
-    }
-    intent = client.create_payment_intent(
-        amount_minor=int(quote["amount_minor"]),
-        currency="usd",
-        metadata=metadata,
-    )
-    intent_id = str(intent.get("id") or "").strip()
-    client_secret = str(intent.get("client_secret") or "").strip()
-    if not intent_id or not client_secret:
-        raise ValueError("Stripe did not return a sandbox PaymentIntent.")
+        metadata = {
+            "service_type": SERVICE_RIDE,
+            "ride_id": str(ride.id),
+            "request_id": str(request_row.id),
+            "internal_service_id": str(ride.id),
+            "organization_id": str(organization_id),
+            "pricing_version": PRICING_VERSION,
+            "sandbox": "true",
+        }
+        stage = "payment_intent"
+        payment_intent_attempted = True
+        intent = client.create_payment_intent(
+            amount_minor=int(quote["amount_minor"]),
+            currency="usd",
+            metadata=metadata,
+        )
+        intent_id = str(intent.get("id") or "").strip()
+        client_secret = str(intent.get("client_secret") or "").strip()
+        if not intent_id or not client_secret:
+            raise ValueError("Stripe did not return a sandbox PaymentIntent.")
 
-    payment = AmicorCustomerPayment(
-        id=uuid4(),
-        service_type=SERVICE_RIDE,
-        internal_service_id=str(ride.id),
-        ride_id=str(ride.id),
-        organization_id=str(organization_id),
-        customer_id=user_id,
-        pricing_version=PRICING_VERSION,
-        stripe_payment_intent_id=intent_id,
-        currency="usd",
-        amount_minor=int(quote["amount_minor"]),
-        payment_status=PAYMENT_PENDING,
-        payout_status=PAYOUT_NOT_STARTED,
-        created_at=now(),
-        updated_at=now(),
-    )
-    db.add(payment)
+        stage = "persist_payment"
+        payment = AmicorCustomerPayment(
+            id=uuid4(),
+            service_type=SERVICE_RIDE,
+            internal_service_id=str(ride.id),
+            ride_id=str(ride.id),
+            organization_id=str(organization_id),
+            customer_id=user_id,
+            pricing_version=PRICING_VERSION,
+            stripe_payment_intent_id=intent_id,
+            currency="usd",
+            amount_minor=int(quote["amount_minor"]),
+            payment_status=PAYMENT_PENDING,
+            payout_status=PAYOUT_NOT_STARTED,
+            created_at=now(),
+            updated_at=now(),
+        )
+        db.add(payment)
 
-    tx = HealthISFPaymentTransaction(
-        id=uuid4(),
-        organization_id=organization_id,
-        ride_id=ride.id,
-        driver_id=ride.driver_id,
-        provider_id=ride.provider_id,
-        gateway="stripe",
-        gateway_payment_intent_id=intent_id,
-        status="requires_payment_method",
-        currency="usd",
-        amount_usd=quote["estimated_ride_fare_usd"],
-        tip_amount_usd=0.0,
-        surcharge_usd=0.0,
-        processing_fee_usd=0.0,
-        settlement_status="pending",
-        invoice_reference=f"RIDE-{str(ride.id)[:8].upper()}",
-        created_by_user_id=user_id,
-        created_at=now(),
-        updated_at=now(),
-    )
-    db.add(tx)
-    payment.health_isf_payment_transaction_id = tx.id
-    db.commit()
-    db.refresh(request_row)
-    db.refresh(ride)
+        tx = HealthISFPaymentTransaction(
+            id=uuid4(),
+            organization_id=organization_id,
+            ride_id=ride.id,
+            driver_id=ride.driver_id,
+            provider_id=ride.provider_id,
+            gateway="stripe",
+            gateway_payment_intent_id=intent_id,
+            status="requires_payment_method",
+            currency="usd",
+            amount_usd=quote["estimated_ride_fare_usd"],
+            tip_amount_usd=0.0,
+            surcharge_usd=0.0,
+            processing_fee_usd=0.0,
+            settlement_status="pending",
+            invoice_reference=f"RIDE-{str(ride.id)[:8].upper()}",
+            created_by_user_id=user_id,
+            created_at=now(),
+            updated_at=now(),
+        )
+        db.add(tx)
+        payment.health_isf_payment_transaction_id = tx.id
+        db.commit()
+        db.refresh(request_row)
+        db.refresh(ride)
 
-    publishable = stripe_publishable_key()
-    return {
-        **quote,
-        "request_id": str(request_row.id),
-        "ride_id": str(ride.id),
-        "dispatch_status": request_row.dispatch_status,
-        "lifecycle_state": getattr(ride, "lifecycle_state", None),
-        "payment_status": PAYMENT_PENDING,
-        "stripe_payment_intent_id": intent_id,
-        "client_secret": client_secret,
-        "publishable_key": publishable,
-        "held_for_payment": True,
-    }
+        publishable = stripe_publishable_key()
+        return {
+            **quote,
+            "request_id": str(request_row.id),
+            "ride_id": str(ride.id),
+            "dispatch_status": request_row.dispatch_status,
+            "lifecycle_state": getattr(ride, "lifecycle_state", None),
+            "payment_status": PAYMENT_PENDING,
+            "stripe_payment_intent_id": intent_id,
+            "client_secret": client_secret,
+            "publishable_key": publishable,
+            "held_for_payment": True,
+        }
+    except Exception as exc:
+        log_checkout_failure(
+            stage=stage,
+            exc=exc,
+            payment_intent_attempted=payment_intent_attempted,
+        )
+        raise
 
 
 def rider_payment_status(db: Session, *, request_id: str, organization_id: str) -> dict[str, Any]:

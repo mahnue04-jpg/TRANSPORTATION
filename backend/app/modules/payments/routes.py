@@ -192,6 +192,13 @@ def start_rider_checkout(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rider checkout is temporarily unavailable.",
+        ) from exc
 
 
 @router.get("/rider/payment-status/{request_id}")

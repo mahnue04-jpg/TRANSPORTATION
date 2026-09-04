@@ -38,7 +38,7 @@ PHOTON_SEARCH_URL = "https://photon.komoot.io/api/"
 OSRM_ROUTE_URL = "https://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
 USER_AGENT = "AMICOR-HealthISF/1.0 (driver-mobile-routing; https://github.com/mahnue04-jpg/TRANSPORTATION)"
 HTTP_TIMEOUT_SECONDS = 4.0
-GEOCODE_TIMEOUT_SECONDS = 12.0
+GEOCODE_TIMEOUT_SECONDS = 4.0
 NOMINATIM_MIN_INTERVAL_SECONDS = 1.1
 HAVERSINE_MPH = 27.0
 EARTH_RADIUS_MILES = 3958.8
@@ -264,31 +264,36 @@ def _geocode_via_nominatim(address: str) -> dict[str, Any] | None:
 
 
 def _geocode_via_census(address: str) -> dict[str, Any] | None:
-    for query_address in _address_query_variants(address):
-        query = urllib.parse.urlencode(
-            {
-                "address": query_address,
-                "benchmark": "Public_AR_Current",
-                "format": "json",
-            }
-        )
-        payload = _fetch_json(f"{CENSUS_GEOCODER_URL}?{query}")
-        matches = ((payload or {}).get("result") or {}).get("addressMatches") or []
-        if not matches or not isinstance(matches[0], dict):
-            continue
-        coords = matches[0].get("coordinates") or {}
-        try:
-            latitude = float(coords.get("y"))
-            longitude = float(coords.get("x"))
-        except (TypeError, ValueError):
-            continue
-        return _result_from_coords(
-            latitude=latitude,
-            longitude=longitude,
-            display_name=str(matches[0].get("matchedAddress") or query_address),
-            provider="census",
-            quality=HOUSE_LEVEL_QUALITY,
-        )
+    try:
+        for query_address in _address_query_variants(address):
+            query = urllib.parse.urlencode(
+                {
+                    "address": query_address,
+                    "benchmark": "Public_AR_Current",
+                    "format": "json",
+                }
+            )
+            payload = _fetch_json(f"{CENSUS_GEOCODER_URL}?{query}")
+            matches = ((payload or {}).get("result") or {}).get("addressMatches") or []
+            if not matches or not isinstance(matches[0], dict):
+                continue
+            coords = matches[0].get("coordinates") or {}
+            try:
+                latitude = float(coords.get("y"))
+                longitude = float(coords.get("x"))
+            except (TypeError, ValueError):
+                continue
+            return _result_from_coords(
+                latitude=latitude,
+                longitude=longitude,
+                display_name=str(matches[0].get("matchedAddress") or query_address),
+                provider="census",
+                quality=HOUSE_LEVEL_QUALITY,
+            )
+    except RoutingHttpDisabled:
+        raise
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
     return None
 
 
