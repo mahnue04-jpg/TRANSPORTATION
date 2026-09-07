@@ -193,48 +193,46 @@ class LiveStripePaymentIntentClient:
         except Exception as exc:
             raise RuntimeError("Stripe SDK import is unavailable.") from exc
 
-        try:
-            import stripe as stripe_mod
+        import stripe as stripe_mod
 
-            # Prefer requests for sync checkout (already in production requirements).
-            # HTTPX is optional; missing httpx must not 503 rider checkout.
-            candidates = []
-            for name in ("RequestsClient", "HTTPXClient"):
-                cls = getattr(stripe_mod, name, None)
-                if cls is not None:
-                    candidates.append(cls)
-            if not candidates:
-                return StripeClient(self.api_key)
+        # Force sync-safe clients only. Bare StripeClient may default to async HTTPX
+        # and recreate ModuleNotFoundError / allow_sync_methods RuntimeError on Render.
+        requests_cls = getattr(stripe_mod, "RequestsClient", None)
+        httpx_cls = getattr(stripe_mod, "HTTPXClient", None)
+        last_exc: BaseException | None = None
 
-            http_client = None
-            last_exc: BaseException | None = None
-            for http_client_cls in candidates:
-                try:
-                    try:
-                        http_client = http_client_cls(
-                            timeout=STRIPE_HTTP_TIMEOUT_SECONDS,
-                            allow_sync_methods=True,
-                        )
-                    except TypeError:
-                        http_client = http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
-                    break
-                except (TypeError, ImportError, ModuleNotFoundError) as exc:
-                    last_exc = exc
-                    http_client = None
-                    continue
-            if http_client is None:
-                if last_exc is not None:
-                    logger.warning(
-                        "stripe_http_client_fallback | error=%s",
-                        sanitize_checkout_error(last_exc),
-                    )
-                return StripeClient(self.api_key)
+        if requests_cls is not None:
             try:
+                try:
+                    http_client = requests_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
+                except TypeError:
+                    http_client = requests_cls()
                 return StripeClient(self.api_key, http_client=http_client)
-            except TypeError:
-                return StripeClient(self.api_key)
-        except TypeError:
-            return StripeClient(self.api_key)
+            except (TypeError, ImportError, ModuleNotFoundError) as exc:
+                last_exc = exc
+
+        if httpx_cls is not None:
+            try:
+                try:
+                    http_client = httpx_cls(
+                        timeout=STRIPE_HTTP_TIMEOUT_SECONDS,
+                        allow_sync_methods=True,
+                    )
+                except TypeError:
+                    http_client = httpx_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
+                return StripeClient(self.api_key, http_client=http_client)
+            except (TypeError, ImportError, ModuleNotFoundError) as exc:
+                last_exc = exc
+
+        if last_exc is not None:
+            logger.warning(
+                "stripe_http_client_fallback | error=%s",
+                sanitize_checkout_error(last_exc),
+            )
+            raise RuntimeError(
+                f"Stripe HTTP client unavailable: {sanitize_checkout_error(last_exc)}"
+            ) from last_exc
+        raise RuntimeError("Stripe HTTP client unavailable.")
 
     def create_payment_intent(
         self,

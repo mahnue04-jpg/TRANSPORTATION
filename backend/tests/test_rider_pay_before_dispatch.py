@@ -288,7 +288,7 @@ def test_live_stripe_key_is_rejected():
 
 
 def test_checkout_unexpected_error_returns_503_without_secrets(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    def _boom(**_kwargs):
+    def _boom(*_args, **_kwargs):
         raise RuntimeError("stripe failed sk_test_51SECRET pi_1_secret_abc")
 
     monkeypatch.setattr("app.modules.payments.routes.create_rider_checkout", _boom)
@@ -311,7 +311,10 @@ def test_checkout_unexpected_error_returns_503_without_secrets(client: TestClien
     assert response.status_code == 503, response.text
     assert "sk_test" not in response.text
     assert "pi_1_secret" not in response.text
-    assert response.json()["detail"] == "Rider checkout is temporarily unavailable."
+    detail = response.json()["detail"]
+    assert detail.startswith("Rider checkout is temporarily unavailable.")
+    assert "RuntimeError" in detail
+    assert "[REDACTED]" in detail
 
 
 def test_fare_quote_accepts_minneapolis_street_addresses(client: TestClient, monkeypatch: pytest.MonkeyPatch):
