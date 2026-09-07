@@ -11,7 +11,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install --upgrade -r requirements.txt
-    releaseCommand: alembic upgrade heads
+    releaseCommand: alembic upgrade heads && python -c "from app.modules.payments.models import ensure_customer_payment_tables; ensure_customer_payment_tables()"
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health/readiness
     disk:

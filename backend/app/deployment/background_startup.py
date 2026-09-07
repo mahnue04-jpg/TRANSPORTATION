@@ -59,11 +59,18 @@ def run_deferred_platform_startup(*, runtime_environment: str) -> None:
 
         from app.db.session import Base, SessionLocal, engine  # type: ignore
 
-        # Payment ledger is Alembic-only. Do not create those tables at startup.
+        # Payment ledger is Alembic-owned; still ensure tables exist when a prior
+        # release stamped past the payment revision without applying DDL.
         payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
         tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
         Base.metadata.create_all(bind=engine, tables=tables)
         logger.info("Deferred Health ISF tables verified.")
+        try:
+            from app.modules.payments.models import ensure_customer_payment_tables
+
+            ensure_customer_payment_tables()
+        except Exception as pay_exc:
+            logger.error("Deferred customer payment schema ensure failed: %s", pay_exc)
 
         try:
             from app.modules.health_isf.realtime import initialize_realtime  # type: ignore

@@ -7,12 +7,14 @@ Production schema is applied only by Alembic.
 
 from app.modules.payments.models import (
     PAYMENT_TABLE_NAMES,
+    ensure_customer_payment_tables,
     ensure_payments_test_schema,
     payments_autocreate_allowed,
 )
 
 __all__ = [
     "PAYMENT_TABLE_NAMES",
+    "ensure_customer_payment_tables",
     "ensure_payments_test_schema",
     "payments_autocreate_allowed",
 ]

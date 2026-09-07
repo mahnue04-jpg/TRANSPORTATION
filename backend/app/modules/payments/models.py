@@ -166,6 +166,19 @@ def ensure_payments_test_schema() -> None:
     if not payments_autocreate_allowed():
         logger.info("payments create_all refused; Alembic is the production schema mechanism")
         return
+    _create_payment_tables_if_missing(reason="test")
+
+
+def ensure_customer_payment_tables() -> None:
+    """Idempotent production-safe create for customer payment ledger tables.
+
+    Used by Render releaseCommand when Alembic history was stamped past the
+    payment revision without applying the table DDL.
+    """
+    _create_payment_tables_if_missing(reason="release")
+
+
+def _create_payment_tables_if_missing(*, reason: str) -> None:
     from sqlalchemy import inspect
 
     from app.db.session import engine
@@ -176,9 +189,10 @@ def ensure_payments_test_schema() -> None:
         AmicorCustomerPayment.__tablename__,
         AmicorCustomerPaymentEvent.__tablename__,
     }
-    if not needed.issubset(existing):
-        Base.metadata.create_all(
-            bind=engine,
-            tables=[AmicorCustomerPayment.__table__, AmicorCustomerPaymentEvent.__table__],
-        )
-        logger.info("payments test schema ensured via create_all")
+    missing = sorted(needed - existing)
+    if not missing:
+        logger.info("payments schema ok | reason=%s", reason)
+        return
+    AmicorCustomerPayment.__table__.create(bind=engine, checkfirst=True)
+    AmicorCustomerPaymentEvent.__table__.create(bind=engine, checkfirst=True)
+    logger.info("payments schema created | reason=%s missing=%s", reason, ",".join(missing))
