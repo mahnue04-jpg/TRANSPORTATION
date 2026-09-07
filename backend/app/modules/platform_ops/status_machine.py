@@ -22,6 +22,27 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
 APPROVAL_SOURCE_STATUSES = frozenset({"under_review", "background_review", "documents_pending"})
 ACTIVATION_SOURCE_STATUSES = frozenset({"approved"})
 
+# Admin/ops display labels (machine statuses unchanged).
+STATUS_DISPLAY_LABELS: dict[str, str] = {
+    "draft": "Draft",
+    "submitted": "Submitted",
+    "under_review": "Under Review",
+    "documents_pending": "Missing Information",
+    "background_review": "Background/MVR Pending",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "suspended": "Suspended/Inactive",
+    "activated": "Activated",
+}
+
+# Compliance Review is an Approval Engine stage, surfaced alongside Platform Ops status.
+COMPLIANCE_REVIEW_DISPLAY_LABEL = "Compliance Review"
+
+
+def status_display_label(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    return STATUS_DISPLAY_LABELS.get(normalized, normalized.replace("_", " ").title() or "New")
+
 
 def normalize_status(status: str) -> str:
     normalized = str(status or "").strip().lower()

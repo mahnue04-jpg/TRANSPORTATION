@@ -350,7 +350,7 @@ def test_phase2a_activation_dispatch_sts_and_ai_controls_remain(client: TestClie
         json={"confirm": True},
     )
     assert blocked.status_code in {400, 409}
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in blocked.text
+    assert any(x in blocked.text for x in ("COMPLIANCE_ACTIVATION_BLOCKED", "INSURANCE_ACTIVATION_BLOCKED", "POLICY_ACTIVATION_BLOCKED", "SCREENING_ACTIVATION_BLOCKED"))
     with pytest.raises(ValueError, match="AI must not manufacture"):
         ExternalVerificationRecord(
             requirement_key="mvr",

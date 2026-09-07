@@ -128,6 +128,7 @@ class PlatformDriverOnboardingApplication(Base):
     declaration_background_authorization: Mapped[bool] = mapped_column(Boolean, default=False)
     declaration_drug_alcohol_policy: Mapped[bool] = mapped_column(Boolean, default=False)
     declaration_truthful_information: Mapped[bool] = mapped_column(Boolean, default=False)
+    policy_acknowledgments_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     electronic_signature: Mapped[str | None] = mapped_column(String(256), nullable=True)
     signed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
@@ -294,6 +295,7 @@ def _ensure_platform_ops_columns(inspector) -> None:
         ),
         "stripe_onboarding_status": "VARCHAR(32)",
         "stripe_connect_updated_at": datetime_sql,
+        "policy_acknowledgments_json": "TEXT",
     }
     note_cols = {
         "category": "VARCHAR(64)",

@@ -292,7 +292,14 @@ def test_activation_blocked_without_approval_engine_ready(client: TestClient) ->
         json={"confirm": True},
     )
     assert first.status_code in {400, 409}, first.text
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in first.text
+    assert any(
+        x in first.text
+        for x in (
+            "COMPLIANCE_ACTIVATION_BLOCKED",
+            "INSURANCE_ACTIVATION_BLOCKED",
+            "POLICY_ACTIVATION_BLOCKED",
+        )
+    )
     with SessionLocal() as db:
         drivers = db.query(HealthISFDriver).filter(HealthISFDriver.phone == phone).all()
         assert drivers == []
@@ -321,7 +328,7 @@ def test_platform_ops_approve_does_not_create_active_driver(client: TestClient) 
         json={"confirm": True},
     )
     assert activated.status_code in {400, 409}, activated.text
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in activated.text
+    assert any(x in activated.text for x in ("COMPLIANCE_ACTIVATION_BLOCKED", "INSURANCE_ACTIVATION_BLOCKED", "POLICY_ACTIVATION_BLOCKED", "SCREENING_ACTIVATION_BLOCKED"))
     with SessionLocal() as db:
         assert db.query(HealthISFDriver).filter(HealthISFDriver.phone == phone).first() is None
 

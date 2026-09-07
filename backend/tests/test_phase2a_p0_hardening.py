@@ -174,7 +174,7 @@ def test_platform_ops_cannot_bypass_compliance_activation(client: TestClient) ->
         json={"confirm": True},
     )
     assert blocked.status_code in {400, 409}, blocked.text
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in blocked.text
+    assert any(x in blocked.text for x in ("COMPLIANCE_ACTIVATION_BLOCKED", "INSURANCE_ACTIVATION_BLOCKED", "POLICY_ACTIVATION_BLOCKED", "SCREENING_ACTIVATION_BLOCKED"))
     with SessionLocal() as db:
         assert db.query(HealthISFDriver).filter(HealthISFDriver.phone == phone).first() is None
         events = (
@@ -199,7 +199,7 @@ def test_status_cannot_mark_activated_without_compliance(client: TestClient) -> 
         json={"to_status": "activated", "confirm": True},
     )
     assert moved.status_code in {400, 409}, moved.text
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in moved.text
+    assert any(x in moved.text for x in ("COMPLIANCE_ACTIVATION_BLOCKED", "INSURANCE_ACTIVATION_BLOCKED", "POLICY_ACTIVATION_BLOCKED", "SCREENING_ACTIVATION_BLOCKED"))
 
 
 def test_onboarding_driver_not_dispatch_eligible_even_if_record_exists() -> None:

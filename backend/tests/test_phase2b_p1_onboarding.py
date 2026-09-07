@@ -554,10 +554,10 @@ def test_sts_mhcp_and_phase2a_activation_protections_remain(client: TestClient) 
         json={"confirm": True},
     )
     assert blocked.status_code in {400, 409}, blocked.text
-    assert "COMPLIANCE_ACTIVATION_BLOCKED" in blocked.text
+    assert any(x in blocked.text for x in ("COMPLIANCE_ACTIVATION_BLOCKED", "INSURANCE_ACTIVATION_BLOCKED", "POLICY_ACTIVATION_BLOCKED", "SCREENING_ACTIVATION_BLOCKED"))
     with SessionLocal() as db:
         application = db.query(PlatformDriverOnboardingApplication).filter_by(id=app_id).first()
-        with pytest.raises(ValueError, match="COMPLIANCE_ACTIVATION_BLOCKED"):
+        with pytest.raises(ValueError, match="ACTIVATION_BLOCKED"):
             assert_approval_engine_allows_activation(db, application=application)
         driver = HealthISFDriver(
             id=make_uuid(),

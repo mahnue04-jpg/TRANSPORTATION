@@ -75,6 +75,7 @@
     prevBtn.classList.toggle("hidden", step === 1);
     nextBtn.classList.toggle("hidden", step === TOTAL_STEPS);
     submitBtn.classList.toggle("hidden", step !== TOTAL_STEPS);
+    if (step === 4) loadPolicyCatalog();
     if (step === 5 && appInput.value && applicantToken) {
       loadWorkSetup().catch(function () { /* status chips stay at last known values */ });
     }
@@ -297,6 +298,10 @@
         ["drivers_license_number", app.drivers_license_number || app.drivers_license_number_masked],
         ["license_issuing_state", app.license_issuing_state],
         ["license_expiration_date", app.license_expiration_date],
+        ["years_driving_experience", app.years_driving_experience],
+        ["availability_start_time", app.availability_start_time],
+        ["availability_end_time", app.availability_end_time],
+        ["availability_days_text", Array.isArray(app.availability_days) ? app.availability_days.join(", ") : ""],
         ["vehicle_year", app.vehicle_year],
         ["vehicle_make", app.vehicle_make],
         ["vehicle_model", app.vehicle_model],
@@ -407,12 +412,15 @@
       if (key === "organization_id" || key === "application_id") continue;
       if (
         key.startsWith("declaration_") ||
-        key === "authorize_qualification_checks"
+        key === "authorize_qualification_checks" ||
+        key === "policy_accept_draft_notice"
       ) {
         const checked = !!(form.elements[key] && form.elements[key].checked);
         if (checked) body[key] = true;
         continue;
       }
+      if (key === "availability_days_text") continue;
+      if (key.startsWith("policy_") || key.indexOf("data-policy") >= 0) continue;
       if (key === "vehicle_year") {
         if (value) body[key] = Number(value);
         continue;
@@ -427,7 +435,47 @@
       if (!body.declaration_valid_license) body.declaration_valid_license = true;
       if (!body.declaration_mvr_authorization) body.declaration_mvr_authorization = true;
     }
+    const daysText = String(data.get("availability_days_text") || "").trim();
+    if (daysText) {
+      body.availability_days = daysText.split(/[,|]/).map(function (d) { return d.trim().toLowerCase(); }).filter(Boolean);
+    }
+    delete body.availability_days_text;
+    if (body.years_driving_experience) body.years_driving_experience = Number(body.years_driving_experience);
+    const policyKeys = [];
+    document.querySelectorAll("[data-policy-key]").forEach(function (el) {
+      if (el.checked) policyKeys.push(el.getAttribute("data-policy-key"));
+    });
+    if (policyKeys.length) {
+      body.policy_acknowledgment_keys = policyKeys;
+      body.policy_typed_name = body.electronic_signature || "";
+      body.policy_accept_draft_notice = !!(form.elements.policy_accept_draft_notice && form.elements.policy_accept_draft_notice.checked);
+    }
     return body;
+  }
+
+  async function loadPolicyCatalog() {
+    const host = document.getElementById("policy-ack-list");
+    if (!host || host.getAttribute("data-loaded") === "1") return;
+    try {
+      const catalog = await api("/policies");
+      host.innerHTML = "";
+      const notice = document.createElement("p");
+      notice.className = "step-help";
+      notice.textContent = catalog.legal_notice || "DRAFT FOR ATTORNEY REVIEW";
+      host.appendChild(notice);
+      (catalog.policies || []).forEach(function (policy) {
+        if (policy.key === "independent_contractor_agreement") return;
+        const label = document.createElement("label");
+        label.className = "check-row";
+        label.innerHTML = "<input type=\"checkbox\" data-policy-key=\"" + policy.key + "\" /> "
+          + "<span><strong>" + (policy.title || policy.key) + "</strong> — "
+          + (policy.summary || "") + " <em>(" + (policy.legal_status || "DRAFT") + ")</em></span>";
+        host.appendChild(label);
+      });
+      host.setAttribute("data-loaded", "1");
+    } catch (err) {
+      host.textContent = "Could not load draft policies. You can continue and retry from this step.";
+    }
   }
 
   async function api(path, options) {

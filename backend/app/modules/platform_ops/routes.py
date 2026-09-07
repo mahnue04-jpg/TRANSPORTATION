@@ -15,6 +15,7 @@ from app.db.models import User as UserModel
 from app.db.session import get_db
 from app.modules.platform_ops.models import PlatformDriverOnboardingDocument, ensure_platform_ops_schema
 from app.modules.platform_ops.onboarding import activation as activation_service
+from app.modules.platform_ops.onboarding import policies as policy_service
 from app.modules.platform_ops.onboarding import service as onboarding_service
 from app.modules.platform_ops.onboarding import work_setup as work_setup_service
 from app.modules.platform_ops.permissions import (
@@ -45,6 +46,7 @@ from app.modules.platform_ops.schemas import (
     DriverApplicationListItemResponse,
     DriverApplicationStatusTransitionRequest,
     DriverApplicationSubmitRequest,
+    DriverPolicyAcknowledgeRequest,
     ReadinessSummaryResponse,
     WorkSetupStatusResponse,
 )
@@ -319,13 +321,98 @@ def get_applicant_progress(
         public_item.pop("notes", None)
         public_items.append(public_item)
     summary["items"] = public_items
+    from app.modules.platform_ops.onboarding.work_setup import agreement_is_signed
+    from app.modules.platform_ops.status_machine import status_display_label
+
+    policies = policy_service.serialize_policy_acknowledgments(
+        application,
+        ica_signed=agreement_is_signed(application),
+    )
+    from app.modules.approval_engine.screening_status import screening_summary_for_application
+    from app.modules.platform_ops.onboarding.insurance_requirements import insurance_requirements_config
+
+    screening = screening_summary_for_application(application=application, case=case)
     return {
         "application_id": application.id,
         "application_status": application.status,
+        "status_display_label": status_display_label(application.status),
         "progress_path": "/platform-ops/driver-onboarding",
         "apply_path": "/platform-ops/driver-apply",
+        "policy_acknowledgments": policies,
+        "screening": screening,
+        "insurance_requirements": insurance_requirements_config(),
+        "attorney_policy_approval_required": True,
+        "dispatch_eligible": bool(
+            application.status == "activated"
+            and application.activated_driver_id
+            and not policies.get("missing_keys")
+            and not screening.get("blocks_activation")
+        ),
         **summary,
     }
+
+
+@router.get("/policies")
+def list_driver_policies() -> dict[str, Any]:
+    """Public draft policy catalog for applicants. Attorney review still required."""
+    return policy_service.policy_catalog_payload()
+
+
+@router.get("/applications/{application_id}/policies")
+def get_application_policies(
+    application_id: str,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise HTTPException(status_code=403, detail="Applicant token required.")
+    from app.modules.platform_ops.onboarding.work_setup import agreement_is_signed
+
+    return policy_service.serialize_policy_acknowledgments(
+        application,
+        ica_signed=agreement_is_signed(application),
+    )
+
+
+@router.post("/applications/{application_id}/policies/acknowledge")
+def acknowledge_application_policies(
+    application_id: str,
+    payload: DriverPolicyAcknowledgeRequest,
+    db: Session = Depends(get_db),
+    x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
+) -> dict[str, Any]:
+    application = _require_applicant_draft(db, application_id, x_applicant_token)
+    try:
+        policy_service.acknowledge_policies(
+            application,
+            policy_keys=payload.policy_keys,
+            typed_name=payload.typed_name,
+            accept_draft_notice=payload.accept_draft_notice,
+        )
+        onboarding_service._record_audit(
+            db,
+            application=application,
+            event_type="policy_acknowledgments_updated",
+            from_status=application.status,
+            to_status=application.status,
+            actor_user_id=None,
+            actor_role="applicant",
+            reason="Applicant acknowledged draft policies",
+            metadata={"keys": payload.policy_keys},
+        )
+        db.commit()
+        db.refresh(application)
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+    from app.modules.platform_ops.onboarding.work_setup import agreement_is_signed
+
+    return policy_service.serialize_policy_acknowledgments(
+        application,
+        ica_signed=agreement_is_signed(application),
+    )
 
 
 def _require_applicant_draft(

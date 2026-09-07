@@ -78,6 +78,45 @@ def _driver_is_onboarding_origin(
     return False, ""
 
 
+def _onboarding_driver_fully_eligible(
+    db: Session,
+    *,
+    organization_id: str,
+    driver_id: str,
+) -> tuple[bool, str]:
+    """Graduate activated onboarding drivers to live dispatch when compliance is complete."""
+    from app.modules.health_isf.models import HealthISFDriver
+    from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+    from app.modules.platform_ops.readiness import compute_readiness_summary
+
+    application = (
+        db.query(PlatformDriverOnboardingApplication)
+        .filter(PlatformDriverOnboardingApplication.activated_driver_id == driver_id)
+        .first()
+    )
+    if application is None:
+        return False, "No activated Platform Ops application"
+    if str(application.status or "").lower() != "activated":
+        return False, f"Application status is {application.status}, not activated"
+    driver = db.query(HealthISFDriver).filter(HealthISFDriver.id == driver_id).first()
+    if driver is None or not bool(getattr(driver, "is_active", False)):
+        return False, "Driver record is inactive"
+    plate = str(getattr(driver, "vehicle_plate", "") or "").upper()
+    if plate.startswith("ONBD-"):
+        return False, "Vehicle plate is still an onboarding placeholder"
+    case = get_active_case_for_driver(db, organization_id=organization_id, driver_id=driver_id)
+    if case is None or str(case.workflow_status or "").upper() != "ACTIVE":
+        return False, "Approval Engine case is not ACTIVE"
+    readiness = compute_readiness_summary(db, application)
+    indicators = readiness.get("indicators") or {}
+    if not indicators.get("insurance_present_and_unexpired"):
+        return False, "Insurance missing or expired"
+    exp = getattr(application, "insurance_expiration_date", None)
+    if exp is not None and exp < date.today():
+        return False, f"Insurance expired on {exp.isoformat()}"
+    return True, "ok"
+
+
 def driver_blocked_from_live_dispatch(
     db: Session,
     *,
@@ -85,7 +124,7 @@ def driver_blocked_from_live_dispatch(
     driver_id: str,
     ride: Any = None,
 ) -> dict[str, Any]:
-    """Always-on hold for onboarding applicants and STS/MHCP. Independent of the dispatch gate."""
+    """Hold incomplete onboarding drivers; allow fully activated compliant drivers."""
     required_tier = _ride_required_tier(ride) if ride is not None else "BASE_PRIVATE_AMBULATORY"
     if required_tier in {"STS_ELIGIBLE", "FUTURE_MHCP_NEMT"} and not sts_mhcp_dispatch_enabled():
         return {
@@ -97,14 +136,16 @@ def driver_blocked_from_live_dispatch(
         db, organization_id=organization_id, driver_id=driver_id
     )
     if origin:
-        return {
-            "blocked": True,
-            "reason": (
-                origin_reason
-                + "; onboarding-origin drivers are not eligible for live passenger dispatch"
-            ),
-            "required_tier": required_tier,
-        }
+        eligible, detail = _onboarding_driver_fully_eligible(
+            db, organization_id=organization_id, driver_id=driver_id
+        )
+        if not eligible:
+            return {
+                "blocked": True,
+                "reason": f"{origin_reason}; {detail}",
+                "required_tier": required_tier,
+            }
+        return {"blocked": False, "reason": "ok", "required_tier": required_tier}
     case = get_active_case_for_driver(db, organization_id=organization_id, driver_id=driver_id)
     if case is not None and str(case.workflow_status or "").upper() != "ACTIVE":
         return {

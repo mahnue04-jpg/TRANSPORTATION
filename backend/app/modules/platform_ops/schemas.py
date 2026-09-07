@@ -59,6 +59,15 @@ class DriverApplicationDraftRequest(BaseModel):
     authorize_qualification_checks: bool | None = None
     payout_setup_started: bool | None = None
     w9_secure_workflow_started: bool | None = None
+    policy_acknowledgment_keys: list[str] | None = None
+    policy_typed_name: str | None = None
+    policy_accept_draft_notice: bool | None = None
+
+
+class DriverPolicyAcknowledgeRequest(BaseModel):
+    policy_keys: list[str] = Field(default_factory=list)
+    typed_name: str
+    accept_draft_notice: bool = False
 
 
 class DriverApplicationSubmitRequest(BaseModel):
@@ -128,6 +137,7 @@ class DriverApplicationListItemResponse(BaseModel):
     id: str
     organization_id: str
     status: str
+    status_display_label: str | None = None
     applicant_name: str | None = None
     application_date: datetime | None = None
     email: str | None = None
@@ -193,6 +203,7 @@ class DriverApplicationDetailResponse(BaseModel):
     id: str
     organization_id: str
     status: str
+    status_display_label: str | None = None
     resume_step: int = 1
     resume_section_key: str = "about_you"
     resume_section_label: str = "About you"
@@ -248,6 +259,7 @@ class DriverApplicationDetailResponse(BaseModel):
     declaration_background_authorization: bool = False
     declaration_drug_alcohol_policy: bool = False
     declaration_truthful_information: bool = False
+    policy_acknowledgments: dict[str, Any] | None = None
     electronic_signature: str | None = None
     signed_date: date | None = None
     assigned_reviewer_id: str | None = None

@@ -33,11 +33,19 @@
       showBanner(json.detail || "Unable to load progress", false);
       return;
     }
-    overall.textContent = "Status: " + (json.overall_status || "—") + " · " + (json.progress_percent || 0) + "% complete";
+    overall.textContent = "Status: " + (json.status_display_label || json.application_status || json.overall_status || "—")
+      + " · " + (json.progress_percent || 0) + "% complete"
+      + (json.dispatch_eligible ? " · Dispatch eligible" : " · Not dispatch eligible yet");
     nextAction.textContent = "Next: " + (json.next_required_action || "—");
     const apply = "/platform-ops/driver-apply?application_id=" + encodeURIComponent(appId) + "&token=" + encodeURIComponent(token);
     document.querySelector("a[href='/platform-ops/driver-apply']").setAttribute("href", apply);
-    list.innerHTML = (json.items || []).map(function (item) {
+    const policyBlock = (json.policy_acknowledgments && json.policy_acknowledgments.items) ? json.policy_acknowledgments.items.map(function (item) {
+      return "<div class='meta'>"
+        + "<span class='health-pill " + (item.accepted ? "ok" : "warn") + "'>" + (item.accepted ? "ACK" : "NEEDED") + "</span> "
+        + "<strong>" + item.title + "</strong> · " + (item.legal_status || "DRAFT")
+        + "</div>";
+    }).join("") : "";
+    list.innerHTML = policyBlock + (json.items || []).map(function (item) {
       return "<div class='meta'>"
         + "<span class='health-pill " + lightClass(item.light) + "'>" + item.light + "</span> "
         + "<strong>" + item.label + "</strong> · " + item.status

@@ -38,6 +38,7 @@ from app.modules.platform_ops.status_machine import (
     assert_transition_allowed,
     list_allowed_next_statuses,
     normalize_status,
+    status_display_label,
 )
 from app.modules.platform_ops.storage import get_document_storage
 
@@ -209,6 +210,18 @@ def _apply_draft_fields(
         application.insurance_policy_ref_masked = mask_policy_reference(policy_number)
     if application.declaration_background_authorization and not getattr(application, "background_consent_at", None):
         application.background_consent_at = now()
+    policy_keys = getattr(payload, "policy_acknowledgment_keys", None)
+    if policy_keys:
+        from app.modules.platform_ops.onboarding.policies import acknowledge_policies
+
+        typed = getattr(payload, "policy_typed_name", None) or getattr(payload, "electronic_signature", None) or ""
+        accept_draft = bool(getattr(payload, "policy_accept_draft_notice", False))
+        acknowledge_policies(
+            application,
+            policy_keys=list(policy_keys),
+            typed_name=str(typed),
+            accept_draft_notice=bool(accept_draft),
+        )
     application.updated_at = now()
 
 
@@ -406,11 +419,23 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
     if application.license_expiration_date and application.license_expiration_date < date.today():
         errors.append({"field": "license_expiration_date", "message": "Driver's license must not be expired."})
 
+    from app.modules.platform_ops.onboarding.policies import required_policies_complete
     from app.modules.platform_ops.onboarding.work_setup import (
         agreement_is_signed,
         payout_is_complete,
         tax_information_is_complete,
     )
+
+    if not required_policies_complete(application, ica_signed=agreement_is_signed(application)):
+        errors.append(
+            {
+                "field": "policy_acknowledgments",
+                "message": (
+                    "Acknowledge all required driver policies (DRAFT FOR ATTORNEY REVIEW) "
+                    "and sign the Independent Contractor Agreement before submit."
+                ),
+            }
+        )
 
     documents = list(application.documents or [])
     present_categories = {
@@ -1059,7 +1084,8 @@ def application_to_detail(
     include_full_license: bool = False,
     include_readiness: bool = True,
 ) -> DriverApplicationDetailResponse:
-    from app.modules.platform_ops.onboarding.work_setup import serialize_work_setup
+    from app.modules.platform_ops.onboarding.policies import serialize_policy_acknowledgments
+    from app.modules.platform_ops.onboarding.work_setup import agreement_is_signed, serialize_work_setup
 
     documents = (
         db.query(PlatformDriverOnboardingDocument)
@@ -1073,11 +1099,16 @@ def application_to_detail(
     if include_full_license:
         license_masked = application.drivers_license_number
     resume = compute_applicant_resume_progress(application, documents)
+    policy_acks = serialize_policy_acknowledgments(
+        application,
+        ica_signed=agreement_is_signed(application),
+    )
 
     return DriverApplicationDetailResponse(
         id=application.id,
         organization_id=application.organization_id,
         status=application.status,
+        status_display_label=status_display_label(application.status),
         resume_step=int(resume["resume_step"]),
         resume_section_key=str(resume["resume_section_key"]),
         resume_section_label=str(resume["resume_section_label"]),
@@ -1135,6 +1166,7 @@ def application_to_detail(
         declaration_background_authorization=application.declaration_background_authorization,
         declaration_drug_alcohol_policy=application.declaration_drug_alcohol_policy,
         declaration_truthful_information=application.declaration_truthful_information,
+        policy_acknowledgments=policy_acks,
         electronic_signature=application.electronic_signature,
         signed_date=application.signed_date,
         assigned_reviewer_id=application.assigned_reviewer_id,
@@ -1163,6 +1195,7 @@ def application_to_list_item(db: Session, application: PlatformDriverOnboardingA
         id=application.id,
         organization_id=application.organization_id,
         status=application.status,
+        status_display_label=status_display_label(application.status),
         applicant_name=applicant_name,
         application_date=application.submitted_at or application.created_at,
         email=application.email,

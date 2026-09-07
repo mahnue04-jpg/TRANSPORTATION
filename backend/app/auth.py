@@ -11,6 +11,7 @@ Endpoints (all under /api/auth):
   GET  /session    — return active JWT session role claims (requires Bearer token)
 """
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -60,7 +61,82 @@ VALID_ROLES = {
 DEFAULT_ROLE = ROLE_STAFF
 
 DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "Amicor Health")
-SEED_PASSWORD = os.getenv("AMICOR_SEED_PASSWORD", "Amicor123!")
+# Local/dev fallback only. Production must set AMICOR_SEED_PASSWORD to a unique strong value.
+_DEFAULT_DEV_SEED_PASSWORD = "Amicor123!"
+SEED_PASSWORD = os.getenv("AMICOR_SEED_PASSWORD", _DEFAULT_DEV_SEED_PASSWORD).strip() or _DEFAULT_DEV_SEED_PASSWORD
+
+# Accounts kept for ops / controlled testing. Others are deactivated on seed sync/startup.
+_DEFAULT_ACTIVE_SEED_EMAILS = (
+    "admin@amicor.local",
+    "dispatcher@amicor.local",
+    "driver@amicor.local",
+    "rider@amicor.local",
+    "compliance@amicor.local",
+    "supervisor@amicor.local",
+)
+
+
+def _parse_email_allowlist(raw: str | None, *, default: tuple[str, ...]) -> frozenset[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return frozenset(item.lower() for item in default)
+    return frozenset(part.strip().lower() for part in text.split(",") if part.strip())
+
+
+def active_seed_emails() -> frozenset[str]:
+    return _parse_email_allowlist(
+        os.getenv("AMICOR_SEED_ACTIVE_EMAILS"),
+        default=_DEFAULT_ACTIVE_SEED_EMAILS,
+    )
+
+
+def seed_account_restriction_enabled() -> bool:
+    """Deactivate unused demo seeds in production-like hosts unless explicitly disabled."""
+    explicit = os.getenv("AMICOR_RESTRICT_SEED_ACCOUNTS", "").strip().lower()
+    if explicit in {"1", "true", "yes", "on"}:
+        return True
+    if explicit in {"0", "false", "no", "off"}:
+        return False
+    environment = (
+        os.getenv("AMICOR_ENVIRONMENT")
+        or os.getenv("ENVIRONMENT")
+        or ""
+    ).strip().lower()
+    if environment in {"production", "prod"}:
+        return True
+    return str(os.getenv("RENDER", "")).strip().lower() in {"1", "true", "yes"}
+
+
+def seed_password_is_weak_default() -> bool:
+    return SEED_PASSWORD == _DEFAULT_DEV_SEED_PASSWORD
+
+
+def deployment_sync_key() -> str:
+    """Deployment sync key must be configured separately — never falls back to seed password."""
+    return os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()
+
+
+def require_deployment_sync_key(request: Request) -> None:
+    expected = deployment_sync_key()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Deployment sync not configured. Set Render env AMICOR_DEPLOYMENT_SYNC_KEY "
+                "to a unique secret distinct from AMICOR_SEED_PASSWORD."
+            ),
+        )
+    provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Invalid deployment sync key. Set Render env AMICOR_DEPLOYMENT_SYNC_KEY to match "
+                "X-Amicor-Deployment-Key. The sync key must not reuse AMICOR_SEED_PASSWORD."
+            ),
+        )
+
+
 SEED_USERS: tuple[dict[str, str], ...] = (
     {
         "email": "admin@amicor.local",
@@ -339,6 +415,7 @@ def seed_default_users() -> list[dict[str, str]]:
 
         for user_seed in SEED_USERS:
             email = user_seed["email"].strip().lower()
+            keep_active = (email in active_seed_emails()) if seed_account_restriction_enabled() else True
             existing = db.query(UserModel).filter(UserModel.email == email).first()
             if existing:
                 existing.role = normalize_role(user_seed.get("role"))
@@ -349,8 +426,12 @@ def seed_default_users() -> list[dict[str, str]]:
                 existing.organization_name = DEFAULT_ORGANIZATION_NAME
                 if default_org is not None:
                     existing.organization_id = default_org.id
-                existing.hashed_password = hash_password(SEED_PASSWORD)
-                existing.is_active = True
+                if keep_active:
+                    existing.hashed_password = hash_password(SEED_PASSWORD)
+                    existing.is_active = True
+                else:
+                    # Restrict unused demo accounts — do not keep them login-ready.
+                    existing.is_active = False
                 synced += 1
                 continue
 
@@ -366,7 +447,7 @@ def seed_default_users() -> list[dict[str, str]]:
                 session_role=normalize_role(user_seed.get("role")),
                 organization_name=DEFAULT_ORGANIZATION_NAME,
                 organization_id=default_org.id if default_org is not None else None,
-                is_active=True,
+                is_active=keep_active,
                 is_verified=True,
             )
             db.add(user)
@@ -377,9 +458,11 @@ def seed_default_users() -> list[dict[str, str]]:
 
         db.commit()
         logger.info(
-            "Auth seed complete: created=%s synced=%s password_source=AMICOR_SEED_PASSWORD",
+            "Auth seed complete: created=%s synced=%s active_allowlist=%s weak_default_seed=%s password_source=AMICOR_SEED_PASSWORD",
             len(created),
             synced,
+            sorted(active_seed_emails()),
+            seed_password_is_weak_default(),
         )
         operator_updates = apply_operator_role_grants()
         if operator_updates:
@@ -486,7 +569,6 @@ SECRET_KEY = TOKEN_SIGNING_SECRET
 
 # ── JWT (pure stdlib — no extra deps) ─────────────────────────────────────────
 import base64
-import hmac
 import json as _json
 
 
@@ -839,18 +921,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/deployment/sync-seed-users")
 def deployment_sync_seed_users(request: Request):
     """Re-sync pilot seed accounts after deploy. Requires X-Amicor-Deployment-Key header."""
-    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
-    if not expected:
-        raise HTTPException(status_code=503, detail="Deployment sync not configured")
-    provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
-    if not provided or not hmac.compare_digest(provided, expected):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Invalid deployment sync key. Set Render env AMICOR_DEPLOYMENT_SYNC_KEY to match "
-                "X-Amicor-Deployment-Key, or unset it to fall back to AMICOR_SEED_PASSWORD."
-            ),
-        )
+    require_deployment_sync_key(request)
     created = seed_default_users()
     operator_updates = apply_operator_role_grants()
     from app.db.session import SessionLocal
@@ -873,6 +944,9 @@ def deployment_sync_seed_users(request: Request):
         "created": created,
         "operator_role_grants": operator_updates,
         "seed_users_total": len(SEED_USERS),
+        "active_seed_emails": sorted(active_seed_emails()),
+        "seed_password_is_weak_default": seed_password_is_weak_default(),
+        "deployment_sync_key_separate": bool(deployment_sync_key()),
         "password_env": "AMICOR_SEED_PASSWORD",
         "provider_seed": provider_summary,
         "driver_seed": driver_summary,
@@ -887,12 +961,7 @@ def deployment_operator_workspace_token(
     db: Session = Depends(get_db),
 ):
     """Issue a real operator JWT for deployment verification (requires deployment sync key)."""
-    expected = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip() or SEED_PASSWORD
-    if not expected:
-        raise HTTPException(status_code=503, detail="Deployment sync not configured")
-    provided = request.headers.get("X-Amicor-Deployment-Key", "").strip()
-    if not provided or not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=403, detail="Invalid deployment sync key")
+    require_deployment_sync_key(request)
 
     from app.db.models import User as UserModel
 
@@ -953,27 +1022,46 @@ def deployment_seed_status(db: Session = Depends(get_db)):
     from app.db.models import User as UserModel
 
     emails = [item["email"] for item in SEED_USERS]
-    rows = db.query(UserModel.email).filter(UserModel.email.in_(emails)).all()
-    present = sorted({str(row[0]).lower() for row in rows})
+    rows = (
+        db.query(UserModel.email, UserModel.is_active, UserModel.role)
+        .filter(UserModel.email.in_(emails))
+        .all()
+    )
+    by_email = {
+        str(row[0]).lower(): {"is_active": bool(row[1]), "role": row[2]}
+        for row in rows
+    }
+    present = sorted(by_email.keys())
     present_set = set(present)
-    seed_password_env = os.getenv("AMICOR_SEED_PASSWORD", "").strip()
-    sync_key_env = os.getenv("AMICOR_DEPLOYMENT_SYNC_KEY", "").strip()
+    allowlist = active_seed_emails()
+    sync_key_env = deployment_sync_key()
     return {
         "expected_accounts": len(emails),
         "present_accounts": len(present),
-        "missing_accounts": [email for email in emails if email not in present],
-        "deployment_sync_configured": bool(sync_key_env or seed_password_env or SEED_PASSWORD),
+        "missing_accounts": [email for email in emails if email not in present_set],
+        "deployment_sync_configured": bool(sync_key_env),
+        "deployment_sync_key_separate": bool(sync_key_env),
+        "seed_password_env_set": bool(os.getenv("AMICOR_SEED_PASSWORD", "").strip()),
+        "seed_password_is_weak_default": seed_password_is_weak_default(),
+        "active_seed_allowlist": sorted(allowlist),
         "pilot_accounts": [
-            {"email": item["email"], "role": item["role"], "present": item["email"].lower() in present_set}
+            {
+                "email": item["email"],
+                "role": item["role"],
+                "present": item["email"].lower() in present_set,
+                "is_active": bool((by_email.get(item["email"].lower()) or {}).get("is_active")),
+                "allowed_for_ops": item["email"].lower() in allowlist,
+            }
             for item in SEED_USERS
         ],
         "login_note": (
-            "Pilot account passwords are reset to the runtime AMICOR_SEED_PASSWORD on every "
-            "deploy startup and after a successful POST /api/auth/deployment/sync-seed-users call."
+            "Allowed pilot account passwords are reset to runtime AMICOR_SEED_PASSWORD on seed sync. "
+            "Unused @amicor.local demo accounts are deactivated. "
+            "Rotate AMICOR_SEED_PASSWORD away from the historical default before public customers."
         ),
         "sync_note": (
-            "Send header X-Amicor-Deployment-Key matching runtime AMICOR_DEPLOYMENT_SYNC_KEY "
-            "(or AMICOR_SEED_PASSWORD when the sync key env var is unset)."
+            "Send header X-Amicor-Deployment-Key matching runtime AMICOR_DEPLOYMENT_SYNC_KEY. "
+            "The sync key must be unique and must not fall back to AMICOR_SEED_PASSWORD."
         ),
     }
 

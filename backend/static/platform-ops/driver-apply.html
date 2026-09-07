@@ -69,6 +69,12 @@
           <label>Driver license number<input required name="drivers_license_number" autocomplete="off" /></label>
           <label>License state<input required name="license_issuing_state" maxlength="2" /></label>
           <label>License expiration<input required type="date" name="license_expiration_date" /></label>
+          <label>Years of driving experience<input type="number" name="years_driving_experience" min="0" max="80" placeholder="5" /></label>
+          <label class="full">Typical availability days <span class="optional">(comma-separated)</span>
+            <input name="availability_days_text" placeholder="monday, tuesday, wednesday, thursday, friday" />
+          </label>
+          <label>Available from<input type="time" name="availability_start_time" /></label>
+          <label>Available until<input type="time" name="availability_end_time" /></label>
           <label class="full">Upload front of driver license
             <input type="file" id="file_license_front" accept="image/*,.pdf" required />
           </label>
@@ -110,10 +116,10 @@
       </section>
 
       <section class="step-panel hidden" data-step-panel="4">
-        <h2>Authorization</h2>
+        <h2>Authorization &amp; policies</h2>
         <p class="step-help">
           Amicor will complete required driver qualification and compliance checks for the services you provide.
-          You do not need to manage those details here.
+          Policy texts below are labeled <strong>DRAFT FOR ATTORNEY REVIEW</strong> and are not final legal language.
         </p>
         <div class="declarations">
           <label class="check-row">
@@ -123,6 +129,11 @@
           <label class="check-row">
             <input type="checkbox" name="declaration_valid_license" />
             I confirm I hold a valid driver's license.
+          </label>
+          <div id="policy-ack-list" class="policy-ack-list"></div>
+          <label class="check-row">
+            <input type="checkbox" id="policy_accept_draft_notice" name="policy_accept_draft_notice" />
+            I understand these policies are drafts for attorney review and acknowledge them for onboarding.
           </label>
           <label>Type your full legal name to sign
             <input required name="electronic_signature" autocomplete="name" />
@@ -215,6 +226,6 @@
       </div>
     </form>
   </main>
-  <script src="/static/platform-ops/driver-apply.js?v=20260902.1"></script>
+  <script src="/static/platform-ops/driver-apply.js?v=20260907.1"></script>
 </body>
 </html>

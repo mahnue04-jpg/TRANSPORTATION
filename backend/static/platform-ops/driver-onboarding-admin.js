@@ -193,7 +193,7 @@
       div.innerHTML = ""
         + "<strong>" + name + "</strong>"
         + "<div class=\"meta\">" + (item.email || "") + " · " + (item.mobile_phone || "") + "</div>"
-        + "<div><span class=\"pill\">" + (item.status || "") + "</span> · docs " + docsPct + "%</div>";
+        + "<div><span class=\"pill\">" + (item.status_display_label || item.status || "") + "</span> · docs " + docsPct + "%</div>";
       div.addEventListener("click", () => loadDetail(item.id));
       listEl.appendChild(div);
     });
@@ -254,7 +254,7 @@
 
     const meta = document.createElement("p");
     meta.className = "meta";
-    meta.textContent = `Platform Ops status: ${app.status} · License exp: ${app.license_expiration_date || "n/a"} · Activated driver: ${app.activated_driver_id || "not activated"}`;
+    meta.textContent = `Status: ${app.status_display_label || app.status} · License exp: ${app.license_expiration_date || "n/a"} · Activated driver: ${app.activated_driver_id || "not activated"}`;
     detailEl.appendChild(meta);
 
     try {
@@ -818,7 +818,8 @@
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar";
     toolbar.appendChild(actionButton("Move to under review", () => transition("under_review"), true));
-    toolbar.appendChild(actionButton("Documents pending", () => transition("documents_pending"), true));
+    toolbar.appendChild(actionButton("Missing information", () => transition("documents_pending"), true));
+    toolbar.appendChild(actionButton("Background/MVR pending", () => transition("background_review"), true));
     toolbar.appendChild(actionButton("Platform Ops Approve", () => decision("/approve"), true));
     const locked = document.createElement("p");
     locked.className = "meta";

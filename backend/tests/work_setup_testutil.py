@@ -60,13 +60,28 @@ def complete_secure_work_setup(
                 headers=headers,
             )
             assert refreshed.status_code == 200, refreshed.text
-            return refreshed.json()
-        latest = client.get(
-            f"/api/platform-ops/driver-onboarding/applications/{app_id}/work-setup",
+            result = refreshed.json()
+        else:
+            latest = client.get(
+                f"/api/platform-ops/driver-onboarding/applications/{app_id}/work-setup",
+                headers=headers,
+            )
+            assert latest.status_code == 200, latest.text
+            result = latest.json()
+
+        from app.modules.platform_ops.onboarding.policies import REQUIRED_POLICY_KEYS
+
+        acks = client.post(
+            f"/api/platform-ops/driver-onboarding/applications/{app_id}/policies/acknowledge",
             headers=headers,
+            json={
+                "policy_keys": list(REQUIRED_POLICY_KEYS),
+                "typed_name": legal_name,
+                "accept_draft_notice": True,
+            },
         )
-        assert latest.status_code == 200, latest.text
-        return latest.json()
+        assert acks.status_code == 200, acks.text
+        return result
     finally:
         if fake is None:
             set_stripe_connect_client_override(None)

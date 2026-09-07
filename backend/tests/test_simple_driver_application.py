@@ -95,7 +95,7 @@ def test_applicant_facing_html_is_simple():
     assert "normalizeDateValue" in js
     assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
-    assert "driver-apply.js?v=20260902.1" in html
+    assert "driver-apply.js?v=20260907.1" in html
     assert "Set Up Payout Account" in html
     assert "file_contractor" not in html
     assert "id=\"ica-sign-btn\"" in html
