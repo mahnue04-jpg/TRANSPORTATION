@@ -132,7 +132,8 @@ def test_fare_quote_uses_canonical_engine(client: TestClient):
     assert body["estimated_duration_minutes"] == expected["estimated_duration_minutes"]
     assert body["estimated_ride_fare_usd"] == expected["estimated_ride_fare_usd"]
     assert body["sandbox_notice"]
-    assert "sandbox test" in body["sandbox_notice"].lower()
+    assert "fare that will be charged" in body["sandbox_notice"].lower()
+    assert "sandbox test" not in body["sandbox_notice"].lower()
     assert body["pricing_version"] == expected["pricing_version"]
 
 

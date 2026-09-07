@@ -43,7 +43,7 @@ from app.modules.payments.stripe_payments import amount_major_from_minor
 
 logger = logging.getLogger("amicor.payments.rider_checkout")
 
-SANDBOX_NOTICE = "This is the amount to be charged in the current sandbox test."
+SANDBOX_NOTICE = "This is the fare that will be charged for this trip."
 DEFAULT_TRAFFIC_MODE = "normal"
 STRIPE_HTTP_TIMEOUT_SECONDS = 15.0
 RIDER_PAYMENT_RETURN_PATH = "/app/riders"
@@ -479,7 +479,7 @@ def create_rider_checkout(
         )
         client = get_stripe_payment_client()
         if client is None:
-            raise ValueError("Stripe sandbox payment is not configured yet.")
+            raise ValueError("Stripe payment is not configured yet.")
 
         stage = "fare_quote"
         quote = quote_rider_fare(
@@ -641,12 +641,12 @@ def rider_payment_status(db: Session, *, request_id: str, organization_id: str) 
         "sandbox": True,
         "sandbox_notice": SANDBOX_NOTICE,
         "message": (
-            "Payment failed. You can retry the sandbox card. This ride is not in the dispatcher queue."
+            "Payment failed. You can try again with another card. This ride is not in the dispatcher queue."
             if failed
             else (
                 "Payment received. Your ride is now in the dispatcher queue."
                 if payment_status == PAYMENT_SUCCEEDED
-                else "Complete sandbox payment before this ride can enter the dispatcher queue."
+                else "Complete payment before this ride can enter the dispatcher queue."
             )
         ),
     }
@@ -681,7 +681,7 @@ def release_ride_after_payment(db: Session, *, payment: AmicorCustomerPayment) -
             target_state=RideStatus.QUEUED.value,
             action_type="payment_succeeded",
             actor_user_id=None,
-            note="Sandbox payment succeeded; ride released to dispatch",
+            note="Payment succeeded; ride released to dispatch",
             payload={"ride_id": ride.id, "payment_id": payment.id},
         )
     if request_row is not None and str(request_row.dispatch_status or "") == CustomerRequestStatus.AWAITING_PAYMENT.value:

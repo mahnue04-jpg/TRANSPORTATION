@@ -5564,23 +5564,23 @@
           '<p class="muted" style="margin:0 0 8px">Estimated distance: <strong>' + escapeHtml(String(quote.estimated_distance_miles)) + ' miles</strong></p>' +
           '<p class="muted" style="margin:0 0 8px">Estimated duration: <strong>' + escapeHtml(String(quote.estimated_duration_minutes)) + ' minutes</strong></p>' +
           '<p style="margin:0 0 8px;font-size:1.15rem">Estimated ride fare: <strong>$' + escapeHtml(Number(quote.estimated_ride_fare_usd).toFixed(2)) + '</strong></p>' +
-          '<p class="muted" style="margin:0">' + escapeHtml(safeText(quote.sandbox_notice, "This is the amount to be charged in the current sandbox test.")) + '</p>' +
+          '<p class="muted" style="margin:0">' + escapeHtml(safeText(quote.sandbox_notice, "This is the fare that will be charged for this trip.")) + '</p>' +
         '</div>';
     } else {
       quoteHtml =
         '<div class="rider-fare-summary" style="margin:14px 0;padding:14px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
-          '<strong>Fare estimate needed.</strong> Enter pickup and drop-off to calculate the sandbox fare before this ride can be paid and sent to dispatch.' +
+          '<strong>Fare estimate needed.</strong> Enter pickup and drop-off to calculate the fare before this ride can be paid and sent to dispatch.' +
         '</div>';
     }
     var payHtml = "";
     if (checkout && checkout.client_secret) {
       payHtml =
         '<div class="rider-payment-panel" style="margin:14px 0;padding:14px;border-radius:12px;background:#eff6ff;border:1px solid #93c5fd">' +
-          '<h4 style="margin:0 0 8px">Sandbox payment</h4>' +
+          '<h4 style="margin:0 0 8px">Payment</h4>' +
           '<p class="muted">This ride is held as awaiting payment and is not in the dispatcher queue.</p>' +
           '<div id="rider-payment-element" style="margin:12px 0;min-height:48px"></div>' +
-          '<p id="rider-payment-message" class="muted">' + escapeHtml(safeText(checkout.message, "Complete sandbox payment to release this ride to dispatch.")) + '</p>' +
-          '<button type="button" class="preview-action rider-action" data-rider-action="pay_sandbox">Pay sandbox fare</button>' +
+          '<p id="rider-payment-message" class="muted">' + escapeHtml(safeText(checkout.message, "Complete payment to release this ride to dispatch.")) + '</p>' +
+          '<button type="button" class="preview-action rider-action" data-rider-action="pay_fare">Pay fare</button>' +
         '</div>';
     }
     return quoteHtml + payHtml;
@@ -14046,7 +14046,7 @@
       } catch (_) {}
       renderPage();
       return;
-    } else if (action === "pay_sandbox") {
+    } else if (action === "pay_fare" || action === "pay_sandbox") {
       await confirmRiderSandboxPayment();
       return;
     } else if (action === "request_now") {
@@ -16010,7 +16010,7 @@
       riderStripeElements.create("payment").mount("#rider-payment-element");
     } catch (err) {
       var msg = document.getElementById("rider-payment-message");
-      if (msg) msg.textContent = err && err.message ? err.message : "Could not load sandbox payment form.";
+      if (msg) msg.textContent = err && err.message ? err.message : "Could not load the payment form.";
     }
   }
 
@@ -16062,7 +16062,7 @@
     }
     state.riderApp.submitStatus = {
       level: paid ? "success" : "info",
-      message: "Payment submitted. Waiting for sandbox confirmation before this ride can enter dispatch."
+      message: "Payment submitted. Waiting for confirmation before this ride can enter dispatch."
     };
     persistSessionState();
     renderPage();
@@ -16074,7 +16074,7 @@
       await mountRiderStripePayment();
     }
     if (!riderStripe || !riderStripeElements) {
-      window.alert("Sandbox payment form is not ready yet.");
+      window.alert("Payment form is not ready yet.");
       return { ok: false };
     }
     var checkout = state.riderApp.checkout || {};
@@ -16130,7 +16130,7 @@
     if (redirectStatus === "failed" || redirectStatus === "canceled") {
       state.riderApp.submitStatus = {
         level: "error",
-        message: "Sandbox payment was canceled or failed. This ride is not in the dispatcher queue."
+        message: "Payment was canceled or failed. This ride is not in the dispatcher queue."
       };
       persistSessionState();
       renderPage();
@@ -16147,7 +16147,7 @@
     }
     state.riderApp.submitStatus = {
       level: "info",
-      message: "Returning from Stripe sandbox confirmation…"
+      message: "Returning from payment confirmation…"
     };
     persistSessionState();
     renderPage();
@@ -16293,7 +16293,7 @@
         state.riderApp.checkout = created;
         state.riderApp.submitStatus = {
           level: "info",
-          message: "Review the fare and complete sandbox payment. This ride is not in the dispatcher queue yet.",
+          message: "Review the fare and complete payment. This ride is not in the dispatcher queue yet.",
           requestId: created.request_id,
           rideId: created.ride_id,
           status: "awaiting_payment"
