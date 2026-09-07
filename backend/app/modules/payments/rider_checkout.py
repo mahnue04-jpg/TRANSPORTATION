@@ -196,21 +196,39 @@ class LiveStripePaymentIntentClient:
         try:
             import stripe as stripe_mod
 
-            http_client_cls = getattr(stripe_mod, "HTTPXClient", None) or getattr(
-                stripe_mod, "RequestsClient", None
-            )
-            if http_client_cls is None:
+            # Prefer requests for sync checkout (already in production requirements).
+            # HTTPX is optional; missing httpx must not 503 rider checkout.
+            candidates = []
+            for name in ("RequestsClient", "HTTPXClient"):
+                cls = getattr(stripe_mod, name, None)
+                if cls is not None:
+                    candidates.append(cls)
+            if not candidates:
                 return StripeClient(self.api_key)
-            try:
-                http_client = http_client_cls(
-                    timeout=STRIPE_HTTP_TIMEOUT_SECONDS,
-                    allow_sync_methods=True,
-                )
-            except TypeError:
+
+            http_client = None
+            last_exc: BaseException | None = None
+            for http_client_cls in candidates:
                 try:
-                    http_client = http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
-                except TypeError:
-                    return StripeClient(self.api_key)
+                    try:
+                        http_client = http_client_cls(
+                            timeout=STRIPE_HTTP_TIMEOUT_SECONDS,
+                            allow_sync_methods=True,
+                        )
+                    except TypeError:
+                        http_client = http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
+                    break
+                except (TypeError, ImportError, ModuleNotFoundError) as exc:
+                    last_exc = exc
+                    http_client = None
+                    continue
+            if http_client is None:
+                if last_exc is not None:
+                    logger.warning(
+                        "stripe_http_client_fallback | error=%s",
+                        sanitize_checkout_error(last_exc),
+                    )
+                return StripeClient(self.api_key)
             try:
                 return StripeClient(self.api_key, http_client=http_client)
             except TypeError:
