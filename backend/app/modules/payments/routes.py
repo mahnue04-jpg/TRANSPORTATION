@@ -28,6 +28,7 @@ from app.db.session import get_db
 from app.modules.payments.rider_checkout import (
     create_rider_checkout,
     quote_rider_fare,
+    resolve_public_base_url,
     rider_payment_status,
     stripe_publishable_key,
 )
@@ -151,6 +152,7 @@ def create_rider_fare_quote(
 @router.post("/rider/checkout")
 def start_rider_checkout(
     payload: RiderCheckoutRequest,
+    request: Request,
     user: UserContext = Depends(get_current_user_context),
     _: None = Depends(_require_rider_payment_access),
     db: Session = Depends(get_db),
@@ -171,6 +173,7 @@ def start_rider_checkout(
         "client_timezone": payload.client_timezone,
         "recurring": str(payload.recurrence or "none").lower() == "weekly",
     }
+    request_base = resolve_public_base_url(str(request.base_url).rstrip("/"))
     try:
         return create_rider_checkout(
             db,
@@ -189,6 +192,7 @@ def start_rider_checkout(
             dropoff_latitude=payload.dropoff_latitude,
             dropoff_longitude=payload.dropoff_longitude,
             extra_request_kwargs=extra,
+            request_base_url=request_base,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc

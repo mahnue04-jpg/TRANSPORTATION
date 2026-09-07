@@ -46,8 +46,48 @@ logger = logging.getLogger("amicor.payments.rider_checkout")
 SANDBOX_NOTICE = "This is the amount to be charged in the current sandbox test."
 DEFAULT_TRAFFIC_MODE = "normal"
 STRIPE_HTTP_TIMEOUT_SECONDS = 15.0
+RIDER_PAYMENT_RETURN_PATH = "/app/riders"
 
 _CLIENT_OVERRIDE: "StripePaymentIntentClient | None" = None
+
+
+def resolve_public_base_url(request_base_url: str | None = None) -> str:
+    """Prefer configured public URL; never hard-code localhost for production."""
+    for key in ("AMICOR_PUBLIC_URL", "AMICOR_BASE_URL", "RENDER_EXTERNAL_URL"):
+        raw = str(os.getenv(key) or "").strip().rstrip("/")
+        if raw:
+            return raw
+    fallback = str(request_base_url or "").strip().rstrip("/")
+    return fallback
+
+
+def build_rider_payment_return_url(
+    *,
+    request_id: str,
+    ride_id: str,
+    request_base_url: str | None = None,
+) -> str:
+    """Absolute success URL for Stripe confirmPayment / 3DS redirects."""
+    base = resolve_public_base_url(request_base_url)
+    if not base:
+        # Relative absolute-path fallback; Stripe requires an absolute URL at confirm time,
+        # so the browser must rewrite this via origin when env base is unavailable.
+        base = ""
+    from urllib.parse import urlencode
+
+    query = urlencode(
+        {
+            "payment_return": "1",
+            "request_id": str(request_id),
+            "ride_id": str(ride_id),
+        }
+    )
+    path = f"{RIDER_PAYMENT_RETURN_PATH}?{query}"
+    if base:
+        return f"{base}{path}"
+    return path
+
+
 _SECRET_PATTERN = re.compile(
     r"(?i)(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]+"
     r"|whsec_[A-Za-z0-9]+"
@@ -147,13 +187,7 @@ class LiveStripePaymentIntentClient:
     def __init__(self, *, api_key: str):
         self.api_key = api_key
 
-    def create_payment_intent(
-        self,
-        *,
-        amount_minor: int,
-        currency: str,
-        metadata: dict[str, str],
-    ) -> dict[str, Any]:
+    def _build_client(self) -> Any:
         try:
             from stripe import StripeClient
         except Exception as exc:
@@ -165,15 +199,33 @@ class LiveStripePaymentIntentClient:
             http_client_cls = getattr(stripe_mod, "HTTPXClient", None) or getattr(
                 stripe_mod, "RequestsClient", None
             )
-            if http_client_cls is not None:
-                client = StripeClient(
-                    self.api_key,
-                    http_client=http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS),
+            if http_client_cls is None:
+                return StripeClient(self.api_key)
+            try:
+                http_client = http_client_cls(
+                    timeout=STRIPE_HTTP_TIMEOUT_SECONDS,
+                    allow_sync_methods=True,
                 )
-            else:
-                client = StripeClient(self.api_key)
+            except TypeError:
+                try:
+                    http_client = http_client_cls(timeout=STRIPE_HTTP_TIMEOUT_SECONDS)
+                except TypeError:
+                    return StripeClient(self.api_key)
+            try:
+                return StripeClient(self.api_key, http_client=http_client)
+            except TypeError:
+                return StripeClient(self.api_key)
         except TypeError:
-            client = StripeClient(self.api_key)
+            return StripeClient(self.api_key)
+
+    def create_payment_intent(
+        self,
+        *,
+        amount_minor: int,
+        currency: str,
+        metadata: dict[str, str],
+    ) -> dict[str, Any]:
+        client = self._build_client()
         created = client.v1.payment_intents.create(
             {
                 "amount": int(amount_minor),
@@ -190,6 +242,25 @@ class LiveStripePaymentIntentClient:
                 "status": getattr(created, "status", None),
             }
         return payload
+
+    def retrieve_payment_intent(self, payment_intent_id: str) -> dict[str, Any]:
+        if is_live_stripe_key(self.api_key):
+            raise ValueError("Live Stripe keys are not allowed. Use a Stripe TEST key.")
+        client = self._build_client()
+        retrieved = client.v1.payment_intents.retrieve(
+            str(payment_intent_id),
+            {"expand": ["latest_charge.balance_transaction"]},
+        )
+        payload = retrieved if isinstance(retrieved, dict) else getattr(retrieved, "to_dict", lambda: {})()
+        return payload if isinstance(payload, dict) else {"id": getattr(retrieved, "id", None)}
+
+    def retrieve_balance_transaction(self, balance_transaction_id: str) -> dict[str, Any]:
+        if is_live_stripe_key(self.api_key):
+            raise ValueError("Live Stripe keys are not allowed. Use a Stripe TEST key.")
+        client = self._build_client()
+        retrieved = client.v1.balance_transactions.retrieve(str(balance_transaction_id))
+        payload = retrieved if isinstance(retrieved, dict) else getattr(retrieved, "to_dict", lambda: {})()
+        return payload if isinstance(payload, dict) else {"id": getattr(retrieved, "id", None)}
 
 
 class FakeStripePaymentIntentClient:
@@ -379,6 +450,7 @@ def create_rider_checkout(
     dropoff_latitude: float | None = None,
     dropoff_longitude: float | None = None,
     extra_request_kwargs: dict[str, Any] | None = None,
+    request_base_url: str | None = None,
 ) -> dict[str, Any]:
     stage = "stripe_client"
     payment_intent_attempted = False
@@ -496,6 +568,11 @@ def create_rider_checkout(
         db.refresh(ride)
 
         publishable = stripe_publishable_key()
+        return_url = build_rider_payment_return_url(
+            request_id=str(request_row.id),
+            ride_id=str(ride.id),
+            request_base_url=request_base_url,
+        )
         return {
             **quote,
             "request_id": str(request_row.id),
@@ -506,6 +583,7 @@ def create_rider_checkout(
             "stripe_payment_intent_id": intent_id,
             "client_secret": client_secret,
             "publishable_key": publishable,
+            "return_url": return_url,
             "held_for_payment": True,
         }
     except Exception as exc:

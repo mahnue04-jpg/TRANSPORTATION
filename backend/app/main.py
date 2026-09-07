@@ -3189,6 +3189,7 @@ def serve_app(request: Request) -> HTMLResponse:
 @app.get("/app/home")
 @app.get("/app/dashboard")
 @app.get("/app/rides")
+@app.get("/app/riders")
 @app.get("/app/providers")
 @app.get("/app/drivers")
 @app.get("/app/operations")
@@ -3263,6 +3264,17 @@ def _build_ops_shell_response(request: Request | None = None) -> HTMLResponse:
     response.headers["X-Amicor-Build-Version"] = FRONTEND_BUILD_VERSION
     response.headers["X-Amicor-Runtime-Environment"] = RUNTIME_ENVIRONMENT
     response.headers["Cache-Control"] = "no-store"
+    # Rider sandbox Payment Element needs Stripe.js + Payment Element frames.
+    path = str(getattr(getattr(request, "url", None), "path", "") or "")
+    if path.rstrip("/").endswith("/riders") or "/riders?" in path:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https://*.stripe.com; "
+            "connect-src 'self' https://api.stripe.com https://js.stripe.com; "
+            "frame-src https://js.stripe.com https://hooks.stripe.com;"
+        )
     return response
 
 

@@ -159,6 +159,12 @@ def test_checkout_holds_ride_out_of_dispatch(client: TestClient, _stripe_overrid
     body = response.json()
     assert body["client_secret"]
     assert body["stripe_payment_intent_id"]
+    assert body["return_url"]
+    assert "/app/riders?" in body["return_url"]
+    assert "payment_return=1" in body["return_url"]
+    assert body["request_id"] in body["return_url"]
+    assert body["ride_id"] in body["return_url"]
+    assert body["return_url"].startswith("http")
     assert "sk_" not in json.dumps(body)
     assert body["dispatch_status"] == CustomerRequestStatus.AWAITING_PAYMENT.value
     assert _stripe_override.last_metadata["service_type"] == "RIDE"
@@ -345,3 +351,97 @@ def test_fare_quote_accepts_minneapolis_street_addresses(client: TestClient, mon
     assert body["estimated_distance_miles"] > 0
     assert body["estimated_duration_minutes"] >= 2
     assert body["estimated_ride_fare_usd"] >= 18.0
+
+
+def test_build_rider_payment_return_url_uses_public_base(monkeypatch: pytest.MonkeyPatch):
+    from app.modules.payments.rider_checkout import build_rider_payment_return_url
+
+    monkeypatch.setenv("AMICOR_PUBLIC_URL", "https://amicor-health-isf-py.onrender.com")
+    url = build_rider_payment_return_url(request_id="req-1", ride_id="ride-2")
+    assert url.startswith("https://amicor-health-isf-py.onrender.com/app/riders?")
+    assert "payment_return=1" in url
+    assert "request_id=req-1" in url
+    assert "ride_id=ride-2" in url
+    assert "localhost" not in url
+
+
+def test_rider_shell_confirm_payment_requires_return_url():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "static" / "ops-shell.js").read_text(encoding="utf-8")
+    assert "buildRiderPaymentReturnUrl" in js
+    assert "confirmParams: {" in js
+    assert "return_url: returnUrl" in js
+    assert "return_url: window.location.href" not in js
+    assert "riderStripeElements.submit" in js
+    assert "resumeRiderStripePaymentReturn" in js
+    assert "payment_return" in js
+
+
+def test_app_riders_csp_allows_stripe_payment_element(client: TestClient):
+    page = client.get("/app/riders")
+    assert page.status_code == 200
+    csp = page.headers.get("content-security-policy") or ""
+    assert "https://js.stripe.com" in csp
+    assert "https://api.stripe.com" in csp
+    assert "https://hooks.stripe.com" in csp
+    other = client.get("/app/dashboard")
+    other_csp = other.headers.get("content-security-policy") or ""
+    assert "https://js.stripe.com" not in other_csp
+
+
+def test_duplicate_payment_intent_succeeded_webhook_is_idempotent(client: TestClient, monkeypatch):
+    monkeypatch.setenv("STRIPE_PAYMENT_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    org_id = _org_id()
+    _ensure_provider(org_id)
+    headers = _login(client)
+    checkout = client.post(
+        CHECKOUT_PATH,
+        headers=headers,
+        json={
+            "rider_name": "Idempotent Rider",
+            "rider_phone": "6125550177",
+            "pickup_address": "100 Nicollet Mall, Minneapolis, MN",
+            "dropoff_address": "4300 Glumack Dr, St Paul, MN",
+            "ride_type": "healthcare",
+            "pickup_latitude": PICKUP_LAT,
+            "pickup_longitude": PICKUP_LNG,
+            "dropoff_latitude": DROPOFF_LAT,
+            "dropoff_longitude": DROPOFF_LNG,
+        },
+    )
+    assert checkout.status_code == 200, checkout.text
+    checkout_body = checkout.json()
+    intent_id = checkout_body["stripe_payment_intent_id"]
+    ride_id = checkout_body["ride_id"]
+    event = {
+        "id": f"evt_{uuid4().hex}",
+        "object": "event",
+        "type": "payment_intent.succeeded",
+        "data": {
+            "object": {
+                "id": intent_id,
+                "object": "payment_intent",
+                "amount": checkout_body["amount_minor"],
+                "amount_received": checkout_body["amount_minor"],
+                "currency": "usd",
+                "metadata": {
+                    "service_type": "RIDE",
+                    "ride_id": ride_id,
+                    "internal_service_id": ride_id,
+                },
+            }
+        },
+    }
+    body, signature = _signed_webhook(event)
+    first = client.post(WEBHOOK_PATH, content=body, headers={"Stripe-Signature": signature})
+    second = client.post(WEBHOOK_PATH, content=body, headers={"Stripe-Signature": signature})
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json().get("duplicate") is True
+    from app.modules.payments.models import AmicorCustomerPayment
+
+    with SessionLocal() as db:
+        rows = db.query(AmicorCustomerPayment).filter_by(stripe_payment_intent_id=intent_id).all()
+        assert len(rows) == 1
+        assert rows[0].payment_status == PAYMENT_SUCCEEDED

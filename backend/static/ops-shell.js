@@ -1517,6 +1517,10 @@
 
   function scheduleRenderPage(options) {
     var opts = options || {};
+    if (!opts.immediate && isDriverMobileSurface() && shouldDeferDriverMobilePollRender()) {
+      window.__amiDeliveryDraftRenderDeferred = true;
+      return;
+    }
     if (opts.immediate) {
       if (driverUiRenderTimer) {
         clearTimeout(driverUiRenderTimer);
@@ -1607,15 +1611,21 @@
   function setHtmlIfChanged(el, html) {
     if (!el) return false;
     if (el.__stableHtml === html) return false;
+    captureDeliveryProofDrafts(el);
+    var savedForm = takeLiveDeliveryForm(el);
     el.__stableHtml = html;
     el.innerHTML = html;
+    putLiveDeliveryForm(el, savedForm);
     return true;
   }
 
   function syncPageContentHtml(el, html) {
     if (!el) return;
+    captureDeliveryProofDrafts(el);
+    var savedForm = takeLiveDeliveryForm(el);
     el.__stableHtml = html;
     el.innerHTML = html;
+    putLiveDeliveryForm(el, savedForm);
   }
 
   function formatIsoShort(ts) {
@@ -7582,8 +7592,9 @@
       '<div class="driver-mobile-layout">' +
         '<section class="driver-mobile-phone">' +
           '<header class="driver-mobile-head">' +
-            '<div><strong>Available Offers</strong><p>Immediate dispatch offers only</p></div>' +
+            '<div><strong>Available Offers</strong><p>DELIVERY offers stay separate from Transportation rides</p></div>' +
           '</header>' +
+          (renderDeliveryOfferCardsHtml() || '<article class="driver-workflow-card"><p class="muted">No DELIVERY offers right now.</p></article>') +
           '<article class="driver-workflow-card">' +
             (immediateOffer && safeText(immediateOffer.ride_id, "")
               ? '<p><strong>Offer:</strong> ' + escapeHtml(shortOperationalId(immediateOffer.ride_id, "ride")) +
@@ -7619,14 +7630,19 @@
               : '<p class="muted">No upcoming scheduled rides.</p>') +
           '</article>' +
           '<header class="driver-mobile-head" style="margin-top:12px;">' +
-            '<div><strong>Current Trip</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
+            '<div><strong>Current Delivery</strong><p>Package job, separate from Transportation</p></div>' +
+            '<span class="status-dot">' + escapeHtml(safeText((safeObject((safeObject(state.deliveryDriver)).activeJob)).status, "none")) + '</span>' +
+          '</header>' +
+          (renderDeliveryActiveJobCardHtml() || '<article class="driver-workflow-card"><p class="muted">No accepted Delivery assigned to this driver.</p></article>') +
+          '<header class="driver-mobile-head" style="margin-top:12px;">' +
+            '<div><strong>Transportation Current Trip</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
             '<span class="status-dot">' + escapeHtml(activeTrip ? titleizeWords(safeText(activeTrip.status, appState.activeStage)) : waitingLabels.statusLabel) + '</span>' +
           '</header>' +
           (activeTrip
             ? ''
             : '<p class="muted driver-awaiting-assignment">' + escapeHtml(waitingLabels.statusMessage) + '</p>') +
           '<article class="driver-workflow-card">' +
-            '<h4>Primary Workflow</h4>' +
+            '<h4>Transportation Primary Workflow</h4>' +
             (activeTrip
               ? ('<div class="table-wrap"><table class="ops-table"><tbody>' +
               '<tr><th>Ride ID</th><td>' + escapeHtml(shortOperationalId(activeTrip.tripId, "n/a")) + '</td></tr>' +
@@ -15727,7 +15743,7 @@
           }
         });
       }
-      scheduleRenderPage(0);
+      scheduleDriverMobilePollRender();
     }
 
     if (opts.lastAction) {
@@ -15998,28 +16014,24 @@
     }
   }
 
-  async function confirmRiderSandboxPayment() {
-    if (!riderStripe || !riderStripeElements) {
-      await mountRiderStripePayment();
+  function buildRiderPaymentReturnUrl(checkout) {
+    var requestId = safeText(checkout && checkout.request_id, "");
+    var rideId = safeText(checkout && checkout.ride_id, "");
+    var configured = safeText(checkout && checkout.return_url, "").trim();
+    if (configured && /^https?:\/\//i.test(configured)) {
+      return configured;
     }
-    if (!riderStripe || !riderStripeElements) {
-      window.alert("Sandbox payment form is not ready yet.");
-      return { ok: false };
+    if (configured && configured.charAt(0) === "/") {
+      return String(window.location.origin || "") + configured;
     }
-    var result = await riderStripe.confirmPayment({
-      elements: riderStripeElements,
-      redirect: "if_required",
-      confirmParams: { return_url: window.location.href }
-    });
-    if (result.error) {
-      state.riderApp.submitStatus = { level: "error", message: result.error.message || "Payment failed. This ride is not in the dispatcher queue." };
-      persistSessionState();
-      renderPage();
-      mountRiderStripePayment();
-      return { ok: false };
-    }
-    var checkout = state.riderApp.checkout || {};
-    var requestId = safeText(checkout.request_id, "");
+    var params = new URLSearchParams();
+    params.set("payment_return", "1");
+    if (requestId) params.set("request_id", requestId);
+    if (rideId) params.set("ride_id", rideId);
+    return String(window.location.origin || "") + "/app/riders?" + params.toString();
+  }
+
+  async function pollRiderPaymentSucceeded(requestId) {
     var paid = false;
     for (var attempt = 0; attempt < 8 && requestId; attempt += 1) {
       try {
@@ -16055,6 +16067,98 @@
     persistSessionState();
     renderPage();
     return { ok: true, pendingWebhook: true };
+  }
+
+  async function confirmRiderSandboxPayment() {
+    if (!riderStripe || !riderStripeElements) {
+      await mountRiderStripePayment();
+    }
+    if (!riderStripe || !riderStripeElements) {
+      window.alert("Sandbox payment form is not ready yet.");
+      return { ok: false };
+    }
+    var checkout = state.riderApp.checkout || {};
+    var returnUrl = buildRiderPaymentReturnUrl(checkout);
+    if (!returnUrl || !/^https?:\/\//i.test(returnUrl)) {
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: "Payment cannot complete because a valid return URL is missing. Refresh and try again."
+      };
+      persistSessionState();
+      renderPage();
+      return { ok: false };
+    }
+    try {
+      if (typeof riderStripeElements.submit === "function") {
+        var submitResult = await riderStripeElements.submit();
+        if (submitResult && submitResult.error) {
+          throw submitResult.error;
+        }
+      }
+      var result = await riderStripe.confirmPayment({
+        elements: riderStripeElements,
+        redirect: "if_required",
+        confirmParams: {
+          return_url: returnUrl
+        }
+      });
+      if (result.error) {
+        throw result.error;
+      }
+    } catch (err) {
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: (err && err.message) ? err.message : "Payment failed. This ride is not in the dispatcher queue."
+      };
+      persistSessionState();
+      renderPage();
+      mountRiderStripePayment();
+      return { ok: false };
+    }
+    var requestId = safeText(checkout.request_id, "");
+    try { sessionStorage.setItem("amicor_rider_payment_request_id", requestId); } catch (_) {}
+    return pollRiderPaymentSucceeded(requestId);
+  }
+
+  async function resumeRiderStripePaymentReturn() {
+    var params = new URLSearchParams(window.location.search || "");
+    if (params.get("payment_return") !== "1") return;
+    var requestId = safeText(params.get("request_id"), "");
+    try { requestId = requestId || sessionStorage.getItem("amicor_rider_payment_request_id") || ""; } catch (_) {}
+    var redirectStatus = safeText(params.get("redirect_status"), "").toLowerCase();
+    state.riderApp = safeObject(state.riderApp);
+    if (redirectStatus === "failed" || redirectStatus === "canceled") {
+      state.riderApp.submitStatus = {
+        level: "error",
+        message: "Sandbox payment was canceled or failed. This ride is not in the dispatcher queue."
+      };
+      persistSessionState();
+      renderPage();
+      return;
+    }
+    if (!requestId) {
+      state.riderApp.submitStatus = {
+        level: "info",
+        message: "Returned from Stripe. Checking payment status…"
+      };
+      persistSessionState();
+      renderPage();
+      return;
+    }
+    state.riderApp.submitStatus = {
+      level: "info",
+      message: "Returning from Stripe sandbox confirmation…"
+    };
+    persistSessionState();
+    renderPage();
+    await pollRiderPaymentSucceeded(requestId);
+    try {
+      var cleaned = new URL(window.location.href);
+      cleaned.searchParams.delete("payment_intent");
+      cleaned.searchParams.delete("payment_intent_client_secret");
+      cleaned.searchParams.delete("redirect_status");
+      history.replaceState({}, "", cleaned.pathname + cleaned.search + cleaned.hash);
+    } catch (_) {}
   }
 
   async function submitRiderRideRequest(recurring) {
@@ -17715,7 +17819,8 @@
     });
     documentEventBindings.forEach(function (binding) {
       try {
-        document.removeEventListener(binding.eventName, binding.handler);
+        var target = binding.element || document;
+        target.removeEventListener(binding.eventName, binding.handler);
       } catch (_) {}
     });
     navEventBindings.forEach(function (binding) {
@@ -17761,7 +17866,7 @@
       refreshDriverWorkflowData({ lastAction: "Driver workspace synchronized (" + triggerSource + ")" }).catch(function () {}).finally(function () {
         refreshInFlight = false;
         if (!isDriverHydrationLocked()) {
-          scheduleRenderPage();
+          scheduleDriverMobilePollRender();
         }
       });
       return;
@@ -18170,6 +18275,9 @@
     }
     loadBackendData({ forceDriverReset: false });
     void refreshAssistantPersistence();
+    if (safeText(state.route, "") === "riders" || String(window.location.pathname || "").indexOf("/riders") >= 0) {
+      void resumeRiderStripePaymentReturn();
+    }
   }
 
   window.AmiOpsShellActions = {
