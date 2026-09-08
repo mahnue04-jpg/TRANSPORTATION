@@ -3,7 +3,7 @@ import re
 
 from app.deployment.release_version import resolve_app_version
 
-DEFAULT_RUNTIME_VERSION = "20260827.9"
+DEFAULT_RUNTIME_VERSION = "20260908.1"
 
 _LOCAL_FRONTEND = "http://127.0.0.1:8010/app"
 _LOCAL_BACKEND = "http://127.0.0.1:8010"

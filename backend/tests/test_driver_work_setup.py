@@ -81,7 +81,7 @@ def test_apply_page_uses_status_cards_instead_of_file_upload():
     assert "Please review and sign the Independent Contractor Agreement." in js
     assert "Please complete your secure tax information." in js
     assert "Payout setup is not complete." in js
-    assert "driver-apply.js?v=20260907.1" in html
+    assert "driver-apply.js?v=20260908.1" in html
 
 
 def test_ica_unsigned_then_signed_reload_shows_on_file(client: TestClient):

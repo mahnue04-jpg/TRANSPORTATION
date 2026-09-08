@@ -534,6 +534,7 @@
     const created = await api("/applications", { method: "POST", body: JSON.stringify({ organization_id: orgInput.value }) });
     appInput.value = created.application.id;
     applicantToken = created.applicant_access_token;
+    existingApplicationLoaded = true;
     persistSession();
     Object.keys(uploadedSignatures).forEach(function (key) { delete uploadedSignatures[key]; });
   }

@@ -2,20 +2,21 @@
   "use strict";
 
   var APP_BASE_PATH = "/app";
+  var PRODUCT_DISPLAY_NAME = "AMICOR Delivery";
 
   var ROUTES = {
-    "home": { path: APP_BASE_PATH, title: "Home", subtitle: "Open the AMICOR apps allowed for your signed-in role." },
-    "dashboard": { path: APP_BASE_PATH + "/dashboard", title: "Dashboard", subtitle: "Healthcare transportation command center with live operational intelligence." },
-    "dispatch": { path: APP_BASE_PATH + "/dispatch", title: "Dispatch Board", subtitle: "Live fleet dispatch, assignment coordination, and escalation control." },
-    "trips": { path: APP_BASE_PATH + "/trips", title: "Trips", subtitle: "Trip lifecycle monitoring across rider, driver, and provider flows." },
+    "home": { path: APP_BASE_PATH, title: "Home", subtitle: "Open the AMICOR Delivery apps allowed for your signed-in role." },
+    "dashboard": { path: APP_BASE_PATH + "/dashboard", title: "Dashboard", subtitle: "AMICOR Delivery command center with live operational intelligence." },
+    "dispatch": { path: APP_BASE_PATH + "/dispatch", title: "Dispatch Board", subtitle: "Live delivery dispatch, assignment coordination, and escalation control." },
+    "trips": { path: APP_BASE_PATH + "/trips", title: "Deliveries", subtitle: "Delivery lifecycle monitoring across customer, driver, and provider flows." },
     "drivers": { path: APP_BASE_PATH + "/drivers", title: "Drivers", subtitle: "Driver operations, compliance state, and shift performance." },
-    "riders": { path: APP_BASE_PATH + "/riders", title: "Rider App", subtitle: "Request rides, track active trips, and contact support." },
-    "providers": { path: APP_BASE_PATH + "/providers", title: "Providers", subtitle: "Facility and provider transport operations portal." },
+    "riders": { path: APP_BASE_PATH + "/riders", title: "Customer App", subtitle: "Request deliveries, track active jobs, and contact support." },
+    "providers": { path: APP_BASE_PATH + "/providers", title: "Providers", subtitle: "Facility and provider delivery operations portal." },
     "vehicles": { path: APP_BASE_PATH + "/vehicles", title: "Vehicles", subtitle: "Fleet inventory, availability, and maintenance readiness." },
-    "billing": { path: APP_BASE_PATH + "/billing", title: "Billing", subtitle: "Revenue tracking, claims reimbursement, and financial controls." },
-    "analytics": { path: APP_BASE_PATH + "/analytics", title: "Reports & Analytics", subtitle: "Operational and financial analytics across dispatch and care delivery." },
+    "billing": { path: APP_BASE_PATH + "/billing", title: "Billing", subtitle: "Revenue tracking, driver payouts, and financial controls." },
+    "analytics": { path: APP_BASE_PATH + "/analytics", title: "Reports & Analytics", subtitle: "Operational and financial analytics across dispatch and delivery." },
     "alerts": { path: APP_BASE_PATH + "/alerts", title: "Alerts", subtitle: "Operational alerts, escalations, and supervision-critical notices." },
-    "mobile": { path: APP_BASE_PATH + "/mobile", title: "Driver Mobile", subtitle: "Field driver sign-in, trip workflow, and assignment sync." },
+    "mobile": { path: APP_BASE_PATH + "/mobile", title: "Driver Mobile", subtitle: "Field driver sign-in, delivery workflow, and assignment sync." },
     "ai-assistant": { path: APP_BASE_PATH + "/ai-assistant", title: "Amicor Nova", subtitle: "Unified AMICOR NOVA home. Governance, authenticated conversation, and voice are live here. /workspace remains the live conversation source as fallback." },
     "settings": { path: APP_BASE_PATH + "/settings", title: "Settings", subtitle: "Organization, permissions, and platform configuration controls." },
     "system-health": { path: APP_BASE_PATH + "/system-health", title: "Operations Status", subtitle: "Operational readiness and live monitoring posture." }
@@ -78,14 +79,14 @@
 
   var LAUNCHER_CORE_TILES = [
     { route: "dashboard", title: "Dashboard", description: "Operational command center and live intelligence." },
-    { route: "riders", title: "Rider", description: "Request rides, track trips, and contact support." },
+    { route: "riders", title: "Customer", description: "Request deliveries, track jobs, and contact support." },
     { route: "dispatch", title: "Dispatch", description: "Live fleet assignment and escalation control." },
-    { route: "trips", title: "Trips", description: "Trip lifecycle across rider, driver, and provider flows." },
-    { route: "mobile", title: "Driver Mobile", description: "Field driver sign-in, offers, and trip workflow." },
+    { route: "trips", title: "Deliveries", description: "Delivery lifecycle across customer, driver, and provider flows." },
+    { route: "mobile", title: "Driver Mobile", description: "Field driver sign-in, offers, and delivery workflow." },
     { route: "drivers", title: "Drivers / Fleet Desk", description: "Driver operations, readiness, and compliance state." },
-    { route: "providers", title: "Providers", description: "Facility and provider transport operations portal." },
+    { route: "providers", title: "Providers", description: "Facility and provider delivery operations portal." },
     { route: "vehicles", title: "Vehicles", description: "Fleet inventory, availability, and maintenance." },
-    { route: "billing", title: "Billing", description: "Completed-trip revenue, claims, and payouts." },
+    { route: "billing", title: "Billing", description: "Completed-delivery revenue and payouts." },
     { route: "analytics", title: "Analytics", description: "Operational and financial reports." },
     { route: "ai-assistant", title: "AI Assistant / Amicor Nova", description: "Unified Nova home: supervised governance now, later capability areas in this shell." },
     { route: "alerts", title: "Alerts", description: "Operational alerts, escalations, and notices." },
@@ -1445,7 +1446,7 @@
 
   function wrapDriverMobilePage(bodyHtml) {
     var header = typeof amicorSurfaceBrandHtml === "function"
-      ? amicorSurfaceBrandHtml("Driver Mobile")
+      ? amicorSurfaceBrandHtml("AMICOR Delivery Driver")
       : "";
     return '<div class="driver-mobile-page">' + header + String(bodyHtml || "") + "</div>";
   }
@@ -1606,6 +1607,26 @@
       .replace(/>/g, "&gt;")
       .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function captureDeliveryProofDrafts(_el) {
+    return {};
+  }
+
+  function takeLiveDeliveryForm(_el) {
+    return {};
+  }
+
+  function putLiveDeliveryForm(_el, _savedForm) {
+    return;
+  }
+
+  function renderDeliveryOfferCardsHtml() {
+    return "";
+  }
+
+  function renderDeliveryActiveJobCardHtml() {
+    return "";
   }
 
   function setHtmlIfChanged(el, html) {
@@ -2816,7 +2837,7 @@
 
     if (!authenticated) {
       return renderPanelBlock(
-        "AMICOR Operations",
+        "AMICOR Delivery Operations",
         "Sign in to open the apps allowed for your role.",
         '<p class="muted">This launcher uses your authenticated session. The role selector is a view lens only and does not grant extra apps.</p>' +
           '<div class="ops-launcher-actions">' +
@@ -2836,8 +2857,8 @@
 
     return [
       renderPanelBlock(
-        "AMICOR Operations",
-        "Choose an application. Each tile opens an existing AMICOR surface — nothing here replaces Driver Mobile, Rider, Dispatch, Billing, or Nova.",
+        "AMICOR Delivery Operations",
+        "Choose an application. Each tile opens an existing AMICOR Delivery surface — nothing here replaces Driver Mobile, Customer, Dispatch, Billing, or Nova.",
         '<div class="ops-launcher-session">' +
           '<span class="badge badge-soft">session roles: ' + escapeHtml(roleLabel) + "</span>" +
         "</div>" +
@@ -5595,7 +5616,7 @@
       etaMin: "",
       driverName: "Awaiting assignment",
       vehicle: "",
-      supportContact: "24/7 Rider Care"
+      supportContact: "24/7 Delivery Support"
     };
   }
 
@@ -5686,23 +5707,23 @@
     } else {
       authBanner =
         '<div class="rider-auth-required" style="margin:12px 0;padding:12px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">' +
-          '<strong>Sign in required.</strong> Log in as a rider to submit ride requests. ' +
+          '<strong>Sign in required.</strong> Log in as a customer to submit delivery requests. ' +
           '<button type="button" class="preview-action rider-action" data-rider-action="sign_in">Sign In</button>' +
         '</div>';
     }
 
     return renderPanelBlock(
-      "Rider and Patient App",
-      "Request rides, schedule recurring transportation, track live trip ETA, and manage support from a healthcare-first rider surface.",
-      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Rider App") : "") +
+      "AMICOR Delivery — Customer Request",
+      "Request deliveries, schedule recurring jobs, track live ETA, and manage support from the AMICOR Delivery customer surface.",
+      (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml("Customer App") : "") +
       submitBanner + authBanner +
       '<div class="rider-app-grid">' +
         '<section class="rider-card">' +
-          '<h4>Ride Request</h4>' +
-          '<p class="muted">Create immediate or recurring transportation requests with appointment context.</p>' +
+          '<h4>Delivery Request</h4>' +
+          '<p class="muted">Create immediate or scheduled AMICOR Delivery requests.</p>' +
           '<div class="grid-2">' +
-            '<label class="muted">Rider Name<input id="rider-name-input" type="text" value="' + escapeHtml(safeText(profile.name, "")) + '" placeholder="Your full name" oninput="window._amiUpdateRiderProfileDraft(\'name\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
-            '<label class="muted">Rider Phone<input id="rider-phone-input" type="text" value="' + escapeHtml(safeText(profile.phone, "")) + '" placeholder="+1 555 123 4567" oninput="window._amiUpdateRiderProfileDraft(\'phone\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Customer Name<input id="rider-name-input" type="text" value="' + escapeHtml(safeText(profile.name, "")) + '" placeholder="Your full name" oninput="window._amiUpdateRiderProfileDraft(\'name\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+            '<label class="muted">Customer Phone<input id="rider-phone-input" type="text" value="' + escapeHtml(safeText(profile.phone, "")) + '" placeholder="+1 555 123 4567" oninput="window._amiUpdateRiderProfileDraft(\'phone\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
             '<label class="muted">Pickup<input id="rider-pickup-input" type="text" value="' + escapeHtml(safeText(profile.pickup, "")) + '" placeholder="Pickup address" oninput="window._amiUpdateRiderProfileDraft(\'pickup\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
             '<label class="muted">Dropoff<input id="rider-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.dropoff, "")) + '" placeholder="Dropoff address" oninput="window._amiUpdateRiderProfileDraft(\'dropoff\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
             '<label class="muted">Ride Type<select id="rider-ride-type-input" onchange="window._amiUpdateRiderProfileDraft(\'rideType\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="healthcare"' + (safeText(profile.rideType, "healthcare") === "healthcare" ? ' selected' : '') + '>Healthcare</option><option value="work"' + (safeText(profile.rideType, "healthcare") === "work" ? ' selected' : '') + '>Work</option><option value="grocery"' + (safeText(profile.rideType, "healthcare") === "grocery" ? ' selected' : '') + '>Grocery</option><option value="church"' + (safeText(profile.rideType, "healthcare") === "church" ? ' selected' : '') + '>Church</option><option value="personal"' + (safeText(profile.rideType, "healthcare") === "personal" ? ' selected' : '') + '>Personal</option></select></label>' +
@@ -5714,11 +5735,11 @@
               ? '<label class="muted">Return Ride Mode<select id="rider-return-type-input" onchange="window._amiUpdateRiderProfileDraft(\'returnPickupType\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="scheduled_time"' + (safeText(profile.returnPickupType, "scheduled_time") === "scheduled_time" ? ' selected' : '') + '>Fixed Return Time</option><option value="call_when_ready"' + (safeText(profile.returnPickupType, "scheduled_time") === "call_when_ready" ? ' selected' : '') + '>Call When Ready</option></select></label>' +
                 (showScheduledReturn
                   ? '<label class="muted">Fixed Return Pickup Time<input id="rider-return-time-input" type="time" value="' + escapeHtml(safeText(profile.returnPickupTime, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'returnPickupTime\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
-                  : '<p class="muted">Return leg will dispatch when patient is marked ready.</p>') +
-                '<label class="muted">Return Pickup Address<input id="rider-return-pickup-input" type="text" value="' + escapeHtml(safeText(profile.returnPickupAddress, profile.dropoff)) + '" placeholder="Clinic or return pickup location" oninput="window._amiUpdateRiderProfileDraft(\'returnPickupAddress\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
+                  : '<p class="muted">Return leg will dispatch when the customer is marked ready.</p>') +
+                '<label class="muted">Return Pickup Address<input id="rider-return-pickup-input" type="text" value="' + escapeHtml(safeText(profile.returnPickupAddress, profile.dropoff)) + '" placeholder="Return pickup location" oninput="window._amiUpdateRiderProfileDraft(\'returnPickupAddress\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>' +
                 '<label class="muted">Return Destination Address<input id="rider-return-dropoff-input" type="text" value="' + escapeHtml(safeText(profile.returnDropoffAddress, profile.pickup)) + '" placeholder="Home or return destination" oninput="window._amiUpdateRiderProfileDraft(\'returnDropoffAddress\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
               : '') +
-            '<label class="muted">Recurring Ride Option<select id="rider-recurrence-input" onchange="window._amiUpdateRiderProfileDraft(\'recurrence\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="none"' + (safeText(profile.recurrence, "none") === "none" ? ' selected' : '') + '>None</option><option value="weekly"' + (safeText(profile.recurrence, "none") === "weekly" ? ' selected' : '') + '>Weekly (Dialysis)</option></select></label>' +
+            '<label class="muted">Recurring Delivery Option<select id="rider-recurrence-input" onchange="window._amiUpdateRiderProfileDraft(\'recurrence\', this.value); renderPage();" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"><option value="none"' + (safeText(profile.recurrence, "none") === "none" ? ' selected' : '') + '>None</option><option value="weekly"' + (safeText(profile.recurrence, "none") === "weekly" ? ' selected' : '') + '>Weekly</option></select></label>' +
             (showRecurrenceSection
               ? '<div class="muted" style="grid-column:1/-1">Recurring Weekdays: ' +
                 renderRiderWeekdayCheckbox("mon", "Mon", profile.recurrenceWeekdays) +
@@ -5733,20 +5754,20 @@
                 '<label class="muted">Recurrence End Date<input id="rider-recurrence-end-input" type="date" value="' + escapeHtml(safeText(profile.recurrenceEndDate, "")) + '" oninput="window._amiUpdateRiderProfileDraft(\'recurrenceEndDate\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff"></label>'
               : '') +
             '<label class="muted" style="display:flex;align-items:center;gap:8px;margin-top:6px"><input id="rider-same-driver-input" type="checkbox"' + (profile.sameDriverPreference ? ' checked' : '') + ' onchange="window._amiUpdateRiderProfileDraft(\'sameDriverPreference\', this.checked)"> Same-Driver Preference</label>' +
-            '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (wheelchair, appointment time, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
+            '<label class="muted">Notes<textarea id="rider-notes-input" rows="3" placeholder="Optional notes (package size, access instructions, etc.)" oninput="window._amiUpdateRiderProfileDraft(\'notes\', this.value)" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.14);background:#fff">' + escapeHtml(safeText(profile.notes, "")) + '</textarea></label>' +
           '</div>' +
           renderRiderFareAndPaymentPanel(riderState) +
           '<div class="command-actions">' +
-            '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? (safeText(riderState.submitStatus && riderState.submitStatus.message, "").indexOf("Checking status") >= 0 ? 'Checking ride status…' : 'Submitting ride…') : 'Request Ride Now') + '</button>' +
-            '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Submit Scheduled Ride</button>' +
-            '<button class="preview-action rider-action" data-rider-action="cancel_active_trip"' + (activeRequestId ? '' : ' disabled') + '>Cancel Active Ride</button>' +
+            '<button class="preview-action rider-action" data-rider-action="request_now"' + (riderState.submitInFlight ? ' disabled' : '') + '>' + (riderState.submitInFlight ? (safeText(riderState.submitStatus && riderState.submitStatus.message, "").indexOf("Checking status") >= 0 ? 'Checking delivery status…' : 'Submitting delivery…') : 'Request Delivery Now') + '</button>' +
+            '<button class="preview-action rider-action" data-rider-action="schedule_recurring"' + (riderState.submitInFlight ? ' disabled' : '') + '>Submit Scheduled Delivery</button>' +
+            '<button class="preview-action rider-action" data-rider-action="cancel_active_trip"' + (activeRequestId ? '' : ' disabled') + '>Cancel Active Delivery</button>' +
           '</div>' +
           '<p class="muted">Latest action: ' + escapeHtml(safeText(riderState.lastAction, 'none')) + '</p>' +
         '</section>' +
         '<section class="rider-card">' +
-          '<h4>Live Trip Tracking</h4>' +
+          '<h4>Live Delivery Tracking</h4>' +
           '<div class="grid-2">' +
-            renderMetric("Trip", activeRequestId ? safeText(activeTrip.tripId, "Active ride") : "No active ride") +
+            renderMetric("Delivery", activeRequestId ? safeText(activeTrip.tripId, "Active delivery") : "No active delivery") +
             renderMetric("Status", activeRequestId ? titleizeWords(safeText(activeTrip.status, "pending")) : "None") +
             renderMetric("ETA", activeRequestId && safeText(activeTrip.etaMin, "") ? safeText(activeTrip.etaMin, "") + " min" : "pending") +
             renderMetric("Driver", activeRequestId ? safeText(activeTrip.driverName, "Awaiting assignment") : "Not assigned") +
@@ -5755,7 +5776,7 @@
           '</div>' +
           '<p class="muted">' + (activeRequestId
             ? ('Pickup: ' + escapeHtml(safeText(activeTrip.pickup, "pickup")) + ' → Dropoff: ' + escapeHtml(safeText(activeTrip.dropoff, "dropoff")))
-            : 'Submit a ride request to begin live trip tracking.') + '</p>' +
+            : 'Submit a delivery request to begin live tracking.') + '</p>' +
         '</section>' +
         '<section class="rider-card">' +
           '<h4>Recurring Schedule</h4>' +
@@ -7592,9 +7613,9 @@
       '<div class="driver-mobile-layout">' +
         '<section class="driver-mobile-phone">' +
           '<header class="driver-mobile-head">' +
-            '<div><strong>Available Offers</strong><p>DELIVERY offers stay separate from Transportation rides</p></div>' +
+            '<div><strong>Available Offers</strong><p>New AMICOR Delivery jobs for this driver</p></div>' +
           '</header>' +
-          (renderDeliveryOfferCardsHtml() || '<article class="driver-workflow-card"><p class="muted">No DELIVERY offers right now.</p></article>') +
+          (renderDeliveryOfferCardsHtml() || '') +
           '<article class="driver-workflow-card">' +
             (immediateOffer && safeText(immediateOffer.ride_id, "")
               ? '<p><strong>Offer:</strong> ' + escapeHtml(shortOperationalId(immediateOffer.ride_id, "ride")) +
@@ -7602,7 +7623,7 @@
               : '<p class="muted">No immediate offers right now.</p>') +
           '</article>' +
           '<header class="driver-mobile-head" style="margin-top:12px;">' +
-            '<div><strong>Upcoming Schedule</strong><p>Future reserved rides</p></div>' +
+            '<div><strong>Upcoming Schedule</strong><p>Future reserved deliveries</p></div>' +
           '</header>' +
           '<article class="driver-workflow-card">' +
             (upcomingSchedule.length
@@ -7627,26 +7648,22 @@
                     startRouteBtn +
                   '</div>';
                 }).join("")
-              : '<p class="muted">No upcoming scheduled rides.</p>') +
+              : '<p class="muted">No upcoming scheduled deliveries.</p>') +
           '</article>' +
+          (renderDeliveryActiveJobCardHtml() || '') +
           '<header class="driver-mobile-head" style="margin-top:12px;">' +
-            '<div><strong>Current Delivery</strong><p>Package job, separate from Transportation</p></div>' +
-            '<span class="status-dot">' + escapeHtml(safeText((safeObject((safeObject(state.deliveryDriver)).activeJob)).status, "none")) + '</span>' +
-          '</header>' +
-          (renderDeliveryActiveJobCardHtml() || '<article class="driver-workflow-card"><p class="muted">No accepted Delivery assigned to this driver.</p></article>') +
-          '<header class="driver-mobile-head" style="margin-top:12px;">' +
-            '<div><strong>Transportation Current Trip</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
+            '<div><strong>Current Delivery</strong><p>' + escapeHtml(shiftOnline ? 'Online and dispatch-ready' : 'Offline') + '</p></div>' +
             '<span class="status-dot">' + escapeHtml(activeTrip ? titleizeWords(safeText(activeTrip.status, appState.activeStage)) : waitingLabels.statusLabel) + '</span>' +
           '</header>' +
           (activeTrip
             ? ''
             : '<p class="muted driver-awaiting-assignment">' + escapeHtml(waitingLabels.statusMessage) + '</p>') +
           '<article class="driver-workflow-card">' +
-            '<h4>Transportation Primary Workflow</h4>' +
+            '<h4>Delivery Workflow</h4>' +
             (activeTrip
               ? ('<div class="table-wrap"><table class="ops-table"><tbody>' +
-              '<tr><th>Ride ID</th><td>' + escapeHtml(shortOperationalId(activeTrip.tripId, "n/a")) + '</td></tr>' +
-              '<tr><th>Rider Name</th><td>' + escapeHtml(riderName) + '</td></tr>' +
+              '<tr><th>Delivery ID</th><td>' + escapeHtml(shortOperationalId(activeTrip.tripId, "n/a")) + '</td></tr>' +
+              '<tr><th>Customer Name</th><td>' + escapeHtml(riderName) + '</td></tr>' +
               '<tr><th>Pickup Address</th><td>' + escapeHtml(routePickup) + '</td></tr>' +
               '<tr><th>Destination Address</th><td>' + escapeHtml(routeDropoff) + '</td></tr>' +
               (safeText(activeTrip.schedulingSummary, "")
@@ -7657,13 +7674,13 @@
               '<tr><th>ETA</th><td>' + escapeHtml(etaText) + '</td></tr>' +
             '</tbody></table></div>' +
             '<div class="command-actions">' +
-              '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Trip</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>Start Route / En Route to Pickup</button>' +
+              '<button class="preview-action driver-action" data-driver-action="accept_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableAccept ? ' disabled' : '') + '>Accept Delivery</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_route" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartRoute ? ' disabled' : '') + '>En Route to Pickup</button>' +
               '<button class="preview-action driver-action" data-driver-action="arrive_pickup" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArrive ? ' disabled' : '') + '>Arrived at Pickup</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Rider On Board / Picked Up</button>' +
-              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Start Transportation</button>' +
-              '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Destination</button>' +
-              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Trip</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disablePickup ? ' disabled' : '') + '>Pickup Complete</button>' +
+              '<button class="preview-action driver-action" data-driver-action="start_transport" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableStartTransport ? ' disabled' : '') + '>Delivery In Progress</button>' +
+              '<button class="preview-action driver-action" data-driver-action="arrive_destination" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableArriveDestination ? ' disabled' : '') + '>Arrived at Drop-off</button>' +
+              '<button class="preview-action driver-action" data-driver-action="complete_trip" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '"' + (disableComplete ? ' disabled' : '') + '>Complete Delivery</button>' +
               (["accepted", "assigned", "scheduled_accepted"].indexOf(tripStatus) >= 0 && ["driver_en_route", "en_route_pickup", "arrived", "rider_onboard", "in_progress"].indexOf(tripStatus) < 0
                 ? '<button class="preview-action driver-action driver-action-danger" data-driver-action="request_cancellation" data-trip-id="' + escapeHtml(safeText(activeTrip.tripId, "")) + '">Request Cancellation</button>'
                 : '') +
@@ -7854,10 +7871,10 @@
       renderStreamStatusPanel(phase17),
       renderAuthDiagnosticsCard(slice),
       renderPanelBlock(
-        "Provider Healthcare Portal",
-        "Provider coverage balancing, response backlog management, and appointment-window coordination workflows.",
+        "AMICOR Delivery Provider Portal",
+        "Provider coverage balancing, response backlog management, and delivery-window coordination workflows.",
         '<div class="grid-4">' +
-          renderMetric("Patients Scheduled", String(safeNumber((phase17.lifecycle || {}).REQUESTED, 0))) +
+          renderMetric("Jobs Scheduled", String(safeNumber((phase17.lifecycle || {}).REQUESTED, 0))) +
           renderMetric("Active Providers", String(safeNumber((phase17.providerStates || {}).active, 0))) +
           renderMetric("Active Facility Requests", String(safeNumber(slice.activeRides, 0))) +
           renderMetric("Pending Authorizations", String(safeNumber((complianceOverview.pending_authorizations), 0))) +
@@ -7914,7 +7931,7 @@
       renderStreamStatusPanel(phase17),
       renderPanelBlock(
         "Dispatcher Operations Panel",
-        "Medical transportation command center with assignment pressure, escalation ownership, and dispatch recovery posture.",
+        "AMICOR Delivery command center with assignment pressure, escalation ownership, and dispatch recovery posture.",
         '<div class="grid-4">' +
           renderMetric("Assignment Pressure", String(requestedTrips), requestedTrips > 0 ? "warn" : "good") +
           renderMetric("Coverage Recovery", String(assignedTrips), assignedTrips > 0 ? "good" : "warn") +
@@ -7991,8 +8008,8 @@
         { href: "/app/dispatch", title: "Dispatch", description: "Live assignment and escalation control." },
         { href: "/app/billing", title: "Billing", description: "Completed-trip financial source of truth." },
         { href: "/app/drivers", title: "Drivers", description: "Driver operations workspace." },
-        { href: "/app/riders", title: "Riders / Patients", description: "Rider and patient coordination." },
-        { href: "/app/mobile", title: "Mobile Apps", description: "Driver and rider mobile surfaces." }
+        { href: "/app/riders", title: "Customers", description: "Customer delivery request and tracking." },
+        { href: "/app/mobile", title: "Mobile Apps", description: "Driver and customer mobile surfaces." }
       ])
     ].join("");
   }
@@ -8650,11 +8667,11 @@
             accepted: "Assigned",
             driver_en_route: "Driver En Route",
             arrived: "Arrived at Pickup",
-            patient_onboard: "Patient Onboard",
-            onboard: "Patient Onboard",
-            in_transit: "In Transit",
-            in_progress: "In Transit",
-            arrived_at_facility: "Arrived Facility",
+            patient_onboard: "Pickup Complete",
+            onboard: "Pickup Complete",
+            in_transit: "Delivery In Progress",
+            in_progress: "Delivery In Progress",
+            arrived_at_facility: "Arrived at Drop-off",
             completed: "Completed",
             resolved: "Completed",
             escalated: "Escalated",
@@ -8717,13 +8734,13 @@
             intake_review: "Intake Review",
             driver_assignment_confirmed: "Driver Assigned",
             rural_pickup_en_route: "Driver En Route",
-            onboard_confirmed: "Patient Onboard",
-            facility_route_active: "Active Facility Transport",
-            facility_arrival_confirmed: "Arrived Facility",
+            onboard_confirmed: "Pickup Complete",
+            facility_route_active: "Delivery In Progress",
+            facility_arrival_confirmed: "Arrived at Drop-off",
             transport_completed: "Completed",
             driver_shortage_escalated: "Driver Shortage Escalated"
           };
-          return '<tr><td>' + escapeHtml(safeText(trip.id, "TRIP")) + '</td><td>' + escapeHtml(safeText(trip.riderName, "Rider")) + '</td><td>' + escapeHtml(safeText(trip.assignedDriverName, "unassigned")) + '</td><td>' + lifecycleBadge(trip.state) + '</td><td>' + escapeHtml(String(safeNumber(trip.etaMin, 0))) + ' min</td><td><span class="badge badge-soft">' + escapeHtml(safeText(routeStatusMap[routeStatusText], titleizeWords(routeStatusText))) + '</span></td><td><button class="btn-action" onclick="window._amiHandleDispatchMarkArrived(\'' + escapeHtml(tripId) + '\')">Mark Arrived</button> <button class="btn-action" onclick="window._amiHandleDispatchComplete(\'' + escapeHtml(tripId) + '\')">Complete Ride</button> <button class="btn-action" onclick="window._amiHandleDispatchMonitor(\'' + escapeHtml(tripId) + '\')">Monitor</button></td></tr>';
+          return '<tr><td>' + escapeHtml(safeText(trip.id, "TRIP")) + '</td><td>' + escapeHtml(safeText(trip.riderName, "Rider")) + '</td><td>' + escapeHtml(safeText(trip.assignedDriverName, "unassigned")) + '</td><td>' + lifecycleBadge(trip.state) + '</td><td>' + escapeHtml(String(safeNumber(trip.etaMin, 0))) + ' min</td><td><span class="badge badge-soft">' + escapeHtml(safeText(routeStatusMap[routeStatusText], titleizeWords(routeStatusText))) + '</span></td><td><button class="btn-action" onclick="window._amiHandleDispatchMarkArrived(\'' + escapeHtml(tripId) + '\')">Mark Arrived</button> <button class="btn-action" onclick="window._amiHandleDispatchComplete(\'' + escapeHtml(tripId) + '\')">Complete Delivery</button> <button class="btn-action" onclick="window._amiHandleDispatchMonitor(\'' + escapeHtml(tripId) + '\')">Monitor</button></td></tr>';
         }).join("");
         if (!activeRows) {
           activeRows = '<tr><td colspan="7" class="muted">No active transports are currently in progress.</td></tr>';
@@ -8769,24 +8786,24 @@
               renderMetric("Pending Intake", String(queueTrips.length), queueTrips.length > 0 ? "warn" : "good") +
               renderMetric("Assigned", String(assignedWorkflowTrips.length), assignedWorkflowTrips.length > 0 ? "warn" : "good") +
               renderMetric("Driver En Route", String(driverEnRouteTrips.length), driverEnRouteTrips.length > 0 ? "good" : "neutral") +
-              renderMetric("Patient Onboard", String(patientOnboardTrips.length), patientOnboardTrips.length > 0 ? "good" : "neutral") +
-              renderMetric("In Transit", String(inTransitWorkflowTrips.length), inTransitWorkflowTrips.length > 0 ? "good" : "neutral") +
-              renderMetric("Arrived Facility", String(arrivedFacilityTrips.length), arrivedFacilityTrips.length > 0 ? "good" : "neutral") +
+              renderMetric("Pickup Complete", String(patientOnboardTrips.length), patientOnboardTrips.length > 0 ? "good" : "neutral") +
+              renderMetric("Delivery In Progress", String(inTransitWorkflowTrips.length), inTransitWorkflowTrips.length > 0 ? "good" : "neutral") +
+              renderMetric("Arrived at Drop-off", String(arrivedFacilityTrips.length), arrivedFacilityTrips.length > 0 ? "good" : "neutral") +
               renderMetric("Completed", String(completedWorkflowTrips.length), completedWorkflowTrips.length > 0 ? "good" : "neutral") +
               renderMetric("Escalated", String(escalatedTrips.length), escalatedTrips.length > 0 ? "warn" : "good") +
               renderMetric("Supervisor Reviewed", String(supervisorReviewedTrips.length), supervisorReviewedTrips.length > 0 ? "good" : "neutral") +
             '</div>' +
-            '<p class="muted">Operational flow: Requested → Assigned → Driver En Route → Patient Onboard → In Transit → Arrived Facility → Completed → Escalated → Supervisor Reviewed.</p>',
+            '<p class="muted">Operational flow: Requested → Assigned → En Route to Pickup → Pickup Complete → Delivery In Progress → Arrived at Drop-off → Completed.</p>',
             'dispatch-lifecycle'
           ),
-          renderPanelBlock("Active Trip Queue", "Requested, scheduled, assigned, and delayed healthcare transport trips requiring dispatch action.",
-            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Trip ID</th><th>Patient</th><th>Leg</th><th>Pickup Facility</th><th>Dropoff Facility</th><th>Wait Time</th><th>Priority</th><th>Trip Stage</th><th>Requested At</th><th>Appt Window</th><th>Coordination</th><th>SLA Window</th><th>Actions</th></tr></thead><tbody id="dispatch-queue-tbody">' + queueRows + '</tbody></table></div>',
+          renderPanelBlock("Active Delivery Queue", "Requested, scheduled, assigned, and delayed deliveries requiring dispatch action.",
+            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Delivery ID</th><th>Customer</th><th>Leg</th><th>Pickup</th><th>Drop-off</th><th>Wait Time</th><th>Priority</th><th>Stage</th><th>Requested At</th><th>Window</th><th>Coordination</th><th>SLA Window</th><th>Actions</th></tr></thead><tbody id="dispatch-queue-tbody">' + queueRows + '</tbody></table></div>',
             "dispatch-queue"),
           renderPanelBlock("Driver Status Board", "Driver statuses, selection, and assignment routing.",
             '<div id="available-drivers-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">' + driverCards + '</div>',
             "available-drivers"),
-          renderPanelBlock("Live Trip Management", "Trips currently in progress with route status indicators, patient transport context, and completion controls.",
-            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Trip ID</th><th>Patient</th><th>Driver</th><th>Transport State</th><th>ETA</th><th>Route Status</th><th>Actions</th></tr></thead><tbody>' + activeRows + '</tbody></table></div>',
+          renderPanelBlock("Live Delivery Management", "Deliveries currently in progress with route status indicators and completion controls.",
+            '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Delivery ID</th><th>Customer</th><th>Driver</th><th>Delivery State</th><th>ETA</th><th>Route Status</th><th>Actions</th></tr></thead><tbody>' + activeRows + '</tbody></table></div>',
             "active-trips"),
           renderPanelBlock("Dispatch Escalation and Incident Watch", "Escalation and exception signals requiring supervised dispatch triage.",
             '<div class="table-wrap"><table class="ops-table"><thead><tr><th>Trip ID</th><th>Indicator</th><th>Priority</th><th>State</th></tr></thead><tbody>' + escalationModule.slice(0, 12).map(function (item, idx) {
@@ -9637,8 +9654,8 @@
     return [
       (typeof amicorSurfaceBrandHtml === "function" ? amicorSurfaceBrandHtml() : ""),
       renderPanelBlock(
-        "AMICOR Operations Control Center",
-        "Create records, execute live ride workflow, and verify backend/UI proof in one screen.",
+        "AMICOR Delivery Control Center",
+        "Create records, execute live delivery workflow, and verify backend/UI proof in one screen.",
         '<article class="tile" style="margin-bottom:12px"><h4>Action Results</h4><ul class="list" id="dispatcher-action-results">' + feedbackRows + '</ul></article>' +
         '<div class="grid-2">' +
           '<article class="tile"><h4>1. Create Records</h4>' +
@@ -9883,8 +9900,8 @@
     });
 
     return renderPanelBlock(
-      "Billing & Claims",
-      "Single source of truth for completed trips: fare, driver payout, platform revenue, payments, and receipts.",
+      "Billing & Earnings",
+      "Single source of truth for completed deliveries: fare, driver payout, AMICOR share, payments, and receipts.",
       '<div class="grid-4">' +
         renderMetric("Completed Trips", completedTrips) +
         renderMetric("Billing Handoffs", String(completedRows.length)) +
@@ -9898,7 +9915,7 @@
       '</div>' +
       '<div class="divider"></div>' +
       (activePipeline.length
-        ? '<section class="panel"><h4>Active trips (awaiting completion)</h4><table class="data-table"><thead><tr><th>Passenger</th><th>Ride</th><th>Driver</th><th>Status</th><th>Pickup</th></tr></thead><tbody>'
+        ? '<section class="panel"><h4>Active deliveries (awaiting completion)</h4><table class="data-table"><thead><tr><th>Customer</th><th>Delivery</th><th>Driver</th><th>Status</th><th>Pickup</th></tr></thead><tbody>'
           + activePipeline.slice(0, 20).map(function (ride) {
               return '<tr><td>' + escapeHtml(safeText(ride.passenger_name, "Passenger")) + '</td><td>'
                 + escapeHtml(String(ride.id || "").slice(0, 10)) + '</td><td>'
@@ -9910,7 +9927,7 @@
         : '<p class="muted">No active assigned trips in billing pipeline. Assigned rides appear here until trip completion creates a billing handoff.</p>') +
       '<div class="divider"></div>' +
       (completedRows.length
-        ? '<section class="panel"><h4>Completed trips (billing ledger)</h4><table class="data-table"><thead><tr><th>Passenger</th><th>Ride</th><th>Fare</th><th>Driver Pay</th><th>Platform</th><th>Payment</th><th>Status</th></tr></thead><tbody>'
+        ? '<section class="panel"><h4>Completed deliveries (billing ledger)</h4><table class="data-table"><thead><tr><th>Customer</th><th>Delivery</th><th>Fare</th><th>Driver Pay</th><th>AMICOR Share</th><th>Payment</th><th>Status</th></tr></thead><tbody>'
           + completedRows.slice(0, 40).map(function (row) {
               return '<tr><td>' + escapeHtml(safeText(row.passenger_name, "Passenger")) + '</td><td>'
                 + escapeHtml(String(row.id || "").slice(0, 10)) + '</td><td>$'
@@ -14775,7 +14792,7 @@
         etaMin: safeText(payload.etaMinutes, activeRide.estimated_duration_minutes || "pending"),
         driverName: safeText(activeRide.driver_name || activeRide.assigned_driver_name, driverAssigned ? "Assigned driver" : "Awaiting assignment"),
         vehicle: safeText(activeRide.vehicle_id || activeRide.vehicle, driverAssigned ? "En route" : "Vehicle pending"),
-        supportContact: "24/7 Rider Care"
+        supportContact: "24/7 Delivery Support"
       } : emptyRiderActiveTrip(),
       recurringSchedule: Array.isArray(riderState.recurringSchedule) ? riderState.recurringSchedule : [],
       notifications: notifications,
@@ -15901,7 +15918,7 @@
       etaMin: "",
       driverName: "Awaiting assignment",
       vehicle: "Vehicle pending",
-      supportContact: "24/7 Rider Care"
+      supportContact: "24/7 Delivery Support"
     };
 
     logRiderSubmitEvent(recoveredAfterTimeout ? "rider_submit_recovered" : "rider_submit_success", {

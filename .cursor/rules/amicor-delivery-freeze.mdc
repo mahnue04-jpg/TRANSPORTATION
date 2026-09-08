@@ -1,0 +1,31 @@
+---
+description: Freeze AMICOR Delivery production build except verified launch-critical changes
+alwaysApply: true
+---
+
+# AMICOR Delivery production freeze
+
+AMICOR Delivery operational surfaces are frozen after the 2026-09-08 cleanup pass.
+Do not add Delivery features or make opportunistic refactors.
+
+## Protected
+
+- Delivery-facing ops-shell branding and navigation (`ops-shell.html`, `ops-shell.js`)
+- Driver apply / onboarding resume and Driver 001 safety
+- Shared Health ISF backend used by Delivery (do not rename modules or migrate hostname)
+- Frozen private-pay revenue path (see `private-pay-revenue-freeze.mdc`)
+
+## Allowed
+
+- Verified launch-blocking bugs
+- Compliance-required changes
+- Launch-critical business needs explicitly requested by the user
+- Read-only audits and documentation
+
+## Hard prohibitions unless the user explicitly overrides
+
+- Stripe LIVE / real-money keys
+- Delete, reset, replace, or duplicate Driver 001
+- Render hostname / service rename away from `amicor-health-isf`
+- Broad refactors, maps work, website redesign, new Delivery features
+- AMICOR Nova feature work in this freeze window

@@ -60,8 +60,8 @@ def test_shell_cache_bust_aligns_injected_runtime_version() -> None:
     assert "ops-shell.js?v=" + DEFAULT_RUNTIME_VERSION in injected or (
         "ops-shell.js?v=" in injected and DEFAULT_RUNTIME_VERSION in injected.split("ops-shell.js?v=", 1)[1][:80]
     )
-    assert 'src="/static/ops-shell.js?v=20260827.9"' in OPS_HTML
-    assert 'href="/static/ops-shell.css?v=20260827.9"' in OPS_HTML
+    assert 'src="/static/ops-shell.js?v=20260908.1"' in OPS_HTML
+    assert 'href="/static/ops-shell.css?v=20260908.1"' in OPS_HTML
     js_stamp = injected.split("ops-shell.js?v=", 1)[1].split('"', 1)[0]
     css_stamp = injected.split("ops-shell.css?v=", 1)[1].split('"', 1)[0]
     assert DEFAULT_RUNTIME_VERSION in js_stamp

@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0b6bcb" />
-  <title>AMICOR Operations</title>
+  <title>AMICOR Delivery Operations</title>
   <link rel="icon" href="/static/branding/favicon.ico?v=20260803.1" sizes="any" />
   <link rel="icon" href="/static/branding/amicor-mark.png?v=20260803.1" type="image/png" />
   <link rel="apple-touch-icon" href="/static/branding/apple-touch-icon.png?v=20260803.1" />
   <link rel="manifest" href="/static/manifest.webmanifest?v=20260803.1" />
   <link rel="stylesheet" href="/static/branding/brand.css?v=20260803.1" />
-  <link rel="stylesheet" href="/static/ops-shell.css?v=20260827.9" />
+  <link rel="stylesheet" href="/static/ops-shell.css?v=20260908.1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
@@ -23,9 +23,9 @@
         <a href="/app" data-route="home">Home</a>
         <a href="/app/dashboard" data-route="dashboard">Dashboard</a>
         <a href="/app/dispatch" data-route="dispatch">Dispatch</a>
-        <a href="/app/trips" data-route="trips">Trips</a>
+        <a href="/app/trips" data-route="trips">Deliveries</a>
         <a href="/app/drivers" data-route="drivers">Drivers</a>
-        <a href="/app/riders" data-route="riders">Riders / Patients</a>
+        <a href="/app/riders" data-route="riders">Customers</a>
         <a href="/app/providers" data-route="providers">Providers</a>
         <a href="/app/vehicles" data-route="vehicles">Vehicles</a>
         <a href="/app/billing" data-route="billing">Billing</a>
@@ -55,14 +55,14 @@
     <main class="ops-main">
       <header class="ops-topbar">
         <div>
-          <p class="ops-kicker">AMICOR</p>
+          <p class="ops-kicker">AMICOR Delivery</p>
           <h2 id="page-title">Dashboard</h2>
           <p id="page-subtitle" class="ops-subtitle">Operational platform surface</p>
         </div>
         <div class="ops-topbar-meta">
           <label class="ops-search" for="ops-search-input">
             <span class="sr-only">Search operational entities</span>
-            <input id="ops-search-input" type="search" placeholder="Search trips, drivers, patients..." autocomplete="off" />
+            <input id="ops-search-input" type="search" placeholder="Search deliveries, drivers, customers..." autocomplete="off" />
           </label>
           <span id="workspace-pill" class="badge badge-soft">workspace: operations</span>
           <span id="last-updated-pill" class="badge badge-soft">updated —</span>
@@ -97,6 +97,6 @@
   <script src="/static/ux/uploadUX.js?v=20260827.1"></script>
   <script src="/static/branding/brand.js?v=20260803.1"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/ops-shell.js?v=20260827.9"></script>
+  <script src="/static/ops-shell.js?v=20260908.1"></script>
 </body>
 </html>

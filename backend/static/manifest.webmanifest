@@ -7,7 +7,7 @@
   "orientation": "any",
   "background_color": "#020a16",
   "theme_color": "#0b6bcb",
-  "description": "AMICOR — Transport. Care. Connect. Healthcare transportation operations, dispatch, and coordinated NEMT workflows.",
+  "description": "AMICOR Delivery — operational dispatch, driver mobile, customer requests, and billing.",
   "icons": [
     {
       "src": "/static/branding/android-chrome-192.png?v=20260803.1",

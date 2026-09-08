@@ -85,7 +85,7 @@ def test_applicant_facing_html_is_simple():
     admin_html = (_static / "driver-onboarding-admin.html").read_text(encoding="utf-8")
     admin_js = (_static / "driver-onboarding-admin.js").read_text(encoding="utf-8")
     assert "About you" in html
-    assert "Become an Amicor Driver" in html
+    assert "Become an AMICOR Delivery Driver" in html
     assert "Application submitted" in html
     assert "start-new-application" in html
     assert "clearApplicationSession" in js
@@ -95,7 +95,7 @@ def test_applicant_facing_html_is_simple():
     assert "normalizeDateValue" in js
     assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
-    assert "driver-apply.js?v=20260907.1" in html
+    assert "driver-apply.js?v=20260908.1" in html
     assert "Set Up Payout Account" in html
     assert "file_contractor" not in html
     assert "id=\"ica-sign-btn\"" in html
