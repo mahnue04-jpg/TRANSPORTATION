@@ -103,7 +103,7 @@ def prepare_driver_001_validation(
             email=email,
             mobile_phone=mobile_phone,
         )
-        application, applicant_token = create_draft_application(
+        application, applicant_token, _resumed = create_draft_application(
             db,
             organization_id=organization_id,
             payload=payload,

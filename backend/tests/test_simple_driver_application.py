@@ -95,7 +95,7 @@ def test_applicant_facing_html_is_simple():
     assert "normalizeDateValue" in js
     assert "onlyIfEmpty" in js
     assert "A new application was not created" in js
-    assert "driver-apply.js?v=20260908.1" in html
+    assert "driver-apply.js?v=20260909.1" in html
     assert "Set Up Payout Account" in html
     assert "file_contractor" not in html
     assert "id=\"ica-sign-btn\"" in html
@@ -458,9 +458,9 @@ def test_driver_001_identity_cannot_fork_a_second_application(client: TestClient
             "email": "driver001.guard@example.com",
         },
     )
-    assert fork.status_code == 409, fork.text
-    assert "already exists" in fork.text.lower()
-    assert "was not created" in fork.text.lower()
+    assert fork.status_code == 200, fork.text
+    assert fork.json()["resumed_existing"] is True
+    assert fork.json()["application"]["id"] == app_id
 
     with SessionLocal() as db:
         rows = (

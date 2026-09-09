@@ -251,6 +251,43 @@
     }
   }
 
+  function documentStatusLabel(status) {
+    const key = String(status || "pending").trim().toLowerCase();
+    if (key === "accepted") return "accepted";
+    if (key === "pending") return "pending review";
+    if (key === "rejected") return "rejected";
+    if (key === "missing") return "missing";
+    return key.replace(/_/g, " ") || "pending review";
+  }
+
+  function renderExistingDocuments(documents) {
+    const host = document.getElementById("existing-documents");
+    if (!host) return;
+    const rows = (documents || []).filter(function (doc) { return !!doc && doc.category; });
+    if (!rows.length) {
+      host.innerHTML = "";
+      host.classList.add("hidden");
+      return;
+    }
+    const labels = {
+      drivers_license_front: "Driver's license (front)",
+      drivers_license_back: "Driver's license (back)",
+      vehicle_registration: "Vehicle registration",
+      proof_of_auto_insurance: "Proof of auto insurance",
+      w9_status: "W-9 status",
+    };
+    host.innerHTML = "<h2>Documents already on file</h2><ul class=\"existing-document-list\"></ul>";
+    const list = host.querySelector("ul");
+    rows.forEach(function (doc) {
+      const item = document.createElement("li");
+      const name = labels[doc.category] || String(doc.category).replace(/_/g, " ");
+      const filename = doc.original_filename ? " · " + doc.original_filename : "";
+      item.textContent = name + filename + " — " + documentStatusLabel(doc.review_status);
+      list.appendChild(item);
+    });
+    host.classList.remove("hidden");
+  }
+
   function markExistingUploads(documents) {
     const inputByCategory = {
       drivers_license_front: "file_license_front",
@@ -258,6 +295,7 @@
       vehicle_registration: "file_registration",
       proof_of_auto_insurance: "file_insurance",
     };
+    renderExistingDocuments(documents);
     (documents || []).forEach(function (doc) {
       if (!doc || String(doc.review_status || "").toLowerCase() === "rejected") return;
       uploadedSignatures[doc.category] = "existing|" + (doc.id || doc.category);
@@ -270,7 +308,9 @@
         hint.className = "on-file-hint";
         input.parentElement.appendChild(hint);
       }
-      hint.textContent = "Already on file" + (doc.original_filename ? ": " + doc.original_filename : ".");
+      hint.textContent = "Already on file"
+        + (doc.original_filename ? ": " + doc.original_filename : ".")
+        + " (" + documentStatusLabel(doc.review_status) + ")";
     });
   }
 
@@ -499,6 +539,29 @@
     return /only draft applications can be edited/i.test(String(message || ""));
   }
 
+  function hasResumeIdentity(body) {
+    const email = String((body && body.email) || "").trim();
+    const first = String((body && body.legal_first_name) || "").trim();
+    const last = String((body && body.legal_last_name) || "").trim();
+    return !!(email || (first && last));
+  }
+
+  function adoptCreatedOrResumedApplication(created) {
+    const app = unwrapApplication(created && created.application ? created.application : created);
+    if (!app || !app.id) {
+      throw new Error("Could not open an application. A new application was not created.");
+    }
+    appInput.value = app.id;
+    if (created && created.applicant_access_token) {
+      applicantToken = created.applicant_access_token;
+    }
+    persistSession();
+    fillFormFromApplication(app);
+    if (created && created.resumed_existing) {
+      applyResumePosition(app);
+    }
+  }
+
   async function ensureApplication() {
     if (appInput.value) {
       if (!applicantToken) {
@@ -527,16 +590,34 @@
       }
     }
 
-    if (!orgInput.value) {
-      throw new Error("Open this page with your Amicor application link (organization required).");
+    const body = payloadFromForm();
+    if (!hasResumeIdentity(body) && !orgInput.value) {
+      throw new Error(
+        "Enter the email or legal name from your existing application, or open your original application link. "
+          + "A new application was not created."
+      );
     }
+    if (!hasResumeIdentity(body) && orgInput.value) {
+      throw new Error(
+        "Enter your email or legal name before saving so an existing application can be reopened. "
+          + "A new application was not created."
+      );
+    }
+    const created = await api("/applications", { method: "POST", body: JSON.stringify(body) });
+    adoptCreatedOrResumedApplication(created);
+  }
 
-    const created = await api("/applications", { method: "POST", body: JSON.stringify({ organization_id: orgInput.value }) });
-    appInput.value = created.application.id;
-    applicantToken = created.applicant_access_token;
-    existingApplicationLoaded = true;
-    persistSession();
-    Object.keys(uploadedSignatures).forEach(function (key) { delete uploadedSignatures[key]; });
+  function recoverAfterChallengeReset() {
+    if (lastHydratedApplication) {
+      fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
+      applyResumePosition(lastHydratedApplication);
+      return true;
+    }
+    if (appInput.value && applicantToken) {
+      restoreExistingApplication();
+      return true;
+    }
+    return false;
   }
 
   function fileSignature(file) {
@@ -870,16 +951,19 @@
     });
   }
 
+  form.addEventListener("reset", function () {
+    if (!lastHydratedApplication && !(appInput.value && applicantToken)) return;
+    setTimeout(function () {
+      recoverAfterChallengeReset();
+    }, 0);
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") recoverAfterChallengeReset();
+  });
+
   window.addEventListener("pageshow", function () {
-    if (lastHydratedApplication) {
-      fillFormFromApplication(lastHydratedApplication, { onlyIfEmpty: true });
-      applyResumePosition(lastHydratedApplication);
-      return;
-    }
-    if (appInput.value && applicantToken) {
-      restoreExistingApplication();
-      return;
-    }
+    if (recoverAfterChallengeReset()) return;
     showStep(1);
   });
 

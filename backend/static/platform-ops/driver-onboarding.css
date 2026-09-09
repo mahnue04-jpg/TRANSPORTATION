@@ -137,6 +137,16 @@ button.secondary { background: #eef2f8; color: var(--text); }
 .step-help { color: var(--muted); margin: 0 0 0.85rem; font-size: 0.95rem; }
 .optional { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
 .on-file-hint { color: var(--ok); font-size: 0.82rem; }
+.existing-documents {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin: 0 0 1rem;
+}
+.existing-documents h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+.existing-document-list { margin: 0; padding-left: 1.1rem; color: var(--text); }
+.existing-document-list li { margin: 0.25rem 0; }
 .check-row {
   flex-direction: row !important;
   align-items: flex-start;

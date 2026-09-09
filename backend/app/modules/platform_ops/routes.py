@@ -183,15 +183,36 @@ def create_application(
     db: Session = Depends(get_db),
     user=Depends(_optional_current_user),  # type: ignore
 ) -> DriverApplicationCreateResponse:
-    organization_id = _resolve_org_id(payload.organization_id, user)
+    explicit_org = str(payload.organization_id or "").strip() or None
+    user_org = str(getattr(user, "organization_id", None) or "").strip() or None
     try:
-        application, token = onboarding_service.create_draft_application(
+        if not explicit_org and not user_org:
+            resumed = onboarding_service.resume_existing_driver_001_if_matched(
+                db, organization_id=None, payload=payload
+            )
+            if resumed is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="organization_id is required.")
+            application, token = resumed
+            detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
+            return DriverApplicationCreateResponse(
+                application=detail,
+                applicant_access_token=token,
+                resumed_existing=True,
+            )
+        organization_id = _resolve_org_id(explicit_org, user)
+        application, token, resumed_existing = onboarding_service.create_draft_application(
             db, organization_id=organization_id, payload=payload
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
     detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
-    return DriverApplicationCreateResponse(application=detail, applicant_access_token=token)
+    return DriverApplicationCreateResponse(
+        application=detail,
+        applicant_access_token=token,
+        resumed_existing=resumed_existing,
+    )
 
 
 @router.post(

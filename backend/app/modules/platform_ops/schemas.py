@@ -11,7 +11,7 @@ EmploymentType = Literal["independent_contractor", "employee"]
 
 
 class DriverApplicationDraftRequest(BaseModel):
-    organization_id: str
+    organization_id: str | None = None
     legal_first_name: str | None = None
     legal_middle_name: str | None = None
     legal_last_name: str | None = None
@@ -292,6 +292,7 @@ class DriverApplicationDetailResponse(BaseModel):
 class DriverApplicationCreateResponse(BaseModel):
     application: DriverApplicationDetailResponse
     applicant_access_token: str
+    resumed_existing: bool = False
 
 
 class ApplicantTokenReissueResponse(BaseModel):
