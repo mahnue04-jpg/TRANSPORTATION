@@ -150,6 +150,13 @@ class DriverApplicationListItemResponse(BaseModel):
     internal_driver_number: str | None = None
 
 
+class Driver001NumberStampResponse(BaseModel):
+    application_id: str
+    internal_driver_number: str
+    already_stamped: bool
+    rows_affected: int
+
+
 class ApplicantSectionCompletion(BaseModel):
     step: int
     key: str

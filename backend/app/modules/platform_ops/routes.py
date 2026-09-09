@@ -38,6 +38,7 @@ from app.modules.platform_ops.schemas import (
     DocumentReviewRequest,
     DocumentStatusOnlyRequest,
     DriverApplicationAssignReviewerRequest,
+    Driver001NumberStampResponse,
     DriverApplicationCreateResponse,
     DriverApplicationDecisionRequest,
     DriverApplicationDetailResponse,
@@ -191,6 +192,32 @@ def create_application(
         raise _parse_service_error(exc) from exc
     detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
     return DriverApplicationCreateResponse(application=detail, applicant_access_token=token)
+
+
+@router.post(
+    "/applications/{application_id}/stamp-driver-001-number",
+    response_model=Driver001NumberStampResponse,
+)
+def stamp_driver_001_number(
+    application_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_onboarding_admin),  # type: ignore
+) -> Driver001NumberStampResponse:
+    if application_id != onboarding_service.EXISTING_DRIVER_001_APPLICATION_ID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This repair is locked to the existing Driver 001 application.",
+        )
+    try:
+        result = onboarding_service.stamp_existing_driver_001_number(
+            db,
+            application_id=application_id,
+            actor_user_id=str(user.id),
+            actor_role=user_role(user),
+        )
+    except ValueError as exc:
+        raise _parse_service_error(exc) from exc
+    return Driver001NumberStampResponse(**result)
 
 
 @router.get("/applications", response_model=list[DriverApplicationListItemResponse])

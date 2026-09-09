@@ -9,6 +9,7 @@ from datetime import date, datetime
 from io import BytesIO
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.helpers import now, uuid4
@@ -477,6 +478,10 @@ def validate_complete_application(application: PlatformDriverOnboardingApplicati
     return errors
 
 
+DRIVER_001_NUMBER = "DRV-001"
+EXISTING_DRIVER_001_APPLICATION_ID = "ed17c75c-04ec-407a-aba6-a48988d5051c"
+
+
 def find_existing_driver_001_application(
     db: Session,
     *,
@@ -486,11 +491,124 @@ def find_existing_driver_001_application(
         db.query(PlatformDriverOnboardingApplication)
         .filter(
             PlatformDriverOnboardingApplication.organization_id == organization_id,
-            PlatformDriverOnboardingApplication.internal_driver_number == "DRV-001",
+            PlatformDriverOnboardingApplication.internal_driver_number == DRIVER_001_NUMBER,
         )
         .order_by(PlatformDriverOnboardingApplication.created_at.asc())
         .first()
     )
+
+
+def stamp_existing_driver_001_number(
+    db: Session,
+    *,
+    application_id: str,
+    actor_user_id: str | None = None,
+    actor_role: str | None = None,
+) -> dict[str, Any]:
+    """Idempotently stamp DRV-001 onto one existing application after hard preconditions.
+
+    Writes only internal_driver_number. Does not create applications, change status,
+    timestamps, documents, approval/activation, or Health ISF driver links.
+    """
+    from app.modules.approval_engine.models import ApprovalCase
+
+    try:
+        application = get_application_by_id(db, application_id)
+        if application is None:
+            raise ValueError("Application not found.")
+
+        badge_cases = (
+            db.query(ApprovalCase)
+            .filter(
+                ApprovalCase.organization_id == application.organization_id,
+                ApprovalCase.display_badge == DRIVER_001_NUMBER,
+            )
+            .all()
+        )
+        if not badge_cases:
+            raise ValueError("Cannot stamp DRV-001: no approval case with display badge DRV-001.")
+        if any(case.platform_ops_application_id != application_id for case in badge_cases):
+            raise ValueError(
+                "Cannot stamp DRV-001: an approval case badge does not point at this application."
+            )
+        if not any(case.platform_ops_application_id == application_id for case in badge_cases):
+            raise ValueError(
+                "Cannot stamp DRV-001: approval case platform_ops_application_id does not match."
+            )
+
+        other_numbered = (
+            db.query(PlatformDriverOnboardingApplication)
+            .filter(
+                PlatformDriverOnboardingApplication.organization_id == application.organization_id,
+                PlatformDriverOnboardingApplication.internal_driver_number == DRIVER_001_NUMBER,
+                PlatformDriverOnboardingApplication.id != application_id,
+            )
+            .count()
+        )
+        if other_numbered:
+            raise ValueError("Cannot stamp DRV-001: another application already stores DRV-001.")
+
+        current = getattr(application, "internal_driver_number", None)
+        if current == DRIVER_001_NUMBER:
+            return {
+                "application_id": application.id,
+                "internal_driver_number": DRIVER_001_NUMBER,
+                "already_stamped": True,
+                "rows_affected": 0,
+            }
+        if current not in {None, ""}:
+            raise ValueError("Cannot stamp DRV-001: application already has a different internal number.")
+
+        preserved_updated_at = application.updated_at
+        result = db.execute(
+            update(PlatformDriverOnboardingApplication)
+            .where(
+                PlatformDriverOnboardingApplication.id == application_id,
+                PlatformDriverOnboardingApplication.internal_driver_number.is_(None),
+            )
+            .values(
+                internal_driver_number=DRIVER_001_NUMBER,
+                updated_at=preserved_updated_at,
+            )
+        )
+        if result.rowcount != 1:
+            raise ValueError("Cannot stamp DRV-001: repair must affect exactly one application row.")
+
+        db.expire(application)
+        db.refresh(application)
+        if application.internal_driver_number != DRIVER_001_NUMBER:
+            raise ValueError("Cannot stamp DRV-001: post-write verification failed.")
+
+        still_unique = (
+            db.query(PlatformDriverOnboardingApplication)
+            .filter(
+                PlatformDriverOnboardingApplication.organization_id == application.organization_id,
+                PlatformDriverOnboardingApplication.internal_driver_number == DRIVER_001_NUMBER,
+            )
+            .count()
+        )
+        if still_unique != 1:
+            raise ValueError("Cannot stamp DRV-001: uniqueness check failed after write.")
+
+        _record_audit(
+            db,
+            application=application,
+            event_type="internal_driver_number_stamped",
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            reason="Idempotent repair stamped existing DRV-001 badge onto the linked application only.",
+            metadata={"internal_driver_number": DRIVER_001_NUMBER, "rows_affected": 1},
+        )
+        db.commit()
+        return {
+            "application_id": application.id,
+            "internal_driver_number": DRIVER_001_NUMBER,
+            "already_stamped": False,
+            "rows_affected": 1,
+        }
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _payload_matches_driver_001(
