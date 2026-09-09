@@ -3882,6 +3882,16 @@ def serve_driver_onboarding_progress() -> Response:
     return JSONResponse({"error": "Driver onboarding progress page not found"}, status_code=404)
 
 
+@app.get("/nova")
+@app.get("/nova/")
+@app.get("/nova/home")
+def serve_nova_home() -> Response:
+    page = os.path.join(_static_dir, "nova-home", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Home page not found"}, status_code=404)
+
+
 @app.get("/nova/freight")
 @app.get("/nova/freight/new")
 @app.get("/nova/freight/shipments")

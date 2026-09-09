@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-home/home.css" />
+</head>
+<body>
+  <div id="boot-screen" class="boot-screen" aria-live="polite">
+    <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+    <p class="brand-kicker">AMICOR NOVA</p>
+    <p id="boot-greeting">Good morning. Let's make today count.</p>
+  </div>
+
+  <main class="home" id="home-root">
+    <header class="home-header amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>AMICOR NOVA</h1>
+        <p id="home-greeting" class="greeting">Good morning. Let's make today count.</p>
+      </div>
+    </header>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Universal command">
+      <form id="command-form">
+        <label class="sr-only" for="command-input">Search the world, your work, or ask Nova.</label>
+        <input
+          id="command-input"
+          name="command"
+          type="search"
+          autocomplete="off"
+          placeholder="Search the world, your work, or ask Nova."
+        />
+        <div class="command-actions">
+          <button type="submit" id="ask-nova">Ask Mrs. Nova Brain</button>
+          <button type="button" id="search-web" class="secondary">Search the web</button>
+          <button type="button" id="search-news" class="secondary">News</button>
+        </div>
+      </form>
+      <p class="hint">Ask uses existing Mrs. Nova Brain APIs. Web and News reuse the existing /api/search capability. No new engines.</p>
+    </section>
+
+    <section class="brain-card" aria-label="Mrs. Nova Brain">
+      <div class="brain-title">
+        <h2>Mrs. Nova Brain</h2>
+        <p id="session-meta" class="hint">Sign in to ask Mrs. Nova Brain.</p>
+      </div>
+      <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+        <a class="button secondary" href="/workspace">Open live workspace conversation</a>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="web-search" class="results-card" aria-label="Web and news results">
+      <h2>Web / News / Search</h2>
+      <p class="hint">Existing /api/search only. Live results depend on configured providers.</p>
+      <div id="search-results">No search yet.</div>
+    </section>
+
+    <section class="destinations" aria-label="Nova destinations">
+      <article class="tile">
+        <h3>Workspace</h3>
+        <p>Existing Health ISF + conversation workspace. A true Nova Workspace is Phase 2.</p>
+        <a class="button" href="/workspace" data-destination="workspace">Open Workspace</a>
+      </article>
+      <article class="tile">
+        <h3>Web / News / Search</h3>
+        <p>Existing internet search and news retrieval.</p>
+        <a class="button" href="#web-search" data-destination="search">Use search</a>
+      </article>
+      <article class="tile">
+        <h3>Files</h3>
+        <p>Existing authenticated file upload on Workspace.</p>
+        <a class="button" href="/workspace" data-destination="files">Open Files</a>
+      </article>
+      <article class="tile">
+        <h3>Voice</h3>
+        <p>Existing voice runtime on Workspace.</p>
+        <a class="button" href="/workspace" data-destination="voice">Open Voice</a>
+      </article>
+      <article class="tile">
+        <h3>Tools</h3>
+        <p>Existing capability tools on Workspace.</p>
+        <a class="button" href="/workspace" data-destination="tools">Open Tools</a>
+      </article>
+      <article class="tile">
+        <h3>Health</h3>
+        <p>AMICOR Health remains a separate product.</p>
+        <a class="button" href="/workspace" data-destination="health">Open Health</a>
+      </article>
+      <article class="tile">
+        <h3>Delivery</h3>
+        <p>AMICOR Delivery remains a separate frozen product.</p>
+        <a class="button" href="/app" data-destination="delivery">Open Delivery</a>
+      </article>
+      <article class="tile">
+        <h3>Freight</h3>
+        <p>AMICOR Nova Freight V1 remains a separate frozen product.</p>
+        <a class="button" href="/nova/freight" data-destination="freight">Open Freight</a>
+      </article>
+      <article class="tile later" data-destination="communications" data-later="true">
+        <h3>Communications</h3>
+        <p>Email and calendar APIs exist, but there is no dedicated Home destination yet.</p>
+        <span class="later-label">Coming later</span>
+      </article>
+      <article class="tile later" data-destination="government" data-later="true">
+        <h3>Government</h3>
+        <p>No live government integrations in V1.</p>
+        <span class="later-label">Coming later</span>
+      </article>
+      <article class="tile later" data-destination="business" data-later="true">
+        <h3>Business</h3>
+        <p>No CRM or accounting OS in V1.</p>
+        <span class="later-label">Coming later</span>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-home/home.js"></script>
+</body>
+</html>
