@@ -259,10 +259,16 @@ def test_nova_today_does_not_mutate_frozen_products(client: TestClient) -> None:
 
 
 def test_nova_today_did_not_edit_frozen_v1_files() -> None:
+    home_nav = {
+        STATIC / "nova-home" / "index.html",
+        STATIC / "nova-home" / "home.js",
+    }
     for path in FROZEN_V1:
         assert path.exists()
         text = path.read_text(encoding="utf-8")
         assert "nova_v2_command_actions" not in text
+        if path in home_nav:
+            continue
         assert "/api/nova/today" not in text
 
 

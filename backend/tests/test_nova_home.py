@@ -1,6 +1,7 @@
 """Nova Core Phase 1: Nova Home shell. Does not unfreeze Freight, Delivery, or Health."""
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,7 @@ def test_nova_home_authenticated_mrs_nova_brain(client: TestClient) -> None:
 
 
 def test_nova_home_destination_links() -> None:
+    assert 'href="/nova/today" data-destination="today"' in HOME_HTML
     assert 'href="/nova/workspace" data-destination="workspace"' in HOME_HTML
     assert 'href="#web-search" data-destination="search"' in HOME_HTML
     assert 'href="/nova/workspace#files" data-destination="files"' in HOME_HTML
@@ -108,6 +110,52 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML
     assert 'data-later="true"' not in HOME_HTML
     assert HOME_HTML.count("Coming later") == 0
+
+
+def test_nova_home_today_tile_is_additive_and_safe() -> None:
+    assert 'data-today-tile="true"' in HOME_HTML
+    assert "Today / Command Center" in HOME_HTML
+    assert "Open Today" in HOME_HTML
+    assert "today-attention-count" in HOME_HTML
+    assert HOME_HTML.count('data-destination="workspace"') == 1
+    assert HOME_HTML.count('href="/app" data-destination="delivery"') == 1
+    assert "/api/nova/today/dashboard" in HOME_JS
+    assert "refreshTodayCount" in HOME_JS
+    count_fn = HOME_JS.split("async function refreshTodayCount")[1].split("async function refreshBrain")[0]
+    assert "attention_now" in count_fn
+    assert ".title" not in count_fn
+    assert "detail" not in count_fn
+    assert "nova_v2_command_actions" not in HOME_JS
+    assert "min-height: 44px" in HOME_CSS
+    assert "@media (max-width: 720px)" in HOME_CSS
+
+
+def test_nova_home_today_count_auth_fallback_and_isolation(client: TestClient) -> None:
+    page = client.get("/nova")
+    assert page.status_code == 200
+    assert 'href="/nova/today"' in page.text
+    assert "Open the Command Center." in page.text
+    assert client.get("/api/nova/today/dashboard").status_code == 401
+
+    owner = _headers(client, "dispatcher@amicor.local")
+    other = _headers(client, "staff@amicor.local")
+    overdue = date.today().isoformat()
+    created = client.post(
+        "/api/nova/government/items",
+        headers=owner,
+        json={"title": "Home tile count license", "due_date": overdue, "status": "renewal_due"},
+    )
+    assert created.status_code == 200, created.text
+    owner_dash = client.get("/api/nova/today/dashboard", headers=owner)
+    other_dash = client.get("/api/nova/today/dashboard", headers=other)
+    assert owner_dash.status_code == 200
+    assert other_dash.status_code == 200
+    owner_count = len(owner_dash.json().get("attention_now") or [])
+    other_ids = {row.get("source_ref_id") for row in other_dash.json().get("attention_now") or []}
+    assert created.json()["item_id"] not in other_ids
+    assert isinstance(owner_count, int)
+    cross = client.get("/api/nova/today/dashboard", headers=owner, params={"organization_id": "org-not-the-caller"})
+    assert cross.status_code == 403
 
 
 def test_nova_home_search_handoff(client: TestClient) -> None:

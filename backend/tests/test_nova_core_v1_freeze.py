@@ -79,6 +79,7 @@ def test_nova_core_v1_routes_and_home_entrance(client: TestClient) -> None:
         assert "Mrs. Nova Brain" in response.text
         assert "ops-shell.js" not in response.text
     home = client.get("/nova")
+    assert 'href="/nova/today"' in home.text
     assert 'href="/nova/workspace"' in home.text
     assert 'href="/nova/communications"' in home.text
     assert 'href="/nova/government"' in home.text

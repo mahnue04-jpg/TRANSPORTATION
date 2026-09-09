@@ -61,10 +61,28 @@
       ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Mrs. Nova Brain"
       : "Sign in to ask Mrs. Nova Brain.";
   }
+  function setTodayCountCopy(text) {
+    var el = $("today-attention-count");
+    if (el) el.textContent = text;
+  }
+  async function refreshTodayCount() {
+    if (!token()) {
+      setTodayCountCopy("Open the Command Center.");
+      return;
+    }
+    try {
+      var dash = await api("/api/nova/today/dashboard");
+      var count = Array.isArray(dash && dash.attention_now) ? dash.attention_now.length : 0;
+      setTodayCountCopy(count === 1 ? "1 item needs attention." : (count + " items need attention."));
+    } catch (_) {
+      setTodayCountCopy("Open the Command Center.");
+    }
+  }
   async function refreshBrain() {
     if (!token()) {
       $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
       setSignedIn(false);
+      await refreshTodayCount();
       return;
     }
     setSignedIn(true);
@@ -77,6 +95,7 @@
     } catch (err) {
       $("brain-output").textContent = err.message;
     }
+    await refreshTodayCount();
   }
   async function askBrain(question) {
     if (!token()) {

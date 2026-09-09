@@ -113,6 +113,7 @@ html, body {
 
 .tile { margin-top: 0; min-height: 180px; }
 .tile.later { opacity: 0.82; }
+.tile .button { min-height: 44px; }
 
 button, .button {
   display: inline-flex;
