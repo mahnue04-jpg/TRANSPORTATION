@@ -163,6 +163,8 @@ class NovaFreightShipmentEvent(Base):
     proof_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     quote_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     invoice_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payout_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    settlement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
@@ -294,3 +296,73 @@ class NovaFreightPaymentEvent(Base):
     processing_result: Mapped[str] = mapped_column(String(64), nullable=False)
     amount_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightPayout(Base):
+    __tablename__ = "nova_freight_payouts"
+    __table_args__ = (
+        Index("ix_nova_freight_payouts_payout_id", "payout_id", unique=True),
+        Index("ix_nova_freight_payouts_shipment_id", "shipment_id"),
+        Index("ix_nova_freight_payouts_carrier_id", "carrier_id"),
+        Index("ix_nova_freight_payouts_org_id", "organization_id"),
+        Index("ix_nova_freight_payouts_idem", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    payout_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    carrier_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    invoice_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    customer_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    carrier_payout_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    amicor_margin_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    adjustment_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    payout_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    payout_method: Mapped[str] = mapped_column(String(32), nullable=False, default="simulated_test")
+    external_payout_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stripe_transfer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    adjusted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    adjusted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    adjustment_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    hold_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    proof_warning: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    processing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightSettlement(Base):
+    __tablename__ = "nova_freight_settlements"
+    __table_args__ = (
+        Index("ix_nova_freight_settlements_settlement_id", "settlement_id", unique=True),
+        Index("ix_nova_freight_settlements_payout_id", "payout_id", unique=True),
+        Index("ix_nova_freight_settlements_carrier_id", "carrier_id"),
+        Index("ix_nova_freight_settlements_org_id", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    settlement_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    payout_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    carrier_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    gross_carrier_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    adjustments: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    net_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    settlement_status: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
+    settlement_period: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    remittance_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remittance_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

@@ -3909,6 +3909,22 @@ def serve_nova_freight_carrier_offers_ui() -> Response:
     return JSONResponse({"error": "Nova freight carrier offers page not found"}, status_code=404)
 
 
+@app.get("/nova/freight/finance")
+def serve_nova_freight_finance_ui() -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "finance.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight finance page not found"}, status_code=404)
+
+
+@app.get("/nova/freight/carrier/earnings")
+def serve_nova_freight_carrier_earnings_ui() -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "earnings.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight earnings page not found"}, status_code=404)
+
+
 @app.get("/nova/freight/carrier/shipments")
 @app.get("/nova/freight/carrier/shipments/{shipment_id}")
 def serve_nova_freight_carrier_execution_ui(shipment_id: str | None = None) -> Response:

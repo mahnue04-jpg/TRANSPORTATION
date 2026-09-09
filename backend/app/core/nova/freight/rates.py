@@ -9,10 +9,9 @@ from __future__ import annotations
 from decimal import ROUND_CEILING, Decimal
 
 from app.core.nova.freight.money import ZERO, money
+from app.core.nova.freight.payout_config import DEFAULT_CURRENCY, split_customer_amount
 
 RATE_ENGINE_VERSION = "nova_freight_v1"
-DEFAULT_CURRENCY = "USD"
-CARRIER_COST_RATIO = Decimal("0.70")
 WEIGHT_STEP_LB = Decimal("10000")
 WEIGHT_STEP_AMOUNT = Decimal("25.00")
 PALLET_AMOUNT = Decimal("8.00")
@@ -101,8 +100,7 @@ def suggested_quote(
     total = money(subtotal - discount + tax_amount)
     if total < ZERO:
         total = ZERO
-    estimated_carrier_cost = money(total * CARRIER_COST_RATIO)
-    estimated_amicor_margin = money(total - estimated_carrier_cost)
+    _customer, estimated_carrier_cost, estimated_amicor_margin = split_customer_amount(total)
     return {
         "pricing_method": "rate_engine",
         "rate_engine_version": RATE_ENGINE_VERSION,

@@ -20,6 +20,22 @@ from app.auth import (
     get_current_user_context,
     require_any_role,
 )
+from app.core.nova.freight.settlement import (
+    adjust_payout,
+    approve_payout,
+    carrier_earnings,
+    create_payout,
+    execute_simulated_payout,
+    finance_board_row,
+    get_payout_or_404,
+    get_settlement_for_payout,
+    get_shipment_payout,
+    hold_payout,
+    list_org_payouts,
+    payout_eligibility,
+    remittance_view,
+    void_payout,
+)
 from app.core.nova.freight.commercial import (
     calculate_suggested_quote,
     confirm_customer_payment,
@@ -47,6 +63,10 @@ from app.core.nova.freight.schemas import (
     NovaFreightOfferOut,
     NovaFreightPaymentConfirm,
     NovaFreightPaymentStart,
+    NovaFreightPayoutAdjust,
+    NovaFreightPayoutHold,
+    NovaFreightPayoutOut,
+    NovaFreightSettlementOut,
     NovaFreightProofCreate,
     NovaFreightProofOut,
     NovaFreightQuoteOut,
@@ -109,6 +129,10 @@ require_freight_offer_actor = require_any_role(
     ROLE_SUPERVISOR,
     ROLE_DRIVER,
 )
+require_freight_finance = require_any_role(
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+)
 require_freight_viewer = require_any_role(
     ROLE_ADMIN,
     ROLE_SUPER_ADMIN_SUPPORT,
@@ -129,6 +153,7 @@ DISPATCH_ROLES = {
     ROLE_STAFF,
     ROLE_SUPERVISOR,
 }
+FINANCE_ROLES = {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}
 
 
 def _org_id(user: UserContext) -> str:
@@ -907,3 +932,232 @@ async def nova_freight_stripe_webhook(
         if signature_error is not None and isinstance(exc, signature_error):
             raise HTTPException(status_code=400, detail="Invalid Stripe signature.") from exc
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook.") from exc
+
+
+@router.get(
+    "/shipments/{shipment_id}/payout/eligibility",
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def get_payout_eligibility(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return payout_eligibility(db, shipment_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/payout",
+    response_model=NovaFreightPayoutOut,
+    status_code=201,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_payout(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return create_payout(
+            db,
+            shipment_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/payout",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def get_shipment_payout_route(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_shipment_payout(db, shipment_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get("/payouts", dependencies=[Depends(require_freight_dispatch)])
+def get_payouts(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return [finance_board_row(db, row) for row in list_org_payouts(db, organization_id=_org_id(user))]
+
+
+@router.post(
+    "/payouts/{payout_id}/adjust",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_finance)],
+)
+def post_payout_adjust(
+    payout_id: str,
+    payload: NovaFreightPayoutAdjust,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return adjust_payout(
+            db,
+            payout_id,
+            organization_id=_org_id(user),
+            carrier_payout_amount=payload.carrier_payout_amount,
+            reason=payload.reason,
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/payouts/{payout_id}/hold",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_finance)],
+)
+def post_payout_hold(
+    payout_id: str,
+    payload: NovaFreightPayoutHold | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        body = payload or NovaFreightPayoutHold()
+        return hold_payout(
+            db,
+            payout_id,
+            organization_id=_org_id(user),
+            reason=body.reason,
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/payouts/{payout_id}/approve",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_finance)],
+)
+def post_payout_approve(
+    payout_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return approve_payout(
+            db,
+            payout_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/payouts/{payout_id}/void",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_finance)],
+)
+def post_payout_void(
+    payout_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return void_payout(
+            db,
+            payout_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/payouts/{payout_id}/execute",
+    response_model=NovaFreightPayoutOut,
+    dependencies=[Depends(require_freight_finance)],
+)
+def post_payout_execute(
+    payout_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return execute_simulated_payout(
+            db,
+            payout_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/payouts/{payout_id}/settlement",
+    response_model=NovaFreightSettlementOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def get_payout_settlement(
+    payout_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_settlement_for_payout(db, payout_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/payouts/{payout_id}/remittance",
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+def get_payout_remittance(
+    payout_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        payout = get_payout_or_404(db, payout_id, organization_id=_org_id(user))
+        if user.role not in DISPATCH_ROLES:
+            allowed = _carrier_scope(db, user, False) or []
+            if payout.carrier_id not in allowed:
+                raise HTTPException(status_code=403, detail="Carriers can only view their own remittance")
+        return remittance_view(db, payout_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get("/carrier/earnings", dependencies=[Depends(require_freight_offer_actor)])
+def get_carrier_earnings(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    dispatcher_view = user.role in DISPATCH_ROLES
+    if dispatcher_view:
+        raise HTTPException(status_code=403, detail="Use the finance payout board for dispatch earnings review")
+    return carrier_earnings(
+        db,
+        organization_id=_org_id(user),
+        carrier_ids=_carrier_scope(db, user, False) or [],
+    )

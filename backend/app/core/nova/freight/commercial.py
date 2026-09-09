@@ -14,6 +14,7 @@ from app.core.nova.freight.models import (
     NovaFreightShipmentEvent,
 )
 from app.core.nova.freight.money import from_minor_units, money, to_minor_units
+from app.core.nova.freight.payout_config import split_customer_amount
 from app.core.nova.freight.rates import suggested_quote
 from app.core.nova.freight.schemas import (
     NovaFreightCustomerQuoteOut,
@@ -140,8 +141,7 @@ def _apply_breakdown(row: NovaFreightQuote, breakdown: dict, *, quoted_amount: D
     row.suggested_amount = money(breakdown["suggested_amount"])
     row.quoted_amount = money(quoted_amount)
     row.total_customer_amount = money(quoted_amount)
-    row.estimated_carrier_cost = money(quoted_amount * money("0.70"))
-    row.estimated_amicor_margin = money(quoted_amount - row.estimated_carrier_cost)
+    _customer, row.estimated_carrier_cost, row.estimated_amicor_margin = split_customer_amount(quoted_amount)
 
 
 def save_quote(

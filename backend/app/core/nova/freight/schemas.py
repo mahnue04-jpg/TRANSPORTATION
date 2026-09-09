@@ -500,6 +500,8 @@ class NovaFreightShipmentEventOut(BaseModel):
     proof_id: str | None = None
     quote_id: str | None = None
     invoice_id: str | None = None
+    payout_id: str | None = None
+    settlement_id: str | None = None
     created_at: datetime
 
 
@@ -666,4 +668,63 @@ class NovaFreightPaymentStart(BaseModel):
 
 class NovaFreightPaymentConfirm(BaseModel):
     simulate: str | None = None
+
+
+class NovaFreightPayoutAdjust(BaseModel):
+    carrier_payout_amount: Decimal
+    reason: str | None = None
+
+
+class NovaFreightPayoutHold(BaseModel):
+    reason: str | None = None
+
+
+class NovaFreightPayoutOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    payout_id: str
+    shipment_id: str
+    carrier_id: str
+    organization_id: str
+    invoice_id: str | None = None
+    customer_amount: Decimal
+    carrier_payout_amount: Decimal
+    amicor_margin_amount: Decimal
+    adjustment_amount: Decimal
+    currency: str
+    payout_status: str
+    payout_method: str
+    external_payout_reference: str | None = None
+    stripe_transfer_id: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    adjusted_by: str | None = None
+    adjusted_at: datetime | None = None
+    adjustment_reason: str | None = None
+    failure_reason: str | None = None
+    hold_reason: str | None = None
+    proof_warning: str | None = None
+    created_at: datetime
+    processing_at: datetime | None = None
+    paid_at: datetime | None = None
+
+
+class NovaFreightSettlementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    settlement_id: str
+    payout_id: str
+    shipment_id: str
+    carrier_id: str
+    organization_id: str
+    gross_carrier_amount: Decimal
+    adjustments: Decimal
+    net_amount: Decimal
+    currency: str
+    settlement_status: str
+    remittance_reference: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    approved_at: datetime | None = None
+    paid_at: datetime | None = None
 

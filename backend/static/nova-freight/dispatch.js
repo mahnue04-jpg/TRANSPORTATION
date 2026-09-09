@@ -201,8 +201,12 @@
   async function loadCommercial(shipmentId, shipment) {
     var quote = null;
     var invoice = null;
+    var payout = null;
+    var eligibility = null;
     try { quote = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/quote"); } catch (_) {}
     try { invoice = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/invoice"); } catch (_) {}
+    try { payout = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/payout"); } catch (_) {}
+    try { eligibility = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/payout/eligibility"); } catch (_) {}
     $("commercial-summary").textContent =
       "Quote: " + (quote ? quote.quoted_amount + " " + quote.currency + " (" + quote.pricing_status + ")" : "none") +
       " · Invoice: " + (invoice ? invoice.invoice_status + " " + invoice.total_amount : "none") +
@@ -227,6 +231,11 @@
     $("invoice-box").textContent = invoice
       ? "Invoice " + invoice.invoice_id + " · " + invoice.invoice_status + " · " + invoice.total_amount + " " + invoice.currency
       : "No invoice yet. Create after completion.";
+    $("payout-box").textContent = payout
+      ? "Payout " + payout.payout_id + " · " + payout.payout_status + " · carrier " + payout.carrier_payout_amount + " · margin " + payout.amicor_margin_amount + (payout.proof_warning ? " · " + payout.proof_warning : "")
+      : (eligibility
+        ? (eligibility.eligible ? "Payout eligible. Create a pending payout after the customer invoice is paid." : "Payout not eligible: " + (eligibility.reasons || []).join("; "))
+        : "No payout yet.");
   }
   function quotePayload() {
     var form = $("quote-form");
@@ -275,6 +284,14 @@
       await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/invoice", { method: "POST" });
       await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/invoice/finalize", { method: "POST" });
       showBanner("Invoice is ready for TEST payment.", true);
+      await loadDetail(selectedId);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("create-payout").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/payout", { method: "POST" });
+      showBanner("Pending carrier payout created. Finance approval is admin-only.", true);
       await loadDetail(selectedId);
     } catch (err) { showBanner(err.message); }
   });

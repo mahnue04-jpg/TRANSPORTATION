@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AMICOR Nova | Freight Carrier Offers</title>
+  <title>AMICOR Nova | Freight Finance</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-freight/freight.css" />
 </head>
 <body>
-  <main class="page">
+  <main class="page wide">
     <header class="brand-lockup amicor-brand-lockup">
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
       <div>
         <p class="brand-kicker">AMICOR Nova</p>
-        <h1>Freight Carrier Offers</h1>
-        <p class="subtitle">Accept or decline Nova freight tenders. Accepting assigns the load. Pickup has not started.</p>
+        <h1>Freight Payout Review</h1>
+        <p class="subtitle">Review TEST/simulated carrier payouts. Approving money is admin-only. No live transfers.</p>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
@@ -34,19 +34,33 @@
           <div class="subtitle" id="session-meta"></div>
         </div>
         <div class="actions">
-          <a class="button secondary" href="/nova/freight/carrier/earnings">Earnings</a>
-          <a class="button secondary" href="/nova/freight/carrier/shipments">Active work</a>
-          <a class="button secondary" href="/nova/freight/dispatch">Dispatch board</a>
+          <a class="button secondary" href="/nova/freight/dispatch">Dispatch</a>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
         </div>
       </div>
       <section class="card">
-        <h2>My offers</h2>
-        <div id="offer-cards"></div>
+        <h2>Payouts</h2>
+        <div id="payout-list"></div>
+      </section>
+      <section id="payout-detail" class="card hidden">
+        <h3>Selected payout</h3>
+        <pre id="payout-box"></pre>
+        <form id="adjust-form" class="grid">
+          <label>Carrier payout override<input name="carrier_payout_amount" type="number" min="0" step="0.01" /></label>
+          <label class="full">Adjustment reason<input name="reason" /></label>
+        </form>
+        <div class="actions">
+          <button type="button" id="adjust-payout" class="secondary finance-only">Adjust</button>
+          <button type="button" id="hold-payout" class="secondary finance-only">Hold</button>
+          <button type="button" id="approve-payout" class="finance-only">Approve</button>
+          <button type="button" id="execute-payout" class="finance-only">Run TEST payout</button>
+          <button type="button" id="void-payout" class="secondary finance-only">Void</button>
+        </div>
+        <pre id="remittance-box"></pre>
       </section>
     </section>
   </main>
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-freight/carrier.js"></script>
+  <script src="/static/nova-freight/finance.js"></script>
 </body>
 </html>

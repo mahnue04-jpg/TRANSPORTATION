@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AMICOR Nova | Freight Carrier Offers</title>
+  <title>AMICOR Nova | Carrier Earnings</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-freight/freight.css" />
@@ -14,8 +14,8 @@
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
       <div>
         <p class="brand-kicker">AMICOR Nova</p>
-        <h1>Freight Carrier Offers</h1>
-        <p class="subtitle">Accept or decline Nova freight tenders. Accepting assigns the load. Pickup has not started.</p>
+        <h1>Carrier Earnings</h1>
+        <p class="subtitle">Your Nova freight payouts and remittance references. Customer price and AMICOR margin are hidden.</p>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
@@ -34,19 +34,19 @@
           <div class="subtitle" id="session-meta"></div>
         </div>
         <div class="actions">
-          <a class="button secondary" href="/nova/freight/carrier/earnings">Earnings</a>
+          <a class="button secondary" href="/nova/freight/carrier/offers">Offers</a>
           <a class="button secondary" href="/nova/freight/carrier/shipments">Active work</a>
-          <a class="button secondary" href="/nova/freight/dispatch">Dispatch board</a>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
         </div>
       </div>
       <section class="card">
-        <h2>My offers</h2>
-        <div id="offer-cards"></div>
+        <h2>Summary</h2>
+        <p id="earn-summary"></p>
+        <div id="earn-list"></div>
       </section>
     </section>
   </main>
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-freight/carrier.js"></script>
+  <script src="/static/nova-freight/earnings.js"></script>
 </body>
 </html>
