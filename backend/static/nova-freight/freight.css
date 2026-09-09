@@ -184,6 +184,29 @@ th, td {
 
 .flags input { width: auto; }
 
+.proof-card {
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--nova-line);
+}
+
+.sig-pad {
+  width: 100%;
+  max-width: 520px;
+  height: 140px;
+  border: 1px dashed var(--nova-line);
+  background: #081421;
+  touch-action: none;
+  border-radius: 8px;
+}
+
+.proof-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.proof-list li { margin: 8px 0; }
+
 @media (max-width: 720px) {
   .grid { grid-template-columns: 1fr; }
   .full { grid-column: auto; }

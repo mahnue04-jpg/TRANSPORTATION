@@ -160,4 +160,38 @@ class NovaFreightShipmentEvent(Base):
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    proof_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightProof(Base):
+    __tablename__ = "nova_freight_proofs"
+    __table_args__ = (
+        Index("ix_nova_freight_proofs_proof_id", "proof_id", unique=True),
+        Index("ix_nova_freight_proofs_shipment_id", "shipment_id"),
+        Index("ix_nova_freight_proofs_org_id", "organization_id"),
+        Index("ix_nova_freight_proofs_doc_ref", "shipment_id", "document_ref"),
+        Index("ix_nova_freight_proofs_active", "shipment_id", "is_active"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    proof_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    proof_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    document_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    uploaded_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    uploaded_by_carrier_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    uploader_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signer_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    signer_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

@@ -92,9 +92,27 @@
       ? "Assigned / accepted carrier: " + shipment.assigned_carrier_id
       : "No carrier assigned yet.";
     $("detail-last").textContent = "Last status update: " + String(shipment.last_status_at || shipment.updated_at || "—").replace("T", " ").slice(0, 16);
+    $("detail-proof-flags").textContent = "Pickup proof: " + (shipment.has_pickup_proof ? "Yes" : "No") +
+      " · Delivery proof: " + (shipment.has_delivery_proof ? "Yes" : "No");
+    var proofs = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/proofs");
+    $("proof-list").innerHTML = proofs.length
+      ? "<ul class='proof-list'>" + proofs.map(function (row) {
+          return "<li>" + row.proof_type + " · " + (row.original_filename || row.document_ref) +
+            " · " + String(row.uploaded_at || "").replace("T", " ").slice(0, 16) +
+            (row.uploader_role ? " · " + row.uploader_role : "") +
+            (row.signer_name ? " · signer " + row.signer_name : "") +
+            (row.notes ? " · " + row.notes : "") +
+            (row.proof_id ? " · " + row.proof_id : "") + "</li>";
+        }).join("") + "</ul>"
+      : "<p>No pickup or delivery proof yet.</p>";
     var events = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/events");
     $("timeline").innerHTML = events.length
       ? "<ol>" + events.map(function (event) {
+          if (event.event_type && event.event_type !== "status_transition") {
+            return "<li><strong>" + event.event_type + "</strong>" +
+              (event.proof_id ? " · " + event.proof_id : "") +
+              " · " + String(event.created_at || "").replace("T", " ").slice(0, 16) + "</li>";
+          }
           return "<li>" + event.status_before + " → <strong>" + event.status_after + "</strong> · " +
             String(event.created_at || "").replace("T", " ").slice(0, 16) + "</li>";
         }).join("") + "</ol>"

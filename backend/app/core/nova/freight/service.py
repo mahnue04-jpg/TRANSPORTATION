@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import os
+import re
 
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -10,16 +13,22 @@ from sqlalchemy.orm import Session
 from app.core.nova.freight.models import (
     NovaFreightCarrier,
     NovaFreightOffer,
+    NovaFreightProof,
     NovaFreightShipment,
     NovaFreightShipmentEvent,
 )
 from app.core.nova.freight.schemas import (
+    DELIVERY_PROOF_STATUSES,
     DISPATCH_STATUSES,
     FORWARD_TRANSITIONS,
+    PICKUP_PROOF_STATUSES,
     PRE_DISPATCH_STATUSES,
+    SAFE_PROOF_CONTENT_TYPES,
+    UNSAFE_PROOF_EXTENSIONS,
     NovaFreightCarrierCreate,
     NovaFreightOfferCreate,
     NovaFreightOfferOut,
+    NovaFreightProofCreate,
     NovaFreightShipmentCreate,
     NovaFreightShipmentUpdate,
     NovaFreightStatusUpdate,
@@ -709,3 +718,277 @@ def transition_shipment_status(
     )
     db.commit()
     return get_shipment(db, shipment_id, organization_id=organization_id)
+
+
+PROOF_EVENT_TYPES = {
+    "pickup_photo": "pickup_proof_added",
+    "pickup_document": "pickup_proof_added",
+    "pickup_signature": "pickup_signature_added",
+    "delivery_photo": "delivery_proof_added",
+    "delivery_document": "delivery_proof_added",
+    "delivery_signature": "delivery_signature_added",
+}
+MAX_PROOF_BYTES = 10 * 1024 * 1024
+PICKUP_PROOF_TYPES = frozenset({"pickup_photo", "pickup_signature", "pickup_document"})
+DELIVERY_PROOF_TYPES = frozenset({"delivery_photo", "delivery_signature", "delivery_document"})
+
+
+def _new_proof_id() -> str:
+    return "NFP-" + uuid4().replace("-", "")[:10].upper()
+
+
+def _new_document_ref() -> str:
+    return "nfr-" + uuid4().replace("-", "")[:16]
+
+
+def _safe_token(value: str, *, limit: int = 128) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "", value or "")[:limit]
+
+
+def proof_store_root() -> Path:
+    configured = os.environ.get("NOVA_FREIGHT_PROOF_DIR")
+    if configured:
+        root = Path(configured)
+    else:
+        root = Path(__file__).resolve().parents[4] / "data" / "nova_freight_proofs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def store_proof_bytes(organization_id: str, document_ref: str, content: bytes) -> None:
+    org = _safe_token(organization_id, limit=64) or "org"
+    ref = _safe_token(document_ref) or _new_document_ref()
+    dest = proof_store_root() / org / ref
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(content)
+
+
+def proof_file_path(organization_id: str, document_ref: str) -> Path | None:
+    org = _safe_token(organization_id, limit=64)
+    ref = _safe_token(document_ref)
+    if not org or not ref:
+        return None
+    path = proof_store_root() / org / ref
+    if not path.is_file():
+        return None
+    return path
+
+
+def validate_proof_file(*, filename: str | None, content_type: str | None, size: int | None) -> None:
+    name = (filename or "").lower()
+    suffix = Path(name).suffix
+    if suffix in UNSAFE_PROOF_EXTENSIONS:
+        raise NovaFreightError("Unsafe file type is not allowed", status_code=415)
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    if ctype and ctype not in SAFE_PROOF_CONTENT_TYPES:
+        raise NovaFreightError("Unsupported proof file type", status_code=415)
+    if suffix in {".html", ".htm", ".svg"}:
+        raise NovaFreightError("Unsafe file type is not allowed", status_code=415)
+    if size is not None and size > MAX_PROOF_BYTES:
+        raise NovaFreightError("Proof file exceeds 10 MB", status_code=413)
+
+
+def _allowed_statuses_for_proof(proof_type: str) -> frozenset[str]:
+    if proof_type in PICKUP_PROOF_TYPES:
+        return PICKUP_PROOF_STATUSES
+    return DELIVERY_PROOF_STATUSES
+
+
+def _sync_shipment_proof_refs(db: Session, shipment: NovaFreightShipment) -> None:
+    active = (
+        db.query(NovaFreightProof)
+        .filter(
+            NovaFreightProof.shipment_id == shipment.shipment_id,
+            NovaFreightProof.organization_id == shipment.organization_id,
+            NovaFreightProof.is_active.is_(True),
+        )
+        .all()
+    )
+    pickup = next((row.proof_id for row in active if row.proof_type in PICKUP_PROOF_TYPES), None)
+    delivery = next((row.proof_id for row in active if row.proof_type in DELIVERY_PROOF_TYPES), None)
+    shipment.proof_of_pickup_ref = pickup
+    shipment.proof_of_delivery_ref = delivery
+
+
+def _assert_proof_upload_allowed(
+    shipment: NovaFreightShipment,
+    proof_type: str,
+    *,
+    allowed_carrier_ids: list[str] | None,
+    dispatcher_view: bool,
+) -> None:
+    if shipment.status == "cancelled":
+        raise NovaFreightError("Cancelled shipments cannot accept proof", status_code=409)
+    if shipment.status == "completed":
+        raise NovaFreightError("Completed shipments are read-only for proof", status_code=409)
+    if not shipment.assigned_carrier_id:
+        raise NovaFreightError("Unaccepted shipments cannot accept proof", status_code=409)
+    if not dispatcher_view:
+        if shipment.assigned_carrier_id not in (allowed_carrier_ids or []):
+            raise NovaFreightError("Only the assigned carrier can upload proof", status_code=403)
+    allowed = _allowed_statuses_for_proof(proof_type)
+    if shipment.status not in allowed:
+        raise NovaFreightError(
+            f"Proof type {proof_type} is not allowed at status {shipment.status}",
+            status_code=409,
+        )
+
+
+def create_proof(
+    db: Session,
+    shipment_id: str,
+    payload: NovaFreightProofCreate,
+    *,
+    organization_id: str,
+    actor_user_id: str | None,
+    actor_role: str | None,
+    allowed_carrier_ids: list[str] | None,
+    dispatcher_view: bool,
+    file_bytes: bytes | None = None,
+) -> NovaFreightProof:
+    shipment = get_shipment(db, shipment_id, organization_id=organization_id)
+    _assert_proof_upload_allowed(
+        shipment,
+        payload.proof_type,
+        allowed_carrier_ids=allowed_carrier_ids,
+        dispatcher_view=dispatcher_view,
+    )
+    if payload.original_filename or payload.content_type or file_bytes is not None:
+        validate_proof_file(
+            filename=payload.original_filename,
+            content_type=payload.content_type,
+            size=len(file_bytes) if file_bytes is not None else None,
+        )
+    document_ref = (payload.document_ref or "").strip() or _new_document_ref()
+    existing = (
+        db.query(NovaFreightProof)
+        .filter(
+            NovaFreightProof.shipment_id == shipment.shipment_id,
+            NovaFreightProof.organization_id == organization_id,
+            NovaFreightProof.document_ref == document_ref,
+        )
+        .first()
+    )
+    if existing:
+        if file_bytes is not None and existing.is_active:
+            store_proof_bytes(organization_id, document_ref, file_bytes)
+        return existing
+
+    stamp = now()
+    proof = NovaFreightProof(
+        proof_id=_new_proof_id(),
+        shipment_id=shipment.shipment_id,
+        organization_id=organization_id,
+        proof_type=payload.proof_type,
+        document_ref=document_ref,
+        original_filename=payload.original_filename,
+        content_type=payload.content_type,
+        uploaded_by_user_id=actor_user_id,
+        uploaded_by_carrier_id=shipment.assigned_carrier_id,
+        uploader_role=actor_role,
+        notes=payload.notes,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        captured_at=payload.captured_at or stamp,
+        signer_name=payload.signer_name,
+        signer_role=payload.signer_role,
+        is_active=True,
+        uploaded_at=stamp,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    db.add(proof)
+    db.flush()
+    if file_bytes is not None:
+        store_proof_bytes(organization_id, document_ref, file_bytes)
+    db.add(
+        NovaFreightShipmentEvent(
+            event_id=_new_event_id(),
+            shipment_id=shipment.shipment_id,
+            organization_id=organization_id,
+            status_before=shipment.status,
+            status_after=shipment.status,
+            event_type=PROOF_EVENT_TYPES[payload.proof_type],
+            actor_user_id=actor_user_id,
+            actor_carrier_id=shipment.assigned_carrier_id,
+            actor_role=actor_role,
+            notes=payload.notes,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            source="nova_freight_proof",
+            proof_id=proof.proof_id,
+            created_at=stamp,
+        )
+    )
+    _sync_shipment_proof_refs(db, shipment)
+    shipment.updated_at = stamp
+    db.commit()
+    db.refresh(proof)
+    return proof
+
+
+def list_proofs(
+    db: Session,
+    shipment_id: str,
+    *,
+    organization_id: str,
+) -> list[NovaFreightProof]:
+    get_shipment(db, shipment_id, organization_id=organization_id)
+    return (
+        db.query(NovaFreightProof)
+        .filter(
+            NovaFreightProof.shipment_id == shipment_id,
+            NovaFreightProof.organization_id == organization_id,
+            NovaFreightProof.is_active.is_(True),
+        )
+        .order_by(NovaFreightProof.uploaded_at.asc())
+        .all()
+    )
+
+
+def get_proof(
+    db: Session,
+    shipment_id: str,
+    proof_id: str,
+    *,
+    organization_id: str,
+) -> NovaFreightProof:
+    get_shipment(db, shipment_id, organization_id=organization_id)
+    row = (
+        db.query(NovaFreightProof)
+        .filter(
+            NovaFreightProof.proof_id == proof_id,
+            NovaFreightProof.shipment_id == shipment_id,
+            NovaFreightProof.organization_id == organization_id,
+            NovaFreightProof.is_active.is_(True),
+        )
+        .first()
+    )
+    if row is None:
+        raise NovaFreightError("Proof not found", status_code=404)
+    return row
+
+
+def delete_proof(
+    db: Session,
+    shipment_id: str,
+    proof_id: str,
+    *,
+    organization_id: str,
+    actor_user_id: str | None,
+    dispatcher_view: bool,
+) -> NovaFreightProof:
+    shipment = get_shipment(db, shipment_id, organization_id=organization_id)
+    if shipment.status == "completed":
+        raise NovaFreightError("Completed shipments are read-only for proof", status_code=409)
+    if shipment.status == "cancelled":
+        raise NovaFreightError("Cancelled shipments cannot change proof", status_code=409)
+    row = get_proof(db, shipment_id, proof_id, organization_id=organization_id)
+    if not dispatcher_view and row.uploaded_by_user_id != actor_user_id:
+        raise NovaFreightError("Carriers cannot delete another user's proof", status_code=403)
+    row.is_active = False
+    row.updated_at = now()
+    _sync_shipment_proof_refs(db, shipment)
+    db.commit()
+    db.refresh(row)
+    return row

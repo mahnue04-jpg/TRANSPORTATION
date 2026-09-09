@@ -176,6 +176,10 @@
     $("detail-delivery").textContent = shipment.delivery_address + " · " + cityLine(shipment.delivery_city, shipment.delivery_state, shipment.delivery_zip);
     $("detail-commodity").textContent = shipment.commodity;
     $("detail-equipment").textContent = shipment.equipment_type;
+    if ($("detail-proof-flags")) {
+      $("detail-proof-flags").textContent = "Pickup proof: " + (shipment.has_pickup_proof ? "Yes" : "No") +
+        " · Delivery proof: " + (shipment.has_delivery_proof ? "Yes" : "No");
+    }
     setView("detail");
   }
 

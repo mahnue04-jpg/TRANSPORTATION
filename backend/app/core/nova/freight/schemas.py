@@ -317,8 +317,18 @@ class NovaFreightShipmentOut(BaseModel):
     assigned_carrier_id: str | None = None
     assigned_offer_id: str | None = None
     last_status_at: datetime | None = None
+    has_pickup_proof: bool = False
+    has_delivery_proof: bool = False
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _proof_flags(self):
+        if self.proof_of_pickup_ref:
+            self.has_pickup_proof = True
+        if self.proof_of_delivery_ref:
+            self.has_delivery_proof = True
+        return self
 
 
 FORWARD_TRANSITIONS = {
@@ -487,4 +497,69 @@ class NovaFreightShipmentEventOut(BaseModel):
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     source: str | None = None
+    proof_id: str | None = None
     created_at: datetime
+
+
+PROOF_TYPES = (
+    "pickup_photo",
+    "pickup_signature",
+    "pickup_document",
+    "delivery_photo",
+    "delivery_signature",
+    "delivery_document",
+)
+PICKUP_PROOF_STATUSES = frozenset({"arrived_pickup", "picked_up"})
+DELIVERY_PROOF_STATUSES = frozenset({"arrived_delivery", "delivered"})
+SAFE_PROOF_CONTENT_TYPES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "application/pdf",
+    "text/plain",
+})
+UNSAFE_PROOF_EXTENSIONS = frozenset({".exe", ".bat", ".cmd", ".com", ".msi", ".js", ".vbs", ".ps1", ".dll"})
+
+
+class NovaFreightProofCreate(BaseModel):
+    proof_type: str
+    document_ref: str | None = None
+    original_filename: str | None = None
+    content_type: str | None = None
+    notes: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    captured_at: datetime | None = None
+    signer_name: str | None = None
+    signer_role: str | None = None
+
+    @field_validator("proof_type", mode="before")
+    @classmethod
+    def _type(cls, value: object) -> str:
+        text = str(value or "").strip()
+        if text not in PROOF_TYPES:
+            raise ValueError("proof_type is not a valid Nova freight proof type")
+        return text
+
+
+class NovaFreightProofOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    proof_id: str
+    shipment_id: str
+    organization_id: str
+    proof_type: str
+    document_ref: str
+    original_filename: str | None = None
+    content_type: str | None = None
+    uploaded_by_user_id: str | None = None
+    uploaded_by_carrier_id: str | None = None
+    uploader_role: str | None = None
+    notes: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    captured_at: datetime | None = None
+    signer_name: str | None = None
+    signer_role: str | None = None
+    is_active: bool
+    uploaded_at: datetime

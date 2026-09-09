@@ -15,7 +15,7 @@
       <div>
         <p class="brand-kicker">AMICOR Nova</p>
         <h1>Freight Shipment Execution</h1>
-        <p class="subtitle">Assigned carriers move an accepted load through pickup, transit, delivery, and completion. No POD or billing in this phase.</p>
+        <p class="subtitle">Assigned carriers move an accepted load through pickup, transit, delivery, and completion. Capture pickup and delivery proof here. Billing is not part of this phase.</p>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
@@ -50,9 +50,52 @@
         <p id="detail-pickup"></p>
         <p id="detail-delivery"></p>
         <p id="detail-load"></p>
+        <p id="detail-proof-flags"></p>
         <div class="actions">
           <button type="button" id="next-action" class="hidden"></button>
         </div>
+        <section id="pickup-proof-card" class="proof-card hidden">
+          <h3>Proof of Pickup</h3>
+          <form id="pickup-proof-form" class="grid">
+            <label>Proof type
+              <select name="proof_type">
+                <option value="pickup_photo">Pickup photo</option>
+                <option value="pickup_document">Pickup document</option>
+                <option value="pickup_signature">Pickup signature</option>
+              </select>
+            </label>
+            <label>Signer name<input name="signer_name" /></label>
+            <label class="full">Notes<textarea name="notes"></textarea></label>
+            <label class="full">Photo or document<input name="file" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,text/plain" /></label>
+            <label class="full">Signature<canvas id="pickup-sig" class="sig-pad" width="520" height="140"></canvas></label>
+            <div class="actions full">
+              <button type="button" id="clear-pickup-sig" class="secondary">Clear signature</button>
+              <button type="submit">Add pickup proof</button>
+            </div>
+          </form>
+          <div id="pickup-proof-list"></div>
+        </section>
+        <section id="delivery-proof-card" class="proof-card hidden">
+          <h3>Proof of Delivery</h3>
+          <form id="delivery-proof-form" class="grid">
+            <label>Proof type
+              <select name="proof_type">
+                <option value="delivery_photo">Delivery photo</option>
+                <option value="delivery_document">Delivery document</option>
+                <option value="delivery_signature">Delivery signature</option>
+              </select>
+            </label>
+            <label>Receiver / signer name<input name="signer_name" /></label>
+            <label class="full">Notes<textarea name="notes"></textarea></label>
+            <label class="full">Photo or document<input name="file" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,text/plain" /></label>
+            <label class="full">Signature<canvas id="delivery-sig" class="sig-pad" width="520" height="140"></canvas></label>
+            <div class="actions full">
+              <button type="button" id="clear-delivery-sig" class="secondary">Clear signature</button>
+              <button type="submit">Add delivery proof</button>
+            </div>
+          </form>
+          <div id="delivery-proof-list"></div>
+        </section>
         <h3>Timeline</h3>
         <div id="timeline"></div>
       </section>

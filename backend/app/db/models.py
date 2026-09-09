@@ -17,6 +17,7 @@ from app.helpers import now, uuid4
 from app.core.nova.freight.models import (  # noqa: F401 — register Nova freight tables
     NovaFreightCarrier,
     NovaFreightOffer,
+    NovaFreightProof,
     NovaFreightShipment,
     NovaFreightShipmentEvent,
 )

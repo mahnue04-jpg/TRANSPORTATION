@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -25,6 +26,8 @@ from app.core.nova.freight.schemas import (
     NovaFreightDispatchShipmentOut,
     NovaFreightOfferCreate,
     NovaFreightOfferOut,
+    NovaFreightProofCreate,
+    NovaFreightProofOut,
     NovaFreightShipmentCreate,
     NovaFreightShipmentEventOut,
     NovaFreightShipmentOut,
@@ -38,16 +41,21 @@ from app.core.nova.freight.service import (
     carriers_for_user,
     create_carrier,
     create_offers,
+    create_proof,
     create_shipment,
     decline_offer,
+    delete_proof,
+    get_proof,
     get_shipment,
     list_carrier_active_shipments,
     list_carriers,
     list_dispatch_shipments,
+    list_proofs,
     list_shipment_events,
     list_shipment_offers,
     list_shipments,
     list_visible_offers,
+    proof_file_path,
     transition_shipment_status,
     update_shipment,
 )
@@ -417,6 +425,166 @@ def post_shipment_status(
             actor_user_id=user.user_id,
             actor_role=user.role,
             allowed_carrier_ids=_carrier_scope(db, user, user.role in DISPATCH_ROLES),
+            dispatcher_view=user.role in DISPATCH_ROLES,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+def _create_proof_for_user(
+    db,
+    shipment_id: str,
+    payload: NovaFreightProofCreate,
+    user: UserContext,
+    file_bytes: bytes | None = None,
+):
+    return create_proof(
+        db,
+        shipment_id,
+        payload,
+        organization_id=_org_id(user),
+        actor_user_id=user.user_id,
+        actor_role=user.role,
+        allowed_carrier_ids=_carrier_scope(db, user, user.role in DISPATCH_ROLES),
+        dispatcher_view=user.role in DISPATCH_ROLES,
+        file_bytes=file_bytes,
+    )
+
+
+@router.post(
+    "/shipments/{shipment_id}/proofs",
+    response_model=NovaFreightProofOut,
+    status_code=201,
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+def post_shipment_proof(
+    shipment_id: str,
+    payload: NovaFreightProofCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return _create_proof_for_user(db, shipment_id, payload, user)
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/proofs/upload",
+    response_model=NovaFreightProofOut,
+    status_code=201,
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+async def upload_shipment_proof(
+    shipment_id: str,
+    proof_type: str = Form(...),
+    document_ref: str | None = Form(None),
+    notes: str | None = Form(None),
+    signer_name: str | None = Form(None),
+    signer_role: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        file_bytes = await file.read() if file is not None else None
+        payload = NovaFreightProofCreate(
+            proof_type=proof_type,
+            document_ref=document_ref,
+            original_filename=file.filename if file is not None else None,
+            content_type=file.content_type if file is not None else None,
+            notes=notes,
+            signer_name=signer_name,
+            signer_role=signer_role,
+        )
+        return _create_proof_for_user(db, shipment_id, payload, user, file_bytes=file_bytes)
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/proofs",
+    response_model=list[NovaFreightProofOut],
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_shipment_proofs(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return list_proofs(db, shipment_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/proofs/{proof_id}",
+    response_model=NovaFreightProofOut,
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_one_shipment_proof(
+    shipment_id: str,
+    proof_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return get_proof(db, shipment_id, proof_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/proofs/{proof_id}/file",
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_shipment_proof_file(
+    shipment_id: str,
+    proof_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        proof = get_proof(db, shipment_id, proof_id, organization_id=_org_id(user))
+        stored = proof_file_path(proof.organization_id, proof.document_ref)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Proof file is not stored")
+        return FileResponse(
+            path=str(stored),
+            media_type=proof.content_type or "application/octet-stream",
+            filename=proof.original_filename or f"{proof.proof_id}.bin",
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.delete(
+    "/shipments/{shipment_id}/proofs/{proof_id}",
+    response_model=NovaFreightProofOut,
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+def delete_shipment_proof(
+    shipment_id: str,
+    proof_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return delete_proof(
+            db,
+            shipment_id,
+            proof_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
             dispatcher_view=user.role in DISPATCH_ROLES,
         )
     except NovaFreightError as exc:

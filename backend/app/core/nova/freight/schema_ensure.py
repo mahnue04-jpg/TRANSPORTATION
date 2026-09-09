@@ -6,7 +6,8 @@ from sqlalchemy import inspect, text
 
 def ensure_nova_freight_schema(engine) -> None:
     inspector = inspect(engine)
-    if "nova_freight_shipments" not in inspector.get_table_names():
+    names = set(inspector.get_table_names())
+    if "nova_freight_shipments" not in names:
         return
     existing = {col["name"] for col in inspector.get_columns("nova_freight_shipments")}
     statements = []
@@ -16,6 +17,10 @@ def ensure_nova_freight_schema(engine) -> None:
         statements.append("ALTER TABLE nova_freight_shipments ADD COLUMN assigned_offer_id VARCHAR(32)")
     if "last_status_at" not in existing:
         statements.append("ALTER TABLE nova_freight_shipments ADD COLUMN last_status_at DATETIME")
+    if "nova_freight_shipment_events" in names:
+        event_cols = {col["name"] for col in inspector.get_columns("nova_freight_shipment_events")}
+        if "proof_id" not in event_cols:
+            statements.append("ALTER TABLE nova_freight_shipment_events ADD COLUMN proof_id VARCHAR(32)")
     if not statements:
         return
     with engine.begin() as conn:
