@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Workspace</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-workspace/workspace.css" />
+</head>
+<body>
+  <header class="ws-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Nova Workspace</h1>
+      </div>
+    </div>
+    <nav class="ws-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova#web-search">Web / Search</a>
+      <a href="#files">Files</a>
+      <a href="/workspace">Voice</a>
+      <a href="/workspace">Tools</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="ws-main">
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Workspace search and Mrs. Nova Brain">
+      <form id="workspace-search-form">
+        <label class="sr-only" for="workspace-search">Search Nova Workspace</label>
+        <input id="workspace-search" type="search" placeholder="Search projects, files, and prior Nova work" />
+        <button type="submit">Search workspace</button>
+      </form>
+      <form id="ask-form" class="ask-row">
+        <label class="sr-only" for="ask-input">Ask Mrs. Nova Brain</label>
+        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about this workspace" />
+        <button type="submit">Ask Nova</button>
+      </form>
+      <div class="command-actions">
+        <button type="button" data-brain="continue" class="secondary">Continue work</button>
+        <button type="button" data-brain="summarize" class="secondary">Summarize project</button>
+        <button type="button" data-brain="find_file" class="secondary">Find a file</button>
+        <button type="button" data-brain="search_prior" class="secondary">Search prior work</button>
+        <button type="button" data-brain="explain_changed" class="secondary">Explain what changed</button>
+        <button type="button" data-brain="next_action" class="secondary">Suggest next action</button>
+      </div>
+      <p id="session-meta" class="hint">Sign in to use Nova Workspace.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="brain-card" aria-label="Mrs. Nova Brain">
+      <h2>Mrs. Nova Brain</h2>
+      <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <h2>Create new workspace / project</h2>
+        <form id="project-form">
+          <label>Title<input id="project-title" required minlength="2" maxlength="180" /></label>
+          <label>Description<textarea id="project-description" maxlength="4000"></textarea></label>
+          <button type="submit">Create project</button>
+        </form>
+      </article>
+      <article class="card" id="files">
+        <h2>Upload / add file</h2>
+        <p class="hint">Uses existing /api/upload, then stores Nova Workspace metadata only.</p>
+        <form id="file-form">
+          <input id="file-input" type="file" />
+          <button type="submit">Upload and add to workspace</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="dashboard" aria-label="Workspace dashboard">
+      <article class="card">
+        <h2>Active projects</h2>
+        <div id="project-list">Sign in to see projects.</div>
+      </article>
+      <article class="card">
+        <h2>Recent work</h2>
+        <div id="recent-work">No recent work yet.</div>
+      </article>
+      <article class="card">
+        <h2>Recent conversations</h2>
+        <div id="recent-conversations">No conversations yet.</div>
+      </article>
+      <article class="card">
+        <h2>Recent files</h2>
+        <div id="recent-files">No files yet.</div>
+      </article>
+      <article class="card">
+        <h2>Saved / recent searches</h2>
+        <div id="recent-searches">No searches yet.</div>
+      </article>
+      <article class="card">
+        <h2>Assistant history</h2>
+        <p class="hint">Existing /api/history for this signed-in user. Not Health or Freight records.</p>
+        <div id="assistant-history">No assistant history loaded.</div>
+      </article>
+    </section>
+
+    <section class="card" id="search-results-card">
+      <h2>Workspace search results</h2>
+      <div id="search-results">Search Nova-owned workspace content only.</div>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-workspace/workspace.js"></script>
+</body>
+</html>

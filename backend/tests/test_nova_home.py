@@ -95,9 +95,9 @@ def test_nova_home_authenticated_mrs_nova_brain(client: TestClient) -> None:
 
 
 def test_nova_home_destination_links() -> None:
-    assert 'href="/workspace" data-destination="workspace"' in HOME_HTML
+    assert 'href="/nova/workspace" data-destination="workspace"' in HOME_HTML
     assert 'href="#web-search" data-destination="search"' in HOME_HTML
-    assert 'href="/workspace" data-destination="files"' in HOME_HTML
+    assert 'href="/nova/workspace#files" data-destination="files"' in HOME_HTML
     assert 'href="/workspace" data-destination="voice"' in HOME_HTML
     assert 'href="/workspace" data-destination="tools"' in HOME_HTML
     assert 'href="/workspace" data-destination="health"' in HOME_HTML

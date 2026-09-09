@@ -55,7 +55,8 @@
       <div class="command-actions">
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
-        <a class="button secondary" href="/workspace">Open live workspace conversation</a>
+        <a class="button secondary" href="/nova/workspace">Open Nova Workspace</a>
+        <a class="button secondary" href="/workspace">Open Health workspace conversation</a>
       </div>
       <form id="login-form" class="login-grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
@@ -73,8 +74,8 @@
     <section class="destinations" aria-label="Nova destinations">
       <article class="tile">
         <h3>Workspace</h3>
-        <p>Existing Health ISF + conversation workspace. A true Nova Workspace is Phase 2.</p>
-        <a class="button" href="/workspace" data-destination="workspace">Open Workspace</a>
+        <p>True Nova Workspace for Mrs. Nova Brain, projects, and files. Health /workspace stays separate.</p>
+        <a class="button" href="/nova/workspace" data-destination="workspace">Open Workspace</a>
       </article>
       <article class="tile">
         <h3>Web / News / Search</h3>
@@ -83,8 +84,8 @@
       </article>
       <article class="tile">
         <h3>Files</h3>
-        <p>Existing authenticated file upload on Workspace.</p>
-        <a class="button" href="/workspace" data-destination="files">Open Files</a>
+        <p>Nova Workspace files, plus existing /api/upload.</p>
+        <a class="button" href="/nova/workspace#files" data-destination="files">Open Files</a>
       </article>
       <article class="tile">
         <h3>Voice</h3>

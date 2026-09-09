@@ -67,6 +67,7 @@ def init_platform_db() -> None:
     Customer-payment ledger tables are Alembic-only and are never created here.
     """
     from app.db import models  # noqa: F401 — registers models with Base.metadata
+    from app.core.nova.workspace import models as nova_workspace_models  # noqa: F401
     os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
     tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
