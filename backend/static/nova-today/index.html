@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Today</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-today/today.css" />
+</head>
+<body>
+  <header class="today-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Today / Command Center</h1>
+      </div>
+    </div>
+    <nav class="today-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today" aria-current="page">Today</a>
+      <a href="/nova/workspace">Workspace</a>
+      <a href="/nova/communications">Communications</a>
+      <a href="/nova/government">Government</a>
+      <a href="/nova/business">Business</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="today-main">
+    <p class="disclaimer">Nova Today reads existing Nova Core records. It does not merge product databases, send email, file with agencies, charge cards, or create a ledger.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="brain-card" aria-label="Mrs. Nova Brain">
+      <div class="brain-layout">
+        <div class="avatar-wrap">
+          <img class="mrs-nova-avatar" src="/static/branding/amicor-mark.png" alt="Mrs. Nova Brain" />
+          <p class="avatar-caption">Mrs. Nova Brain</p>
+        </div>
+        <div class="brain-copy">
+          <h2>Mrs. Nova Brain</h2>
+          <p id="session-meta" class="hint">Sign in to use Nova Today.</p>
+          <p id="trust-labels" class="hint">Trust labels: VERIFIED DATA · USER-SAVED INFORMATION · AI SUGGESTION · ACTION REQUIRES APPROVAL</p>
+          <form id="ask-form" class="ask-row">
+            <label class="sr-only" for="ask-input">Ask Mrs. Nova Brain</label>
+            <input id="ask-input" type="text" placeholder="What needs attention now?" />
+            <button type="submit">Ask Nova</button>
+          </form>
+          <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+          <div class="command-actions">
+            <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+            <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+          </div>
+          <form id="login-form" class="login-grid hidden">
+            <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+            <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+            <button type="submit">Sign in</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="What needs attention now">
+      <h2>What needs attention now</h2>
+      <div id="attention-box" class="card-list">Sign in to load today's ranked work.</div>
+    </section>
+
+    <section class="panel" aria-label="Communications">
+      <h2>Communications</h2>
+      <div id="communications-box" class="card-list">No communications loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Government deadlines and grants">
+      <h2>Government deadlines and grants</h2>
+      <div id="government-box" class="card-list">No government items loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Business follow-ups and opportunities">
+      <h2>Business follow-ups and opportunities</h2>
+      <div id="business-box" class="card-list">No business items loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Workspace recent work">
+      <h2>Workspace recent work</h2>
+      <div id="workspace-box" class="card-list">No workspace items loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Product links">
+      <h2>Product links</h2>
+      <p class="hint">Health, Delivery, and Freight stay separate products.</p>
+      <div id="links-box" class="card-list">No product links loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Mrs. Nova recommendations">
+      <h2>Recommendations</h2>
+      <div id="recommendations-box" class="card-list">No recommendations loaded.</div>
+    </section>
+
+    <section class="panel" aria-label="Approval queue">
+      <h2>Approval queue</h2>
+      <p class="hint">Approve only opens a V1 link, saves a Communications draft, creates a Business task, or acknowledges an item.</p>
+      <div id="queue-box" class="card-list">No items waiting for approval.</div>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-today/today.js"></script>
+</body>
+</html>
