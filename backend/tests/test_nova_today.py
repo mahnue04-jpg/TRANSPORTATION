@@ -266,6 +266,21 @@ def test_nova_today_did_not_edit_frozen_v1_files() -> None:
         assert "/api/nova/today" not in text
 
 
+def test_nova_today_schema_ensure_is_additive_and_dialect_safe() -> None:
+    from app.core.nova.today.schema_ensure import ensure_nova_today_schema, snooze_column_sql
+    from app.db.session import engine, init_platform_db
+    from sqlalchemy import inspect
+
+    assert "TIMESTAMPTZ" in snooze_column_sql("postgresql")
+    assert "IF NOT EXISTS" in snooze_column_sql("postgresql")
+    assert "DATETIME" in snooze_column_sql("sqlite")
+    init_platform_db()
+    ensure_nova_today_schema(engine)
+    ensure_nova_today_schema(engine)
+    columns = {col["name"] for col in inspect(engine).get_columns("nova_v2_command_actions")}
+    assert "snoozed_until" in columns
+
+
 def test_nova_today_rank_score_boosts_overdue() -> None:
     from app.core.nova.today.schemas import NovaTodayCard
     from app.core.nova.today.service import rank_score
