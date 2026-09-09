@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMICOR Nova | Freight Carrier Offers</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-freight/freight.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="brand-lockup amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR Nova</p>
+        <h1>Freight Carrier Offers</h1>
+        <p class="subtitle">Accept or decline Nova freight tenders. Accepting assigns the load. Pickup has not started.</p>
+      </div>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <section id="login-card" class="card">
+      <h2>Sign in</h2>
+      <form id="login-form" class="grid">
+        <label>Email<input id="login-email" type="email" required /></label>
+        <label>Password<input id="login-password" type="password" required /></label>
+        <div class="actions full"><button type="submit">Sign in</button></div>
+      </form>
+    </section>
+    <section id="app-shell" class="hidden">
+      <div class="toolbar">
+        <div>
+          <strong id="session-name">Signed in</strong>
+          <div class="subtitle" id="session-meta"></div>
+        </div>
+        <div class="actions">
+          <a class="button secondary" href="/nova/freight/dispatch">Dispatch board</a>
+          <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </div>
+      <section class="card">
+        <h2>My offers</h2>
+        <div id="offer-cards"></div>
+      </section>
+    </section>
+  </main>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-freight/carrier.js"></script>
+</body>
+</html>

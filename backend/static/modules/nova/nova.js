@@ -270,7 +270,7 @@
     runtime.busySinceAt = runtime.busy ? stampNow() : null;
     if (els.askButton) {
       els.askButton.disabled = !!busy;
-      els.askButton.textContent = busy ? "Working..." : "Ask Mr. Nova";
+      els.askButton.textContent = busy ? "Working..." : "Ask Mrs. Nova Brain";
     }
     if (Array.isArray(els.actions)) {
       els.actions.forEach(function (button) {
@@ -336,12 +336,12 @@
         const statusErr = results[0].status === "rejected" ? String(results[0].reason && results[0].reason.message ? results[0].reason.message : results[0].reason) : null;
         const contextErr = results[1].status === "rejected" ? String(results[1].reason && results[1].reason.message ? results[1].reason.message : results[1].reason) : null;
         const reason = contextErr || statusErr || "unavailable";
-        setOutput(els, "Mr. Nova status unavailable: " + reason);
+        setOutput(els, "Mrs. Nova Brain status unavailable: " + reason);
       }
     } catch (error) {
       if (els.widgetPhase) els.widgetPhase.textContent = "unavailable";
       if (els.widgetHealth) els.widgetHealth.textContent = "degraded";
-      setOutput(els, "Mr. Nova status unavailable: " + String(error && error.message ? error.message : error));
+      setOutput(els, "Mrs. Nova Brain status unavailable: " + String(error && error.message ? error.message : error));
     }
   }
 
@@ -487,7 +487,7 @@
   async function askNova(els, question) {
     const prompt = String(question || "").trim();
     if (!prompt) {
-      setOutput(els, "Enter a prompt for Mr. Nova.");
+      setOutput(els, "Enter a prompt for Mrs. Nova Brain.");
       return;
     }
     try {
@@ -495,7 +495,7 @@
       runtime.lastActionAt = stampNow();
       runtime.lastCompletedAction = null;
       runtime.lastFailedAction = null;
-      setOutput(els, "Mr. Nova is analyzing live runtime context...");
+      setOutput(els, "Mrs. Nova Brain is analyzing live runtime context...");
       const actionId = nextActionId("ask");
       const payload = {
         question: prompt,

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMICOR Nova | Freight Dispatch</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-freight/freight.css" />
+</head>
+<body>
+  <main class="page wide">
+    <header class="brand-lockup amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR Nova</p>
+        <h1>Freight Dispatch Board</h1>
+        <p class="subtitle">Offer Nova freight shipments to eligible carriers. Pickup lifecycle is not enabled in this phase.</p>
+      </div>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <section id="login-card" class="card">
+      <h2>Sign in</h2>
+      <form id="login-form" class="grid">
+        <label>Email<input id="login-email" type="email" required /></label>
+        <label>Password<input id="login-password" type="password" required /></label>
+        <div class="actions full"><button type="submit">Sign in</button></div>
+      </form>
+    </section>
+    <section id="app-shell" class="hidden">
+      <div class="toolbar">
+        <div>
+          <strong id="session-name">Signed in</strong>
+          <div class="subtitle" id="session-meta"></div>
+        </div>
+        <div class="actions">
+          <a class="button secondary" href="/nova/freight/shipments">Shipper</a>
+          <a class="button secondary" href="/nova/freight/carrier/offers">Carrier offers</a>
+          <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </div>
+      <section class="card">
+        <h2>Filters</h2>
+        <form id="filter-form" class="grid">
+          <label>Status
+            <select name="status">
+              <option value="">Dispatch-relevant</option>
+              <option value="ready_for_dispatch">ready_for_dispatch</option>
+              <option value="offered">offered</option>
+              <option value="assigned">assigned</option>
+              <option value="accepted">accepted</option>
+            </select>
+          </label>
+          <label>Equipment
+            <select name="equipment_type">
+              <option value="">Any</option>
+              <option value="cargo_van">Cargo van</option>
+              <option value="van">Van</option>
+              <option value="box_truck">Box truck</option>
+              <option value="straight_truck">Straight truck</option>
+              <option value="dry_van">Dry van</option>
+              <option value="reefer">Reefer</option>
+              <option value="flatbed">Flatbed</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Pickup city/state<input name="pickup" /></label>
+          <label>Destination city/state<input name="destination" /></label>
+          <label>Window from<input name="window_from" type="datetime-local" /></label>
+          <label>Window to<input name="window_to" type="datetime-local" /></label>
+          <label class="full"><input type="checkbox" name="unassigned_only" /> Unassigned only</label>
+          <div class="actions full"><button type="submit">Apply filters</button></div>
+        </form>
+      </section>
+      <section class="card">
+        <h2>Shipments</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Shipment</th>
+                <th>Customer</th>
+                <th>Pickup</th>
+                <th>Destination</th>
+                <th>Pickup window</th>
+                <th>Delivery window</th>
+                <th>Commodity</th>
+                <th>Weight</th>
+                <th>Equipment</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Carrier</th>
+              </tr>
+            </thead>
+            <tbody id="board-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <section id="detail-card" class="card hidden">
+        <h2>Dispatch actions</h2>
+        <p><strong id="detail-id"></strong> · <span id="detail-status" class="status"></span></p>
+        <p id="detail-assigned"></p>
+        <h3>Eligible carriers</h3>
+        <div id="carrier-list"></div>
+        <div class="actions">
+          <button type="button" id="send-offers">Send offer / tender</button>
+        </div>
+        <h3>Offers</h3>
+        <div id="offer-list"></div>
+      </section>
+    </section>
+  </main>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-freight/dispatch.js"></script>
+</body>
+</html>

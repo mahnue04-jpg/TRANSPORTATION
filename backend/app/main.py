@@ -3893,6 +3893,22 @@ def serve_nova_freight_shipper_ui(shipment_id: str | None = None) -> Response:
     return JSONResponse({"error": "Nova freight page not found"}, status_code=404)
 
 
+@app.get("/nova/freight/dispatch")
+def serve_nova_freight_dispatch_ui() -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "dispatch.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight dispatch page not found"}, status_code=404)
+
+
+@app.get("/nova/freight/carrier/offers")
+def serve_nova_freight_carrier_offers_ui() -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "carrier.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight carrier offers page not found"}, status_code=404)
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_fallback(full_path: str, request: Request) -> Response:
     """Global SPA fallback registered last to preserve /api and asset route priority."""

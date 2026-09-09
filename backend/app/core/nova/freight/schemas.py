@@ -314,5 +314,109 @@ class NovaFreightShipmentOut(BaseModel):
     currency: str
     proof_of_pickup_ref: str | None = None
     proof_of_delivery_ref: str | None = None
+    assigned_carrier_id: str | None = None
+    assigned_offer_id: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+DISPATCH_STATUSES = ("ready_for_dispatch", "offered", "assigned", "accepted")
+OFFER_STATUSES = ("pending", "accepted", "declined", "expired", "cancelled")
+
+
+class NovaFreightCarrierCreate(BaseModel):
+    name: str
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    contact_email: str | None = None
+    user_id: str | None = None
+    equipment_type: EquipmentType = "cargo_van"
+    service_area: str | None = None
+    availability: str = "available"
+    active: bool = True
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name(cls, value: object) -> str:
+        return _require_text(str(value) if value is not None else "", "name")
+
+
+class NovaFreightCarrierOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    carrier_id: str
+    organization_id: str
+    user_id: str | None = None
+    name: str
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    contact_email: str | None = None
+    active: bool
+    equipment_type: str
+    service_area: str | None = None
+    availability: str
+    authority_status: str
+    insurance_status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class NovaFreightOfferCreate(BaseModel):
+    carrier_ids: list[str]
+    expires_at: datetime | None = None
+    offered_rate: Decimal | None = None
+    currency: str = "USD"
+
+    @field_validator("carrier_ids", mode="before")
+    @classmethod
+    def _ids(cls, value: object) -> list[str]:
+        if not isinstance(value, list) or not value:
+            raise ValueError("carrier_ids must include at least one carrier")
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        if not cleaned:
+            raise ValueError("carrier_ids must include at least one carrier")
+        return list(dict.fromkeys(cleaned))
+
+    @field_validator("offered_rate", mode="before")
+    @classmethod
+    def _rate(cls, value: object) -> Decimal | None:
+        if value in (None, ""):
+            return None
+        number = Decimal(str(value))
+        if number <= 0:
+            raise ValueError("offered_rate must be greater than 0")
+        return number
+
+
+class NovaFreightOfferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    offer_id: str
+    shipment_id: str
+    organization_id: str
+    carrier_id: str
+    carrier_name: str | None = None
+    status: str
+    offered_rate: Decimal | None = None
+    currency: str
+    offered_at: datetime
+    expires_at: datetime | None = None
+    responded_at: datetime | None = None
+    pickup_city: str | None = None
+    pickup_state: str | None = None
+    delivery_city: str | None = None
+    delivery_state: str | None = None
+    pickup_window_start: datetime | None = None
+    pickup_window_end: datetime | None = None
+    delivery_window_start: datetime | None = None
+    delivery_window_end: datetime | None = None
+    commodity: str | None = None
+    weight: Decimal | None = None
+    weight_unit: str | None = None
+    equipment_type: str | None = None
+    shipment_status: str | None = None
+
+
+class NovaFreightDispatchShipmentOut(NovaFreightShipmentOut):
+    assigned_carrier_name: str | None = None
+    pending_offer_count: int = 0

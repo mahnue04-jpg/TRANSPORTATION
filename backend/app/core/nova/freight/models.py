@@ -76,5 +76,61 @@ class NovaFreightShipment(Base):
     proof_of_delivery_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     document_refs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    assigned_carrier_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    assigned_offer_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightCarrier(Base):
+    __tablename__ = "nova_freight_carriers"
+    __table_args__ = (
+        Index("ix_nova_freight_carriers_carrier_id", "carrier_id", unique=True),
+        Index("ix_nova_freight_carriers_org_id", "organization_id"),
+        Index("ix_nova_freight_carriers_user_id", "user_id"),
+        Index("ix_nova_freight_carriers_active", "organization_id", "active"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    carrier_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    equipment_type: Mapped[str] = mapped_column(String(32), nullable=False, default="cargo_van")
+    service_area: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    availability: Mapped[str] = mapped_column(String(32), nullable=False, default="available")
+    authority_status: Mapped[str] = mapped_column(String(32), nullable=False, default="placeholder")
+    insurance_status: Mapped[str] = mapped_column(String(32), nullable=False, default="placeholder")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightOffer(Base):
+    __tablename__ = "nova_freight_offers"
+    __table_args__ = (
+        Index("ix_nova_freight_offers_offer_id", "offer_id", unique=True),
+        Index("ix_nova_freight_offers_shipment_id", "shipment_id"),
+        Index("ix_nova_freight_offers_carrier_id", "carrier_id"),
+        Index("ix_nova_freight_offers_org_status", "organization_id", "status"),
+        Index("ix_nova_freight_offers_shipment_status", "shipment_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    offer_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    carrier_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    offered_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

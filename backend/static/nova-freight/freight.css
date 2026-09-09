@@ -26,6 +26,8 @@ html, body {
   padding: 24px 16px 64px;
 }
 
+.page.wide { max-width: 1180px; }
+
 .brand-kicker {
   margin: 0 0 4px;
   color: var(--nova-accent);
