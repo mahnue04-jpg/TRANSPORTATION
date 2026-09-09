@@ -498,6 +498,8 @@ class NovaFreightShipmentEventOut(BaseModel):
     longitude: Decimal | None = None
     source: str | None = None
     proof_id: str | None = None
+    quote_id: str | None = None
+    invoice_id: str | None = None
     created_at: datetime
 
 
@@ -563,3 +565,105 @@ class NovaFreightProofOut(BaseModel):
     signer_role: str | None = None
     is_active: bool
     uploaded_at: datetime
+
+
+class NovaFreightQuoteUpdate(BaseModel):
+    estimated_miles: Decimal | None = None
+    estimated_hours: Decimal | None = None
+    other_surcharge: Decimal | None = None
+    discount_amount: Decimal | None = None
+    quoted_amount: Decimal | None = None
+    quote_notes: str | None = None
+    customer_notes: str | None = None
+
+
+class NovaFreightQuoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    quote_id: str
+    shipment_id: str
+    organization_id: str
+    pricing_status: str
+    pricing_method: str
+    currency: str
+    estimated_miles: Decimal | None = None
+    estimated_hours: Decimal | None = None
+    base_rate: Decimal
+    mileage_amount: Decimal
+    time_amount: Decimal
+    equipment_surcharge: Decimal
+    special_handling_surcharge: Decimal
+    fuel_surcharge: Decimal
+    other_surcharge: Decimal
+    discount_amount: Decimal
+    tax_amount: Decimal
+    suggested_amount: Decimal
+    quoted_amount: Decimal
+    total_customer_amount: Decimal
+    estimated_carrier_cost: Decimal
+    estimated_amicor_margin: Decimal
+    quote_notes: str | None = None
+    customer_notes: str | None = None
+    quoted_by_user_id: str | None = None
+    quoted_at: datetime | None = None
+    finalized_by_user_id: str | None = None
+    finalized_at: datetime | None = None
+    last_adjusted_by_user_id: str | None = None
+    last_adjusted_at: datetime | None = None
+
+
+class NovaFreightCustomerQuoteOut(BaseModel):
+    shipment_id: str
+    pickup_address: str
+    pickup_city: str
+    pickup_state: str
+    pickup_zip: str
+    delivery_address: str
+    delivery_city: str
+    delivery_state: str
+    delivery_zip: str
+    commodity: str
+    weight: Decimal | None = None
+    equipment_type: str
+    quoted_amount: Decimal | None = None
+    currency: str
+    pricing_status: str
+    quoted_at: datetime | None = None
+    customer_notes: str | None = None
+    payment_status: str
+    invoice_status: str | None = None
+    invoice_id: str | None = None
+    total_amount: Decimal | None = None
+
+
+class NovaFreightInvoiceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    invoice_id: str
+    shipment_id: str
+    organization_id: str
+    quote_id: str | None = None
+    customer_user_id: str | None = None
+    amount_subtotal: Decimal
+    surcharge_total: Decimal
+    discount_total: Decimal
+    tax_total: Decimal
+    total_amount: Decimal
+    total_amount_minor: int
+    currency: str
+    invoice_status: str
+    stripe_payment_intent_id: str | None = None
+    stripe_checkout_session_id: str | None = None
+    failure_reason: str | None = None
+    created_at: datetime
+    finalized_at: datetime | None = None
+    paid_at: datetime | None = None
+
+
+class NovaFreightPaymentStart(BaseModel):
+    amount: Decimal | None = None
+
+
+class NovaFreightPaymentConfirm(BaseModel):
+    simulate: str | None = None
+

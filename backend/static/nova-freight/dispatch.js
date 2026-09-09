@@ -94,6 +94,7 @@
     $("detail-last").textContent = "Last status update: " + String(shipment.last_status_at || shipment.updated_at || "—").replace("T", " ").slice(0, 16);
     $("detail-proof-flags").textContent = "Pickup proof: " + (shipment.has_pickup_proof ? "Yes" : "No") +
       " · Delivery proof: " + (shipment.has_delivery_proof ? "Yes" : "No");
+    await loadCommercial(shipmentId, shipment);
     var proofs = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/proofs");
     $("proof-list").innerHTML = proofs.length
       ? "<ul class='proof-list'>" + proofs.map(function (row) {
@@ -197,6 +198,87 @@
     if (!btn) return;
     try { await loadDetail(btn.getAttribute("data-id")); } catch (err) { showBanner(err.message); }
   });
+  async function loadCommercial(shipmentId, shipment) {
+    var quote = null;
+    var invoice = null;
+    try { quote = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/quote"); } catch (_) {}
+    try { invoice = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/invoice"); } catch (_) {}
+    $("commercial-summary").textContent =
+      "Quote: " + (quote ? quote.quoted_amount + " " + quote.currency + " (" + quote.pricing_status + ")" : "none") +
+      " · Invoice: " + (invoice ? invoice.invoice_status + " " + invoice.total_amount : "none") +
+      " · Customer amount: " + (quote ? quote.total_customer_amount : "—") +
+      " · Est. carrier cost: " + (quote ? quote.estimated_carrier_cost : "—") +
+      " · Est. AMICOR margin: " + (quote ? quote.estimated_amicor_margin : shipment.amicor_margin || "—") +
+      (invoice && invoice.paid_at ? " · Paid: " + String(invoice.paid_at).replace("T", " ").slice(0, 16) : "") +
+      (invoice && invoice.stripe_payment_intent_id ? " · Stripe TEST: " + invoice.stripe_payment_intent_id : "");
+    $("quote-breakdown").textContent = quote
+      ? JSON.stringify({
+          suggested_amount: quote.suggested_amount,
+          quoted_amount: quote.quoted_amount,
+          base_rate: quote.base_rate,
+          mileage_amount: quote.mileage_amount,
+          special_handling_surcharge: quote.special_handling_surcharge,
+          fuel_surcharge: quote.fuel_surcharge,
+          tax_amount: quote.tax_amount,
+          estimated_carrier_cost: quote.estimated_carrier_cost,
+          estimated_amicor_margin: quote.estimated_amicor_margin
+        }, null, 2)
+      : "No quote yet.";
+    $("invoice-box").textContent = invoice
+      ? "Invoice " + invoice.invoice_id + " · " + invoice.invoice_status + " · " + invoice.total_amount + " " + invoice.currency
+      : "No invoice yet. Create after completion.";
+  }
+  function quotePayload() {
+    var form = $("quote-form");
+    var miles = form.estimated_miles.value;
+    var override = form.quoted_amount.value;
+    return {
+      estimated_miles: miles ? miles : null,
+      quoted_amount: override ? override : null,
+      quote_notes: form.quote_notes.value || null,
+      customer_notes: form.customer_notes.value || null
+    };
+  }
+  $("suggest-quote").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      var suggested = await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/quote/suggest", {
+        method: "POST",
+        body: JSON.stringify(quotePayload())
+      });
+      $("quote-breakdown").textContent = JSON.stringify(suggested, null, 2);
+      showBanner("Suggested quote is " + suggested.suggested_amount + ".", true);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("save-quote").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/quote", {
+        method: "POST",
+        body: JSON.stringify(quotePayload())
+      });
+      showBanner("Quote saved.", true);
+      await loadDetail(selectedId);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("finalize-quote").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/quote/finalize", { method: "POST" });
+      showBanner("Quote finalized.", true);
+      await loadDetail(selectedId);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("create-invoice").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/invoice", { method: "POST" });
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/invoice/finalize", { method: "POST" });
+      showBanner("Invoice is ready for TEST payment.", true);
+      await loadDetail(selectedId);
+    } catch (err) { showBanner(err.message); }
+  });
+
   $("send-offers").addEventListener("click", async function () {
     var ids = Array.prototype.map.call(document.querySelectorAll("input[name='carrier']:checked"), function (el) { return el.value; });
     if (!selectedId || !ids.length) {

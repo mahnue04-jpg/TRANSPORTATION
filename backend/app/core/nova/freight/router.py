@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -20,14 +20,37 @@ from app.auth import (
     get_current_user_context,
     require_any_role,
 )
+from app.core.nova.freight.commercial import (
+    calculate_suggested_quote,
+    confirm_customer_payment,
+    create_invoice,
+    customer_quote_view,
+    finalize_invoice,
+    finalize_quote,
+    get_invoice_or_404,
+    get_quote_or_404,
+    invoice_out,
+    process_nova_freight_webhook,
+    quote_out,
+    save_quote,
+    start_customer_payment,
+    verify_nova_freight_webhook,
+    void_invoice,
+)
 from app.core.nova.freight.schemas import (
     NovaFreightCarrierCreate,
     NovaFreightCarrierOut,
+    NovaFreightCustomerQuoteOut,
     NovaFreightDispatchShipmentOut,
+    NovaFreightInvoiceOut,
     NovaFreightOfferCreate,
     NovaFreightOfferOut,
+    NovaFreightPaymentConfirm,
+    NovaFreightPaymentStart,
     NovaFreightProofCreate,
     NovaFreightProofOut,
+    NovaFreightQuoteOut,
+    NovaFreightQuoteUpdate,
     NovaFreightShipmentCreate,
     NovaFreightShipmentEventOut,
     NovaFreightShipmentOut,
@@ -128,6 +151,14 @@ def _carrier_scope(db, user: UserContext, dispatcher_view: bool) -> list[str] | 
     return [row.carrier_id for row in mine]
 
 
+def _shipment_out(user: UserContext, shipment) -> NovaFreightShipmentOut:
+    item = NovaFreightShipmentOut.model_validate(shipment)
+    if user.role not in DISPATCH_ROLES:
+        item.amicor_margin = None
+        item.carrier_payout_amount = None
+    return item
+
+
 def _assert_viewer_access(db, user: UserContext, shipment) -> None:
     if user.role in DISPATCH_ROLES or user.role in {ROLE_RIDER, ROLE_PROVIDER}:
         return
@@ -144,11 +175,14 @@ def post_shipment(
     db: Session = Depends(get_db),
 ):
     try:
-        return create_shipment(
-            db,
-            payload,
-            organization_id=_org_id(user),
-            user_id=user.user_id,
+        return _shipment_out(
+            user,
+            create_shipment(
+                db,
+                payload,
+                organization_id=_org_id(user),
+                user_id=user.user_id,
+            ),
         )
     except NovaFreightError as exc:
         _raise(exc)
@@ -159,7 +193,7 @@ def get_shipments(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return list_shipments(db, organization_id=_org_id(user))
+    return [_shipment_out(user, row) for row in list_shipments(db, organization_id=_org_id(user))]
 
 
 @router.get("/shipments/{shipment_id}", response_model=NovaFreightShipmentOut, dependencies=[Depends(require_freight_viewer)])
@@ -171,7 +205,7 @@ def get_one_shipment(
     try:
         shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
         _assert_viewer_access(db, user, shipment)
-        return shipment
+        return _shipment_out(user, shipment)
     except NovaFreightError as exc:
         _raise(exc)
 
@@ -184,11 +218,14 @@ def patch_shipment(
     db: Session = Depends(get_db),
 ):
     try:
-        return update_shipment(
-            db,
-            shipment_id,
-            payload,
-            organization_id=_org_id(user),
+        return _shipment_out(
+            user,
+            update_shipment(
+                db,
+                shipment_id,
+                payload,
+                organization_id=_org_id(user),
+            ),
         )
     except NovaFreightError as exc:
         _raise(exc)
@@ -373,18 +410,20 @@ def get_carrier_active_shipments(
 ):
     dispatcher_view = user.role in DISPATCH_ROLES
     if dispatcher_view:
-        return list_carrier_active_shipments(
+        rows = list_carrier_active_shipments(
             db,
             organization_id=_org_id(user),
             carrier_ids=[
                 row.carrier_id for row in list_carriers(db, organization_id=_org_id(user), active_only=True)
             ],
         )
-    return list_carrier_active_shipments(
-        db,
-        organization_id=_org_id(user),
-        carrier_ids=_carrier_scope(db, user, False) or [],
-    )
+    else:
+        rows = list_carrier_active_shipments(
+            db,
+            organization_id=_org_id(user),
+            carrier_ids=_carrier_scope(db, user, False) or [],
+        )
+    return [_shipment_out(user, row) for row in rows]
 
 
 @router.get(
@@ -417,15 +456,18 @@ def post_shipment_status(
     db: Session = Depends(get_db),
 ):
     try:
-        return transition_shipment_status(
-            db,
-            shipment_id,
-            payload,
-            organization_id=_org_id(user),
-            actor_user_id=user.user_id,
-            actor_role=user.role,
-            allowed_carrier_ids=_carrier_scope(db, user, user.role in DISPATCH_ROLES),
-            dispatcher_view=user.role in DISPATCH_ROLES,
+        return _shipment_out(
+            user,
+            transition_shipment_status(
+                db,
+                shipment_id,
+                payload,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+                allowed_carrier_ids=_carrier_scope(db, user, user.role in DISPATCH_ROLES),
+                dispatcher_view=user.role in DISPATCH_ROLES,
+            ),
         )
     except NovaFreightError as exc:
         _raise(exc)
@@ -589,3 +631,279 @@ def delete_shipment_proof(
         )
     except NovaFreightError as exc:
         _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/quote/suggest",
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_quote_suggest(
+    shipment_id: str,
+    payload: NovaFreightQuoteUpdate | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        body = payload or NovaFreightQuoteUpdate()
+        return calculate_suggested_quote(
+            db,
+            shipment_id,
+            organization_id=_org_id(user),
+            estimated_miles=body.estimated_miles,
+            estimated_hours=body.estimated_hours,
+            other_surcharge=body.other_surcharge,
+            discount_amount=body.discount_amount,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/quote",
+    response_model=NovaFreightQuoteOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_quote(
+    shipment_id: str,
+    payload: NovaFreightQuoteUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return quote_out(
+            save_quote(
+                db,
+                shipment_id,
+                payload,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/quote/finalize",
+    response_model=NovaFreightQuoteOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_quote_finalize(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return quote_out(
+            finalize_quote(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/quote",
+    response_model=NovaFreightQuoteOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def get_quote(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return quote_out(get_quote_or_404(db, shipment_id, organization_id=_org_id(user)))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/quote/customer",
+    response_model=NovaFreightCustomerQuoteOut,
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_customer_quote(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return customer_quote_view(db, shipment_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/invoice",
+    response_model=NovaFreightInvoiceOut,
+    status_code=201,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_invoice(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return invoice_out(
+            create_invoice(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/invoice/finalize",
+    response_model=NovaFreightInvoiceOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_invoice_finalize(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return invoice_out(
+            finalize_invoice(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/shipments/{shipment_id}/invoice",
+    response_model=NovaFreightInvoiceOut,
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_invoice(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        invoice = get_invoice_or_404(db, shipment_id, organization_id=_org_id(user))
+        if user.role not in DISPATCH_ROLES and user.role not in {ROLE_RIDER, ROLE_PROVIDER}:
+            raise HTTPException(status_code=403, detail="Only the customer or dispatch can view this invoice")
+        return invoice_out(invoice)
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/invoice/void",
+    response_model=NovaFreightInvoiceOut,
+    dependencies=[Depends(require_freight_dispatch)],
+)
+def post_invoice_void(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return invoice_out(
+            void_invoice(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/invoice/pay",
+    dependencies=[Depends(require_freight_shipper)],
+)
+def post_invoice_pay(
+    shipment_id: str,
+    payload: NovaFreightPaymentStart | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        body = payload or NovaFreightPaymentStart()
+        return start_customer_payment(
+            db,
+            shipment_id,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+            requested_amount=body.amount,
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/invoice/confirm-payment",
+    response_model=NovaFreightInvoiceOut,
+    dependencies=[Depends(require_freight_shipper)],
+)
+def post_invoice_confirm_payment(
+    shipment_id: str,
+    payload: NovaFreightPaymentConfirm | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        body = payload or NovaFreightPaymentConfirm()
+        return invoice_out(
+            confirm_customer_payment(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+                simulate=body.simulate,
+            )
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post("/stripe/webhook")
+async def nova_freight_stripe_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+):
+    payload = await request.body()
+    try:
+        event = verify_nova_freight_webhook(payload, stripe_signature)
+        result = process_nova_freight_webhook(db, event)
+        return {"received": True, **result}
+    except NovaFreightError as exc:
+        _raise(exc)
+    except Exception as exc:
+        import stripe
+
+        signature_error = getattr(stripe, "SignatureVerificationError", None)
+        if signature_error is not None and isinstance(exc, signature_error):
+            raise HTTPException(status_code=400, detail="Invalid Stripe signature.") from exc
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook.") from exc

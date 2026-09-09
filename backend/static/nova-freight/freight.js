@@ -180,7 +180,32 @@
       $("detail-proof-flags").textContent = "Pickup proof: " + (shipment.has_pickup_proof ? "Yes" : "No") +
         " · Delivery proof: " + (shipment.has_delivery_proof ? "Yes" : "No");
     }
+    loadCustomerQuote(shipment.shipment_id);
     setView("detail");
+  }
+
+  async function loadCustomerQuote(shipmentId) {
+    var box = $("customer-quote");
+    var pay = $("pay-invoice");
+    if (!box) return;
+    try {
+      var quote = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/quote/customer");
+      box.innerHTML =
+        "<p>Quoted price: <strong>" + (quote.quoted_amount != null ? quote.quoted_amount + " " + quote.currency : "Not quoted yet") + "</strong></p>" +
+        "<p>Rate status: " + quote.pricing_status + "</p>" +
+        "<p>Quote date: " + (quote.quoted_at ? String(quote.quoted_at).replace("T", " ").slice(0, 16) : "—") + "</p>" +
+        "<p>Payment status: " + quote.payment_status + "</p>" +
+        (quote.customer_notes ? "<p>" + quote.customer_notes + "</p>" : "") +
+        (quote.invoice_status ? "<p>Invoice: " + quote.invoice_status + (quote.total_amount != null ? " · " + quote.total_amount + " " + quote.currency : "") + "</p>" : "");
+      if (pay) {
+        var ready = quote.invoice_status === "ready" || quote.invoice_status === "payment_pending" || quote.invoice_status === "failed";
+        pay.classList.toggle("hidden", !ready);
+        pay.setAttribute("data-shipment", shipmentId);
+      }
+    } catch (_) {
+      box.innerHTML = "<p>No customer quote is available yet.</p>";
+      if (pay) pay.classList.add("hidden");
+    }
   }
 
   async function loadList() {
@@ -273,6 +298,28 @@
     }
     await renderApp();
   });
+
+  if ($("pay-invoice")) {
+    $("pay-invoice").addEventListener("click", async function () {
+      var shipmentId = $("pay-invoice").getAttribute("data-shipment") || routeShipmentId();
+      if (!shipmentId) return;
+      try {
+        await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/invoice/pay", {
+          method: "POST",
+          body: JSON.stringify({})
+        });
+        var paid = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/invoice/confirm-payment", {
+          method: "POST",
+          body: JSON.stringify({ simulate: "succeed" })
+        });
+        if (paid.invoice_status === "paid") showBanner("TEST payment succeeded. Invoice is paid.", true);
+        else showBanner("Payment status: " + paid.invoice_status + (paid.failure_reason ? " · " + paid.failure_reason : ""));
+        await loadCustomerQuote(shipmentId);
+      } catch (err) {
+        showBanner(err.message || "TEST payment failed");
+      }
+    });
+  }
 
   $("sign-out").addEventListener("click", async function () {
     if (session() && session().logout) await session().logout();

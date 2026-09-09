@@ -21,6 +21,10 @@ def ensure_nova_freight_schema(engine) -> None:
         event_cols = {col["name"] for col in inspector.get_columns("nova_freight_shipment_events")}
         if "proof_id" not in event_cols:
             statements.append("ALTER TABLE nova_freight_shipment_events ADD COLUMN proof_id VARCHAR(32)")
+        if "quote_id" not in event_cols:
+            statements.append("ALTER TABLE nova_freight_shipment_events ADD COLUMN quote_id VARCHAR(32)")
+        if "invoice_id" not in event_cols:
+            statements.append("ALTER TABLE nova_freight_shipment_events ADD COLUMN invoice_id VARCHAR(32)")
     if not statements:
         return
     with engine.begin() as conn:

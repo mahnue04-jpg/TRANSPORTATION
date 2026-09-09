@@ -110,6 +110,22 @@
         <p id="detail-assigned"></p>
         <p id="detail-last"></p>
         <p id="detail-proof-flags"></p>
+        <h3>Commercial</h3>
+        <p id="commercial-summary"></p>
+        <form id="quote-form" class="grid">
+          <label>Estimated miles<input name="estimated_miles" type="number" min="0" step="0.1" /></label>
+          <label>Manual quote override<input name="quoted_amount" type="number" min="0" step="0.01" /></label>
+          <label class="full">Internal quote notes<textarea name="quote_notes"></textarea></label>
+          <label class="full">Customer-visible notes<textarea name="customer_notes"></textarea></label>
+          <div class="actions full">
+            <button type="button" id="suggest-quote" class="secondary">Calculate suggested quote</button>
+            <button type="button" id="save-quote" class="secondary">Save quote</button>
+            <button type="button" id="finalize-quote">Finalize quote</button>
+            <button type="button" id="create-invoice" class="secondary">Create / finalize invoice</button>
+          </div>
+        </form>
+        <pre id="quote-breakdown"></pre>
+        <div id="invoice-box"></div>
         <h3>Proofs</h3>
         <div id="proof-list"></div>
         <h3>Timeline</h3>

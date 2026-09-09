@@ -161,6 +161,8 @@ class NovaFreightShipmentEvent(Base):
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     proof_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    quote_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
@@ -195,3 +197,100 @@ class NovaFreightProof(Base):
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightQuote(Base):
+    __tablename__ = "nova_freight_quotes"
+    __table_args__ = (
+        Index("ix_nova_freight_quotes_quote_id", "quote_id", unique=True),
+        Index("ix_nova_freight_quotes_shipment_id", "shipment_id", unique=True),
+        Index("ix_nova_freight_quotes_org_id", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    quote_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    pricing_status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    pricing_method: Mapped[str] = mapped_column(String(32), nullable=False, default="rate_engine")
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    estimated_miles: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    estimated_hours: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    base_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    mileage_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    time_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    equipment_surcharge: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    special_handling_surcharge: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    fuel_surcharge: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    other_surcharge: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    suggested_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    quoted_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    total_customer_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    estimated_carrier_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    estimated_amicor_margin: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    quote_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quoted_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finalized_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_adjusted_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    last_adjusted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightInvoice(Base):
+    __tablename__ = "nova_freight_invoices"
+    __table_args__ = (
+        Index("ix_nova_freight_invoices_invoice_id", "invoice_id", unique=True),
+        Index("ix_nova_freight_invoices_shipment_id", "shipment_id"),
+        Index("ix_nova_freight_invoices_org_id", "organization_id"),
+        Index("ix_nova_freight_invoices_idem", "idempotency_key", unique=True),
+        Index("ix_nova_freight_invoices_pi", "stripe_payment_intent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    invoice_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    quote_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    customer_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    amount_subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    surcharge_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    total_amount_minor: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    invoice_status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightPaymentEvent(Base):
+    __tablename__ = "nova_freight_payment_events"
+    __table_args__ = (
+        Index("ix_nova_freight_pay_events_event", "stripe_event_id", unique=True),
+        Index("ix_nova_freight_pay_events_invoice", "invoice_id"),
+        Index("ix_nova_freight_pay_events_pi", "stripe_payment_intent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    stripe_event_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    shipment_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    organization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    processing_result: Mapped[str] = mapped_column(String(64), nullable=False)
+    amount_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
