@@ -426,11 +426,7 @@
       }
       return true;
     } catch (err) {
-      showBanner(
-        "Could not open your existing application. Use your original application link. A new application was not created. "
-          + (err.message || ""),
-        false
-      );
+      showBanner("Not authorized.", false);
       return false;
     }
   }
@@ -526,6 +522,9 @@
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { json = { detail: text }; }
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("Not authorized.");
+      }
       const detail = json && json.detail ? json.detail : json;
       if (detail && detail.errors) {
         throw new Error(detail.errors.map(function (e) { return e.message || (e.field + " is required"); }).join("\n"));
@@ -539,17 +538,13 @@
     return /only draft applications can be edited/i.test(String(message || ""));
   }
 
-  function hasResumeIdentity(body) {
-    const email = String((body && body.email) || "").trim();
-    const first = String((body && body.legal_first_name) || "").trim();
-    const last = String((body && body.legal_last_name) || "").trim();
-    return !!(email || (first && last));
-  }
-
-  function adoptCreatedOrResumedApplication(created) {
+  function adoptCreatedApplication(created) {
+    if (created && created.resumed_existing) {
+      throw new Error("Not authorized.");
+    }
     const app = unwrapApplication(created && created.application ? created.application : created);
     if (!app || !app.id) {
-      throw new Error("Could not open an application. A new application was not created.");
+      throw new Error("Not authorized.");
     }
     appInput.value = app.id;
     if (created && created.applicant_access_token) {
@@ -557,18 +552,12 @@
     }
     persistSession();
     fillFormFromApplication(app);
-    if (created && created.resumed_existing) {
-      applyResumePosition(app);
-    }
   }
 
   async function ensureApplication() {
     if (appInput.value) {
       if (!applicantToken) {
-        throw new Error(
-          "Your existing application could not be opened because the applicant link token is missing. "
-            + "A new application was not created. Use your original application link."
-        );
+        throw new Error("Not authorized.");
       }
       try {
         const app = await api("/applications/" + appInput.value);
@@ -580,31 +569,19 @@
         }
         return;
       } catch (err) {
-        if (isNonDraftError(err.message) || /already/i.test(err.message || "")) {
+        if (isNonDraftError(err.message)) {
           throw err;
         }
-        throw new Error(
-          "Could not open your existing application. A new application was not created. "
-            + (err.message || "")
-        );
+        throw new Error("Not authorized.");
       }
     }
 
-    const body = payloadFromForm();
-    if (!hasResumeIdentity(body) && !orgInput.value) {
-      throw new Error(
-        "Enter the email or legal name from your existing application, or open your original application link. "
-          + "A new application was not created."
-      );
+    if (!orgInput.value) {
+      throw new Error("Open this page with your Amicor application link (organization required).");
     }
-    if (!hasResumeIdentity(body) && orgInput.value) {
-      throw new Error(
-        "Enter your email or legal name before saving so an existing application can be reopened. "
-          + "A new application was not created."
-      );
-    }
-    const created = await api("/applications", { method: "POST", body: JSON.stringify(body) });
-    adoptCreatedOrResumedApplication(created);
+
+    const created = await api("/applications", { method: "POST", body: JSON.stringify(payloadFromForm()) });
+    adoptCreatedApplication(created);
   }
 
   function recoverAfterChallengeReset() {

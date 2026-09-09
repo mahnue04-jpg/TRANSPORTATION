@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import ensure_auth_schema, seed_default_users
+from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
 from app.db.session import SessionLocal
 from app.helpers import now
 from app.main import app
@@ -120,6 +120,34 @@ def _create_driver_001_draft(client: TestClient, *, org_id: str | None = None) -
     return app_id, token, payload
 
 
+def _assert_unauthorized(response, *, forbidden_snippets: list[str]) -> None:
+    assert response.status_code == 403
+    body = response.json()
+    assert body == {"detail": "Not authorized."}
+    text = response.text.lower()
+    for snippet in forbidden_snippets:
+        assert snippet.lower() not in text
+
+
+def _private_snippets(payload: dict, app_id: str) -> list[str]:
+    return [
+        payload["legal_first_name"],
+        payload["legal_last_name"],
+        payload["email"],
+        payload["mobile_phone"],
+        payload["vehicle_make"],
+        payload["vehicle_model"],
+        payload["vehicle_license_plate"],
+        payload["vehicle_vin"],
+        app_id,
+        "DRV-001",
+        "front-test-only.jpg",
+        "storage_ref",
+        "resume_step",
+        "work_setup",
+    ]
+
+
 def _count_driver_001(org_id: str) -> list[str]:
     with SessionLocal() as db:
         rows = (
@@ -133,56 +161,105 @@ def _count_driver_001(org_id: str) -> list[str]:
         return [row.id for row in rows]
 
 
-def test_driver_001_identity_resumes_existing_application(client: TestClient):
+def test_legal_name_alone_cannot_resume(client: TestClient):
     app_id, _token, payload = _create_driver_001_draft(client)
-    org_id = payload["organization_id"]
-
-    by_email = client.post(
-        "/api/platform-ops/driver-onboarding/applications",
-        json={"organization_id": org_id, "email": payload["email"]},
-    )
-    assert by_email.status_code == 200, by_email.text
-    body = by_email.json()
-    assert body["resumed_existing"] is True
-    assert body["application"]["id"] == app_id
-    assert body["application"]["internal_driver_number"] == "DRV-001"
-    assert body["applicant_access_token"]
-
-    by_name = client.post(
+    response = client.post(
         "/api/platform-ops/driver-onboarding/applications",
         json={
-            "organization_id": org_id,
-            "legal_first_name": "Saye",
-            "legal_last_name": "Monibah",
+            "organization_id": payload["organization_id"],
+            "legal_first_name": payload["legal_first_name"],
+            "legal_last_name": payload["legal_last_name"],
         },
     )
-    assert by_name.status_code == 200, by_name.text
-    assert by_name.json()["resumed_existing"] is True
-    assert by_name.json()["application"]["id"] == app_id
-    assert _count_driver_001(org_id) == [app_id]
-
-
-def test_driver_001_org_less_identity_resumes_pinned_application(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    app_id, _token, payload = _create_driver_001_draft(client)
-    monkeypatch.setattr(onboarding_service, "EXISTING_DRIVER_001_APPLICATION_ID", app_id)
-    resumed = client.post(
-        "/api/platform-ops/driver-onboarding/applications",
-        json={"email": payload["email"]},
-    )
-    assert resumed.status_code == 200, resumed.text
-    assert resumed.json()["resumed_existing"] is True
-    assert resumed.json()["application"]["id"] == app_id
+    _assert_unauthorized(response, forbidden_snippets=_private_snippets(payload, app_id))
     assert _count_driver_001(payload["organization_id"]) == [app_id]
 
 
-def test_driver_001_resume_loads_fields_documents_and_work_setup_step(client: TestClient):
+def test_email_alone_cannot_resume(client: TestClient):
     app_id, _token, payload = _create_driver_001_draft(client)
-    resumed = client.post(
+    response = client.post(
         "/api/platform-ops/driver-onboarding/applications",
         json={"organization_id": payload["organization_id"], "email": payload["email"]},
     )
-    assert resumed.status_code == 200, resumed.text
-    token = resumed.json()["applicant_access_token"]
+    _assert_unauthorized(response, forbidden_snippets=_private_snippets(payload, app_id))
+    assert _count_driver_001(payload["organization_id"]) == [app_id]
+
+
+def test_drv_001_alone_cannot_resume(client: TestClient):
+    app_id, _token, payload = _create_driver_001_draft(client)
+    response = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={"organization_id": payload["organization_id"], "legal_first_name": "DRV-001"},
+    )
+    _assert_unauthorized(response, forbidden_snippets=_private_snippets(payload, app_id))
+    org_only = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={"organization_id": payload["organization_id"]},
+    )
+    assert org_only.status_code == 200, org_only.text
+    assert org_only.json().get("resumed_existing") is False
+    assert org_only.json()["application"]["id"] != app_id
+    assert org_only.json()["application"].get("internal_driver_number") != "DRV-001"
+    assert _count_driver_001(payload["organization_id"]) == [app_id]
+
+
+def test_application_id_without_token_cannot_resume(client: TestClient):
+    app_id, _token, payload = _create_driver_001_draft(client)
+    missing = client.get(f"/api/platform-ops/driver-onboarding/applications/{app_id}")
+    unknown = client.get(f"/api/platform-ops/driver-onboarding/applications/{uuid4()}")
+    _assert_unauthorized(missing, forbidden_snippets=_private_snippets(payload, app_id))
+    _assert_unauthorized(unknown, forbidden_snippets=_private_snippets(payload, app_id))
+    assert missing.text == unknown.text
+
+
+def test_other_application_token_cannot_resume_driver_001(client: TestClient):
+    app_id, _token, payload = _create_driver_001_draft(client)
+    other = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={
+            "organization_id": payload["organization_id"],
+            "legal_first_name": "Other",
+            "legal_last_name": "Applicant",
+            "email": f"other.{uuid4().hex[:8]}@example.com",
+        },
+    )
+    assert other.status_code == 200, other.text
+    other_token = other.json()["applicant_access_token"]
+    response = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers={"X-Applicant-Token": other_token},
+    )
+    _assert_unauthorized(response, forbidden_snippets=_private_snippets(payload, app_id))
+
+
+def test_rotated_token_cannot_resume(client: TestClient):
+    app_id, old_token, payload = _create_driver_001_draft(client)
+    login = client.post("/api/auth/login", json={"email": "admin@amicor.local", "password": SEED_PASSWORD})
+    assert login.status_code == 200
+    reissued = client.post(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}/applicant-token/reissue",
+        headers={"Authorization": "Bearer " + login.json()["access_token"]},
+        json={},
+    )
+    assert reissued.status_code == 200, reissued.text
+    new_token = reissued.json()["applicant_access_token"]
+    stale = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers={"X-Applicant-Token": old_token},
+    )
+    _assert_unauthorized(stale, forbidden_snippets=_private_snippets(payload, app_id))
+    current = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers={"X-Applicant-Token": new_token},
+    )
+    assert current.status_code == 200
+    assert current.json()["id"] == app_id
+    assert old_token not in stale.text
+    assert new_token not in stale.text
+
+
+def test_current_valid_token_resumes_exact_existing_application(client: TestClient):
+    app_id, token, payload = _create_driver_001_draft(client)
     loaded = client.get(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}",
         headers={"X-Applicant-Token": token},
@@ -220,12 +297,7 @@ def test_driver_001_resume_loads_fields_documents_and_work_setup_step(client: Te
 
 
 def test_driver_001_save_draft_reloads_same_application(client: TestClient):
-    app_id, _token, payload = _create_driver_001_draft(client)
-    resumed = client.post(
-        "/api/platform-ops/driver-onboarding/applications",
-        json={"organization_id": payload["organization_id"], "email": payload["email"]},
-    )
-    token = resumed.json()["applicant_access_token"]
+    app_id, token, payload = _create_driver_001_draft(client)
     saved = client.put(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}",
         headers={"X-Applicant-Token": token},
@@ -246,12 +318,7 @@ def test_driver_001_save_draft_reloads_same_application(client: TestClient):
 
 
 def test_driver_001_captcha_empty_save_does_not_clear_saved_data(client: TestClient):
-    app_id, _token, payload = _create_driver_001_draft(client)
-    resumed = client.post(
-        "/api/platform-ops/driver-onboarding/applications",
-        json={"organization_id": payload["organization_id"], "email": payload["email"]},
-    )
-    token = resumed.json()["applicant_access_token"]
+    app_id, token, payload = _create_driver_001_draft(client)
     emptied = client.put(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}",
         headers={"X-Applicant-Token": token},
@@ -300,10 +367,16 @@ def test_driver_001_number_and_activation_stay_unchanged_after_resume(client: Te
             (row.id, row.storage_ref, row.review_status)
             for row in db.query(PlatformDriverOnboardingDocument).filter_by(application_id=app_id).all()
         ]
-    client.post(
-        "/api/platform-ops/driver-onboarding/applications",
-        json={"organization_id": payload["organization_id"], "email": payload["email"]},
+    loaded = client.get(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        headers={"X-Applicant-Token": _token},
     )
+    assert loaded.status_code == 200
+    unauthorized_save = client.put(
+        f"/api/platform-ops/driver-onboarding/applications/{app_id}",
+        json={"organization_id": payload["organization_id"], "preferred_language": "French"},
+    )
+    _assert_unauthorized(unauthorized_save, forbidden_snippets=_private_snippets(payload, app_id))
     with SessionLocal() as db:
         after = db.query(PlatformDriverOnboardingApplication).filter_by(id=app_id).one()
         assert after.internal_driver_number == snapshot["internal_driver_number"] == "DRV-001"
@@ -342,14 +415,12 @@ def test_unrelated_create_does_not_replace_driver_001(client: TestClient):
 def test_driver_001_resume_js_contract():
     html = APPLY_HTML.read_text(encoding="utf-8")
     js = APPLY_JS.read_text(encoding="utf-8")
-    assert "driver-apply.js?v=20260909.1" in html
+    assert "driver-apply.js?v=20260909.2" in html
     assert 'id="existing-documents"' in html
     assert "recoverAfterChallengeReset" in js
-    assert "adoptCreatedOrResumedApplication" in js
-    assert "hasResumeIdentity" in js
-    assert "resumed_existing" in js
-    assert "payloadFromForm()" in js
-    assert "A new application was not created" in js
+    assert "adoptCreatedApplication" in js
+    assert "hasResumeIdentity" not in js
+    assert "Not authorized." in js
     assert "pending review" in js
     assert "w9_status" in js
 
@@ -425,13 +496,7 @@ def _browser_driver_001_resume() -> None:
         if "/api/platform-ops/driver-onboarding/applications" in url:
             if method == "POST" and url.rstrip("/").endswith("/applications"):
                 posts.append(route.request.post_data or "")
-                return route.fulfill(
-                    json={
-                        "application": payload,
-                        "applicant_access_token": "resumed-token",
-                        "resumed_existing": True,
-                    }
-                )
+                return route.fulfill(status=403, json={"detail": "Not authorized."})
             if method == "PUT":
                 return route.fulfill(json=payload)
             return route.fulfill(json=payload)
@@ -443,10 +508,11 @@ def _browser_driver_001_resume() -> None:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.route("**/*", handle_route)
-        page.goto("https://amicor.example/platform-ops/driver-apply")
+        page.goto(
+            "https://amicor.example/platform-ops/driver-apply"
+            "?organization_id=org-resume-001&application_id=ed17c75c-04ec-407a-aba6-a48988d5051c&token=synthetic-token"
+        )
         page.wait_for_selector('input[name="email"]', state="attached")
-        page.fill('input[name="email"]', "saye.resume@example.com")
-        page.locator("#save-draft").click()
         page.wait_for_function("() => document.querySelector('[name=legal_first_name]').value === 'Saye'")
         page.wait_for_function(
             "() => !document.querySelector('[data-step-panel=\"5\"]').classList.contains('hidden')"
@@ -463,7 +529,7 @@ def _browser_driver_001_resume() -> None:
         page.reload()
         page.wait_for_function("() => document.querySelector('[name=legal_first_name]').value === 'Saye'")
         assert page.locator('[data-step-panel="5"]').is_visible()
-        assert len(posts) == 1
+        assert posts == []
         browser.close()
 
 

@@ -238,11 +238,11 @@ def test_resume_html_js_contract_maps_saved_fields_and_documents():
     assert "computeApplicantResumeProgress" in js
     assert "applyResumePosition" in js
     assert "recoverAfterChallengeReset" in js
-    assert "adoptCreatedOrResumedApplication" in js
-    assert "hasResumeIdentity" in js
+    assert "adoptCreatedApplication" in js
+    assert "Not authorized." in js
     assert "pending review" in js
     assert "-webkit-text-fill-color" in css
-    assert "driver-apply.js?v=20260909.1" in html
+    assert "driver-apply.js?v=20260909.2" in html
 
 
 def _browser_resume(viewport: dict[str, int]) -> None:

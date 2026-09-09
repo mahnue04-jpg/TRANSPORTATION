@@ -81,7 +81,7 @@ def test_apply_page_uses_status_cards_instead_of_file_upload():
     assert "Please review and sign the Independent Contractor Agreement." in js
     assert "Please complete your secure tax information." in js
     assert "Payout setup is not complete." in js
-    assert "driver-apply.js?v=20260909.1" in html
+    assert "driver-apply.js?v=20260909.2" in html
 
 
 def test_ica_unsigned_then_signed_reload_shows_on_file(client: TestClient):
@@ -365,15 +365,15 @@ def test_driver_001_shaped_record_stays_untouched(client: TestClient):
             "internal_driver_number": "DRV-001",
         },
     )
-    assert blocked.status_code in {200, 400, 409}, blocked.text
-    if blocked.status_code == 200:
-        created_id = blocked.json()["application"]["id"]
-        created_number = blocked.json()["application"].get("internal_driver_number")
-        if snapshot:
-            assert blocked.json().get("resumed_existing") is True
-            assert created_id == snapshot["id"]
-            assert created_number == "DRV-001"
-        else:
+    if snapshot:
+        assert blocked.status_code == 403, blocked.text
+        assert blocked.json().get("detail") == "Not authorized."
+        assert "application" not in blocked.json()
+    else:
+        assert blocked.status_code in {200, 400, 403, 409}, blocked.text
+        if blocked.status_code == 200:
+            created_id = blocked.json()["application"]["id"]
+            created_number = blocked.json()["application"].get("internal_driver_number")
             assert created_id != (snapshot or {}).get("id")
             assert created_number != "DRV-001"
 

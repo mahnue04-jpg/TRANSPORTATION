@@ -148,6 +148,13 @@ def _parse_service_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
+def _applicant_unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=onboarding_service.APPLICANT_UNAUTHORIZED,
+    )
+
+
 def _authorize_application_access(
     *,
     application,
@@ -156,9 +163,20 @@ def _authorize_application_access(
 ) -> None:
     if user and can_review(user):
         return
-    if onboarding_service.verify_applicant_token(application, applicant_token):
+    if application is not None and onboarding_service.verify_applicant_token(application, applicant_token):
         return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access this application.")
+    raise _applicant_unauthorized()
+
+
+def _require_applicant_application(
+    db: Session,
+    application_id: str,
+    applicant_token: str | None,
+):
+    application = onboarding_service.get_application_by_id(db, application_id)
+    if application is None or not onboarding_service.verify_applicant_token(application, applicant_token):
+        raise _applicant_unauthorized()
+    return application
 
 
 ensure_platform_ops_schema()
@@ -183,35 +201,22 @@ def create_application(
     db: Session = Depends(get_db),
     user=Depends(_optional_current_user),  # type: ignore
 ) -> DriverApplicationCreateResponse:
-    explicit_org = str(payload.organization_id or "").strip() or None
-    user_org = str(getattr(user, "organization_id", None) or "").strip() or None
+    organization_id = _resolve_org_id(payload.organization_id, user)
     try:
-        if not explicit_org and not user_org:
-            resumed = onboarding_service.resume_existing_driver_001_if_matched(
-                db, organization_id=None, payload=payload
-            )
-            if resumed is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="organization_id is required.")
-            application, token = resumed
-            detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
-            return DriverApplicationCreateResponse(
-                application=detail,
-                applicant_access_token=token,
-                resumed_existing=True,
-            )
-        organization_id = _resolve_org_id(explicit_org, user)
         application, token, resumed_existing = onboarding_service.create_draft_application(
             db, organization_id=organization_id, payload=payload
         )
-    except HTTPException:
-        raise
     except ValueError as exc:
+        if str(exc) == onboarding_service.APPLICANT_UNAUTHORIZED:
+            raise _applicant_unauthorized() from exc
         raise _parse_service_error(exc) from exc
+    if resumed_existing:
+        raise _applicant_unauthorized()
     detail = onboarding_service.application_to_detail(db, application, include_full_license=True)
     return DriverApplicationCreateResponse(
         application=detail,
         applicant_access_token=token,
-        resumed_existing=resumed_existing,
+        resumed_existing=False,
     )
 
 
@@ -261,14 +266,15 @@ def get_application(
     x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
 ) -> DriverApplicationDetailResponse:
     application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    _authorize_application_access(application=application, user=user, applicant_token=x_applicant_token)
-    if onboarding_service.verify_applicant_token(application, x_applicant_token):
-        # Applicant token holders receive their own saved fields so the portal can resume
-        # without writing masked values back over real data.
-        return onboarding_service.application_to_detail(db, application, include_full_license=True)
-    return _detail_for_user(db, application, user)
+    if user and can_review(user):
+        if application is None:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        if onboarding_service.verify_applicant_token(application, x_applicant_token):
+            return onboarding_service.application_to_detail(db, application, include_full_license=True)
+        return _detail_for_user(db, application, user)
+    if application is None or not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise _applicant_unauthorized()
+    return onboarding_service.application_to_detail(db, application, include_full_license=True)
 
 
 @router.post(
@@ -323,11 +329,7 @@ def get_applicant_status(
     from app.modules.approval_engine.driver_messages import applicant_facing_status
     from app.modules.approval_engine.models import ApprovalCase
 
-    application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
-        raise HTTPException(status_code=403, detail="Applicant token required.")
+    application = _require_applicant_application(db, application_id, x_applicant_token)
     case = (
         db.query(ApprovalCase)
         .filter(ApprovalCase.platform_ops_application_id == application.id)
@@ -350,11 +352,7 @@ def get_applicant_progress(
     )
     from app.modules.approval_engine.models import ApprovalCase
 
-    application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
-        raise HTTPException(status_code=403, detail="Applicant token required.")
+    application = _require_applicant_application(db, application_id, x_applicant_token)
     case = (
         db.query(ApprovalCase)
         .filter(ApprovalCase.platform_ops_application_id == application.id)
@@ -412,11 +410,7 @@ def get_application_policies(
     db: Session = Depends(get_db),
     x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
 ) -> dict[str, Any]:
-    application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
-        raise HTTPException(status_code=403, detail="Applicant token required.")
+    application = _require_applicant_application(db, application_id, x_applicant_token)
     from app.modules.platform_ops.onboarding.work_setup import agreement_is_signed
 
     return policy_service.serialize_policy_acknowledgments(
@@ -468,12 +462,7 @@ def _require_applicant_draft(
     application_id: str,
     x_applicant_token: str | None,
 ) -> Any:
-    application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
-        raise HTTPException(status_code=403, detail="Applicant token required.")
-    return application
+    return _require_applicant_application(db, application_id, x_applicant_token)
 
 
 @router.get("/applications/{application_id}/work-setup", response_model=WorkSetupStatusResponse)
@@ -584,12 +573,13 @@ def update_application(
     x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
 ) -> DriverApplicationDetailResponse:
     application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
     if user and is_driver_role(user):
         raise HTTPException(status_code=403, detail="Drivers cannot modify onboarding applications.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token) and not (user and can_review(user)):
-        raise HTTPException(status_code=403, detail="Not authorized to update this application.")
+    if user and can_review(user):
+        if application is None:
+            raise HTTPException(status_code=404, detail="Application not found.")
+    elif application is None or not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise _applicant_unauthorized()
     try:
         updated = onboarding_service.update_draft_application(
             db,
@@ -612,11 +602,7 @@ def submit_application(
     user=Depends(_optional_current_user),  # type: ignore
     x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
 ) -> DriverApplicationDetailResponse:
-    application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token):
-        raise HTTPException(status_code=403, detail="Applicant token required to submit.")
+    application = _require_applicant_application(db, application_id, x_applicant_token)
     try:
         updated = onboarding_service.submit_application(
             db,
@@ -645,10 +631,11 @@ async def upload_document(
     user=Depends(_optional_current_user),  # type: ignore
 ):
     application = onboarding_service.get_application_by_id(db, application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if not onboarding_service.verify_applicant_token(application, x_applicant_token) and not (user and can_review(user)):
-        raise HTTPException(status_code=403, detail="Not authorized to upload documents.")
+    if user and can_review(user):
+        if application is None:
+            raise HTTPException(status_code=404, detail="Application not found.")
+    elif application is None or not onboarding_service.verify_applicant_token(application, x_applicant_token):
+        raise _applicant_unauthorized()
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")

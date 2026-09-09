@@ -611,6 +611,9 @@ def stamp_existing_driver_001_number(
         raise
 
 
+APPLICANT_UNAUTHORIZED = "Not authorized."
+
+
 def _normalized_identity(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -619,6 +622,7 @@ def _payload_matches_driver_001(
     payload: DriverApplicationDraftRequest | None,
     existing: PlatformDriverOnboardingApplication,
 ) -> bool:
+    """Locate a Driver 001 candidate. Matching never grants applicant access."""
     if payload is None:
         return False
     email = _normalized_identity(getattr(payload, "email", None))
@@ -627,29 +631,23 @@ def _payload_matches_driver_001(
     last = _normalized_identity(getattr(payload, "legal_last_name", None))
     existing_first = _normalized_identity(existing.legal_first_name)
     existing_last = _normalized_identity(existing.legal_last_name)
+    claimed = " ".join([email, first, last])
     if email and existing_email and email == existing_email:
         return True
     if first and last and existing_first and existing_last and first == existing_first and last == existing_last:
         return True
     if first == "driver" and last == "001":
         return True
+    if "drv-001" in claimed or "driver 001" in claimed:
+        return True
     return False
 
 
-def resume_existing_driver_001_if_matched(
+def _driver_001_candidates(
     db: Session,
     *,
-    organization_id: str | None = None,
-    payload: DriverApplicationDraftRequest | None = None,
-) -> tuple[PlatformDriverOnboardingApplication, str] | None:
-    """Return the existing Driver 001 application when identity matches.
-
-    Rotates the applicant token so the portal can load the same row. Does not
-    create an application, apply draft fields, approve, activate, or change
-    documents or vehicle data.
-    """
-    if payload is None:
-        return None
+    organization_id: str | None,
+) -> list[PlatformDriverOnboardingApplication]:
     candidates: list[PlatformDriverOnboardingApplication] = []
     if organization_id:
         found = find_existing_driver_001_application(db, organization_id=organization_id)
@@ -662,29 +660,7 @@ def resume_existing_driver_001_if_matched(
         and all(item.id != pinned.id for item in candidates)
     ):
         candidates.append(pinned)
-    matched = next((item for item in candidates if _payload_matches_driver_001(payload, item)), None)
-    if matched is None:
-        return None
-    if matched.status == "activated" or matched.activated_driver_id:
-        raise ValueError(
-            "Cannot create a duplicate Driver 001 application. An application already exists. "
-            "Use the original application link. A new application was not created."
-        )
-    token, token_hash = _generate_applicant_token()
-    matched.applicant_access_token_hash = token_hash
-    _record_audit(
-        db,
-        application=matched,
-        event_type="application_resumed",
-        from_status=matched.status,
-        to_status=matched.status,
-        actor_role="applicant",
-        reason="Existing Driver 001 application resumed. No new application was created.",
-        metadata={"resumed_existing": True, "token_included": False},
-    )
-    db.commit()
-    db.refresh(matched)
-    return matched, token
+    return candidates
 
 
 def create_draft_application(
@@ -693,11 +669,10 @@ def create_draft_application(
     organization_id: str,
     payload: DriverApplicationDraftRequest | None = None,
 ) -> tuple[PlatformDriverOnboardingApplication, str, bool]:
-    resumed = resume_existing_driver_001_if_matched(
-        db, organization_id=organization_id, payload=payload
-    )
-    if resumed is not None:
-        return resumed[0], resumed[1], True
+    for existing in _driver_001_candidates(db, organization_id=organization_id):
+        if _payload_matches_driver_001(payload, existing):
+            # Identity can locate Driver 001 but never authorizes read or write access.
+            raise ValueError(APPLICANT_UNAUTHORIZED)
     token, token_hash = _generate_applicant_token()
     application = PlatformDriverOnboardingApplication(
         id=uuid4(),
