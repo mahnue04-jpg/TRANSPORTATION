@@ -13,7 +13,8 @@ TRUST_LABELS = (
     "ACTION REQUIRES APPROVAL",
 )
 RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge")
-ACTION_STATUSES = ("proposed", "approved", "dismissed", "done")
+ACTION_STATUSES = ("proposed", "approved", "dismissed", "done", "snoozed")
+SNOOZE_HOURS = (1, 4, 24, 72)
 SOURCE_MODULES = (
     "workspace",
     "communications",
@@ -52,6 +53,7 @@ class NovaTodayActionOut(BaseModel):
     result_ref_id: str | None
     created_at: datetime
     decided_at: datetime | None
+    snoozed_until: datetime | None = None
 
 
 class NovaTodayDashboardOut(BaseModel):
@@ -110,6 +112,11 @@ class NovaTodayApproveOut(BaseModel):
     task_id: str | None = None
     message: str
     fact_label: str
+
+
+class NovaTodaySnoozeRequest(BaseModel):
+    organization_id: str | None = None
+    hours: Literal[1, 4, 24, 72] = 24
 
 
 class NovaTodaySafetyOut(BaseModel):

@@ -77,7 +77,9 @@ def init_platform_db() -> None:
     tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
     Base.metadata.create_all(bind=engine, tables=tables)
     from app.core.nova.freight.schema_ensure import ensure_nova_freight_schema
+    from app.core.nova.today.schema_ensure import ensure_nova_today_schema
     ensure_nova_freight_schema(engine)
+    ensure_nova_today_schema(engine)
 
 
 def _classify_db_connection_error(exc: Exception) -> str:

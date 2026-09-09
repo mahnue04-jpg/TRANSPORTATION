@@ -59,6 +59,7 @@
       actions =
         "<div class=\"card-actions\">" +
         "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>" +
+        "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(card.action_id) + "\">Snooze 24h</button>" +
         "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(card.action_id) + "\">Dismiss</button>" +
         "<a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a>" +
         "</div>";
@@ -79,6 +80,7 @@
       "<div class=\"hint\">" + escapeHtml(row.recommended_action) + " · " + escapeHtml(row.source_module) + "</div>" +
       "<div class=\"card-actions\">" +
       "<button type=\"button\" data-approve=\"" + escapeHtml(row.action_id) + "\">Approve</button>" +
+      "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(row.action_id) + "\">Snooze 24h</button>" +
       "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(row.action_id) + "\">Dismiss</button>" +
       "</div></article>";
   }
@@ -123,12 +125,13 @@
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or filed.", true);
   }
   async function decide(actionId, kind) {
-    var path = kind === "approve"
-      ? "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/approve"
-      : "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/dismiss";
-    var result = await api(path, { method: "POST", body: "{}" });
+    var path = "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/" + kind;
+    var body = kind === "snooze" ? JSON.stringify({ hours: 24 }) : "{}";
+    var result = await api(path, { method: "POST", body: body });
     if (kind === "approve" && result.href) {
       showBanner((result.message || "Approved.") + " Opened only after your confirmation.", true);
+    } else if (kind === "snooze") {
+      showBanner("Snoozed for 24 hours. It will return to Today after that.", true);
     } else {
       showBanner(result.message || "Saved. Refresh will keep this decision.", true);
     }
@@ -136,9 +139,13 @@
   }
   document.addEventListener("click", function (event) {
     var approve = event.target && event.target.getAttribute && event.target.getAttribute("data-approve");
+    var snooze = event.target && event.target.getAttribute && event.target.getAttribute("data-snooze");
     var dismiss = event.target && event.target.getAttribute && event.target.getAttribute("data-dismiss");
     if (approve) {
       decide(approve, "approve").catch(function (err) { showBanner(err.message || String(err)); });
+    }
+    if (snooze) {
+      decide(snooze, "snooze").catch(function (err) { showBanner(err.message || String(err)); });
     }
     if (dismiss) {
       decide(dismiss, "dismiss").catch(function (err) { showBanner(err.message || String(err)); });

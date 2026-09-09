@@ -38,8 +38,13 @@ FROZEN_V1 = [
 
 @pytest.fixture(scope="module")
 def client() -> TestClient:
+    from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+    from app.db.session import engine, init_platform_db
+
     ensure_auth_schema()
     seed_default_users()
+    init_platform_db()
+    ensure_nova_today_schema(engine)
     return TestClient(app)
 
 
@@ -87,6 +92,8 @@ def test_nova_today_trust_labels_and_responsive() -> None:
     assert "@media (min-width: 1280px)" in TODAY_CSS
     assert "@media (min-width: 1600px)" in TODAY_CSS
     assert "min-height: 44px" in TODAY_CSS
+    assert "Snooze 24h" in TODAY_JS
+    assert "/actions/" in TODAY_JS and "snooze" in TODAY_JS
     assert "hardware" not in TODAY_JS.lower()
     assert "gpio" not in TODAY_JS.lower()
     assert "nfc" not in TODAY_JS.lower()
@@ -257,3 +264,92 @@ def test_nova_today_did_not_edit_frozen_v1_files() -> None:
         text = path.read_text(encoding="utf-8")
         assert "nova_v2_command_actions" not in text
         assert "/api/nova/today" not in text
+
+
+def test_nova_today_rank_score_boosts_overdue() -> None:
+    from app.core.nova.today.schemas import NovaTodayCard
+    from app.core.nova.today.service import rank_score
+
+    overdue = NovaTodayCard(
+        source_module="government",
+        source_ref_id="gov-overdue",
+        title="Overdue: license",
+        href="/nova/government",
+        trust_label="USER-SAVED INFORMATION",
+        priority=95,
+        recommended_action="create_task",
+    )
+    workspace = NovaTodayCard(
+        source_module="workspace",
+        source_ref_id="ws-1",
+        title="Project: notes",
+        href="/nova/workspace",
+        trust_label="USER-SAVED INFORMATION",
+        priority=95,
+        recommended_action="open_link",
+    )
+    assert rank_score(overdue) > rank_score(workspace)
+
+
+def test_nova_today_snooze_hides_and_returns(client: TestClient) -> None:
+    from datetime import timedelta
+
+    from app.core.nova.today.models import NovaV2CommandAction
+    from app.helpers import now
+
+    owner = _headers(client, "dispatcher@amicor.local")
+    other = _headers(client, "staff@amicor.local")
+    overdue = (date.today() - timedelta(days=3)).isoformat()
+    created = client.post(
+        "/api/nova/government/items",
+        headers=owner,
+        json={"title": "Snooze ranking license", "due_date": overdue, "status": "renewal_due"},
+    )
+    assert created.status_code == 200, created.text
+    item_id = created.json()["item_id"]
+
+    dash = client.get("/api/nova/today/dashboard", headers=owner)
+    assert dash.status_code == 200, dash.text
+    titles = [row["title"] for row in dash.json()["attention_now"]]
+    assert any(row["source_ref_id"] == item_id for row in dash.json()["attention_now"])
+    assert titles[0].startswith("Overdue:")
+    action = next(row for row in dash.json()["approval_queue"] if row["source_ref_id"] == item_id)
+
+    hidden = client.post(
+        f"/api/nova/today/actions/{action['action_id']}/snooze",
+        headers=other,
+        json={"hours": 24},
+    )
+    assert hidden.status_code == 404
+
+    bad_hours = client.post(
+        f"/api/nova/today/actions/{action['action_id']}/snooze",
+        headers=owner,
+        json={"hours": 7},
+    )
+    assert bad_hours.status_code == 422
+
+    snoozed = client.post(
+        f"/api/nova/today/actions/{action['action_id']}/snooze",
+        headers=owner,
+        json={"hours": 24},
+    )
+    assert snoozed.status_code == 200, snoozed.text
+    assert snoozed.json()["status"] == "snoozed"
+    assert snoozed.json()["snoozed_until"]
+
+    after = client.get("/api/nova/today/dashboard", headers=owner)
+    assert all(row["source_ref_id"] != item_id for row in after.json()["attention_now"])
+    assert all(row["action_id"] != action["action_id"] for row in after.json()["approval_queue"])
+    listed = client.get("/api/nova/today/actions", headers=owner)
+    kept = next(row for row in listed.json() if row["action_id"] == action["action_id"])
+    assert kept["status"] == "snoozed"
+
+    with SessionLocal() as db:
+        row = db.query(NovaV2CommandAction).filter(NovaV2CommandAction.action_id == action["action_id"]).one()
+        row.snoozed_until = now() - timedelta(minutes=1)
+        db.commit()
+
+    woken = client.get("/api/nova/today/dashboard", headers=owner)
+    assert any(row["source_ref_id"] == item_id for row in woken.json()["attention_now"])
+    assert any(row["action_id"] == action["action_id"] for row in woken.json()["approval_queue"])

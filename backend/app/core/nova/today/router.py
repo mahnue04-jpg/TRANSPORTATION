@@ -16,6 +16,7 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainOut,
     NovaTodayBrainRequest,
     NovaTodayDashboardOut,
+    NovaTodaySnoozeRequest,
 )
 from app.db.session import get_db
 
@@ -111,6 +112,26 @@ def approve_today_action(
             body,
             organization_id=_resolve_org(user, body.organization_id),
             user=user,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/actions/{action_id}/snooze", response_model=NovaTodayActionOut)
+def snooze_today_action(
+    action_id: str,
+    payload: NovaTodaySnoozeRequest | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or NovaTodaySnoozeRequest()
+    try:
+        return service.snooze_action(
+            db,
+            action_id,
+            organization_id=_resolve_org(user, body.organization_id),
+            user=user,
+            hours=body.hours,
         )
     except Exception as exc:
         _raise(exc)

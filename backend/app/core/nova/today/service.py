@@ -1,6 +1,8 @@
 """Nova V2 Today aggregator. Reads V1 dashboards. Writes only nova_v2_command_actions."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.business.schemas import NovaBizTaskCreate
 from app.core.nova.business.service import create_task as create_business_task
@@ -13,6 +15,7 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.today.models import NovaV2CommandAction
 from app.core.nova.today.schemas import (
     RECOMMENDED_ACTIONS,
+    SNOOZE_HOURS,
     TRUST_LABELS,
     NovaTodayActionCreate,
     NovaTodayActionOut,
@@ -65,7 +68,43 @@ def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
         result_ref_id=row.result_ref_id,
         created_at=row.created_at,
         decided_at=row.decided_at,
+        snoozed_until=row.snoozed_until,
     )
+
+
+_MODULE_RANK = {
+    "government": 8,
+    "communications": 6,
+    "business": 5,
+    "workspace": 2,
+    "link": 0,
+}
+
+
+def rank_score(card: NovaTodayCard) -> int:
+    """Phase 2 richer ranking: keep V1 priority, boost overdue / grants / important."""
+    score = int(card.priority or 0)
+    title = str(card.title or "").lower()
+    if title.startswith("overdue"):
+        score += 20
+    elif title.startswith("grant deadline"):
+        score += 10
+    elif title.startswith("important"):
+        score += 8
+    score += _MODULE_RANK.get(card.source_module, 0)
+    return score
+
+
+def _is_active_snooze(row: NovaV2CommandAction, *, at=None) -> bool:
+    if str(row.status or "") != "snoozed":
+        return False
+    until = row.snoozed_until
+    if until is None:
+        return False
+    current = at or now()
+    if until.tzinfo is None and getattr(current, "tzinfo", None) is not None:
+        until = until.replace(tzinfo=current.tzinfo)
+    return until > current
 
 
 def _card(
@@ -126,6 +165,12 @@ def _upsert_proposed(
         .first()
     )
     if existing is not None:
+        if existing.status == "snoozed" and _is_active_snooze(existing):
+            return existing
+        if existing.status == "snoozed" and not _is_active_snooze(existing):
+            existing.status = "proposed"
+            existing.snoozed_until = None
+            existing.decided_at = None
         if existing.status == "proposed":
             existing.title = card.title
             existing.detail = card.detail
@@ -415,20 +460,20 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
 
     rows = _list_actions(db, organization_id=organization_id, user=user)
     keyed = {(row.source_module, row.source_ref_id, row.recommended_action): row for row in rows}
-    dismissed = {
+    hidden = {
         (row.source_module, row.source_ref_id, row.recommended_action)
         for row in rows
-        if row.status == "dismissed"
+        if row.status == "dismissed" or _is_active_snooze(row)
     }
 
     def visible(cards: list[NovaTodayCard]) -> list[NovaTodayCard]:
         kept: list[NovaTodayCard] = []
         for card in cards:
             key = (card.source_module, card.source_ref_id, card.recommended_action)
-            if key in dismissed:
+            if key in hidden:
                 continue
             kept.append(_attach_action(card, keyed))
-        return sorted(kept, key=lambda item: item.priority, reverse=True)
+        return sorted(kept, key=rank_score, reverse=True)
 
     communications = visible(groups["communications"])
     government = visible(groups["government"])
@@ -438,7 +483,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
     recommendations = visible(groups["recommendations"])
     attention_now = sorted(
         communications + government + business + workspace,
-        key=lambda item: item.priority,
+        key=rank_score,
         reverse=True,
     )[:16]
     approval_queue = [action_out(row) for row in rows if row.status == "proposed"]
@@ -490,6 +535,29 @@ def dismiss_action(db: Session, action_id: str, *, organization_id: str, user: U
     row = _get_action(db, action_id, organization_id=organization_id, user=user)
     row.status = "dismissed"
     row.decided_at = now()
+    row.snoozed_until = None
+    db.commit()
+    db.refresh(row)
+    return action_out(row)
+
+
+def snooze_action(
+    db: Session,
+    action_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    hours: int = 24,
+) -> NovaTodayActionOut:
+    if hours not in SNOOZE_HOURS:
+        raise NovaTodayError("Snooze hours must be 1, 4, 24, or 72.", status_code=422)
+    row = _get_action(db, action_id, organization_id=organization_id, user=user)
+    if row.status in {"approved", "done", "dismissed"}:
+        raise NovaTodayError("Only open Today items can be snoozed.", status_code=409)
+    stamp = now()
+    row.status = "snoozed"
+    row.decided_at = stamp
+    row.snoozed_until = stamp + timedelta(hours=hours)
     db.commit()
     db.refresh(row)
     return action_out(row)
