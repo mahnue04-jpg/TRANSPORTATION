@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Business</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-business/business.css" />
+</head>
+<body>
+  <header class="biz-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Business OS</h1>
+      </div>
+    </div>
+    <nav class="biz-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/workspace">Nova Workspace</a>
+      <a href="/nova/communications">Communications</a>
+      <a href="/nova/government">Government</a>
+      <a href="/nova#web-search">Web / Search</a>
+      <a href="/nova/workspace#files">Files</a>
+      <a href="/workspace">Voice</a>
+      <a href="/workspace">Tools</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="biz-main">
+    <p class="disclaimer">Nova Business OS organizes operations, customers, opportunities, tasks, and documents. Revenue totals are operational forecasts only. Expense entries are labeled Operational Expense Tracking — NOT Accounting. No ledger, payroll, tax filing, or autonomous outreach in this phase.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Mrs. Nova Brain business assistant">
+      <form id="ask-form" class="ask-row">
+        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about this business" />
+        <button type="submit">Ask Nova</button>
+      </form>
+      <div class="command-actions">
+        <button type="button" data-brain="attention_today" class="secondary">What needs attention</button>
+        <button type="button" data-brain="summarize_business" class="secondary">Summarize business</button>
+        <button type="button" data-brain="overdue_followups" class="secondary">Overdue follow-ups</button>
+        <button type="button" data-brain="top_opportunities" class="secondary">Top opportunities</button>
+        <button type="button" data-brain="summarize_pipeline" class="secondary">Revenue pipeline</button>
+        <button type="button" data-brain="summarize_expenses" class="secondary">Summarize expenses</button>
+        <button type="button" data-brain="government_requirements" class="secondary">Government requirements</button>
+        <button type="button" data-brain="next_work" class="secondary">What next</button>
+        <button type="button" data-brain="draft_followup" class="secondary">Draft follow-up</button>
+        <button type="button" data-brain="operational_risks" class="secondary">Operational risks</button>
+      </div>
+      <p id="session-meta" class="hint">Sign in to use Nova Business.</p>
+      <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+      <p id="fact-label" class="hint">AI SUGGESTION is not accounting, legal advice, or a filed action.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="section-nav" aria-label="Business sections">
+      <article class="card compact"><h3>Overview</h3></article>
+      <article class="card compact"><h3>Companies / Organizations</h3></article>
+      <article class="card compact"><h3>Customers</h3></article>
+      <article class="card compact"><h3>Leads</h3></article>
+      <article class="card compact"><h3>Opportunities</h3></article>
+      <article class="card compact"><h3>Projects</h3></article>
+      <article class="card compact"><h3>Tasks</h3></article>
+      <article class="card compact"><h3>Documents</h3></article>
+      <article class="card compact"><h3>Communications</h3></article>
+      <article class="card compact"><h3>Government / Compliance</h3></article>
+      <article class="card compact"><h3>Revenue Pipeline</h3></article>
+      <article class="card compact"><h3>Expenses Summary</h3></article>
+      <article class="card compact"><h3>Vendors</h3></article>
+      <article class="card compact"><h3>Contracts</h3></article>
+      <article class="card compact"><h3>Meetings</h3></article>
+      <article class="card compact"><h3>Deadlines</h3></article>
+      <article class="card compact"><h3>Notes</h3></article>
+      <article class="card compact"><h3>Recent Activity</h3></article>
+    </section>
+
+    <section class="card">
+      <h2>Company / organization profile</h2>
+      <form id="profile-form" class="compose-grid">
+        <label>Business name<input id="profile-name" required minlength="2" /></label>
+        <label>Legal name<input id="profile-legal" /></label>
+        <label>Entity
+          <select id="profile-entity">
+            <option>llc</option>
+            <option>corp</option>
+            <option>sole_prop</option>
+            <option>partnership</option>
+            <option>nonprofit</option>
+            <option>other</option>
+          </select>
+        </label>
+        <label>State of formation<input id="profile-state" /></label>
+        <label>Workspace project ID<input id="profile-workspace" placeholder="optional NW-..." /></label>
+        <label>Government item ID<input id="profile-gov" placeholder="optional NG-..." /></label>
+        <button type="submit">Save profile</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Customer / contact</h2>
+      <form id="customer-form" class="compose-grid">
+        <label>Name<input id="customer-name" required minlength="2" /></label>
+        <label>Kind
+          <select id="customer-kind">
+            <option>company</option>
+            <option>individual</option>
+          </select>
+        </label>
+        <label>Email<input id="customer-email" type="email" /></label>
+        <label>Next follow-up<input id="customer-follow" type="date" /></label>
+        <button type="submit">Save customer</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Opportunity</h2>
+      <form id="opp-form" class="compose-grid">
+        <label>Title<input id="opp-title" required minlength="2" /></label>
+        <label>Estimated value<input id="opp-value" type="number" min="0" step="0.01" value="0" /></label>
+        <label>Probability %<input id="opp-prob" type="number" min="0" max="100" value="20" /></label>
+        <label>Status
+          <select id="opp-status">
+            <option>new</option>
+            <option>contacted</option>
+            <option>qualified</option>
+            <option>meeting_scheduled</option>
+            <option>proposal_needed</option>
+            <option>proposal_sent</option>
+            <option>negotiating</option>
+            <option>won</option>
+            <option>lost</option>
+            <option>on_hold</option>
+          </select>
+        </label>
+        <label>Customer ID<input id="opp-customer" placeholder="optional NBC-..." /></label>
+        <button type="submit">Save opportunity</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Task / vendor / document / expense / meeting</h2>
+      <form id="task-form" class="compose-grid">
+        <label>Task title<input id="task-title" required minlength="2" /></label>
+        <label>Due date<input id="task-due" type="date" /></label>
+        <label>Government item ID<input id="task-gov" placeholder="optional NG-..." /></label>
+        <button type="submit">Save task</button>
+      </form>
+      <form id="vendor-form" class="compose-grid">
+        <label>Vendor name<input id="vendor-name" required minlength="2" /></label>
+        <label>Category<input id="vendor-category" /></label>
+        <button type="submit">Save vendor</button>
+      </form>
+      <form id="doc-form" class="compose-grid">
+        <label>Document title<input id="doc-title" required minlength="2" /></label>
+        <label>Kind
+          <select id="doc-kind">
+            <option>contract</option>
+            <option>proposal</option>
+            <option>agreement</option>
+            <option>invoice</option>
+            <option>insurance</option>
+            <option>license</option>
+            <option>certification</option>
+          </select>
+        </label>
+        <label>Expiration<input id="doc-exp" type="date" /></label>
+        <label>Workspace file ID<input id="doc-file" placeholder="optional NWF-..." /></label>
+        <button type="submit">Save document link</button>
+      </form>
+      <form id="expense-form" class="compose-grid">
+        <label>Expense amount<input id="expense-amount" type="number" min="0" step="0.01" required /></label>
+        <label>Vendor<input id="expense-vendor" /></label>
+        <label>Description<input id="expense-desc" required minlength="2" /></label>
+        <button type="submit">Record informational expense</button>
+      </form>
+      <p class="hint">Operational Expense Tracking — NOT Accounting</p>
+      <form id="meeting-form" class="compose-grid">
+        <label>Meeting title<input id="meeting-title" required minlength="2" /></label>
+        <label>Start<input id="meeting-start" type="datetime-local" required /></label>
+        <button type="submit">Save local meeting</button>
+      </form>
+      <form id="draft-form" class="compose-grid">
+        <label>Follow-up to<input id="draft-to" type="email" /></label>
+        <label>Subject<input id="draft-subject" required minlength="1" /></label>
+        <button type="submit">Save Communications draft</button>
+      </form>
+    </section>
+
+    <section class="dashboard" aria-label="Business dashboard">
+      <article class="card metric"><h2>Revenue Pipeline</h2><div id="pipeline-box">Sign in to see pipeline.</div></article>
+      <article class="card"><h2>Open opportunities</h2><div id="opp-list">None.</div></article>
+      <article class="card"><h2>Active customers</h2><div id="customer-list">None.</div></article>
+      <article class="card"><h2>Follow-ups due</h2><div id="follow-list">None.</div></article>
+      <article class="card"><h2>Overdue tasks</h2><div id="task-list">None.</div></article>
+      <article class="card"><h2>Upcoming meetings</h2><div id="meeting-list">None.</div></article>
+      <article class="card"><h2>Contracts / documents needing attention</h2><div id="doc-list">None.</div></article>
+      <article class="card"><h2>Expenses Summary</h2><div id="expense-box">Operational Expense Tracking — NOT Accounting</div></article>
+      <article class="card"><h2>Government / Compliance</h2><div id="gov-list">Referenced from Government Hub. Not copied.</div></article>
+      <article class="card"><h2>Communications</h2><div id="comms-list">Referenced from Nova Communications.</div></article>
+      <article class="card"><h2>Vendors</h2><div id="vendor-list">None.</div></article>
+      <article class="card"><h2>Recent Activity</h2><div id="activity-list">None.</div></article>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-business/business.js"></script>
+</body>
+</html>

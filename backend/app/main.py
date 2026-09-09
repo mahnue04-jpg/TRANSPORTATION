@@ -80,6 +80,7 @@ from app.core.nova.freight.router import router as nova_freight_router  # type: 
 from app.core.nova.workspace.router import router as nova_workspace_router  # type: ignore
 from app.core.nova.communications.router import router as nova_communications_router  # type: ignore
 from app.core.nova.government.router import router as nova_government_router  # type: ignore
+from app.core.nova.business.router import router as nova_business_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -458,6 +459,7 @@ app.include_router(nova_freight_router)
 app.include_router(nova_workspace_router)
 app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
+app.include_router(nova_business_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3920,6 +3922,14 @@ def serve_nova_government() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Government page not found"}, status_code=404)
+
+
+@app.get("/nova/business")
+def serve_nova_business() -> Response:
+    page = os.path.join(_static_dir, "nova-business", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Business page not found"}, status_code=404)
 
 
 @app.get("/nova/freight")

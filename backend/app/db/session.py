@@ -70,6 +70,7 @@ def init_platform_db() -> None:
     from app.core.nova.workspace import models as nova_workspace_models  # noqa: F401
     from app.core.nova.communications import models as nova_communications_models  # noqa: F401
     from app.core.nova.government import models as nova_government_models  # noqa: F401
+    from app.core.nova.business import models as nova_business_models  # noqa: F401
     os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
     tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
