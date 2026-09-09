@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 from app.helpers import now, uuid4
+from app.core.nova.freight.models import NovaFreightShipment  # noqa: F401 — register Nova freight table
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────

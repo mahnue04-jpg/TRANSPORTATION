@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMICOR Nova | Freight / Logistics</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-freight/freight.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="brand-lockup amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR Nova</p>
+        <h1>Freight / Logistics</h1>
+        <p class="subtitle">Create a freight load request. This is the Nova TMS shipper intake, not Health rides or Delivery jobs.</p>
+      </div>
+    </header>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <section id="login-card" class="card">
+      <h2>Sign in</h2>
+      <p class="subtitle">Use your existing AMICOR account. Login and logout are unchanged.</p>
+      <form id="login-form" class="grid">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <div class="actions full">
+          <button type="submit">Sign in</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="app-shell" class="hidden">
+      <div class="toolbar">
+        <div>
+          <strong id="session-name">Signed in</strong>
+          <div class="subtitle" id="session-meta"></div>
+        </div>
+        <div class="actions">
+          <a class="button secondary" href="/nova/freight/new">New Freight Request</a>
+          <a class="button secondary" href="/nova/freight/shipments">My Shipments</a>
+          <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </div>
+
+      <section id="view-list" class="card hidden">
+        <h2>My Shipments / Shipment Requests</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Shipment ID</th>
+                <th>Pickup</th>
+                <th>Destination</th>
+                <th>Commodity</th>
+                <th>Equipment</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="shipment-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-form" class="card hidden">
+        <h2>New Freight Request</h2>
+        <nav class="steps" aria-label="Freight request steps">
+          <button type="button" class="step-dot active" data-step="1">1 · Request</button>
+          <button type="button" class="step-dot" data-step="2">2 · Pickup</button>
+          <button type="button" class="step-dot" data-step="3">3 · Delivery</button>
+          <button type="button" class="step-dot" data-step="4">4 · Load</button>
+          <button type="button" class="step-dot" data-step="5">5 · Equipment</button>
+          <button type="button" class="step-dot" data-step="6">6 · Review</button>
+          <button type="button" class="step-dot" data-step="7">7 · Submit</button>
+        </nav>
+
+        <form id="freight-form" novalidate>
+          <section class="step-panel" data-step-panel="1">
+            <h3>Shipper / customer</h3>
+            <div class="grid">
+              <label class="full">Company / customer name<input name="customer_name" required /></label>
+              <label>Contact name<input name="contact_name" /></label>
+              <label>Phone<input name="contact_phone" /></label>
+              <label class="full">Email<input name="contact_email" type="email" /></label>
+            </div>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="2">
+            <h3>Pickup information</h3>
+            <div class="grid">
+              <label class="full">Pickup address<input name="pickup_address" required /></label>
+              <label>City<input name="pickup_city" required /></label>
+              <label>State<input name="pickup_state" required maxlength="2" /></label>
+              <label>ZIP<input name="pickup_zip" required /></label>
+              <label>Pickup contact<input name="pickup_contact" /></label>
+              <label>Pickup phone<input name="pickup_phone" /></label>
+              <label>Pickup window start<input name="pickup_window_start" type="datetime-local" /></label>
+              <label>Pickup window end<input name="pickup_window_end" type="datetime-local" /></label>
+            </div>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="3">
+            <h3>Delivery information</h3>
+            <div class="grid">
+              <label class="full">Delivery address<input name="delivery_address" required /></label>
+              <label>City<input name="delivery_city" required /></label>
+              <label>State<input name="delivery_state" required maxlength="2" /></label>
+              <label>ZIP<input name="delivery_zip" required /></label>
+              <label>Delivery contact<input name="delivery_contact" /></label>
+              <label>Delivery phone<input name="delivery_phone" /></label>
+              <label>Delivery window start<input name="delivery_window_start" type="datetime-local" /></label>
+              <label>Delivery window end<input name="delivery_window_end" type="datetime-local" /></label>
+            </div>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="4">
+            <h3>Load details</h3>
+            <div class="grid">
+              <label class="full">Commodity / description<input name="commodity" required /></label>
+              <label>Quantity<input name="quantity" type="number" min="0.01" step="0.01" /></label>
+              <label>Weight<input name="weight" type="number" min="0.01" step="0.01" /></label>
+              <label>Weight unit
+                <select name="weight_unit">
+                  <option value="lb">lb</option>
+                  <option value="kg">kg</option>
+                </select>
+              </label>
+              <label>Piece count<input name="piece_count" type="number" min="0" step="1" /></label>
+              <label>Pallet count<input name="pallet_count" type="number" min="0" step="1" /></label>
+              <label>Length (in)<input name="length_in" type="number" min="0.01" step="0.01" /></label>
+              <label>Width (in)<input name="width_in" type="number" min="0.01" step="0.01" /></label>
+              <label>Height (in)<input name="height_in" type="number" min="0.01" step="0.01" /></label>
+              <label class="full">Special handling notes<textarea name="special_handling_notes"></textarea></label>
+              <div class="flags full">
+                <label><input type="checkbox" name="hazardous" /> Hazardous material</label>
+                <label><input type="checkbox" name="temperature_controlled" /> Temperature-controlled</label>
+                <label><input type="checkbox" name="fragile" /> Fragile</label>
+              </div>
+            </div>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="5">
+            <h3>Vehicle / equipment requirement</h3>
+            <label>Required equipment
+              <select name="equipment_type">
+                <option value="cargo_van">Cargo van</option>
+                <option value="van">Van</option>
+                <option value="box_truck">Box truck</option>
+                <option value="straight_truck">Straight truck</option>
+                <option value="dry_van">Dry van</option>
+                <option value="reefer">Reefer</option>
+                <option value="flatbed">Flatbed</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="6">
+            <h3>Review</h3>
+            <pre id="review-box"></pre>
+          </section>
+
+          <section class="step-panel hidden" data-step-panel="7">
+            <h3>Submit</h3>
+            <p>Submitting saves this as a Nova freight shipment with status <strong>ready_for_dispatch</strong>.</p>
+          </section>
+
+          <div class="actions">
+            <button type="button" id="prev-step" class="secondary">Back</button>
+            <button type="button" id="next-step">Continue</button>
+            <button type="submit" id="submit-freight" class="hidden">Submit freight request</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="view-detail" class="card hidden">
+        <h2>Shipment saved</h2>
+        <p id="detail-confirm">The freight request was saved.</p>
+        <p><strong>Shipment ID:</strong> <span id="detail-id"></span></p>
+        <p><strong>Status:</strong> <span id="detail-status" class="status"></span></p>
+        <p><strong>Pickup:</strong> <span id="detail-pickup"></span></p>
+        <p><strong>Drop-off:</strong> <span id="detail-delivery"></span></p>
+        <p><strong>Commodity:</strong> <span id="detail-commodity"></span></p>
+        <p><strong>Equipment:</strong> <span id="detail-equipment"></span></p>
+        <div class="actions">
+          <a class="button secondary" href="/nova/freight/shipments">Back to shipments</a>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-freight/freight.js"></script>
+</body>
+</html>

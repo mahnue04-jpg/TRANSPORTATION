@@ -76,6 +76,7 @@ from app import responses as responses_module     # type: ignore
 from app import validation as validation_module   # type: ignore
 from app import logging_utils                     # type: ignore
 from app.core.nova import router as nova_router, actions_router as nova_actions_router  # type: ignore
+from app.core.nova.freight.router import router as nova_freight_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -450,6 +451,7 @@ app.include_router(replay_router)
 app.include_router(predictive_router)
 app.include_router(governance_router)
 app.include_router(assistant_execution_router)
+app.include_router(nova_freight_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3878,6 +3880,17 @@ def serve_driver_onboarding_progress() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Driver onboarding progress page not found"}, status_code=404)
+
+
+@app.get("/nova/freight")
+@app.get("/nova/freight/new")
+@app.get("/nova/freight/shipments")
+@app.get("/nova/freight/shipments/{shipment_id}")
+def serve_nova_freight_shipper_ui(shipment_id: str | None = None) -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight page not found"}, status_code=404)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

@@ -16,6 +16,7 @@ from app.db.session import Base, DATABASE_URL  # noqa: E402
 import app.db.models  # noqa: F401, E402 — registers all ORM models with Base
 import app.modules.health_isf.models  # noqa: F401, E402 — include Health ISF metadata
 import app.modules.payments.models  # noqa: F401, E402 — Ride + Deliver payment ledger
+import app.core.nova.freight.models  # noqa: F401, E402 — Nova freight shipments
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
@@ -39,6 +40,7 @@ def include_object(object_, name, type_, reflected, compare_to):
             name.startswith("platform_")
             or name.startswith("health_isf_")
             or name.startswith("amicor_")
+            or name.startswith("nova_freight_")
         )
     return True
 
