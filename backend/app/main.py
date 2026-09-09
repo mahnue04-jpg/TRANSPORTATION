@@ -78,6 +78,7 @@ from app import logging_utils                     # type: ignore
 from app.core.nova import router as nova_router, actions_router as nova_actions_router  # type: ignore
 from app.core.nova.freight.router import router as nova_freight_router  # type: ignore
 from app.core.nova.workspace.router import router as nova_workspace_router  # type: ignore
+from app.core.nova.communications.router import router as nova_communications_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -454,6 +455,7 @@ app.include_router(governance_router)
 app.include_router(assistant_execution_router)
 app.include_router(nova_freight_router)
 app.include_router(nova_workspace_router)
+app.include_router(nova_communications_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3900,6 +3902,14 @@ def serve_nova_workspace() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Workspace page not found"}, status_code=404)
+
+
+@app.get("/nova/communications")
+def serve_nova_communications() -> Response:
+    page = os.path.join(_static_dir, "nova-communications", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Communications page not found"}, status_code=404)
 
 
 @app.get("/nova/freight")

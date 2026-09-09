@@ -230,6 +230,7 @@ def test_nova_workspace_recent_work_and_search(client: TestClient) -> None:
 def test_nova_home_and_workspace_navigation() -> None:
     assert 'href="/nova/workspace" data-destination="workspace"' in HOME_HTML
     assert 'href="/nova">Nova Home' in WS_HTML
+    assert 'href="/nova/communications">Communications' in WS_HTML
     assert 'href="/workspace">Health' in WS_HTML
     assert 'href="/app">Delivery' in WS_HTML
     assert 'href="/nova/freight">Freight' in WS_HTML

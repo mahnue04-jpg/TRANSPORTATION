@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Communications</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-communications/communications.css" />
+</head>
+<body>
+  <header class="comms-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Communications</h1>
+      </div>
+    </div>
+    <nav class="comms-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/workspace">Nova Workspace</a>
+      <a href="/nova#web-search">Web / Search</a>
+      <a href="/nova/workspace#files">Files</a>
+      <a href="/workspace">Voice</a>
+      <a href="/workspace">Tools</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="comms-main">
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Mrs. Nova Brain communications assistant">
+      <h2>Mrs. Nova Brain</h2>
+      <p id="session-meta" class="hint">Sign in to use Nova Communications.</p>
+      <form id="ask-form" class="ask-row">
+        <label class="sr-only" for="ask-input">Ask Mrs. Nova Brain</label>
+        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about messages or calendar" />
+        <button type="submit">Ask Nova</button>
+        <button type="button" id="dictate" class="secondary">Dictate draft</button>
+        <button type="button" id="speak" class="secondary">Read summary aloud</button>
+      </form>
+      <div class="command-actions">
+        <button type="button" data-brain="summarize_recent" class="secondary">Summarize recent</button>
+        <button type="button" data-brain="needs_attention" class="secondary">Needs attention</button>
+        <button type="button" data-brain="draft_reply" class="secondary">Draft a reply</button>
+        <button type="button" data-brain="summarize_thread" class="secondary">Summarize thread</button>
+        <button type="button" data-brain="meeting_notes" class="secondary">Meeting notes</button>
+        <button type="button" data-brain="summarize_calendar" class="secondary">Today's calendar</button>
+        <button type="button" data-brain="follow_up" class="secondary">Suggest follow-up</button>
+        <button type="button" data-brain="locate_contact" class="secondary">Locate a person</button>
+        <button type="button" data-brain="explain_notification" class="secondary">Explain notification</button>
+      </div>
+      <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="quick-actions card">
+      <h2>Quick actions</h2>
+      <form id="compose-form" class="compose-grid">
+        <label>To<input id="compose-to" type="email" placeholder="recipient@example.com" /></label>
+        <label>Subject<input id="compose-subject" required /></label>
+        <label>Body<textarea id="compose-body"></textarea></label>
+        <button type="submit">Save draft</button>
+        <button type="button" id="send-blocked" class="secondary">Send (requires confirmation)</button>
+      </form>
+      <form id="event-form" class="compose-grid">
+        <label>Meeting title<input id="event-title" required /></label>
+        <label>Start<input id="event-start" type="datetime-local" required /></label>
+        <label>End<input id="event-end" type="datetime-local" required /></label>
+        <label>Location or link<input id="event-location" /></label>
+        <label>Attendees<input id="event-attendees" placeholder="optional emails, comma separated" /></label>
+        <button type="submit">Create local event</button>
+      </form>
+    </section>
+
+    <section class="dashboard" aria-label="Communications dashboard">
+      <article class="card" id="inbox">
+        <h2>Inbox / Messages</h2>
+        <div id="inbox-list">Sign in to see messages.</div>
+      </article>
+      <article class="card">
+        <h2>Important</h2>
+        <div id="important-list">No important messages.</div>
+      </article>
+      <article class="card">
+        <h2>Email drafts</h2>
+        <div id="draft-list">No drafts yet.</div>
+      </article>
+      <article class="card" id="calendar">
+        <h2>Calendar</h2>
+        <div id="calendar-today"></div>
+        <div id="calendar-upcoming">No upcoming events.</div>
+      </article>
+      <article class="card">
+        <h2>Contacts / People</h2>
+        <form id="contact-search-form" class="ask-row">
+          <input id="contact-search" type="search" placeholder="Search people from communications" />
+          <button type="submit">Search</button>
+        </form>
+        <div id="contact-list">No contacts derived yet.</div>
+      </article>
+      <article class="card">
+        <h2>Notifications</h2>
+        <div id="notification-list">No notices yet.</div>
+      </article>
+      <article class="card">
+        <h2>Recent communication</h2>
+        <div id="recent-list">No recent communication.</div>
+      </article>
+      <article class="card">
+        <h2>Message detail</h2>
+        <div id="message-detail">Open a message to read it.</div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/ux/humanVoiceEngine.js"></script>
+  <script src="/static/nova-communications/communications.js"></script>
+</body>
+</html>
