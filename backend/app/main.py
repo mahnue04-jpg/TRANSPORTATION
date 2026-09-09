@@ -300,6 +300,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Platform DB init failed: %s", exc)
 
+    try:
+        from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+        from app.db.session import engine as platform_engine
+
+        ensure_nova_today_schema(platform_engine)
+        logger.info("Nova Today schema verified.")
+    except Exception as today_schema_exc:
+        logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
+
     from app.deployment.release_version import resolve_app_version
 
     logger.info(
