@@ -1205,6 +1205,7 @@ def application_to_list_item(db: Session, application: PlatformDriverOnboardingA
         missing_documents=readiness["missing_documents"],
         compliance_warnings=readiness["compliance_warnings"],
         assigned_reviewer_id=application.assigned_reviewer_id,
+        internal_driver_number=getattr(application, "internal_driver_number", None),
     )
 
 

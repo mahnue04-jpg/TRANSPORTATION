@@ -190,8 +190,11 @@
       div.className = "list-item" + (item.id === selectedId ? " active" : "");
       const name = item.applicant_name || "Unnamed applicant";
       const docsPct = item.document_completion_percentage != null ? item.document_completion_percentage : "—";
+      const badge = item.internal_driver_number
+        ? " <span class=\"pill\">" + item.internal_driver_number + "</span>"
+        : "";
       div.innerHTML = ""
-        + "<strong>" + name + "</strong>"
+        + "<strong>" + name + "</strong>" + badge
         + "<div class=\"meta\">" + (item.email || "") + " · " + (item.mobile_phone || "") + "</div>"
         + "<div><span class=\"pill\">" + (item.status_display_label || item.status || "") + "</span> · docs " + docsPct + "%</div>";
       div.addEventListener("click", () => loadDetail(item.id));

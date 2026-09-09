@@ -147,6 +147,7 @@ class DriverApplicationListItemResponse(BaseModel):
     missing_documents: list[str] = Field(default_factory=list)
     compliance_warnings: list[str] = Field(default_factory=list)
     assigned_reviewer_id: str | None = None
+    internal_driver_number: str | None = None
 
 
 class ApplicantSectionCompletion(BaseModel):

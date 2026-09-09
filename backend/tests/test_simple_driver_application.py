@@ -109,6 +109,7 @@ def test_applicant_facing_html_is_simple():
     assert "admin-sign-in" in admin_html
     assert "Session expired" in admin_js or "Click Sign in" in admin_js
     assert "latestDocumentsByCategory" in admin_js
+    assert "internal_driver_number" in admin_js
     assert "refreshWorkspace" in admin_js
     assert "FETCH_TIMEOUT_MS" in admin_js
     assert "Sign in required" in admin_js
@@ -386,6 +387,40 @@ def test_applicant_reloads_existing_draft_without_creating_another(client: TestC
         assert len(rows) == 1
         assert rows[0].id == app_id
         assert rows[0].drivers_license_number == "MN-RESUME-001"
+
+
+def test_application_list_exposes_internal_driver_number(client: TestClient):
+    org_id = _org_id()
+    create = client.post(
+        "/api/platform-ops/driver-onboarding/applications",
+        json={
+            "organization_id": org_id,
+            "legal_first_name": "List",
+            "legal_last_name": "Visibility",
+            "email": "list.visibility@example.com",
+        },
+    )
+    assert create.status_code == 200, create.text
+    app_id = create.json()["application"]["id"]
+    assert create.json()["application"].get("internal_driver_number") != "DRV-001"
+
+    with SessionLocal() as db:
+        from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
+
+        row = db.query(PlatformDriverOnboardingApplication).filter_by(id=app_id).one()
+        assert row.internal_driver_number != "DRV-001"
+        row.internal_driver_number = "DRV-LIST-VIS"
+        db.commit()
+
+    listed = client.get(
+        "/api/platform-ops/driver-onboarding/applications",
+        headers={"Authorization": f"Bearer {_login(client)}"},
+    )
+    assert listed.status_code == 200, listed.text
+    row = next(item for item in listed.json() if item["id"] == app_id)
+    assert "internal_driver_number" in row
+    assert row["internal_driver_number"] == "DRV-LIST-VIS"
+    assert all(item.get("internal_driver_number") != "DRV-001" or item["id"] != app_id for item in listed.json())
 
 
 def test_driver_001_identity_cannot_fork_a_second_application(client: TestClient):
