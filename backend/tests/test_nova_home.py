@@ -104,10 +104,10 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/app" data-destination="delivery"' in HOME_HTML
     assert 'href="/nova/freight" data-destination="freight"' in HOME_HTML
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
-    for dest in ("government", "business"):
-        assert f'data-destination="{dest}"' in HOME_HTML
-        assert 'data-later="true"' in HOME_HTML
-    assert HOME_HTML.count("Coming later") == 2
+    assert 'href="/nova/government" data-destination="government"' in HOME_HTML
+    assert 'data-destination="business"' in HOME_HTML
+    assert 'data-later="true"' in HOME_HTML
+    assert HOME_HTML.count("Coming later") == 1
 
 
 def test_nova_home_search_handoff(client: TestClient) -> None:

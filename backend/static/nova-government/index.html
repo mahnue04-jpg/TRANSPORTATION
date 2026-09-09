@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Government</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-government/government.css" />
+</head>
+<body>
+  <header class="gov-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Government Services</h1>
+      </div>
+    </div>
+    <nav class="gov-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/workspace">Nova Workspace</a>
+      <a href="/nova/communications">Communications</a>
+      <a href="/nova#web-search">Web / Search</a>
+      <a href="/nova/workspace#files">Files</a>
+      <a href="/workspace">Voice</a>
+      <a href="/workspace">Tools</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="gov-main">
+    <p class="disclaimer">Nova organizes government research and documents. It is not connected to live agency filing systems in this phase and does not submit forms or pay fees.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Government search and Mrs. Nova Brain">
+      <form id="search-form" class="ask-row">
+        <label class="sr-only" for="gov-search">Government search</label>
+        <input id="gov-search" type="search" placeholder="Find an agency, license, form, or deadline" />
+        <select id="search-level" aria-label="Government level">
+          <option value="">All levels</option>
+          <option>federal</option>
+          <option>state</option>
+          <option>county</option>
+          <option>city</option>
+        </select>
+        <select id="search-category" aria-label="Category">
+          <option value="">All categories</option>
+          <option>licensing</option>
+          <option>permits</option>
+          <option>grants</option>
+          <option>tax</option>
+          <option>transportation</option>
+          <option>business</option>
+          <option>certification</option>
+        </select>
+        <button type="submit">Search</button>
+      </form>
+      <form id="ask-form" class="ask-row">
+        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about this government work" />
+        <button type="submit">Ask Nova</button>
+      </form>
+      <div class="command-actions">
+        <button type="button" data-brain="explain_requirement" class="secondary">Explain requirement</button>
+        <button type="button" data-brain="summarize_letter" class="secondary">Summarize letter</button>
+        <button type="button" data-brain="find_agency" class="secondary">Find agency</button>
+        <button type="button" data-brain="missing_documents" class="secondary">Missing documents</button>
+        <button type="button" data-brain="build_checklist" class="secondary">Build checklist</button>
+        <button type="button" data-brain="next_step" class="secondary">Next step</button>
+        <button type="button" data-brain="compare_levels" class="secondary">Compare levels</button>
+        <button type="button" data-brain="prepare_email" class="secondary">Draft inquiry</button>
+        <button type="button" data-brain="identify_deadlines" class="secondary">Identify deadlines</button>
+        <button type="button" data-brain="summarize_open_work" class="secondary">Summarize open work</button>
+      </div>
+      <p id="session-meta" class="hint">Sign in to use Nova Government.</p>
+      <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
+      <p id="fact-label" class="hint">AI SUGGESTION is not an official government ruling.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Save government work</h2>
+      <form id="item-form" class="compose-grid">
+        <label>Title<input id="item-title" required minlength="2" /></label>
+        <label>Agency<input id="item-agency" /></label>
+        <label>Level
+          <select id="item-level">
+            <option>federal</option>
+            <option selected>state</option>
+            <option>county</option>
+            <option>city</option>
+            <option>local</option>
+          </select>
+        </label>
+        <label>Category
+          <select id="item-category">
+            <option>licensing</option>
+            <option>permits</option>
+            <option>taxes</option>
+            <option>grants</option>
+            <option>certifications</option>
+            <option>transportation</option>
+            <option>business_registration</option>
+            <option selected>compliance</option>
+            <option>benefits</option>
+            <option>forms</option>
+          </select>
+        </label>
+        <label>State<input id="item-state" /></label>
+        <label>County<input id="item-county" /></label>
+        <label>City<input id="item-city" /></label>
+        <label>Due date<input id="item-due" type="date" /></label>
+        <label>Renewal date<input id="item-renewal" type="date" /></label>
+        <label>Workspace project ID<input id="item-workspace" placeholder="optional NW-..." /></label>
+        <label>Workspace file ID<input id="item-file" placeholder="optional NWF-..." /></label>
+        <label>Notes<textarea id="item-notes"></textarea></label>
+        <button type="submit">Save work item</button>
+      </form>
+    </section>
+
+    <section class="section-nav" aria-label="Government sections">
+      <article class="card compact"><h3>Federal</h3></article>
+      <article class="card compact"><h3>State</h3></article>
+      <article class="card compact"><h3>County</h3></article>
+      <article class="card compact"><h3>City / Local</h3></article>
+      <article class="card compact"><h3>Licensing &amp; Permits</h3></article>
+      <article class="card compact"><h3>Taxes</h3></article>
+      <article class="card compact"><h3>Grants &amp; Funding</h3></article>
+      <article class="card compact"><h3>Certifications</h3></article>
+      <article class="card compact"><h3>Transportation / DOT</h3></article>
+      <article class="card compact"><h3>Business Registration</h3></article>
+      <article class="card compact"><h3>Compliance</h3></article>
+      <article class="card compact"><h3>Benefits / Public Services</h3></article>
+      <article class="card compact"><h3>Forms &amp; Documents</h3></article>
+      <article class="card compact"><h3>Deadlines</h3></article>
+      <article class="card compact"><h3>Saved Government Work</h3></article>
+    </section>
+
+    <section class="dashboard" aria-label="Government dashboard">
+      <article class="card"><h2>Section counts</h2><div id="section-list"></div></article>
+      <article class="card"><h2>Saved Government Work</h2><div id="work-list">Sign in to see saved work.</div></article>
+      <article class="card"><h2>Deadlines</h2><div id="deadline-list">No upcoming deadlines.</div></article>
+      <article class="card"><h2>Renewals</h2><div id="renewal-list">No upcoming renewals.</div></article>
+      <article class="card"><h2>Overdue / waiting</h2><div id="waiting-list">None.</div></article>
+      <article class="card"><h2>Grants &amp; Funding</h2>
+        <form id="program-form">
+          <input id="program-name" placeholder="Program name" required minlength="2" />
+          <input id="program-agency" placeholder="Agency" />
+          <button type="submit">Save program</button>
+        </form>
+        <div id="program-list">No saved programs.</div>
+      </article>
+      <article class="card"><h2>Checklist</h2>
+        <form id="check-form">
+          <input id="check-label" placeholder="Document or requirement" required minlength="2" />
+          <input id="check-file" placeholder="optional Workspace file ID" />
+          <button type="submit">Add checklist item</button>
+        </form>
+        <div id="check-list">Open a work item first.</div>
+      </article>
+      <article class="card"><h2>Sources / evidence</h2>
+        <form id="source-form">
+          <input id="source-title" placeholder="Page or document title" required minlength="2" />
+          <input id="source-url" placeholder="Official URL or reference" />
+          <select id="source-status">
+            <option>unverified</option>
+            <option>user_provided</option>
+            <option>official_source</option>
+            <option>confirmed_in_writing</option>
+            <option>expired_or_superseded</option>
+          </select>
+          <button type="submit">Save source</button>
+        </form>
+        <div id="source-list">Open a work item first.</div>
+      </article>
+      <article class="card"><h2>Search results</h2><div id="search-results">Search official pages with existing /api/search. Results are not filings.</div></article>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-government/government.js"></script>
+</body>
+</html>

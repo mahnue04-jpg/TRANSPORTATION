@@ -67,6 +67,12 @@ def _parse_iso(value: str) -> datetime:
     return parsed
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def _location_from_description(description: str | None) -> tuple[str | None, str | None]:
     text = description or ""
     if text.startswith("Location: "):
@@ -480,9 +486,9 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaCo
     today = [
         event
         for event in events
-        if event.start_time.date() == current.date()
+        if _as_utc(event.start_time).date() == current.date()
     ]
-    upcoming = [event for event in events if event.start_time >= current][:12]
+    upcoming = [event for event in events if _as_utc(event.start_time) >= current][:12]
     return NovaCommsDashboardOut(
         inbox=[message_out(row) for row in messages[:20]],
         important=[message_out(row) for row in messages if row.important][:12],
