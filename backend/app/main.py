@@ -3909,6 +3909,15 @@ def serve_nova_freight_carrier_offers_ui() -> Response:
     return JSONResponse({"error": "Nova freight carrier offers page not found"}, status_code=404)
 
 
+@app.get("/nova/freight/carrier/shipments")
+@app.get("/nova/freight/carrier/shipments/{shipment_id}")
+def serve_nova_freight_carrier_execution_ui(shipment_id: str | None = None) -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "execute.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight carrier execution page not found"}, status_code=404)
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_fallback(full_path: str, request: Request) -> Response:
     """Global SPA fallback registered last to preserve /api and asset route priority."""

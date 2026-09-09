@@ -14,6 +14,8 @@ def ensure_nova_freight_schema(engine) -> None:
         statements.append("ALTER TABLE nova_freight_shipments ADD COLUMN assigned_carrier_id VARCHAR(32)")
     if "assigned_offer_id" not in existing:
         statements.append("ALTER TABLE nova_freight_shipments ADD COLUMN assigned_offer_id VARCHAR(32)")
+    if "last_status_at" not in existing:
+        statements.append("ALTER TABLE nova_freight_shipments ADD COLUMN last_status_at DATETIME")
     if not statements:
         return
     with engine.begin() as conn:

@@ -7,15 +7,22 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.nova.freight.models import NovaFreightCarrier, NovaFreightOffer, NovaFreightShipment
+from app.core.nova.freight.models import (
+    NovaFreightCarrier,
+    NovaFreightOffer,
+    NovaFreightShipment,
+    NovaFreightShipmentEvent,
+)
 from app.core.nova.freight.schemas import (
     DISPATCH_STATUSES,
+    FORWARD_TRANSITIONS,
     PRE_DISPATCH_STATUSES,
     NovaFreightCarrierCreate,
     NovaFreightOfferCreate,
     NovaFreightOfferOut,
     NovaFreightShipmentCreate,
     NovaFreightShipmentUpdate,
+    NovaFreightStatusUpdate,
 )
 from app.helpers import now, uuid4
 
@@ -560,3 +567,145 @@ def _restore_ready_if_unassigned(
     if pending == 0 and shipment.status == "offered":
         shipment.status = "ready_for_dispatch"
         shipment.updated_at = stamp
+
+
+def _new_event_id() -> str:
+    return "NFE-" + uuid4().replace("-", "")[:10].upper()
+
+
+def list_carrier_active_shipments(
+    db: Session,
+    *,
+    organization_id: str,
+    carrier_ids: list[str],
+) -> list[NovaFreightShipment]:
+    if not carrier_ids:
+        return []
+    return (
+        db.query(NovaFreightShipment)
+        .filter(
+            NovaFreightShipment.organization_id == organization_id,
+            NovaFreightShipment.assigned_carrier_id.in_(carrier_ids),
+            NovaFreightShipment.status.notin_(["completed", "cancelled"]),
+        )
+        .order_by(NovaFreightShipment.updated_at.desc())
+        .all()
+    )
+
+
+def list_shipment_events(
+    db: Session,
+    shipment_id: str,
+    *,
+    organization_id: str,
+) -> list[NovaFreightShipmentEvent]:
+    get_shipment(db, shipment_id, organization_id=organization_id)
+    return (
+        db.query(NovaFreightShipmentEvent)
+        .filter(
+            NovaFreightShipmentEvent.shipment_id == shipment_id,
+            NovaFreightShipmentEvent.organization_id == organization_id,
+        )
+        .order_by(NovaFreightShipmentEvent.created_at.asc())
+        .all()
+    )
+
+
+def _close_open_offers(db: Session, shipment_id: str, *, organization_id: str, stamp: datetime) -> None:
+    (
+        db.query(NovaFreightOffer)
+        .filter(
+            NovaFreightOffer.shipment_id == shipment_id,
+            NovaFreightOffer.organization_id == organization_id,
+            NovaFreightOffer.status == "pending",
+        )
+        .update(
+            {"status": "cancelled", "responded_at": stamp, "updated_at": stamp},
+            synchronize_session=False,
+        )
+    )
+
+
+def transition_shipment_status(
+    db: Session,
+    shipment_id: str,
+    payload: NovaFreightStatusUpdate,
+    *,
+    organization_id: str,
+    actor_user_id: str | None,
+    actor_role: str | None,
+    allowed_carrier_ids: list[str] | None,
+    dispatcher_view: bool,
+) -> NovaFreightShipment:
+    shipment = get_shipment(db, shipment_id, organization_id=organization_id)
+    requested = payload.status
+    current = shipment.status
+
+    if current == "cancelled":
+        raise NovaFreightError("Cancelled shipments cannot enter execution", status_code=409)
+    if current in {"draft", "requested", "ready_for_dispatch", "offered", "assigned"} and not shipment.assigned_carrier_id:
+        raise NovaFreightError("Unaccepted shipments cannot begin pickup execution", status_code=409)
+    if current == "completed" and requested != "completed":
+        raise NovaFreightError("Completed shipments cannot be reopened", status_code=409)
+
+    if not dispatcher_view:
+        if not shipment.assigned_carrier_id or shipment.assigned_carrier_id not in (allowed_carrier_ids or []):
+            raise NovaFreightError("Only the assigned carrier can execute this shipment", status_code=403)
+
+    if requested == current:
+        return shipment
+
+    expected = FORWARD_TRANSITIONS.get(current)
+    if expected != requested:
+        raise NovaFreightError(
+            f"Invalid transition from {current} to {requested}",
+            status_code=409,
+        )
+
+    stamp = now()
+    claimed = (
+        db.query(NovaFreightShipment)
+        .filter(
+            NovaFreightShipment.shipment_id == shipment.shipment_id,
+            NovaFreightShipment.organization_id == organization_id,
+            NovaFreightShipment.status == current,
+        )
+        .update(
+            {
+                "status": requested,
+                "updated_at": stamp,
+                "last_status_at": stamp,
+            },
+            synchronize_session=False,
+        )
+    )
+    if claimed != 1:
+        db.rollback()
+        fresh = get_shipment(db, shipment_id, organization_id=organization_id)
+        if fresh.status == requested:
+            return fresh
+        raise NovaFreightError("Shipment status changed; retry the current next step", status_code=409)
+
+    if requested == "completed":
+        _close_open_offers(db, shipment.shipment_id, organization_id=organization_id, stamp=stamp)
+
+    db.add(
+        NovaFreightShipmentEvent(
+            event_id=_new_event_id(),
+            shipment_id=shipment.shipment_id,
+            organization_id=organization_id,
+            status_before=current,
+            status_after=requested,
+            event_type="status_transition",
+            actor_user_id=actor_user_id,
+            actor_carrier_id=shipment.assigned_carrier_id,
+            actor_role=actor_role,
+            notes=payload.notes,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            source=payload.source or "nova_freight_execution",
+            created_at=stamp,
+        )
+    )
+    db.commit()
+    return get_shipment(db, shipment_id, organization_id=organization_id)

@@ -18,6 +18,7 @@ from app.core.nova.freight.models import (  # noqa: F401 — register Nova freig
     NovaFreightCarrier,
     NovaFreightOffer,
     NovaFreightShipment,
+    NovaFreightShipmentEvent,
 )
 
 

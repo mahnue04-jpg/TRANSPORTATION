@@ -57,7 +57,7 @@
     var body = $("board-rows");
     body.innerHTML = "";
     if (!rows.length) {
-      body.innerHTML = "<tr><td colspan='12'>No dispatch-ready freight shipments.</td></tr>";
+      body.innerHTML = "<tr><td colspan='13'>No dispatch-ready freight shipments.</td></tr>";
       return;
     }
     rows.forEach(function (row) {
@@ -73,6 +73,7 @@
         "<td>" + (row.weight || "") + " " + (row.weight_unit || "") + "</td>" +
         "<td>" + (row.equipment_type || "") + "</td>" +
         "<td><span class='status'>" + row.status + "</span></td>" +
+        "<td>" + String(row.last_status_at || row.updated_at || "").replace("T", " ").slice(0, 16) + "</td>" +
         "<td>" + String(row.created_at || "").replace("T", " ").slice(0, 16) + "</td>" +
         "<td>" + (row.assigned_carrier_name || row.assigned_carrier_id || "—") + "</td>";
       body.appendChild(tr);
@@ -90,6 +91,14 @@
     $("detail-assigned").textContent = shipment.assigned_carrier_id
       ? "Assigned / accepted carrier: " + shipment.assigned_carrier_id
       : "No carrier assigned yet.";
+    $("detail-last").textContent = "Last status update: " + String(shipment.last_status_at || shipment.updated_at || "—").replace("T", " ").slice(0, 16);
+    var events = await api("/api/nova/freight/shipments/" + encodeURIComponent(shipmentId) + "/events");
+    $("timeline").innerHTML = events.length
+      ? "<ol>" + events.map(function (event) {
+          return "<li>" + event.status_before + " → <strong>" + event.status_after + "</strong> · " +
+            String(event.created_at || "").replace("T", " ").slice(0, 16) + "</li>";
+        }).join("") + "</ol>"
+      : "<p>No execution events yet.</p>";
     $("carrier-list").innerHTML = carriers.length
       ? carriers.map(function (carrier) {
           return "<label><input type='checkbox' name='carrier' value='" + carrier.carrier_id + "' /> " +

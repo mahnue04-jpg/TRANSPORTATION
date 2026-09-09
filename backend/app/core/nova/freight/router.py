@@ -26,8 +26,10 @@ from app.core.nova.freight.schemas import (
     NovaFreightOfferCreate,
     NovaFreightOfferOut,
     NovaFreightShipmentCreate,
+    NovaFreightShipmentEventOut,
     NovaFreightShipmentOut,
     NovaFreightShipmentUpdate,
+    NovaFreightStatusUpdate,
 )
 from app.core.nova.freight.service import (
     NovaFreightError,
@@ -39,11 +41,14 @@ from app.core.nova.freight.service import (
     create_shipment,
     decline_offer,
     get_shipment,
+    list_carrier_active_shipments,
     list_carriers,
     list_dispatch_shipments,
+    list_shipment_events,
     list_shipment_offers,
     list_shipments,
     list_visible_offers,
+    transition_shipment_status,
     update_shipment,
 )
 from app.core.nova.service import NovaCoreService
@@ -69,6 +74,16 @@ require_freight_offer_actor = require_any_role(
     ROLE_ADMIN,
     ROLE_SUPER_ADMIN_SUPPORT,
     ROLE_DISPATCHER,
+    ROLE_STAFF,
+    ROLE_SUPERVISOR,
+    ROLE_DRIVER,
+)
+require_freight_viewer = require_any_role(
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_DISPATCHER,
+    ROLE_RIDER,
+    ROLE_PROVIDER,
     ROLE_STAFF,
     ROLE_SUPERVISOR,
     ROLE_DRIVER,
@@ -105,6 +120,15 @@ def _carrier_scope(db, user: UserContext, dispatcher_view: bool) -> list[str] | 
     return [row.carrier_id for row in mine]
 
 
+def _assert_viewer_access(db, user: UserContext, shipment) -> None:
+    if user.role in DISPATCH_ROLES or user.role in {ROLE_RIDER, ROLE_PROVIDER}:
+        return
+    allowed = _carrier_scope(db, user, False) or []
+    if shipment.assigned_carrier_id and shipment.assigned_carrier_id in allowed:
+        return
+    raise HTTPException(status_code=403, detail="Only the assigned carrier can view this shipment")
+
+
 @router.post("/shipments", response_model=NovaFreightShipmentOut, status_code=201, dependencies=[Depends(require_freight_shipper)])
 def post_shipment(
     payload: NovaFreightShipmentCreate,
@@ -130,14 +154,16 @@ def get_shipments(
     return list_shipments(db, organization_id=_org_id(user))
 
 
-@router.get("/shipments/{shipment_id}", response_model=NovaFreightShipmentOut, dependencies=[Depends(require_freight_shipper)])
+@router.get("/shipments/{shipment_id}", response_model=NovaFreightShipmentOut, dependencies=[Depends(require_freight_viewer)])
 def get_one_shipment(
     shipment_id: str,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     try:
-        return get_shipment(db, shipment_id, organization_id=_org_id(user))
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return shipment
     except NovaFreightError as exc:
         _raise(exc)
 
@@ -324,5 +350,74 @@ def post_cancel_offer(
 ):
     try:
         return cancel_offer(db, offer_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get(
+    "/carrier/shipments",
+    response_model=list[NovaFreightShipmentOut],
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+def get_carrier_active_shipments(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    dispatcher_view = user.role in DISPATCH_ROLES
+    if dispatcher_view:
+        return list_carrier_active_shipments(
+            db,
+            organization_id=_org_id(user),
+            carrier_ids=[
+                row.carrier_id for row in list_carriers(db, organization_id=_org_id(user), active_only=True)
+            ],
+        )
+    return list_carrier_active_shipments(
+        db,
+        organization_id=_org_id(user),
+        carrier_ids=_carrier_scope(db, user, False) or [],
+    )
+
+
+@router.get(
+    "/shipments/{shipment_id}/events",
+    response_model=list[NovaFreightShipmentEventOut],
+    dependencies=[Depends(require_freight_viewer)],
+)
+def get_shipment_events(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
+        _assert_viewer_access(db, user, shipment)
+        return list_shipment_events(db, shipment_id, organization_id=_org_id(user))
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/status",
+    response_model=NovaFreightShipmentOut,
+    dependencies=[Depends(require_freight_offer_actor)],
+)
+def post_shipment_status(
+    shipment_id: str,
+    payload: NovaFreightStatusUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return transition_shipment_status(
+            db,
+            shipment_id,
+            payload,
+            organization_id=_org_id(user),
+            actor_user_id=user.user_id,
+            actor_role=user.role,
+            allowed_carrier_ids=_carrier_scope(db, user, user.role in DISPATCH_ROLES),
+            dispatcher_view=user.role in DISPATCH_ROLES,
+        )
     except NovaFreightError as exc:
         _raise(exc)

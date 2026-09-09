@@ -49,6 +49,13 @@
               <option value="offered">offered</option>
               <option value="assigned">assigned</option>
               <option value="accepted">accepted</option>
+              <option value="en_route_to_pickup">en_route_to_pickup</option>
+              <option value="arrived_pickup">arrived_pickup</option>
+              <option value="picked_up">picked_up</option>
+              <option value="in_transit">in_transit</option>
+              <option value="arrived_delivery">arrived_delivery</option>
+              <option value="delivered">delivered</option>
+              <option value="completed">completed</option>
             </select>
           </label>
           <label>Equipment
@@ -88,6 +95,7 @@
                 <th>Weight</th>
                 <th>Equipment</th>
                 <th>Status</th>
+                <th>Last update</th>
                 <th>Created</th>
                 <th>Carrier</th>
               </tr>
@@ -100,6 +108,9 @@
         <h2>Dispatch actions</h2>
         <p><strong id="detail-id"></strong> · <span id="detail-status" class="status"></span></p>
         <p id="detail-assigned"></p>
+        <p id="detail-last"></p>
+        <h3>Timeline</h3>
+        <div id="timeline"></div>
         <h3>Eligible carriers</h3>
         <div id="carrier-list"></div>
         <div class="actions">

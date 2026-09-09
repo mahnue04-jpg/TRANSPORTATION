@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AMICOR Nova | Freight Carrier Offers</title>
+  <title>AMICOR Nova | Freight Execution</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-freight/freight.css" />
@@ -14,8 +14,8 @@
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
       <div>
         <p class="brand-kicker">AMICOR Nova</p>
-        <h1>Freight Carrier Offers</h1>
-        <p class="subtitle">Accept or decline Nova freight tenders. Accepting assigns the load. Pickup has not started.</p>
+        <h1>Freight Shipment Execution</h1>
+        <p class="subtitle">Assigned carriers move an accepted load through pickup, transit, delivery, and completion. No POD or billing in this phase.</p>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
@@ -34,18 +34,31 @@
           <div class="subtitle" id="session-meta"></div>
         </div>
         <div class="actions">
+          <a class="button secondary" href="/nova/freight/carrier/offers">Offers</a>
           <a class="button secondary" href="/nova/freight/carrier/shipments">Active work</a>
-          <a class="button secondary" href="/nova/freight/dispatch">Dispatch board</a>
+          <a class="button secondary" href="/nova/freight/dispatch">Dispatch</a>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
         </div>
       </div>
-      <section class="card">
-        <h2>My offers</h2>
-        <div id="offer-cards"></div>
+      <section id="view-list" class="card hidden">
+        <h2>Active assigned shipments</h2>
+        <div id="active-list"></div>
+      </section>
+      <section id="view-detail" class="card hidden">
+        <p><strong id="detail-id"></strong> · <span id="detail-status" class="status"></span></p>
+        <p id="detail-carrier"></p>
+        <p id="detail-pickup"></p>
+        <p id="detail-delivery"></p>
+        <p id="detail-load"></p>
+        <div class="actions">
+          <button type="button" id="next-action" class="hidden"></button>
+        </div>
+        <h3>Timeline</h3>
+        <div id="timeline"></div>
       </section>
     </section>
   </main>
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-freight/carrier.js"></script>
+  <script src="/static/nova-freight/execute.js"></script>
 </body>
 </html>

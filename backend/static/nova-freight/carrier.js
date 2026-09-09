@@ -50,7 +50,7 @@
         ? "<div class='actions'><button type='button' data-act='accept' data-id='" + offer.offer_id + "'>ACCEPT</button>" +
           "<button type='button' class='secondary' data-act='decline' data-id='" + offer.offer_id + "'>DECLINE</button></div>"
         : (offer.status === "accepted"
-          ? "<p><strong>Assigned to you.</strong> Pickup lifecycle has not started.</p>"
+          ? "<p><strong>Assigned to you.</strong> <a href='/nova/freight/carrier/shipments/" + encodeURIComponent(offer.shipment_id) + "'>Open execution</a></p>"
           : "<p>This offer is closed.</p>");
       return "<article class='card' style='margin-top:12px'>" +
         "<p><strong>" + offer.shipment_id + "</strong> · <span class='status'>" + offer.status + "</span></p>" +

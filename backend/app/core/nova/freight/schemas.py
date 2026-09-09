@@ -316,11 +316,43 @@ class NovaFreightShipmentOut(BaseModel):
     proof_of_delivery_ref: str | None = None
     assigned_carrier_id: str | None = None
     assigned_offer_id: str | None = None
+    last_status_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
-DISPATCH_STATUSES = ("ready_for_dispatch", "offered", "assigned", "accepted")
+FORWARD_TRANSITIONS = {
+    "accepted": "en_route_to_pickup",
+    "en_route_to_pickup": "arrived_pickup",
+    "arrived_pickup": "picked_up",
+    "picked_up": "in_transit",
+    "in_transit": "arrived_delivery",
+    "arrived_delivery": "delivered",
+    "delivered": "completed",
+}
+EXECUTION_STATUSES = (
+    "accepted",
+    "en_route_to_pickup",
+    "arrived_pickup",
+    "picked_up",
+    "in_transit",
+    "arrived_delivery",
+    "delivered",
+    "completed",
+)
+ACTIVE_DISPATCH_STATUSES = (
+    "ready_for_dispatch",
+    "offered",
+    "assigned",
+    "accepted",
+    "en_route_to_pickup",
+    "arrived_pickup",
+    "picked_up",
+    "in_transit",
+    "arrived_delivery",
+    "delivered",
+)
+DISPATCH_STATUSES = ACTIVE_DISPATCH_STATUSES
 OFFER_STATUSES = ("pending", "accepted", "declined", "expired", "cancelled")
 
 
@@ -420,3 +452,39 @@ class NovaFreightOfferOut(BaseModel):
 class NovaFreightDispatchShipmentOut(NovaFreightShipmentOut):
     assigned_carrier_name: str | None = None
     pending_offer_count: int = 0
+    last_status_at: datetime | None = None
+
+
+class NovaFreightStatusUpdate(BaseModel):
+    status: str
+    notes: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    source: str | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _status(cls, value: object) -> str:
+        text = str(value or "").strip()
+        if text not in SHIPMENT_STATUSES:
+            raise ValueError("status is not a valid Nova freight status")
+        return text
+
+
+class NovaFreightShipmentEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    event_id: str
+    shipment_id: str
+    organization_id: str
+    status_before: str
+    status_after: str
+    event_type: str
+    actor_user_id: str | None = None
+    actor_carrier_id: str | None = None
+    actor_role: str | None = None
+    notes: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    source: str | None = None
+    created_at: datetime

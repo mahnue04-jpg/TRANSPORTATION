@@ -78,6 +78,7 @@ class NovaFreightShipment(Base):
 
     assigned_carrier_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     assigned_offer_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -134,3 +135,29 @@ class NovaFreightOffer(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaFreightShipmentEvent(Base):
+    __tablename__ = "nova_freight_shipment_events"
+    __table_args__ = (
+        Index("ix_nova_freight_events_event_id", "event_id", unique=True),
+        Index("ix_nova_freight_events_shipment_id", "shipment_id"),
+        Index("ix_nova_freight_events_org_id", "organization_id"),
+        Index("ix_nova_freight_events_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    event_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    shipment_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status_before: Mapped[str] = mapped_column(String(32), nullable=False)
+    status_after: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False, default="status_transition")
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    actor_carrier_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    actor_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
