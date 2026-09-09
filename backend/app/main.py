@@ -3893,6 +3893,23 @@ def serve_nova_freight_shipper_ui(shipment_id: str | None = None) -> Response:
     return JSONResponse({"error": "Nova freight page not found"}, status_code=404)
 
 
+@app.get("/nova/freight/ops")
+def serve_nova_freight_ops_ui() -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "ops.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight operations page not found"}, status_code=404)
+
+
+@app.get("/nova/freight/history")
+@app.get("/nova/freight/history/{shipment_id}")
+def serve_nova_freight_history_ui(shipment_id: str | None = None) -> Response:
+    page = os.path.join(_static_dir, "nova-freight", "history.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova freight history page not found"}, status_code=404)
+
+
 @app.get("/nova/freight/dispatch")
 def serve_nova_freight_dispatch_ui() -> Response:
     page = os.path.join(_static_dir, "nova-freight", "dispatch.html")

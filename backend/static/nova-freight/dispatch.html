@@ -15,7 +15,7 @@
       <div>
         <p class="brand-kicker">AMICOR Nova</p>
         <h1>Freight Dispatch Board</h1>
-        <p class="subtitle">Offer Nova freight shipments to eligible carriers. Pickup lifecycle is not enabled in this phase.</p>
+        <p class="subtitle">Offer Nova freight shipments, manage execution, and create pending payouts after TEST payment. Completed loads belong in History.</p>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
@@ -34,6 +34,8 @@
           <div class="subtitle" id="session-meta"></div>
         </div>
         <div class="actions">
+          <a class="button secondary" href="/nova/freight/ops">Operations</a>
+          <a class="button secondary" href="/nova/freight/history">History</a>
           <a class="button secondary" href="/nova/freight/shipments">Shipper</a>
           <a class="button secondary" href="/nova/freight/finance">Finance</a>
           <a class="button secondary" href="/nova/freight/carrier/offers">Carrier offers</a>
@@ -137,6 +139,7 @@
         <div id="carrier-list"></div>
         <div class="actions">
           <button type="button" id="send-offers">Send offer / tender</button>
+          <button type="button" id="cancel-shipment" class="secondary">Cancel shipment</button>
         </div>
         <h3>Offers</h3>
         <div id="offer-list"></div>

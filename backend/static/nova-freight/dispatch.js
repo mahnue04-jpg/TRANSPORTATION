@@ -31,6 +31,7 @@
     var response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
     var body = null;
     try { body = await response.json(); } catch (_) {}
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
     if (!response.ok) throw new Error(errorText(body, "Request failed (" + response.status + ")"));
     return body;
   }
@@ -293,6 +294,15 @@
       await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/payout", { method: "POST" });
       showBanner("Pending carrier payout created. Finance approval is admin-only.", true);
       await loadDetail(selectedId);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("cancel-shipment").addEventListener("click", async function () {
+    if (!selectedId) return;
+    try {
+      await api("/api/nova/freight/shipments/" + encodeURIComponent(selectedId) + "/cancel", { method: "POST" });
+      showBanner("Shipment cancelled. It is no longer active work.", true);
+      selectedId = "";
+      await loadBoard();
     } catch (err) { showBanner(err.message); }
   });
 

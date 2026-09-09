@@ -20,6 +20,7 @@ from app.auth import (
     get_current_user_context,
     require_any_role,
 )
+from app.core.nova.freight.ops import get_history_detail, list_history, ops_summary
 from app.core.nova.freight.settlement import (
     adjust_payout,
     approve_payout,
@@ -81,6 +82,7 @@ from app.core.nova.freight.service import (
     NovaFreightError,
     accept_offer,
     cancel_offer,
+    cancel_shipment,
     carriers_for_user,
     create_carrier,
     create_offers,
@@ -215,10 +217,15 @@ def post_shipment(
 
 @router.get("/shipments", response_model=list[NovaFreightShipmentOut], dependencies=[Depends(require_freight_shipper)])
 def get_shipments(
+    status: str | None = Query(None),
+    scope: str | None = Query(None),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return [_shipment_out(user, row) for row in list_shipments(db, organization_id=_org_id(user))]
+    return [
+        _shipment_out(user, row)
+        for row in list_shipments(db, organization_id=_org_id(user), status=status, scope=scope)
+    ]
 
 
 @router.get("/shipments/{shipment_id}", response_model=NovaFreightShipmentOut, dependencies=[Depends(require_freight_viewer)])
@@ -231,6 +238,60 @@ def get_one_shipment(
         shipment = get_shipment(db, shipment_id, organization_id=_org_id(user))
         _assert_viewer_access(db, user, shipment)
         return _shipment_out(user, shipment)
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/shipments/{shipment_id}/cancel",
+    response_model=NovaFreightShipmentOut,
+    dependencies=[Depends(require_freight_shipper)],
+)
+def post_cancel_shipment(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return _shipment_out(
+            user,
+            cancel_shipment(
+                db,
+                shipment_id,
+                organization_id=_org_id(user),
+                actor_user_id=user.user_id,
+                actor_role=user.role,
+                dispatcher_view=user.role in DISPATCH_ROLES,
+            ),
+        )
+    except NovaFreightError as exc:
+        _raise(exc)
+
+
+@router.get("/ops/summary", dependencies=[Depends(require_freight_dispatch)])
+def get_ops_summary(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return ops_summary(db, organization_id=_org_id(user))
+
+
+@router.get("/history", dependencies=[Depends(require_freight_dispatch)])
+def get_freight_history(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return list_history(db, organization_id=_org_id(user))
+
+
+@router.get("/history/{shipment_id}", dependencies=[Depends(require_freight_dispatch)])
+def get_freight_history_detail(
+    shipment_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_history_detail(db, shipment_id, organization_id=_org_id(user))
     except NovaFreightError as exc:
         _raise(exc)
 

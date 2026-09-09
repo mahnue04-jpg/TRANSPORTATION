@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.nova.freight.models import (
@@ -167,6 +168,8 @@ def save_quote(
         discount_amount=payload.discount_amount,
     )
     quoted = money(payload.quoted_amount) if payload.quoted_amount is not None else money(breakdown["suggested_amount"])
+    if quoted < money(0):
+        raise NovaFreightError("Quoted amount cannot be negative", status_code=409)
     method = "manual_override" if payload.quoted_amount is not None else "rate_engine"
     stamp = now()
     created = existing is None
@@ -310,6 +313,15 @@ def create_invoice(
     )
     subtotal = money(quote.base_rate + quote.mileage_amount + quote.time_amount + surcharge)
     stamp = now()
+    voided_count = (
+        db.query(NovaFreightInvoice)
+        .filter(
+            NovaFreightInvoice.shipment_id == shipment.shipment_id,
+            NovaFreightInvoice.organization_id == organization_id,
+            NovaFreightInvoice.invoice_status == "void",
+        )
+        .count()
+    )
     row = NovaFreightInvoice(
         invoice_id=_new_invoice_id(),
         shipment_id=shipment.shipment_id,
@@ -324,25 +336,32 @@ def create_invoice(
         total_amount_minor=to_minor_units(quote.quoted_amount),
         currency=quote.currency,
         invoice_status="draft",
-        idempotency_key=f"nova-freight-invoice:{organization_id}:{shipment.shipment_id}",
+        idempotency_key=f"nova-freight-invoice:{organization_id}:{shipment.shipment_id}:{voided_count}",
         created_at=stamp,
         updated_at=stamp,
     )
-    db.add(row)
-    db.flush()
-    _add_event(
-        db,
-        shipment,
-        event_type="invoice_created",
-        actor_user_id=actor_user_id,
-        actor_role=actor_role,
-        notes=f"invoice={row.invoice_id} amount={row.total_amount}",
-        quote_id=quote.quote_id,
-        invoice_id=row.invoice_id,
-    )
-    db.commit()
-    db.refresh(row)
-    return row
+    try:
+        db.add(row)
+        db.flush()
+        _add_event(
+            db,
+            shipment,
+            event_type="invoice_created",
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            notes=f"invoice={row.invoice_id} amount={row.total_amount}",
+            quote_id=quote.quote_id,
+            invoice_id=row.invoice_id,
+        )
+        db.commit()
+        db.refresh(row)
+        return row
+    except IntegrityError:
+        db.rollback()
+        existing_after = _get_active_invoice(db, shipment_id, organization_id)
+        if existing_after is not None:
+            return existing_after
+        raise NovaFreightError("Invoice already exists", status_code=409)
 
 
 def finalize_invoice(
@@ -445,6 +464,8 @@ def start_customer_payment(
         return _payment_payload(invoice, reused=True)
     if requested_amount is not None and money(requested_amount) != money(invoice.total_amount):
         raise NovaFreightError("Client-provided amount does not match the finalized invoice", status_code=409)
+    if money(invoice.total_amount) <= money(0):
+        raise NovaFreightError("Invoice amount must be greater than zero", status_code=409)
     if invoice.stripe_payment_intent_id and invoice.invoice_status == "payment_pending":
         return _payment_payload(invoice, reused=True)
     try:

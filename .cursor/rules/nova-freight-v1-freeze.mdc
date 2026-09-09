@@ -1,0 +1,30 @@
+---
+description: AMICOR Nova Freight V1 production freeze
+globs:
+  - backend/app/core/nova/freight/**
+  - backend/static/nova-freight/**
+  - backend/tests/test_nova_freight*
+  - backend/migrations/versions/*nova_freight*
+  - docs/AMICOR_NOVA_FREIGHT_V1_PRODUCTION_FREEZE.md
+---
+
+# Nova Freight V1 production freeze
+
+AMICOR NOVA FREIGHT V1 SOFTWARE BUILD FROZEN after Phase 7 (2026-09-09).
+
+Do not change Nova Freight V1 unless the user explicitly requests a verified production bug, security issue, legal/compliance requirement, or launch-critical business fix.
+
+See `docs/AMICOR_NOVA_FREIGHT_V1_PRODUCTION_FREEZE.md`.
+
+## Protected
+
+- Freight shipment, offer, lifecycle, proof, quote, invoice, Stripe TEST charge, payout, settlement, remittance
+- `/nova/freight*` UI and `/api/nova/freight*` APIs
+- `nova_freight_*` tables and Phase 1–7 tests
+
+## Still prohibited
+
+- Stripe LIVE / real customer charges
+- Real carrier payouts or Stripe Connect live transfers
+- Tax / 1099, payout batching, analytics dashboards, marketplace/ELD integrations
+- Changes to frozen Delivery, Driver 001, or Health billing/lifecycle

@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.core.nova.freight.models import (
     NovaFreightCarrier,
+    NovaFreightInvoice,
     NovaFreightOffer,
+    NovaFreightPayout,
     NovaFreightProof,
     NovaFreightShipment,
     NovaFreightShipmentEvent,
@@ -74,13 +76,21 @@ def create_shipment(
     raise NovaFreightError("Could not allocate a unique shipment ID", status_code=409)
 
 
-def list_shipments(db: Session, *, organization_id: str) -> list[NovaFreightShipment]:
-    return (
-        db.query(NovaFreightShipment)
-        .filter(NovaFreightShipment.organization_id == organization_id)
-        .order_by(NovaFreightShipment.created_at.desc())
-        .all()
-    )
+def list_shipments(
+    db: Session,
+    *,
+    organization_id: str,
+    status: str | None = None,
+    scope: str | None = None,
+) -> list[NovaFreightShipment]:
+    query = db.query(NovaFreightShipment).filter(NovaFreightShipment.organization_id == organization_id)
+    if scope == "active":
+        query = query.filter(NovaFreightShipment.status.notin_(["completed", "cancelled"]))
+    elif scope == "history":
+        query = query.filter(NovaFreightShipment.status.in_(["completed", "cancelled"]))
+    if status:
+        query = query.filter(NovaFreightShipment.status == status)
+    return query.order_by(NovaFreightShipment.created_at.desc()).all()
 
 
 def get_shipment(
@@ -713,6 +723,71 @@ def transition_shipment_status(
             latitude=payload.latitude,
             longitude=payload.longitude,
             source=payload.source or "nova_freight_execution",
+            created_at=stamp,
+        )
+    )
+    db.commit()
+    return get_shipment(db, shipment_id, organization_id=organization_id)
+
+
+def cancel_shipment(
+    db: Session,
+    shipment_id: str,
+    *,
+    organization_id: str,
+    actor_user_id: str | None,
+    actor_role: str | None,
+    dispatcher_view: bool,
+    notes: str | None = None,
+) -> NovaFreightShipment:
+    shipment = get_shipment(db, shipment_id, organization_id=organization_id)
+    if shipment.status == "cancelled":
+        return shipment
+    if shipment.status == "completed":
+        raise NovaFreightError("Completed shipments cannot be cancelled", status_code=409)
+    paid_invoice = (
+        db.query(NovaFreightInvoice)
+        .filter(
+            NovaFreightInvoice.shipment_id == shipment.shipment_id,
+            NovaFreightInvoice.organization_id == organization_id,
+            NovaFreightInvoice.invoice_status == "paid",
+        )
+        .first()
+    )
+    if paid_invoice is not None:
+        raise NovaFreightError("Paid shipments cannot be cancelled", status_code=409)
+    paid_payout = (
+        db.query(NovaFreightPayout)
+        .filter(
+            NovaFreightPayout.shipment_id == shipment.shipment_id,
+            NovaFreightPayout.organization_id == organization_id,
+            NovaFreightPayout.payout_status.in_(["processing", "paid"]),
+        )
+        .first()
+    )
+    if paid_payout is not None:
+        raise NovaFreightError("Shipments with a processing or paid payout cannot be cancelled", status_code=409)
+    if not dispatcher_view and shipment.status not in {"draft", "requested", "ready_for_dispatch", "offered"}:
+        raise NovaFreightError("Only dispatch can cancel an assigned or in-progress shipment", status_code=403)
+    stamp = now()
+    previous = shipment.status
+    _close_open_offers(db, shipment.shipment_id, organization_id=organization_id, stamp=stamp)
+    shipment.status = "cancelled"
+    shipment.updated_at = stamp
+    shipment.last_status_at = stamp
+    db.add(
+        NovaFreightShipmentEvent(
+            event_id=_new_event_id(),
+            shipment_id=shipment.shipment_id,
+            organization_id=organization_id,
+            status_before=previous,
+            status_after="cancelled",
+            event_type="shipment_cancelled",
+            actor_user_id=actor_user_id,
+            actor_carrier_id=shipment.assigned_carrier_id,
+            actor_role=actor_role,
+            notes=notes,
+            source="nova_freight_ops",
             created_at=stamp,
         )
     )

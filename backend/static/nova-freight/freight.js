@@ -140,6 +140,9 @@
     var response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
     var body = null;
     try { body = await response.json(); } catch (_) {}
+    if (response.status === 401) {
+      throw new Error("Session expired. Sign in again.");
+    }
     if (!response.ok) {
       throw new Error(errorText(body, "Request failed (" + response.status + ")"));
     }
@@ -209,7 +212,7 @@
   }
 
   async function loadList() {
-    var rows = await api("/api/nova/freight/shipments");
+    var rows = await api("/api/nova/freight/shipments?scope=active");
     var body = $("shipment-rows");
     body.innerHTML = "";
     if (!rows.length) {
