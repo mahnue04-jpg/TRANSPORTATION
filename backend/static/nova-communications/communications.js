@@ -36,11 +36,19 @@
     var headers = { "Content-Type": "application/json" };
     if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
     else if (token()) headers.Authorization = "Bearer " + token();
-    var response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
+    var response;
+    try {
+      response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
+    } catch (_) {
+      throw new Error("Network error. Saved work was not changed.");
+    }
     var body = null;
     try { body = await response.json(); } catch (_) {}
-    if (response.status === 401) throw new Error("Session expired. Sign in to continue.");
-    if (!response.ok) throw new Error(errorText(body, "Request failed (" + response.status + ")"));
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
+    if (response.status === 403) throw new Error("Access denied.");
+    if (response.status === 404) throw new Error("Not found / unavailable.");
+    if (response.status >= 500) throw new Error("Temporary system error.");
+    if (!response.ok) throw new Error(errorText(body, "Request failed."));
     return body;
   }
   function setSignedIn(on) {
@@ -110,7 +118,7 @@
         notification_id: state.notificationId
       })
     });
-    $("brain-output").textContent = result.answer || "No response from Mrs. Nova Brain.";
+    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
     if (result.draft) showBanner("Draft saved. Nothing was sent.", true);
     else showBanner("Mrs. Nova Brain used existing Nova intelligence APIs.", true);
     await refresh();

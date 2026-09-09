@@ -140,6 +140,7 @@ class NovaCommsBrainRequest(BaseModel):
 class NovaCommsBrainOut(BaseModel):
     action: str
     answer: str
+    fact_label: str = "AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA."
     draft: NovaCommsDraftOut | None = None
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str

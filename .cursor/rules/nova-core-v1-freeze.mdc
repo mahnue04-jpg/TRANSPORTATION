@@ -1,0 +1,53 @@
+---
+description: AMICOR Nova Core V1 production freeze
+globs:
+  - backend/app/core/nova/workspace/**
+  - backend/app/core/nova/communications/**
+  - backend/app/core/nova/government/**
+  - backend/app/core/nova/business/**
+  - backend/app/core/nova/router.py
+  - backend/app/core/nova/service.py
+  - backend/static/nova-home/**
+  - backend/static/nova-workspace/**
+  - backend/static/nova-communications/**
+  - backend/static/nova-government/**
+  - backend/static/nova-business/**
+  - backend/tests/test_nova_home.py
+  - backend/tests/test_nova_workspace.py
+  - backend/tests/test_nova_communications.py
+  - backend/tests/test_nova_government.py
+  - backend/tests/test_nova_business.py
+  - backend/tests/test_nova_core_v1_freeze.py
+  - docs/AMICOR_NOVA_CORE_V1_PRODUCTION_FREEZE.md
+---
+
+# Nova Core V1 production freeze
+
+AMICOR NOVA CORE V1 SOFTWARE BUILD FROZEN after Phase 6 (2026-09-09).
+
+Do not change Nova Core V1 unless the user explicitly requests one of:
+
+1. a verified production bug
+2. a security issue
+3. a data-integrity issue
+4. a legal/compliance requirement
+5. a launch-critical correction
+6. explicitly authorized V2 work
+
+See `docs/AMICOR_NOVA_CORE_V1_PRODUCTION_FREEZE.md`.
+
+## Protected
+
+- `/nova`, `/nova/workspace`, `/nova/communications`, `/nova/government`, `/nova/business`
+- Mrs. Nova Brain display name and single-intelligence-layer design
+- Trust labels: VERIFIED DATA, USER-SAVED INFORMATION, AI SUGGESTION
+- Nova-owned Workspace, Communications, Government, and Business tables
+- Organization and user isolation
+
+## Still prohibited
+
+- Accounting, general ledger, payroll, tax, 1099
+- Autonomous outreach, autonomous calling, live government filing
+- Stripe LIVE / real-money keys
+- Hardware controls or physical Nova hardware
+- Changes to frozen Freight, frozen Delivery, Driver 001, or Health lifecycle/billing/onboarding/`/workspace`

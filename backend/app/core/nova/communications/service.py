@@ -565,7 +565,11 @@ def ask_communications(
         "explain_notification": "Explain the selected Nova notification without exposing secrets.",
         "ask": payload.question or "Help with Nova Communications.",
     }
-    question = f"{prompts[payload.action]}\n\n{context}\n\n{payload.question or ''}".strip()
+    question = (
+        "You are Mrs. Nova Brain. Separate VERIFIED DATA, USER-SAVED INFORMATION, and AI SUGGESTION. "
+        "Do not send email.\n\n"
+        + f"{prompts[payload.action]}\n\n{context}\n\n{payload.question or ''}"
+    ).strip()
     asked = NovaCoreService.ask(
         db,
         organization_id=organization_id,
@@ -590,6 +594,7 @@ def ask_communications(
     return NovaCommsBrainOut(
         action=payload.action,
         answer=asked.answer,
+        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA. Nothing was sent.",
         draft=draft_out(draft) if draft else None,
         next_actions=asked.next_actions,
         generated_at=asked.generated_at,

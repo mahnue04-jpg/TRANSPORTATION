@@ -559,7 +559,7 @@ def ask_government(
     else:
         context += "Titles: " + ", ".join(row.title for row in items[:10])
     prompts = {
-        "explain_requirement": "Explain this government requirement. Label VERIFIED FACT vs USER-SAVED INFORMATION vs AI SUGGESTION. Do not present this as an official ruling.",
+        "explain_requirement": "Explain this government requirement. Label VERIFIED DATA vs USER-SAVED INFORMATION vs AI SUGGESTION. Do not present this as an official ruling.",
         "summarize_letter": "Summarize the government letter or notes. Distinguish user-saved text from AI suggestion.",
         "find_agency": "Suggest the likely responsible agency. Mark as AI SUGGESTION unless a saved official source exists.",
         "missing_documents": "List missing checklist documents from USER-SAVED INFORMATION only, then suggest extras as AI SUGGESTION.",
@@ -577,7 +577,7 @@ def ask_government(
     question = (
         "You are Mrs. Nova Brain assisting with Nova Government organization only. "
         "Never claim a filing was submitted. Never impersonate the user. "
-        "Always separate VERIFIED FACT, USER-SAVED INFORMATION, and AI SUGGESTION.\n\n"
+        "Always separate VERIFIED DATA, USER-SAVED INFORMATION, and AI SUGGESTION. Government sources may be OFFICIAL SOURCE, CONFIRMED IN WRITING, or EXPIRED OR SUPERSEDED.\n\n"
         + prompts[payload.action]
         + "\n\n"
         + context
@@ -622,7 +622,7 @@ def ask_government(
     return NovaGovBrainOut(
         action=payload.action,
         answer=asked.answer,
-        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or an official_source record. Not an official government ruling.",
+        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA from an OFFICIAL SOURCE or CONFIRMED IN WRITING record. EXPIRED OR SUPERSEDED sources are not current. Not an official government ruling.",
         next_actions=asked.next_actions,
         generated_at=asked.generated_at,
     )
