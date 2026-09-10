@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
+from app.core.nova.accounting import aging as aging_service
 from app.core.nova.accounting import service
-from app.core.nova.accounting.schemas import NovaAccountingSummaryOut
+from app.core.nova.accounting.schemas import NovaAccountingAgingOut, NovaAccountingSummaryOut
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.db.session import get_db
@@ -45,6 +46,18 @@ def accounting_summary(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+@router.get("/aging", response_model=NovaAccountingAgingOut)
+def accounting_aging(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return aging_service.aging(db, organization_id=_resolve_org(user, organization_id), user=user)
+    except service.NovaAccountingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.post("/pay")
 def refuse_pay(user: UserContext = Depends(get_current_user_context)):
     raise HTTPException(status_code=403, detail="Accounting is read-only. Payments are not created here.")
@@ -63,3 +76,18 @@ def refuse_invoice(user: UserContext = Depends(get_current_user_context)):
 @router.post("/refund")
 def refuse_refund(user: UserContext = Depends(get_current_user_context)):
     raise HTTPException(status_code=403, detail="Accounting is read-only. Refunds are not created here.")
+
+
+@router.post("/collect")
+def refuse_collect(user: UserContext = Depends(get_current_user_context)):
+    raise HTTPException(status_code=403, detail="Accounting is read-only. Collections are not started here.")
+
+
+@router.post("/remind")
+def refuse_remind(user: UserContext = Depends(get_current_user_context)):
+    raise HTTPException(status_code=403, detail="Accounting is read-only. Reminders and outreach are not sent here.")
+
+
+@router.post("/export")
+def refuse_export(user: UserContext = Depends(get_current_user_context)):
+    raise HTTPException(status_code=403, detail="Accounting is read-only. Exports are not created here.")

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Accounting Aging</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-accounting/accounting.css" />
+</head>
+<body>
+  <header class="page-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Pending funds aging</h1>
+      </div>
+    </div>
+    <nav class="page-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/accounting">Accounting</a>
+      <a href="/nova/accounting/aging" aria-current="page">Aging</a>
+      <a href="/nova/business">Business</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="page-main">
+    <p class="disclaimer">Read-only aging of pending customer payments and unpaid Freight invoices. These pipelines are never combined. Age is measured since created. No canonical due date exists. Stripe remains TEST. No collections, reminders, invoices, refunds, or exports are created here.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="panel" aria-label="Session">
+      <p id="session-meta" class="hint">Sign in to load aging totals.</p>
+      <p id="as-of" class="hint"></p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="panel" id="customer-section" aria-label="Customer payment pipeline">
+      <h2>Customer payment pipeline</h2>
+      <p class="hint">payment_status=pending only. Age since created. Stripe TEST. No due date is applied.</p>
+      <div id="customer-box"><p class="hint">Sign in to load aging totals.</p></div>
+    </section>
+
+    <section class="panel" id="freight-section" aria-label="Freight invoice pipeline">
+      <h2>Freight invoice pipeline</h2>
+      <p class="hint">Draft, ready, payment_pending, and failed stay separate. Age since created. Draft is not collectible revenue. Stripe TEST. No due date is applied.</p>
+      <div id="freight-box"><p class="hint">Sign in to load aging totals.</p></div>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-accounting/aging.js"></script>
+</body>
+</html>

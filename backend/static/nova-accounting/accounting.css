@@ -186,6 +186,38 @@ button.secondary {
 
 .metric-card .definition { margin: 0; font-size: 0.85rem; }
 
+.aging-group {
+  border: 1px solid var(--nova-line);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 12px 0;
+}
+
+.aging-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.aging-meta p { margin: 0; }
+
+.bucket-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.bucket-card {
+  border: 1px solid var(--nova-line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.bucket-card h4 { margin: 0 0 6px; font-size: 0.9rem; }
+
+.currency-block { margin-top: 12px; }
+
 @media (max-width: 720px) {
   .page-header, .page-main { width: calc(100% - 16px); }
   .page-nav a, button { width: 100%; }

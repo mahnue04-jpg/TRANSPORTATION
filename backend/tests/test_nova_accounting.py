@@ -104,6 +104,8 @@ def test_nova_accounting_page_and_layout() -> None:
     assert "passenger_name" not in ACCT_JS
     assert "routing" not in ACCT_JS.lower()
     assert 'href="/nova/accounting">Accounting</a>' in TODAY_HTML
+    assert 'href="/nova/accounting/aging">Aging</a>' in ACCT_HTML
+    assert 'href="/nova/accounting/aging">Aging</a>' in TODAY_HTML
 
 
 def test_nova_accounting_auth_and_refuses(client: TestClient) -> None:
@@ -116,6 +118,9 @@ def test_nova_accounting_auth_and_refuses(client: TestClient) -> None:
     assert client.post("/api/nova/accounting/payout", headers=headers).status_code == 403
     assert client.post("/api/nova/accounting/invoice", headers=headers).status_code == 403
     assert client.post("/api/nova/accounting/refund", headers=headers).status_code == 403
+    assert client.post("/api/nova/accounting/collect", headers=headers).status_code == 403
+    assert client.post("/api/nova/accounting/remind", headers=headers).status_code == 403
+    assert client.post("/api/nova/accounting/export", headers=headers).status_code == 403
     driver, _ = _headers(client, "driver@amicor.local")
     assert client.get("/api/nova/accounting/summary", headers=driver).status_code == 403
     cross = client.get("/api/nova/accounting/summary", headers=headers, params={"organization_id": "org-not-the-caller"})
