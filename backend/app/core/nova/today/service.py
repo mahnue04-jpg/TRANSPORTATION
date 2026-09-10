@@ -3,7 +3,19 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
+from app.auth import (
+    ROLE_ADMIN,
+    ROLE_ANALYTICS_READONLY,
+    ROLE_DISPATCHER,
+    ROLE_DRIVER,
+    ROLE_PROVIDER,
+    ROLE_RIDER,
+    ROLE_STAFF,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_SUPERVISOR,
+    UserContext,
+    normalize_role,
+)
 from app.core.nova.business.schemas import NovaBizTaskCreate
 from app.core.nova.business.service import create_task as create_business_task
 from app.core.nova.business.service import dashboard as business_dashboard
@@ -25,6 +37,7 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainRequest,
     NovaTodayCard,
     NovaTodayDashboardOut,
+    NovaTodayProductCount,
 )
 from app.core.nova.workspace.service import dashboard as workspace_dashboard
 from app.helpers import now, uuid4
@@ -43,6 +56,114 @@ def _new_id() -> str:
 
 def _can_see_org_wide(user: UserContext) -> bool:
     return normalize_role(user.role) in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}
+
+
+_HEALTH_DELIVERY_COUNT_ROLES = {
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_DISPATCHER,
+    ROLE_STAFF,
+    ROLE_SUPERVISOR,
+    ROLE_DRIVER,
+    ROLE_PROVIDER,
+    ROLE_RIDER,
+    ROLE_ANALYTICS_READONLY,
+}
+_FREIGHT_COUNT_ROLES = {
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    ROLE_DISPATCHER,
+    ROLE_RIDER,
+    ROLE_PROVIDER,
+    ROLE_STAFF,
+    ROLE_SUPERVISOR,
+}
+_PRODUCT_COUNT_SPECS = (
+    {
+        "key": "health",
+        "label": "AMICOR Health",
+        "metric": "Active rides",
+        "href": "/workspace",
+        "roles": _HEALTH_DELIVERY_COUNT_ROLES,
+    },
+    {
+        "key": "delivery",
+        "label": "AMICOR Delivery",
+        "metric": "Open requests",
+        "href": "/app",
+        "roles": _HEALTH_DELIVERY_COUNT_ROLES,
+    },
+    {
+        "key": "freight",
+        "label": "AMICOR Nova Freight",
+        "metric": "Active shipments",
+        "href": "/nova/freight",
+        "roles": _FREIGHT_COUNT_ROLES,
+    },
+)
+
+
+def _product_count_card(spec: dict, *, count: int | None, status: str) -> NovaTodayProductCount:
+    return NovaTodayProductCount(
+        key=spec["key"],
+        label=spec["label"],
+        metric=spec["metric"],
+        count=count,
+        status=status,
+        href=spec["href"],
+        trust_label="VERIFIED DATA",
+    )
+
+
+def _count_health_active_rides(db: Session, organization_id: str) -> int:
+    from app.modules.health_isf.service import get_all_rides
+
+    return len(
+        get_all_rides(
+            db,
+            skip=0,
+            limit=500,
+            organization_id=organization_id,
+            active_only=True,
+            exclude_test=True,
+        )
+    )
+
+
+def _count_delivery_open_requests(db: Session, organization_id: str) -> int:
+    from app.modules.health_isf.service import get_customer_ride_queue_metrics
+
+    metrics = get_customer_ride_queue_metrics(db, organization_id=organization_id)
+    open_count = int(metrics.get("total") or 0) - int(metrics.get("completed") or 0) - int(metrics.get("cancelled") or 0)
+    return max(open_count, 0)
+
+
+def _count_freight_active_shipments(db: Session, organization_id: str) -> int:
+    from app.core.nova.freight.service import list_shipments
+
+    return len(list_shipments(db, organization_id=organization_id, scope="active"))
+
+
+def _read_one_product_count(db: Session, *, organization_id: str, user: UserContext, spec: dict) -> NovaTodayProductCount:
+    try:
+        if normalize_role(user.role) not in spec["roles"]:
+            return _product_count_card(spec, count=None, status="unavailable")
+        counters = {
+            "health": _count_health_active_rides,
+            "delivery": _count_delivery_open_requests,
+            "freight": _count_freight_active_shipments,
+        }
+        count = counters[spec["key"]](db, organization_id)
+        return _product_count_card(spec, count=int(count), status="ok")
+    except Exception:
+        return _product_count_card(spec, count=None, status="unavailable")
+
+
+def product_counts(db: Session, *, organization_id: str, user: UserContext) -> list[NovaTodayProductCount]:
+    return [
+        _read_one_product_count(db, organization_id=organization_id, user=user, spec=spec)
+        for spec in _PRODUCT_COUNT_SPECS
+    ]
 
 
 def _owner_filter(query, user: UserContext):
@@ -487,6 +608,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         reverse=True,
     )[:16]
     approval_queue = [action_out(row) for row in rows if row.status == "proposed"]
+    try:
+        counts = product_counts(db, organization_id=organization_id, user=user)
+    except Exception:
+        counts = [_product_count_card(spec, count=None, status="unavailable") for spec in _PRODUCT_COUNT_SPECS]
     return NovaTodayDashboardOut(
         attention_now=attention_now,
         communications=communications,
@@ -494,6 +619,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         business=business,
         workspace=workspace,
         product_links=product_links,
+        product_counts=counts,
         recommendations=recommendations,
         approval_queue=approval_queue,
         trust_labels=list(TRUST_LABELS),

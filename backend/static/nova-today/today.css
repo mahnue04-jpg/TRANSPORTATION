@@ -181,6 +181,38 @@ pre {
   padding: 12px;
 }
 
+.product-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.product-count-card {
+  border: 1px solid var(--nova-line);
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 160px;
+}
+
+.product-count-card h3 {
+  margin: 0 0 6px;
+}
+
+.product-count-card .count-metric {
+  margin: 0;
+  color: var(--nova-muted);
+}
+
+.product-count-card .count-value {
+  margin: 10px 0 14px;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.product-count-card a {
+  min-height: 44px;
+}
+
 .trust {
   display: inline-block;
   margin-bottom: 8px;

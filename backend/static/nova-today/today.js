@@ -91,6 +91,33 @@
     }
     $(id).innerHTML = items.map(cardHtml).join("");
   }
+  function renderProductCounts(cards) {
+    var host = $("product-counts-box");
+    if (!host) return;
+    var specs = [
+      { key: "health", label: "AMICOR Health", metric: "Active rides", href: "/workspace", open: "Open Health" },
+      { key: "delivery", label: "AMICOR Delivery", metric: "Open requests", href: "/app", open: "Open Delivery" },
+      { key: "freight", label: "AMICOR Nova Freight", metric: "Active shipments", href: "/nova/freight", open: "Open Freight" }
+    ];
+    var byKey = {};
+    (cards || []).forEach(function (row) {
+      if (row && row.key) byKey[row.key] = row;
+    });
+    host.innerHTML = specs.map(function (spec) {
+      var row = byKey[spec.key] || {};
+      var value = "Unavailable";
+      if (row.status === "ok" && typeof row.count === "number") {
+        value = String(row.count);
+      }
+      return "<article class=\"product-count-card\" data-count-key=\"" + escapeHtml(spec.key) + "\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>" + escapeHtml(spec.label) + "</h3>" +
+        "<p class=\"count-metric\">" + escapeHtml(spec.metric) + "</p>" +
+        "<p class=\"count-value\">" + escapeHtml(value) + "</p>" +
+        "<a class=\"secondary\" href=\"" + escapeHtml(spec.href) + "\">" + escapeHtml(spec.open) + "</a>" +
+        "</article>";
+    }).join("");
+  }
   async function refresh() {
     if (!token()) {
       $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
@@ -104,6 +131,11 @@
     renderList("government-box", dash.government, "No government deadlines or grants.");
     renderList("business-box", dash.business, "No business follow-ups or opportunities.");
     renderList("workspace-box", dash.workspace, "No recent workspace work.");
+    try {
+      renderProductCounts(dash.product_counts);
+    } catch (_) {
+      renderProductCounts([]);
+    }
     renderList("links-box", dash.product_links, "Product links unavailable.");
     renderList("recommendations-box", dash.recommendations, "No recommendations.");
     $("queue-box").innerHTML = (dash.approval_queue && dash.approval_queue.length)

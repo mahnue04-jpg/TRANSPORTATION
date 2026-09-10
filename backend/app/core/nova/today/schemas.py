@@ -56,6 +56,16 @@ class NovaTodayActionOut(BaseModel):
     snoozed_until: datetime | None = None
 
 
+class NovaTodayProductCount(BaseModel):
+    key: str
+    label: str
+    metric: str
+    count: int | None = None
+    status: Literal["ok", "unavailable"]
+    href: str
+    trust_label: str = "VERIFIED DATA"
+
+
 class NovaTodayDashboardOut(BaseModel):
     attention_now: list[NovaTodayCard]
     communications: list[NovaTodayCard]
@@ -63,6 +73,7 @@ class NovaTodayDashboardOut(BaseModel):
     business: list[NovaTodayCard]
     workspace: list[NovaTodayCard]
     product_links: list[NovaTodayCard]
+    product_counts: list[NovaTodayProductCount] = Field(default_factory=list)
     recommendations: list[NovaTodayCard]
     approval_queue: list[NovaTodayActionOut]
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))

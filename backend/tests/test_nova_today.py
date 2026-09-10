@@ -127,6 +127,11 @@ def test_nova_today_dashboard_and_brain(client: TestClient) -> None:
     assert "/workspace" in hrefs
     assert "/app" in hrefs
     assert "/nova/freight" in hrefs
+    counts = {row["key"]: row for row in body["product_counts"]}
+    assert set(counts) == {"health", "delivery", "freight"}
+    assert counts["health"]["metric"] == "Active rides"
+    assert counts["delivery"]["metric"] == "Open requests"
+    assert counts["freight"]["metric"] == "Active shipments"
     asked = client.post(
         "/api/nova/today/ask",
         headers=headers,
@@ -374,3 +379,94 @@ def test_nova_today_snooze_hides_and_returns(client: TestClient) -> None:
     woken = client.get("/api/nova/today/dashboard", headers=owner)
     assert any(row["source_ref_id"] == item_id for row in woken.json()["attention_now"])
     assert any(row["action_id"] == action["action_id"] for row in woken.json()["approval_queue"])
+
+
+def test_nova_today_product_counts_auth_empty_privacy_and_isolation(client: TestClient) -> None:
+    import json
+
+    assert "Active rides" in TODAY_HTML
+    assert "Open requests" in TODAY_HTML
+    assert "Active shipments" in TODAY_HTML
+    assert "product-counts" in TODAY_CSS
+    assert "minmax(220px, 1fr)" in TODAY_CSS
+    assert "@media (max-width: 720px)" in TODAY_CSS
+    assert "renderProductCounts" in TODAY_JS
+    assert "passenger_name" not in TODAY_JS
+    assert "pickup_address" not in TODAY_JS
+    assert "dropoff_address" not in TODAY_JS
+    assert client.get("/api/nova/today/dashboard").status_code == 401
+
+    owner = _headers(client, "dispatcher@amicor.local")
+    other = _headers(client, "staff@amicor.local")
+    owner_dash = client.get("/api/nova/today/dashboard", headers=owner)
+    other_dash = client.get("/api/nova/today/dashboard", headers=other)
+    assert owner_dash.status_code == 200, owner_dash.text
+    assert other_dash.status_code == 200, other_dash.text
+    owner_counts = {row["key"]: row for row in owner_dash.json()["product_counts"]}
+    other_counts = {row["key"]: row for row in other_dash.json()["product_counts"]}
+    assert set(owner_counts) == {"health", "delivery", "freight"}
+    for row in owner_counts.values():
+        assert row["status"] in {"ok", "unavailable"}
+        assert row["trust_label"] == "VERIFIED DATA"
+        if row["status"] == "ok":
+            assert isinstance(row["count"], int)
+            assert row["count"] >= 0
+        else:
+            assert row["count"] is None
+        blob = json.dumps(row)
+        assert "passenger_name" not in blob
+        assert "pickup_address" not in blob
+        assert "dropoff_address" not in blob
+        assert "rider_name" not in blob
+        assert "medical" not in blob.lower()
+    assert owner_counts["health"]["href"] == "/workspace"
+    assert owner_counts["delivery"]["href"] == "/app"
+    assert owner_counts["freight"]["href"] == "/nova/freight"
+    assert other_counts["health"]["href"] == "/workspace"
+    cross = client.get("/api/nova/today/dashboard", headers=owner, params={"organization_id": "org-not-the-caller"})
+    assert cross.status_code == 403
+
+    rides = client.get("/api/health-isf/rides", headers=owner, params={"active_only": True, "exclude_test": True})
+    if rides.status_code == 200 and owner_counts["health"]["status"] == "ok":
+        assert owner_counts["health"]["count"] == len(rides.json())
+    requests = client.get("/api/health-isf/customer-requests/metrics", headers=owner)
+    if requests.status_code == 200 and owner_counts["delivery"]["status"] == "ok":
+        metrics = requests.json()
+        expected = max(int(metrics.get("total") or 0) - int(metrics.get("completed") or 0) - int(metrics.get("cancelled") or 0), 0)
+        assert owner_counts["delivery"]["count"] == expected
+    freight = client.get("/api/nova/freight/shipments", headers=owner, params={"scope": "active"})
+    if freight.status_code == 200 and owner_counts["freight"]["status"] == "ok":
+        assert owner_counts["freight"]["count"] == len(freight.json())
+
+
+def test_nova_today_product_counts_partial_service_failure(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("health list unavailable")
+
+    monkeypatch.setattr("app.core.nova.today.service._count_health_active_rides", boom)
+    headers = _headers(client)
+    dash = client.get("/api/nova/today/dashboard", headers=headers)
+    assert dash.status_code == 200, dash.text
+    body = dash.json()
+    assert "attention_now" in body
+    assert "approval_queue" in body
+    counts = {row["key"]: row for row in body["product_counts"]}
+    assert counts["health"]["status"] == "unavailable"
+    assert counts["health"]["count"] is None
+    assert counts["delivery"]["status"] == "ok"
+    assert counts["freight"]["status"] == "ok"
+    assert counts["health"]["href"] == "/workspace"
+    assert counts["delivery"]["href"] == "/app"
+    assert counts["freight"]["href"] == "/nova/freight"
+
+
+def test_nova_today_product_counts_do_not_change_v1_destinations() -> None:
+    assert 'href="/workspace">Health</a>' in TODAY_HTML
+    assert 'href="/app">Delivery</a>' in TODAY_HTML
+    assert 'href="/nova/freight">Freight</a>' in TODAY_HTML
+    assert 'href="/workspace">Open Health</a>' in TODAY_HTML
+    assert 'href="/app">Open Delivery</a>' in TODAY_HTML
+    assert 'href="/nova/freight">Open Freight</a>' in TODAY_HTML
+    assert 'href="/nova/workspace"' in HOME_HTML
+    assert 'href="/app" data-destination="delivery"' in HOME_HTML
+    assert 'href="/nova/freight" data-destination="freight"' in HOME_HTML
