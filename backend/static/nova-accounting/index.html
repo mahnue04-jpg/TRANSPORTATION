@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Accounting</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-accounting/accounting.css" />
+</head>
+<body>
+  <header class="page-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Accounting summary</h1>
+      </div>
+    </div>
+    <nav class="page-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/accounting" aria-current="page">Accounting</a>
+      <a href="/nova/business">Business</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="page-main">
+    <p class="disclaimer">Read-only aggregates from existing ledgers. Confirmed payments, pending amounts, and calculated completion totals stay separate. Stripe remains TEST. No invoices, payouts, refunds, or ledger changes are created here.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="panel" aria-label="Session">
+      <p id="session-meta" class="hint">Sign in to load accounting totals.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-label="Accounting metrics">
+      <h2>Canonical totals</h2>
+      <p class="hint">Each card fails independently. Unavailable means that source could not be read.</p>
+      <div id="metrics-box" class="metric-grid">
+        <article class="metric-card"><h3>Confirmed customer payments</h3><p class="state">confirmed</p><p class="value">Sign in to load totals.</p></article>
+        <article class="metric-card"><h3>Pending customer payments</h3><p class="state">pending</p><p class="value">Sign in to load totals.</p></article>
+        <article class="metric-card"><h3>Completed-trip calculated ride totals</h3><p class="state">calculated</p><p class="value">Sign in to load totals.</p></article>
+        <article class="metric-card"><h3>Completed-trip calculated platform share</h3><p class="state">calculated</p><p class="value">Sign in to load totals.</p></article>
+        <article class="metric-card"><h3>Freight paid invoice totals</h3><p class="state">confirmed</p><p class="value">Sign in to load totals.</p></article>
+        <article class="metric-card"><h3>Freight unpaid invoice totals</h3><p class="state">pending</p><p class="value">Sign in to load totals.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-accounting/accounting.js"></script>
+</body>
+</html>

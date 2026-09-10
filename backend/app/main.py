@@ -82,6 +82,7 @@ from app.core.nova.communications.router import router as nova_communications_ro
 from app.core.nova.government.router import router as nova_government_router  # type: ignore
 from app.core.nova.business.router import router as nova_business_router  # type: ignore
 from app.core.nova.today.router import router as nova_today_router  # type: ignore
+from app.core.nova.accounting.router import router as nova_accounting_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -471,6 +472,7 @@ app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_today_router)
+app.include_router(nova_accounting_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3949,6 +3951,14 @@ def serve_nova_today() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Today page not found"}, status_code=404)
+
+
+@app.get("/nova/accounting")
+def serve_nova_accounting() -> Response:
+    page = os.path.join(_static_dir, "nova-accounting", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Accounting page not found"}, status_code=404)
 
 
 @app.get("/nova/freight")
