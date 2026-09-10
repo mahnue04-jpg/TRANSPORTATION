@@ -1,0 +1,204 @@
+:root {
+  --nova-bg: #06101c;
+  --nova-surface: #0d1b2d;
+  --nova-line: #2a4a6a;
+  --nova-text: #eef6ff;
+  --nova-muted: #9db6ce;
+  --nova-accent: #3b9bff;
+  --nova-warn: #ffb020;
+  --nova-ok: #3ad15a;
+  --nova-blocked: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 80% -12%, rgba(59, 155, 255, 0.16), transparent 42%),
+    var(--nova-bg);
+  color: var(--nova-text);
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+.brand-kicker {
+  margin: 0;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nova-accent);
+  font-size: 0.75rem;
+}
+
+.page-header, .page-main {
+  width: min(880px, calc(100% - 24px));
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 0 8px;
+}
+
+.page-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.page-nav a,
+button {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  text-decoration: none;
+}
+
+.page-nav a {
+  border: 1px solid var(--nova-line);
+  color: var(--nova-text);
+  background: var(--nova-surface);
+}
+
+.page-nav a[aria-current="page"] {
+  border-color: var(--nova-accent);
+  color: var(--nova-accent);
+}
+
+.disclaimer, .hint {
+  color: var(--nova-muted);
+  line-height: 1.45;
+}
+
+.banner {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid var(--nova-warn);
+}
+
+.banner.ok {
+  background: rgba(59, 155, 255, 0.12);
+  border-color: var(--nova-accent);
+}
+
+.hidden { display: none !important; }
+
+.panel {
+  background: var(--nova-surface);
+  border: 1px solid var(--nova-line);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.command-actions, .login-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.login-grid input {
+  flex: 1 1 220px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nova-line);
+  background: #082033;
+  color: var(--nova-text);
+}
+
+button {
+  border: 0;
+  background: var(--nova-accent);
+  color: #041018;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--nova-text);
+  border: 1px solid var(--nova-line);
+}
+
+.mode-box {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--nova-line);
+  border-radius: 12px;
+  line-height: 1.45;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.check-card {
+  border: 1px solid var(--nova-line);
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 150px;
+}
+
+.check-card h3 { margin: 0 0 8px; font-size: 1rem; }
+
+.check-card .state {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  color: var(--nova-muted);
+}
+
+.check-card .state.configured { color: var(--nova-accent); }
+.check-card .state.verified { color: var(--nova-ok); }
+.check-card .state.missing,
+.check-card .state.blocked { color: var(--nova-blocked); }
+.check-card .state.not-verified,
+.check-card .state.not-applicable { color: var(--nova-warn); }
+
+.check-card p { margin: 0; color: var(--nova-muted); font-size: 0.88rem; line-height: 1.4; }
+
+.blocker-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.blocker-list li {
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.blocker-list .meta {
+  display: block;
+  color: var(--nova-muted);
+  font-size: 0.88rem;
+}
+
+@media (max-width: 720px) {
+  .page-header, .page-main { width: calc(100% - 16px); }
+  .page-nav a, button { width: 100%; }
+  .command-actions, .login-grid { flex-direction: column; }
+}
+
+@media (max-width: 390px) {
+  .page-header, .page-main { width: calc(100% - 12px); }
+  .check-grid { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 1280px) {
+  .page-header, .page-main { width: min(980px, calc(100% - 40px)); }
+}
+
+@media (min-width: 1600px) {
+  .page-header, .page-main { width: min(1080px, calc(100% - 64px)); }
+}

@@ -108,6 +108,7 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML
+    assert 'href="/nova/payments/readiness" data-destination="payments-readiness"' in HOME_HTML
     assert 'data-later="true"' not in HOME_HTML
     assert HOME_HTML.count("Coming later") == 0
 

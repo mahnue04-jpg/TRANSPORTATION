@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Payments Readiness</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-payments/readiness.css" />
+</head>
+<body>
+  <header class="page-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Payments Readiness</h1>
+      </div>
+    </div>
+    <nav class="page-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/accounting">Accounting</a>
+      <a href="/nova/accounting/aging">Aging</a>
+      <a href="/nova/accounting/trends">Trends</a>
+      <a href="/nova/payments/readiness" aria-current="page">Payments Readiness</a>
+      <a href="/nova/business">Business</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="page-main">
+    <p class="disclaimer">Read-only Stripe control status. Configured is not verified. TEST is not LIVE. This page does not activate LIVE Stripe, register webhooks, create Connect accounts, start payouts, or change existing driver applications.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="panel" aria-label="Session">
+      <p id="session-meta" class="hint">Sign in with an admin account to load readiness details.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-label="Readiness summary">
+      <h2>Stripe mode</h2>
+      <p id="mode-box" class="mode-box">Sign in to load mode. LIVE readiness is not shown as a single go-ahead.</p>
+    </section>
+
+    <section class="panel" aria-label="Customer payment configuration">
+      <h2>Customer payment configuration</h2>
+      <p class="hint">Key presence and code paths only. Secret values are never shown.</p>
+      <div id="section-customer_payments" class="check-grid">
+        <article class="check-card"><h3>Stripe mode</h3><p class="state">Not verified</p><p>Sign in to load status.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Stripe Connect and driver payout configuration">
+      <h2>Stripe Connect and driver payout configuration</h2>
+      <p class="hint">Route existence, configuration, and Stripe verification stay separate.</p>
+      <div id="section-connect_payouts" class="check-grid">
+        <article class="check-card"><h3>Connect integration</h3><p class="state">Not verified</p><p>Sign in to load status.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Driver onboarding business gates">
+      <h2>Driver onboarding business gates</h2>
+      <p class="hint">Catalog and policy status only. Policies remain labeled DRAFT FOR ATTORNEY REVIEW. No applicant names, documents, or tax values.</p>
+      <div id="section-onboarding_gates" class="check-grid">
+        <article class="check-card"><h3>Policy catalog</h3><p class="state">Not verified</p><p>Sign in to load status.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Operational safety controls">
+      <h2>Operational safety controls</h2>
+      <p class="hint">Authorization, isolation, and log-safety checks. No money movement.</p>
+      <div id="section-operational_safety" class="check-grid">
+        <article class="check-card"><h3>Safety controls</h3><p class="state">Not verified</p><p>Sign in to load status.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Blockers and next actions">
+      <h2>Blockers and next actions</h2>
+      <p class="hint">Read-only. Consequential actions stay unauthorized unless the owner authorizes them separately.</p>
+      <ol id="blocker-list" class="blocker-list">
+        <li>Sign in to load the ordered blocker list.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-payments/readiness.js"></script>
+</body>
+</html>
