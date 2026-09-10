@@ -3969,6 +3969,14 @@ def serve_nova_accounting_aging() -> Response:
     return JSONResponse({"error": "Nova Accounting aging page not found"}, status_code=404)
 
 
+@app.get("/nova/accounting/trends")
+def serve_nova_accounting_trends() -> Response:
+    page = os.path.join(_static_dir, "nova-accounting", "trends.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Accounting trends page not found"}, status_code=404)
+
+
 @app.get("/nova/freight")
 @app.get("/nova/freight/new")
 @app.get("/nova/freight/shipments")

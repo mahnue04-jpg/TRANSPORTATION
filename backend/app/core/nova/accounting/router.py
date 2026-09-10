@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.accounting import aging as aging_service
 from app.core.nova.accounting import service
-from app.core.nova.accounting.schemas import NovaAccountingAgingOut, NovaAccountingSummaryOut
+from app.core.nova.accounting import trends as trends_service
+from app.core.nova.accounting.schemas import (
+    NovaAccountingAgingOut,
+    NovaAccountingSummaryOut,
+    NovaAccountingTrendsOut,
+)
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.db.session import get_db
@@ -58,6 +63,24 @@ def accounting_aging(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+@router.get("/trends", response_model=NovaAccountingTrendsOut)
+def accounting_trends(
+    organization_id: str | None = None,
+    months: int | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return trends_service.trends(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            months=months,
+        )
+    except service.NovaAccountingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.post("/pay")
 def refuse_pay(user: UserContext = Depends(get_current_user_context)):
     raise HTTPException(status_code=403, detail="Accounting is read-only. Payments are not created here.")
@@ -91,3 +114,8 @@ def refuse_remind(user: UserContext = Depends(get_current_user_context)):
 @router.post("/export")
 def refuse_export(user: UserContext = Depends(get_current_user_context)):
     raise HTTPException(status_code=403, detail="Accounting is read-only. Exports are not created here.")
+
+
+@router.post("/forecast")
+def refuse_forecast(user: UserContext = Depends(get_current_user_context)):
+    raise HTTPException(status_code=403, detail="Accounting is read-only. Forecasts are not created here.")

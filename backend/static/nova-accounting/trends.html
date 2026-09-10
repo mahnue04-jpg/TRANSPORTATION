@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>AMICOR Nova Accounting Aging</title>
+  <title>AMICOR Nova Accounting Trends</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-accounting/accounting.css" />
@@ -14,15 +14,15 @@
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
       <div>
         <p class="brand-kicker">AMICOR NOVA</p>
-        <h1>Pending funds aging</h1>
+        <h1>Monthly financial trends</h1>
       </div>
     </div>
     <nav class="page-nav" aria-label="Nova destinations">
       <a href="/nova">Nova Home</a>
       <a href="/nova/today">Today</a>
       <a href="/nova/accounting">Accounting</a>
-      <a href="/nova/accounting/aging" aria-current="page">Aging</a>
-      <a href="/nova/accounting/trends">Trends</a>
+      <a href="/nova/accounting/aging">Aging</a>
+      <a href="/nova/accounting/trends" aria-current="page">Trends</a>
       <a href="/nova/business">Business</a>
       <a href="/workspace">Health</a>
       <a href="/app">Delivery</a>
@@ -31,11 +31,11 @@
   </header>
 
   <main class="page-main">
-    <p class="disclaimer">Read-only aging of pending customer payments and unpaid Freight invoices. These pipelines are never combined. Age is measured since created. No canonical due date exists. Stripe remains TEST. No collections, reminders, invoices, refunds, or exports are created here.</p>
+    <p class="disclaimer">Read-only UTC monthly totals. Confirmed cash, current pending cohorts, calculated trip totals, and Freight invoices stay on separate panels. Current pending and unpaid values are not historical month-end balances. The current month is Month to date. Stripe remains TEST. No projected totals, combined revenue, collections, or ledger changes are created here.</p>
     <div id="banner" class="banner hidden"></div>
 
     <section class="panel" aria-label="Session">
-      <p id="session-meta" class="hint">Sign in to load aging totals.</p>
+      <p id="session-meta" class="hint">Sign in to load monthly trends.</p>
       <p id="as-of" class="hint"></p>
       <div class="command-actions">
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
@@ -48,20 +48,22 @@
       </form>
     </section>
 
-    <section class="panel" id="customer-section" aria-label="Customer payment pipeline">
-      <h2>Customer payment pipeline</h2>
-      <p class="hint">payment_status=pending only. Age since created. Stripe TEST. No due date is applied.</p>
-      <div id="customer-box"><p class="hint">Sign in to load aging totals.</p></div>
+    <section class="panel" aria-label="Trend window">
+      <h2>Trend window</h2>
+      <p class="hint">Last 12 months is the default. Months are UTC calendar months.</p>
+      <div id="month-controls" class="window-controls" role="group" aria-label="Trend months">
+        <button type="button" class="secondary window-btn" data-months="3" aria-pressed="false">Last 3 months</button>
+        <button type="button" class="secondary window-btn" data-months="6" aria-pressed="false">Last 6 months</button>
+        <button type="button" class="secondary window-btn" data-months="12" aria-pressed="true">Last 12 months</button>
+      </div>
     </section>
 
-    <section class="panel" id="freight-section" aria-label="Freight invoice pipeline">
-      <h2>Freight invoice pipeline</h2>
-      <p class="hint">Draft, ready, payment_pending, and failed stay separate. Age since created. Draft is not collectible revenue. Stripe TEST. No due date is applied.</p>
-      <div id="freight-box"><p class="hint">Sign in to load aging totals.</p></div>
+    <section class="panel" aria-label="Trend streams">
+      <div id="streams-box"><p class="hint">Sign in to load monthly trends.</p></div>
     </section>
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-accounting/aging.js"></script>
+  <script src="/static/nova-accounting/trends.js"></script>
 </body>
 </html>

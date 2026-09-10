@@ -52,14 +52,16 @@ def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> tupl
 
 
 def _counts() -> dict[str, int]:
-    from app.core.nova.freight.models import NovaFreightInvoice, NovaFreightShipment
+    from app.core.nova.freight.models import NovaFreightInvoice
     from app.modules.health_isf.models import HealthISFRide
     from app.modules.payments.models import AmicorCustomerPayment
     from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
 
+    from sqlalchemy import text
+
     with SessionLocal() as db:
         return {
-            "freight_shipments": db.query(NovaFreightShipment).count(),
+            "freight_shipments": int(db.execute(text("SELECT COUNT(*) FROM nova_freight_shipments")).scalar() or 0),
             "freight_invoices": db.query(NovaFreightInvoice).count(),
             "health_rides": db.query(HealthISFRide).count(),
             "customer_payments": db.query(AmicorCustomerPayment).count(),
@@ -99,6 +101,8 @@ def test_aging_page_layout_and_privacy_copy() -> None:
     assert 'href="/nova/accounting/aging"' in AGING_HTML
     assert 'href="/nova/accounting/aging">Aging</a>' in ACCT_HTML
     assert 'href="/nova/accounting/aging">Aging</a>' in TODAY_HTML
+    assert 'href="/nova/accounting/trends">Trends</a>' in AGING_HTML
+    assert 'href="/nova/accounting/trends">Trends</a>' in TODAY_HTML
     assert 'name="viewport"' in AGING_HTML
 
 

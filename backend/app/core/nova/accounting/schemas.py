@@ -90,3 +90,51 @@ class NovaAccountingAgingOut(BaseModel):
         "Read-only pending-funds aging. Customer payments and Freight invoices stay separate. "
         "No canonical due date exists, so age since created is shown. Stripe remains TEST."
     )
+
+
+class NovaTrendMonth(BaseModel):
+    month: str
+    label: str
+    month_to_date: bool = False
+    count: int = 0
+    amount: float | None = None
+
+
+class NovaTrendCurrencySlice(BaseModel):
+    currency: str
+    excluded_missing_timestamp_count: int = 0
+    months: list[NovaTrendMonth] = Field(default_factory=list)
+
+
+class NovaTrendGroup(BaseModel):
+    key: str
+    label: str
+    status: Literal["ok", "unavailable"] = "ok"
+    state: AccountingState
+    cohort: str
+    timestamp_field: str
+    collectible: bool = False
+    stripe_mode: str = "TEST"
+    source_note: str = ""
+    currencies: list[NovaTrendCurrencySlice] = Field(default_factory=list)
+
+
+class NovaTrendStream(BaseModel):
+    key: str
+    label: str
+    status: Literal["ok", "unavailable"] = "ok"
+    groups: list[NovaTrendGroup] = Field(default_factory=list)
+
+
+class NovaAccountingTrendsOut(BaseModel):
+    organization_id: str
+    months: Literal[3, 6, 12] = 12
+    calculated_as_of_utc: str
+    range_start_utc: str
+    stripe_mode: str = "TEST"
+    streams: list[NovaTrendStream] = Field(default_factory=list)
+    disclaimer: str = (
+        "Read-only monthly trends. Confirmed cash, current pending cohorts, calculated trip totals, "
+        "and Freight invoices stay on separate panels. Current pending and unpaid values are not "
+        "historical month-end balances. Stripe remains TEST. No projected totals are produced."
+    )

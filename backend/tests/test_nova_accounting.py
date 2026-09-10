@@ -53,14 +53,16 @@ def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> tupl
 
 
 def _counts() -> dict[str, int]:
-    from app.core.nova.freight.models import NovaFreightInvoice, NovaFreightShipment
+    from app.core.nova.freight.models import NovaFreightInvoice
     from app.modules.health_isf.models import HealthISFRide
     from app.modules.payments.models import AmicorCustomerPayment
     from app.modules.platform_ops.models import PlatformDriverOnboardingApplication
 
+    from sqlalchemy import text
+
     with SessionLocal() as db:
         return {
-            "freight_shipments": db.query(NovaFreightShipment).count(),
+            "freight_shipments": int(db.execute(text("SELECT COUNT(*) FROM nova_freight_shipments")).scalar() or 0),
             "freight_invoices": db.query(NovaFreightInvoice).count(),
             "health_rides": db.query(HealthISFRide).count(),
             "customer_payments": db.query(AmicorCustomerPayment).count(),
@@ -106,6 +108,8 @@ def test_nova_accounting_page_and_layout() -> None:
     assert 'href="/nova/accounting">Accounting</a>' in TODAY_HTML
     assert 'href="/nova/accounting/aging">Aging</a>' in ACCT_HTML
     assert 'href="/nova/accounting/aging">Aging</a>' in TODAY_HTML
+    assert 'href="/nova/accounting/trends">Trends</a>' in ACCT_HTML
+    assert 'href="/nova/accounting/trends">Trends</a>' in TODAY_HTML
 
 
 def test_nova_accounting_auth_and_refuses(client: TestClient) -> None:
@@ -121,6 +125,7 @@ def test_nova_accounting_auth_and_refuses(client: TestClient) -> None:
     assert client.post("/api/nova/accounting/collect", headers=headers).status_code == 403
     assert client.post("/api/nova/accounting/remind", headers=headers).status_code == 403
     assert client.post("/api/nova/accounting/export", headers=headers).status_code == 403
+    assert client.post("/api/nova/accounting/forecast", headers=headers).status_code == 403
     driver, _ = _headers(client, "driver@amicor.local")
     assert client.get("/api/nova/accounting/summary", headers=driver).status_code == 403
     cross = client.get("/api/nova/accounting/summary", headers=headers, params={"organization_id": "org-not-the-caller"})
