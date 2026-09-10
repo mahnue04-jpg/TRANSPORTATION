@@ -240,6 +240,7 @@ def test_configured_versus_verified_and_missing_versus_unverified(
     monkeypatch.setenv("STRIPE_PUBLISHABLE_KEY", "pk_test_exampleonly")
     monkeypatch.setenv("STRIPE_PAYMENT_WEBHOOK_SECRET", "whsec_exampleonly")
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("STRIPE_CONNECT_V2_WEBHOOK_SECRET", raising=False)
     headers, _ = _headers(client)
     body = client.get("/api/nova/payments/readiness", headers=headers).json()
     assert body["go_live_displayed"] is False
@@ -250,6 +251,8 @@ def test_configured_versus_verified_and_missing_versus_unverified(
     assert _check(body, "secret_key_mode")["classification"] == "TEST"
     assert _check(body, "connect_webhook_route")["status"] == "Configured"
     assert _check(body, "connect_webhook_configured")["status"] == "Missing"
+    assert _check(body, "connect_v2_webhook_route")["status"] == "Configured"
+    assert _check(body, "connect_v2_webhook_configured")["status"] == "Missing"
     assert _check(body, "connect_webhook_registered")["status"] == "Not verified"
     assert _check(body, "connect_webhook_verified")["status"] == "Not verified"
     assert _check(body, "connect_return_url")["status"] == "Configured"

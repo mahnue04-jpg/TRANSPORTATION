@@ -567,9 +567,43 @@ async def stripe_connect_webhook(
             detail="Invalid webhook.",
         ) from None
     try:
-        return connect_webhook_service.process_connect_webhook_event(db, event)
+        return connect_webhook_service.process_connect_webhook_event(
+            db,
+            event,
+            destination=connect_webhook_service.DESTINATION_V1,
+        )
     except Exception:
         logger.warning("connect_webhook_failed")
+        return {"received": True, "handled": False, "duplicate": False, "result": "ignored"}
+
+
+@router.post("/stripe/v2/webhook")
+async def stripe_connect_v2_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+) -> dict[str, Any]:
+    payload = await request.body()
+    try:
+        event = connect_webhook_service.verify_and_parse_connect_v2_webhook(payload, stripe_signature)
+    except connect_webhook_service.ConnectWebhookNotConfigured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook is unavailable.",
+        ) from None
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid webhook.",
+        ) from None
+    try:
+        return connect_webhook_service.process_connect_webhook_event(
+            db,
+            event,
+            destination=connect_webhook_service.DESTINATION_V2,
+        )
+    except Exception:
+        logger.warning("connect_v2_webhook_failed")
         return {"received": True, "handled": False, "duplicate": False, "result": "ignored"}
 
 

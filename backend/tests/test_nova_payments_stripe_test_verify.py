@@ -15,14 +15,20 @@ from fastapi.testclient import TestClient
 
 from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
 from app.core.nova.payments.stripe_test_verify import (
+    CONNECT_V2_WEBHOOK_URL,
     CONNECT_WEBHOOK_URL,
     CUSTOMER_PAYMENT_WEBHOOK_URL,
     reset_test_verification_state,
     set_test_reader_override,
     webhook_urls_exactly_equal,
 )
+from app.db.session import SessionLocal
 from app.main import app
 from app.modules.payments.models import ensure_payments_test_schema
+from app.modules.platform_ops.models import (
+    PlatformDriverOnboardingStripeEvent,
+    ensure_platform_ops_schema,
+)
 
 
 VERIFY_PATH = "/api/nova/payments/readiness/verify"
@@ -36,15 +42,18 @@ class FakeStripeTestReader:
     def __init__(self) -> None:
         self.balance_calls = 0
         self.list_calls = 0
+        self.destination_calls = 0
         self.balance = {"object": "balance", "livemode": False}
         self.endpoints: list[dict] = []
+        self.destinations: list[dict] = []
         self.balance_error: Exception | None = None
         self.list_error: Exception | None = None
+        self.destination_error: Exception | None = None
         self.delay = 0.0
 
     @property
     def calls(self) -> int:
-        return self.balance_calls + self.list_calls
+        return self.balance_calls + self.list_calls + self.destination_calls
 
     def retrieve_platform_balance(self) -> dict:
         self.balance_calls += 1
@@ -60,6 +69,12 @@ class FakeStripeTestReader:
             raise self.list_error
         return [dict(row) for row in self.endpoints]
 
+    def list_event_destination_summaries(self) -> list[dict]:
+        self.destination_calls += 1
+        if self.destination_error:
+            raise self.destination_error
+        return [dict(row) for row in self.destinations]
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -69,13 +84,22 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _clear_signed_delivery_ledger() -> None:
+    ensure_platform_ops_schema()
+    with SessionLocal() as db:
+        db.query(PlatformDriverOnboardingStripeEvent).delete()
+        db.commit()
+
+
 @pytest.fixture(autouse=True)
 def _reset_verify():
     reset_test_verification_state()
     set_test_reader_override(None)
+    _clear_signed_delivery_ledger()
     yield
     reset_test_verification_state()
     set_test_reader_override(None)
+    _clear_signed_delivery_ledger()
 
 
 def _headers(client: TestClient, email: str = "admin@amicor.local") -> tuple[dict[str, str], str]:
@@ -105,7 +129,8 @@ def _matched_endpoints() -> list[dict]:
             "url": CONNECT_WEBHOOK_URL,
             "status": "enabled",
             "livemode": False,
-            "enabled_events": ["account.updated", "v2.core.account.updated"],
+            "connect": True,
+            "enabled_events": ["account.updated"],
         },
         {
             "url": "https://unrelated.example/hooks",
@@ -202,8 +227,17 @@ def test_successful_test_authentication_and_exact_webhooks(
     assert _check(body, "customer_webhook_events")["status"] == "Verified"
     assert _check(body, "connect_webhook_registration")["status"] == "Verified"
     assert _check(body, "connect_webhook_events")["status"] == "Verified"
+    assert _check(body, "connect_v1_webhook_registration")["status"] == "Verified"
+    assert _check(body, "connect_v1_webhook_scope")["status"] == "Verified"
+    assert _check(body, "connect_v1_webhook_events")["status"] == "Verified"
+    assert _check(body, "connect_v1_signed_delivery")["status"] == "Not verified"
+    assert _check(body, "connect_v2_webhook_registration")["status"] == "Missing"
+    assert _check(body, "connect_v2_webhook_events")["status"] == "Not verified"
+    assert _check(body, "connect_v2_signed_delivery")["status"] == "Not verified"
     assert _check(body, "customer_webhook_signing_match")["status"] == "Configured"
     assert _check(body, "connect_webhook_signing_match")["status"] == "Configured"
+    assert _check(body, "connect_v1_webhook_secret")["status"] == "Configured"
+    assert _check(body, "connect_v1_webhook_secret")["status"] != "Verified"
     dumped = json.dumps(body)
     assert "we_should_never_appear" not in dumped
     assert "unrelated.example" not in dumped
@@ -270,6 +304,8 @@ def test_http_port_lookalike_and_path_mismatches_rejected() -> None:
     ) is False
     assert webhook_urls_exactly_equal(expected + "/extra", expected) is False
     assert webhook_urls_exactly_equal(CONNECT_WEBHOOK_URL, expected) is False
+    assert webhook_urls_exactly_equal(CONNECT_V2_WEBHOOK_URL, CONNECT_WEBHOOK_URL) is False
+    assert webhook_urls_exactly_equal(CONNECT_V2_WEBHOOK_URL, CONNECT_V2_WEBHOOK_URL) is True
 
 
 def test_incomplete_events_and_separate_endpoints(
@@ -287,6 +323,7 @@ def test_incomplete_events_and_separate_endpoints(
             "url": CONNECT_WEBHOOK_URL,
             "status": "enabled",
             "livemode": False,
+            "connect": True,
             "enabled_events": ["account.updated"],
         },
     ]
@@ -297,8 +334,10 @@ def test_incomplete_events_and_separate_endpoints(
     assert _check(body, "customer_webhook_registration")["status"] == "Verified"
     assert _check(body, "customer_webhook_events")["status"] == "Not verified"
     assert "Coverage: no" in _check(body, "customer_webhook_events")["explanation"]
-    assert _check(body, "connect_webhook_events")["status"] == "Not verified"
-    assert "Coverage: not verified" in _check(body, "connect_webhook_events")["explanation"]
+    assert _check(body, "connect_webhook_events")["status"] == "Verified"
+    assert "Coverage: yes" in _check(body, "connect_webhook_events")["explanation"]
+    assert _check(body, "connect_v2_webhook_events")["status"] == "Not verified"
+    assert "Coverage: not verified" in _check(body, "connect_v2_webhook_events")["explanation"]
     assert _check(body, "customer_webhook_signing_match")["status"] != "Verified"
     assert _check(body, "connect_webhook_signing_match")["status"] != "Verified"
 
@@ -361,11 +400,15 @@ def test_no_mutating_sdk_methods_in_adapter() -> None:
     ).read_text(encoding="utf-8")
     assert "v1.balance.retrieve" in source
     assert "v1.webhook_endpoints.list" in source
+    assert "v2.core.event_destinations.list" in source
+    assert 'include": ["webhook_endpoint.url"]' in source
     assert "webhook_endpoints.create" not in source
+    assert "event_destinations.create" not in source
     assert "accounts.create" not in source
     assert "account_links.create" not in source
     assert ".delete(" not in source
     assert "test_helpers" not in source
+    assert "signing_secret" not in source
 
 
 def test_secret_and_id_exclusion(client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:

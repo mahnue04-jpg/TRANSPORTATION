@@ -1,7 +1,8 @@
-"""Stripe Connect webhook for driver-onboarding payout readiness.
+"""Stripe Connect webhooks for driver-onboarding payout readiness.
 
-Verifies a dedicated Connect signing secret. Updates only existing Connect
-onboarding/readiness fields. Does not approve, activate, pay, or payout.
+v1 snapshot and v2 thin destinations use separate routes and secrets.
+Updates only existing Connect onboarding/readiness fields. Does not
+approve, activate, pay, or payout.
 """
 from __future__ import annotations
 
@@ -24,7 +25,16 @@ from app.modules.platform_ops.onboarding.work_setup import _record_work_setup_au
 logger = logging.getLogger("amicor.platform_ops.connect_webhook")
 
 CONNECT_WEBHOOK_PATH = "/api/platform-ops/driver-onboarding/stripe/webhook"
-SUPPORTED_EVENT_TYPES = frozenset({"account.updated", "v2.core.account.updated"})
+CONNECT_V2_WEBHOOK_PATH = "/api/platform-ops/driver-onboarding/stripe/v2/webhook"
+DESTINATION_V1 = "connect_v1"
+DESTINATION_V2 = "connect_v2"
+V1_REQUIRED_EVENT = "account.updated"
+V2_REQUIRED_EVENT = "v2.core.account.updated"
+SUPPORTED_EVENT_TYPES = frozenset({V1_REQUIRED_EVENT, V2_REQUIRED_EVENT})
+ROUTE_EVENT_TYPES = {
+    DESTINATION_V1: frozenset({V1_REQUIRED_EVENT}),
+    DESTINATION_V2: frozenset({V2_REQUIRED_EVENT}),
+}
 
 RESULT_APPLIED = "applied"
 RESULT_IGNORED = "ignored"
@@ -40,6 +50,10 @@ def connect_webhook_secret() -> str:
     return (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
 
 
+def connect_v2_webhook_secret() -> str:
+    return (os.getenv("STRIPE_CONNECT_V2_WEBHOOK_SECRET") or "").strip()
+
+
 def _safe_response(*, handled: bool, result: str, duplicate: bool) -> dict[str, Any]:
     return {
         "received": True,
@@ -47,6 +61,12 @@ def _safe_response(*, handled: bool, result: str, duplicate: bool) -> dict[str, 
         "duplicate": duplicate,
         "result": result,
     }
+
+
+def _decode_payload(payload: bytes | str) -> str:
+    if isinstance(payload, (bytes, bytearray)):
+        return payload.decode("utf-8")
+    return str(payload)
 
 
 def verify_and_parse_connect_webhook(payload: bytes, signature: str | None) -> dict[str, Any]:
@@ -63,7 +83,27 @@ def verify_and_parse_connect_webhook(payload: bytes, signature: str | None) -> d
     except Exception:
         logger.warning("connect_webhook_signature_rejected")
         raise ValueError("invalid") from None
-    raw = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else str(payload)
+    parsed = json.loads(_decode_payload(payload))
+    if not isinstance(parsed, dict):
+        raise ValueError("invalid")
+    return parsed
+
+
+def verify_and_parse_connect_v2_webhook(payload: bytes, signature: str | None) -> dict[str, Any]:
+    secret = connect_v2_webhook_secret()
+    if not secret:
+        logger.warning("connect_v2_webhook_not_configured")
+        raise ConnectWebhookNotConfigured()
+    if not signature:
+        raise ValueError("invalid")
+    import stripe
+
+    raw = _decode_payload(payload)
+    try:
+        stripe.WebhookSignature.verify_header(raw, signature, secret)
+    except Exception:
+        logger.warning("connect_v2_webhook_signature_rejected")
+        raise ValueError("invalid") from None
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
         raise ValueError("invalid")
@@ -78,6 +118,17 @@ def _lookup_event(db: Session, event_id: str) -> PlatformDriverOnboardingStripeE
     )
 
 
+def _event_livemode(event: dict[str, Any]) -> bool | None:
+    if "livemode" not in event:
+        return None
+    value = event.get("livemode")
+    if value is True:
+        return True
+    if value is False:
+        return False
+    return None
+
+
 def _account_from_event(event: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
     event_type = str(event.get("type") or "").strip()
     data = event.get("data")
@@ -86,12 +137,12 @@ def _account_from_event(event: dict[str, Any]) -> tuple[str | None, dict[str, An
     object_type = str((snapshot or {}).get("object") or "").strip().lower()
     object_id = str((snapshot or {}).get("id") or "").strip() or None
 
-    if event_type == "account.updated":
+    if event_type == V1_REQUIRED_EVENT:
         if object_id and object_type in {"", "account"}:
             return object_id, snapshot
         return None, None
 
-    if event_type == "v2.core.account.updated":
+    if event_type == V2_REQUIRED_EVENT:
         related = event.get("related_object")
         related_id = None
         related_type = ""
@@ -123,6 +174,8 @@ def _record_event(
     event_id: str,
     event_type: str,
     result: str,
+    destination: str,
+    livemode: bool | None,
     application: PlatformDriverOnboardingApplication | None = None,
 ) -> PlatformDriverOnboardingStripeEvent:
     row = PlatformDriverOnboardingStripeEvent(
@@ -131,14 +184,42 @@ def _record_event(
         processing_result=result,
         application_id=application.id if application is not None else None,
         organization_id=application.organization_id if application is not None else None,
+        destination=(destination or "")[:32] or None,
+        livemode=livemode,
     )
     db.add(row)
     return row
 
 
-def process_connect_webhook_event(db: Session, event: dict[str, Any]) -> dict[str, Any]:
+def has_signed_test_delivery(*, destination: str, event_type: str) -> bool:
+    try:
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as db:
+            row = (
+                db.query(PlatformDriverOnboardingStripeEvent.id)
+                .filter(
+                    PlatformDriverOnboardingStripeEvent.destination == destination,
+                    PlatformDriverOnboardingStripeEvent.event_type == event_type,
+                    PlatformDriverOnboardingStripeEvent.livemode.is_(False),
+                )
+                .first()
+            )
+            return row is not None
+    except Exception:
+        logger.info("connect_signed_delivery_lookup_unavailable")
+        return False
+
+
+def process_connect_webhook_event(
+    db: Session,
+    event: dict[str, Any],
+    *,
+    destination: str = DESTINATION_V1,
+) -> dict[str, Any]:
     event_id = str(event.get("id") or "").strip()
     event_type = str(event.get("type") or "").strip()
+    livemode = _event_livemode(event)
     if not event_id:
         logger.info("connect_webhook result=%s type=%s", RESULT_IGNORED, event_type or "unknown")
         return _safe_response(handled=False, result=RESULT_IGNORED, duplicate=False)
@@ -148,16 +229,44 @@ def process_connect_webhook_event(db: Session, event: dict[str, Any]) -> dict[st
         logger.info("connect_webhook result=%s type=%s", RESULT_DUPLICATE, event_type or "unknown")
         return _safe_response(handled=False, result=RESULT_DUPLICATE, duplicate=True)
 
+    allowed = ROUTE_EVENT_TYPES.get(destination, frozenset())
     try:
-        if event_type not in SUPPORTED_EVENT_TYPES:
-            _record_event(db, event_id=event_id, event_type=event_type, result=RESULT_IGNORED)
+        if event_type not in allowed:
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_IGNORED,
+                destination=destination,
+                livemode=livemode,
+            )
             db.commit()
             logger.info("connect_webhook result=%s type=%s", RESULT_IGNORED, event_type or "unknown")
             return _safe_response(handled=False, result=RESULT_IGNORED, duplicate=False)
 
+        if livemode is True:
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_IGNORED,
+                destination=destination,
+                livemode=True,
+            )
+            db.commit()
+            logger.info("connect_webhook result=%s type=%s", RESULT_IGNORED, event_type)
+            return _safe_response(handled=False, result=RESULT_IGNORED, duplicate=False)
+
         account_id, snapshot = _account_from_event(event)
         if not account_id:
-            _record_event(db, event_id=event_id, event_type=event_type, result=RESULT_UNRELATED)
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_UNRELATED,
+                destination=destination,
+                livemode=livemode,
+            )
             db.commit()
             logger.info("connect_webhook result=%s type=%s", RESULT_UNRELATED, event_type)
             return _safe_response(handled=False, result=RESULT_UNRELATED, duplicate=False)
@@ -168,7 +277,14 @@ def process_connect_webhook_event(db: Session, event: dict[str, Any]) -> dict[st
             .all()
         )
         if len(matches) != 1:
-            _record_event(db, event_id=event_id, event_type=event_type, result=RESULT_UNRELATED)
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_UNRELATED,
+                destination=destination,
+                livemode=livemode,
+            )
             db.commit()
             logger.info("connect_webhook result=%s type=%s", RESULT_UNRELATED, event_type)
             return _safe_response(handled=False, result=RESULT_UNRELATED, duplicate=False)
@@ -179,13 +295,29 @@ def process_connect_webhook_event(db: Session, event: dict[str, Any]) -> dict[st
         if isinstance(metadata, dict):
             meta_org = str(metadata.get("organization_id") or "").strip()
         if meta_org and meta_org != str(application.organization_id):
-            _record_event(db, event_id=event_id, event_type=event_type, result=RESULT_UNRELATED)
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_UNRELATED,
+                destination=destination,
+                livemode=livemode,
+                application=application,
+            )
             db.commit()
             logger.info("connect_webhook result=%s type=%s", RESULT_UNRELATED, event_type)
             return _safe_response(handled=False, result=RESULT_UNRELATED, duplicate=False)
 
         if not _snapshot_has_status_fields(snapshot):
-            _record_event(db, event_id=event_id, event_type=event_type, result=RESULT_IGNORED)
+            _record_event(
+                db,
+                event_id=event_id,
+                event_type=event_type,
+                result=RESULT_IGNORED,
+                destination=destination,
+                livemode=livemode,
+                application=application,
+            )
             db.commit()
             logger.info("connect_webhook result=%s type=%s", RESULT_IGNORED, event_type)
             return _safe_response(handled=False, result=RESULT_IGNORED, duplicate=False)
@@ -201,6 +333,8 @@ def process_connect_webhook_event(db: Session, event: dict[str, Any]) -> dict[st
             event_id=event_id,
             event_type=event_type,
             result=RESULT_APPLIED,
+            destination=destination,
+            livemode=livemode,
             application=application,
         )
         _record_work_setup_audit(

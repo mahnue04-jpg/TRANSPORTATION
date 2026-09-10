@@ -237,6 +237,8 @@ class PlatformDriverOnboardingStripeEvent(Base):
     processing_result: Mapped[str] = mapped_column(String(32), nullable=False)
     application_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     organization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    destination: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    livemode: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     __table_args__ = (
@@ -337,6 +339,20 @@ def _ensure_platform_ops_columns(inspector) -> None:
             f"ALTER TABLE platform_driver_onboarding_internal_notes ADD COLUMN {name} {ddl}"
             for name, ddl in note_cols.items()
             if name not in existing_notes
+        )
+    except Exception:
+        pass
+    try:
+        existing_events = {
+            c["name"] for c in inspector.get_columns("platform_driver_onboarding_stripe_events")
+        }
+        statements.extend(
+            f"ALTER TABLE platform_driver_onboarding_stripe_events ADD COLUMN {name} {ddl}"
+            for name, ddl in {
+                "destination": "VARCHAR(32)",
+                "livemode": "BOOLEAN",
+            }.items()
+            if name not in existing_events
         )
     except Exception:
         pass
