@@ -49,6 +49,7 @@
     if (typeof amount !== "number") return "Unavailable";
     return "$" + amount.toFixed(2);
   }
+  var currentWindow = "all";
   function renderMetrics(metrics) {
     var host = $("metrics-box");
     if (!host) return;
@@ -60,13 +61,22 @@
       var unavailable = !row || row.status === "unavailable" || row.amount_usd == null;
       var state = unavailable ? "unavailable" : (row.state || "unavailable");
       var value = unavailable ? "Unavailable" : moneyText(row.amount_usd);
+      var windowLabel = row.window_label || "All time";
+      var sourceNote = row.source_note || "";
       return "<article class=\"metric-card\" data-metric-key=\"" + escapeHtml(row.key || "") + "\">" +
         "<h3>" + escapeHtml(row.label || "Metric") + "</h3>" +
         "<p class=\"state " + escapeHtml(state) + "\">" + escapeHtml(state) + "</p>" +
+        "<p class=\"window-label\">" + escapeHtml(windowLabel) + "</p>" +
+        "<p class=\"source-note\">" + escapeHtml(sourceNote) + "</p>" +
         "<p class=\"value\">" + escapeHtml(value) + "</p>" +
         "<p class=\"definition\">" + escapeHtml(row.definition || "") + "</p>" +
         "</article>";
     }).join("");
+  }
+  function setWindowButtons() {
+    document.querySelectorAll(".window-btn").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-window") === currentWindow ? "true" : "false");
+    });
   }
   function setSignedIn(on) {
     $("sign-out").classList.toggle("hidden", !on);
@@ -81,7 +91,7 @@
       setSignedIn(false);
       return;
     }
-    var summary = await api("/api/nova/accounting/summary");
+    var summary = await api("/api/nova/accounting/summary?window=" + encodeURIComponent(currentWindow));
     setSignedIn(true);
     try {
       renderMetrics(summary.metrics);
@@ -89,6 +99,13 @@
       renderMetrics([]);
     }
   }
+  document.querySelectorAll(".window-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      currentWindow = btn.getAttribute("data-window") || "all";
+      setWindowButtons();
+      refresh().catch(function (err) { showBanner(err.message || String(err)); });
+    });
+  });
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });

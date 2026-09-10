@@ -45,9 +45,19 @@
       </form>
     </section>
 
+    <section class="panel" aria-label="Time window">
+      <h2>Time window</h2>
+      <p class="hint">All time is the default. 30 days and 7 days use each metric’s own timestamp. A card marked All time only cannot be filtered.</p>
+      <div id="window-controls" class="window-controls" role="group" aria-label="Accounting time window">
+        <button type="button" class="secondary window-btn" data-window="all" aria-pressed="true">All time</button>
+        <button type="button" class="secondary window-btn" data-window="30d" aria-pressed="false">Last 30 days</button>
+        <button type="button" class="secondary window-btn" data-window="7d" aria-pressed="false">Last 7 days</button>
+      </div>
+    </section>
+
     <section class="panel" aria-label="Accounting metrics">
       <h2>Canonical totals</h2>
-      <p class="hint">Each card fails independently. Unavailable means that source could not be read.</p>
+      <p class="hint">Confirmed cash, pending amounts, and calculated trip totals stay on separate cards. Each card fails independently. Unavailable means that source could not be read. Stripe remains TEST.</p>
       <div id="metrics-box" class="metric-grid">
         <article class="metric-card"><h3>Confirmed customer payments</h3><p class="state">confirmed</p><p class="value">Sign in to load totals.</p></article>
         <article class="metric-card"><h3>Pending customer payments</h3><p class="state">pending</p><p class="value">Sign in to load totals.</p></article>

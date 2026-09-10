@@ -127,6 +127,17 @@ button.secondary {
   border: 1px solid var(--nova-line);
 }
 
+.window-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.window-btn[aria-pressed="true"] {
+  border-color: var(--nova-accent);
+  color: var(--nova-accent);
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -154,6 +165,19 @@ button.secondary {
 .metric-card .state.calculated { color: var(--nova-accent); }
 .metric-card .state.unavailable { color: var(--nova-muted); }
 
+.metric-card .window-label {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: var(--nova-muted);
+}
+
+.metric-card .source-note {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--nova-muted);
+  line-height: 1.4;
+}
+
 .metric-card .value {
   margin: 10px 0 8px;
   font-size: 1.45rem;
@@ -165,7 +189,7 @@ button.secondary {
 @media (max-width: 720px) {
   .page-header, .page-main { width: calc(100% - 16px); }
   .page-nav a, button { width: 100%; }
-  .command-actions, .login-grid { flex-direction: column; }
+  .command-actions, .login-grid, .window-controls { flex-direction: column; }
 }
 
 @media (min-width: 1280px) {

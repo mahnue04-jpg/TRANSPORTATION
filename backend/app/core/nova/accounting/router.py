@@ -30,11 +30,17 @@ def _resolve_org(user: UserContext, requested: str | None) -> str:
 @router.get("/summary", response_model=NovaAccountingSummaryOut)
 def accounting_summary(
     organization_id: str | None = None,
+    window: str | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     try:
-        return service.summary(db, organization_id=_resolve_org(user, organization_id), user=user)
+        return service.summary(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            window=window,
+        )
     except service.NovaAccountingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
