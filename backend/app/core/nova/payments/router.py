@@ -70,6 +70,22 @@ def payments_readiness(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+@router.get("/readiness/verify", response_model=NovaPaymentsReadinessOut)
+def payments_readiness_test_verify(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_readiness_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.readiness_with_test_verification(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except service.NovaPaymentsReadinessError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.post("/pay")
 def refuse_pay(user: UserContext = Depends(require_readiness_user)):
     raise HTTPException(status_code=403, detail="Payments readiness is read-only. Payments are not created here.")

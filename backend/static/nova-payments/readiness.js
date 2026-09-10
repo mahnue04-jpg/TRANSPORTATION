@@ -110,6 +110,12 @@
     } catch (_) {
       showBanner("Readiness details could not be rendered. Saved work was not changed.");
     }
+    try {
+      var verified = await api("/api/nova/payments/readiness/verify");
+      renderSummary(verified);
+    } catch (_) {
+      /* Cached or classified statuses remain. No Stripe write is attempted. */
+    }
   }
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");

@@ -154,6 +154,7 @@ def test_payments_readiness_page_and_nav() -> None:
     assert "Customer payment configuration" in PAGE_HTML
     assert "Stripe Connect and driver payout configuration" in PAGE_HTML
     assert "Driver onboarding business gates" in PAGE_HTML
+    assert "Stripe TEST verification" in PAGE_HTML
     assert "Operational safety controls" in PAGE_HTML
     assert "Blockers and next actions" in PAGE_HTML
     assert "DRAFT FOR ATTORNEY REVIEW" in PAGE_HTML
@@ -161,6 +162,7 @@ def test_payments_readiness_page_and_nav() -> None:
     assert "@media (max-width: 390px)" in PAGE_CSS
     assert "min-height: 44px" in PAGE_CSS
     assert "/api/nova/payments/readiness" in PAGE_JS
+    assert "/api/nova/payments/readiness/verify" in PAGE_JS
     assert 'href="/nova/payments/readiness"' in HOME_HTML
     assert 'href="/nova/payments/readiness">Payments Readiness</a>' in TODAY_HTML
     assert 'href="/nova/payments/readiness">Payments Readiness</a>' in ACCT_HTML
@@ -225,6 +227,7 @@ def test_payments_readiness_write_routes_refused(client: TestClient) -> None:
         "/api/nova/payments/key",
     ):
         assert client.post(path, headers=headers).status_code == 403
+    assert client.post("/api/nova/payments/readiness/verify", headers=headers).status_code in {403, 405}
     assert client.patch("/api/nova/payments/readiness", headers=headers).status_code in {403, 405}
     assert client.put("/api/nova/payments/readiness", headers=headers).status_code in {403, 405}
     assert client.delete("/api/nova/payments/readiness", headers=headers).status_code in {403, 405}

@@ -26,6 +26,7 @@ _LEAK_PATTERN = re.compile(
     r"|acct_[A-Za-z0-9]+"
     r"|cus_[A-Za-z0-9]+"
     r"|pi_[A-Za-z0-9_]+"
+    r"|we_[A-Za-z0-9]+"
 )
 
 NOT_AUTHORIZED = "Not authorized"
@@ -955,9 +956,16 @@ def readiness(db: Session, *, organization_id: str, user: UserContext) -> NovaPa
             "Payments readiness is limited to admin and super-admin roles",
             status_code=403,
         )
+    from app.core.nova.payments.stripe_test_verify import cached_verification_section
+
     sections = [
         _safe_section("customer_payments", "Customer payment configuration", _customer_payment_section),
         _safe_section("connect_payouts", "Stripe Connect and driver payout configuration", _connect_section),
+        _safe_section(
+            "stripe_test_verification",
+            "Stripe TEST verification",
+            lambda: cached_verification_section(organization_id),
+        ),
         _safe_section("onboarding_gates", "Driver onboarding business gates", _onboarding_section),
         _safe_section("operational_safety", "Operational safety controls", _safety_section),
     ]
@@ -976,3 +984,23 @@ def readiness(db: Session, *, organization_id: str, user: UserContext) -> NovaPa
             status_code=500,
         )
     return payload
+
+
+def readiness_with_test_verification(
+    db: Session, *, organization_id: str, user: UserContext
+) -> NovaPaymentsReadinessOut:
+    from app.core.nova.payments.stripe_test_verify import RateLimited, run_test_verification
+
+    if normalize_role(user.role) not in READINESS_ROLES:
+        raise NovaPaymentsReadinessError(
+            "Payments readiness is limited to admin and super-admin roles",
+            status_code=403,
+        )
+    try:
+        run_test_verification(organization_id=organization_id, user_id=str(user.user_id))
+    except RateLimited as exc:
+        raise NovaPaymentsReadinessError(
+            "Verification is temporarily limited.",
+            status_code=429,
+        ) from exc
+    return readiness(db, organization_id=organization_id, user=user)
