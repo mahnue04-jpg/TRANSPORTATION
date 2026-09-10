@@ -48,10 +48,7 @@ def complete_secure_work_setup(
             start = client.post(
                 f"/api/platform-ops/driver-onboarding/applications/{app_id}/work-setup/payout/start",
                 headers=headers,
-                json={
-                    "return_url": "https://amicor.test/driver-apply?work_setup=stripe_return",
-                    "refresh_url": "https://amicor.test/driver-apply?work_setup=stripe_refresh",
-                },
+                json={},
             )
             assert start.status_code == 200, start.text
             stripe.mark_complete()

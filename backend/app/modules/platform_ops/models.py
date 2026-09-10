@@ -226,6 +226,24 @@ class PlatformDriverOnboardingAuditEvent(Base):
     application: Mapped["PlatformDriverOnboardingApplication"] = relationship(back_populates="audit_events")
 
 
+class PlatformDriverOnboardingStripeEvent(Base):
+    """Idempotency ledger for Connect webhook deliveries. Stores no payload."""
+
+    __tablename__ = "platform_driver_onboarding_stripe_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    stripe_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    processing_result: Mapped[str] = mapped_column(String(32), nullable=False)
+    application_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    organization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+    __table_args__ = (
+        Index("uq_platform_driver_onboarding_stripe_events_event", "stripe_event_id", unique=True),
+    )
+
+
 class PlatformDriverOnboardingInternalNote(Base):
     __tablename__ = "platform_driver_onboarding_internal_notes"
 
@@ -347,6 +365,7 @@ def ensure_platform_ops_schema() -> None:
             PlatformDriverOnboardingDocument.__tablename__,
             PlatformDriverOnboardingAuditEvent.__tablename__,
             PlatformDriverOnboardingInternalNote.__tablename__,
+            PlatformDriverOnboardingStripeEvent.__tablename__,
         }
         if not needed.issubset(existing):
             Base.metadata.create_all(bind=engine, tables=[
@@ -354,6 +373,7 @@ def ensure_platform_ops_schema() -> None:
                 PlatformDriverOnboardingDocument.__table__,
                 PlatformDriverOnboardingAuditEvent.__table__,
                 PlatformDriverOnboardingInternalNote.__table__,
+                PlatformDriverOnboardingStripeEvent.__table__,
             ])
             logger.info("platform_ops schema ensured via create_all")
             inspector = inspect(engine)

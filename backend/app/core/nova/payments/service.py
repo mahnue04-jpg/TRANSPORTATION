@@ -296,10 +296,11 @@ def _connect_section() -> list[NovaPaymentsReadinessCheck]:
         "def create_account_onboarding_link",
         "account_links.create",
     )
-    redirect_source = _source("modules/platform_ops/onboarding/work_setup.py")
-    https_only = 'parsed.scheme not in {"https"}' in redirect_source or 'parsed.scheme != "https"' in redirect_source
+    redirect_source = _source("modules/platform_ops/onboarding/connect_redirects.py")
+    https_only = 'parsed.scheme != "https"' in redirect_source
     host_enforced = APPROVED_PRODUCTION_HOST in redirect_source
-    url_status = "Configured" if https_only and host_enforced else "Blocked"
+    server_side = "def build_connect_redirect_urls" in redirect_source
+    url_status = "Configured" if https_only and host_enforced and server_side else "Blocked"
     token_binding = _has(
         "modules/platform_ops/onboarding/service.py",
         "def verify_applicant_token",
@@ -311,8 +312,13 @@ def _connect_section() -> list[NovaPaymentsReadinessCheck]:
         "def refresh_payout_status",
         "map_account_to_payout_status",
     )
-    connect_route = _has("modules/platform_ops/routes.py", "/stripe/webhook")
+    connect_route = _has("modules/platform_ops/routes.py", '@router.post("/stripe/webhook")')
     connect_secret = _env_present("STRIPE_WEBHOOK_SECRET")
+    connect_signing_dedicated = _has(
+        "modules/platform_ops/onboarding/connect_webhook.py",
+        "STRIPE_WEBHOOK_SECRET",
+        "stripe.Webhook.construct_event",
+    ) and "STRIPE_PAYMENT_WEBHOOK_SECRET" not in _source("modules/platform_ops/onboarding/connect_webhook.py")
     org_bind = _has(
         "modules/platform_ops/onboarding/work_setup.py",
         '"organization_id": application.organization_id',
@@ -373,28 +379,26 @@ def _connect_section() -> list[NovaPaymentsReadinessCheck]:
             label="Return URL is HTTPS on the approved production host",
             status=url_status,
             explanation=(
-                "Return URL validation requires HTTPS on the approved production host."
+                "Return URLs are generated server-side and restricted to HTTPS on the approved production host."
                 if url_status == "Configured"
                 else (
-                    "Current return-URL validation accepts http or https on any host. "
-                    "LIVE payouts require HTTPS on the approved production host."
+                    "Return-URL construction is not restricted to the approved HTTPS production host."
                 )
             ),
-            evidence_source="backend/app/modules/platform_ops/onboarding/work_setup.py _safe_redirect_url",
+            evidence_source="backend/app/modules/platform_ops/onboarding/connect_redirects.py",
         ),
         _check(
             key="connect_refresh_url",
             label="Refresh URL is HTTPS on the approved production host",
             status=url_status,
             explanation=(
-                "Refresh URL validation requires HTTPS on the approved production host."
+                "Refresh URLs are generated server-side and restricted to HTTPS on the approved production host."
                 if url_status == "Configured"
                 else (
-                    "Current refresh-URL validation accepts http or https on any host. "
-                    "LIVE payouts require HTTPS on the approved production host."
+                    "Refresh-URL construction is not restricted to the approved HTTPS production host."
                 )
             ),
-            evidence_source="backend/app/modules/platform_ops/onboarding/work_setup.py _safe_redirect_url",
+            evidence_source="backend/app/modules/platform_ops/onboarding/connect_redirects.py",
         ),
         _check(
             key="applicant_token_binding",
@@ -423,7 +427,8 @@ def _connect_section() -> list[NovaPaymentsReadinessCheck]:
             label="Connect webhook route exists",
             status="Configured" if connect_route else "Missing",
             explanation=(
-                "A Connect webhook route exists in repository code."
+                "POST /api/platform-ops/driver-onboarding/stripe/webhook exists in repository code. "
+                "Route existence is not Stripe registration."
                 if connect_route
                 else "POST /api/platform-ops/driver-onboarding/stripe/webhook was not found. Route existence is separate from configuration."
             ),
@@ -431,24 +436,38 @@ def _connect_section() -> list[NovaPaymentsReadinessCheck]:
         ),
         _check(
             key="connect_webhook_configured",
-            label="Connect webhook is configured",
-            status="Configured" if connect_secret else "Missing",
+            label="Connect webhook signing is configured",
+            status="Configured" if connect_secret and connect_signing_dedicated else "Missing",
             explanation=(
-                "A Connect webhook signing secret is present. Presence is not verification with Stripe."
-                if connect_secret
-                else "No Connect webhook signing secret is configured."
+                "A dedicated Connect webhook signing secret is present. Presence is not verification with Stripe."
+                if connect_secret and connect_signing_dedicated
+                else "No dedicated Connect webhook signing secret is configured."
             ),
             evidence_source="STRIPE_WEBHOOK_SECRET presence boolean",
         ),
         _check(
+            key="connect_webhook_registered",
+            label="Connect webhook is registered with Stripe",
+            status="Not verified",
+            explanation="This phase does not register a webhook with Stripe, so registration remains Not verified.",
+            evidence_source="No Stripe webhook registration call",
+        ),
+        _check(
             key="connect_webhook_verified",
-            label="Connect webhook is verified",
+            label="Connect webhook is verified with Stripe",
             status="Not verified",
             explanation=(
                 "No approved read-only Stripe adapter is used in this phase, so Connect webhook "
-                "registration is not verified with Stripe."
+                "delivery is not verified with Stripe."
             ),
             evidence_source="No external Stripe verification call",
+        ),
+        _check(
+            key="live_connect_payouts",
+            label="LIVE Connect payouts",
+            status="Not verified",
+            explanation="LIVE Connect payouts are not verified. TEST configuration is never treated as LIVE readiness.",
+            evidence_source="No LIVE Connect payout verification",
         ),
         _check(
             key="connect_organization_isolation",
@@ -807,9 +826,11 @@ def _blockers(sections: list[NovaPaymentsReadinessSection]) -> list[NovaPayments
         "customer_webhook_route",
         "connect_webhook_route",
         "connect_webhook_configured",
+        "connect_webhook_registered",
         "connect_webhook_verified",
         "connect_return_url",
         "connect_refresh_url",
+        "live_connect_payouts",
         "ica_attorney_draft",
         "draft_policy_count",
         "published_policy_count",
@@ -822,10 +843,12 @@ def _blockers(sections: list[NovaPaymentsReadinessSection]) -> list[NovaPayments
         "customer_webhook_signing": "LIVE payment confirmation cannot be trusted without a configured signing secret.",
         "customer_webhook_route": "LIVE payment events have nowhere to land if the webhook route is missing.",
         "connect_webhook_route": "Route existence, configuration, and Stripe verification are separate. A missing Connect route blocks LIVE payouts.",
-        "connect_webhook_configured": "A Connect webhook secret is required before LIVE connected-account updates can be trusted.",
+        "connect_webhook_configured": "A dedicated Connect webhook secret is required before LIVE connected-account updates can be trusted.",
+        "connect_webhook_registered": "A route and secret are not a registered Stripe webhook. LIVE payouts need a human-confirmed registration.",
         "connect_webhook_verified": "Configured is not verified. LIVE payouts need a human-confirmed Connect webhook at Stripe.",
         "connect_return_url": "LIVE Connect onboarding must return only to the approved HTTPS production host.",
         "connect_refresh_url": "LIVE Connect refresh must stay on the approved HTTPS production host.",
+        "live_connect_payouts": "LIVE Connect payouts remain independently unverified.",
         "ica_attorney_draft": "LIVE recruiting and activation cannot treat a draft agreement as final legal language.",
         "draft_policy_count": "Required policies remain drafts for attorney review.",
         "published_policy_count": "No counsel-approved policy pack is published.",
@@ -837,11 +860,13 @@ def _blockers(sections: list[NovaPaymentsReadinessSection]) -> list[NovaPayments
         "key_modes_match": "Owner or engineering must align publishable and secret key modes. Not authorized in this phase.",
         "customer_webhook_signing": "Owner or engineering must add a LIVE customer-payment webhook secret when LIVE is authorized.",
         "customer_webhook_route": "Engineering must add the missing route. Not authorized in this phase.",
-        "connect_webhook_route": "Engineering must add a Connect webhook route. Not authorized in this phase.",
-        "connect_webhook_configured": "Owner or engineering must configure a Connect webhook secret when authorized.",
+        "connect_webhook_route": "Engineering must keep the Connect webhook route. Registration with Stripe is not authorized in this phase.",
+        "connect_webhook_configured": "Owner or engineering must configure a dedicated Connect webhook secret when authorized.",
+        "connect_webhook_registered": "Owner must register the Connect webhook with Stripe when LIVE payouts are authorized. Not authorized in this phase.",
         "connect_webhook_verified": "Owner must verify the Connect webhook with Stripe when LIVE payouts are authorized.",
         "connect_return_url": "Engineering must restrict return URLs to HTTPS on the approved production host when authorized.",
         "connect_refresh_url": "Engineering must restrict refresh URLs to HTTPS on the approved production host when authorized.",
+        "live_connect_payouts": "Owner must independently verify LIVE Connect payouts. Not authorized in this phase.",
         "ica_attorney_draft": "Counsel must complete attorney review. Policy text is not changed in this phase.",
         "draft_policy_count": "Counsel must approve required policies. Catalog text is not changed in this phase.",
         "published_policy_count": "Counsel must publish approved policies. Catalog text is not changed in this phase.",
@@ -855,9 +880,11 @@ def _blockers(sections: list[NovaPaymentsReadinessSection]) -> list[NovaPayments
         "customer_webhook_route": "Customer payment configuration",
         "connect_webhook_route": "Stripe Connect and driver payout configuration",
         "connect_webhook_configured": "Stripe Connect and driver payout configuration",
+        "connect_webhook_registered": "Stripe Connect and driver payout configuration",
         "connect_webhook_verified": "Stripe Connect and driver payout configuration",
         "connect_return_url": "Stripe Connect and driver payout configuration",
         "connect_refresh_url": "Stripe Connect and driver payout configuration",
+        "live_connect_payouts": "Stripe Connect and driver payout configuration",
         "connect_configured": "Stripe Connect and driver payout configuration",
         "ica_attorney_draft": "Driver onboarding business gates",
         "draft_policy_count": "Driver onboarding business gates",

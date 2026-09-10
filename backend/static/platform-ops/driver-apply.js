@@ -753,15 +753,6 @@
     return status;
   }
 
-  function stripeReturnUrls() {
-    const url = new URL(window.location.href);
-    url.searchParams.set("work_setup", "stripe_return");
-    url.searchParams.delete("token");
-    const returnUrl = url.toString();
-    url.searchParams.set("work_setup", "stripe_refresh");
-    return { return_url: returnUrl, refresh_url: url.toString() };
-  }
-
   const icaOpenBtn = document.getElementById("ica-open-btn");
   if (icaOpenBtn) {
     icaOpenBtn.addEventListener("click", async function () {
@@ -848,7 +839,7 @@
         await ensureApplication();
         const started = await api("/applications/" + appInput.value + "/work-setup/payout/start", {
           method: "POST",
-          body: JSON.stringify(stripeReturnUrls()),
+          body: JSON.stringify({}),
         });
         renderWorkSetup(started);
         const url = started && started.payout && started.payout.onboarding_url;

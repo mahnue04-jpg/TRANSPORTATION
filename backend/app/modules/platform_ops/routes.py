@@ -17,6 +17,7 @@ from app.modules.platform_ops.models import PlatformDriverOnboardingDocument, en
 from app.modules.platform_ops.onboarding import activation as activation_service
 from app.modules.platform_ops.onboarding import policies as policy_service
 from app.modules.platform_ops.onboarding import service as onboarding_service
+from app.modules.platform_ops.onboarding import connect_webhook as connect_webhook_service
 from app.modules.platform_ops.onboarding import work_setup as work_setup_service
 from app.modules.platform_ops.permissions import (
     can_activate,
@@ -539,16 +540,37 @@ def start_work_setup_payout(
     x_applicant_token: str | None = Header(default=None, alias="X-Applicant-Token"),
 ) -> dict[str, Any]:
     application = _require_applicant_draft(db, application_id, x_applicant_token)
-    body = payload or ApplicantPayoutStartRequest()
+    _ = payload
     try:
-        return work_setup_service.start_payout_onboarding(
-            db,
-            application=application,
-            return_url=body.return_url,
-            refresh_url=body.refresh_url,
-        )
+        return work_setup_service.start_payout_onboarding(db, application=application)
     except ValueError as exc:
         raise _parse_service_error(exc) from exc
+
+
+@router.post("/stripe/webhook")
+async def stripe_connect_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+) -> dict[str, Any]:
+    payload = await request.body()
+    try:
+        event = connect_webhook_service.verify_and_parse_connect_webhook(payload, stripe_signature)
+    except connect_webhook_service.ConnectWebhookNotConfigured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook is unavailable.",
+        ) from None
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid webhook.",
+        ) from None
+    try:
+        return connect_webhook_service.process_connect_webhook_event(db, event)
+    except Exception:
+        logger.warning("connect_webhook_failed")
+        return {"received": True, "handled": False, "duplicate": False, "result": "ignored"}
 
 
 @router.post("/applications/{application_id}/work-setup/payout/refresh", response_model=WorkSetupStatusResponse)

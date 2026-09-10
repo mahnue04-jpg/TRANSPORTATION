@@ -10,8 +10,6 @@ import logging
 from datetime import datetime
 from io import BytesIO
 from typing import Any
-from urllib.parse import urlparse
-
 from sqlalchemy.orm import Session
 
 from app.helpers import now, uuid4
@@ -502,29 +500,21 @@ def complete_electronic_w9(
     return serialize_work_setup(application, documents)
 
 
-def _safe_redirect_url(url: str | None) -> str | None:
-    raw = str(url or "").strip()
-    if not raw:
-        return None
-    parsed = urlparse(raw)
-    if parsed.scheme not in {"http", "https"}:
-        raise ValueError("Invalid return URL.")
-    if parsed.username or parsed.password:
-        raise ValueError("Invalid return URL.")
-    return raw
-
-
 def start_payout_onboarding(
     db: Session,
     *,
     application: PlatformDriverOnboardingApplication,
-    return_url: str | None,
-    refresh_url: str | None,
+    return_url: str | None = None,
+    refresh_url: str | None = None,
 ) -> dict[str, Any]:
     if application.status != "draft":
         raise ValueError("Only draft applications can start payout setup.")
-    safe_return = _safe_redirect_url(return_url)
-    safe_refresh = _safe_redirect_url(refresh_url) or safe_return
+    from app.modules.platform_ops.onboarding.connect_redirects import (
+        ConnectRedirectError,
+        build_connect_redirect_urls,
+    )
+
+    _ = return_url, refresh_url
     client = get_stripe_connect_client()
     if client is None:
         if not getattr(application, "stripe_onboarding_status", None):
@@ -542,6 +532,11 @@ def start_payout_onboarding(
             "Payout setup is not configured yet. An owner still needs to add Stripe Connect keys."
         )
         return status
+
+    try:
+        safe_return, safe_refresh = build_connect_redirect_urls()
+    except ConnectRedirectError as exc:
+        raise ValueError("Payout setup could not be started.") from exc
 
     account_id = str(getattr(application, "stripe_account_id", None) or "").strip()
     created_new = False
@@ -571,11 +566,9 @@ def start_payout_onboarding(
         application.stripe_details_submitted = False
         created_new = True
 
-    if not safe_return:
-        raise ValueError("A return URL is required to start payout setup.")
     link = client.create_account_onboarding_link(
         account_id=account_id,
-        refresh_url=safe_refresh or safe_return,
+        refresh_url=safe_refresh,
         return_url=safe_return,
     )
     onboarding_url = str(link.get("url") or "").strip() or None

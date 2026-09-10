@@ -236,6 +236,8 @@ class FakeStripeConnectClient:
         self.created_count = 0
         self.link_count = 0
         self.last_account_id: str | None = None
+        self.last_return_url: str | None = None
+        self.last_refresh_url: str | None = None
 
     def create_recipient_account(
         self,
@@ -276,6 +278,8 @@ class FakeStripeConnectClient:
         if account_id not in self.accounts:
             raise ValueError("Unknown connected account.")
         self.link_count += 1
+        self.last_return_url = return_url
+        self.last_refresh_url = refresh_url
         return {
             "url": f"https://connect.stripe.test/setup/{account_id}?return_url=1",
             "refresh_url": refresh_url,

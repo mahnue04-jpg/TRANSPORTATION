@@ -230,10 +230,7 @@ def test_stripe_onboarding_start_return_persists_account_and_status(client: Test
     start = client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/work-setup/payout/start",
         headers=headers,
-        json={
-            "return_url": "https://amicor.test/driver-apply?work_setup=stripe_return",
-            "refresh_url": "https://amicor.test/driver-apply?work_setup=stripe_refresh",
-        },
+        json={},
     )
     assert start.status_code == 200, start.text
     payout = start.json()["payout"]
@@ -241,15 +238,15 @@ def test_stripe_onboarding_start_return_persists_account_and_status(client: Test
     assert payout["status_key"] == "pending_verification"
     assert payout["onboarding_url"]
     assert fake.created_count == 1
+    assert fake.last_return_url == "http://127.0.0.1/platform-ops/driver-apply?work_setup=stripe_return"
+    assert fake.last_refresh_url == "http://127.0.0.1/platform-ops/driver-apply?work_setup=stripe_refresh"
+    assert "token=" not in (fake.last_return_url or "")
     first_account = fake.last_account_id
 
     start_again = client.post(
         f"/api/platform-ops/driver-onboarding/applications/{app_id}/work-setup/payout/start",
         headers=headers,
-        json={
-            "return_url": "https://amicor.test/driver-apply?work_setup=stripe_return",
-            "refresh_url": "https://amicor.test/driver-apply?work_setup=stripe_refresh",
-        },
+        json={},
     )
     assert start_again.status_code == 200, start_again.text
     assert fake.created_count == 1
