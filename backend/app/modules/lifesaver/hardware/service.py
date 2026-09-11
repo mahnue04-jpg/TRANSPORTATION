@@ -12,12 +12,16 @@ from app.helpers import now, uuid4
 from app.modules.lifesaver.audit import write_audit
 from app.modules.lifesaver.hardware import bridge
 from app.modules.lifesaver.hardware.adapters import simulated_car_hub, simulated_home_hub
+from app.modules.lifesaver.hardware.camera_contract import camera_status
 from app.modules.lifesaver.hardware.command_contract import (
     SAFETY_REVIEW,
     VEHICLE_FORBIDDEN,
     VIDEO_ROLES,
     normalize_command,
 )
+from app.modules.lifesaver.hardware.hardware_mode import hardware_mode, local_pi_enabled
+from app.modules.lifesaver.hardware.motor_contract import motor_snapshot
+from app.modules.lifesaver.hardware.sensor_contract import SENSOR_REVIEW_COPY, is_sensor_event, normalize_sensor_event
 from app.modules.lifesaver.hardware.events import new_fall_event, serialize_event
 from app.modules.lifesaver.hardware.health import build_health
 from app.modules.lifesaver.hardware.models import (
@@ -73,6 +77,11 @@ def serialize_device(device: LifesaverDevice) -> dict[str, Any]:
     state = _state(device)
     privacy = bool(state.get("privacy_mode"))
     camera_on = bool(state.get("camera_enabled")) and not privacy
+    adapter = getattr(device, "adapter_type", None) or "simulated"
+    pairing = getattr(device, "pairing_state", None) or "PAIRED"
+    prototype = adapter in {"local_pi", "raspberry_pi"} and local_pi_enabled()
+    motor = motor_snapshot(state)
+    camera = camera_status(state, privacy=privacy)
     return {
         "id": device.id,
         "device_type": device.device_type,
@@ -103,12 +112,23 @@ def serialize_device(device: LifesaverDevice) -> dict[str, Any]:
         "nova_lifesaver_link": state.get("nova_lifesaver_link"),
         "capabilities": list(capabilities_for(device.device_type)),
         "allowed_commands": sorted(commands_for(device.device_type)),
-        "adapter": getattr(device, "adapter_type", None) or "simulated",
-        "adapter_type": getattr(device, "adapter_type", None) or "simulated",
-        "pairing_state": getattr(device, "pairing_state", None) or "PAIRED",
+        "adapter": adapter,
+        "adapter_type": adapter,
+        "pairing_state": pairing,
+        "paired": pairing not in {"UNPAIRED", "DISCOVERED", "PENDING_PAIR"},
+        "connected": device.status not in {"OFFLINE", "MAINTENANCE"} and pairing != "UNPAIRED",
         "hardware_model": getattr(device, "hardware_model", None),
         "local_ip": getattr(device, "local_ip", None),
-        "simulation_badge": "SIMULATION",
+        "local_host_label": getattr(device, "local_ip", None) or "local",
+        "motor_state": motor["moving_state"],
+        "requested_angle": motor["requested_angle"],
+        "power_status": state.get("power") or "mains",
+        "last_command": state.get("last_command"),
+        "last_acknowledgement": state.get("last_acknowledgement"),
+        "safety_event_status": state.get("safety_event_status") or "none",
+        "camera_contract": camera,
+        "hardware_mode": hardware_mode(),
+        "simulation_badge": "LOCAL PROTOTYPE" if prototype else "SIMULATION",
         "external_device_connected": False,
         "vehicle_control": False,
         "disclaimer": HARDWARE_DISCLAIMER,
@@ -299,7 +319,7 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
     if command == "SIMULATE_FALL_EVENT":
         return simulate_fall(db, ctx, device_id)
     row = _owned_device(db, actor, device_id, action="device.command")
-    if getattr(row, "pairing_state", "PAIRED") == "UNPAIRED":
+    if getattr(row, "pairing_state", "PAIRED") == "UNPAIRED" and command != "ROTATE_STOP":
         raise HTTPException(status_code=409, detail="Unpaired devices cannot receive commands.")
     allowed = commands_for(row.device_type)
     if command not in allowed:
@@ -327,8 +347,13 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
     state = _state(row)
     extra = {}
     if payload.motion_detected is not None:
-        extra["motion_detected"] = True if payload.motion_detected else False
         extra["motion_detected"] = bool(payload.motion_detected)
+    if payload.angle is not None:
+        extra["angle"] = payload.angle
+    if payload.device_token:
+        extra["device_token"] = payload.device_token
+    elif local_pi_enabled() and getattr(row, "pairing_token", None) and (payload.adapter_type or row.adapter_type) in {"local_pi", "raspberry_pi"}:
+        extra["device_token"] = row.pairing_token
     if command == "START_VIDEO_SESSION" and state.get("privacy_mode"):
         raise HTTPException(status_code=409, detail="Privacy mode prevents automatic video start.")
     started = now()
@@ -339,6 +364,8 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
         extra=extra,
         adapter_type=payload.adapter_type,
     )
+    next_state["last_command"] = command
+    next_state["last_acknowledgement"] = lifecycle
     _save_state(row, next_state, status)
     if getattr(row, "pairing_state", None) != "UNPAIRED":
         if status == "OFFLINE" or lifecycle == "TIMED_OUT":
@@ -466,6 +493,75 @@ def simulate_fall(db: Session, ctx: UserContext, device_id: str) -> dict[str, An
         "needs_human_review": True,
         "label": "SIMULATION",
         "summary": FALL_REVIEW_COPY,
+    }
+
+
+def ingest_hardware_event(db: Session, ctx: UserContext, device_id: str, event_type: str, confidence: str | None = None) -> dict[str, Any]:
+    actor = lifesaver_service.get_or_create_profile(db, ctx)
+    require_consent(db, ctx, actor, "hardware_simulation", action="device.hardware_event", resource_type="safety")
+    kind = normalize_sensor_event(event_type)
+    if not is_sensor_event(kind):
+        raise HTTPException(status_code=422, detail="Unsupported hardware safety-event type.")
+    row = _owned_device(db, actor, device_id, action="device.hardware_event")
+    if row.device_type != DEVICE_HOME_HUB:
+        raise HTTPException(status_code=409, detail="Hardware safety events are available on Home Hub only.")
+    event = LifesaverDeviceEvent(
+        organization_id=actor.organization_id,
+        device_id=row.id,
+        profile_id=actor.id,
+        event_type=kind,
+        status="needs_human_review",
+        summary=SENSOR_REVIEW_COPY,
+        emergency_services_contacted=False,
+        simulated=True,
+        confidence=(confidence or "low")[:16],
+        review_status="NEEDS_REVIEW",
+        escalation_state="none",
+        source="hardware_contract",
+        metadata_json=json.dumps({"media_stored": False, "external_call": False, "clinical": False}),
+        created_at=now(),
+    )
+    db.add(event)
+    db.flush()
+    safety = LifesaverSafetyEvent(
+        organization_id=actor.organization_id,
+        device_id=row.id,
+        profile_id=actor.id,
+        event_type=kind,
+        confidence=(confidence or "low")[:16],
+        source="hardware_contract",
+        review_status="NEEDS_REVIEW",
+        escalation_state="none",
+        summary=SENSOR_REVIEW_COPY,
+        simulated=True,
+        emergency_services_contacted=False,
+        detected_at=now(),
+    )
+    db.add(safety)
+    state = _state(row)
+    state["safety_event_status"] = "NEEDS_REVIEW"
+    _save_state(row, state, row.status)
+    write_audit(
+        db,
+        organization_id=actor.organization_id,
+        actor_user_id=ctx.user_id,
+        actor_profile_id=actor.id,
+        action="device.hardware_event",
+        resource_type="safety",
+        resource_id=event.id,
+        outcome="allowed",
+        metadata={"event_type": kind, "emergency_services_contacted": False},
+    )
+    db.commit()
+    db.refresh(event)
+    return {
+        "event": serialize_event(event),
+        "safety_event_id": safety.id,
+        "review_status": "NEEDS_REVIEW",
+        "emergency_services_contacted": False,
+        "needs_human_review": True,
+        "summary": SENSOR_REVIEW_COPY,
+        "label": "SIMULATION" if not local_pi_enabled() else "LOCAL PROTOTYPE",
     }
 
 

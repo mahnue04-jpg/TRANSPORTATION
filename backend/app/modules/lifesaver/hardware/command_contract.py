@@ -18,6 +18,9 @@ COMMAND_ALIASES = {
     "SIMULATE_MOTION": "SET_MOTION",
     "SIMULATE_FALL": "SIMULATE_FALL_EVENT",
     "RESTART_DEVICE": "DEVICE_RESTART_SIMULATED",
+    "DEVICE_RESTART": "DEVICE_RESTART_SIMULATED",
+    "ROTATE_TO_ANGLE": "ROTATE_TO_ANGLE",
+    "STOP_MOTOR": "ROTATE_STOP",
     "DISPLAY_ON": "DISPLAY_ENABLE",
     "DISPLAY_OFF": "DISPLAY_DISABLE",
     "SAFE_DRIVE_MODE_ON": "SAFE_MODE_ENABLE",
@@ -70,7 +73,7 @@ SAFETY_REVIEW = frozenset({
     "RESOLVED",
 })
 
-ADAPTER_TYPES = frozenset({"simulated", "local_lan", "raspberry_pi", "offline"})
+ADAPTER_TYPES = frozenset({"simulated", "local_lan", "raspberry_pi", "local_pi", "offline"})
 
 VEHICLE_FORBIDDEN = frozenset({
     "STEER",

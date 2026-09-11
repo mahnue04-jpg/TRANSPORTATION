@@ -42,6 +42,7 @@ The application talks to one command contract. Adapters underneath may be:
 - `simulated`
 - `local_lan` (allowlisted loopback / private test hosts only)
 - `raspberry_pi` (same local contract; no live GPIO yet)
+- `local_pi` (explicit local prototype mode; default disabled)
 - `offline` fallback
 
 Public internet addresses are rejected by default.

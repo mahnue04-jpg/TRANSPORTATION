@@ -24,7 +24,7 @@ Capabilities represented in software:
 - device health
 - simulated fall / event input
 
-Commands: `DEVICE_PING`, `GET_STATUS`, `GET_DEVICE_HEALTH`, `CAMERA_ENABLE`, `CAMERA_DISABLE`, `MIC_ENABLE`, `MIC_DISABLE`, `PRIVACY_ENABLE`, `PRIVACY_DISABLE`, `ROTATE_LEFT`, `ROTATE_RIGHT`, `ROTATE_HOME`, `ROTATE_STOP`, `AUDIO_TEST`, `SENSOR_SAMPLE`, `SET_MOTION`, `SET_ONLINE`, `SET_OFFLINE`, `START_VIDEO_SESSION`, `END_VIDEO_SESSION`, `SIMULATE_FALL_EVENT`, `DEVICE_RESTART_SIMULATED`
+Commands: `DEVICE_PING`, `GET_STATUS`, `GET_DEVICE_HEALTH`, `CAMERA_ENABLE`, `CAMERA_DISABLE`, `MIC_ENABLE`, `MIC_DISABLE`, `PRIVACY_ENABLE`, `PRIVACY_DISABLE`, `ROTATE_LEFT`, `ROTATE_RIGHT`, `ROTATE_HOME`, `ROTATE_STOP`, `ROTATE_TO_ANGLE`, `AUDIO_TEST`, `SENSOR_SAMPLE`, `SET_MOTION`, `SET_ONLINE`, `SET_OFFLINE`, `START_VIDEO_SESSION`, `END_VIDEO_SESSION`, `SIMULATE_FALL_EVENT`, `DEVICE_RESTART_SIMULATED`
 
 This is not a medical device and is not a certified fall detector.
 
@@ -93,6 +93,22 @@ Each simulated device receives a tenant-scoped `serial_number` (default `SIM-{TY
 
 Do not reuse Health ISF vehicle IDs, Delivery IDs, Freight shipment IDs, or Driver 001 identifiers.
 
+## Local physical-prototype mode
+
+`AMICOR_LIFESAVER_HARDWARE_MODE=mock|local_pi` (default `mock`). Production always stays on mock.
+
+When `local_pi` is enabled in local development:
+
+- only private/allowlisted LAN hosts are accepted
+- the device must be explicitly paired
+- a valid device token is required
+- `client_command_id` is idempotent
+- timeout and retry ceiling are enforced
+- logs stay metadata-only
+
+Adapter: `backend/app/modules/lifesaver/hardware/adapters/physical_pi_adapter.py`  
+JSON contract: `GET /api/lifesaver/devices/contract`
+
 ## Future Raspberry Pi communication strategy
 
 When hardware arrives, a local Pi agent should speak this same command/event contract over a private LAN:
@@ -102,7 +118,7 @@ When hardware arrives, a local Pi agent should speak this same command/event con
 - Commands remain authorized, audited, and privacy-gated
 - Media stays on-device unless a later consented provider is added
 
-This pass does not implement the Pi agent.
+This pass adds the Lifesaver-side `local_pi` adapter foundation and contracts. It does not attach a live camera stream or a purchased Pi.
 
 ## Future local-network / API strategy
 

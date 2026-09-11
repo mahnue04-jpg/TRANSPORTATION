@@ -401,3 +401,11 @@ nav.tabs button[aria-current="page"] {
 .pairing-panel .actions {
   margin-bottom: 8px;
 }
+
+.proto-badge {
+  background: #dce8d6;
+}
+
+.prototype-test-panel .hub-stop {
+  grid-column: 1 / -1;
+}

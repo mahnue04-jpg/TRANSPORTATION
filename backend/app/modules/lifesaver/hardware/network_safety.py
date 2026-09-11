@@ -21,6 +21,9 @@ FORBIDDEN_COMMAND_LOG_KEYS = frozenset({
     "video",
     "audio",
     "frame",
+    "device_token",
+    "pairing_token",
+    "credential",
 })
 
 

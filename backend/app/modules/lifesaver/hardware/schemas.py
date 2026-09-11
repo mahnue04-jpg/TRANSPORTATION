@@ -15,6 +15,8 @@ class HardwareCommand(BaseModel):
     motion_detected: bool | None = None
     client_command_id: str | None = Field(default=None, max_length=64)
     adapter_type: str | None = Field(default=None, max_length=32)
+    angle: float | None = None
+    device_token: str | None = Field(default=None, max_length=64)
 
 
 class VideoSessionCreate(BaseModel):
@@ -40,3 +42,8 @@ class SafetyReviewAction(BaseModel):
 
 class SafetyEventAction(BaseModel):
     confirm: bool = True
+
+
+class HardwareSensorEvent(BaseModel):
+    event_type: str
+    confidence: str | None = Field(default="low", max_length=16)

@@ -18,6 +18,7 @@ from app.modules.lifesaver.hardware.registry import (
     CMD_ROTATE_LEFT,
     CMD_ROTATE_RIGHT,
     CMD_ROTATE_STOP,
+    CMD_ROTATE_TO_ANGLE,
     CMD_SENSOR_SAMPLE,
     CMD_SET_MOTION,
     CMD_SET_OFFLINE,
@@ -101,6 +102,9 @@ def apply_command(state: dict[str, Any], command: str, extra: dict[str, Any] | N
         return state, STATUS_PRIVACY_MODE if state.get("privacy_mode") else STATUS_ONLINE
     if command == CMD_ROTATE_STOP:
         rotation_adapter.stop(state)
+        return state, STATUS_PRIVACY_MODE if state.get("privacy_mode") else STATUS_ONLINE
+    if command == CMD_ROTATE_TO_ANGLE:
+        rotation_adapter.apply_angle(state, extra.get("angle"))
         return state, STATUS_PRIVACY_MODE if state.get("privacy_mode") else STATUS_ONLINE
     if command == CMD_AUDIO_TEST:
         audio_adapter.speaker_test(state)

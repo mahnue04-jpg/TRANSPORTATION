@@ -7,10 +7,13 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext, get_current_user_context
 from app.db.session import get_db
 from app.modules.lifesaver.hardware import pairing, service
+from app.modules.lifesaver.hardware.device_contract import contract_example
+from app.modules.lifesaver.hardware.hardware_mode import snapshot as hardware_mode_snapshot
 from app.modules.lifesaver.hardware.prototype_config import CAR_HUB_PROTOTYPE, HOME_HUB_PROTOTYPE
 from app.modules.lifesaver.hardware.schemas import (
     DiscoverRequest,
     HardwareCommand,
+    HardwareSensorEvent,
     PairConfirm,
     SafetyReviewAction,
     SimulatedDeviceCreate,
@@ -35,6 +38,27 @@ def get_devices(
     db: Session = Depends(_db),
 ):
     return normalize_success(data=service.list_devices(db, ctx, member_profile_id))
+
+
+@router.get("/hardware-mode")
+def get_hardware_mode(
+    ctx: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(_db),
+):
+    ctx
+    db
+    return normalize_success(data=hardware_mode_snapshot())
+
+
+@router.get("/contract")
+@router.get("/device-contract")
+def get_device_contract(
+    ctx: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(_db),
+):
+    ctx
+    db
+    return normalize_success(data=contract_example())
 
 
 @router.get("/prototype-config")
@@ -134,6 +158,16 @@ def post_device_command(
     db: Session = Depends(_db),
 ):
     return normalize_success(data=service.run_command(db, ctx, device_id, payload))
+
+
+@router.post("/{device_id}/hardware-events")
+def post_hardware_event(
+    device_id: str,
+    payload: HardwareSensorEvent,
+    ctx: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(_db),
+):
+    return normalize_success(data=service.ingest_hardware_event(db, ctx, device_id, payload.event_type, payload.confidence))
 
 
 @router.post("/{device_id}/simulate-fall")

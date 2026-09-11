@@ -4,7 +4,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.modules.lifesaver.hardware.adapters import simulated_car_hub, simulated_home_hub
-from app.modules.lifesaver.hardware.adapters import local_lan_adapter, offline_adapter, raspberry_pi_adapter
+from app.modules.lifesaver.hardware.adapters import (
+    local_lan_adapter,
+    offline_adapter,
+    physical_pi_adapter,
+    raspberry_pi_adapter,
+)
 from app.modules.lifesaver.hardware.registry import DEVICE_HOME_HUB
 
 
@@ -23,6 +28,8 @@ def adapter_type_for(device: Any, requested: str | None = None, command: str | N
     if command in {"DEVICE_RESTART_SIMULATED", "SET_ONLINE"}:
         if named in {"local_lan", "lan"}:
             return "local_lan"
+        if named in {"local_pi", "physical_pi"}:
+            return "local_pi"
         if named in {"raspberry_pi", "pi", "mock_pi"}:
             return "raspberry_pi"
         return "simulated"
@@ -30,6 +37,8 @@ def adapter_type_for(device: Any, requested: str | None = None, command: str | N
         return "offline"
     if named in {"local_lan", "lan"}:
         return "local_lan"
+    if named in {"local_pi", "physical_pi"}:
+        return "local_pi"
     if named in {"raspberry_pi", "pi", "mock_pi"}:
         return "raspberry_pi"
     return "simulated"
@@ -52,6 +61,17 @@ def execute(
     if kind == "local_lan":
         next_state, status, lifecycle = local_lan_adapter.apply_command(
             state, command, extra, device_type=device_type, local_ip=local_ip or "127.0.0.1"
+        )
+        return next_state, status, lifecycle, kind
+    if kind == "local_pi":
+        next_state, status, lifecycle = physical_pi_adapter.apply_command(
+            state,
+            command,
+            extra,
+            device_type=device_type,
+            local_ip=local_ip or "127.0.0.1",
+            pairing_state=getattr(device, "pairing_state", None),
+            pairing_token=getattr(device, "pairing_token", None),
         )
         return next_state, status, lifecycle, kind
     if kind == "raspberry_pi":

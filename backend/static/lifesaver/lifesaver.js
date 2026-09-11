@@ -24,6 +24,7 @@
     memberProfileId: "",
     view: "today",
     coordFilter: "all",
+    deviceTokens: {},
   };
 
   function session() {
@@ -495,12 +496,27 @@
     ].join("");
   }
 
+  function deviceBadge(device) {
+    return (device.simulation_badge === "LOCAL PROTOTYPE")
+      ? "<p class='sim-badge proto-badge'><strong>LOCAL PROTOTYPE</strong></p>"
+      : "<p class='sim-badge'><strong>SIMULATION</strong></p>";
+  }
+
   function deviceStateLine(device) {
     const privacyOn = !!device.privacy_mode;
+    const pairing = device.pairing_state || "PAIRED";
+    const paired = (device.paired != null)
+      ? !!device.paired
+      : (pairing !== "UNPAIRED" && pairing !== "DISCOVERED" && pairing !== "PENDING_PAIR");
+    const connected = (device.connected != null)
+      ? !!device.connected
+      : (device.status !== "OFFLINE" && device.status !== "MAINTENANCE" && pairing !== "UNPAIRED");
     return [
       privacyOn ? "<p class='privacy-banner'><strong>PRIVACY MODE</strong> Camera off. Rotation tracking off. No automatic video.</p>" : "",
-      "<p class='sim-badge'><strong>SIMULATION</strong></p>",
+      deviceBadge(device),
       "<div class='device-status-grid'>",
+      "<p><strong>Connected: " + escapeHtml(connected ? "Connected" : "Disconnected") + "</strong></p>",
+      "<p><strong>Paired: " + escapeHtml(paired ? "Paired" : "Unpaired") + "</strong></p>",
       "<p class='camera-state'><strong>Camera: " + escapeHtml((device.camera_state || "off").toUpperCase()) + "</strong></p>",
       "<p class='privacy-state'><strong>Privacy: " + escapeHtml(privacyOn ? "ON" : "OFF") + "</strong></p>",
       "<p><strong>Mic: " + escapeHtml(device.microphone_enabled ? "ON" : "OFF") + "</strong></p>",
@@ -508,14 +524,50 @@
         (device.microphone_enabled ? " · mic on" : " · mic off") + "</strong></p>",
       "<p><strong>Rotation: " + escapeHtml(device.rotation_state || "home") +
         (device.rotation_moving ? " (moving)" : "") + "</strong></p>",
-      "<p><strong>Orientation: " + escapeHtml(String(device.orientation_deg == null ? "n/a" : device.orientation_deg)) + "°</strong></p>",
+      "<p><strong>Base angle: " + escapeHtml(String(device.orientation_deg == null ? "n/a" : device.orientation_deg)) + "°</strong></p>",
+      "<p><strong>Motor: " + escapeHtml(device.motor_state || (device.rotation_moving ? "moving" : "stopped")) + "</strong></p>",
       "<p><strong>Sensors: " + escapeHtml(device.sensor_state || "quiet") + "</strong></p>",
       "<p><strong>Status: " + escapeHtml(device.status || "OFFLINE") + "</strong></p>",
       "<p><strong>Pairing: " + escapeHtml(device.pairing_state || "PAIRED") + "</strong></p>",
+      "<p><strong>IP / host: " + escapeHtml(device.local_host_label || device.local_ip || "local") + "</strong></p>",
       "<p><strong>Adapter: " + escapeHtml(device.adapter_type || device.adapter || "simulated") + "</strong></p>",
       "<p><strong>Firmware: " + escapeHtml(device.firmware_version || "n/a") + "</strong></p>",
+      "<p><strong>Power: " + escapeHtml(device.power_status || device.power || "n/a") + "</strong></p>",
+      "<p><strong>Temp: " + escapeHtml(String(device.temperature_c == null ? "n/a" : device.temperature_c)) + " C</strong></p>",
+      "<p><strong>Last command: " + escapeHtml(device.last_command || "none") + "</strong></p>",
+      "<p><strong>Last acknowledgement: " + escapeHtml(device.last_acknowledgement || "none") + "</strong></p>",
+      "<p><strong>Safety event: " + escapeHtml(device.safety_event_status || "none") + "</strong></p>",
       "<p class='meta'>Last seen: " + escapeHtml(device.last_seen_at || "never") + "</p>",
       "</div>"
+    ].join("");
+  }
+
+  function renderPrototypeTest(device, hardwareMode) {
+    if (!hardwareMode || !hardwareMode.prototype_panel_available || !device) return "";
+    const id = escapeHtml(device.id);
+    const angles = [0, 45, 90, 180, 270];
+    return [
+      "<section class='card prototype-test-panel'><h2>LOCAL PROTOTYPE TEST</h2>",
+      "<p class='meta'>Non-production only. STOP MOTOR stays available. No live camera stream. No emergency services.</p>",
+      "<div class='hub-controls'>",
+      "<button type='button' data-hub-cmd='" + id + "' data-command='DEVICE_PING'>Ping device</button>",
+      "<button type='button' data-hub-cmd='" + id + "' data-command='CAMERA_ENABLE'>Camera ON</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='CAMERA_DISABLE'>Camera OFF</button>",
+      "<button type='button' data-hub-cmd='" + id + "' data-command='MIC_ENABLE'>Mic ON</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='MIC_DISABLE'>Mic OFF</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='AUDIO_TEST'>Speaker test</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='ROTATE_LEFT'>Rotate left</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='ROTATE_RIGHT'>Rotate right</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='ROTATE_HOME'>Rotate home</button>",
+      angles.map(function (angle) {
+        return "<button type='button' class='secondary' data-hub-cmd='" + id +
+          "' data-command='ROTATE_TO_ANGLE' data-angle='" + angle + "'>Rotate to " + angle + "°</button>";
+      }).join(""),
+      "<button type='button' class='hub-stop' data-hub-cmd='" + id + "' data-command='ROTATE_STOP'>STOP MOTOR</button>",
+      "<button type='button' data-hub-cmd='" + id + "' data-command='PRIVACY_ENABLE'>Privacy ON</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='PRIVACY_DISABLE'>Privacy OFF</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + id + "' data-command='DEVICE_RESTART'>Restart device</button>",
+      "</div></section>"
     ].join("");
   }
 
@@ -565,6 +617,7 @@
     const safetyEvents = home
       ? await api("/api/lifesaver/devices/" + encodeURIComponent(home.id) + "/events").catch(function () { return []; })
       : [];
+    const hardwareMode = await api("/api/lifesaver/devices/hardware-mode").catch(function () { return { mode: "mock", prototype_panel_available: true }; });
     const commands = [].concat(homeCommands || [], carCommands || []).slice(0, 12);
     document.getElementById("view-devices").innerHTML = [
       "<section class='card' id='devices-panel'><h2>Devices</h2>",
@@ -605,6 +658,7 @@
           renderHomeControls(home)
         : "<p class='meta'>No Home Hub yet. Create a simulated hub to practice local controls.</p>",
       "</section>",
+      renderPrototypeTest(home, hardwareMode),
       "<section class='card hub-card hub-card-car'><h2>Car Hub</h2>",
       car
         ? "<p class='sim-badge'><strong>SIMULATION</strong></p>" +
@@ -849,9 +903,14 @@
         showBanner("Simulated hub ready.", "ok");
       }
       if (target.dataset.hubCmd && target.dataset.command) {
+        const commandBody = { command: target.dataset.command };
+        if (target.dataset.angle) commandBody.angle = Number(target.dataset.angle);
+        if (state.deviceTokens && state.deviceTokens[target.dataset.hubCmd]) {
+          commandBody.device_token = state.deviceTokens[target.dataset.hubCmd];
+        }
         await api("/api/lifesaver/devices/" + target.dataset.hubCmd + "/commands", {
           method: "POST",
-          body: JSON.stringify({ command: target.dataset.command }),
+          body: JSON.stringify(commandBody),
         });
         await loadDevices();
       }
@@ -887,10 +946,16 @@
         if (!window.confirm("Confirm pairing this local hub? Unknown devices are never auto-trusted.")) {
           return;
         }
-        await api("/api/lifesaver/devices/pairings/" + target.dataset.pairConfirm + "/confirm", {
+        const mode = await api("/api/lifesaver/devices/hardware-mode").catch(function () { return { mode: "mock" }; });
+        const adapterType = mode && mode.mode === "local_pi" ? "local_pi" : "simulated";
+        const paired = await api("/api/lifesaver/devices/pairings/" + target.dataset.pairConfirm + "/confirm", {
           method: "POST",
-          body: JSON.stringify({ confirm: true, adapter_type: "simulated" }),
+          body: JSON.stringify({ confirm: true, adapter_type: adapterType }),
         });
+        if (paired && paired.device_token && paired.device_id) {
+          state.deviceTokens = state.deviceTokens || {};
+          state.deviceTokens[paired.device_id] = paired.device_token;
+        }
         await loadDevices();
         showBanner("Hub paired after explicit confirmation.", "ok");
       }

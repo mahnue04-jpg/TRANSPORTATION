@@ -163,7 +163,7 @@ def confirm_pair(db: Session, ctx: UserContext, pairing_id: str, payload: PairCo
         db.commit()
         raise HTTPException(status_code=422, detail="Explicit human confirmation is required to pair.")
     adapter = (payload.adapter_type or "simulated").lower()
-    if adapter not in {"simulated", "local_lan", "raspberry_pi"}:
+    if adapter not in {"simulated", "local_lan", "raspberry_pi", "local_pi"}:
         adapter = "simulated"
     state = simulated_home_hub.default_state() if row.device_type == DEVICE_HOME_HUB else simulated_car_hub.default_state()
     device = LifesaverDevice(
@@ -213,7 +213,10 @@ def confirm_pair(db: Session, ctx: UserContext, pairing_id: str, payload: PairCo
     )
     db.commit()
     db.refresh(row)
-    return serialize_pairing(row)
+    payload = serialize_pairing(row)
+    if adapter == "local_pi":
+        payload["device_token"] = row.pairing_token
+    return payload
 
 
 def unpair(db: Session, ctx: UserContext, pairing_id: str) -> dict[str, Any]:
