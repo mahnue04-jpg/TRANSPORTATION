@@ -12,10 +12,12 @@
   <meta property="og:title" content="AMICOR Autonomous Operations Agent — Early Access Software">
   <meta property="og:description" content="The AMICOR Autonomous Operations Agent observes operations, recommends actions, requires human approval, verifies results, and keeps an audit trail. Early access. Preliminary pricing.">
   <meta property="og:url" content="https://amicor.local/technologies/autonomous-operations-agent/">
+  <meta property="og:image" content="https://amicor.local/assets/logo.svg">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="AMICOR Autonomous Operations Agent — Early Access Software">
   <meta name="twitter:description" content="The AMICOR Autonomous Operations Agent observes operations, recommends actions, requires human approval, verifies results, and keeps an audit trail. Early access. Preliminary pricing.">
   <link rel="icon" href="../../assets/logo.svg">
+  <link rel="apple-touch-icon" href="../../assets/logo.svg">
   <link rel="stylesheet" href="../../assets/css/site.css">
   <script type="application/ld+json">
   {
@@ -33,12 +35,12 @@
   }
   </script>
 </head>
-<body>
+<body class="theme-tech">
   <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="wrap header-row">
       <a class="brand" href="/">
-        <span class="mark" aria-hidden="true">A</span>
+        <img src="../../assets/logo.svg" alt="AMICOR" width="36" height="36">
         <span>AMICOR</span>
       </a>
       <button class="menu-btn" type="button" data-menu-button aria-expanded="false" aria-controls="site-nav">Menu</button>
@@ -64,21 +66,33 @@
         <p class="lede">AI that watches your operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
         <p class="notice">Status: Early Access / In Development. The agent is designed to supervise existing systems. It is not offered as unattended production execution.</p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
-          <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
+          <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
+          <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
         </div>
       </div>
     </section>
     <section class="section">
       <div class="wrap">
-        <h2>How it works</h2>
+        <h2>What it does</h2>
+        <p class="lede">The product loop is observe, recommend, human approval, verify, and audit. After a person approves, existing operational systems perform the action. The agent does not run unattended production execution.</p>
         <div class="steps">
           <div class="step"><b>1</b><div><h3>OBSERVE</h3><p>Read live operational state from the systems you already run.</p></div></div>
           <div class="step"><b>2</b><div><h3>RECOMMEND</h3><p>Propose the next action using existing operational intelligence. Recommendation is not execution.</p></div></div>
-          <div class="step"><b>3</b><div><h3>APPROVE</h3><p>Stop for a human decision. Approval stays with operators, dispatchers, or administrators.</p></div></div>
-          <div class="step"><b>4</b><div><h3>ACT THROUGH EXISTING SYSTEM</h3><p>After approval, your current dispatch, lifecycle, or business systems perform the action.</p></div></div>
-          <div class="step"><b>5</b><div><h3>VERIFY</h3><p>Compare expected and actual state. Inconsistencies are reported, not silently repaired.</p></div></div>
-          <div class="step"><b>6</b><div><h3>AUDIT</h3><p>Keep a correlated trail of what was observed, recommended, approved, and verified.</p></div></div>
+          <div class="step"><b>3</b><div><h3>HUMAN APPROVAL</h3><p>Stop for a human decision. Approval stays with operators, dispatchers, or administrators. Approved work then continues through your current systems.</p></div></div>
+          <div class="step"><b>4</b><div><h3>VERIFY</h3><p>Compare expected and actual state. Inconsistencies are reported, not silently repaired.</p></div></div>
+          <div class="step"><b>5</b><div><h3>AUDIT</h3><p>Keep a correlated trail of what was observed, recommended, approved, and verified.</p></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap">
+        <h2>Who it is for</h2>
+        <div class="grid grid-2">
+          <article class="card"><h3>Transportation</h3><p>Operators who need a supervised recommendation layer on live trip and assignment work.</p></article>
+          <article class="card"><h3>NEMT</h3><p>Non-emergency medical transportation teams that keep humans in the approval path.</p></article>
+          <article class="card"><h3>Courier / delivery</h3><p>Local delivery and courier operations that want observation and audit without unattended execution.</p></article>
+          <article class="card"><h3>Fleet operations</h3><p>Fleet coordinators who need recommended next actions and a verifiable record.</p></article>
+          <article class="card"><h3>Field-service operations</h3><p>Field teams that need the same observe-recommend-approve-verify loop across jobs and exceptions.</p></article>
         </div>
       </div>
     </section>
@@ -92,19 +106,22 @@
           <article class="card"><h3>Exception detection</h3><p>Surface stale offers, conflicting state, and missing handoffs for human review.</p></article>
           <article class="card"><h3>Post-action verification</h3><p>After your system acts, confirm whether the result matches the expected state.</p></article>
           <article class="card"><h3>Operational audit trail</h3><p>One correlation identity can follow observation, recommendation, approval wait, verification, and exceptions.</p></article>
-          <article class="card"><h3>Command-center readiness</h3><p>A UI-ready operational status view is part of the product direction.</p></article>
         </div>
       </div>
     </section>
     <section class="section">
       <div class="wrap">
-        <h2>Pricing preview</h2>
-        <p class="notice">Preliminary / subject to change before commercial launch. These figures are planning prices, not an offer to sell.</p>
+        <h2>Preliminary pricing</h2>
+        <p class="notice">Preliminary pricing / subject to change before commercial launch. These figures are planning prices, not an offer to sell. There is no payment checkout on this website.</p>
         <div class="price-grid" style="margin-top:20px">
-          <article class="card price"><span class="chip chip-early">Early Access Pilot</span><h3>Pilot</h3><strong>Contact AMICOR</strong><p>Supervised evaluation with AMICOR.</p></article>
-          <article class="card price"><span class="chip chip-dev">Planning</span><h3>Starter</h3><strong>$149/month</strong><p>Planning price only. Subject to change.</p></article>
-          <article class="card price"><span class="chip chip-dev">Planning</span><h3>Growth</h3><strong>$399/month</strong><p>Planning price only. Subject to change.</p></article>
-          <article class="card price"><span class="chip chip-soon">Enterprise</span><h3>Business / Enterprise</h3><strong>Contact Sales</strong><p>Scoped after a conversation.</p></article>
+          <article class="card price"><span class="chip chip-early">Early Access</span><h3>Early Access</h3><strong>Contact AMICOR</strong><p>Supervised evaluation. Request Early Access or a demo.</p></article>
+          <article class="card price"><span class="chip chip-dev">Planned</span><h3>Starter</h3><strong>planned $149/month</strong><p>Preliminary pricing. Subject to change.</p></article>
+          <article class="card price"><span class="chip chip-dev">Planned</span><h3>Growth</h3><strong>planned $399/month</strong><p>Preliminary pricing. Subject to change.</p></article>
+          <article class="card price"><span class="chip chip-soon">Enterprise</span><h3>Business / Enterprise</h3><strong>Contact Sales</strong><p>Scoped after a conversation. No checkout.</p></article>
+        </div>
+        <div class="cta-row" style="margin-top:24px">
+          <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
+          <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
         </div>
       </div>
     </section>
@@ -137,6 +154,7 @@
       </div>
     </div>
   </footer>
+  <script src="../../assets/js/site-config.js"></script>
   <script src="../../assets/js/site.js"></script>
 </body>
 </html>

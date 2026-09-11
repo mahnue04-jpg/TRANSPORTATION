@@ -1,8 +1,8 @@
-# AMICOR public website (Phase W1)
+# AMICOR public website (Phase W2)
 
-Static corporate site for **AMICOR** / **AMICOR HEALTH ISF LLC**.
+Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC**.
 
-This folder is independent of Health ISF production code, Stripe, Delivery execution, Freight, Nova Core, Driver 001, and the Autonomous Operations Agent backend branch.
+This folder is independent of Health ISF production code, Stripe, Delivery execution, Freight, Nova Core, Driver 001, and the Autonomous Operations Agent backend.
 
 ## Local run
 
@@ -23,6 +23,18 @@ python website/_generate.py
 
 No Node packages, accounts, or paid tools are required.
 
+## Canonical URL
+
+Generated pages, `sitemap.xml`, and `robots.txt` use the placeholder origin `https://amicor.local`.
+
+When a public host exists:
+
+1. Set `ORIGIN` in `_generate.py` to that URL (no trailing slash).
+2. Set `window.AMICOR_SITE.siteOrigin` in `assets/js/site-config.js` to the same URL.
+3. Run `python website/_generate.py`.
+
+Do not purchase a domain in this phase.
+
 ## Content-status matrix
 
 | Surface | Status |
@@ -34,7 +46,7 @@ No Node packages, accounts, or paid tools are required.
 | Lifesaver AI Care Cloud | IN DEVELOPMENT |
 | Home Hub | FUTURE HARDWARE / IN DEVELOPMENT |
 
-Prices shown on the Operations Agent page are **preliminary / subject to change**.
+Prices on the Operations Agent page are **preliminary pricing / subject to change before commercial launch**. There is no checkout.
 
 ## Routes
 
@@ -53,6 +65,10 @@ Prices shown on the Operations Agent page are **preliminary / subject to change*
 - `/software-terms/`
 - `/accessibility/`
 
+## Early Access form
+
+See `FORM.md`. Default behavior is validated localStorage fallback. A live POST happens only if `formEndpoint` is set to an approved HTTPS URL. Secrets must not be placed in frontend files.
+
 ## Deployment (do not do this until approved)
 
 ### Cloudflare Pages (preferred)
@@ -62,7 +78,7 @@ Prices shown on the Operations Agent page are **preliminary / subject to change*
 3. Project settings:
    - Build command: *(leave empty)*
    - Build output directory: `website`
-4. After the first preview URL exists, replace `https://amicor.local` in `sitemap.xml`, `robots.txt`, and page canonical/Open Graph tags with that URL.
+4. After the first preview URL exists, replace `https://amicor.local` as described under Canonical URL.
 
 Estimated recurring hosting cost: **$0** on the Cloudflare Pages free tier.
 
@@ -75,7 +91,7 @@ Estimated recurring hosting cost: **$0** on the Cloudflare Pages free tier.
 
 Estimated recurring hosting cost: **$0** on GitHub Pages for a public or qualifying repo.
 
-## Domain connection (later, not in W1)
+## Domain connection (later)
 
 Do **not** buy a domain for this phase.
 
@@ -89,8 +105,6 @@ When a domain exists:
 
 None. No website builder, no paid font service, no paid form vendor.
 
-Early Access submissions are stored in the visitor’s `localStorage` only.
-
 ## Security
 
-Do not add Stripe keys, API secrets, database URLs, or customer data to this folder.
+Do not add Stripe keys, API secrets, SMTP passwords, database URLs, or customer data to this folder.

@@ -12,10 +12,12 @@
   <meta property="og:title" content="AMICOR — Intelligent Technology for Health, Transportation, Delivery and Operations">
   <meta property="og:description" content="AMICOR is a Minnesota technology company building one ecosystem across health, transportation, delivery, AI operations, and future intelligent hardware.">
   <meta property="og:url" content="https://amicor.local/">
+  <meta property="og:image" content="https://amicor.local/assets/logo.svg">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="AMICOR — Intelligent Technology for Health, Transportation, Delivery and Operations">
   <meta name="twitter:description" content="AMICOR is a Minnesota technology company building one ecosystem across health, transportation, delivery, AI operations, and future intelligent hardware.">
   <link rel="icon" href="assets/logo.svg">
+  <link rel="apple-touch-icon" href="assets/logo.svg">
   <link rel="stylesheet" href="assets/css/site.css">
   <script type="application/ld+json">
   {
@@ -33,12 +35,12 @@
   }
   </script>
 </head>
-<body>
+<body class="theme-corporate">
   <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="wrap header-row">
       <a class="brand" href="/">
-        <span class="mark" aria-hidden="true">A</span>
+        <img src="assets/logo.svg" alt="AMICOR" width="36" height="36">
         <span>AMICOR</span>
       </a>
       <button class="menu-btn" type="button" data-menu-button aria-expanded="false" aria-controls="site-nav">Menu</button>
@@ -62,7 +64,6 @@
         <p class="kicker">AMICOR HEALTH ISF LLC</p>
         <h1>AMICOR</h1>
         <p class="lede">Intelligent Technology for Health, Transportation, Delivery and Operations.</p>
-        <p class="lede">One company. One brand. Multiple products in different stages of development and commercialization.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="#ecosystem">Explore AMICOR</a>
           <a class="btn btn-ghost" href="/early-access/">Request Early Access</a>
@@ -71,15 +72,22 @@
     </section>
     <section class="section" id="ecosystem">
       <div class="wrap">
-        <h2>One ecosystem</h2>
-        <p class="lede">AMICOR is building connected products for operations, care, movement, and the home. Status is shown plainly so partners and reviewers can see what is live, early, or still in development.</p>
-        <div class="grid grid-3" style="margin-top:28px">
-          <article class="card"><span class="chip chip-early">Early Access</span><h3>Autonomous Operations Agent</h3><p>AI that watches an operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p><a href="/technologies/autonomous-operations-agent/">View product</a></article>
-          <article class="card"><span class="chip chip-dev">In Development</span><h3>AMICOR Health</h3><p>AI-enabled private-pay transportation technology and operations software. Commercial launch and local licensing are not implied on this site.</p><a href="/health/">Learn more</a></article>
-          <article class="card"><span class="chip chip-soon">Coming Soon</span><h3>AMICOR Deliver</h3><p>Planned local delivery technology and operations. Not commercially available.</p><a href="/deliver/">Learn more</a></article>
-          <article class="card"><span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>An AMICOR health-technology initiative for a connected, home-centered ecosystem. Not a medical device or emergency service.</p><a href="/lifesaver/">Learn more</a></article>
-          <article class="card"><span class="chip chip-future">Future Hardware</span><h3>AMICOR Home Hub</h3><p>Planned physical gateway for local edge intelligence, device connectivity, and privacy controls.</p><a href="/home-hub/">Learn more</a></article>
-          <article class="card"><span class="chip chip-dev">In Development</span><h3>AMICOR Technologies</h3><p>A growing software catalog for operators who want intelligence without giving up human control.</p><a href="/technologies/">Browse catalog</a></article>
+        <h2>One AMICOR ecosystem</h2>
+        <p class="lede">AMICOR connects software, operations, and future hardware under one parent brand. Products ship on different timelines. Status labels on this site are the public source of truth.</p>
+        <article class="panel featured" style="margin:28px 0 24px">
+          <span class="chip chip-early">Featured early access</span>
+          <h3>Autonomous Operations Agent</h3>
+          <p>The first AMICOR Technologies product: AI that watches an operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="/technologies/autonomous-operations-agent/">View software</a>
+            <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
+          </div>
+        </article>
+        <div class="grid grid-2">
+          <article class="card"><span class="chip chip-dev">In Development</span><h3>AMICOR Health</h3><p>AI-enabled private-pay transportation technology and operations software. Commercial launch and local licensing are not implied.</p><a class="card-link" href="/health/">Learn more</a></article>
+          <article class="card"><span class="chip chip-soon">Coming Soon</span><h3>AMICOR Deliver</h3><p>Planned local delivery technology and operations. Not commercially available.</p><a class="card-link" href="/deliver/">Learn more</a></article>
+          <article class="card"><span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>An AMICOR health-technology initiative for a connected, home-centered ecosystem. Not a medical device or emergency service.</p><a class="card-link" href="/lifesaver/">Learn more</a></article>
+          <article class="card"><span class="chip chip-future">Future Hardware</span><h3>AMICOR Home Hub</h3><p>Planned physical gateway for local edge intelligence, device connectivity, and privacy controls.</p><a class="card-link" href="/home-hub/">Learn more</a></article>
         </div>
       </div>
     </section>
@@ -131,6 +139,7 @@
       </div>
     </div>
   </footer>
+  <script src="assets/js/site-config.js"></script>
   <script src="assets/js/site.js"></script>
 </body>
 </html>

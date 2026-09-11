@@ -4,18 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AMICOR Early Access and Partners</title>
-  <meta name="description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Local form handling only in this website version.">
+  <meta name="description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Validated form with local fallback until a live intake endpoint is approved.">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://amicor.local/early-access/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="AMICOR">
   <meta property="og:title" content="AMICOR Early Access and Partners">
-  <meta property="og:description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Local form handling only in this website version.">
+  <meta property="og:description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Validated form with local fallback until a live intake endpoint is approved.">
   <meta property="og:url" content="https://amicor.local/early-access/">
+  <meta property="og:image" content="https://amicor.local/assets/logo.svg">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="AMICOR Early Access and Partners">
-  <meta name="twitter:description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Local form handling only in this website version.">
+  <meta name="twitter:description" content="Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Validated form with local fallback until a live intake endpoint is approved.">
   <link rel="icon" href="../assets/logo.svg">
+  <link rel="apple-touch-icon" href="../assets/logo.svg">
   <link rel="stylesheet" href="../assets/css/site.css">
   <script type="application/ld+json">
   {
@@ -33,12 +35,12 @@
   }
   </script>
 </head>
-<body>
+<body class="theme-corporate">
   <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="wrap header-row">
       <a class="brand" href="/">
-        <span class="mark" aria-hidden="true">A</span>
+        <img src="../assets/logo.svg" alt="AMICOR" width="36" height="36">
         <span>AMICOR</span>
       </a>
       <button class="menu-btn" type="button" data-menu-button aria-expanded="false" aria-controls="site-nav">Menu</button>
@@ -61,13 +63,17 @@
       <div class="wrap">
         <p class="kicker">Partners / Early Access</p>
         <h1>Tell us what you want to explore.</h1>
-        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. In this website version, submissions stay in your browser. No production email is sent.</p>
-        <p class="form-success" data-form-success tabindex="-1">Request saved on this device. AMICOR has not been emailed from this page.</p>
-        <form class="panel" data-early-access-form>
-          <label>Name <input name="name" required autocomplete="name"></label>
-          <label>Company <input name="company" required autocomplete="organization"></label>
-          <label>Email <input name="email" type="email" required autocomplete="email"></label>
-          <label>Phone <span style="font-weight:400;color:var(--muted)">(optional)</span> <input name="phone" type="tel" autocomplete="tel"></label>
+        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. Until AMICOR connects an approved intake endpoint, submissions stay on this device. No production email is sent from the page.</p>
+        <p class="form-error" data-form-error role="alert"></p>
+        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Request saved on this device. AMICOR has not been emailed from this page.</p>
+        <form class="panel" data-early-access-form novalidate>
+          <div class="hp" aria-hidden="true">
+            <label>Company website <input name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true"></label>
+          </div>
+          <label>Name <input name="name" autocomplete="name" required></label>
+          <label>Company <input name="company" autocomplete="organization" required></label>
+          <label>Email <input name="email" type="email" autocomplete="email" required></label>
+          <label>Phone <span class="optional">(optional)</span> <input name="phone" type="tel" autocomplete="tel"></label>
           <label>Industry <input name="industry" required></label>
           <label>Company size
             <select name="companySize" required>
@@ -92,6 +98,10 @@
             </select>
           </label>
           <label>Message <textarea name="message" rows="5" required></textarea></label>
+          <label class="consent">
+            <input name="consent" type="checkbox" value="yes" required>
+            <span>I understand this is not a purchase, I acknowledge the <a href="/privacy/">Privacy Policy</a> placeholder, and I consent to AMICOR storing this inquiry if a live intake channel is later connected.</span>
+          </label>
           <button class="btn btn-primary" type="submit">Submit request</button>
         </form>
       </div>
@@ -125,6 +135,7 @@
       </div>
     </div>
   </footer>
+  <script src="../assets/js/site-config.js"></script>
   <script src="../assets/js/site.js"></script>
 </body>
 </html>
