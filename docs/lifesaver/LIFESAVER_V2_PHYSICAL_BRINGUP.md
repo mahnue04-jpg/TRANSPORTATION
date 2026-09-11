@@ -35,8 +35,10 @@ Connect only to a private LAN or loopback test path. Public IPs are rejected by 
 
 ### D. Run Amicor Home Hub agent
 
-Start the future on-device agent that speaks the JSON contract in `GET /api/lifesaver/devices/contract`.
-Until that agent exists, Lifesaver uses an in-process transport. No raw sockets are opened from the Lifesaver module.
+Install and start `hardware/lifesaver-home-hub/` on the Pi (see that package `docs/INSTALL.md`).
+The agent is application software version `lifesaver-home-hub-agent 0.1.0-dev`, not device firmware.
+It speaks the shared command vocabulary in `docs/lifesaver/LIFESAVER_V2_DEVICE_PROTOCOL.md`.
+Until a physical Pi is attached, Lifesaver hosts the same agent in-process for local simulation. No raw sockets are opened from the Lifesaver module to unknown hosts.
 
 ### E. Discover device
 
