@@ -1,13 +1,24 @@
 # Lifesaver AI Care Cloud V1 — Staging Readiness
 
 Prepared on the isolated branch after Phase 1 + Phase 2 local verification.
+Phase 3A staging review updated this file for accuracy only.
 This file does not authorize push, merge, Render changes, or production migration.
 
 ## 1. Current branch
 
 `feature/lifesaver-ai-care-cloud-v1`
 
+Local commits reviewed in Phase 3A:
+
+- `8698c0054fedce4c03f1eefa115c3d76cf8136a5` — `feat(lifesaver): complete AI Care Cloud V1 phases 1 and 2`
+- `de3df8f22a1538668d603f2b0c321c1842a1f720` — `chore(lifesaver): prepare staging migration and smoke checks`
+
 Worktree: isolated Lifesaver checkout. Do not merge into production until Saye / Mrs. Nova approval.
+
+Related review files:
+
+- `docs/lifesaver/LIFESAVER_V1_STAGING_ENV_TEMPLATE.md`
+- `docs/lifesaver/LIFESAVER_V1_STAGING_ROLLBACK.md`
 
 ## 2. Current V1 scope
 
@@ -242,11 +253,12 @@ Runtime schema fallback remains `ensure_lifesaver_schema()` if migrations have n
 3. Run `python scripts/lifesaver_staging_smoke.py`.
 4. Confirm `/lifesaver` loads and `/api/lifesaver/health` returns product identity.
 5. Sign in with the staging test user only.
-6. Hit appointments, coordination, notifications, and transport routes.
-7. Confirm an AI diagnosis/treatment prompt is refused.
-8. Confirm the script reports no external side-effect flags.
-9. Optionally walk the UI checklist in a browser.
-10. Stop. Do not promote to production from a green smoke run alone.
+6. Confirm that user has granted the consents required by the authenticated GET routes (at least `care_cloud_use`, plus feature consents used by appointments / coordination / notifications / transport). Without those grants the smoke script correctly receives 403 and exits nonzero.
+7. Hit appointments, coordination, notifications, and transport routes.
+8. Confirm an AI diagnosis/treatment prompt is refused.
+9. Confirm the script reports no external side-effect flags.
+10. Optionally walk the UI checklist in a browser.
+11. Stop. Do not promote to production from a green smoke run alone.
 
 Local dry-run (public endpoints only):
 
@@ -258,10 +270,20 @@ python scripts/lifesaver_staging_smoke.py
 
 ## 21. Rollback plan
 
-- Application: revert the Lifesaver router include and `/lifesaver` static route, or undeploy the Lifesaver-only release.
-- Database: `alembic downgrade 20260911_lifesaver_phase2_schema` then `alembic downgrade 20260911_lifesaver_phase1_schema` **only on the staging database**, after approval.
-- Downgrade drops Lifesaver tables/columns only. It does not touch Health ISF, Nova, Delivery, Freight, Driver 001, or Stripe.
-- Local verify DB can be discarded; it is not production data.
+See `docs/lifesaver/LIFESAVER_V1_STAGING_ROLLBACK.md`.
+
+Alembic `downgrade <rev>` means downgrade **to** that revision.
+
+Staging DB only, after approval and backup:
+
+1. Undo Phase 2: `alembic downgrade 20260911_lifesaver_phase1_schema`
+2. Undo Phase 1: `alembic downgrade 20260909_nova_freight_settlement`
+
+Do **not** run `alembic downgrade 20260911_lifesaver_phase2_schema` when already at Phase 2 head; that is a no-op.
+
+Application: restore the previous staging image/build that does not serve Lifesaver, or revert only the Lifesaver router include and `/lifesaver` static route. Production is unaffected if staging DB and host stay isolated.
+
+Local verify DB can be discarded; it is not production data.
 
 ## 22. Deployment order
 
@@ -307,3 +329,29 @@ Lifesaver adds:
 - Additive Alembic include of `lifesaver_*` in `backend/migrations/env.py`
 
 Lifesaver does not import Health ISF, Nova Core, Delivery, Stripe, Twilio, or SMTP. Transportation simulation does not create rides. Notification simulation does not send messages. Device ingest does not call external vendors.
+
+## 26. Phase 3A go / no-go scorecard
+
+| Area | Score | Note |
+|---|---|---|
+| A. Code readiness | GREEN | Phase 1+2 committed; AI counts match Coord |
+| B. Test readiness | GREEN | 64 passed / 0 failed / 0 skipped in approved matrix |
+| C. Migration readiness | GREEN | Two additive revisions reviewed; not applied |
+| D. Auth readiness | GREEN | JWT + invalid login + logout verified locally |
+| E. Security/privacy readiness | GREEN | Isolation, consent, redaction, no debug endpoint |
+| F. Mobile readiness | GREEN | 390×844 local acceptance passed |
+| G. Observability/logging readiness | YELLOW | Action/outcome audit only; no Lifesaver metrics board |
+| H. Rollback readiness | GREEN | Plan and corrected Alembic downgrade order documented |
+| I. Isolation readiness | GREEN | Frozen products untouched in Lifesaver commits |
+| J. Known issues | YELLOW | Pre-existing Health ISF persistence failures; no staging host yet |
+
+**Final Phase 3A status: READY FOR STAGING WITH CONDITIONS**
+
+Conditions before any later staging deployment approval:
+
+1. Dedicated staging database and secrets (never production).
+2. Do not deploy onto production Render `amicor-health-isf`.
+3. Backup staging DB, then apply Phase 1, then Phase 2.
+4. Dedicated staging test user with explicit consents before authenticated smoke.
+5. Keep real email/SMS/Stripe live/device/emergency keys unset.
+6. Commit the Phase 3A review docs in a later isolated local commit if Saye / Mrs. Nova want them in the package.
