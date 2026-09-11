@@ -532,6 +532,19 @@ except Exception as exc:
     import traceback
     traceback.print_exc()
 
+# ── Lifesaver AI Care Cloud V1 (isolated from Nova / Delivery / Health ISF) ──
+try:
+    from app.modules.lifesaver.models import ensure_lifesaver_schema  # type: ignore
+    from app.modules.lifesaver.routes import router as lifesaver_router  # type: ignore
+
+    ensure_lifesaver_schema()
+    app.include_router(lifesaver_router)
+    logger.info("Lifesaver Care Cloud routes registered")
+except Exception as exc:
+    logger.error("Failed to register Lifesaver routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
 # ── Customer payments (Ride + Deliver webhook; isolated from Connect) ─────────
 # Schema is Alembic-only in production. Do not create_all here.
 try:
@@ -3879,6 +3892,16 @@ def serve_admin() -> Response:
     if os.path.isfile(admin_html):
         return FileResponse(admin_html, media_type="text/html")
     return JSONResponse({"error": "Admin UI not found"}, status_code=404)
+
+
+@app.get("/lifesaver")
+@app.get("/lifesaver/{full_path:path}")
+def serve_lifesaver_app(full_path: str | None = None) -> Response:
+    """Isolated Lifesaver AI Care Cloud UI. Does not alter ops-shell or Nova pages."""
+    page = os.path.join(_static_dir, "lifesaver", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Lifesaver Care Cloud page not found"}, status_code=404)
 
 
 @app.get("/platform-ops/driver-apply")

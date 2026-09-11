@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Lifesaver AI Care Cloud</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/lifesaver/lifesaver.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="app">
+    <header class="brand amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="kicker">AMICOR Healthcare Technology</p>
+        <h1>Lifesaver AI Care Cloud</h1>
+      </div>
+    </header>
+
+    <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
+
+    <section id="login-card" class="card">
+      <h2>Sign in</h2>
+      <p>Use your existing AMICOR account. Lifesaver is a separate care-coordination product.</p>
+      <p id="local-login-hint" class="meta hidden">Local verify only: the email field can use the seeded rider@amicor.local account. The password is your local AMICOR dest seed from AMICOR_SEED_PASSWORD. This screen never displays that password.</p>
+      <form id="login-form">
+        <label>Email
+          <input id="login-email" type="email" autocomplete="username" required />
+        </label>
+        <label>Password
+          <input id="login-password" type="password" autocomplete="current-password" required />
+        </label>
+        <div class="actions">
+          <button type="submit">Sign in</button>
+        </div>
+      </form>
+    </section>
+
+    <div id="app-shell" class="hidden">
+      <section class="card session-bar">
+        <div>
+          <strong id="session-name">Signed in</strong>
+          <div class="meta" id="session-meta"></div>
+        </div>
+        <button type="button" id="sign-out" class="secondary">Sign out</button>
+      </section>
+
+      <p id="product-disclaimer" class="card disclaimer"></p>
+
+      <nav class="tabs" aria-label="Lifesaver sections">
+        <button type="button" data-view="today" aria-current="page">Today</button>
+        <button type="button" data-view="care">Care</button>
+        <button type="button" data-view="coord">Coord</button>
+        <button type="button" data-view="circle">Circle</button>
+        <button type="button" data-view="notify">Notify</button>
+        <button type="button" data-view="privacy">Privacy</button>
+      </nav>
+
+      <main id="main">
+        <section id="view-today" class="view"></section>
+        <section id="view-care" class="view hidden"></section>
+        <section id="view-coord" class="view hidden"></section>
+        <section id="view-circle" class="view hidden"></section>
+        <section id="view-notify" class="view hidden"></section>
+        <section id="view-privacy" class="view hidden"></section>
+      </main>
+    </div>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Primary">
+    <button type="button" data-view="today" aria-current="page">Today</button>
+    <button type="button" data-view="care">Care</button>
+    <button type="button" data-view="coord">Coord</button>
+    <button type="button" data-view="notify">Notify</button>
+    <button type="button" data-view="circle">Circle</button>
+    <button type="button" data-view="privacy">More</button>
+  </nav>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/lifesaver/lifesaver.js"></script>
+</body>
+</html>
