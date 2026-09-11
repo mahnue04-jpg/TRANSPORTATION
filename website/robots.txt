@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://amicor.local/sitemap.xml
+Sitemap: https://amicor-public.pages.dev/sitemap.xml

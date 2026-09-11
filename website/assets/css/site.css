@@ -5,7 +5,7 @@
   --surface-2: #163044;
   --line: rgba(184, 214, 236, 0.18);
   --text: #f4f9fc;
-  --muted: #b7c9d6;
+  --muted: #c5d6e3;
   --primary: #2b97e6;
   --primary-2: #0b6bcb;
   --accent: #5ee0c4;
@@ -275,16 +275,17 @@ textarea { min-height: 120px; }
 
 .site-footer {
   border-top: 1px solid var(--line);
-  padding: 40px 0 52px;
+  padding: 48px 0 56px;
   color: var(--muted);
 }
-.footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 28px; }
+.footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 32px; }
+.footer-grid strong { color: var(--text); display: block; margin-bottom: 8px; }
 .footer-grid a {
   color: var(--muted);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: 44px;
 }
 .footer-grid a:hover { color: var(--text); }
 

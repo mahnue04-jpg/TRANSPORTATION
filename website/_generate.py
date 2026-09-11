@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-# Replace after a public host exists. Keep empty-looking placeholders out of HTML by using this token.
-ORIGIN = "https://amicor.local"
+# Stable Cloudflare Pages preview host. Unique per-deploy URLs change; do not use a custom domain yet.
+ORIGIN = "https://amicor-public.pages.dev"
 
 NAV = [
     ("/", "Home"),
@@ -509,7 +509,7 @@ add(
       <div class="wrap">
         <p class="kicker">Partners / Early Access</p>
         <h1>Tell us what you want to explore.</h1>
-        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. Until AMICOR connects an approved intake endpoint, submissions stay on this device. No production email is sent from the page.</p>
+        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. Live delivery to AMICOR is not enabled yet. A successful local save means the request stayed on this device; it was not emailed.</p>
         <p class="form-error" data-form-error role="alert"></p>
         <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Request saved on this device. AMICOR has not been emailed from this page.</p>
         <form class="panel" data-early-access-form novalidate>

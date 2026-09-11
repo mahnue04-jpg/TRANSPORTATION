@@ -106,7 +106,7 @@
       product: data.product,
       message: data.message.trim(),
       consent: true,
-      source: "amicor-public-website-w3"
+      source: "amicor-public-website-w4"
     };
 
     function saveLocal() {

@@ -4,14 +4,17 @@ Preferred host: **Cloudflare Pages free tier**.
 Fallback: **GitHub Pages**.  
 Cost: **$0**. Do not buy a domain in this phase.
 
-W3 could not create a public preview from this environment:
+W4 preview project: `amicor-public`  
+Stable URL: https://amicor-public.pages.dev
 
-- `wrangler` is not installed
-- `CLOUDFLARE_API_TOKEN` is not set
-- `gh` is not installed
-- the website branch is **2 local commits ahead of `origin/main` and has not been pushed**
+Redeploy from this folder after website changes:
 
-Do not treat localhost as a public preview.
+```powershell
+cd website
+wrangler pages deploy . --project-name amicor-public
+```
+
+Do not put secrets in this repo. Set `LEAD_WEBHOOK_URL` only in the Pages dashboard.
 
 ## Exact owner step (required before a real preview URL exists)
 

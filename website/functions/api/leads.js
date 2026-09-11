@@ -91,7 +91,7 @@ export async function onRequest(context) {
     product: plain(raw.product, LIMITS.product),
     message: plain(raw.message, LIMITS.message),
     consent: raw.consent === true || raw.consent === "yes",
-    source: "amicor-public-website-w3",
+    source: "amicor-public-website-w4",
   };
 
   if (!payload.name || !payload.company || !payload.industry || !payload.message) {
@@ -116,12 +116,14 @@ export async function onRequest(context) {
     });
   }
 
+  const headers = { "Content-Type": "application/json" };
+  if (env.LEAD_WEBHOOK_TOKEN) {
+    headers.Authorization = `Bearer ${env.LEAD_WEBHOOK_TOKEN}`;
+  }
+
   const forwarded = await fetch(destination, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: env.LEAD_WEBHOOK_TOKEN ? `Bearer ${env.LEAD_WEBHOOK_TOKEN}` : "",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 

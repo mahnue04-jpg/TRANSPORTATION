@@ -1,6 +1,6 @@
 # Early Access lead endpoint (W3)
 
-Live lead collection is **disabled** until an owner configures an approved destination. The public form does not contain secrets.
+Live lead collection is **disabled**. The Pages Function is deployed, but the Cloudflare project has no `LEAD_WEBHOOK_URL` secret. The public form does not contain secrets.
 
 ## Current public behavior
 
