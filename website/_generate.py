@@ -501,7 +501,7 @@ add(
     "/early-access/",
     "early-access/index.html",
     "AMICOR Early Access and Partners",
-    "Request AMICOR early access or partnership conversations. Validated form with local fallback. Live email intake is not enabled.",
+    "Request AMICOR early access or partnership conversations. Validated form. Successful submit means AMICOR received the business inquiry.",
     "/early-access/",
     1,
     """
@@ -509,9 +509,9 @@ add(
       <div class="wrap">
         <p class="kicker">Partners / Early Access</p>
         <h1>Tell us what you want to explore.</h1>
-        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. Live delivery to AMICOR is not enabled yet. A successful local save means the request stayed on this device; it was not emailed.</p>
+        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. A success message appears only after AMICOR’s lead store accepts the request. Do not submit medical records or other sensitive health information.</p>
         <p class="form-error" data-form-error role="alert"></p>
-        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Request saved on this device. AMICOR has not been emailed from this page.</p>
+        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Thank you. Your request was sent to AMICOR.</p>
         <form class="panel" data-early-access-form novalidate>
           <div class="hp" aria-hidden="true">
             <label>Company website <input name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true"></label>
@@ -546,7 +546,7 @@ add(
           <label>Message <textarea name="message" rows="5" required></textarea></label>
           <label class="consent">
             <input name="consent" type="checkbox" value="yes" required>
-            <span>I understand this is not a purchase, I have read the <a href="/privacy/">Privacy Policy</a> draft, I will not submit medical records or other sensitive health information, and I consent to AMICOR storing this business inquiry if a live intake channel is later connected.</span>
+            <span>I understand this is not a purchase, I have read the <a href="/privacy/">Privacy Policy</a> draft, I will not submit medical records or other sensitive health information, and I consent to AMICOR storing this business inquiry.</span>
           </label>
           <button class="btn btn-primary" type="submit">Submit request</button>
         </form>
@@ -568,7 +568,7 @@ add(
         <p class="kicker">Contact</p>
         <h1>Start with the public channel.</h1>
         <p class="lede">AMICOR HEALTH ISF LLC is a Minnesota company. For product, partnership, and review inquiries, use the Early Access form. This page does not publish a street address, personal inbox, or other private founder details.</p>
-        <p class="notice">Public lead email is not connected on this website yet. Submissions stay on the visitor’s device until an approved intake endpoint is configured.</p>
+        <p class="notice">Use the Early Access form to reach AMICOR. A success message means the inquiry was stored for AMICOR. This page does not publish a public inbox address.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="/early-access/">Open Early Access form</a>
           <a class="btn btn-ghost" href="/about/">About AMICOR</a>
@@ -599,7 +599,7 @@ add(
       <div class="wrap grid grid-2">
         <article class="card"><h2>Who we are</h2><p>The public brand is AMICOR. The legal operator of this site is AMICOR HEALTH ISF LLC, Minnesota, United States. This page does not publish a street address.</p></article>
         <article class="card"><h2>What this site collects</h2><p>The Early Access form may collect name, company, email, optional phone, industry, company size, product interest, a message, a consent flag, and a timestamp. That is business-contact information, not clinical data.</p></article>
-        <article class="card"><h2>How it is stored today</h2><p>Until an approved intake endpoint is connected, submissions stay in the visitor’s browser storage. AMICOR is not emailed from the public page. If a later HTTPS endpoint is enabled, the same fields may be forwarded to an AMICOR business inbox or admin lead store.</p></article>
+        <article class="card"><h2>How it is stored today</h2><p>When the Early Access form succeeds, the inquiry is stored in an AMICOR-owned Cloudflare lead store. An optional inbox webhook may be added later. Browser storage is used only if live delivery fails.</p></article>
         <article class="card"><h2>What we do not claim</h2><p>This draft does not claim HIPAA compliance, medical-device compliance, sale of personal information, or that a live customer database already exists.</p></article>
       </div>
     </section>

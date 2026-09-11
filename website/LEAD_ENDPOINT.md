@@ -1,6 +1,6 @@
 # Early Access lead endpoint (W3)
 
-Live lead collection is **disabled**. The Pages Function is deployed, but the Cloudflare project has no `LEAD_WEBHOOK_URL` secret. The public form does not contain secrets.
+Live lead collection stores validated inquiries in the AMICOR-owned Cloudflare KV namespace `AMICOR_LEADS`. Inbox webhook forwarding is optional and is not configured in W5. The public form does not contain secrets.
 
 ## Current public behavior
 

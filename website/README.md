@@ -1,4 +1,4 @@
-# AMICOR public website (Phase W4)
+# AMICOR public website (Phase W5)
 
 Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC** (Minnesota).
 
@@ -38,7 +38,7 @@ Prices on the Operations Agent page are **preliminary pricing / subject to chang
 
 ## Early Access form
 
-See `FORM.md` and `LEAD_ENDPOINT.md`. Live email intake is disabled. `formEndpoint` stays empty until `LEAD_WEBHOOK_URL` is set in the Cloudflare Pages dashboard.
+See `FORM.md` and `LEAD_ENDPOINT.md`. `formEndpoint` is `/api/leads`. Validated inquiries are stored in an AMICOR Cloudflare KV lead store. Inbox email forwarding is not configured yet.
 
 ## Legal drafts
 

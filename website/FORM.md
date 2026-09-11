@@ -1,18 +1,22 @@
-# Early Access form architecture (W4)
+# Early Access form architecture (W5)
 
 The public form does **not** contain SMTP passwords, API keys, or Stripe secrets.
 
 ## Current public behavior
 
-`formEndpoint` is empty because no `LEAD_WEBHOOK_URL` secret is configured on the Pages project.
+`formEndpoint` is `/api/leads`.
 
 1. Browser validates required fields, email format, and privacy consent.
-2. Honeypot field `company_website` is ignored as spam.
-3. The request is stored in `localStorage` only.
-4. The success message states that no email was sent.
+2. Honeypot field `company_website` is not sent as a real lead.
+3. A success message is shown only after `POST /api/leads` returns 2xx.
+4. If delivery fails, the page says AMICOR did not receive the request and saves a local fallback.
 
-## Prepared backend
+## Destination
 
-`POST /api/leads` is deployed as a Cloudflare Pages Function. Without `LEAD_WEBHOOK_URL` it returns `503 lead_delivery_disabled`. See `LEAD_ENDPOINT.md`.
+Validated leads are stored in the AMICOR Cloudflare KV namespace bound as `AMICOR_LEADS`. An optional `LEAD_WEBHOOK_URL` secret can later forward a copy to an inbox webhook. That secret is not set in W5.
 
-Do not set `formEndpoint` to `/api/leads` until that secret exists. Otherwise the page would attempt live delivery that is still disabled.
+List stored leads (owner only):
+
+```powershell
+wrangler kv key list --namespace-id <AMICOR_LEADS id> --remote
+```

@@ -106,7 +106,7 @@
       product: data.product,
       message: data.message.trim(),
       consent: true,
-      source: "amicor-public-website-w4"
+      source: "amicor-public-website-w5"
     };
 
     function saveLocal() {
@@ -120,22 +120,26 @@
       localStorage.setItem("amicor-early-access", JSON.stringify(submissions));
     }
 
-    function finish(localOnly) {
-      saveLocal();
+    function finishDelivered() {
       form.reset();
       if (product && params.get("product")) product.value = params.get("product");
       show(success, true);
       if (success) {
-        success.textContent = localOnly
-          ? "Request saved on this device. No email was sent because a live form endpoint is not configured."
-          : "Request received. AMICOR will follow up through the configured intake channel.";
+        success.textContent = "Thank you. Your request was sent to AMICOR.";
         success.focus();
       }
     }
 
     var endpoint = (config.formEndpoint || "").trim();
     if (!endpoint) {
-      finish(true);
+      saveLocal();
+      form.reset();
+      if (product && params.get("product")) product.value = params.get("product");
+      show(success, true);
+      if (success) {
+        success.textContent = "Request saved on this device only. It was not sent to AMICOR.";
+        success.focus();
+      }
       return;
     }
 
@@ -146,12 +150,12 @@
       body: JSON.stringify(payload)
     }).then(function (response) {
       if (!response.ok) throw new Error("endpoint");
-      finish(false);
+      finishDelivered();
     }).catch(function () {
       saveLocal();
       show(errorBox, true);
       if (errorBox) {
-        errorBox.textContent = "The live intake channel was unavailable. Your request was saved on this device as a fallback.";
+        errorBox.textContent = "AMICOR did not receive this request. It was saved on this device only.";
       }
     }).finally(function () {
       if (submit) submit.disabled = false;

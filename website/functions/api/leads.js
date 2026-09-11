@@ -37,6 +37,10 @@ function plain(value, max) {
     .slice(0, max);
 }
 
+function tooLong(value, max) {
+  return String(value || "").length > max;
+}
+
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
@@ -80,6 +84,12 @@ export async function onRequest(context) {
     return json(204, { ok: true });
   }
 
+  for (const field of Object.keys(LIMITS)) {
+    if (tooLong(raw[field], LIMITS[field])) {
+      return json(400, { ok: false, error: "field_too_long" });
+    }
+  }
+
   const payload = {
     receivedAt: new Date().toISOString(),
     name: plain(raw.name, LIMITS.name),
@@ -91,10 +101,10 @@ export async function onRequest(context) {
     product: plain(raw.product, LIMITS.product),
     message: plain(raw.message, LIMITS.message),
     consent: raw.consent === true || raw.consent === "yes",
-    source: "amicor-public-website-w4",
+    source: "amicor-public-website-w5",
   };
 
-  if (!payload.name || !payload.company || !payload.industry || !payload.message) {
+  if (!payload.name || !payload.company || !payload.industry || !payload.companySize || !payload.message) {
     return json(400, { ok: false, error: "missing_fields" });
   }
   if (!validEmail(payload.email)) {
@@ -107,28 +117,34 @@ export async function onRequest(context) {
     return json(400, { ok: false, error: "consent_required" });
   }
 
-  const destination = (env.LEAD_WEBHOOK_URL || "").trim();
-  if (!destination) {
+  const store = env.AMICOR_LEADS;
+  const webhook = (env.LEAD_WEBHOOK_URL || "").trim();
+  if (!store && !webhook) {
     return json(503, {
       ok: false,
       error: "lead_delivery_disabled",
-      message: "No approved lead destination is configured. Frontend should keep the local fallback.",
     });
   }
 
-  const headers = { "Content-Type": "application/json" };
-  if (env.LEAD_WEBHOOK_TOKEN) {
-    headers.Authorization = `Bearer ${env.LEAD_WEBHOOK_TOKEN}`;
+  if (store) {
+    const id = crypto.randomUUID();
+    await store.put(`lead:${payload.receivedAt}:${id}`, JSON.stringify(payload));
   }
 
-  const forwarded = await fetch(destination, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  if (!forwarded.ok) {
-    return json(502, { ok: false, error: "delivery_failed" });
+  if (webhook) {
+    const headers = { "Content-Type": "application/json" };
+    if (env.LEAD_WEBHOOK_TOKEN) {
+      headers.Authorization = `Bearer ${env.LEAD_WEBHOOK_TOKEN}`;
+    }
+    const forwarded = await fetch(webhook, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!forwarded.ok) {
+      return json(502, { ok: false, error: "delivery_failed" });
+    }
   }
-  return json(202, { ok: true });
+
+  return json(202, { ok: true, stored: Boolean(store) });
 }
