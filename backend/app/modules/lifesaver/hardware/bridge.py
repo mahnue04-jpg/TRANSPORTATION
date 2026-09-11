@@ -10,6 +10,7 @@ from app.modules.lifesaver.hardware.adapters import (
     physical_pi_adapter,
     raspberry_pi_adapter,
 )
+from app.modules.lifesaver.hardware.hardware_mode import local_pi_enabled
 from app.modules.lifesaver.hardware.registry import DEVICE_HOME_HUB
 
 
@@ -29,7 +30,7 @@ def adapter_type_for(device: Any, requested: str | None = None, command: str | N
         if named in {"local_lan", "lan"}:
             return "local_lan"
         if named in {"local_pi", "physical_pi"}:
-            return "local_pi"
+            return "local_pi" if local_pi_enabled() else "simulated"
         if named in {"raspberry_pi", "pi", "mock_pi"}:
             return "raspberry_pi"
         return "simulated"
@@ -38,7 +39,7 @@ def adapter_type_for(device: Any, requested: str | None = None, command: str | N
     if named in {"local_lan", "lan"}:
         return "local_lan"
     if named in {"local_pi", "physical_pi"}:
-        return "local_pi"
+        return "local_pi" if local_pi_enabled() else "simulated"
     if named in {"raspberry_pi", "pi", "mock_pi"}:
         return "raspberry_pi"
     return "simulated"

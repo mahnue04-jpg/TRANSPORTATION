@@ -409,3 +409,28 @@ nav.tabs button[aria-current="page"] {
 .prototype-test-panel .hub-stop {
   grid-column: 1 / -1;
 }
+
+.digital-twin,
+.diagnostics-panel,
+.setup-wizard,
+.emulator-faults {
+  overflow-wrap: anywhere;
+}
+
+.setup-wizard ol {
+  padding-left: 1.2rem;
+}
+
+.setup-wizard button,
+.emulator-faults button,
+.diagnostics-panel button {
+  min-height: var(--ls-tap);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--ls-focus);
+  outline-offset: 2px;
+}

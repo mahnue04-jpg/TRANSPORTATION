@@ -294,10 +294,18 @@
           "<div class='meta'>" + escapeHtml(card.kind) + " · " + escapeHtml(card.status || "") + "</div>" +
           "<p>Why: " + escapeHtml(card.why) + "</p>" +
           (card.needs_human_review ? "<span class='badge'>Needs human review</span>" : "") +
-          (card.kind === "safety" ? "<span class='badge'>SIMULATION</span><p class='meta'>Emergency services contacted: no. This is not a diagnosis.</p>" : "") +
+          (card.kind === "safety" ? "<span class='badge'>SIMULATION</span><p class='meta'>Possible safety event detected. Human review required. Emergency services contacted: no. This is not a diagnosis.</p>" : "") +
           (card.kind === "safety" && card.status === "needs_human_review" && card.resource_id
             ? "<div class='actions'><button type='button' data-ack-safety='" + escapeHtml(card.resource_id) +
-              "'>Confirm local review</button></div>"
+              "'>Acknowledge</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(card.resource_id) +
+              "' data-review-status='FALSE_ALARM'>Mark false alarm</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(card.resource_id) +
+              "' data-review-status='RESOLVED'>Resolve</button>" +
+              "<button type='button' class='secondary' data-view='devices'>View device</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(card.resource_id) +
+              "' data-review-status='ESCALATION_SIMULATED'>Simulate escalation</button></div>" +
+              "<p class='meta'>SIMULATION ONLY — NO EMERGENCY SERVICE CONTACT</p>"
             : "") +
           "</article>";
       }).join("") || "<p class='meta'>No coordination items for this filter.</p>",
@@ -589,6 +597,109 @@
     ].join("");
   }
 
+  function renderTwin(twin) {
+    if (!twin) return "";
+    const id = twin.identity || {};
+    const motor = twin.motor || {};
+    const cam = twin.camera || {};
+    const mic = twin.microphone || {};
+    const hb = twin.heartbeat || {};
+    const offline = twin.offline_banner
+      ? "<p class='privacy-banner'><strong>" + escapeHtml(twin.offline_banner) + "</strong></p>"
+      : "";
+    return [
+      "<section class='card digital-twin' aria-label='Home Hub digital twin'>",
+      "<h2>Home Hub digital twin</h2>",
+      "<p class='sim-badge'><strong>" + escapeHtml(twin.simulation_badge || "SIMULATION") + "</strong></p>",
+      "<p class='meta'>NOT CONNECTED TO REAL HARDWARE · agent " + escapeHtml(twin.agent_version || "") + "</p>",
+      offline,
+      "<div class='device-status-grid'>",
+      "<p><strong>Connected: " + escapeHtml(twin.connected ? "Connected" : "Disconnected") + "</strong></p>",
+      "<p><strong>Paired: " + escapeHtml(twin.paired ? "Paired" : "Unpaired") + "</strong></p>",
+      "<p><strong>Device ID: " + escapeHtml(id.device_id || "n/a") + "</strong></p>",
+      "<p><strong>Firmware: " + escapeHtml(twin.firmware_version || "n/a") + "</strong></p>",
+      "<p><strong>IP / host: " + escapeHtml(twin.ip_host || "local") + "</strong></p>",
+      "<p><strong>Latency: " + escapeHtml(String(hb.latency_ms == null ? "n/a" : hb.latency_ms)) + " ms</strong></p>",
+      "<p><strong>Last seen: " + escapeHtml(hb.last_seen || "never") + "</strong></p>",
+      "<p><strong>Camera: " + escapeHtml((cam.state || "off").toUpperCase()) + "</strong></p>",
+      "<p><strong>Microphone: " + escapeHtml((mic.state || "off").toUpperCase()) + "</strong></p>",
+      "<p><strong>Speaker: " + escapeHtml((twin.speaker && twin.speaker.available) ? "ready" : "unavailable") + "</strong></p>",
+      "<p class='privacy-state'><strong>Privacy: " + escapeHtml(twin.privacy_mode ? "ON" : "OFF") + "</strong></p>",
+      "<p><strong>Current angle: " + escapeHtml(String(motor.current_angle == null ? "n/a" : motor.current_angle)) + "°</strong></p>",
+      "<p><strong>Requested angle: " + escapeHtml(String(motor.requested_angle == null ? "n/a" : motor.requested_angle)) + "°</strong></p>",
+      "<p><strong>Motor: " + escapeHtml(motor.motor_state || "IDLE") + "</strong></p>",
+      "<p><strong>Temp: " + escapeHtml(String((twin.thermal && twin.thermal.temperature_c) || "n/a")) + " C</strong></p>",
+      "<p><strong>Power: " + escapeHtml((twin.power && twin.power.ac) ? "AC" : "battery") + "</strong></p>",
+      "<p><strong>Safety event: " + escapeHtml(twin.safety_event_status || "none") + "</strong></p>",
+      "<p><strong>Last command: " + escapeHtml(twin.last_command || "none") + "</strong></p>",
+      "<p><strong>Command outcome: " + escapeHtml(twin.last_outcome || "none") + "</strong></p>",
+      "<p><strong>Last acknowledgement: " + escapeHtml(String(twin.last_acknowledgement || "none")) + "</strong></p>",
+      "</div></section>"
+    ].join("");
+  }
+
+  function renderDiagnostics(twin, selfTest) {
+    const parts = (selfTest && selfTest.components) || {};
+    const keys = ["agent", "network", "camera", "microphone", "speaker", "motor", "rotation_calibration", "sensors", "privacy_switch", "stop_button", "power", "temperature"];
+    return [
+      "<section class='card diagnostics-panel'><h2>HOME HUB DIAGNOSTICS</h2>",
+      "<p class='meta'>Simulation only. Agent " + escapeHtml((twin && twin.agent_version) || "0.1.0-dev") + ".</p>",
+      "<p><strong>Overall: " + escapeHtml((selfTest && selfTest.overall) || "not run") + "</strong></p>",
+      "<p><strong>Last heartbeat: " + escapeHtml(((twin && twin.heartbeat) || {}).last_heartbeat || "n/a") + "</strong></p>",
+      "<p><strong>Last command: " + escapeHtml((twin && twin.last_command) || "none") + "</strong></p>",
+      "<p><strong>Last error: " + escapeHtml((twin && twin.last_error) || "none") + "</strong></p>",
+      "<ul>" + keys.map(function (name) {
+        return "<li><strong>" + escapeHtml(name) + ":</strong> " + escapeHtml(parts[name] || "n/a") + "</li>";
+      }).join("") + "</ul>",
+      "<div class='actions'><button type='button' data-agent-self-test='1'>Run self test</button></div>",
+      "</section>"
+    ].join("");
+  }
+
+  function renderFaultPanel(available) {
+    if (!available) return "";
+    const faults = [
+      ["network_disconnect", "Network disconnect"],
+      ["network_reconnect", "Network reconnect"],
+      ["camera_failure", "Camera failure"],
+      ["mic_failure", "Mic failure"],
+      ["motor_obstruction", "Motor obstruction"],
+      ["motor_timeout", "Motor timeout"],
+      ["power_loss", "Power loss"],
+      ["low_battery", "Low battery"],
+      ["high_temperature", "High temperature"],
+      ["possible_fall", "Possible fall"],
+      ["device_tipped", "Device tipped"],
+      ["agent_restart", "Agent restart"]
+    ];
+    return [
+      "<section class='card emulator-faults'><h2>LOCAL SIMULATION controls</h2>",
+      "<p class='meta'>SIMULATION · LOCAL PROTOTYPE · NOT CONNECTED TO REAL HARDWARE</p>",
+      "<div class='hub-controls'>",
+      faults.map(function (row) {
+        return "<button type='button' class='secondary' data-agent-fault='" + row[0] + "'>" + row[1] + "</button>";
+      }).join(""),
+      "<button type='button' class='hub-stop' data-agent-physical-stop='1'>PHYSICAL STOP</button>",
+      "<button type='button' class='secondary' data-agent-privacy-switch='1'>Physical privacy switch</button>",
+      "<button type='button' data-agent-pair='1'>Pair emulator</button>",
+      "<button type='button' class='secondary' data-agent-demo='1'>Prototype demo mode</button>",
+      "</div></section>"
+    ].join("");
+  }
+
+  function renderWizard(wizard) {
+    const steps = (wizard && wizard.steps) || [];
+    return [
+      "<section class='card setup-wizard'><h2>Home Hub setup wizard</h2>",
+      "<p class='meta'>Local prototype only. Reusable when a physical Pi arrives.</p>",
+      "<ol>" + steps.map(function (name, idx) {
+        return "<li><button type='button' class='secondary' data-wizard-step='" + (idx + 1) + "'>" +
+          escapeHtml((idx + 1) + ". " + name) + "</button></li>";
+      }).join("") + "</ol>",
+      "</section>"
+    ].join("");
+  }
+
   function renderCarControls(device) {
     return [
       "<div class='hub-controls'>",
@@ -618,6 +729,8 @@
       ? await api("/api/lifesaver/devices/" + encodeURIComponent(home.id) + "/events").catch(function () { return []; })
       : [];
     const hardwareMode = await api("/api/lifesaver/devices/hardware-mode").catch(function () { return { mode: "mock", prototype_panel_available: true }; });
+    const twin = await api("/api/lifesaver/home-hub-agent/twin").catch(function () { return null; });
+    const wizard = await api("/api/lifesaver/home-hub-agent/wizard").catch(function () { return { steps: [] }; });
     const commands = [].concat(homeCommands || [], carCommands || []).slice(0, 12);
     document.getElementById("view-devices").innerHTML = [
       "<section class='card' id='devices-panel'><h2>Devices</h2>",
@@ -659,6 +772,10 @@
         : "<p class='meta'>No Home Hub yet. Create a simulated hub to practice local controls.</p>",
       "</section>",
       renderPrototypeTest(home, hardwareMode),
+      renderTwin(twin),
+      renderFaultPanel(hardwareMode && hardwareMode.prototype_panel_available),
+      renderDiagnostics(twin, twin && twin.self_test),
+      renderWizard(wizard),
       "<section class='card hub-card hub-card-car'><h2>Car Hub</h2>",
       car
         ? "<p class='sim-badge'><strong>SIMULATION</strong></p>" +
@@ -692,7 +809,10 @@
               "<button type='button' class='secondary' data-review-safety='" + escapeHtml(row.id) +
               "' data-review-status='FALSE_ALARM'>False alarm</button>" +
               "<button type='button' class='secondary' data-review-safety='" + escapeHtml(row.id) +
-              "' data-review-status='RESOLVED'>Resolve</button></div>"
+              "' data-review-status='RESOLVED'>Resolve</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(row.id) +
+              "' data-review-status='ESCALATION_SIMULATED'>Simulate escalation</button></div>" +
+              "<p class='meta'>SIMULATION ONLY — NO EMERGENCY SERVICE CONTACT</p>"
             : "") + "</li>";
       }),
       "</section>",
@@ -962,6 +1082,50 @@
       if (target.dataset.pairUnpair) {
         await api("/api/lifesaver/devices/pairings/" + target.dataset.pairUnpair + "/unpair", { method: "POST" });
         await loadDevices();
+      }
+      if (target.dataset.agentFault) {
+        await api("/api/lifesaver/home-hub-agent/faults", {
+          method: "POST",
+          body: JSON.stringify({ kind: target.dataset.agentFault }),
+        });
+        await loadDevices();
+        showBanner("Local emulator fault applied. Emergency services contacted: no.", "ok");
+      }
+      if (target.dataset.agentSelfTest) {
+        await api("/api/lifesaver/home-hub-agent/self-test", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.agentPair) {
+        const paired = await api("/api/lifesaver/home-hub-agent/pair", { method: "POST" });
+        if (paired && paired.device_token) {
+          state.agentToken = paired.device_token;
+        }
+        await loadDevices();
+        showBanner("Emulator paired. Token is kept in memory only.", "ok");
+      }
+      if (target.dataset.agentPhysicalStop) {
+        await api("/api/lifesaver/home-hub-agent/physical-stop", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.agentPrivacySwitch) {
+        await api("/api/lifesaver/home-hub-agent/privacy-switch", {
+          method: "POST",
+          body: JSON.stringify({ pressed: true }),
+        });
+        await loadDevices();
+      }
+      if (target.dataset.wizardStep) {
+        await api("/api/lifesaver/home-hub-agent/wizard/step", {
+          method: "POST",
+          body: JSON.stringify({ step: Number(target.dataset.wizardStep) }),
+        });
+        await loadDevices();
+      }
+      if (target.dataset.agentDemo) {
+        await api("/api/lifesaver/home-hub-agent/pair", { method: "POST" });
+        await api("/api/lifesaver/home-hub-agent/self-test", { method: "POST" });
+        await loadDevices();
+        showBanner("PROTOTYPE SIMULATION ready. Emergency services were not contacted.", "ok");
       }
       if (target.dataset.reviewSafety) {
         await api("/api/lifesaver/devices/events/" + target.dataset.reviewSafety + "/review", {
