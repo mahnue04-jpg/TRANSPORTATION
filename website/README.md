@@ -1,14 +1,14 @@
-# AMICOR public website (Phase W5)
+# AMICOR public website (Phase W6)
 
 Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC** (Minnesota).
 
 This folder is independent of Health ISF production code, Stripe, Delivery execution, Freight, Nova Core, Driver 001, and the Autonomous Operations Agent backend.
 
-## Live preview
+## Official public URL
 
-- Stable project URL: https://amicor-public.pages.dev
-- Canonical / Open Graph / sitemap origin: `https://amicor-public.pages.dev`
-- Unique per-deploy URLs (`https://<hash>.amicor-public.pages.dev`) also work
+- **Official domain:** https://getamicor.com
+- Canonical / Open Graph / sitemap origin: `https://getamicor.com`
+- Underlying Cloudflare Pages host (not customer-facing): https://amicor-public.pages.dev
 
 ## Local run
 
@@ -27,7 +27,7 @@ python website/_generate.py
 
 | Surface | Status |
 |---|---|
-| This public website | LIVE PREVIEW on Cloudflare Pages |
+| This public website | LIVE at getamicor.com |
 | Autonomous Operations Agent | EARLY ACCESS / IN DEVELOPMENT |
 | AMICOR Health | IN DEVELOPMENT |
 | AMICOR Deliver | COMING SOON / IN DEVELOPMENT |
@@ -46,8 +46,8 @@ See `FORM.md` and `LEAD_ENDPOINT.md`. `formEndpoint` is `/api/leads`. Validated 
 
 ## Hosting
 
-Cloudflare Pages free tier. Estimated cost: **$0**. See `DEPLOY.md`.
+Cloudflare Pages free tier plus the owner-purchased `getamicor.com` domain. See `DEPLOY.md`.
 
 ## Paid dependencies
 
-None.
+None in the website codebase. Domain registration is paid separately by the owner.

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-# Stable Cloudflare Pages preview host. Unique per-deploy URLs change; do not use a custom domain yet.
-ORIGIN = "https://amicor-public.pages.dev"
+# Official public origin. Cloudflare Pages host amicor-public.pages.dev remains the underlying project host only.
+ORIGIN = "https://getamicor.com"
 
 NAV = [
     ("/", "Home"),

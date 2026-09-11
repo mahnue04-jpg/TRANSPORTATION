@@ -4,8 +4,9 @@ Preferred host: **Cloudflare Pages free tier**.
 Fallback: **GitHub Pages**.  
 Cost: **$0**. Do not buy a domain in this phase.
 
-W4 preview project: `amicor-public`  
-Stable URL: https://amicor-public.pages.dev
+W6 official domain: https://getamicor.com  
+Cloudflare Pages project: `amicor-public`  
+Underlying host only: https://amicor-public.pages.dev
 
 Redeploy from this folder after website changes:
 

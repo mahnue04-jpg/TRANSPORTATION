@@ -12,7 +12,5 @@ RDAP and public price lists are **signals only**. They do not reserve a name or 
 | `getamicor.com` | W3 RDAP had no registration record; re-confirm at checkout | about $10–$20 | about $12–$25 | Familiar .com, lowest long-term cost | Longer to say and type |
 | `amicor.com` | **Registered** | n/a | n/a | Ideal if it were free | Not available |
 
-**Primary recommendation:** `amicor.io`  
-**Backup:** `getamicor.com`
-
-Do not purchase in W4. After a name is chosen, attach it to the `amicor-public` Pages project and then replace the `pages.dev` canonical.
+**Chosen official domain:** `getamicor.com` (purchased and connected in W6).  
+Do not buy another domain. `amicor-public.pages.dev` remains the underlying Pages host only.

@@ -1,13 +1,15 @@
-# Domain email plan (do not purchase in W5)
+# Domain email plan
 
-After a custom domain is bought in a later phase, create these mailboxes or aliases on that domain. If the domain changes, move the same names with it.
+Official domain: **getamicor.com**. Mailboxes are not configured in W6.
+
+Recommended aliases when Email Routing is approved later:
 
 | Address | Intended use |
 |---|---|
-| info@ | General public inquiries |
-| support@ | Product and early-access follow-up |
-| sales@ | Software and partnership commercial conversations |
-| partners@ | Insurers, advisors, and operating partners |
-| privacy@ | Privacy and legal-draft questions |
+| info@getamicor.com | General public inquiries |
+| support@getamicor.com | Product and early-access follow-up |
+| sales@getamicor.com | Software and partnership commercial conversations |
+| partners@getamicor.com | Insurers, advisors, and operating partners |
+| privacy@getamicor.com | Privacy and legal-draft questions |
 
-Do not point these at a founder personal address on the public website. Use the registrar or Cloudflare Email Routing after the domain exists. No paid mailbox is configured in W5.
+Do not publish a founder personal address on the public website.
