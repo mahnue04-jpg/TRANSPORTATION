@@ -1,12 +1,10 @@
-# AMICOR public website (Phase W2)
+# AMICOR public website (Phase W3)
 
-Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC**.
+Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC** (Minnesota).
 
 This folder is independent of Health ISF production code, Stripe, Delivery execution, Freight, Nova Core, Driver 001, and the Autonomous Operations Agent backend.
 
 ## Local run
-
-From the repository root:
 
 ```bash
 cd website
@@ -21,90 +19,43 @@ Regenerate HTML after editing `_generate.py`:
 python website/_generate.py
 ```
 
-No Node packages, accounts, or paid tools are required.
-
 ## Canonical URL
 
-Generated pages, `sitemap.xml`, and `robots.txt` use the placeholder origin `https://amicor.local`.
+Pages, `sitemap.xml`, and `robots.txt` still use the placeholder `https://amicor.local` because no public preview host exists yet.
 
-When a public host exists:
+When a `*.pages.dev` or `*.github.io` URL exists:
 
 1. Set `ORIGIN` in `_generate.py` to that URL (no trailing slash).
-2. Set `window.AMICOR_SITE.siteOrigin` in `assets/js/site-config.js` to the same URL.
+2. Set `window.AMICOR_SITE.siteOrigin` in `assets/js/site-config.js`.
 3. Run `python website/_generate.py`.
 
-Do not purchase a domain in this phase.
+Do not purchase a domain in this phase. See `DOMAINS.md` and `DEPLOY.md`.
 
 ## Content-status matrix
 
 | Surface | Status |
 |---|---|
-| This public website | LIVE (when you later host it) |
+| This public website | READY TO HOST (not publicly deployed in W3) |
 | Autonomous Operations Agent | EARLY ACCESS / IN DEVELOPMENT |
 | AMICOR Health | IN DEVELOPMENT |
 | AMICOR Deliver | COMING SOON / IN DEVELOPMENT |
 | Lifesaver AI Care Cloud | IN DEVELOPMENT |
 | Home Hub | FUTURE HARDWARE / IN DEVELOPMENT |
 
-Prices on the Operations Agent page are **preliminary pricing / subject to change before commercial launch**. There is no checkout.
-
-## Routes
-
-- `/`
-- `/health/`
-- `/deliver/`
-- `/technologies/`
-- `/technologies/autonomous-operations-agent/`
-- `/lifesaver/`
-- `/home-hub/`
-- `/about/`
-- `/early-access/`
-- `/contact/`
-- `/privacy/`
-- `/terms/`
-- `/software-terms/`
-- `/accessibility/`
+Prices on the Operations Agent page are **preliminary pricing / subject to change**. There is no checkout.
 
 ## Early Access form
 
-See `FORM.md`. Default behavior is validated localStorage fallback. A live POST happens only if `formEndpoint` is set to an approved HTTPS URL. Secrets must not be placed in frontend files.
+See `FORM.md` and `LEAD_ENDPOINT.md`. Live email intake is disabled. `formEndpoint` stays empty until an approved destination secret exists.
 
-## Deployment (do not do this until approved)
+## Legal drafts
 
-### Cloudflare Pages (preferred)
+`/privacy/`, `/terms/`, `/software-terms/`, and `/accessibility/` are business drafts with attorney-review notices. They are not certifications, HIPAA statements, SLAs, or executed contracts.
 
-1. Create a free Cloudflare account.
-2. Pages → Create project → connect this GitHub repository when you are ready to publish.
-3. Project settings:
-   - Build command: *(leave empty)*
-   - Build output directory: `website`
-4. After the first preview URL exists, replace `https://amicor.local` as described under Canonical URL.
+## Hosting
 
-Estimated recurring hosting cost: **$0** on the Cloudflare Pages free tier.
-
-### GitHub Pages
-
-1. Repository Settings → Pages.
-2. Source: Deploy from a branch.
-3. Folder: `/website` if GitHub allows a subfolder; otherwise copy `website/` contents to `/docs` or a `gh-pages` branch.
-4. Update sitemap/canonical URLs to the `*.github.io` address.
-
-Estimated recurring hosting cost: **$0** on GitHub Pages for a public or qualifying repo.
-
-## Domain connection (later)
-
-Do **not** buy a domain for this phase.
-
-When a domain exists:
-
-1. Cloudflare: Pages project → Custom domains → add the hostname.
-2. At the registrar, point the domain to Cloudflare nameservers or add the CNAME Cloudflare shows.
-3. GitHub Pages: add the same hostname under Pages → Custom domain, then create the DNS records GitHub shows.
+Preferred: Cloudflare Pages free tier. Fallback: GitHub Pages. Estimated cost: **$0**. Owner authentication is required before a preview URL can exist.
 
 ## Paid dependencies
 
-None. No website builder, no paid font service, no paid form vendor.
-
-## Security
-
-Do not add Stripe keys, API secrets, SMTP passwords, database URLs, or customer data to this folder.
+None.

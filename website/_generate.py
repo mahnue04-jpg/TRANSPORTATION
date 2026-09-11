@@ -1,4 +1,4 @@
-"""Generate the static AMICOR W1 public website. Output is plain HTML."""
+"""Generate the static AMICOR public website. Output is plain HTML."""
 
 from __future__ import annotations
 
@@ -501,7 +501,7 @@ add(
     "/early-access/",
     "early-access/index.html",
     "AMICOR Early Access and Partners",
-    "Request AMICOR early access or partnership conversations for software, health technology, delivery, or future hardware. Validated form with local fallback until a live intake endpoint is approved.",
+    "Request AMICOR early access or partnership conversations. Validated form with local fallback. Live email intake is not enabled.",
     "/early-access/",
     1,
     """
@@ -546,7 +546,7 @@ add(
           <label>Message <textarea name="message" rows="5" required></textarea></label>
           <label class="consent">
             <input name="consent" type="checkbox" value="yes" required>
-            <span>I understand this is not a purchase, I acknowledge the <a href="/privacy/">Privacy Policy</a> placeholder, and I consent to AMICOR storing this inquiry if a live intake channel is later connected.</span>
+            <span>I understand this is not a purchase, I have read the <a href="/privacy/">Privacy Policy</a> draft, I will not submit medical records or other sensitive health information, and I consent to AMICOR storing this business inquiry if a live intake channel is later connected.</span>
           </label>
           <button class="btn btn-primary" type="submit">Submit request</button>
         </form>
@@ -567,7 +567,8 @@ add(
       <div class="wrap">
         <p class="kicker">Contact</p>
         <h1>Start with the public channel.</h1>
-        <p class="lede">AMICOR HEALTH ISF LLC is based in Minnesota, United States. For product, partnership, and review inquiries, use the Early Access form. This page does not publish private founder contact details.</p>
+        <p class="lede">AMICOR HEALTH ISF LLC is a Minnesota company. For product, partnership, and review inquiries, use the Early Access form. This page does not publish a street address, personal inbox, or other private founder details.</p>
+        <p class="notice">Public lead email is not connected on this website yet. Submissions stay on the visitor’s device until an approved intake endpoint is configured.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="/early-access/">Open Early Access form</a>
           <a class="btn btn-ghost" href="/about/">About AMICOR</a>
@@ -578,32 +579,121 @@ add(
 )
 
 
-def legal(title: str, path: str, filename: str, current: str, heading: str) -> None:
-    add(
-        path,
-        filename,
-        f"{title} — AMICOR",
-        f"{title} placeholder for the AMICOR public website. Not a complete legal agreement.",
-        current,
-        1,
-        f"""
-        <section class="hero">
-          <div class="wrap">
-            <p class="kicker">Legal placeholder</p>
-            <h1>{heading}</h1>
-            <p class="lede">This page is a placeholder. It is not a complete privacy policy, contract, or accessibility statement. AMICOR HEALTH ISF LLC has not made legal promises on this page.</p>
-            <p>A reviewed version will replace this text before public commercialization claims expand. Until then, do not treat this page as governing terms.</p>
-            <p><a href="/contact/">Contact</a></p>
-          </div>
-        </section>
-        """,
-    )
+add(
+    "/privacy/",
+    "privacy/index.html",
+    "Privacy Policy — AMICOR",
+    "Business-draft privacy notice for the AMICOR public website. Not attorney-approved. AMICOR HEALTH ISF LLC, Minnesota.",
+    "/privacy/",
+    1,
+    """
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">Business draft</p>
+        <h1>Privacy Policy</h1>
+        <p class="lede">This is a business draft for AMICOR HEALTH ISF LLC, a Minnesota company. It is not attorney-approved and is not a complete privacy program, HIPAA statement, or certification.</p>
+        <p class="notice">Legal review is still required before this page is treated as governing terms. Do not submit medical records, diagnoses, insurance identifiers, or other sensitive health information through this website.</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap grid grid-2">
+        <article class="card"><h2>Who we are</h2><p>The public brand is AMICOR. The legal operator of this site is AMICOR HEALTH ISF LLC, Minnesota, United States. This page does not publish a street address.</p></article>
+        <article class="card"><h2>What this site collects</h2><p>The Early Access form may collect name, company, email, optional phone, industry, company size, product interest, a message, a consent flag, and a timestamp. That is business-contact information, not clinical data.</p></article>
+        <article class="card"><h2>How it is stored today</h2><p>Until an approved intake endpoint is connected, submissions stay in the visitor’s browser storage. AMICOR is not emailed from the public page. If a later HTTPS endpoint is enabled, the same fields may be forwarded to an AMICOR business inbox or admin lead store.</p></article>
+        <article class="card"><h2>What we do not claim</h2><p>This draft does not claim HIPAA compliance, medical-device compliance, sale of personal information, or that a live customer database already exists.</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap">
+        <h2>Cookies and analytics</h2>
+        <p>This static site does not add a third-party analytics or advertising pixel. The browser may store a menu state or form fallback locally.</p>
+        <h2>Questions</h2>
+        <p>Use the <a href="/early-access/">Early Access form</a> or the <a href="/contact/">Contact</a> page. Those channels are not a live inbox until lead delivery is enabled.</p>
+      </div>
+    </section>
+    """,
+)
 
+add(
+    "/terms/",
+    "terms/index.html",
+    "Terms of Service — AMICOR",
+    "Business-draft website terms for AMICOR HEALTH ISF LLC. Not attorney-approved. No SLA, refund, or launch warranty.",
+    "/terms/",
+    1,
+    """
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">Business draft</p>
+        <h1>Terms of Service</h1>
+        <p class="lede">These draft website terms describe use of the public AMICOR site operated by AMICOR HEALTH ISF LLC, Minnesota. They are not attorney-approved and are not a customer contract for transportation, delivery, software, or hardware.</p>
+        <p class="notice">Legal review is still required. This page does not create warranties, refund rights, uptime promises, SLAs, insurance coverage, or licensed-market rights.</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap grid grid-2">
+        <article class="card"><h2>Informational site</h2><p>This website describes products and initiatives at different stages. Status labels — Early Access, In Development, Coming Soon, and Future Hardware — limit what is available today.</p></article>
+        <article class="card"><h2>No commercial launch claim</h2><p>Using this site is not a booking, a delivery order, a software purchase, or a hardware sale. Preliminary prices are planning figures, not an offer to sell.</p></article>
+        <article class="card"><h2>Acceptable use</h2><p>Do not misuse the form, attempt to inject content, or submit sensitive health information. We may ignore or discard abusive submissions.</p></article>
+        <article class="card"><h2>As-is information</h2><p>Site content is provided as-is for public information. AMICOR does not warrant completeness, uninterrupted access, or fitness for a particular purpose on this page.</p></article>
+      </div>
+    </section>
+    """,
+)
 
-legal("Privacy Policy", "/privacy/", "privacy/index.html", "/privacy/", "Privacy Policy")
-legal("Terms of Service", "/terms/", "terms/index.html", "/terms/", "Terms of Service")
-legal("Software Terms", "/software-terms/", "software-terms/index.html", "/software-terms/", "Software Terms")
-legal("Accessibility", "/accessibility/", "accessibility/index.html", "/accessibility/", "Accessibility")
+add(
+    "/software-terms/",
+    "software-terms/index.html",
+    "Software Terms — AMICOR",
+    "Business-draft software terms for AMICOR Technologies early access. Not attorney-approved. Human approval required. No autonomous production execution.",
+    "/software-terms/",
+    1,
+    """
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">Business draft</p>
+        <h1>Software Terms</h1>
+        <p class="lede">This draft applies to public discussion of AMICOR Technologies software, including the Autonomous Operations Agent. It is not attorney-approved and is not an executed license.</p>
+        <p class="notice">Legal review is still required. There is no payment checkout on this website, no refund promise, no uptime SLA, and no grant of production execution rights.</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap grid grid-2">
+        <article class="card"><h2>Early Access / In Development</h2><p>The Autonomous Operations Agent is offered for supervised evaluation conversations only. It is not sold as unattended production execution.</p></article>
+        <article class="card"><h2>Human approval</h2><p>The intended loop is observe, recommend, human approval, verify, and audit. After a person approves, existing operational systems perform the action.</p></article>
+        <article class="card"><h2>Preliminary pricing</h2><p>Listed prices are preliminary and subject to change before commercial launch. Contact AMICOR is not an invoice.</p></article>
+        <article class="card"><h2>Not a medical device</h2><p>AMICOR software described here is not a diagnostic product, emergency service, or certified medical device. No regulatory-approval claim is made.</p></article>
+      </div>
+    </section>
+    """,
+)
+
+add(
+    "/accessibility/",
+    "accessibility/index.html",
+    "Accessibility — AMICOR",
+    "AMICOR accessibility goals for the public website. Business draft, not a WCAG certification.",
+    "/accessibility/",
+    1,
+    """
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">Business draft</p>
+        <h1>Accessibility</h1>
+        <p class="lede">AMICOR HEALTH ISF LLC aims to keep this public website usable with keyboard, screen readers, and common phone sizes. This page is a business draft, not a WCAG certification or legal accessibility audit.</p>
+        <p class="notice">Legal and accessibility review is still required. We do not claim certified conformance.</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap grid grid-2">
+        <article class="card"><h2>Current goals</h2><p>Skip link, labeled form fields, visible focus, heading order, 44-pixel tap targets, and text alternatives for the logo.</p></article>
+        <article class="card"><h2>Known limits</h2><p>Legal pages remain drafts. The status table may scroll horizontally on small screens. A live lead inbox is not connected yet.</p></article>
+        <article class="card"><h2>Reporting a barrier</h2><p>Describe the page and the barrier through the <a href="/early-access/">Early Access form</a>. Until live intake is enabled, that report stays on your device.</p></article>
+        <article class="card"><h2>What this is not</h2><p>This statement is not a guarantee, not an ADA legal opinion, and not a claim that every AMICOR product interface is covered.</p></article>
+      </div>
+    </section>
+    """,
+)
 
 
 def main() -> None:
@@ -634,7 +724,7 @@ def main() -> None:
     sitemap.append("</urlset>")
     (ROOT / "sitemap.xml").write_text("\n".join(sitemap) + "\n", encoding="utf-8")
     (ROOT / "robots.txt").write_text(
-        "User-agent: *\nAllow: /\nSitemap: https://amicor.local/sitemap.xml\n",
+        f"User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n",
         encoding="utf-8",
     )
     (ROOT / "404.html").write_text(
