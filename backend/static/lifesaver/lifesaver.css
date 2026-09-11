@@ -434,3 +434,13 @@ select:focus-visible {
   outline: 3px solid var(--ls-focus);
   outline-offset: 2px;
 }
+
+.connected-health-panel button,
+.connected-health-cards button {
+  min-height: var(--ls-tap);
+}
+
+.connected-health-panel,
+.connected-health-cards {
+  overflow-wrap: anywhere;
+}

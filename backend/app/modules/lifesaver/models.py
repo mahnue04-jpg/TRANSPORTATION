@@ -356,9 +356,10 @@ LIFESAVER_MODELS = (
     LifesaverAuditEvent,
 )
 
+from app.modules.lifesaver.connected_health.models import CONNECTED_HEALTH_MODELS
 from app.modules.lifesaver.hardware.models import HARDWARE_MODELS
 
-LIFESAVER_MODELS = LIFESAVER_MODELS + HARDWARE_MODELS
+LIFESAVER_MODELS = LIFESAVER_MODELS + HARDWARE_MODELS + CONNECTED_HEALTH_MODELS
 
 
 def ensure_lifesaver_schema() -> None:

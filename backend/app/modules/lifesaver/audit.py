@@ -34,6 +34,14 @@ _BLOCKED_METADATA_KEYS = frozenset({
     "webhook",
     "access_token",
     "refresh_token",
+    "result",
+    "result_text",
+    "diagnosis",
+    "specimen",
+    "lab_value",
+    "measurement",
+    "serial",
+    "device_token",
 })
 
 

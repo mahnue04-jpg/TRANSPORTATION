@@ -1,6 +1,13 @@
 """Product constants, consent keys, and non-clinical disclaimers."""
 from __future__ import annotations
 
+from app.modules.lifesaver.connected_health.constants import (
+    PHASE5_CONSENT_LABELS,
+    PHASE5_CONSENT_TYPES,
+    PHASE5_PERMISSION_LABELS,
+    PHASE5_PERMISSIONS,
+)
+
 PRODUCT_NAME = "Healthcare Technology Lifesaver AI Care Cloud"
 PRODUCT_VERSION = "v2"
 CONSENT_VERSION = "lifesaver-v2"
@@ -45,7 +52,7 @@ CONSENT_TYPES = (
     "simulated_device_ingest",
     "hardware_simulation",
     "video_session_simulation",
-)
+) + PHASE5_CONSENT_TYPES
 
 CONSENT_LABELS = {
     "care_cloud_use": "Use Lifesaver Care Cloud",
@@ -62,6 +69,7 @@ CONSENT_LABELS = {
     "simulated_device_ingest": "Enter simulated-device readings (not from a medical device)",
     "hardware_simulation": "Use simulated Home Hub and Car Hub controls (no real devices)",
     "video_session_simulation": "Request a local simulated video session (no live video provider)",
+    **PHASE5_CONSENT_LABELS,
 }
 
 READING_TYPES = frozenset({
@@ -137,7 +145,7 @@ CAREGIVER_PERMISSIONS = (
     "manage_tasks",
     "handoff",
     "view_devices",
-)
+) + PHASE5_PERMISSIONS
 
 DEFAULT_CAREGIVER_PERMISSIONS = (
     "view_today",
@@ -158,6 +166,7 @@ CAREGIVER_PERMISSION_LABELS = {
     "manage_tasks": "Manage shared tasks",
     "handoff": "Participate in handoffs",
     "view_devices": "View simulated Home Hub and Car Hub status",
+    **PHASE5_PERMISSION_LABELS,
 }
 
 CIRCLE_STATUSES = frozenset({"invited", "active", "revoked"})
@@ -202,4 +211,7 @@ CONSENT_FOR_FEATURE = {
     "device": "simulated_device_ingest",
     "hardware": "hardware_simulation",
     "video": "video_session_simulation",
+    "connected_devices": "connected_device_readings",
+    "home_tests": "home_test_status",
+    "result_documents": "laboratory_result_documents",
 }

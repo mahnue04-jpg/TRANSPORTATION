@@ -18,6 +18,9 @@
     { id: "manage_tasks", label: "Manage shared tasks" },
     { id: "handoff", label: "Participate in handoffs" },
     { id: "view_devices", label: "View simulated Home Hub and Car Hub status" },
+    { id: "view_connected_devices", label: "View simulated connected-health devices" },
+    { id: "view_home_tests", label: "View home-test kit status" },
+    { id: "view_result_documents", label: "View result-document references" },
   ];
   let state = {
     me: null,
@@ -176,6 +179,10 @@
     journal = await tryLoad("Journal", function () { return api("/api/lifesaver/journal" + memberQuery()); });
     try { transport = await api("/api/lifesaver/transport" + memberQuery()); } catch (err) { errors.push("Transport: " + err.message); }
     sos = await tryLoad("SOS", function () { return api("/api/lifesaver/sos"); });
+    const connectedDevices = await tryLoad("Connected devices", function () { return api("/api/lifesaver/connected-health/devices" + memberQuery()); });
+    const homeKits = await tryLoad("Home tests", function () { return api("/api/lifesaver/connected-health/kits" + memberQuery()); });
+    const resultDocs = await tryLoad("Results", function () { return api("/api/lifesaver/connected-health/results" + memberQuery()); });
+    const connectedMeta = await api("/api/lifesaver/connected-health/meta").catch(function () { return {}; });
 
     document.getElementById("view-care").innerHTML = [
       errors.length ? "<p class='card disclaimer'>" + escapeHtml(errors.join(" ")) + "</p>" : "",
@@ -253,6 +260,7 @@
       "<label>Device alias<input name='device_alias' value='local-simulator' /></label>",
       "<div class='actions'><button type='submit'>Save simulated device reading</button></div></form>",
       "</section>",
+      renderConnectedHealth(connectedDevices, homeKits, resultDocs, connectedMeta),
       "<section class='card'><h2>Transportation status</h2>",
       "<p>" + escapeHtml(transport ? transport.status_text : "Consent required to view transportation status.") + "</p>",
       "<p class='meta'>This interface does not dispatch production rides.</p>",
@@ -634,7 +642,87 @@
       "<p><strong>Last command: " + escapeHtml(twin.last_command || "none") + "</strong></p>",
       "<p><strong>Command outcome: " + escapeHtml(twin.last_outcome || "none") + "</strong></p>",
       "<p><strong>Last acknowledgement: " + escapeHtml(String(twin.last_acknowledgement || "none")) + "</strong></p>",
-      "</div></section>"
+      "</div>",
+      renderConnectedHealthCards(twin.connected_health_display),
+      "</section>"
+    ].join("");
+  }
+
+  function renderConnectedHealthCards(cards) {
+    const items = cards || [];
+    if (!items.length) {
+      return "<p class='meta'>No simulated connected-health status on this hub yet.</p>";
+    }
+    return "<div class='connected-health-cards'><h3>Connected health on this hub</h3><ul>" +
+      items.map(function (card) {
+        return "<li>" + escapeHtml(card) + "<div class='meta'>SIMULATION — NOT CONNECTED TO A REAL MEDICAL DEVICE</div></li>";
+      }).join("") + "</ul></div>";
+  }
+
+  function renderConnectedHealth(devices, kits, results, meta) {
+    const deviceOptions = ((meta && meta.device_types) || [
+      "blood_pressure_monitor", "pulse_oximeter", "thermometer", "weight_scale"
+    ]).map(function (name) {
+      return "<option value='" + escapeHtml(name) + "'>" + escapeHtml(name.replace(/_/g, " ")) + "</option>";
+    }).join("");
+    const kitOptions = ((meta && meta.test_categories) || [
+      "urine_collection_placeholder", "oral_swab_placeholder"
+    ]).map(function (name) {
+      return "<option value='" + escapeHtml(name) + "'>" + escapeHtml(name.replace(/_/g, " ")) + "</option>";
+    }).join("");
+    return [
+      "<section class='card connected-health-panel' id='connected-health'>",
+      "<h2>CONNECTED HEALTH</h2>",
+      "<p class='sim-badge'><strong>SIMULATION — NOT CONNECTED TO A REAL MEDICAL DEVICE</strong></p>",
+      "<p class='disclaimer'>" + escapeHtml((meta && meta.disclaimer) ||
+        "Lifesaver coordinates and stores user- or provider-supplied information. It does not diagnose or contact emergency services.") + "</p>",
+      "<h3>My Devices</h3>",
+      "<form id='cdev-form'><label>Device type<select name='device_type'>" + deviceOptions + "</select></label>",
+      "<label>Alias<input name='device_alias' value='Home monitor' /></label>",
+      "<div class='actions'><button type='submit'>Add / Simulate Device</button></div></form>",
+      renderList(devices, "No simulated connected devices yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.device_alias || row.device_type) + "</strong>" +
+          "<div class='meta'>Connection: " + escapeHtml(row.integration_status) +
+          " · quality " + escapeHtml(row.data_quality || "n/a") +
+          " · last4 " + escapeHtml(row.serial_last4 || "n/a") + "</div>" +
+          "<p class='meta'>SIMULATION — NOT CONNECTED TO A REAL MEDICAL DEVICE</p>" +
+          "<div class='actions'>" +
+          "<button type='button' data-cdev-pair='" + escapeHtml(row.id) + "'>Pair simulated</button>" +
+          "<button type='button' class='secondary' data-cdev-offline='" + escapeHtml(row.id) + "'>Mark offline</button>" +
+          "<button type='button' class='secondary' data-cdev-reading='" + escapeHtml(row.id) + "'>Simulate reading</button>" +
+          "</div></li>";
+      }),
+      "</section>",
+      "<section class='card connected-health-panel' id='home-tests'>",
+      "<h2>HOME TESTS</h2>",
+      "<p class='disclaimer'>Lifesaver coordinates kit status and stores user/provider supplied information. It is not performing laboratory testing or diagnosis.</p>",
+      "<form id='kit-form'><label>Test category<select name='test_category'>" + kitOptions + "</select></label>",
+      "<label>Lab / manufacturer<input name='manufacturer_or_lab' value='unspecified' /></label>",
+      "<div class='actions'><button type='submit'>Add / Simulate Kit</button></div></form>",
+      renderList(kits, "No home-test kits yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.test_category) + "</strong>" +
+          "<div class='meta'>Collection: " + escapeHtml(row.status) +
+          " · shipping " + escapeHtml(row.shipping_status || "none") + "</div>" +
+          "<div class='actions'>" +
+          "<button type='button' data-kit-next='" + escapeHtml(row.id) + "'>Advance status</button>" +
+          "<button type='button' class='secondary' data-kit-provider='" + escapeHtml(row.id) + "'>Share With Provider</button>" +
+          "<button type='button' class='secondary' data-kit-circle='" + escapeHtml(row.id) + "'>Share With Care Circle</button>" +
+          "</div></li>";
+      }),
+      "<h3>Results</h3>",
+      "<form id='result-form'><label>Document reference<input name='document_reference' value='ref-redacted' required /></label>",
+      "<div class='actions'><button type='submit'>Add result reference</button></div></form>",
+      renderList(results, "No result documents yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.review_status) + "</strong>" +
+          "<div class='meta'>source " + escapeHtml(row.source) + " · " + escapeHtml(row.document_reference) + "</div>" +
+          "<p class='meta'>Informational only. Not a diagnosis. Emergency services contacted: no.</p>" +
+          "<div class='actions'>" +
+          "<button type='button' data-result-ack='" + escapeHtml(row.id) + "'>Acknowledge</button>" +
+          "<button type='button' class='secondary' data-result-provider='" + escapeHtml(row.id) + "'>Share With Provider</button>" +
+          "<button type='button' class='secondary' data-result-circle='" + escapeHtml(row.id) + "'>Share With Care Circle</button>" +
+          "</div></li>";
+      }),
+      "</section>"
     ].join("");
   }
 
@@ -731,6 +819,10 @@
     const hardwareMode = await api("/api/lifesaver/devices/hardware-mode").catch(function () { return { mode: "mock", prototype_panel_available: true }; });
     const twin = await api("/api/lifesaver/home-hub-agent/twin").catch(function () { return null; });
     const wizard = await api("/api/lifesaver/home-hub-agent/wizard").catch(function () { return { steps: [] }; });
+    const hubHealth = await api("/api/lifesaver/connected-health/hub-summary" + memberQuery()).catch(function () { return null; });
+    if (twin && hubHealth && hubHealth.cards && hubHealth.cards.length) {
+      twin.connected_health_display = hubHealth.cards;
+    }
     const commands = [].concat(homeCommands || [], carCommands || []).slice(0, 12);
     document.getElementById("view-devices").innerHTML = [
       "<section class='card' id='devices-panel'><h2>Devices</h2>",
@@ -1083,6 +1175,54 @@
         await api("/api/lifesaver/devices/pairings/" + target.dataset.pairUnpair + "/unpair", { method: "POST" });
         await loadDevices();
       }
+      if (target.dataset.cdevPair) {
+        await api("/api/lifesaver/connected-health/devices/" + target.dataset.cdevPair + "/pair", { method: "POST" });
+        await loadCare();
+        showBanner("Simulated pairing complete. Not connected to a real medical device.", "ok");
+      }
+      if (target.dataset.cdevOffline) {
+        await api("/api/lifesaver/connected-health/devices/" + target.dataset.cdevOffline + "/offline", { method: "POST" });
+        await loadCare();
+      }
+      if (target.dataset.cdevReading) {
+        await api("/api/lifesaver/connected-health/devices/" + target.dataset.cdevReading + "/readings", {
+          method: "POST",
+          body: JSON.stringify({ reading_kind: "other_simulated", data_quality: "unknown" }),
+        });
+        await loadCare();
+        showBanner("Simulated reading stored. No diagnosis. Emergency services contacted: no.", "ok");
+      }
+      if (target.dataset.kitNext) {
+        await api("/api/lifesaver/connected-health/kits/" + target.dataset.kitNext + "/transition", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        await loadCare();
+      }
+      if (target.dataset.kitProvider) {
+        await api("/api/lifesaver/connected-health/kits/" + target.dataset.kitProvider + "/provider-share", { method: "POST" });
+        await loadCare();
+        showBanner("Provider share recorded locally. No real provider message sent.", "ok");
+      }
+      if (target.dataset.kitCircle) {
+        await api("/api/lifesaver/connected-health/kits/" + target.dataset.kitCircle + "/circle-share", { method: "POST" });
+        await loadCare();
+        showBanner("Care Circle share recorded locally. No email or SMS sent.", "ok");
+      }
+      if (target.dataset.resultAck) {
+        await api("/api/lifesaver/connected-health/results/" + target.dataset.resultAck + "/acknowledge", { method: "POST" });
+        await loadCare();
+      }
+      if (target.dataset.resultProvider) {
+        await api("/api/lifesaver/connected-health/results/" + target.dataset.resultProvider + "/provider-share", { method: "POST" });
+        await loadCare();
+        showBanner("Provider share recorded locally. No real provider message sent.", "ok");
+      }
+      if (target.dataset.resultCircle) {
+        await api("/api/lifesaver/connected-health/results/" + target.dataset.resultCircle + "/circle-share", { method: "POST" });
+        await loadCare();
+        showBanner("Care Circle share recorded locally. No email or SMS sent.", "ok");
+      }
       if (target.dataset.agentFault) {
         await api("/api/lifesaver/home-hub-agent/faults", {
           method: "POST",
@@ -1247,6 +1387,40 @@
           }),
         });
         await loadCare();
+      }
+      if (form.id === "cdev-form") {
+        await api("/api/lifesaver/connected-health/devices", {
+          method: "POST",
+          body: JSON.stringify({
+            device_type: data.get("device_type"),
+            device_alias: data.get("device_alias") || "Simulated device",
+            connection_method: "simulated",
+          }),
+        });
+        await loadCare();
+        showBanner("Simulated connected device added. Not a real medical device.", "ok");
+      }
+      if (form.id === "kit-form") {
+        await api("/api/lifesaver/connected-health/kits", {
+          method: "POST",
+          body: JSON.stringify({
+            test_category: data.get("test_category"),
+            manufacturer_or_lab: data.get("manufacturer_or_lab") || "unspecified",
+          }),
+        });
+        await loadCare();
+        showBanner("Simulated home-test kit added. No specimen is processed.", "ok");
+      }
+      if (form.id === "result-form") {
+        await api("/api/lifesaver/connected-health/results", {
+          method: "POST",
+          body: JSON.stringify({
+            source: "user_uploaded",
+            document_reference: data.get("document_reference") || "ref-redacted",
+          }),
+        });
+        await loadCare();
+        showBanner("Result document reference stored. No diagnosis generated.", "ok");
       }
       if (form.id === "treq-form") {
         const pickup = data.get("pickup_at");

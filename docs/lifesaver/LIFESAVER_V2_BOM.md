@@ -25,4 +25,9 @@ No parts are purchased in this document.
 | 3D print material | Enclosure | Optional | TBD | Filament/resin | n/a | n/a | n/a | Prototype only | Not selected | No | No | No |
 | Tools | Assembly | Required | set | Bench | n/a | n/a | n/a | Local shop | Not selected | No | No | No |
 
-All physical rows: **NOT YET PURCHASED**.
+| Optional consumer BP cuff | Future connected-health demo | Optional | 1 | Bluetooth reserved | TBD | TBD | TBD | Non-diagnostic simulation first | Not selected | No | No | No |
+| Optional pulse oximeter | Future connected-health demo | Optional | 1 | Bluetooth reserved | TBD | TBD | TBD | Non-diagnostic simulation first | Not selected | No | No | No |
+| Optional thermometer | Future connected-health demo | Optional | 1 | Bluetooth reserved | TBD | TBD | TBD | Non-diagnostic simulation first | Not selected | No | No | No |
+| Optional home-test kit (empty) | Workflow rehearsal only | Optional | 1 | n/a | n/a | n/a | TBD | No specimen processing | Not selected | No | No | No |
+
+All physical rows: **NOT YET PURCHASED**. Do not buy proprietary medical-cloud SDKs for this phase.

@@ -74,6 +74,7 @@ class HomeHubEmulator:
         self.self_test = None
         self.offline_banner = None
         self.safety_event_status = "none"
+        self.connected_health_display: list[str] = []
 
     def digital_twin(self) -> dict[str, Any]:
         privacy = self.effective_privacy()
@@ -112,7 +113,16 @@ class HomeHubEmulator:
             "emergency_services_contacted": False,
             "real_camera_streaming": False,
             "debug_controls": self.config.debug_controls,
+            "connected_health_display": list(self.connected_health_display),
         }
+
+    def set_connected_health_display(self, cards: list[str]) -> None:
+        clean: list[str] = []
+        for item in cards[:8]:
+            text = str(item).strip()[:160]
+            if text:
+                clean.append(text)
+        self.connected_health_display = clean
 
     def effective_privacy(self) -> bool:
         return self.privacy_mode or self.privacy_switch == PRIVACY_SWITCH_ON
