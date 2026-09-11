@@ -17,6 +17,7 @@
     { id: "acknowledge_alerts", label: "Acknowledge alerts" },
     { id: "manage_tasks", label: "Manage shared tasks" },
     { id: "handoff", label: "Participate in handoffs" },
+    { id: "view_devices", label: "View simulated Home Hub and Car Hub status" },
   ];
   let state = {
     me: null,
@@ -292,6 +293,11 @@
           "<div class='meta'>" + escapeHtml(card.kind) + " · " + escapeHtml(card.status || "") + "</div>" +
           "<p>Why: " + escapeHtml(card.why) + "</p>" +
           (card.needs_human_review ? "<span class='badge'>Needs human review</span>" : "") +
+          (card.kind === "safety" ? "<span class='badge'>SIMULATION</span><p class='meta'>Emergency services contacted: no. This is not a diagnosis.</p>" : "") +
+          (card.kind === "safety" && card.status === "needs_human_review" && card.resource_id
+            ? "<div class='actions'><button type='button' data-ack-safety='" + escapeHtml(card.resource_id) +
+              "'>Confirm local review</button></div>"
+            : "") +
           "</article>";
       }).join("") || "<p class='meta'>No coordination items for this filter.</p>",
       "</section>",
@@ -489,11 +495,185 @@
     ].join("");
   }
 
+  function deviceStateLine(device) {
+    const privacyOn = !!device.privacy_mode;
+    return [
+      privacyOn ? "<p class='privacy-banner'><strong>PRIVACY MODE</strong> Camera off. Rotation tracking off. No automatic video.</p>" : "",
+      "<p class='sim-badge'><strong>SIMULATION</strong></p>",
+      "<div class='device-status-grid'>",
+      "<p class='camera-state'><strong>Camera: " + escapeHtml((device.camera_state || "off").toUpperCase()) + "</strong></p>",
+      "<p class='privacy-state'><strong>Privacy: " + escapeHtml(privacyOn ? "ON" : "OFF") + "</strong></p>",
+      "<p><strong>Mic: " + escapeHtml(device.microphone_enabled ? "ON" : "OFF") + "</strong></p>",
+      "<p><strong>Audio: " + escapeHtml(device.audio_state || "ready") +
+        (device.microphone_enabled ? " · mic on" : " · mic off") + "</strong></p>",
+      "<p><strong>Rotation: " + escapeHtml(device.rotation_state || "home") +
+        (device.rotation_moving ? " (moving)" : "") + "</strong></p>",
+      "<p><strong>Orientation: " + escapeHtml(String(device.orientation_deg == null ? "n/a" : device.orientation_deg)) + "°</strong></p>",
+      "<p><strong>Sensors: " + escapeHtml(device.sensor_state || "quiet") + "</strong></p>",
+      "<p><strong>Status: " + escapeHtml(device.status || "OFFLINE") + "</strong></p>",
+      "<p><strong>Pairing: " + escapeHtml(device.pairing_state || "PAIRED") + "</strong></p>",
+      "<p><strong>Adapter: " + escapeHtml(device.adapter_type || device.adapter || "simulated") + "</strong></p>",
+      "<p><strong>Firmware: " + escapeHtml(device.firmware_version || "n/a") + "</strong></p>",
+      "<p class='meta'>Last seen: " + escapeHtml(device.last_seen_at || "never") + "</p>",
+      "</div>"
+    ].join("");
+  }
+
+  function renderHomeControls(device) {
+    return [
+      "<div class='hub-controls'>",
+      "<button type='button' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='CAMERA_ENABLE'>Camera On</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='CAMERA_DISABLE'>Camera Off</button>",
+      "<button type='button' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='PRIVACY_ENABLE'>Privacy Mode</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='PRIVACY_DISABLE'>Privacy Off</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='ROTATE_LEFT'>Rotate Left</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='ROTATE_RIGHT'>Rotate Right</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='ROTATE_HOME'>Home</button>",
+      "<button type='button' class='hub-stop' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='ROTATE_STOP'>Stop</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_ONLINE'>Online</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_OFFLINE'>Offline</button>",
+      "<button type='button' class='danger' data-sim-fall='" + escapeHtml(device.id) + "'>Simulate Fall Event · SIMULATION</button>",
+      "</div>"
+    ].join("");
+  }
+
+  function renderCarControls(device) {
+    return [
+      "<div class='hub-controls'>",
+      "<button type='button' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='CONNECTION_TEST'>Connection Test</button>",
+      "<button type='button' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='AUDIO_TEST'>Audio Test</button>",
+      "<button type='button' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SAFE_MODE_ENABLE'>Safe Mode</button>",
+      "<button type='button' class='secondary' data-hub-health='" + escapeHtml(device.id) + "'>Device Health</button>",
+      "</div>"
+    ].join("");
+  }
+
+  async function loadDevices() {
+    const devices = await api("/api/lifesaver/devices" + memberQuery()).catch(function () { return []; });
+    const home = (devices || []).find(function (row) { return row.device_type === "HOME_HUB"; });
+    const car = (devices || []).find(function (row) { return row.device_type === "CAR_HUB"; });
+    const sessions = home
+      ? await api("/api/lifesaver/devices/" + encodeURIComponent(home.id) + "/video-sessions").catch(function () { return []; })
+      : [];
+    const pairings = await api("/api/lifesaver/devices/pairings").catch(function () { return []; });
+    const homeCommands = home
+      ? await api("/api/lifesaver/devices/" + encodeURIComponent(home.id) + "/commands").catch(function () { return []; })
+      : [];
+    const carCommands = car
+      ? await api("/api/lifesaver/devices/" + encodeURIComponent(car.id) + "/commands").catch(function () { return []; })
+      : [];
+    const safetyEvents = home
+      ? await api("/api/lifesaver/devices/" + encodeURIComponent(home.id) + "/events").catch(function () { return []; })
+      : [];
+    const commands = [].concat(homeCommands || [], carCommands || []).slice(0, 12);
+    document.getElementById("view-devices").innerHTML = [
+      "<section class='card' id='devices-panel'><h2>Devices</h2>",
+      "<p class='disclaimer'>" + escapeHtml((state.me && state.me.hardware_disclaimer) ||
+        "Simulated AMICOR hub controls only. This is not a medical device and does not contact emergency services.") + "</p>",
+      "<p class='meta'>Camera defaults off. No continuous recording. No hidden microphone. No real hardware is connected.</p>",
+      "<div class='actions'>",
+      "<button type='button' data-create-hub='HOME_HUB'>Add simulated Home Hub</button>",
+      "<button type='button' class='secondary' data-create-hub='CAR_HUB'>Add simulated Car Hub</button>",
+      "</div></section>",
+      "<section class='card pairing-panel'><h2>Local pairing</h2>",
+      "<p class='meta'>Discover only configured local addresses. Unknown devices are never auto-trusted.</p>",
+      "<div class='actions'>",
+      "<button type='button' data-discover-hub='HOME_HUB'>Discover Home Hub · 127.0.0.1</button>",
+      "<button type='button' class='secondary' data-discover-hub='CAR_HUB'>Discover Car Hub · 127.0.0.1</button>",
+      "</div>",
+      renderList(pairings, "No discovered hubs yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.device_type) + "</strong> · " + escapeHtml(row.pairing_state) +
+          "<div class='meta'>" + escapeHtml(row.local_ip || "") + " · auto-trusted: no</div>" +
+          "<div class='actions'>" +
+          (row.pairing_state === "DISCOVERED" || row.pairing_state === "PENDING_PAIR"
+            ? "<button type='button' data-pair-request='" + escapeHtml(row.id) + "'>Request pair</button>" +
+              "<button type='button' data-pair-confirm='" + escapeHtml(row.id) + "'>Confirm pair</button>"
+            : "") +
+          (row.pairing_state !== "UNPAIRED"
+            ? "<button type='button' class='secondary' data-pair-unpair='" + escapeHtml(row.id) + "'>Unpair</button>"
+            : "") +
+          "</div></li>";
+      }),
+      "</section>",
+      "<section class='card hub-card hub-card-home'><h2>Home Hub</h2>",
+      home
+        ? "<p class='meta'>" + escapeHtml(home.display_name) + " · " + escapeHtml(home.serial_number || "") + "</p>" +
+          deviceStateLine(home) +
+          "<p class='meta'>Device health: adapter " + escapeHtml(home.adapter_type || home.adapter || "simulated") +
+          " · battery " + escapeHtml(String(home.battery_percent == null ? "n/a" : home.battery_percent)) +
+          "% · temp " + escapeHtml(String(home.temperature_c == null ? "n/a" : home.temperature_c)) + " C</p>" +
+          renderHomeControls(home)
+        : "<p class='meta'>No Home Hub yet. Create a simulated hub to practice local controls.</p>",
+      "</section>",
+      "<section class='card hub-card hub-card-car'><h2>Car Hub</h2>",
+      car
+        ? "<p class='sim-badge'><strong>SIMULATION</strong></p>" +
+          "<p class='meta'>" + escapeHtml(car.display_name) + " · " + escapeHtml(car.serial_number || "") +
+          " · pairing " + escapeHtml(car.pairing_state || "PAIRED") + "</p>" +
+          "<p><strong>Status: " + escapeHtml(car.status || "OFFLINE") + "</strong></p>" +
+          "<p><strong>Connection: " + escapeHtml(car.nova_lifesaver_link || "simulated_ready") + "</strong></p>" +
+          "<p><strong>Network: " + escapeHtml(car.network_status || "connected_simulated") + "</strong></p>" +
+          "<p><strong>Safe mode: " + escapeHtml(car.safe_drive_mode ? "ON" : "OFF") + "</strong></p>" +
+          "<p class='meta'>Adapter " + escapeHtml(car.adapter_type || car.adapter || "simulated") +
+          " · firmware " + escapeHtml(car.firmware_version || "n/a") + "</p>" +
+          "<p class='meta'>" + escapeHtml(car.vehicle_disclaimer || "Car Hub does not control the vehicle.") + "</p>" +
+          renderCarControls(car)
+        : "<p class='meta'>No Car Hub yet. Create a simulated hub to practice local checks.</p>",
+      "</section>",
+      "<section class='card'><h2>Recent commands</h2>",
+      renderList(commands, "No local commands yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.command_type || "") + "</strong> · " + escapeHtml(row.status || "") +
+          "<div class='meta'>adapter " + escapeHtml(row.adapter_type || "simulated") +
+          " · simulated · " + escapeHtml(row.requested_at || "") + "</div></li>";
+      }),
+      "</section>",
+      "<section class='card'><h2>Safety Event review</h2>",
+      "<p class='disclaimer'>Possible fall or safety event detected. Human review required. Emergency services are not contacted.</p>",
+      renderList(safetyEvents, "No safety events yet.", function (row) {
+        return "<li><strong>" + escapeHtml(row.review_status || row.status) + "</strong>" +
+          "<div class='meta'>" + escapeHtml(row.summary || "") + " · SIMULATION</div>" +
+          (row.review_status === "NEEDS_REVIEW" || row.status === "needs_human_review"
+            ? "<div class='actions'>" +
+              "<button type='button' data-ack-safety='" + escapeHtml(row.id) + "'>Acknowledge</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(row.id) +
+              "' data-review-status='FALSE_ALARM'>False alarm</button>" +
+              "<button type='button' class='secondary' data-review-safety='" + escapeHtml(row.id) +
+              "' data-review-status='RESOLVED'>Resolve</button></div>"
+            : "") + "</li>";
+      }),
+      "</section>",
+      "<section class='card'><h2>Video session foundation</h2>",
+      "<p class='disclaimer'>Local session request only. No third-party video provider is connected. No video or audio is stored.</p>",
+      home
+        ? "<div class='actions'><button type='button' data-video-request='" + escapeHtml(home.id) +
+          "'>Request simulated session</button></div>" +
+          renderList(sessions, "No session requests yet.", function (row) {
+            return "<li><strong>" + escapeHtml(row.session_phase || row.status) + "</strong>" +
+              "<div class='meta'>Privacy gate: " + (row.privacy_ok ? "open" : "blocked") +
+              " · role " + escapeHtml(row.participant_role || "user") +
+              " · media stored: no</div>" +
+              (row.status === "requested"
+                ? "<div class='actions'><button type='button' data-video-accept='" + escapeHtml(row.id) +
+                  "'>Accept</button><button type='button' class='secondary' data-video-decline='" +
+                  escapeHtml(row.id) + "'>Decline</button></div>"
+                : "") +
+              (row.status === "accepted" && row.session_phase !== "ENDED"
+                ? "<div class='actions'><button type='button' data-video-activate='" + escapeHtml(row.id) +
+                  "'>Activate simulated session</button><button type='button' class='secondary' data-video-end='" +
+                  escapeHtml(row.id) + "'>End session</button></div>"
+                : "") + "</li>";
+          })
+        : "<p class='meta'>Add a Home Hub before requesting a simulated session.</p>",
+      "</section>"
+    ].join("");
+  }
+
   async function loadView(name) {
     try {
       if (name === "today") await loadToday();
       if (name === "care") await loadCare();
       if (name === "coord") await loadCoord();
+      if (name === "devices") await loadDevices();
       if (name === "circle") await loadCircle();
       if (name === "notify") await loadNotify();
       if (name === "privacy") await loadPrivacy();
@@ -659,6 +839,98 @@
       if (target.dataset.noticeSuppress) {
         await api("/api/lifesaver/notifications/" + target.dataset.noticeSuppress + "/suppress", { method: "POST" });
         await loadNotify();
+      }
+      if (target.dataset.createHub) {
+        await api("/api/lifesaver/devices/simulated", {
+          method: "POST",
+          body: JSON.stringify({ device_type: target.dataset.createHub }),
+        });
+        await loadDevices();
+        showBanner("Simulated hub ready.", "ok");
+      }
+      if (target.dataset.hubCmd && target.dataset.command) {
+        await api("/api/lifesaver/devices/" + target.dataset.hubCmd + "/commands", {
+          method: "POST",
+          body: JSON.stringify({ command: target.dataset.command }),
+        });
+        await loadDevices();
+      }
+      if (target.dataset.hubHealth) {
+        const health = await api("/api/lifesaver/devices/" + target.dataset.hubHealth + "/health");
+        showBanner("Device health: " + (health.adapter_status || "simulated") + " · online " + (health.online ? "yes" : "no") + " · camera " + (health.camera_enabled ? "on" : "off") + ".", "ok");
+        await loadDevices();
+      }
+      if (target.dataset.simFall) {
+        const result = await api("/api/lifesaver/devices/" + target.dataset.simFall + "/simulate-fall", { method: "POST" });
+        showBanner((result.summary || "Possible fall or safety event detected. Human review required.") + " SIMULATION. Emergency services contacted: no.", "ok");
+        state.coordFilter = "safety";
+        setView("coord");
+      }
+      if (target.dataset.ackSafety) {
+        await api("/api/lifesaver/devices/events/" + target.dataset.ackSafety + "/acknowledge", { method: "POST" });
+        await loadCoord();
+        showBanner("Safety event marked reviewed locally. Emergency services were not contacted.", "ok");
+      }
+      if (target.dataset.discoverHub) {
+        await api("/api/lifesaver/devices/discover", {
+          method: "POST",
+          body: JSON.stringify({ device_type: target.dataset.discoverHub, local_ip: "127.0.0.1" }),
+        });
+        await loadDevices();
+        showBanner("Local hub discovered. Pairing is not automatic.", "ok");
+      }
+      if (target.dataset.pairRequest) {
+        await api("/api/lifesaver/devices/pairings/" + target.dataset.pairRequest + "/request", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.pairConfirm) {
+        if (!window.confirm("Confirm pairing this local hub? Unknown devices are never auto-trusted.")) {
+          return;
+        }
+        await api("/api/lifesaver/devices/pairings/" + target.dataset.pairConfirm + "/confirm", {
+          method: "POST",
+          body: JSON.stringify({ confirm: true, adapter_type: "simulated" }),
+        });
+        await loadDevices();
+        showBanner("Hub paired after explicit confirmation.", "ok");
+      }
+      if (target.dataset.pairUnpair) {
+        await api("/api/lifesaver/devices/pairings/" + target.dataset.pairUnpair + "/unpair", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.reviewSafety) {
+        await api("/api/lifesaver/devices/events/" + target.dataset.reviewSafety + "/review", {
+          method: "POST",
+          body: JSON.stringify({ review_status: target.dataset.reviewStatus }),
+        });
+        await loadDevices();
+        showBanner("Safety event reviewed locally. Emergency services were not contacted.", "ok");
+      }
+      if (target.dataset.videoRequest) {
+        if (!window.confirm("Start a simulated video session request? Camera stays off until you enable it and accept.")) {
+          return;
+        }
+        await api("/api/lifesaver/devices/" + target.dataset.videoRequest + "/video-sessions", {
+          method: "POST",
+          body: JSON.stringify({ participant_role: "user" }),
+        });
+        await loadDevices();
+      }
+      if (target.dataset.videoAccept) {
+        await api("/api/lifesaver/devices/video-sessions/" + target.dataset.videoAccept + "/accept", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.videoDecline) {
+        await api("/api/lifesaver/devices/video-sessions/" + target.dataset.videoDecline + "/decline", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.videoActivate) {
+        await api("/api/lifesaver/devices/video-sessions/" + target.dataset.videoActivate + "/activate", { method: "POST" });
+        await loadDevices();
+      }
+      if (target.dataset.videoEnd) {
+        await api("/api/lifesaver/devices/video-sessions/" + target.dataset.videoEnd + "/end", { method: "POST" });
+        await loadDevices();
       }
     } catch (err) {
       showBanner(err.message, "error");

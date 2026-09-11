@@ -356,6 +356,10 @@ LIFESAVER_MODELS = (
     LifesaverAuditEvent,
 )
 
+from app.modules.lifesaver.hardware.models import HARDWARE_MODELS
+
+LIFESAVER_MODELS = LIFESAVER_MODELS + HARDWARE_MODELS
+
 
 def ensure_lifesaver_schema() -> None:
     """Create additive lifesaver_* tables and columns when they are not yet present."""
@@ -384,5 +388,21 @@ def ensure_lifesaver_schema() -> None:
                     for stmt in alters:
                         conn.execute(text(stmt))
                 logger.info("lifesaver reading columns ensured")
+        from app.modules.lifesaver.hardware.models import HARDWARE_COLUMN_ENSURES
+
+        current_tables = set(inspect(engine).get_table_names())
+        extra_alters = []
+        for table, columns in HARDWARE_COLUMN_ENSURES.items():
+            if table not in current_tables:
+                continue
+            have = {col["name"] for col in inspect(engine).get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in have:
+                    extra_alters.append(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        if extra_alters:
+            with engine.begin() as conn:
+                for stmt in extra_alters:
+                    conn.execute(text(stmt))
+            logger.info("lifesaver hardware columns ensured")
     except Exception as exc:
         logger.warning("lifesaver schema ensure skipped: %s", type(exc).__name__)

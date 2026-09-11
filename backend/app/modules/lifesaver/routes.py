@@ -30,9 +30,13 @@ from app.modules.lifesaver.schemas import (
     TransportUpdate,
     WellnessCreate,
 )
+from app.modules.lifesaver.hardware.mock_pi import router as mock_pi_router
+from app.modules.lifesaver.hardware.routes import router as hardware_router
 from app.responses import normalize_success
 
 router = APIRouter(prefix="/api/lifesaver", tags=["lifesaver"])
+router.include_router(hardware_router)
+router.include_router(mock_pi_router)
 
 
 def _db(db: Session = Depends(get_db)) -> Session:

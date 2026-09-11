@@ -1,0 +1,185 @@
+"""Capability and command catalogs. No real hardware I/O."""
+from __future__ import annotations
+
+DEVICE_HOME_HUB = "HOME_HUB"
+DEVICE_CAR_HUB = "CAR_HUB"
+DEVICE_TYPES = frozenset({DEVICE_HOME_HUB, DEVICE_CAR_HUB})
+
+STATUS_OFFLINE = "OFFLINE"
+STATUS_ONLINE = "ONLINE"
+STATUS_DEGRADED = "DEGRADED"
+STATUS_PRIVACY_MODE = "PRIVACY_MODE"
+STATUS_MAINTENANCE = "MAINTENANCE"
+DEVICE_STATUSES = frozenset({
+    STATUS_OFFLINE,
+    STATUS_ONLINE,
+    STATUS_DEGRADED,
+    STATUS_PRIVACY_MODE,
+    STATUS_MAINTENANCE,
+})
+
+CMD_DEVICE_PING = "DEVICE_PING"
+CMD_CAMERA_ENABLE = "CAMERA_ENABLE"
+CMD_CAMERA_DISABLE = "CAMERA_DISABLE"
+CMD_PRIVACY_ENABLE = "PRIVACY_ENABLE"
+CMD_PRIVACY_DISABLE = "PRIVACY_DISABLE"
+CMD_ROTATE_LEFT = "ROTATE_LEFT"
+CMD_ROTATE_RIGHT = "ROTATE_RIGHT"
+CMD_ROTATE_HOME = "ROTATE_HOME"
+CMD_ROTATE_STOP = "ROTATE_STOP"
+CMD_AUDIO_TEST = "AUDIO_TEST"
+CMD_SENSOR_SAMPLE = "SENSOR_SAMPLE"
+CMD_SIMULATE_FALL_EVENT = "SIMULATE_FALL_EVENT"
+CMD_DEVICE_RESTART_SIMULATED = "DEVICE_RESTART_SIMULATED"
+CMD_CONNECTION_TEST = "CONNECTION_TEST"
+CMD_SAFE_MODE_ENABLE = "SAFE_MODE_ENABLE"
+CMD_SAFE_MODE_DISABLE = "SAFE_MODE_DISABLE"
+CMD_DISPLAY_ENABLE = "DISPLAY_ENABLE"
+CMD_DISPLAY_DISABLE = "DISPLAY_DISABLE"
+CMD_SET_ONLINE = "SET_ONLINE"
+CMD_SET_OFFLINE = "SET_OFFLINE"
+CMD_SET_MOTION = "SET_MOTION"
+CMD_MIC_ENABLE = "MIC_ENABLE"
+CMD_MIC_DISABLE = "MIC_DISABLE"
+CMD_GET_STATUS = "GET_STATUS"
+CMD_GET_DEVICE_HEALTH = "GET_DEVICE_HEALTH"
+CMD_START_VIDEO_SESSION = "START_VIDEO_SESSION"
+CMD_END_VIDEO_SESSION = "END_VIDEO_SESSION"
+CMD_LIFESAVER_LINK_STATUS = "LIFESAVER_LINK_STATUS"
+CMD_NOVA_LINK_STATUS = "NOVA_LINK_STATUS"
+
+HARDWARE_COMMANDS = frozenset({
+    CMD_DEVICE_PING,
+    CMD_CAMERA_ENABLE,
+    CMD_CAMERA_DISABLE,
+    CMD_PRIVACY_ENABLE,
+    CMD_PRIVACY_DISABLE,
+    CMD_ROTATE_LEFT,
+    CMD_ROTATE_RIGHT,
+    CMD_ROTATE_HOME,
+    CMD_ROTATE_STOP,
+    CMD_AUDIO_TEST,
+    CMD_SENSOR_SAMPLE,
+    CMD_SIMULATE_FALL_EVENT,
+    CMD_DEVICE_RESTART_SIMULATED,
+    CMD_CONNECTION_TEST,
+    CMD_SAFE_MODE_ENABLE,
+    CMD_SAFE_MODE_DISABLE,
+    CMD_DISPLAY_ENABLE,
+    CMD_DISPLAY_DISABLE,
+    CMD_SET_ONLINE,
+    CMD_SET_OFFLINE,
+    CMD_SET_MOTION,
+    CMD_MIC_ENABLE,
+    CMD_MIC_DISABLE,
+    CMD_GET_STATUS,
+    CMD_GET_DEVICE_HEALTH,
+    CMD_START_VIDEO_SESSION,
+    CMD_END_VIDEO_SESSION,
+    CMD_LIFESAVER_LINK_STATUS,
+    CMD_NOVA_LINK_STATUS,
+})
+
+HOME_HUB_COMMANDS = frozenset({
+    CMD_DEVICE_PING,
+    CMD_CAMERA_ENABLE,
+    CMD_CAMERA_DISABLE,
+    CMD_PRIVACY_ENABLE,
+    CMD_PRIVACY_DISABLE,
+    CMD_ROTATE_LEFT,
+    CMD_ROTATE_RIGHT,
+    CMD_ROTATE_HOME,
+    CMD_ROTATE_STOP,
+    CMD_AUDIO_TEST,
+    CMD_SENSOR_SAMPLE,
+    CMD_SIMULATE_FALL_EVENT,
+    CMD_DEVICE_RESTART_SIMULATED,
+    CMD_SET_ONLINE,
+    CMD_SET_OFFLINE,
+    CMD_SET_MOTION,
+    CMD_MIC_ENABLE,
+    CMD_MIC_DISABLE,
+    CMD_GET_STATUS,
+    CMD_GET_DEVICE_HEALTH,
+    CMD_START_VIDEO_SESSION,
+    CMD_END_VIDEO_SESSION,
+})
+
+CAR_HUB_COMMANDS = frozenset({
+    CMD_DEVICE_PING,
+    CMD_AUDIO_TEST,
+    CMD_CONNECTION_TEST,
+    CMD_SAFE_MODE_ENABLE,
+    CMD_SAFE_MODE_DISABLE,
+    CMD_DISPLAY_ENABLE,
+    CMD_DISPLAY_DISABLE,
+    CMD_DEVICE_RESTART_SIMULATED,
+    CMD_SET_ONLINE,
+    CMD_SET_OFFLINE,
+    CMD_PRIVACY_ENABLE,
+    CMD_PRIVACY_DISABLE,
+    CMD_GET_STATUS,
+    CMD_GET_DEVICE_HEALTH,
+    CMD_LIFESAVER_LINK_STATUS,
+    CMD_NOVA_LINK_STATUS,
+})
+
+HOME_HUB_CAPABILITIES = (
+    "touchscreen",
+    "camera",
+    "microphone",
+    "speaker",
+    "motorized_rotating_base",
+    "motion_proximity",
+    "orientation_imu",
+    "wifi",
+    "bluetooth",
+    "privacy_mode",
+    "device_health",
+    "simulated_fall_event_input",
+)
+
+CAR_HUB_CAPABILITIES = (
+    "display",
+    "microphone",
+    "speaker",
+    "network_connectivity",
+    "nova_lifesaver_interface",
+    "device_health",
+    "safe_vehicle_use_mode",
+)
+
+SAFETY_EVENT_TYPES = frozenset({"SIMULATED_FALL_EVENT"})
+SAFETY_STATUSES = frozenset({"needs_human_review", "acknowledged", "closed"})
+VIDEO_SESSION_STATUSES = frozenset({
+    "requested",
+    "accepted",
+    "declined",
+    "ended",
+    "failed",
+    "ringing_simulated",
+    "active_simulated",
+})
+FALL_REVIEW_COPY = "Possible fall or safety event detected. Human review required."
+HARDWARE_DISCLAIMER = (
+    "Simulated AMICOR hub controls only. This is not a medical device, not a "
+    "certified fall detector, and does not contact emergency services."
+)
+NO_VEHICLE_CONTROL = "Car Hub does not control the vehicle."
+NO_RECORDING = "No continuous recording. No hidden microphone. No video or audio content is stored."
+
+
+def commands_for(device_type: str) -> frozenset[str]:
+    if device_type == DEVICE_HOME_HUB:
+        return HOME_HUB_COMMANDS
+    if device_type == DEVICE_CAR_HUB:
+        return CAR_HUB_COMMANDS
+    return frozenset()
+
+
+def capabilities_for(device_type: str) -> tuple[str, ...]:
+    if device_type == DEVICE_HOME_HUB:
+        return HOME_HUB_CAPABILITIES
+    if device_type == DEVICE_CAR_HUB:
+        return CAR_HUB_CAPABILITIES
+    return ()

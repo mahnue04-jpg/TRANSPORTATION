@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 PRODUCT_NAME = "Healthcare Technology Lifesaver AI Care Cloud"
-PRODUCT_VERSION = "v1"
-CONSENT_VERSION = "lifesaver-v1"
+PRODUCT_VERSION = "v2"
+CONSENT_VERSION = "lifesaver-v2"
 
 PRODUCT_DISCLAIMER = (
     "Lifesaver AI Care Cloud is software for care coordination, accessibility, "
@@ -43,6 +43,8 @@ CONSENT_TYPES = (
     "audit_retention",
     "caregiver_notifications",
     "simulated_device_ingest",
+    "hardware_simulation",
+    "video_session_simulation",
 )
 
 CONSENT_LABELS = {
@@ -58,6 +60,8 @@ CONSENT_LABELS = {
     "audit_retention": "Keep an audit trail of permission and access events",
     "caregiver_notifications": "Queue local caregiver notification simulations",
     "simulated_device_ingest": "Enter simulated-device readings (not from a medical device)",
+    "hardware_simulation": "Use simulated Home Hub and Car Hub controls (no real devices)",
+    "video_session_simulation": "Request a local simulated video session (no live video provider)",
 }
 
 READING_TYPES = frozenset({
@@ -112,6 +116,7 @@ NOTIFICATION_TYPES = frozenset({
     "handoff_assigned",
     "task_assigned",
     "alert_ack_request",
+    "safety_event_review",
 })
 TRANSPORT_COORD_DISCLAIMER = (
     "Transportation coordination only. This does not dispatch a ride."
@@ -131,6 +136,7 @@ CAREGIVER_PERMISSIONS = (
     "acknowledge_alerts",
     "manage_tasks",
     "handoff",
+    "view_devices",
 )
 
 DEFAULT_CAREGIVER_PERMISSIONS = (
@@ -151,6 +157,7 @@ CAREGIVER_PERMISSION_LABELS = {
     "acknowledge_alerts": "Acknowledge alerts",
     "manage_tasks": "Manage shared tasks",
     "handoff": "Participate in handoffs",
+    "view_devices": "View simulated Home Hub and Car Hub status",
 }
 
 CIRCLE_STATUSES = frozenset({"invited", "active", "revoked"})
@@ -163,6 +170,7 @@ ALERT_TYPES = frozenset({
     "handoff",
     "sos_demonstration",
     "task_assigned",
+    "safety_event",
 })
 ALERT_SEVERITIES = frozenset({"info", "attention", "urgent_demo"})
 ALERT_STATUSES = frozenset({"open", "acknowledged", "escalated_demo", "closed"})
@@ -192,4 +200,6 @@ CONSENT_FOR_FEATURE = {
     "coordination": "care_cloud_use",
     "notifications": "caregiver_notifications",
     "device": "simulated_device_ingest",
+    "hardware": "hardware_simulation",
+    "video": "video_session_simulation",
 }

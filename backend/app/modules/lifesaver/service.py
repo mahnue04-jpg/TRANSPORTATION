@@ -184,6 +184,10 @@ def product_meta() -> dict[str, Any]:
         "transport_disclaimer": TRANSPORT_COORD_DISCLAIMER,
         "notification_disclaimer": NOTIFICATION_SIM_LABEL,
         "device_disclaimer": DEVICE_SIM_LABEL,
+        "hardware_disclaimer": (
+            "Simulated AMICOR hub controls only. This is not a medical device, not a "
+            "certified fall detector, and does not contact emergency services."
+        ),
         "diagnostic_device": False,
         "emergency_response_guaranteed": False,
         "caregiver_permissions": [
@@ -1786,6 +1790,13 @@ def coordination_view(
         ),
         "external_device_connected": False,
     }
+    from app.modules.lifesaver.hardware.service import open_safety_events
+
+    safety_events = open_safety_events(
+        db,
+        organization_id=subject.organization_id,
+        profile_id=subject.id,
+    )
     cards = build_coordination_cards(
         appointments=appointments,
         reminders=reminders,
@@ -1803,6 +1814,7 @@ def coordination_view(
         notification_status=notification_status,
         device_status=device_status,
         can_view_readings=can_view_readings,
+        safety_events=safety_events,
     )
     selected = (selected_filter or "all").lower()
     if selected not in COORDINATION_FILTERS:

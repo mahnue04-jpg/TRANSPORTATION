@@ -242,7 +242,11 @@ nav.tabs {
 }
 
 @media (min-width: 520px) {
-  nav.tabs { grid-template-columns: repeat(6, 1fr); }
+  nav.tabs { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (min-width: 860px) {
+  nav.tabs { grid-template-columns: repeat(7, 1fr); }
 }
 
 nav.tabs button {
@@ -339,4 +343,61 @@ nav.tabs button[aria-current="page"] {
 @media (min-width: 720px) {
   .app { padding-bottom: 32px; }
   .bottom-nav { display: none; }
+}
+
+.device-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.camera-state,
+.privacy-state {
+  font-size: 1rem;
+}
+
+.hub-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hub-controls button {
+  min-height: var(--ls-tap);
+}
+
+.hub-controls .hub-stop,
+.hub-controls .danger {
+  grid-column: 1 / -1;
+  min-height: 56px;
+}
+
+.hub-card-home {
+  border-left: 6px solid #0b4f8a;
+}
+
+.hub-card-car {
+  border-left: 6px solid #8a4b00;
+}
+
+.privacy-banner {
+  background: #102033;
+  color: #ffffff;
+  padding: 10px 12px;
+  border-radius: 10px;
+  letter-spacing: 0.04em;
+}
+
+.sim-badge {
+  display: inline-block;
+  background: #e8eef5;
+  border: 1px solid var(--ls-line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.pairing-panel .actions {
+  margin-bottom: 8px;
 }

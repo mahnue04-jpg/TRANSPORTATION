@@ -20,6 +20,7 @@ COORDINATION_FILTERS = (
     "care_circle",
     "tasks",
     "alerts",
+    "safety",
 )
 
 PRIORITY_HIGH = "HIGH"
@@ -87,6 +88,13 @@ def assign_priority(
             "priority": PRIORITY_HIGH,
             "why": "A reminder is overdue and still open.",
             "needs_human_review": False,
+        }
+
+    if kind == "safety" and status == "needs_human_review":
+        return {
+            "priority": PRIORITY_HIGH,
+            "why": "Possible fall or safety event detected. Human review required.",
+            "needs_human_review": True,
         }
 
     if kind == "sos" and status == "confirmed":
@@ -193,6 +201,8 @@ def matches_filter(card: dict[str, Any], selected: str) -> bool:
         return card["kind"] in {"care_circle", "handoff"}
     if selected == "transportation":
         return card["kind"] == "transport"
+    if selected == "safety":
+        return card["kind"] == "safety"
     return selected in card.get("filters", []) or selected == card.get("kind")
 
 
@@ -215,6 +225,7 @@ def build_coordination_cards(
     device_status: dict[str, Any],
     can_view_readings: bool,
     clock: datetime | None = None,
+    safety_events: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
     current = _as_dt(clock or now()) or now()
@@ -358,6 +369,25 @@ def build_coordination_cards(
                 "sources": [item["source"] for item in reading_summaries],
                 "values_included": False,
                 "can_view_readings": bool(can_view_readings),
+            }
+        )
+
+    for row in safety_events or []:
+        cards.append(
+            {
+                **_card(
+                    kind="safety",
+                    title=getattr(row, "summary", None) or "Possible fall or safety event detected. Human review required.",
+                    status=getattr(row, "status", "needs_human_review"),
+                    due_at=getattr(row, "created_at", None),
+                    clock=current,
+                    resource_id=row.id,
+                    filter_keys=("safety", "alerts", "today"),
+                ),
+                "label": "SIMULATION",
+                "emergency_services_contacted": False,
+                "simulated": True,
+                "clinical": False,
             }
         )
 
