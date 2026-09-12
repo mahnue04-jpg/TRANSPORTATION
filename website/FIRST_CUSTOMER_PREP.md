@@ -68,8 +68,8 @@ These figures are planning numbers only. They are **not an offer to sell**.
 |---|---|---|
 | Supervised demo | No charge | Screen-share / conversation only |
 | Early Access evaluation | Contact AMICOR | Time-boxed, human approval required |
-| Starter pilot | planned $149/month | Same public planning price; owner must approve before quoting |
-| Growth pilot | planned $399/month | Same public planning price; owner must approve before quoting |
+| Starter pilot | planned $29/month | Same public planning price; owner must approve before quoting |
+| Growth pilot | planned $99/month | Same public planning price; owner must approve before quoting |
 | Business / Enterprise | Contact Sales | Scoped after a conversation |
 
 Pilot rules if later approved:

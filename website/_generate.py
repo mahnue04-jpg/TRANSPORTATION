@@ -24,6 +24,88 @@ def asset_prefix(depth: int) -> str:
     return "../" * depth if depth else ""
 
 
+def _svg(paths: str) -> str:
+    return (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        f"{paths}</svg>"
+    )
+
+
+ICONS = {
+    "observe": _svg(
+        '<circle cx="12" cy="12" r="3"/><path d="M2.5 12C4.8 7.8 8.1 5.5 12 5.5S19.2 7.8 21.5 12C19.2 16.2 15.9 18.5 12 18.5S4.8 16.2 2.5 12Z"/>'
+    ),
+    "recommend": _svg(
+        '<path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.8 6.2 7.6 8.4"/><path d="M16.4 15.6 19.2 17.8"/>'
+        '<path d="M3 12h4"/><path d="M17 12h4"/><circle cx="12" cy="12" r="3.2"/>'
+    ),
+    "approval": _svg(
+        '<circle cx="12" cy="8" r="3"/><path d="M5.5 19c.8-3 3.3-4.8 6.5-4.8s5.7 1.8 6.5 4.8"/>'
+        '<path d="m9.2 12.8 1.8 1.8 3.6-3.8"/>'
+    ),
+    "verify": _svg(
+        '<path d="M20 7.2 10.4 17 4.8 11.3"/><path d="M20 12v7.2H4V4.8h10"/>'
+    ),
+    "audit": _svg(
+        '<path d="M8 4.5h8.5A2.5 2.5 0 0 1 19 7v12.5H8A2.5 2.5 0 0 1 5.5 17V7A2.5 2.5 0 0 1 8 4.5Z"/>'
+        '<path d="M8.8 9.5h6.5M8.8 13h6.5M8.8 16.5H13"/>'
+    ),
+    "live": _svg(
+        '<path d="M3 12h3l2.2-5 3.6 10L14.8 9 17 12h4"/>'
+    ),
+    "intel": _svg(
+        '<path d="M12 3.5 19 7.2v9.6L12 20.5 5 16.8V7.2L12 3.5Z"/><path d="M12 8.2v7.6M8.6 10.2 12 12l3.4-1.8"/>'
+    ),
+    "controls": _svg(
+        '<path d="M12 3.5 19.5 7v5.2c0 4.2-3 7.2-7.5 8.3-4.5-1.1-7.5-4.1-7.5-8.3V7L12 3.5Z"/><path d="m8.8 12.2 2.2 2.2 4.4-4.5"/>'
+    ),
+    "exception": _svg(
+        '<path d="M12 4.2 21 19.5H3L12 4.2Z"/><path d="M12 10v4.2"/><path d="M12 17.2h.01"/>'
+    ),
+    "compare": _svg(
+        '<rect x="3.5" y="4.5" width="7.2" height="15" rx="1.4"/><rect x="13.3" y="4.5" width="7.2" height="15" rx="1.4"/>'
+        '<path d="M8 9.2h0M8 12h0M8 14.8h0M17.2 9.2h0M17.2 12h0"/>'
+    ),
+    "trail": _svg(
+        '<path d="M6 5.5v13"/><circle cx="6" cy="6.2" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="6" cy="17.8" r="1.6"/>'
+        '<path d="M9.2 6.2H19M9.2 12H16M9.2 17.8H18"/>'
+    ),
+    "transport": _svg(
+        '<path d="M3.5 15.2h17V10l-3.2-4.4H3.5v9.6Z"/><path d="M13.8 5.6V10h6.7"/><circle cx="7.2" cy="17.4" r="1.6"/><circle cx="16.6" cy="17.4" r="1.6"/>'
+    ),
+    "nemt": _svg(
+        '<path d="M3.8 15h16.4v-4.6L16.8 6H3.8V15Z"/><circle cx="7.4" cy="17.2" r="1.5"/><circle cx="16.4" cy="17.2" r="1.5"/>'
+        '<path d="M11.2 7.4v4.4M9 9.6h4.4"/>'
+    ),
+    "courier": _svg(
+        '<path d="M3.8 8.2 12 4.6l8.2 3.6v8.8L12 20.4 3.8 17V8.2Z"/><path d="M12 4.6v15.8M3.8 8.2 12 12l8.2-3.8"/>'
+    ),
+    "fleet": _svg(
+        '<rect x="3.2" y="11.2" width="8.2" height="6.2" rx="1"/><rect x="12.6" y="6.6" width="8.2" height="6.2" rx="1"/>'
+        '<circle cx="5.6" cy="18.4" r="1.1"/><circle cx="9.2" cy="18.4" r="1.1"/><circle cx="15" cy="13.8" r="1.1"/><circle cx="18.6" cy="13.8" r="1.1"/>'
+    ),
+    "field": _svg(
+        '<path d="M14.8 4.8 9.4 14.2l2.3.6.6 2.3 5.4-9.4-2.9-2.9Z"/><path d="M5.2 19.2h6.4"/>'
+    ),
+}
+
+
+def icon_mark(name: str) -> str:
+    return f'<span class="icon-mark" aria-hidden="true">{ICONS[name]}</span>'
+
+
+def icon_card(name: str, title: str, body: str) -> str:
+    return f'<article class="card icon-card">{icon_mark(name)}<h3>{title}</h3><p>{body}</p></article>'
+
+
+def icon_step(number: str, name: str, title: str, body: str) -> str:
+    return (
+        f'<div class="step">{icon_mark(name)}<div><p class="step-index">{number}</p>'
+        f"<h3>{title}</h3><p>{body}</p></div></div>"
+    )
+
+
 def page(
     *,
     path: str,
@@ -302,7 +384,7 @@ add(
       <div class="wrap">
         <p class="kicker">AMICOR Technologies</p>
         <h1>Software for operators who keep humans in control.</h1>
-        <p class="lede">AMICOR Technologies is the software catalog inside the AMICOR ecosystem. The first featured product is the Autonomous Operations Agent.</p>
+        <p class="lede">AMICOR Technologies is the software catalog inside the AMICOR parent brand. The first featured product page is the Autonomous Operations Agent — one technology offering, not the company and not AMICOR Health or AMICOR Deliver.</p>
       </div>
     </section>
     <section class="section">
@@ -319,20 +401,20 @@ add(
     "tech",
 )
 
-add(
-    "/technologies/autonomous-operations-agent/",
-    "technologies/autonomous-operations-agent/index.html",
-    "AMICOR Autonomous Operations Agent — Early Access Software",
-    "The AMICOR Autonomous Operations Agent observes operations, recommends actions, requires human approval, verifies results, and keeps an audit trail. Early access. Preliminary pricing.",
-    "/technologies/",
-    2,
-    """
+AOA_BODY = f"""
     <section class="hero">
       <div class="wrap">
-        <p class="kicker">AMICOR Technologies</p>
+        <p class="kicker">AMICOR Technologies → Autonomous Operations Agent</p>
         <h1>Autonomous Operations Agent</h1>
-        <p class="lede">AI that watches your operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
-        <p class="notice">Status: Early Access / In Development. The agent is designed to supervise existing systems. It is not offered as unattended production execution.</p>
+        <p class="lede">A supervised operations-intelligence product from AMICOR Technologies. It is one software offering inside the AMICOR parent brand — not the company itself, and not AMICOR Health or AMICOR Deliver.</p>
+        <p class="notice">Status: Early Access / In Development. The agent observes, recommends, waits for human approval, verifies, and audits. It is not offered as unattended production execution.</p>
+        <div class="loop-visual" aria-hidden="true">
+          <span>{icon_mark("observe")}<small>Observe</small></span>
+          <span>{icon_mark("recommend")}<small>Recommend</small></span>
+          <span>{icon_mark("approval")}<small>Approve</small></span>
+          <span>{icon_mark("verify")}<small>Verify</small></span>
+          <span>{icon_mark("audit")}<small>Audit</small></span>
+        </div>
         <div class="hero-actions">
           <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
           <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
@@ -344,23 +426,11 @@ add(
         <h2>What it does</h2>
         <p class="lede">The product loop is observe, recommend, human approval, verify, and audit. After a person approves, existing operational systems perform the action. The agent does not run unattended production execution.</p>
         <div class="steps">
-          <div class="step"><b>1</b><div><h3>OBSERVE</h3><p>Read live operational state from the systems you already run.</p></div></div>
-          <div class="step"><b>2</b><div><h3>RECOMMEND</h3><p>Propose the next action using existing operational intelligence. Recommendation is not execution.</p></div></div>
-          <div class="step"><b>3</b><div><h3>HUMAN APPROVAL</h3><p>Stop for a human decision. Approval stays with operators, dispatchers, or administrators. Approved work then continues through your current systems.</p></div></div>
-          <div class="step"><b>4</b><div><h3>VERIFY</h3><p>Compare expected and actual state. Inconsistencies are reported, not silently repaired.</p></div></div>
-          <div class="step"><b>5</b><div><h3>AUDIT</h3><p>Keep a correlated trail of what was observed, recommended, approved, and verified.</p></div></div>
-        </div>
-      </div>
-    </section>
-    <section class="section">
-      <div class="wrap">
-        <h2>Who it is for</h2>
-        <div class="grid grid-2">
-          <article class="card"><h3>Transportation</h3><p>Operators who need a supervised recommendation layer on live trip and assignment work.</p></article>
-          <article class="card"><h3>NEMT</h3><p>Non-emergency medical transportation teams that keep humans in the approval path.</p></article>
-          <article class="card"><h3>Courier / delivery</h3><p>Local delivery and courier operations that want observation and audit without unattended execution.</p></article>
-          <article class="card"><h3>Fleet operations</h3><p>Fleet coordinators who need recommended next actions and a verifiable record.</p></article>
-          <article class="card"><h3>Field-service operations</h3><p>Field teams that need the same observe-recommend-approve-verify loop across jobs and exceptions.</p></article>
+          {icon_step("1", "observe", "Observe", "Read live operational state from the systems you already run.")}
+          {icon_step("2", "recommend", "Recommend", "Propose the next action using operational intelligence. A recommendation is not execution.")}
+          {icon_step("3", "approval", "Human Approval", "Stop for a human decision. Operators, dispatchers, or administrators stay in control. Approved work continues through your current systems.")}
+          {icon_step("4", "verify", "Verify", "Compare expected and actual state. Inconsistencies are reported, not silently repaired.")}
+          {icon_step("5", "audit", "Audit", "Keep a correlated trail of what was observed, recommended, approved, and verified.")}
         </div>
       </div>
     </section>
@@ -368,12 +438,25 @@ add(
       <div class="wrap">
         <h2>Capabilities</h2>
         <div class="grid grid-3">
-          <article class="card"><h3>Live operational observation</h3><p>Assemble ride, assignment, driver, and financial signals without replacing the source of truth.</p></article>
-          <article class="card"><h3>Intelligent recommendations</h3><p>Wrap existing ranking and recommendation engines rather than inventing a parallel dispatcher.</p></article>
-          <article class="card"><h3>Human approval controls</h3><p>The agent stops at approval. Autonomous production execution is not enabled in this program.</p></article>
-          <article class="card"><h3>Exception detection</h3><p>Surface stale offers, conflicting state, and missing handoffs for human review.</p></article>
-          <article class="card"><h3>Post-action verification</h3><p>After your system acts, confirm whether the result matches the expected state.</p></article>
-          <article class="card"><h3>Operational audit trail</h3><p>One correlation identity can follow observation, recommendation, approval wait, verification, and exceptions.</p></article>
+          {icon_card("live", "Live operational observation", "Watch live operational signals without replacing the source of truth.")}
+          {icon_card("intel", "Intelligent recommendations", "Surface the next recommended action. Recommendation is not dispatch execution.")}
+          {icon_card("controls", "Human approval controls", "The agent stops at approval. Unattended production execution is not enabled.")}
+          {icon_card("exception", "Exception detection", "Surface stale work, conflicting state, and missing handoffs for human review.")}
+          {icon_card("compare", "Post-action verification", "After your system acts, confirm whether the result matches the expected state.")}
+          {icon_card("trail", "Operational audit trail", "Follow observation, recommendation, approval, verification, and exceptions in one record.")}
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <div class="wrap">
+        <h2>Who it is for</h2>
+        <p class="lede">The Autonomous Operations Agent is for operators who want supervised intelligence on work they already run. It is not a booking marketplace and not a live delivery or licensed-ride service.</p>
+        <div class="grid grid-2">
+          {icon_card("transport", "Transportation", "Operators who need a supervised recommendation layer on live trip and assignment work.")}
+          {icon_card("nemt", "NEMT", "Non-emergency medical transportation teams that keep humans in the approval path.")}
+          {icon_card("courier", "Courier / Delivery", "Courier and local delivery operations that want observation and audit without unattended execution.")}
+          {icon_card("fleet", "Fleet operations", "Fleet coordinators who need recommended next actions and a verifiable record.")}
+          {icon_card("field", "Field-service operations", "Field teams that need the same observe-recommend-approve-verify loop across jobs and exceptions.")}
         </div>
       </div>
     </section>
@@ -382,18 +465,72 @@ add(
         <h2>Preliminary pricing</h2>
         <p class="notice">Preliminary pricing / subject to change before commercial launch. These figures are planning prices, not an offer to sell. There is no payment checkout on this website.</p>
         <div class="price-grid" style="margin-top:20px">
-          <article class="card price"><span class="chip chip-early">Early Access</span><h3>Early Access</h3><strong>Contact AMICOR</strong><p>Supervised evaluation. Request Early Access or a demo.</p></article>
-          <article class="card price"><span class="chip chip-dev">Planned</span><h3>Starter</h3><strong>planned $149/month</strong><p>Preliminary pricing. Subject to change.</p></article>
-          <article class="card price"><span class="chip chip-dev">Planned</span><h3>Growth</h3><strong>planned $399/month</strong><p>Preliminary pricing. Subject to change.</p></article>
-          <article class="card price"><span class="chip chip-soon">Enterprise</span><h3>Business / Enterprise</h3><strong>Contact Sales</strong><p>Scoped after a conversation. No checkout.</p></article>
-        </div>
-        <div class="cta-row" style="margin-top:24px">
-          <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
-          <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
+          <article class="card price">
+            <span class="chip chip-early">Early Access</span>
+            <h3>Contact AMICOR</h3>
+            <p>Supervised evaluation. Request Early Access or a demo.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="/early-access/?product=Autonomous%20Operations%20Agent&amp;intent=demo">Request Demo</a>
+              <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
+            </div>
+          </article>
+          <article class="card price">
+            <span class="chip chip-dev">Planned</span>
+            <h3>Starter</h3>
+            <strong>planned $29/month</strong>
+            <ul class="plan-features">
+              <li>1 operations workspace</li>
+              <li>Live operational observation dashboard</li>
+              <li>Intelligent recommendations</li>
+              <li>Human approval workflow</li>
+              <li>Basic verification status</li>
+              <li>Basic audit trail</li>
+              <li>Email support</li>
+            </ul>
+          </article>
+          <article class="card price">
+            <span class="chip chip-dev">Planned</span>
+            <h3>Growth</h3>
+            <strong>planned $99/month</strong>
+            <ul class="plan-features">
+              <li>Everything in Starter</li>
+              <li>Up to 3 operations workspaces</li>
+              <li>Advanced exception detection</li>
+              <li>Enhanced verification reporting</li>
+              <li>Deeper audit history</li>
+              <li>Basic integration / webhook readiness</li>
+              <li>Priority email support</li>
+            </ul>
+          </article>
+          <article class="card price">
+            <span class="chip chip-soon">Enterprise</span>
+            <h3>Business / Enterprise</h3>
+            <strong>Contact Sales</strong>
+            <p>Scoped after a conversation. No checkout.</p>
+            <ul class="plan-features">
+              <li>Everything in Growth</li>
+              <li>Multi-team / multi-operator support</li>
+              <li>Custom workflows</li>
+              <li>Integration support</li>
+              <li>Admin / governance controls</li>
+              <li>Custom onboarding</li>
+              <li>Higher support level</li>
+              <li>Commercial scoping after a conversation</li>
+            </ul>
+          </article>
         </div>
       </div>
     </section>
-    """,
+"""
+
+add(
+    "/technologies/autonomous-operations-agent/",
+    "technologies/autonomous-operations-agent/index.html",
+    "AMICOR Autonomous Operations Agent — Early Access Software",
+    "The Autonomous Operations Agent is an AMICOR Technologies product: observe, recommend, human approval, verify, and audit. Early access. Preliminary pricing. Not the AMICOR company, Health, or Deliver.",
+    "/technologies/",
+    2,
+    AOA_BODY,
     "tech",
 )
 
