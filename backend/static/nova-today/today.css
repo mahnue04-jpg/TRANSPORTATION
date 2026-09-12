@@ -85,6 +85,47 @@ button,
   color: var(--nova-muted);
   line-height: 1.45;
 }
+.workflow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0;
+  margin: 0 0 16px;
+  list-style: decimal inside;
+  color: var(--nova-muted);
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0;
+  color: var(--nova-muted);
+  font-size: 0.88rem;
+}
+.item.selected {
+  border-color: var(--nova-accent);
+}
+.health-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.health-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--nova-line);
+  color: var(--nova-muted);
+  font-size: 0.78rem;
+}
+.health-pill.ok { border-color: #3b9bff; color: #cfe6ff; }
+.health-pill.partial { border-color: var(--nova-warn); color: #ffe3ad; }
+.health-pill.unavailable { border-color: #8a3a3a; color: #ffd0d0; }
+.activity-strip .item { padding: 10px 12px; }
+.review-block { margin: 8px 0 0; color: var(--nova-muted); font-size: 0.9rem; }
 
 .banner {
   padding: 12px 14px;

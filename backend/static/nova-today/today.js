@@ -53,36 +53,115 @@
       ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Mrs. Nova Brain"
       : "Sign in to use Nova Today.";
   }
-  function cardHtml(card) {
-    var actions = "";
+  var selectedActionId = "";
+  var selectedSourceRefId = "";
+  function cardMeta(card) {
+    return "<div class=\"meta\">" +
+      "<span>Source: " + escapeHtml(card.source_label || card.source_module || "") + "</span>" +
+      "<span>Priority: " + escapeHtml(card.priority_band || String(card.priority || "")) + "</span>" +
+      "<span>Next: " + escapeHtml(card.recommended_action || "") + "</span>" +
+      (card.sender ? "<span>From: " + escapeHtml(card.sender) + "</span>" : "") +
+      (card.received_at ? "<span>Received: " + escapeHtml(card.received_at) + "</span>" : "") +
+      (card.unread != null ? "<span>" + (card.unread ? "Unread" : "Read") + "</span>" : "") +
+      (card.important ? "<span>Important</span>" : "") +
+      (card.provider ? "<span>Provider: " + escapeHtml(card.provider) + "</span>" : "") +
+      "</div>" +
+      "<div class=\"hint\">" + escapeHtml(card.explanation || card.detail || card.recommended_action) + "</div>";
+  }
+  function sourceLink(card) {
+    var href = card.source_href || "";
+    if (!href) return "";
+    return "<a class=\"secondary\" href=\"" + escapeHtml(href) + "\">Open source</a>";
+  }
+  function cardActions(card) {
+    var open = sourceLink(card);
+    var review = card.action_id
+      ? "<button type=\"button\" class=\"secondary\" data-review=\"" + escapeHtml(card.action_id) + "\">Review</button>"
+      : "";
     if (card.action_id && card.status === "proposed") {
-      actions =
-        "<div class=\"card-actions\">" +
-        "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>" +
+      var draft = card.recommended_action === "create_draft"
+        ? "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Prepare draft</button>"
+        : "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>";
+      return "<div class=\"card-actions\">" +
+        draft +
         "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(card.action_id) + "\">Snooze 24h</button>" +
         "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(card.action_id) + "\">Dismiss</button>" +
-        "<a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a>" +
+        review + open +
         "</div>";
-    } else {
-      actions = "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a></div>";
     }
+    return "<div class=\"card-actions\">" + review + open + "</div>";
+  }
+  function cardHtml(card) {
     return "<article class=\"item\">" +
       "<span class=\"trust\">" + escapeHtml(card.trust_label) + "</span>" +
       "<strong>" + escapeHtml(card.title) + "</strong>" +
-      "<div class=\"hint\">" + escapeHtml(card.detail || card.recommended_action) + "</div>" +
-      actions +
+      cardMeta(card) +
+      cardActions(card) +
       "</article>";
   }
   function queueHtml(row) {
     return "<article class=\"item\">" +
       "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
       "<strong>" + escapeHtml(row.title) + "</strong>" +
-      "<div class=\"hint\">" + escapeHtml(row.recommended_action) + " · " + escapeHtml(row.source_module) + "</div>" +
-      "<div class=\"card-actions\">" +
-      "<button type=\"button\" data-approve=\"" + escapeHtml(row.action_id) + "\">Approve</button>" +
-      "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(row.action_id) + "\">Snooze 24h</button>" +
-      "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(row.action_id) + "\">Dismiss</button>" +
-      "</div></article>";
+      cardMeta(row) +
+      "<div class=\"hint\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
+      "<div class=\"hint\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      "<div class=\"hint\">Why: " + escapeHtml(row.why_recommended || row.recommended_action) + "</div>" +
+      cardActions(row) +
+      "</article>";
+  }
+  function reviewHtml(row) {
+    if (!row) return "No item selected.";
+    var details = row.source_details || {};
+    var history = (row.related_history || []).map(function (item) {
+      return escapeHtml(item.result_type) + " · " + escapeHtml(item.title);
+    }).join("<br>");
+    return "<article class=\"item selected\">" +
+      "<span class=\"trust\">" + escapeHtml(row.trust_label || "ACTION REQUIRES APPROVAL") + "</span>" +
+      "<strong>" + escapeHtml(row.title) + "</strong>" +
+      cardMeta(row) +
+      "<div class=\"review-block\">Why Nova surfaced it: " + escapeHtml(row.why_surfaced || row.why_recommended || "") + "</div>" +
+      "<div class=\"review-block\">What Nova recommends: " + escapeHtml(row.recommended_action || "") + "</div>" +
+      "<div class=\"review-block\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
+      "<div class=\"review-block\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      (details.title || details.subject ? "<div class=\"review-block\">Source details: " + escapeHtml(details.sender || "") + " " + escapeHtml(details.subject || details.title || "") + "</div>" : "") +
+      (details.source || details.unread || details.important ? "<div class=\"review-block\">Mailbox state: " + escapeHtml([details.source, details.unread, details.important].filter(Boolean).join(" · ")) + "</div>" : "") +
+      (details.received_at ? "<div class=\"review-block\">Received: " + escapeHtml(details.received_at) + "</div>" : "") +
+      (row.verification_label ? "<div class=\"review-block\">Result verification: " + escapeHtml(row.verification_label) + "</div>" : "") +
+      (history ? "<div class=\"review-block\">Related history:<br>" + history + "</div>" : "<div class=\"review-block\">Related history: none yet.</div>") +
+      "<div class=\"card-actions\"><button type=\"button\" class=\"secondary\" data-recheck=\"" + escapeHtml(row.action_id || "") + "\">Re-check source</button></div>" +
+      cardActions(row) +
+      "</article>";
+  }
+  function activityHtml(row) {
+    return "<article class=\"item\">" +
+      "<span class=\"trust\">" + escapeHtml(row.result_type || row.resulting_status || "") + "</span>" +
+      "<strong>" + escapeHtml(row.title) + "</strong>" +
+      "<div class=\"meta\">" +
+      "<span>Action: " + escapeHtml(row.action_id) + "</span>" +
+      "<span>Source: " + escapeHtml(row.source_module) + " / " + escapeHtml(row.source_ref_id) + "</span>" +
+      "<span>" + escapeHtml(row.prior_status || "proposed") + " → " + escapeHtml(row.resulting_status || "") + "</span>" +
+      (row.result_ref_id ? "<span>Result: " + escapeHtml(row.result_ref_id) + "</span>" : "") +
+      (row.verification_label ? "<span>" + escapeHtml(row.verification_label) + "</span>" : "") +
+      (row.prior_verification_status ? "<span>Was: " + escapeHtml(row.prior_verification_status) + "</span>" : "") +
+      (row.decided_at ? "<span>" + escapeHtml(row.decided_at) + "</span>" : "") +
+      "</div>" +
+      (row.source_href ? "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(row.source_href) + "\">Open source</a></div>" : "") +
+      "</article>";
+  }
+  function renderHealth(rows) {
+    var host = $("source-health");
+    if (!host) return;
+    if (!rows || !rows.length) {
+      host.textContent = "No source status yet.";
+      return;
+    }
+    host.innerHTML = rows.map(function (row) {
+      return "<span class=\"health-pill " + escapeHtml(row.status) + "\">" +
+        escapeHtml(row.source) + ": " + escapeHtml(row.status) +
+        (row.connector && row.connector !== "n/a" ? " · " + escapeHtml(row.connector) : "") +
+        "</span>";
+    }).join("");
   }
   function renderList(id, items, empty) {
     if (!items || !items.length) {
@@ -126,10 +205,10 @@
     }
     var dash = await api("/api/nova/today/dashboard");
     setSignedIn(true);
-    renderList("attention-box", dash.attention_now, "Nothing needs attention now.");
-    renderList("communications-box", dash.communications, "No communications attention items.");
-    renderList("government-box", dash.government, "No government deadlines or grants.");
-    renderList("business-box", dash.business, "No business follow-ups or opportunities.");
+    renderList("attention-box", dash.attention_now, "Nothing needs attention now. No real items were invented.");
+    renderList("communications-box", dash.communications, "No real unread or important communications.");
+    renderList("government-box", dash.government, "No saved government or compliance items.");
+    renderList("business-box", dash.business, "No saved business or operations follow-ups.");
     renderList("workspace-box", dash.workspace, "No recent workspace work.");
     try {
       renderProductCounts(dash.product_counts);
@@ -137,10 +216,36 @@
       renderProductCounts([]);
     }
     renderList("links-box", dash.product_links, "Product links unavailable.");
-    renderList("recommendations-box", dash.recommendations, "No recommendations.");
+    renderList("recommendations-box", dash.recommendations, "No recommendations from real records.");
     $("queue-box").innerHTML = (dash.approval_queue && dash.approval_queue.length)
       ? dash.approval_queue.map(queueHtml).join("")
       : "No items waiting for approval.";
+    $("activity-box").innerHTML = (dash.recent_activity && dash.recent_activity.length)
+      ? dash.recent_activity.map(activityHtml).join("")
+      : "No recent owner activity.";
+    renderHealth(dash.source_health);
+    var connector = $("connector-health");
+    if (connector) {
+      var health = dash.connector_health || {};
+      var parts = [];
+      if (health.status) parts.push("Mailbox: " + health.status);
+      if (health.provider) parts.push(health.provider);
+      if (health.freshness) parts.push("Freshness: " + health.freshness);
+      if (health.last_success_at) parts.push("Last successful read: " + health.last_success_at);
+      if (health.last_attempted_at) parts.push("Last attempted read: " + health.last_attempted_at);
+      if (health.recheck_available === "yes") parts.push("Manual re-check available");
+      if (health.detail) parts.push(health.detail);
+      connector.textContent = parts.length ? parts.join(" · ") : "No mailbox connector status.";
+    }
+    if (selectedActionId) {
+      try {
+        var selected = await api("/api/nova/today/actions/" + encodeURIComponent(selectedActionId));
+        selectedSourceRefId = selected.source_ref_id || "";
+        $("review-box").innerHTML = reviewHtml(selected);
+      } catch (_) {
+        $("review-box").innerHTML = "Selected item is no longer visible.";
+      }
+    }
   }
   async function runBrain(event) {
     event.preventDefault();
@@ -151,7 +256,11 @@
     }
     var result = await api("/api/nova/today/ask", {
       method: "POST",
-      body: JSON.stringify({ question: $("ask-input").value.trim() })
+      body: JSON.stringify({
+        question: $("ask-input").value.trim(),
+        action_id: selectedActionId || null,
+        source_ref_id: selectedSourceRefId || null
+      })
     });
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or filed.", true);
@@ -169,10 +278,26 @@
     }
     await refresh();
   }
+  async function recheckSource(actionId) {
+    var result = await api("/api/nova/today/recheck", {
+      method: "POST",
+      body: JSON.stringify({ action_id: actionId || null })
+    });
+    showBanner((result.message || "Source re-checked.") + " Nothing was sent or recreated.", true);
+    await refresh();
+  }
   document.addEventListener("click", function (event) {
     var approve = event.target && event.target.getAttribute && event.target.getAttribute("data-approve");
     var snooze = event.target && event.target.getAttribute && event.target.getAttribute("data-snooze");
     var dismiss = event.target && event.target.getAttribute && event.target.getAttribute("data-dismiss");
+    var review = event.target && event.target.getAttribute && event.target.getAttribute("data-review");
+    var recheck = event.target && event.target.getAttribute && event.target.getAttribute("data-recheck");
+    if (review) {
+      selectedActionId = review;
+      refresh().catch(function (err) { showBanner(err.message || String(err)); });
+      $("ask-input").focus();
+      return;
+    }
     if (approve) {
       decide(approve, "approve").catch(function (err) { showBanner(err.message || String(err)); });
     }
@@ -182,7 +307,15 @@
     if (dismiss) {
       decide(dismiss, "dismiss").catch(function (err) { showBanner(err.message || String(err)); });
     }
+    if (recheck) {
+      recheckSource(recheck).catch(function (err) { showBanner(err.message || String(err)); });
+    }
   });
+  if ($("recheck-mailbox")) {
+    $("recheck-mailbox").addEventListener("click", function () {
+      recheckSource(null).catch(function (err) { showBanner(err.message || String(err)); });
+    });
+  }
   $("ask-form").addEventListener("submit", function (event) {
     runBrain(event).catch(function (err) { showBanner(err.message || String(err)); });
   });

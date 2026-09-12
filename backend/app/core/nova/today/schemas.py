@@ -12,7 +12,7 @@ TRUST_LABELS = (
     "AI SUGGESTION",
     "ACTION REQUIRES APPROVAL",
 )
-RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge")
+RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge", "recheck_source")
 ACTION_STATUSES = ("proposed", "approved", "dismissed", "done", "snoozed")
 SNOOZE_HOURS = (1, 4, 24, 72)
 SOURCE_MODULES = (
@@ -29,12 +29,26 @@ class NovaTodayCard(BaseModel):
     source_ref_id: str
     title: str
     detail: str | None = None
-    href: str
+    explanation: str | None = None
+    source_label: str | None = None
+    sender: str | None = None
+    subject: str | None = None
+    href: str | None = None
     trust_label: str
     priority: int
+    priority_band: str | None = None
     recommended_action: str
+    why_recommended: str | None = None
+    if_approved: str | None = None
+    will_not_happen: str | None = None
     action_id: str | None = None
     status: str | None = None
+    received_at: datetime | None = None
+    source_href: str | None = None
+    unread: bool | None = None
+    important: bool | None = None
+    provider: str | None = None
+    connector_status: str | None = None
 
 
 class NovaTodayActionOut(BaseModel):
@@ -45,15 +59,31 @@ class NovaTodayActionOut(BaseModel):
     source_ref_id: str
     title: str
     detail: str | None
+    explanation: str | None = None
+    source_label: str | None = None
     href: str | None
     trust_label: str
     priority: int
+    priority_band: str | None = None
     status: str
     recommended_action: str
+    why_recommended: str | None = None
+    if_approved: str | None = None
+    will_not_happen: str | None = None
     result_ref_id: str | None
     created_at: datetime
     decided_at: datetime | None
     snoozed_until: datetime | None = None
+    prior_status: str | None = None
+    resulting_status: str | None = None
+    result_type: str | None = None
+    actor_user_id: str | None = None
+    source_href: str | None = None
+    source_details: dict[str, str] | None = None
+    related_history: list["NovaTodayHistoryItem"] = Field(default_factory=list)
+    why_surfaced: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
 
 
 class NovaTodayProductCount(BaseModel):
@@ -66,6 +96,33 @@ class NovaTodayProductCount(BaseModel):
     trust_label: str = "VERIFIED DATA"
 
 
+class NovaTodaySourceHealth(BaseModel):
+    source: str
+    status: Literal["ok", "empty", "unavailable", "partial"]
+    detail: str
+    connector: Literal["connected", "disconnected", "degraded", "unavailable", "stale", "n/a"] = "n/a"
+    last_sync_at: datetime | None = None
+
+
+class NovaTodayHistoryItem(BaseModel):
+    action_id: str
+    source_module: str
+    source_ref_id: str
+    title: str
+    prior_status: str
+    resulting_status: str
+    result_ref_id: str | None = None
+    actor_user_id: str
+    decided_at: datetime | None = None
+    trust_label: str
+    recommended_action: str
+    result_type: str
+    source_href: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
+    prior_verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+
+
 class NovaTodayDashboardOut(BaseModel):
     attention_now: list[NovaTodayCard]
     communications: list[NovaTodayCard]
@@ -76,12 +133,17 @@ class NovaTodayDashboardOut(BaseModel):
     product_counts: list[NovaTodayProductCount] = Field(default_factory=list)
     recommendations: list[NovaTodayCard]
     approval_queue: list[NovaTodayActionOut]
+    recent_activity: list[NovaTodayHistoryItem] = Field(default_factory=list)
+    source_health: list[NovaTodaySourceHealth] = Field(default_factory=list)
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))
 
 
 class NovaTodayBrainRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
     organization_id: str | None = None
+    action_id: str | None = Field(default=None, max_length=32)
+    source_ref_id: str | None = Field(default=None, max_length=80)
 
 
 class NovaTodayBrainOut(BaseModel):
@@ -89,6 +151,10 @@ class NovaTodayBrainOut(BaseModel):
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str
+    source_href: str | None = None
+    referenced_action_id: str | None = None
+    referenced_source_ref_id: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
 
 
 class NovaTodayActionCreate(BaseModel):
@@ -104,7 +170,7 @@ class NovaTodayActionCreate(BaseModel):
         "ACTION REQUIRES APPROVAL",
     ] = "ACTION REQUIRES APPROVAL"
     priority: int = Field(default=50, ge=0, le=100)
-    recommended_action: Literal["open_link", "create_draft", "create_task", "acknowledge"]
+    recommended_action: Literal["open_link", "create_draft", "create_task", "acknowledge", "recheck_source"]
     organization_id: str | None = None
 
 
@@ -123,11 +189,59 @@ class NovaTodayApproveOut(BaseModel):
     task_id: str | None = None
     message: str
     fact_label: str
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
 
 
 class NovaTodaySnoozeRequest(BaseModel):
     organization_id: str | None = None
     hours: Literal[1, 4, 24, 72] = 24
+
+
+class NovaTodayMailboxItemOut(BaseModel):
+    external_message_id: str
+    provider: str
+    sender: str
+    recipients: list[str] = Field(default_factory=list)
+    subject: str
+    received_at: datetime | None = None
+    unread: bool
+    important: bool
+    snippet: str | None = None
+    connector_account_id: str | None = None
+    source_href: str | None = None
+    source_health: str = "ok"
+    message_id: str | None = None
+
+
+class NovaTodayMailboxOut(BaseModel):
+    items: list[NovaTodayMailboxItemOut] = Field(default_factory=list)
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
+
+
+class NovaTodayRecheckRequest(BaseModel):
+    organization_id: str | None = None
+    action_id: str | None = Field(default=None, max_length=32)
+    connector_account_id: str | None = Field(default=None, max_length=36)
+
+
+class NovaTodayRecheckOut(BaseModel):
+    recheck_id: str
+    action_id: str | None = None
+    source_ref_id: str | None = None
+    result_ref_id: str | None = None
+    prior_verification: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
+    source_health: str | None = None
+    mutated_external: bool = False
+    message: str
+    fact_label: str = "VERIFIED DATA"
+
+
+class NovaTodayReadinessOut(BaseModel):
+    items: list[dict[str, str]] = Field(default_factory=list)
+    fact_label: str = "VERIFIED DATA"
 
 
 class NovaTodaySafetyOut(BaseModel):
