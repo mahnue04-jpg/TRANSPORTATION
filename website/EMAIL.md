@@ -1,10 +1,18 @@
-# AMICOR business email (W8)
+# AMICOR business email (W9)
 
 Official domain: **getamicor.com**.  
 Public contact address: **info@getamicor.com**.  
 Commercial alias: **sales@getamicor.com**.
 
-**Email Routing is not active.** W8 verified Cloudflare status `Enabled: false` / `unconfigured` and no MX records on getamicor.com. Mail sent to info@ or sales@ will bounce until the owner completes the steps below.
+**Email Routing is ACTIVE and VERIFIED.**
+
+| Check | W9 result |
+|---|---|
+| Cloudflare Email Routing | Enabled / status `ready` |
+| Public MX | `route1/2/3.mx.cloudflare.net` |
+| info@getamicor.com | Forwards to the owner inbox. Owner tested from a separate iCloud account; message arrived. |
+| sales@getamicor.com | Forwards to the same owner inbox. Owner tested from a separate iCloud account; message arrived. |
+| Catch-all | Disabled |
 
 Do not write the private destination inbox (the personal address that receives the forwarded mail) in this repository, in `site-config.js`, or on the public website.
 
@@ -12,7 +20,7 @@ Cloudflare Email Routing is included with the existing Cloudflare zone. Do not b
 
 ## Recommended aliases
 
-Enable now:
+Active now:
 
 | Public address | Use | Destination |
 |---|---|---|
@@ -27,15 +35,17 @@ Optional later (same destination unless you split later):
 | partners@getamicor.com | Insurers, advisors, and operating partners |
 | privacy@getamicor.com | Privacy and legal-draft questions |
 
-Do not enable a catch-all unless you want every misspelled address forwarded to the same inbox.
+Catch-all remains **disabled**. Do not enable it unless you want every misspelled address forwarded to the same inbox.
 
 ## Who should receive the mail
 
 Route **info@** and **sales@** to the **same existing owner inbox** already used to sign in to Cloudflare. That keeps setup free and avoids a second mailbox.
 
-Reply from that personal inbox until a later “send as info@getamicor.com” step is approved. Do not publish the personal address. After routing works, prefer to reply from Gmail “Send mail as” info@ only if you add that later — it is not required for W8.
+Replies still come from the personal inbox until a later “send as info@getamicor.com” step is approved. Do not publish the personal address.
 
-## Exact Cloudflare owner setup (click by click)
+## Exact Cloudflare owner setup (reference)
+
+info@ and sales@ are already live. Use these steps only to add later aliases or to rebuild routing if it is disabled.
 
 Use the Cloudflare account that already owns getamicor.com and the Pages project `amicor-public`. You must be using Cloudflare DNS for this domain (already true for the public site).
 
@@ -117,7 +127,7 @@ Routing is actually active only when **all** of these are true:
 |---|---|---|
 | Early Access / Request Demo form | Validated `POST /api/leads` writes the AMICOR KV lead store | No. Form success does not require mail. |
 | Optional `LEAD_WEBHOOK_URL` | Pages dashboard secret only; best-effort notify | No. Must not be stored in git. |
-| info@ / sales@ | Human-written email | Yes. Owner must finish the steps above. |
+| info@ / sales@ | Human-written email | Yes. W9: active and owner-verified. |
 
 List stored form leads (owner only; this prints keys, not a public inbox):
 

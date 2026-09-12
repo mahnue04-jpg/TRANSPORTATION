@@ -570,7 +570,7 @@ add(
         <p class="kicker">Contact</p>
         <h1>Start with the public channel.</h1>
         <p class="lede">AMICOR HEALTH ISF LLC is a Minnesota company. For product, partnership, and review inquiries, use the Early Access form first. You can also write to <a href="mailto:info@getamicor.com">info@getamicor.com</a>. This page does not publish a street address or a personal inbox.</p>
-        <p class="notice">A success message on the Early Access form means AMICOR stored the inquiry. That form works even if mailbox forwarding is not finished yet.</p>
+        <p class="notice">A success message on the Early Access form means AMICOR stored the inquiry. Mail to info@getamicor.com is a separate channel and is not required for that storage.</p>
         <p class="contact-channels">General contact: <a href="mailto:info@getamicor.com">info@getamicor.com</a></p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="/early-access/">Open Early Access form</a>
@@ -690,7 +690,7 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card"><h2>Current goals</h2><p>Skip link, labeled form fields, visible focus, heading order, 44-pixel tap targets, and text alternatives for the logo.</p></article>
-        <article class="card"><h2>Known limits</h2><p>Legal pages remain drafts. The status table may scroll horizontally on small screens. Mailbox forwarding for info@getamicor.com is an owner Cloudflare step and may not be active yet.</p></article>
+        <article class="card"><h2>Known limits</h2><p>Legal pages remain drafts. The status table may scroll horizontally on small screens.</p></article>
         <article class="card"><h2>Reporting a barrier</h2><p>Describe the page and the barrier through the <a href="/early-access/">Early Access form</a> or <a href="mailto:info@getamicor.com">info@getamicor.com</a>.</p></article>
         <article class="card"><h2>What this is not</h2><p>This statement is not a guarantee, not an ADA legal opinion, and not a claim that every AMICOR product interface is covered.</p></article>
       </div>

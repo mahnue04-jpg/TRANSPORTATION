@@ -1,4 +1,4 @@
-# Early Access form architecture (W8)
+# Early Access form architecture (W9)
 
 The public form does **not** contain SMTP passwords, API keys, Stripe secrets, or a private destination inbox.
 
@@ -16,9 +16,9 @@ The public form does **not** contain SMTP passwords, API keys, Stripe secrets, o
 
 Validated leads are stored in the AMICOR Cloudflare KV namespace bound as `AMICOR_LEADS`. That store is authoritative.
 
-An optional `LEAD_WEBHOOK_URL` secret may later forward a copy to a private HTTPS endpoint. Set that secret only in the Cloudflare Pages dashboard. It is not set in W8.
+An optional `LEAD_WEBHOOK_URL` secret may later forward a copy to a private HTTPS endpoint. Set that secret only in the Cloudflare Pages dashboard. It is not set in W9.
 
-Mailbox aliases such as info@getamicor.com are documented in `EMAIL.md` and are a separate owner action.
+Mailbox aliases info@getamicor.com and sales@getamicor.com are **ACTIVE and VERIFIED**. They are a separate channel from this form. See `EMAIL.md`.
 
 List stored leads (owner only):
 

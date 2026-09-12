@@ -1,4 +1,4 @@
-# Early Access lead endpoint (W8)
+# Early Access lead endpoint (W9)
 
 Live lead collection stores validated inquiries in the AMICOR-owned Cloudflare KV namespace `AMICOR_LEADS`. That store is **authoritative**. Inbox email and webhooks are optional and must not decide whether the public form succeeds.
 
@@ -18,7 +18,7 @@ formEndpoint: "/api/leads"
 4. If KV is unavailable, the page says AMICOR did not receive the request and saves a local fallback.
 5. Optional webhook notification, if later configured in the Pages dashboard, is best-effort. Webhook failure must not fail the form after KV write succeeds.
 
-Email Routing for info@getamicor.com is a separate owner action. It is not required for form storage. See `EMAIL.md`.
+Email Routing for info@getamicor.com is **ACTIVE and VERIFIED**. It is a separate channel and is not required for form storage. See `EMAIL.md`.
 
 ## Contract
 

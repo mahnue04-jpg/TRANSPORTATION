@@ -11,7 +11,7 @@ Do not implement billing from this document.
 | A. Public website | Ready for outreach | Live HTTPS site at https://getamicor.com; truthful product-status labels | Legal pages are drafts |
 | B. Lead capture | Ready for inquiries | Early Access / Request Demo form → `POST /api/leads` → AMICOR KV store | Optional webhook not set; no CRM |
 | C. Legal | Blocker for paid work | Draft Privacy, Terms, Software Terms, Accessibility | Attorney review required before accepting payment |
-| D. Business email | Owner action required | Public address `info@getamicor.com` is published in website source; setup steps are in `EMAIL.md` | Cloudflare Email Routing still unconfigured; mail will bounce until the owner enables it |
+| D. Business email | Active and verified | `info@getamicor.com` and `sales@getamicor.com` forward to the owner inbox; public site uses info@ | Optional aliases (support / partners / privacy) not created; send-as not configured |
 | E. Customer demo | Ready as a conversation | Request Demo query, product page, supervised-agent story | No scheduled demo product, no shared calendar |
 | F. Payment / revenue | Not ready | Public site says Contact AMICOR / preliminary prices | No Stripe checkout, no invoice product, no paid-pilot agreement |
 | G. Outreach | Ready with limits | Public URL, form, status matrix | Do not claim licensed rides, live delivery, medical use, or autonomous production execution |
@@ -30,7 +30,7 @@ Do not implement billing from this document.
 2. Form pre-fills product and a demo message.
 3. After consent and validation, `POST /api/leads` stores the inquiry if accepted.
 4. Success copy appears only after storage succeeds.
-5. Owner reviews the KV lead and replies from an AMICOR channel. After Email Routing is enabled, prefer info@getamicor.com as the public face. Until then, use the private destination inbox only as a receive-and-reply path and do not publish it.
+5. Owner reviews the KV lead and replies from an AMICOR channel. Use info@getamicor.com as the public face. Do not publish the private destination inbox.
 
 ## Early Access lead flow
 
@@ -83,7 +83,7 @@ Pilot rules if later approved:
 
 - Attorney-reviewed customer terms (or a signed pilot agreement)
 - A way to invoice or collect payment that is not the public website checkout (none exists today)
-- A named AMICOR reply mailbox or documented owner follow-up process
+- A named AMICOR reply mailbox or documented owner follow-up process (`info@getamicor.com` now receives mail; send-as is still optional)
 - Written confirmation that the pilot is supervised software, not a licensed transportation or medical service
 - Owner approval of any price actually quoted
 
