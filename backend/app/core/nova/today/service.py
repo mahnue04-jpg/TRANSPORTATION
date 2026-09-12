@@ -24,6 +24,12 @@ from app.core.nova.communications.service import create_draft as create_communic
 from app.core.nova.communications.service import dashboard as communications_dashboard
 from app.core.nova.government.service import dashboard as government_dashboard
 from app.core.nova.service import NovaCoreService
+from app.core.nova.today.links import (
+    prior_status_for,
+    result_type_for,
+    source_details,
+    source_href,
+)
 from app.core.nova.today.models import NovaV2CommandAction
 from app.core.nova.today.schemas import (
     RECOMMENDED_ACTIONS,
@@ -37,6 +43,7 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainRequest,
     NovaTodayCard,
     NovaTodayDashboardOut,
+    NovaTodayHistoryItem,
     NovaTodayProductCount,
     NovaTodaySourceHealth,
 )
@@ -224,8 +231,16 @@ def action_consequences(recommended_action: str) -> tuple[str, str, str]:
     )
 
 
-def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
+def action_out(
+    row: NovaV2CommandAction,
+    *,
+    resolved_href: str | None = None,
+    use_resolved: bool = False,
+    details: dict[str, str] | None = None,
+    related: list[NovaTodayHistoryItem] | None = None,
+) -> NovaTodayActionOut:
     why, if_approved, will_not = action_consequences(row.recommended_action)
+    href = resolved_href if use_resolved else (resolved_href or row.href)
     return NovaTodayActionOut(
         action_id=row.action_id,
         organization_id=row.organization_id,
@@ -236,7 +251,7 @@ def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
         detail=row.detail,
         explanation=row.detail,
         source_label=_SOURCE_LABELS.get(row.source_module, row.source_module),
-        href=row.href,
+        href=href,
         trust_label=row.trust_label,
         priority=row.priority,
         priority_band=priority_band(row.priority),
@@ -249,7 +264,75 @@ def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
         created_at=row.created_at,
         decided_at=row.decided_at,
         snoozed_until=row.snoozed_until,
+        prior_status=prior_status_for(row),
+        resulting_status=row.status,
+        result_type=result_type_for(row),
+        actor_user_id=row.owner_user_id,
+        source_href=resolved_href if use_resolved else resolved_href,
+        source_details=details,
+        related_history=related or [],
+        why_surfaced=why,
     )
+
+
+def history_item(row: NovaV2CommandAction, *, resolved_href: str | None = None) -> NovaTodayHistoryItem:
+    return NovaTodayHistoryItem(
+        action_id=row.action_id,
+        source_module=row.source_module,
+        source_ref_id=row.source_ref_id,
+        title=row.title,
+        prior_status=prior_status_for(row),
+        resulting_status=row.status,
+        result_ref_id=row.result_ref_id,
+        actor_user_id=row.owner_user_id,
+        decided_at=row.decided_at,
+        trust_label=row.trust_label,
+        recommended_action=row.recommended_action,
+        result_type=result_type_for(row),
+        source_href=resolved_href,
+    )
+
+
+def _resolved_source_href(
+    db: Session,
+    row: NovaV2CommandAction,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> str | None:
+    return source_href(
+        db,
+        source_module=row.source_module,
+        source_ref_id=row.source_ref_id,
+        organization_id=organization_id,
+        user=user,
+    )
+
+
+def list_history(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int = 20,
+) -> list[NovaTodayHistoryItem]:
+    rows = [
+        row
+        for row in _list_actions(db, organization_id=organization_id, user=user)
+        if row.status != "proposed" and row.decided_at is not None
+    ]
+    rows.sort(key=lambda row: row.decided_at or row.created_at, reverse=True)
+    items: list[NovaTodayHistoryItem] = []
+    for row in rows[:limit]:
+        items.append(
+            history_item(
+                row,
+                resolved_href=_resolved_source_href(
+                    db, row, organization_id=organization_id, user=user
+                ),
+            )
+        )
+    return items
 
 
 _MODULE_RANK = {
@@ -293,13 +376,16 @@ def _card(
     source_ref_id: str,
     title: str,
     detail: str | None,
-    href: str,
+    href: str | None,
     trust_label: str,
     priority: int,
     recommended_action: str,
     explanation: str | None = None,
     sender: str | None = None,
     subject: str | None = None,
+    received_at=None,
+    source_href: str | None = None,
+    source_label: str | None = None,
 ) -> NovaTodayCard:
     why, if_approved, will_not = action_consequences(recommended_action)
     return NovaTodayCard(
@@ -308,7 +394,7 @@ def _card(
         title=title,
         detail=detail,
         explanation=explanation or detail,
-        source_label=_SOURCE_LABELS.get(source_module, source_module),
+        source_label=source_label or _SOURCE_LABELS.get(source_module, source_module),
         sender=sender,
         subject=subject,
         href=href,
@@ -319,6 +405,8 @@ def _card(
         why_recommended=why,
         if_approved=if_approved,
         will_not_happen=will_not,
+        received_at=received_at,
+        source_href=source_href,
     )
 
 
@@ -406,20 +494,62 @@ def _safe_source(loader):
         return None, "unavailable"
 
 
-def _health(source: str, status: str, *, count: int = 0) -> NovaTodaySourceHealth:
+def _health(
+    source: str,
+    status: str,
+    *,
+    count: int = 0,
+    connector: str = "n/a",
+    email_connected: bool | None = None,
+) -> NovaTodaySourceHealth:
     if status == "unavailable":
         return NovaTodaySourceHealth(
             source=source,
             status="unavailable",
             detail="This Nova source is unavailable. Today did not invent records.",
+            connector="n/a" if connector == "n/a" else "disconnected",
+        )
+    if source == "communications" and email_connected is not None:
+        if email_connected and count > 0:
+            return NovaTodaySourceHealth(
+                source=source,
+                status="ok",
+                detail=f"{count} real items from the connected mailbox or saved messages.",
+                connector="connected",
+            )
+        if email_connected and count == 0:
+            return NovaTodaySourceHealth(
+                source=source,
+                status="empty",
+                detail="Mailbox connector is present. No unread or important messages were invented.",
+                connector="connected",
+            )
+        if not email_connected and count > 0:
+            return NovaTodaySourceHealth(
+                source=source,
+                status="partial",
+                detail="Local saved messages only. No mailbox connector is connected.",
+                connector="disconnected",
+            )
+        return NovaTodaySourceHealth(
+            source=source,
+            status="empty",
+            detail="No mailbox connector. No saved messages were invented.",
+            connector="disconnected",
         )
     if count == 0:
         return NovaTodaySourceHealth(
             source=source,
             status="empty",
             detail="No real records in this source today.",
+            connector=connector,
         )
-    return NovaTodaySourceHealth(source=source, status="ok", detail=f"{count} real items.")
+    return NovaTodaySourceHealth(
+        source=source,
+        status="ok",
+        detail=f"{count} real items.",
+        connector=connector,
+    )
 
 
 def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -> dict[str, list[NovaTodayCard]]:
@@ -438,6 +568,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
 
     comms_cards: list[NovaTodayCard] = []
     seen_messages: set[str] = set()
+    email_connected = bool(getattr(communications, "email_connected", False)) if communications is not None else False
     if communications is not None:
         for row in list(communications.important) + list(communications.inbox):
             if row.message_id in seen_messages:
@@ -446,6 +577,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                 continue
             seen_messages.add(row.message_id)
             label = "Important" if row.important else "Unread"
+            connector_backed = email_connected and str(getattr(row, "source", "local") or "local") != "local"
             comms_cards.append(
                 _card(
                     source_module="communications",
@@ -454,11 +586,14 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.snippet or row.sender,
                     explanation=f"From {row.sender}. {row.snippet or 'Saved message. Prepare a draft only.'}",
                     href="/nova/communications",
+                    source_href="/nova/communications",
                     trust_label="USER-SAVED INFORMATION",
                     priority=82 if row.important else 75,
                     recommended_action="create_draft",
                     sender=row.sender,
                     subject=row.subject,
+                    received_at=row.created_at,
+                    source_label="Connected mailbox" if connector_backed else "Nova saved message",
                 )
             )
         for row in communications.today:
@@ -470,10 +605,13 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.location,
                     explanation=row.location or "Calendar item saved in Nova Communications.",
                     href="/nova/communications",
+                    source_href="/nova/communications",
                     trust_label="USER-SAVED INFORMATION",
                     priority=60,
                     recommended_action="open_link",
                     subject=row.title,
+                    received_at=row.start_time,
+                    source_label="Connected calendar" if getattr(communications, "calendar_connected", False) else "Nova saved calendar",
                 )
             )
         for row in communications.drafts[:6]:
@@ -485,10 +623,12 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail="Saved draft. Nothing was sent.",
                     explanation="This is a saved Communications draft. Nova Today will not send it.",
                     href="/nova/communications",
+                    source_href="/nova/communications",
                     trust_label="USER-SAVED INFORMATION",
                     priority=55,
                     recommended_action="open_link",
                     subject=row.subject,
+                    source_label="Nova saved draft",
                 )
             )
 
@@ -503,6 +643,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.agency,
                     explanation=f"Saved compliance item is overdue{f' at {row.agency}' if row.agency else ''}. Nova will not file this.",
                     href="/nova/government",
+                    source_href="/nova/government",
                     trust_label="USER-SAVED INFORMATION",
                     priority=95,
                     recommended_action="create_task",
@@ -517,6 +658,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=f"Due {row.due_date}" if row.due_date else row.agency,
                     explanation=f"Upcoming deadline from a user-saved Government record. Due {row.due_date}." if row.due_date else "Upcoming deadline from a user-saved Government record.",
                     href="/nova/government",
+                    source_href="/nova/government",
                     trust_label="USER-SAVED INFORMATION",
                     priority=78,
                     recommended_action="open_link",
@@ -531,6 +673,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=f"Renewal {row.renewal_date}" if row.renewal_date else row.agency,
                     explanation="Saved renewal date. This is not a government notice invented by Nova.",
                     href="/nova/government",
+                    source_href="/nova/government",
                     trust_label="USER-SAVED INFORMATION",
                     priority=74,
                     recommended_action="create_task",
@@ -546,6 +689,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                         detail=row.agency,
                         explanation="Program deadline from saved Government records. Nova will not file an application.",
                         href="/nova/government",
+                        source_href="/nova/government",
                         trust_label="USER-SAVED INFORMATION",
                         priority=76,
                         recommended_action="open_link",
@@ -563,6 +707,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.notes,
                     explanation="Overdue Business task from saved workspace data.",
                     href="/nova/business",
+                    source_href="/nova/business",
                     trust_label="USER-SAVED INFORMATION",
                     priority=88,
                     recommended_action="open_link",
@@ -577,6 +722,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=f"Next follow-up {row.next_follow_up}" if row.next_follow_up else None,
                     explanation="Saved customer follow-up. Prepare a draft only; nothing is sent.",
                     href="/nova/business",
+                    source_href="/nova/business",
                     trust_label="USER-SAVED INFORMATION",
                     priority=70,
                     recommended_action="create_draft",
@@ -592,6 +738,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.next_action,
                     explanation=row.next_action or "Open opportunity from saved Business records.",
                     href="/nova/business",
+                    source_href="/nova/business",
                     trust_label="USER-SAVED INFORMATION",
                     priority=58,
                     recommended_action="create_task",
@@ -609,6 +756,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.kind,
                     explanation=f"Recent workspace activity ({row.kind}).",
                     href="/nova/workspace",
+                    source_href="/nova/workspace",
                     trust_label="USER-SAVED INFORMATION",
                     priority=35,
                     recommended_action="open_link",
@@ -623,6 +771,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     detail=row.status,
                     explanation=f"Active project status: {row.status}.",
                     href="/nova/workspace",
+                    source_href="/nova/workspace",
                     trust_label="USER-SAVED INFORMATION",
                     priority=32,
                     recommended_action="open_link",
@@ -636,6 +785,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
             title="AMICOR Health",
             detail="Open the existing Health ISF workspace. Linked, not merged.",
             href="/workspace",
+            source_href="/workspace",
             trust_label="VERIFIED DATA",
             priority=12,
             recommended_action="open_link",
@@ -646,6 +796,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
             title="AMICOR Delivery",
             detail="Open the frozen Delivery operations surface.",
             href="/app",
+            source_href="/app",
             trust_label="VERIFIED DATA",
             priority=11,
             recommended_action="open_link",
@@ -656,6 +807,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
             title="AMICOR Nova Freight",
             detail="Open the frozen Freight V1 product.",
             href="/nova/freight",
+            source_href="/nova/freight",
             trust_label="VERIFIED DATA",
             priority=10,
             recommended_action="open_link",
@@ -673,6 +825,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                 detail="Mrs. Nova Brain suggestion from existing Business and Government records.",
                 explanation="AI suggestion based on real saved records already listed on Today. Not a new deadline.",
                 href="/nova/today",
+                source_href=None,
                 trust_label="AI SUGGESTION",
                 priority=40,
                 recommended_action="acknowledge",
@@ -684,6 +837,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                 detail="Today will not send email.",
                 explanation="Standing safety reminder. Approve only acknowledges this guidance.",
                 href="/nova/communications",
+                source_href=None,
                 trust_label="AI SUGGESTION",
                 priority=38,
                 recommended_action="acknowledge",
@@ -698,11 +852,17 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
         "product_links": product_links,
         "recommendations": recommendations,
         "source_health": [
-            _health("communications", comms_status, count=len(comms_cards)),
+            _health(
+                "communications",
+                comms_status,
+                count=len(comms_cards),
+                email_connected=email_connected if communications is not None else None,
+            ),
             _health("government", gov_status, count=len(gov_cards)),
             _health("business", biz_status, count=len(biz_cards)),
             _health("workspace", workspace_status, count=len(workspace_cards)),
         ],
+        "email_connected": email_connected,
     }
 
 
@@ -741,7 +901,16 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         key=rank_score,
         reverse=True,
     )[:16]
-    approval_queue = [action_out(row) for row in rows if row.status == "proposed"]
+    approval_queue = [
+        action_out(
+            row,
+            resolved_href=_resolved_source_href(db, row, organization_id=organization_id, user=user),
+            use_resolved=True,
+        )
+        for row in rows
+        if row.status == "proposed"
+    ]
+    recent_activity = list_history(db, organization_id=organization_id, user=user)
     try:
         counts = product_counts(db, organization_id=organization_id, user=user)
     except Exception:
@@ -756,6 +925,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         product_counts=counts,
         recommendations=recommendations,
         approval_queue=approval_queue,
+        recent_activity=recent_activity,
         source_health=list(groups.get("source_health") or []),
         trust_labels=list(TRUST_LABELS),
     )
@@ -766,7 +936,33 @@ def list_actions(db: Session, *, organization_id: str, user: UserContext) -> lis
 
 
 def get_action(db: Session, action_id: str, *, organization_id: str, user: UserContext) -> NovaTodayActionOut:
-    return action_out(_get_action(db, action_id, organization_id=organization_id, user=user))
+    row = _get_action(db, action_id, organization_id=organization_id, user=user)
+    resolved = _resolved_source_href(db, row, organization_id=organization_id, user=user)
+    details = source_details(
+        db,
+        source_module=row.source_module,
+        source_ref_id=row.source_ref_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    related = [
+        history_item(
+            other,
+            resolved_href=_resolved_source_href(db, other, organization_id=organization_id, user=user),
+        )
+        for other in _list_actions(db, organization_id=organization_id, user=user)
+        if other.source_ref_id == row.source_ref_id
+        and other.action_id != row.action_id
+        and other.status != "proposed"
+        and other.decided_at is not None
+    ]
+    return action_out(
+        row,
+        resolved_href=resolved,
+        use_resolved=True,
+        details=details,
+        related=related[:8],
+    )
 
 
 def create_action(
@@ -923,41 +1119,77 @@ def ask_today(
     user: UserContext,
 ) -> NovaTodayBrainOut:
     dash = dashboard(db, organization_id=organization_id, user=user)
+    history = dash.recent_activity
     selected = ""
+    referenced_action_id = None
+    referenced_source_ref_id = payload.source_ref_id
+    resolved = None
     if payload.action_id:
         try:
-            row = _get_action(db, payload.action_id, organization_id=organization_id, user=user)
+            reviewed = get_action(db, payload.action_id, organization_id=organization_id, user=user)
+            referenced_action_id = reviewed.action_id
+            referenced_source_ref_id = reviewed.source_ref_id
+            resolved = reviewed.source_href
             selected = (
-                f" Owner is reviewing action {row.action_id}: {row.title}. "
-                f"Recommended {row.recommended_action}. Source {row.source_module}/{row.source_ref_id}."
+                f" Owner is reviewing action {reviewed.action_id}: {reviewed.title}. "
+                f"Recommended {reviewed.recommended_action}. Source {reviewed.source_module}/{reviewed.source_ref_id}. "
+                f"Status {reviewed.status}. Result type {reviewed.result_type}. "
+                f"Source link: {reviewed.source_href or 'none'}."
             )
+            if reviewed.source_details:
+                selected += f" Source details: {reviewed.source_details}."
+            if reviewed.related_history:
+                selected += " Related history: " + "; ".join(
+                    f"{item.result_type} {item.title}" for item in reviewed.related_history[:4]
+                )
         except NovaTodayError:
             selected = " The requested action was not visible to this owner."
     elif payload.source_ref_id:
         match = next((card for card in dash.attention_now if card.source_ref_id == payload.source_ref_id), None)
         if match:
-            selected = f" Owner is reviewing {match.trust_label} item {match.title}."
+            resolved = match.source_href
+            selected = (
+                f" Owner is reviewing {match.trust_label} item {match.title} "
+                f"({match.source_module}/{match.source_ref_id}). Source link: {match.source_href or 'none'}."
+            )
+        else:
+            selected = " The requested source record is not visible on Today."
+    history_line = ""
+    if history:
+        history_line = " Recent owner results: " + "; ".join(
+            f"{item.result_type} {item.title}" for item in history[:6]
+        )
     context = (
         "You are Mrs. Nova Brain on Nova Today. Use VERIFIED DATA, USER-SAVED INFORMATION, "
-        "AI SUGGESTION, and ACTION REQUIRES APPROVAL. Do not send email, file with an agency, "
-        "charge a card, or create a ledger.\n\n"
+        "AI SUGGESTION, and ACTION REQUIRES APPROVAL. Explain, summarize, recommend, and point "
+        "to existing source links only. Do not send email, file with an agency, charge a card, "
+        "create a ledger, place a call, or execute any external action.\n\n"
         f"Attention items: {len(dash.attention_now)}. "
         f"Communications: {len(dash.communications)}. "
         f"Government: {len(dash.government)}. "
         f"Business: {len(dash.business)}. "
         f"Workspace: {len(dash.workspace)}. "
-        f"Approval queue: {len(dash.approval_queue)}.\n"
+        f"Approval queue: {len(dash.approval_queue)}. "
+        f"Recent activity: {len(history)}.\n"
         "Top attention: "
         + "; ".join(f"{card.trust_label} {card.title}" for card in dash.attention_now[:8])
+        + history_line
         + selected
         + f"\n\n{payload.question.strip()}"
     )
     asked = NovaCoreService.ask(db, organization_id=organization_id, mode="founder_advisor", question=context)
+    next_actions = list(asked.next_actions or [])
+    if resolved:
+        next_actions = [f"Open existing source: {resolved}"] + next_actions
+    next_actions = [item for item in next_actions if "send" not in item.lower() and "file" not in item.lower()][:6]
     return NovaTodayBrainOut(
         answer=asked.answer,
-        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA. ACTION REQUIRES APPROVAL before any write.",
-        next_actions=asked.next_actions,
+        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA. ACTION REQUIRES APPROVAL before any write. Ask Nova does not execute external actions.",
+        next_actions=next_actions,
         generated_at=asked.generated_at,
+        source_href=resolved,
+        referenced_action_id=referenced_action_id,
+        referenced_source_ref_id=referenced_source_ref_id,
     )
 
 

@@ -33,7 +33,7 @@ class NovaTodayCard(BaseModel):
     source_label: str | None = None
     sender: str | None = None
     subject: str | None = None
-    href: str
+    href: str | None = None
     trust_label: str
     priority: int
     priority_band: str | None = None
@@ -43,6 +43,8 @@ class NovaTodayCard(BaseModel):
     will_not_happen: str | None = None
     action_id: str | None = None
     status: str | None = None
+    received_at: datetime | None = None
+    source_href: str | None = None
 
 
 class NovaTodayActionOut(BaseModel):
@@ -68,6 +70,14 @@ class NovaTodayActionOut(BaseModel):
     created_at: datetime
     decided_at: datetime | None
     snoozed_until: datetime | None = None
+    prior_status: str | None = None
+    resulting_status: str | None = None
+    result_type: str | None = None
+    actor_user_id: str | None = None
+    source_href: str | None = None
+    source_details: dict[str, str] | None = None
+    related_history: list["NovaTodayHistoryItem"] = Field(default_factory=list)
+    why_surfaced: str | None = None
 
 
 class NovaTodayProductCount(BaseModel):
@@ -82,8 +92,25 @@ class NovaTodayProductCount(BaseModel):
 
 class NovaTodaySourceHealth(BaseModel):
     source: str
-    status: Literal["ok", "empty", "unavailable"]
+    status: Literal["ok", "empty", "unavailable", "partial"]
     detail: str
+    connector: Literal["connected", "disconnected", "n/a"] = "n/a"
+
+
+class NovaTodayHistoryItem(BaseModel):
+    action_id: str
+    source_module: str
+    source_ref_id: str
+    title: str
+    prior_status: str
+    resulting_status: str
+    result_ref_id: str | None = None
+    actor_user_id: str
+    decided_at: datetime | None = None
+    trust_label: str
+    recommended_action: str
+    result_type: str
+    source_href: str | None = None
 
 
 class NovaTodayDashboardOut(BaseModel):
@@ -96,6 +123,7 @@ class NovaTodayDashboardOut(BaseModel):
     product_counts: list[NovaTodayProductCount] = Field(default_factory=list)
     recommendations: list[NovaTodayCard]
     approval_queue: list[NovaTodayActionOut]
+    recent_activity: list[NovaTodayHistoryItem] = Field(default_factory=list)
     source_health: list[NovaTodaySourceHealth] = Field(default_factory=list)
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))
 
@@ -112,6 +140,9 @@ class NovaTodayBrainOut(BaseModel):
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str
+    source_href: str | None = None
+    referenced_action_id: str | None = None
+    referenced_source_ref_id: str | None = None
 
 
 class NovaTodayActionCreate(BaseModel):

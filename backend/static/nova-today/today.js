@@ -54,17 +54,24 @@
       : "Sign in to use Nova Today.";
   }
   var selectedActionId = "";
+  var selectedSourceRefId = "";
   function cardMeta(card) {
     return "<div class=\"meta\">" +
       "<span>Source: " + escapeHtml(card.source_label || card.source_module || "") + "</span>" +
       "<span>Priority: " + escapeHtml(card.priority_band || String(card.priority || "")) + "</span>" +
       "<span>Next: " + escapeHtml(card.recommended_action || "") + "</span>" +
       (card.sender ? "<span>From: " + escapeHtml(card.sender) + "</span>" : "") +
+      (card.received_at ? "<span>Received: " + escapeHtml(card.received_at) + "</span>" : "") +
       "</div>" +
       "<div class=\"hint\">" + escapeHtml(card.explanation || card.detail || card.recommended_action) + "</div>";
   }
+  function sourceLink(card) {
+    var href = card.source_href || "";
+    if (!href) return "";
+    return "<a class=\"secondary\" href=\"" + escapeHtml(href) + "\">Open source</a>";
+  }
   function cardActions(card) {
-    var open = "<a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a>";
+    var open = sourceLink(card);
     var review = card.action_id
       ? "<button type=\"button\" class=\"secondary\" data-review=\"" + escapeHtml(card.action_id) + "\">Review</button>"
       : "";
@@ -102,14 +109,50 @@
   }
   function reviewHtml(row) {
     if (!row) return "No item selected.";
+    var details = row.source_details || {};
+    var history = (row.related_history || []).map(function (item) {
+      return escapeHtml(item.result_type) + " · " + escapeHtml(item.title);
+    }).join("<br>");
     return "<article class=\"item selected\">" +
       "<span class=\"trust\">" + escapeHtml(row.trust_label || "ACTION REQUIRES APPROVAL") + "</span>" +
       "<strong>" + escapeHtml(row.title) + "</strong>" +
       cardMeta(row) +
-      "<div class=\"hint\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
-      "<div class=\"hint\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      "<div class=\"review-block\">Why Nova surfaced it: " + escapeHtml(row.why_surfaced || row.why_recommended || "") + "</div>" +
+      "<div class=\"review-block\">What Nova recommends: " + escapeHtml(row.recommended_action || "") + "</div>" +
+      "<div class=\"review-block\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
+      "<div class=\"review-block\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      (details.title || details.subject ? "<div class=\"review-block\">Source details: " + escapeHtml(details.sender || "") + " " + escapeHtml(details.subject || details.title || "") + "</div>" : "") +
+      (history ? "<div class=\"review-block\">Related history:<br>" + history + "</div>" : "<div class=\"review-block\">Related history: none yet.</div>") +
       cardActions(row) +
       "</article>";
+  }
+  function activityHtml(row) {
+    return "<article class=\"item\">" +
+      "<span class=\"trust\">" + escapeHtml(row.result_type || row.resulting_status || "") + "</span>" +
+      "<strong>" + escapeHtml(row.title) + "</strong>" +
+      "<div class=\"meta\">" +
+      "<span>Action: " + escapeHtml(row.action_id) + "</span>" +
+      "<span>Source: " + escapeHtml(row.source_module) + " / " + escapeHtml(row.source_ref_id) + "</span>" +
+      "<span>" + escapeHtml(row.prior_status || "proposed") + " → " + escapeHtml(row.resulting_status || "") + "</span>" +
+      (row.result_ref_id ? "<span>Result: " + escapeHtml(row.result_ref_id) + "</span>" : "") +
+      (row.decided_at ? "<span>" + escapeHtml(row.decided_at) + "</span>" : "") +
+      "</div>" +
+      (row.source_href ? "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(row.source_href) + "\">Open source</a></div>" : "") +
+      "</article>";
+  }
+  function renderHealth(rows) {
+    var host = $("source-health");
+    if (!host) return;
+    if (!rows || !rows.length) {
+      host.textContent = "No source status yet.";
+      return;
+    }
+    host.innerHTML = rows.map(function (row) {
+      return "<span class=\"health-pill " + escapeHtml(row.status) + "\">" +
+        escapeHtml(row.source) + ": " + escapeHtml(row.status) +
+        (row.connector && row.connector !== "n/a" ? " · " + escapeHtml(row.connector) : "") +
+        "</span>";
+    }).join("");
   }
   function renderList(id, items, empty) {
     if (!items || !items.length) {
@@ -168,9 +211,18 @@
     $("queue-box").innerHTML = (dash.approval_queue && dash.approval_queue.length)
       ? dash.approval_queue.map(queueHtml).join("")
       : "No items waiting for approval.";
+    $("activity-box").innerHTML = (dash.recent_activity && dash.recent_activity.length)
+      ? dash.recent_activity.map(activityHtml).join("")
+      : "No recent owner activity.";
+    renderHealth(dash.source_health);
     if (selectedActionId) {
-      var selected = (dash.approval_queue || []).find(function (row) { return row.action_id === selectedActionId; });
-      $("review-box").innerHTML = reviewHtml(selected);
+      try {
+        var selected = await api("/api/nova/today/actions/" + encodeURIComponent(selectedActionId));
+        selectedSourceRefId = selected.source_ref_id || "";
+        $("review-box").innerHTML = reviewHtml(selected);
+      } catch (_) {
+        $("review-box").innerHTML = "Selected item is no longer visible.";
+      }
     }
   }
   async function runBrain(event) {
@@ -184,7 +236,8 @@
       method: "POST",
       body: JSON.stringify({
         question: $("ask-input").value.trim(),
-        action_id: selectedActionId || null
+        action_id: selectedActionId || null,
+        source_ref_id: selectedSourceRefId || null
       })
     });
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");

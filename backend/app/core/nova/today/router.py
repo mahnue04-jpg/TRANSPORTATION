@@ -16,6 +16,7 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainOut,
     NovaTodayBrainRequest,
     NovaTodayDashboardOut,
+    NovaTodayHistoryItem,
     NovaTodaySnoozeRequest,
 )
 from app.db.session import get_db
@@ -69,6 +70,15 @@ def ask_today(
         )
     except Exception as exc:
         _raise(exc)
+
+
+@router.get("/history", response_model=list[NovaTodayHistoryItem])
+def today_history(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return service.list_history(db, organization_id=_resolve_org(user, organization_id), user=user)
 
 
 @router.get("/actions/{action_id}", response_model=NovaTodayActionOut)
