@@ -15,7 +15,7 @@ cd website
 wrangler pages deploy . --project-name amicor-public
 ```
 
-Do not put secrets in this repo. Set `LEAD_WEBHOOK_URL` only in the Pages dashboard.
+Do not put secrets in this repo. If you later add optional lead notification, set `LEAD_WEBHOOK_URL` only in the Pages dashboard as a secret. Email Routing steps are in `EMAIL.md` and are owner-only.
 
 ## Exact owner step (required before a real preview URL exists)
 
@@ -64,5 +64,5 @@ wrangler pages deploy . --project-name amicor-public
 ## After a preview URL exists
 
 - Keep product status labels unchanged.
-- Leave `formEndpoint` empty until `LEAD_WEBHOOK_URL` is set. See `LEAD_ENDPOINT.md`.
-- Do not attach a custom domain until a name is chosen and purchased in a later phase.
+- `formEndpoint` is `/api/leads`. KV storage is required for a public success message. An optional webhook is not required. See `LEAD_ENDPOINT.md`.
+- Official domain is already `getamicor.com`. Do not buy another domain.

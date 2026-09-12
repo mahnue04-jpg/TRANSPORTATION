@@ -69,6 +69,7 @@ def page(
     "alternateName": "AMICOR",
     "url": "{ORIGIN}/",
     "description": "Minnesota technology company building an integrated ecosystem across health, transportation, delivery, AI operations, and future intelligent hardware.",
+    "email": "info@getamicor.com",
     "address": {{
       "@type": "PostalAddress",
       "addressRegion": "MN",
@@ -100,6 +101,7 @@ def page(
       <div>
         <strong>AMICOR</strong>
         <p>AMICOR HEALTH ISF LLC is a Minnesota technology company. Product availability varies. Unlaunched offerings are labeled Coming Soon, In Development, or Early Access.</p>
+        <p><a href="mailto:info@getamicor.com">info@getamicor.com</a></p>
         <p>&copy; <span data-year></span> AMICOR HEALTH ISF LLC</p>
       </div>
       <div>
@@ -567,8 +569,9 @@ add(
       <div class="wrap">
         <p class="kicker">Contact</p>
         <h1>Start with the public channel.</h1>
-        <p class="lede">AMICOR HEALTH ISF LLC is a Minnesota company. For product, partnership, and review inquiries, use the Early Access form. This page does not publish a street address, personal inbox, or other private founder details.</p>
-        <p class="notice">Use the Early Access form to reach AMICOR. A success message means the inquiry was stored for AMICOR. This page does not publish a public inbox address.</p>
+        <p class="lede">AMICOR HEALTH ISF LLC is a Minnesota company. For product, partnership, and review inquiries, use the Early Access form first. You can also write to <a href="mailto:info@getamicor.com">info@getamicor.com</a>. This page does not publish a street address or a personal inbox.</p>
+        <p class="notice">A success message on the Early Access form means AMICOR stored the inquiry. That form works even if mailbox forwarding is not finished yet.</p>
+        <p class="contact-channels">General contact: <a href="mailto:info@getamicor.com">info@getamicor.com</a></p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="/early-access/">Open Early Access form</a>
           <a class="btn btn-ghost" href="/about/">About AMICOR</a>
@@ -599,7 +602,7 @@ add(
       <div class="wrap grid grid-2">
         <article class="card"><h2>Who we are</h2><p>The public brand is AMICOR. The legal operator of this site is AMICOR HEALTH ISF LLC, Minnesota, United States. This page does not publish a street address.</p></article>
         <article class="card"><h2>What this site collects</h2><p>The Early Access form may collect name, company, email, optional phone, industry, company size, product interest, a message, a consent flag, and a timestamp. That is business-contact information, not clinical data.</p></article>
-        <article class="card"><h2>How it is stored today</h2><p>When the Early Access form succeeds, the inquiry is stored in an AMICOR-owned Cloudflare lead store. An optional inbox webhook may be added later. Browser storage is used only if live delivery fails.</p></article>
+        <article class="card"><h2>How it is stored today</h2><p>When the Early Access form succeeds, the inquiry is stored in an AMICOR-owned Cloudflare lead store. An optional inbox webhook may be added later and must not replace that store. Browser storage is used only if live delivery fails.</p></article>
         <article class="card"><h2>What we do not claim</h2><p>This draft does not claim HIPAA compliance, medical-device compliance, sale of personal information, or that a live customer database already exists.</p></article>
       </div>
     </section>
@@ -608,7 +611,7 @@ add(
         <h2>Cookies and analytics</h2>
         <p>This static site does not add a third-party analytics or advertising pixel. The browser may store a menu state or form fallback locally.</p>
         <h2>Questions</h2>
-        <p>Use the <a href="/early-access/">Early Access form</a> or the <a href="/contact/">Contact</a> page. Those channels are not a live inbox until lead delivery is enabled.</p>
+        <p>Use the <a href="/early-access/">Early Access form</a>, the <a href="/contact/">Contact</a> page, or <a href="mailto:info@getamicor.com">info@getamicor.com</a>. A form success message means AMICOR stored the business inquiry.</p>
       </div>
     </section>
     """,
@@ -687,8 +690,8 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card"><h2>Current goals</h2><p>Skip link, labeled form fields, visible focus, heading order, 44-pixel tap targets, and text alternatives for the logo.</p></article>
-        <article class="card"><h2>Known limits</h2><p>Legal pages remain drafts. The status table may scroll horizontally on small screens. A live lead inbox is not connected yet.</p></article>
-        <article class="card"><h2>Reporting a barrier</h2><p>Describe the page and the barrier through the <a href="/early-access/">Early Access form</a>. Until live intake is enabled, that report stays on your device.</p></article>
+        <article class="card"><h2>Known limits</h2><p>Legal pages remain drafts. The status table may scroll horizontally on small screens. Mailbox forwarding for info@getamicor.com is an owner Cloudflare step and may not be active yet.</p></article>
+        <article class="card"><h2>Reporting a barrier</h2><p>Describe the page and the barrier through the <a href="/early-access/">Early Access form</a> or <a href="mailto:info@getamicor.com">info@getamicor.com</a>.</p></article>
         <article class="card"><h2>What this is not</h2><p>This statement is not a guarantee, not an ADA legal opinion, and not a claim that every AMICOR product interface is covered.</p></article>
       </div>
     </section>

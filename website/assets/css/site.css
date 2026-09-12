@@ -245,6 +245,13 @@ td { color: var(--muted); }
   padding: 12px 14px;
   max-width: 760px;
 }
+.contact-channels {
+  margin: 18px 0 0;
+  max-width: 760px;
+}
+.contact-channels a, .lede a, .section a[href^="mailto:"] {
+  color: var(--accent);
+}
 
 form { display: grid; gap: 14px; position: relative; }
 label { display: grid; gap: 6px; color: var(--text); font-weight: 600; }

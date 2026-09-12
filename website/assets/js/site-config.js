@@ -1,5 +1,6 @@
 /* Public, non-secret site settings only. Do not put SMTP, API, or Stripe keys here. */
 window.AMICOR_SITE = {
   siteOrigin: "https://getamicor.com",
-  formEndpoint: "/api/leads"
+  formEndpoint: "/api/leads",
+  publicContactEmail: "info@getamicor.com"
 };

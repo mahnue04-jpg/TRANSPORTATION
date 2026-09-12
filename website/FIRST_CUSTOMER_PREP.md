@@ -9,9 +9,9 @@ Do not implement billing from this document.
 | Area | Status | What is ready now | What is not ready |
 |---|---|---|---|
 | A. Public website | Ready for outreach | Live HTTPS site at https://getamicor.com; truthful product-status labels | Legal pages are drafts |
-| B. Lead capture | Ready for inquiries | Early Access / Request Demo form → `POST /api/leads` → AMICOR KV store | No inbox email yet; no CRM |
+| B. Lead capture | Ready for inquiries | Early Access / Request Demo form → `POST /api/leads` → AMICOR KV store | Optional webhook not set; no CRM |
 | C. Legal | Blocker for paid work | Draft Privacy, Terms, Software Terms, Accessibility | Attorney review required before accepting payment |
-| D. Business email | Blocker for polished outreach | Domain owned | info@ / support@ / sales@ / partners@ / privacy@ not configured |
+| D. Business email | Owner action required | Public address `info@getamicor.com` is published in website source; setup steps are in `EMAIL.md` | Cloudflare Email Routing still unconfigured; mail will bounce until the owner enables it |
 | E. Customer demo | Ready as a conversation | Request Demo query, product page, supervised-agent story | No scheduled demo product, no shared calendar |
 | F. Payment / revenue | Not ready | Public site says Contact AMICOR / preliminary prices | No Stripe checkout, no invoice product, no paid-pilot agreement |
 | G. Outreach | Ready with limits | Public URL, form, status matrix | Do not claim licensed rides, live delivery, medical use, or autonomous production execution |
@@ -30,7 +30,7 @@ Do not implement billing from this document.
 2. Form pre-fills product and a demo message.
 3. After consent and validation, `POST /api/leads` stores the inquiry if accepted.
 4. Success copy appears only after storage succeeds.
-5. Owner reviews the KV lead and replies from an AMICOR channel (personal founder inbox only if no business mailbox exists yet; do not publish that address on the site).
+5. Owner reviews the KV lead and replies from an AMICOR channel. After Email Routing is enabled, prefer info@getamicor.com as the public face. Until then, use the private destination inbox only as a receive-and-reply path and do not publish it.
 
 ## Early Access lead flow
 

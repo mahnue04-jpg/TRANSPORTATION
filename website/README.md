@@ -1,4 +1,4 @@
-# AMICOR public website (Phase W7)
+# AMICOR public website (Phase W8)
 
 Static corporate and software-commercialization site for **AMICOR** / **AMICOR HEALTH ISF LLC** (Minnesota).
 
@@ -38,7 +38,9 @@ Prices on the Operations Agent page are **preliminary pricing / subject to chang
 
 ## Early Access form
 
-See `FORM.md` and `LEAD_ENDPOINT.md`. `formEndpoint` is `/api/leads`. Validated inquiries are stored in an AMICOR Cloudflare KV lead store. Inbox email forwarding is not configured yet.
+See `FORM.md` and `LEAD_ENDPOINT.md`. `formEndpoint` is `/api/leads`. Validated inquiries are stored in an AMICOR Cloudflare KV lead store. That store remains authoritative if mailbox forwarding or an optional webhook is missing.
+
+Public contact address: `info@getamicor.com`. Cloudflare Email Routing is **not active** until the owner finishes `EMAIL.md`. Do not put the private destination inbox in this folder.
 
 Internal outreach plan: `FIRST_CUSTOMER_PREP.md`. Do not treat that file as a public offer.
 

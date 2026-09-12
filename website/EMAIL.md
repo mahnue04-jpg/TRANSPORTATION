@@ -1,15 +1,127 @@
-# Domain email plan
+# AMICOR business email (W8)
 
-Official domain: **getamicor.com**. Mailboxes are not configured in W6.
+Official domain: **getamicor.com**.  
+Public contact address: **info@getamicor.com**.  
+Commercial alias: **sales@getamicor.com**.
 
-Recommended aliases when Email Routing is approved later:
+**Email Routing is not active.** W8 verified Cloudflare status `Enabled: false` / `unconfigured` and no MX records on getamicor.com. Mail sent to info@ or sales@ will bounce until the owner completes the steps below.
 
-| Address | Intended use |
+Do not write the private destination inbox (the personal address that receives the forwarded mail) in this repository, in `site-config.js`, or on the public website.
+
+Cloudflare Email Routing is included with the existing Cloudflare zone. Do not buy Google Workspace, Microsoft 365, or another paid mailbox for this phase unless the owner later chooses to.
+
+## Recommended aliases
+
+Enable now:
+
+| Public address | Use | Destination |
+|---|---|---|
+| info@getamicor.com | General public contact | Owner’s existing personal inbox already used for the Cloudflare / Wrangler login |
+| sales@getamicor.com | Software, demo, and commercial conversations | Same destination inbox at first |
+
+Optional later (same destination unless you split later):
+
+| Public address | Use |
 |---|---|
-| info@getamicor.com | General public inquiries |
 | support@getamicor.com | Product and early-access follow-up |
-| sales@getamicor.com | Software and partnership commercial conversations |
 | partners@getamicor.com | Insurers, advisors, and operating partners |
 | privacy@getamicor.com | Privacy and legal-draft questions |
 
-Do not publish a founder personal address on the public website.
+Do not enable a catch-all unless you want every misspelled address forwarded to the same inbox.
+
+## Who should receive the mail
+
+Route **info@** and **sales@** to the **same existing owner inbox** already used to sign in to Cloudflare. That keeps setup free and avoids a second mailbox.
+
+Reply from that personal inbox until a later “send as info@getamicor.com” step is approved. Do not publish the personal address. After routing works, prefer to reply from Gmail “Send mail as” info@ only if you add that later — it is not required for W8.
+
+## Exact Cloudflare owner setup (click by click)
+
+Use the Cloudflare account that already owns getamicor.com and the Pages project `amicor-public`. You must be using Cloudflare DNS for this domain (already true for the public site).
+
+### 1. Open Email Routing
+
+1. Sign in at https://dash.cloudflare.com
+2. Open the **getamicor.com** zone.
+3. Try the current path first: **Compute** → **Email Service** → **Email Routing**.  
+   If that menu is missing, use the classic path: **Email** → **Email Routing**.
+4. If the page asks to onboard a domain, choose **getamicor.com**.
+
+Official reference: https://developers.cloudflare.com/email-routing/get-started/enable-email-routing/
+
+### 2. Enable routing and accept DNS records
+
+1. Select **Onboard Domain** or **Enable Email Routing** / **Get started**.
+2. Review the DNS records Cloudflare will add on getamicor.com:
+   - **MX** records that send incoming mail to Cloudflare
+   - **TXT** SPF record that authorizes Email Routing
+   - **TXT** DKIM record for authentication
+3. Confirm those records. DNS usually updates in 5–15 minutes; allow up to 24 hours.
+4. Do **not** keep a different mail host’s MX records. getamicor.com has no mail host today.
+
+### 3. Add and verify the destination inbox
+
+1. Open **Destination addresses** (account-level; reusable across domains).
+2. Enter the owner’s existing personal inbox (the Cloudflare login inbox). Do not type that address into this repo.
+3. Submit.
+4. Open the verification email Cloudflare sends to that inbox.
+5. Select **Verify email address**.
+6. Wait until the destination shows as verified. Routing rules will not deliver before this.
+
+### 4. Create the info@ rule
+
+1. Stay on **Email Routing** for **getamicor.com**.
+2. Open the **Routing rules** tab.
+3. Select **Create routing rule**.
+4. Email pattern / custom address: `info` @ `getamicor.com`
+5. Action: **Send to an email**
+6. Destination: the verified owner inbox
+7. Save.
+
+### 5. Create the sales@ rule
+
+1. **Create routing rule** again.
+2. Email pattern: `sales` @ `getamicor.com`
+3. Action: **Send to an email**
+4. Destination: the same verified owner inbox
+5. Save.
+
+Optional aliases later: repeat for `support`, `partners`, and `privacy`.
+
+### 6. Confirm status
+
+Routing is actually active only when **all** of these are true:
+
+- Email Routing shows **Enabled** for getamicor.com
+- Destination address is **Verified**
+- `info` and `sales` rules exist and are enabled
+- Public DNS for getamicor.com has Cloudflare Email Routing **MX** records
+
+### 7. Test from a different mailbox
+
+1. Send a short test to info@getamicor.com from an account that is **not** the destination inbox (Gmail often drops mail that appears to come from itself).
+2. Send a second test to sales@getamicor.com from that same other account.
+3. Check the destination inbox and spam folder.
+4. If nothing arrives after DNS has propagated, re-check MX records and that the destination is still verified.
+
+## What this does not do
+
+- It does **not** send Early Access form leads by email. Form leads stay in Cloudflare KV.
+- It does **not** create a paid mailbox or a CRM.
+- It does **not** let the public site send mail by itself.
+- It does **not** change Health ISF, Stripe, Delivery, Driver 001, Lifesaver, or Nova.
+
+## Lead form vs mailbox
+
+| Path | What happens today | Depends on Email Routing? |
+|---|---|---|
+| Early Access / Request Demo form | Validated `POST /api/leads` writes the AMICOR KV lead store | No. Form success does not require mail. |
+| Optional `LEAD_WEBHOOK_URL` | Pages dashboard secret only; best-effort notify | No. Must not be stored in git. |
+| info@ / sales@ | Human-written email | Yes. Owner must finish the steps above. |
+
+List stored form leads (owner only; this prints keys, not a public inbox):
+
+```powershell
+cd website
+npx wrangler kv key list --namespace-id aef188e1167a41c98ee81deabbbce50d --remote --prefix lead:
+```
