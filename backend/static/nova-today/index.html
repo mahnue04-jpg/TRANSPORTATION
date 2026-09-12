@@ -42,6 +42,7 @@
       <li>Review an item</li>
       <li>Ask Nova</li>
       <li>Approve or dismiss a safe action</li>
+      <li>Re-check a source or result</li>
       <li>Record the result</li>
     </ol>
     <div id="banner" class="banner hidden"></div>
@@ -74,6 +75,9 @@
       <h2>Communications</h2>
       <p class="hint">Unread and important saved or connector messages. Prepare draft only. Nova will not send mail.</p>
       <div id="connector-health" class="hint">Connector status loads after sign-in.</div>
+      <div class="card-actions">
+        <button type="button" id="recheck-mailbox" class="secondary">Re-check mailbox</button>
+      </div>
       <div id="communications-box" class="card-list">No communications loaded.</div>
     </section>
 
@@ -96,7 +100,7 @@
 
     <section class="panel" aria-label="Approval queue">
       <h2>Approval Queue</h2>
-      <p class="hint">Approve only opens a V1 link, saves a Communications draft, creates a Business task, or acknowledges an item.</p>
+      <p class="hint">Approve only opens a V1 link, saves a Communications draft, creates a Business task, acknowledges an item, or re-checks a source. Re-check does not send or recreate.</p>
       <div id="queue-box" class="card-list">No items waiting for approval.</div>
     </section>
 

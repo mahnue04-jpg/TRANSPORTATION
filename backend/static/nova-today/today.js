@@ -129,6 +129,7 @@
       (details.received_at ? "<div class=\"review-block\">Received: " + escapeHtml(details.received_at) + "</div>" : "") +
       (row.verification_label ? "<div class=\"review-block\">Result verification: " + escapeHtml(row.verification_label) + "</div>" : "") +
       (history ? "<div class=\"review-block\">Related history:<br>" + history + "</div>" : "<div class=\"review-block\">Related history: none yet.</div>") +
+      "<div class=\"card-actions\"><button type=\"button\" class=\"secondary\" data-recheck=\"" + escapeHtml(row.action_id || "") + "\">Re-check source</button></div>" +
       cardActions(row) +
       "</article>";
   }
@@ -142,6 +143,7 @@
       "<span>" + escapeHtml(row.prior_status || "proposed") + " → " + escapeHtml(row.resulting_status || "") + "</span>" +
       (row.result_ref_id ? "<span>Result: " + escapeHtml(row.result_ref_id) + "</span>" : "") +
       (row.verification_label ? "<span>" + escapeHtml(row.verification_label) + "</span>" : "") +
+      (row.prior_verification_status ? "<span>Was: " + escapeHtml(row.prior_verification_status) + "</span>" : "") +
       (row.decided_at ? "<span>" + escapeHtml(row.decided_at) + "</span>" : "") +
       "</div>" +
       (row.source_href ? "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(row.source_href) + "\">Open source</a></div>" : "") +
@@ -225,9 +227,15 @@
     var connector = $("connector-health");
     if (connector) {
       var health = dash.connector_health || {};
-      connector.textContent = health.status
-        ? ("Mailbox: " + health.status + (health.provider ? " · " + health.provider : "") + (health.detail ? " — " + health.detail : ""))
-        : "No mailbox connector status.";
+      var parts = [];
+      if (health.status) parts.push("Mailbox: " + health.status);
+      if (health.provider) parts.push(health.provider);
+      if (health.freshness) parts.push("Freshness: " + health.freshness);
+      if (health.last_success_at) parts.push("Last successful read: " + health.last_success_at);
+      if (health.last_attempted_at) parts.push("Last attempted read: " + health.last_attempted_at);
+      if (health.recheck_available === "yes") parts.push("Manual re-check available");
+      if (health.detail) parts.push(health.detail);
+      connector.textContent = parts.length ? parts.join(" · ") : "No mailbox connector status.";
     }
     if (selectedActionId) {
       try {
@@ -270,11 +278,20 @@
     }
     await refresh();
   }
+  async function recheckSource(actionId) {
+    var result = await api("/api/nova/today/recheck", {
+      method: "POST",
+      body: JSON.stringify({ action_id: actionId || null })
+    });
+    showBanner((result.message || "Source re-checked.") + " Nothing was sent or recreated.", true);
+    await refresh();
+  }
   document.addEventListener("click", function (event) {
     var approve = event.target && event.target.getAttribute && event.target.getAttribute("data-approve");
     var snooze = event.target && event.target.getAttribute && event.target.getAttribute("data-snooze");
     var dismiss = event.target && event.target.getAttribute && event.target.getAttribute("data-dismiss");
     var review = event.target && event.target.getAttribute && event.target.getAttribute("data-review");
+    var recheck = event.target && event.target.getAttribute && event.target.getAttribute("data-recheck");
     if (review) {
       selectedActionId = review;
       refresh().catch(function (err) { showBanner(err.message || String(err)); });
@@ -290,7 +307,15 @@
     if (dismiss) {
       decide(dismiss, "dismiss").catch(function (err) { showBanner(err.message || String(err)); });
     }
+    if (recheck) {
+      recheckSource(recheck).catch(function (err) { showBanner(err.message || String(err)); });
+    }
   });
+  if ($("recheck-mailbox")) {
+    $("recheck-mailbox").addEventListener("click", function () {
+      recheckSource(null).catch(function (err) { showBanner(err.message || String(err)); });
+    });
+  }
   $("ask-form").addEventListener("submit", function (event) {
     runBrain(event).catch(function (err) { showBanner(err.message || String(err)); });
   });

@@ -43,3 +43,30 @@ class NovaV2CommandAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NovaV2RecheckEvent(Base):
+    """Owner-initiated source/result re-check. Does not recreate drafts or tasks."""
+
+    __tablename__ = "nova_v2_recheck_events"
+    __table_args__ = (
+        Index("ix_nova_v2_recheck_id", "recheck_id", unique=True),
+        Index("ix_nova_v2_recheck_org_owner", "organization_id", "owner_user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    recheck_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_module: Mapped[str] = mapped_column(String(40), nullable=False, default="communications")
+    source_ref_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    result_ref_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    connector_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    prior_verification: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    new_verification: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    connector_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    source_health: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

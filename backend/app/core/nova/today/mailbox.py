@@ -13,6 +13,7 @@ from app.helpers import json_loads_or, now
 from sqlalchemy.orm import Session
 
 STALE_AFTER = timedelta(hours=6)
+FRESH_WITHIN = timedelta(minutes=30)
 
 
 class MailboxItem:
@@ -41,6 +42,10 @@ class ConnectorHealth:
         account_email: str | None = None,
         connector_account_id: str | None = None,
         last_success_at: datetime | None = None,
+        last_attempted_at: datetime | None = None,
+        freshness: str = "unknown",
+        stale_age_seconds: int | None = None,
+        recheck_available: bool = False,
         detail: str,
     ) -> None:
         self.status = status
@@ -48,6 +53,10 @@ class ConnectorHealth:
         self.account_email = account_email
         self.connector_account_id = connector_account_id
         self.last_success_at = last_success_at
+        self.last_attempted_at = last_attempted_at
+        self.freshness = freshness
+        self.stale_age_seconds = stale_age_seconds
+        self.recheck_available = recheck_available
         self.detail = detail
 
     def as_dict(self) -> dict[str, str | None]:
@@ -57,6 +66,10 @@ class ConnectorHealth:
             "account_email": self.account_email,
             "connector_account_id": self.connector_account_id,
             "last_success_at": self.last_success_at.isoformat() if self.last_success_at else None,
+            "last_attempted_at": self.last_attempted_at.isoformat() if self.last_attempted_at else None,
+            "freshness": self.freshness,
+            "stale_age_seconds": str(self.stale_age_seconds) if self.stale_age_seconds is not None else None,
+            "recheck_available": "yes" if self.recheck_available else "no",
             "detail": self.detail,
         }
 
@@ -123,36 +136,99 @@ def last_success_from_meta(account: IntegrationAccount | None) -> datetime | Non
     return _parse_received(str(meta.get("last_mailbox_read_at") or ""))
 
 
+def last_attempt_from_meta(account: IntegrationAccount | None) -> datetime | None:
+    if account is None:
+        return None
+    meta = json_loads_or(account.meta_json, {})
+    if not isinstance(meta, dict):
+        return None
+    return _parse_received(str(meta.get("last_mailbox_attempt_at") or ""))
+
+
+def token_expired(account: IntegrationAccount | None) -> bool:
+    if account is None or not account.token_expires_at:
+        return False
+    return bool(_as_utc(account.token_expires_at) < now())
+
+
+def freshness_for(last_success_at: datetime | None, *, at: datetime | None = None) -> tuple[str, int | None]:
+    if last_success_at is None:
+        return "unknown", None
+    stamp = at or now()
+    success = _as_utc(last_success_at)
+    if success is None:
+        return "unknown", None
+    age = max(0, int((stamp - success).total_seconds()))
+    if stamp - success <= FRESH_WITHIN:
+        return "fresh", age
+    if stamp - success <= STALE_AFTER:
+        return "aging", age
+    return "stale", age
+
+
+def recheck_available_for(account: IntegrationAccount | None) -> bool:
+    if account is None:
+        return False
+    return str(account.provider or "").lower() in {"gmail", "outlook"}
+
+
+def try_authorized_refresh(account: IntegrationAccount) -> str:
+    """Reuse existing Outlook refresh only. Do not invent a Gmail OAuth refresh helper."""
+    provider = str(account.provider or "").lower()
+    if provider == "smtp":
+        raise RuntimeError("SMTP accounts cannot read a mailbox")
+    if provider == "gmail":
+        if token_expired(account):
+            raise RuntimeError("Gmail token expired and no refresh helper exists")
+        if not account.access_token:
+            raise RuntimeError("Gmail integration has no access token")
+        return account.access_token
+    if provider == "outlook":
+        from app.ecosystem import _refresh_outlook_if_needed
+
+        try:
+            return _refresh_outlook_if_needed(account)
+        except Exception as exc:
+            detail = getattr(exc, "detail", None) or str(exc)
+            raise RuntimeError(str(detail)) from exc
+    raise RuntimeError(f"Unsupported mailbox provider {provider}")
+
+
 def _health_for_account(
     account: IntegrationAccount | None,
     *,
     status: str,
     detail: str,
     last_success_at: datetime | None = None,
+    last_attempted_at: datetime | None = None,
 ) -> ConnectorHealth:
+    success_at = last_success_at or last_success_from_meta(account)
+    freshness, stale_age = freshness_for(success_at)
     return ConnectorHealth(
         status=status,
         provider=account.provider if account else None,
         account_email=account.account_email if account else None,
         connector_account_id=account.id if account else None,
-        last_success_at=last_success_at or last_success_from_meta(account),
+        last_success_at=success_at,
+        last_attempted_at=last_attempted_at or last_attempt_from_meta(account),
+        freshness=freshness,
+        stale_age_seconds=stale_age,
+        recheck_available=recheck_available_for(account),
         detail=detail,
     )
 
 
 def fetch_provider_messages(account: IntegrationAccount, *, limit: int = 12) -> list[dict[str, Any]]:
     """Read-only metadata via existing ecosystem inbox helpers. No send. No new credentials."""
-    from app.ecosystem import _gmail_inbox, _outlook_inbox, _refresh_outlook_if_needed
+    from app.ecosystem import _gmail_inbox, _outlook_inbox
 
     provider = str(account.provider or "").lower()
     if provider == "smtp":
         return []
+    token = try_authorized_refresh(account)
     if provider == "gmail":
-        if not account.access_token:
-            raise RuntimeError("Gmail integration has no access token")
-        return list(_gmail_inbox(account.access_token, limit) or [])
+        return list(_gmail_inbox(token, limit) or [])
     if provider == "outlook":
-        token = _refresh_outlook_if_needed(account)
         return list(_outlook_inbox(token, limit) or [])
     raise RuntimeError(f"Unsupported mailbox provider {provider}")
 
@@ -236,12 +312,27 @@ def upsert_mailbox_item(
     return row
 
 
+def _account_meta(account: IntegrationAccount) -> dict[str, Any]:
+    meta = json_loads_or(account.meta_json, {})
+    return meta if isinstance(meta, dict) else {}
+
+
+def _mark_attempt(account: IntegrationAccount) -> datetime:
+    stamp = now()
+    meta = _account_meta(account)
+    meta["last_mailbox_attempt_at"] = stamp.isoformat()
+    from app.helpers import json_dumps
+
+    account.meta_json = json_dumps(meta)
+    account.updated_at = stamp
+    return stamp
+
+
 def _mark_success(account: IntegrationAccount) -> datetime:
     stamp = now()
-    meta = json_loads_or(account.meta_json, {})
-    if not isinstance(meta, dict):
-        meta = {}
+    meta = _account_meta(account)
     meta["last_mailbox_read_at"] = stamp.isoformat()
+    meta["last_mailbox_attempt_at"] = stamp.isoformat()
     from app.helpers import json_dumps
 
     account.meta_json = json_dumps(meta)
@@ -265,24 +356,32 @@ def read_mailbox(
             status="disconnected",
             detail="No mailbox connector is connected. Today did not invent messages.",
         )
+    attempted_at = _mark_attempt(account)
     if account.provider == "smtp":
         return [], _health_for_account(
             account,
             status="unavailable",
             detail="SMTP accounts cannot read a mailbox. No messages were invented.",
+            last_attempted_at=attempted_at,
         )
-    expired = bool(account.token_expires_at and _as_utc(account.token_expires_at) < now())
+    expired = token_expired(account)
     last_success = last_success_from_meta(account)
     try:
         raw = fetch_provider_messages(account, limit=limit)
     except Exception as exc:
-        if expired or "token" in str(exc).lower():
+        if expired or "token" in str(exc).lower() or "refresh" in str(exc).lower():
             status = "stale"
             detail = "Mailbox connector token is stale or expired. Today did not invent messages."
         else:
             status = "unavailable"
             detail = "Mailbox connector is unavailable. Today did not invent messages."
-        return [], _health_for_account(account, status=status, detail=detail, last_success_at=last_success)
+        return [], _health_for_account(
+            account,
+            status=status,
+            detail=detail,
+            last_success_at=last_success,
+            last_attempted_at=attempted_at,
+        )
 
     items: list[MailboxItem] = []
     for row in raw:
@@ -307,7 +406,7 @@ def read_mailbox(
     )
     success_at = _mark_success(account)
     status = "connected"
-    if expired:
+    if token_expired(account):
         status = "degraded"
     elif last_success and now() - last_success > STALE_AFTER and not items:
         status = "stale"
@@ -316,4 +415,5 @@ def read_mailbox(
         status=status,
         detail=f"{len(items)} connector messages read. Nothing was sent." if items else "Mailbox connector is present. No unread or important messages were invented.",
         last_success_at=success_at,
+        last_attempted_at=success_at,
     )

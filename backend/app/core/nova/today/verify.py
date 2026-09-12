@@ -71,4 +71,6 @@ def verification_label(result_type: str | None, state: VerificationState | None)
         return "Task reference missing"
     if state == "unavailable":
         return "Verification unavailable"
+    if result_type == "source_rechecked":
+        return f"Source re-checked — {state}"
     return f"{result_type or 'result'} — {state}"

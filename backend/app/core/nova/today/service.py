@@ -31,8 +31,9 @@ from app.core.nova.today.links import (
     source_href,
 )
 from app.core.nova.today.mailbox import ConnectorHealth, MailboxItem, read_mailbox
+from app.core.nova.today.models import NovaV2CommandAction, NovaV2RecheckEvent
+from app.core.nova.today.readiness import beta_readiness_checklist
 from app.core.nova.today.verify import verification_label, verify_result
-from app.core.nova.today.models import NovaV2CommandAction
 from app.core.nova.today.schemas import (
     RECOMMENDED_ACTIONS,
     SNOOZE_HOURS,
@@ -48,6 +49,8 @@ from app.core.nova.today.schemas import (
     NovaTodayHistoryItem,
     NovaTodayMailboxItemOut,
     NovaTodayMailboxOut,
+    NovaTodayReadinessOut,
+    NovaTodayRecheckOut,
     NovaTodayProductCount,
     NovaTodaySourceHealth,
 )
@@ -228,6 +231,12 @@ def action_consequences(recommended_action: str) -> tuple[str, str, str]:
             "The item is recorded as acknowledged on Nova Today.",
             "No email send, filing, payment, Stripe charge, ledger post, or phone call.",
         )
+    if recommended_action == "recheck_source":
+        return (
+            "Re-read the authorized connector or re-verify a saved draft/task reference.",
+            "Nova refreshes connector/source health and verification status only.",
+            "No send, recreate, edit, payment, Stripe charge, ledger post, call, submit, delete, or filing.",
+        )
     return (
         "This action is not supported on Nova Today.",
         "Nothing will be executed.",
@@ -289,6 +298,7 @@ def history_item(
     *,
     resolved_href: str | None = None,
     verification_status: str | None = None,
+    prior_verification_status: str | None = None,
 ) -> NovaTodayHistoryItem:
     result = result_type_for(row)
     return NovaTodayHistoryItem(
@@ -307,6 +317,7 @@ def history_item(
         source_href=resolved_href,
         verification_status=verification_status,
         verification_label=verification_label(result, verification_status) if verification_status else None,
+        prior_verification_status=prior_verification_status,
     )
 
 
@@ -352,7 +363,10 @@ def list_history(
                 ),
             )
         )
-    return items
+    for event in list_recheck_events(db, organization_id=organization_id, user=user, limit=limit):
+        items.append(_recheck_history_item(event))
+    items.sort(key=lambda item: item.decided_at or item.action_id, reverse=True)
+    return items[:limit]
 
 
 _MODULE_RANK = {
@@ -1198,6 +1212,24 @@ def approve_action(
             fact_label="USER-SAVED INFORMATION",
             verification_status=verified,
         )
+    if row.recommended_action == "recheck_source":
+        checked = recheck_source(
+            db,
+            organization_id=organization_id,
+            user=user,
+            action_id=row.action_id,
+        )
+        row.status = "done"
+        row.decided_at = now()
+        db.commit()
+        db.refresh(row)
+        return NovaTodayApproveOut(
+            action=action_out(row, verification_status=checked.verification_status),
+            href=row.href,
+            message=checked.message,
+            fact_label="VERIFIED DATA",
+            verification_status=checked.verification_status,
+        )
     if row.recommended_action == "create_task":
         title = (payload.task_title or row.title).strip()
         task = create_business_task(
@@ -1253,6 +1285,8 @@ def ask_today(
                 selected += f" Source details: {reviewed.source_details}."
             if reviewed.verification_status:
                 selected += f" Result verification: {reviewed.verification_label or reviewed.verification_status}."
+            if reviewed.verification_status == "missing":
+                selected += " Draft or task reference is missing. You can re-check the source."
             if reviewed.related_history:
                 selected += " Related history: " + "; ".join(
                     f"{item.verification_label or item.result_type} {item.title}" for item in reviewed.related_history[:4]
@@ -1271,9 +1305,25 @@ def ask_today(
             selected = " The requested source record is not visible on Today."
     mailbox_line = ""
     if dash.connector_health:
+        health = dash.connector_health
         mailbox_line = (
-            f" Mailbox connector {dash.connector_health.get('status') or 'n/a'}."
-            f" Provider {dash.connector_health.get('provider') or 'none'}."
+            f" Mailbox connector {health.get('status') or 'n/a'}."
+            f" Provider {health.get('provider') or 'none'}."
+            f" Freshness {health.get('freshness') or 'unknown'}."
+        )
+        if (health.get("status") == "stale") or (health.get("freshness") == "stale"):
+            mailbox_line += " This connector is stale."
+        if health.get("last_success_at"):
+            mailbox_line += f" Last successful read was {health.get('last_success_at')}."
+        if health.get("last_attempted_at"):
+            mailbox_line += f" Last attempted read was {health.get('last_attempted_at')}."
+        if health.get("recheck_available") == "yes":
+            mailbox_line += " You can re-check the source."
+    rechecks = list_recheck_events(db, organization_id=organization_id, user=user, limit=4)
+    if rechecks:
+        mailbox_line += " Recent re-checks: " + "; ".join(
+            f"{row.detail} ({row.prior_verification or 'unknown'} → {row.new_verification or 'unknown'})"
+            for row in rechecks
         )
     comms_line = ""
     if dash.communications:
@@ -1309,6 +1359,10 @@ def ask_today(
     next_actions = list(asked.next_actions or [])
     if resolved:
         next_actions = [f"Open existing source: {resolved}"] + next_actions
+    if (dash.connector_health or {}).get("recheck_available") == "yes" or (
+        reviewed is not None and reviewed.verification_status in {"missing", "unavailable", "unknown"}
+    ):
+        next_actions = ["Re-check the source"] + next_actions
     next_actions = [item for item in next_actions if "send" not in item.lower() and "file" not in item.lower()][:6]
     return NovaTodayBrainOut(
         answer=asked.answer,
@@ -1365,6 +1419,133 @@ def list_mailbox(
         ],
         connector_health=health.as_dict(),
     )
+
+
+def list_recheck_events(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int = 20,
+) -> list[NovaV2RecheckEvent]:
+    query = db.query(NovaV2RecheckEvent).filter(NovaV2RecheckEvent.organization_id == organization_id)
+    if not _can_see_org_wide(user):
+        query = query.filter(NovaV2RecheckEvent.owner_user_id == user.user_id)
+    return query.order_by(NovaV2RecheckEvent.created_at.desc()).limit(limit).all()
+
+
+def _recheck_history_item(event: NovaV2RecheckEvent) -> NovaTodayHistoryItem:
+    return NovaTodayHistoryItem(
+        action_id=event.action_id or event.recheck_id,
+        source_module=event.source_module,
+        source_ref_id=event.source_ref_id,
+        title=event.detail,
+        prior_status=event.prior_verification or "unknown",
+        resulting_status=event.new_verification or "unknown",
+        result_ref_id=event.result_ref_id,
+        actor_user_id=event.actor_user_id,
+        decided_at=event.created_at,
+        trust_label="VERIFIED DATA",
+        recommended_action="recheck_source",
+        result_type="source_rechecked",
+        source_href="/nova/communications" if event.source_module == "communications" else None,
+        verification_status=event.new_verification,
+        verification_label=verification_label("source_rechecked", event.new_verification) if event.new_verification else None,
+        prior_verification_status=event.prior_verification,
+    )
+
+
+def recheck_source(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    action_id: str | None = None,
+    connector_account_id: str | None = None,
+) -> NovaTodayRecheckOut:
+    row = None
+    if action_id:
+        row = _get_action(db, action_id, organization_id=organization_id, user=user)
+    prior = None
+    if row is not None:
+        prior = verify_result(db, row, organization_id=organization_id, user=user)
+    health = ConnectorHealth(status="n/a", detail="No connector re-read was required.", recheck_available=False)
+    read_connector = bool(connector_account_id) or row is None or (row.source_module == "communications")
+    if read_connector:
+        try:
+            _items, health = read_mailbox(
+                db,
+                organization_id=organization_id,
+                user=user,
+                connector_account_id=connector_account_id,
+                persist=True,
+            )
+        except PermissionError as exc:
+            raise NovaTodayError(str(exc), status_code=403) from exc
+        except Exception:
+            health = ConnectorHealth(
+                status="unavailable",
+                detail="Mailbox connector is unavailable. Today did not invent messages.",
+            )
+    new_state = prior
+    if row is not None:
+        new_state = verify_result(db, row, organization_id=organization_id, user=user)
+    elif read_connector:
+        new_state = "unknown"
+    source_ref = (row.source_ref_id if row else None) or health.connector_account_id or "mailbox"
+    if row and row.result_ref_id:
+        detail = (
+            f"Owner re-checked {row.recommended_action} result {row.result_ref_id}. "
+            f"Verification {prior or 'unknown'} → {new_state or 'unknown'}. Nothing was recreated."
+        )
+    else:
+        detail = (
+            f"Owner re-checked mailbox connector {health.status}. "
+            f"Last successful read {health.last_success_at.isoformat() if health.last_success_at else 'unknown'}. "
+            "Nothing was sent."
+        )
+    event = NovaV2RecheckEvent(
+        recheck_id=f"NVR-{uuid4().replace('-', '')[:12].upper()}",
+        organization_id=organization_id,
+        owner_user_id=row.owner_user_id if row else user.user_id,
+        actor_user_id=user.user_id,
+        action_id=row.action_id if row else None,
+        source_module=row.source_module if row else "communications",
+        source_ref_id=source_ref,
+        result_ref_id=row.result_ref_id if row else None,
+        connector_account_id=health.connector_account_id or connector_account_id,
+        prior_verification=prior,
+        new_verification=new_state,
+        connector_status=health.status,
+        source_health=health.freshness,
+        detail=detail,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return NovaTodayRecheckOut(
+        recheck_id=event.recheck_id,
+        action_id=event.action_id,
+        source_ref_id=event.source_ref_id,
+        result_ref_id=event.result_ref_id,
+        prior_verification=prior,
+        verification_status=new_state,
+        verification_label=verification_label(
+            "source_rechecked" if not row else result_type_for(row),
+            new_state,
+        )
+        if new_state
+        else None,
+        connector_health=health.as_dict(),
+        source_health=health.freshness,
+        mutated_external=False,
+        message=detail,
+        fact_label="VERIFIED DATA",
+    )
+
+
+def readiness_checklist() -> NovaTodayReadinessOut:
+    return NovaTodayReadinessOut(items=beta_readiness_checklist(), fact_label="VERIFIED DATA")
 
 
 def refuse_send() -> None:

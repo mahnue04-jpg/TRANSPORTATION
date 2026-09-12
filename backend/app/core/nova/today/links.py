@@ -173,6 +173,8 @@ def result_type_for(row: NovaV2CommandAction) -> str:
         return "acknowledged"
     if status in {"approved", "done"} and recommended == "open_link":
         return "link_opened"
+    if status in {"approved", "done"} and recommended == "recheck_source":
+        return "source_rechecked"
     if status == "approved":
         return "approved"
     if status == "done":

@@ -12,7 +12,7 @@ TRUST_LABELS = (
     "AI SUGGESTION",
     "ACTION REQUIRES APPROVAL",
 )
-RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge")
+RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge", "recheck_source")
 ACTION_STATUSES = ("proposed", "approved", "dismissed", "done", "snoozed")
 SNOOZE_HOURS = (1, 4, 24, 72)
 SOURCE_MODULES = (
@@ -120,6 +120,7 @@ class NovaTodayHistoryItem(BaseModel):
     source_href: str | None = None
     verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
     verification_label: str | None = None
+    prior_verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
 
 
 class NovaTodayDashboardOut(BaseModel):
@@ -169,7 +170,7 @@ class NovaTodayActionCreate(BaseModel):
         "ACTION REQUIRES APPROVAL",
     ] = "ACTION REQUIRES APPROVAL"
     priority: int = Field(default=50, ge=0, le=100)
-    recommended_action: Literal["open_link", "create_draft", "create_task", "acknowledge"]
+    recommended_action: Literal["open_link", "create_draft", "create_task", "acknowledge", "recheck_source"]
     organization_id: str | None = None
 
 
@@ -215,6 +216,32 @@ class NovaTodayMailboxItemOut(BaseModel):
 class NovaTodayMailboxOut(BaseModel):
     items: list[NovaTodayMailboxItemOut] = Field(default_factory=list)
     connector_health: dict[str, str | None] = Field(default_factory=dict)
+
+
+class NovaTodayRecheckRequest(BaseModel):
+    organization_id: str | None = None
+    action_id: str | None = Field(default=None, max_length=32)
+    connector_account_id: str | None = Field(default=None, max_length=36)
+
+
+class NovaTodayRecheckOut(BaseModel):
+    recheck_id: str
+    action_id: str | None = None
+    source_ref_id: str | None = None
+    result_ref_id: str | None = None
+    prior_verification: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
+    source_health: str | None = None
+    mutated_external: bool = False
+    message: str
+    fact_label: str = "VERIFIED DATA"
+
+
+class NovaTodayReadinessOut(BaseModel):
+    items: list[dict[str, str]] = Field(default_factory=list)
+    fact_label: str = "VERIFIED DATA"
 
 
 class NovaTodaySafetyOut(BaseModel):

@@ -18,6 +18,9 @@ from app.core.nova.today.schemas import (
     NovaTodayDashboardOut,
     NovaTodayHistoryItem,
     NovaTodayMailboxOut,
+    NovaTodayReadinessOut,
+    NovaTodayRecheckOut,
+    NovaTodayRecheckRequest,
     NovaTodaySnoozeRequest,
 )
 from app.db.session import get_db
@@ -89,6 +92,30 @@ def today_mailbox(
         )
     except Exception as exc:
         _raise(exc)
+
+
+@router.post("/recheck", response_model=NovaTodayRecheckOut)
+def today_recheck(
+    payload: NovaTodayRecheckRequest | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or NovaTodayRecheckRequest()
+    try:
+        return service.recheck_source(
+            db,
+            organization_id=_resolve_org(user, body.organization_id),
+            user=user,
+            action_id=body.action_id,
+            connector_account_id=body.connector_account_id,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/readiness", response_model=NovaTodayReadinessOut)
+def today_readiness(user: UserContext = Depends(get_current_user_context)):
+    return service.readiness_checklist()
 
 
 @router.get("/history", response_model=list[NovaTodayHistoryItem])
