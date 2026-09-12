@@ -45,6 +45,10 @@ class NovaTodayCard(BaseModel):
     status: str | None = None
     received_at: datetime | None = None
     source_href: str | None = None
+    unread: bool | None = None
+    important: bool | None = None
+    provider: str | None = None
+    connector_status: str | None = None
 
 
 class NovaTodayActionOut(BaseModel):
@@ -78,6 +82,8 @@ class NovaTodayActionOut(BaseModel):
     source_details: dict[str, str] | None = None
     related_history: list["NovaTodayHistoryItem"] = Field(default_factory=list)
     why_surfaced: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
 
 
 class NovaTodayProductCount(BaseModel):
@@ -94,7 +100,8 @@ class NovaTodaySourceHealth(BaseModel):
     source: str
     status: Literal["ok", "empty", "unavailable", "partial"]
     detail: str
-    connector: Literal["connected", "disconnected", "n/a"] = "n/a"
+    connector: Literal["connected", "disconnected", "degraded", "unavailable", "stale", "n/a"] = "n/a"
+    last_sync_at: datetime | None = None
 
 
 class NovaTodayHistoryItem(BaseModel):
@@ -111,6 +118,8 @@ class NovaTodayHistoryItem(BaseModel):
     recommended_action: str
     result_type: str
     source_href: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
+    verification_label: str | None = None
 
 
 class NovaTodayDashboardOut(BaseModel):
@@ -125,6 +134,7 @@ class NovaTodayDashboardOut(BaseModel):
     approval_queue: list[NovaTodayActionOut]
     recent_activity: list[NovaTodayHistoryItem] = Field(default_factory=list)
     source_health: list[NovaTodaySourceHealth] = Field(default_factory=list)
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))
 
 
@@ -143,6 +153,7 @@ class NovaTodayBrainOut(BaseModel):
     source_href: str | None = None
     referenced_action_id: str | None = None
     referenced_source_ref_id: str | None = None
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
 
 
 class NovaTodayActionCreate(BaseModel):
@@ -177,11 +188,33 @@ class NovaTodayApproveOut(BaseModel):
     task_id: str | None = None
     message: str
     fact_label: str
+    verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
 
 
 class NovaTodaySnoozeRequest(BaseModel):
     organization_id: str | None = None
     hours: Literal[1, 4, 24, 72] = 24
+
+
+class NovaTodayMailboxItemOut(BaseModel):
+    external_message_id: str
+    provider: str
+    sender: str
+    recipients: list[str] = Field(default_factory=list)
+    subject: str
+    received_at: datetime | None = None
+    unread: bool
+    important: bool
+    snippet: str | None = None
+    connector_account_id: str | None = None
+    source_href: str | None = None
+    source_health: str = "ok"
+    message_id: str | None = None
+
+
+class NovaTodayMailboxOut(BaseModel):
+    items: list[NovaTodayMailboxItemOut] = Field(default_factory=list)
+    connector_health: dict[str, str | None] = Field(default_factory=dict)
 
 
 class NovaTodaySafetyOut(BaseModel):

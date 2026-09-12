@@ -210,7 +210,9 @@ def _communications_details(db: Session, ref: str, *, organization_id: str, user
             "sender": out.sender,
             "subject": out.subject,
             "source": out.source,
-            "received_at": out.created_at.isoformat(),
+            "received_at": out.created_at.isoformat() if out.created_at else "",
+            "unread": "unread" if not out.read else "read",
+            "important": "important" if out.important else "normal",
         }
     except Exception:
         pass

@@ -17,6 +17,7 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainRequest,
     NovaTodayDashboardOut,
     NovaTodayHistoryItem,
+    NovaTodayMailboxOut,
     NovaTodaySnoozeRequest,
 )
 from app.db.session import get_db
@@ -67,6 +68,24 @@ def ask_today(
             payload,
             organization_id=_resolve_org(user, payload.organization_id),
             user=user,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/mailbox", response_model=NovaTodayMailboxOut)
+def today_mailbox(
+    organization_id: str | None = None,
+    connector_account_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.list_mailbox(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            connector_account_id=connector_account_id,
         )
     except Exception as exc:
         _raise(exc)

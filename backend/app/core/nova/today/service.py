@@ -30,6 +30,8 @@ from app.core.nova.today.links import (
     source_details,
     source_href,
 )
+from app.core.nova.today.mailbox import ConnectorHealth, MailboxItem, read_mailbox
+from app.core.nova.today.verify import verification_label, verify_result
 from app.core.nova.today.models import NovaV2CommandAction
 from app.core.nova.today.schemas import (
     RECOMMENDED_ACTIONS,
@@ -44,6 +46,8 @@ from app.core.nova.today.schemas import (
     NovaTodayCard,
     NovaTodayDashboardOut,
     NovaTodayHistoryItem,
+    NovaTodayMailboxItemOut,
+    NovaTodayMailboxOut,
     NovaTodayProductCount,
     NovaTodaySourceHealth,
 )
@@ -238,9 +242,12 @@ def action_out(
     use_resolved: bool = False,
     details: dict[str, str] | None = None,
     related: list[NovaTodayHistoryItem] | None = None,
+    verification_status: str | None = None,
 ) -> NovaTodayActionOut:
     why, if_approved, will_not = action_consequences(row.recommended_action)
     href = resolved_href if use_resolved else (resolved_href or row.href)
+    result = result_type_for(row)
+    verify_state = verification_status
     return NovaTodayActionOut(
         action_id=row.action_id,
         organization_id=row.organization_id,
@@ -266,16 +273,24 @@ def action_out(
         snoozed_until=row.snoozed_until,
         prior_status=prior_status_for(row),
         resulting_status=row.status,
-        result_type=result_type_for(row),
+        result_type=result,
         actor_user_id=row.owner_user_id,
         source_href=resolved_href if use_resolved else resolved_href,
         source_details=details,
         related_history=related or [],
         why_surfaced=why,
+        verification_status=verify_state,
+        verification_label=verification_label(result, verify_state) if verify_state else None,
     )
 
 
-def history_item(row: NovaV2CommandAction, *, resolved_href: str | None = None) -> NovaTodayHistoryItem:
+def history_item(
+    row: NovaV2CommandAction,
+    *,
+    resolved_href: str | None = None,
+    verification_status: str | None = None,
+) -> NovaTodayHistoryItem:
+    result = result_type_for(row)
     return NovaTodayHistoryItem(
         action_id=row.action_id,
         source_module=row.source_module,
@@ -288,8 +303,10 @@ def history_item(row: NovaV2CommandAction, *, resolved_href: str | None = None) 
         decided_at=row.decided_at,
         trust_label=row.trust_label,
         recommended_action=row.recommended_action,
-        result_type=result_type_for(row),
+        result_type=result,
         source_href=resolved_href,
+        verification_status=verification_status,
+        verification_label=verification_label(result, verification_status) if verification_status else None,
     )
 
 
@@ -328,6 +345,9 @@ def list_history(
             history_item(
                 row,
                 resolved_href=_resolved_source_href(
+                    db, row, organization_id=organization_id, user=user
+                ),
+                verification_status=verify_result(
                     db, row, organization_id=organization_id, user=user
                 ),
             )
@@ -386,6 +406,10 @@ def _card(
     received_at=None,
     source_href: str | None = None,
     source_label: str | None = None,
+    unread: bool | None = None,
+    important: bool | None = None,
+    provider: str | None = None,
+    connector_status: str | None = None,
 ) -> NovaTodayCard:
     why, if_approved, will_not = action_consequences(recommended_action)
     return NovaTodayCard(
@@ -407,6 +431,10 @@ def _card(
         will_not_happen=will_not,
         received_at=received_at,
         source_href=source_href,
+        unread=unread,
+        important=important,
+        provider=provider,
+        connector_status=connector_status,
     )
 
 
@@ -501,41 +529,53 @@ def _health(
     count: int = 0,
     connector: str = "n/a",
     email_connected: bool | None = None,
+    last_sync_at=None,
+    mailbox_status: str | None = None,
 ) -> NovaTodaySourceHealth:
+    connector_state = mailbox_status or connector
     if status == "unavailable":
         return NovaTodaySourceHealth(
             source=source,
             status="unavailable",
             detail="This Nova source is unavailable. Today did not invent records.",
-            connector="n/a" if connector == "n/a" else "disconnected",
+            connector="unavailable" if mailbox_status == "unavailable" else ("n/a" if connector == "n/a" else "disconnected"),
+            last_sync_at=last_sync_at,
         )
     if source == "communications" and email_connected is not None:
+        if mailbox_status in {"connected", "degraded", "stale", "unavailable"}:
+            connector_value = mailbox_status
+        else:
+            connector_value = "connected" if email_connected else "disconnected"
         if email_connected and count > 0:
             return NovaTodaySourceHealth(
                 source=source,
-                status="ok",
+                status="ok" if connector_value in {"connected", "degraded"} else "partial",
                 detail=f"{count} real items from the connected mailbox or saved messages.",
-                connector="connected",
+                connector=connector_value,
+                last_sync_at=last_sync_at,
             )
         if email_connected and count == 0:
             return NovaTodaySourceHealth(
                 source=source,
                 status="empty",
                 detail="Mailbox connector is present. No unread or important messages were invented.",
-                connector="connected",
+                connector=connector_value,
+                last_sync_at=last_sync_at,
             )
         if not email_connected and count > 0:
             return NovaTodaySourceHealth(
                 source=source,
                 status="partial",
                 detail="Local saved messages only. No mailbox connector is connected.",
-                connector="disconnected",
+                connector=connector_value if connector_value != "n/a" else "disconnected",
+                last_sync_at=last_sync_at,
             )
         return NovaTodaySourceHealth(
             source=source,
             status="empty",
             detail="No mailbox connector. No saved messages were invented.",
-            connector="disconnected",
+            connector=connector_value if connector_value != "n/a" else "disconnected",
+            last_sync_at=last_sync_at,
         )
     if count == 0:
         return NovaTodaySourceHealth(
@@ -543,16 +583,37 @@ def _health(
             status="empty",
             detail="No real records in this source today.",
             connector=connector,
+            last_sync_at=last_sync_at,
         )
     return NovaTodaySourceHealth(
         source=source,
         status="ok",
         detail=f"{count} real items.",
         connector=connector,
+        last_sync_at=last_sync_at,
     )
 
 
 def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -> dict[str, list[NovaTodayCard]]:
+    mailbox_items: list[MailboxItem] = []
+    mailbox_health = ConnectorHealth(
+        status="n/a",
+        detail="Mailbox connector was not checked.",
+    )
+    try:
+        mailbox_items, mailbox_health = read_mailbox(
+            db, organization_id=organization_id, user=user, persist=True
+        )
+    except PermissionError:
+        mailbox_health = ConnectorHealth(
+            status="unavailable",
+            detail="Cross-owner or cross-org connector access is denied.",
+        )
+    except Exception:
+        mailbox_health = ConnectorHealth(
+            status="unavailable",
+            detail="Mailbox connector is unavailable. Today did not invent messages.",
+        )
     workspace, workspace_status = _safe_source(
         lambda: workspace_dashboard(db, organization_id=organization_id, user=user)
     )
@@ -569,6 +630,7 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
     comms_cards: list[NovaTodayCard] = []
     seen_messages: set[str] = set()
     email_connected = bool(getattr(communications, "email_connected", False)) if communications is not None else False
+    email_connected = email_connected or mailbox_health.status in {"connected", "degraded", "stale"}
     if communications is not None:
         for row in list(communications.important) + list(communications.inbox):
             if row.message_id in seen_messages:
@@ -594,6 +656,10 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     subject=row.subject,
                     received_at=row.created_at,
                     source_label="Connected mailbox" if connector_backed else "Nova saved message",
+                    unread=not bool(row.read),
+                    important=bool(row.important),
+                    provider=str(getattr(row, "source", "local") or "local"),
+                    connector_status=mailbox_health.status if connector_backed else "n/a",
                 )
             )
         for row in communications.today:
@@ -629,6 +695,35 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                     recommended_action="open_link",
                     subject=row.subject,
                     source_label="Nova saved draft",
+                )
+            )
+    if mailbox_items:
+        seen_mailbox = {card.source_ref_id for card in comms_cards}
+        for item in mailbox_items:
+            ref = item.message_id or item.external_message_id
+            if not ref or ref in seen_mailbox:
+                continue
+            label = "Important" if item.important else "Unread"
+            comms_cards.append(
+                _card(
+                    source_module="communications",
+                    source_ref_id=ref,
+                    title=f"{label}: {item.subject}",
+                    detail=item.snippet or item.sender,
+                    explanation=f"From {item.sender}. {item.snippet or 'Connector message. Prepare a draft only.'}",
+                    href="/nova/communications",
+                    source_href=item.source_href,
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=82 if item.important else 75,
+                    recommended_action="create_draft",
+                    sender=item.sender,
+                    subject=item.subject,
+                    received_at=item.received_at,
+                    source_label="Connected mailbox",
+                    unread=item.unread,
+                    important=item.important,
+                    provider=item.provider,
+                    connector_status=mailbox_health.status,
                 )
             )
 
@@ -856,13 +951,17 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
                 "communications",
                 comms_status,
                 count=len(comms_cards),
-                email_connected=email_connected if communications is not None else None,
+                email_connected=email_connected if communications is not None or mailbox_health.status != "n/a" else None,
+                last_sync_at=mailbox_health.last_success_at,
+                mailbox_status=mailbox_health.status,
             ),
             _health("government", gov_status, count=len(gov_cards)),
             _health("business", biz_status, count=len(biz_cards)),
             _health("workspace", workspace_status, count=len(workspace_cards)),
         ],
         "email_connected": email_connected,
+        "connector_health": mailbox_health.as_dict(),
+        "mailbox_items": mailbox_items,
     }
 
 
@@ -927,6 +1026,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         approval_queue=approval_queue,
         recent_activity=recent_activity,
         source_health=list(groups.get("source_health") or []),
+        connector_health=dict(groups.get("connector_health") or {}),
         trust_labels=list(TRUST_LABELS),
     )
 
@@ -949,6 +1049,9 @@ def get_action(db: Session, action_id: str, *, organization_id: str, user: UserC
         history_item(
             other,
             resolved_href=_resolved_source_href(db, other, organization_id=organization_id, user=user),
+            verification_status=verify_result(
+                db, other, organization_id=organization_id, user=user
+            ),
         )
         for other in _list_actions(db, organization_id=organization_id, user=user)
         if other.source_ref_id == row.source_ref_id
@@ -962,6 +1065,7 @@ def get_action(db: Session, action_id: str, *, organization_id: str, user: UserC
         use_resolved=True,
         details=details,
         related=related[:8],
+        verification_status=verify_result(db, row, organization_id=organization_id, user=user),
     )
 
 
@@ -1037,12 +1141,16 @@ def approve_action(
         raise NovaTodayError("Dismissed Today items cannot be approved", status_code=409)
     if row.status in {"approved", "done"}:
         return NovaTodayApproveOut(
-            action=action_out(row),
+            action=action_out(
+                row,
+                verification_status=verify_result(db, row, organization_id=organization_id, user=user),
+            ),
             href=row.href,
             draft_id=row.result_ref_id if row.recommended_action == "create_draft" else None,
             task_id=row.result_ref_id if row.recommended_action == "create_task" else None,
             message="Already approved. Nothing else was sent or filed.",
             fact_label="USER-SAVED INFORMATION",
+            verification_status=verify_result(db, row, organization_id=organization_id, user=user),
         )
     if row.recommended_action == "open_link":
         row.status = "done"
@@ -1081,12 +1189,14 @@ def approve_action(
         row.result_ref_id = draft.id
         db.commit()
         db.refresh(row)
+        verified = verify_result(db, row, organization_id=organization_id, user=user)
         return NovaTodayApproveOut(
-            action=action_out(row),
+            action=action_out(row, verification_status=verified),
             href="/nova/communications",
             draft_id=draft.id,
             message="Communications draft saved. External send was not performed.",
             fact_label="USER-SAVED INFORMATION",
+            verification_status=verified,
         )
     if row.recommended_action == "create_task":
         title = (payload.task_title or row.title).strip()
@@ -1101,12 +1211,14 @@ def approve_action(
         row.result_ref_id = task.task_id
         db.commit()
         db.refresh(row)
+        verified = verify_result(db, row, organization_id=organization_id, user=user)
         return NovaTodayApproveOut(
-            action=action_out(row),
+            action=action_out(row, verification_status=verified),
             href="/nova/business",
             task_id=task.task_id,
             message="Business task created. This is not accounting, payroll, or a filing.",
             fact_label="USER-SAVED INFORMATION",
+            verification_status=verified,
         )
     raise NovaTodayError("Unsupported Today action", status_code=422)
 
@@ -1124,6 +1236,7 @@ def ask_today(
     referenced_action_id = None
     referenced_source_ref_id = payload.source_ref_id
     resolved = None
+    reviewed = None
     if payload.action_id:
         try:
             reviewed = get_action(db, payload.action_id, organization_id=organization_id, user=user)
@@ -1138,9 +1251,11 @@ def ask_today(
             )
             if reviewed.source_details:
                 selected += f" Source details: {reviewed.source_details}."
+            if reviewed.verification_status:
+                selected += f" Result verification: {reviewed.verification_label or reviewed.verification_status}."
             if reviewed.related_history:
                 selected += " Related history: " + "; ".join(
-                    f"{item.result_type} {item.title}" for item in reviewed.related_history[:4]
+                    f"{item.verification_label or item.result_type} {item.title}" for item in reviewed.related_history[:4]
                 )
         except NovaTodayError:
             selected = " The requested action was not visible to this owner."
@@ -1154,10 +1269,21 @@ def ask_today(
             )
         else:
             selected = " The requested source record is not visible on Today."
+    mailbox_line = ""
+    if dash.connector_health:
+        mailbox_line = (
+            f" Mailbox connector {dash.connector_health.get('status') or 'n/a'}."
+            f" Provider {dash.connector_health.get('provider') or 'none'}."
+        )
+    comms_line = ""
+    if dash.communications:
+        comms_line = " Recent mailbox/communications: " + "; ".join(
+            f"{card.sender or ''} {card.subject or card.title}" for card in dash.communications[:5]
+        )
     history_line = ""
     if history:
         history_line = " Recent owner results: " + "; ".join(
-            f"{item.result_type} {item.title}" for item in history[:6]
+            f"{item.verification_label or item.result_type} {item.title}" for item in history[:6]
         )
     context = (
         "You are Mrs. Nova Brain on Nova Today. Use VERIFIED DATA, USER-SAVED INFORMATION, "
@@ -1173,6 +1299,8 @@ def ask_today(
         f"Recent activity: {len(history)}.\n"
         "Top attention: "
         + "; ".join(f"{card.trust_label} {card.title}" for card in dash.attention_now[:8])
+        + mailbox_line
+        + comms_line
         + history_line
         + selected
         + f"\n\n{payload.question.strip()}"
@@ -1190,6 +1318,52 @@ def ask_today(
         source_href=resolved,
         referenced_action_id=referenced_action_id,
         referenced_source_ref_id=referenced_source_ref_id,
+        verification_status=reviewed.verification_status if reviewed is not None else None,
+    )
+
+
+def list_mailbox(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    connector_account_id: str | None = None,
+) -> NovaTodayMailboxOut:
+    try:
+        items, health = read_mailbox(
+            db,
+            organization_id=organization_id,
+            user=user,
+            connector_account_id=connector_account_id,
+            persist=True,
+        )
+    except PermissionError as exc:
+        raise NovaTodayError(str(exc), status_code=403) from exc
+    except Exception:
+        items, health = [], ConnectorHealth(
+            status="unavailable",
+            detail="Mailbox connector is unavailable. Today did not invent messages.",
+        )
+    return NovaTodayMailboxOut(
+        items=[
+            NovaTodayMailboxItemOut(
+                external_message_id=item.external_message_id,
+                provider=item.provider,
+                sender=item.sender,
+                recipients=item.recipients,
+                subject=item.subject,
+                received_at=item.received_at,
+                unread=item.unread,
+                important=item.important,
+                snippet=item.snippet,
+                connector_account_id=item.connector_account_id,
+                source_href=item.source_href,
+                source_health=item.source_health,
+                message_id=item.message_id,
+            )
+            for item in items
+        ],
+        connector_health=health.as_dict(),
     )
 
 

@@ -62,6 +62,9 @@
       "<span>Next: " + escapeHtml(card.recommended_action || "") + "</span>" +
       (card.sender ? "<span>From: " + escapeHtml(card.sender) + "</span>" : "") +
       (card.received_at ? "<span>Received: " + escapeHtml(card.received_at) + "</span>" : "") +
+      (card.unread != null ? "<span>" + (card.unread ? "Unread" : "Read") + "</span>" : "") +
+      (card.important ? "<span>Important</span>" : "") +
+      (card.provider ? "<span>Provider: " + escapeHtml(card.provider) + "</span>" : "") +
       "</div>" +
       "<div class=\"hint\">" + escapeHtml(card.explanation || card.detail || card.recommended_action) + "</div>";
   }
@@ -122,6 +125,9 @@
       "<div class=\"review-block\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
       "<div class=\"review-block\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
       (details.title || details.subject ? "<div class=\"review-block\">Source details: " + escapeHtml(details.sender || "") + " " + escapeHtml(details.subject || details.title || "") + "</div>" : "") +
+      (details.source || details.unread || details.important ? "<div class=\"review-block\">Mailbox state: " + escapeHtml([details.source, details.unread, details.important].filter(Boolean).join(" · ")) + "</div>" : "") +
+      (details.received_at ? "<div class=\"review-block\">Received: " + escapeHtml(details.received_at) + "</div>" : "") +
+      (row.verification_label ? "<div class=\"review-block\">Result verification: " + escapeHtml(row.verification_label) + "</div>" : "") +
       (history ? "<div class=\"review-block\">Related history:<br>" + history + "</div>" : "<div class=\"review-block\">Related history: none yet.</div>") +
       cardActions(row) +
       "</article>";
@@ -135,6 +141,7 @@
       "<span>Source: " + escapeHtml(row.source_module) + " / " + escapeHtml(row.source_ref_id) + "</span>" +
       "<span>" + escapeHtml(row.prior_status || "proposed") + " → " + escapeHtml(row.resulting_status || "") + "</span>" +
       (row.result_ref_id ? "<span>Result: " + escapeHtml(row.result_ref_id) + "</span>" : "") +
+      (row.verification_label ? "<span>" + escapeHtml(row.verification_label) + "</span>" : "") +
       (row.decided_at ? "<span>" + escapeHtml(row.decided_at) + "</span>" : "") +
       "</div>" +
       (row.source_href ? "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(row.source_href) + "\">Open source</a></div>" : "") +
@@ -215,6 +222,13 @@
       ? dash.recent_activity.map(activityHtml).join("")
       : "No recent owner activity.";
     renderHealth(dash.source_health);
+    var connector = $("connector-health");
+    if (connector) {
+      var health = dash.connector_health || {};
+      connector.textContent = health.status
+        ? ("Mailbox: " + health.status + (health.provider ? " · " + health.provider : "") + (health.detail ? " — " + health.detail : ""))
+        : "No mailbox connector status.";
+    }
     if (selectedActionId) {
       try {
         var selected = await api("/api/nova/today/actions/" + encodeURIComponent(selectedActionId));
