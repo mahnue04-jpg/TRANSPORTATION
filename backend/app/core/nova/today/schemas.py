@@ -29,10 +29,18 @@ class NovaTodayCard(BaseModel):
     source_ref_id: str
     title: str
     detail: str | None = None
+    explanation: str | None = None
+    source_label: str | None = None
+    sender: str | None = None
+    subject: str | None = None
     href: str
     trust_label: str
     priority: int
+    priority_band: str | None = None
     recommended_action: str
+    why_recommended: str | None = None
+    if_approved: str | None = None
+    will_not_happen: str | None = None
     action_id: str | None = None
     status: str | None = None
 
@@ -45,11 +53,17 @@ class NovaTodayActionOut(BaseModel):
     source_ref_id: str
     title: str
     detail: str | None
+    explanation: str | None = None
+    source_label: str | None = None
     href: str | None
     trust_label: str
     priority: int
+    priority_band: str | None = None
     status: str
     recommended_action: str
+    why_recommended: str | None = None
+    if_approved: str | None = None
+    will_not_happen: str | None = None
     result_ref_id: str | None
     created_at: datetime
     decided_at: datetime | None
@@ -66,6 +80,12 @@ class NovaTodayProductCount(BaseModel):
     trust_label: str = "VERIFIED DATA"
 
 
+class NovaTodaySourceHealth(BaseModel):
+    source: str
+    status: Literal["ok", "empty", "unavailable"]
+    detail: str
+
+
 class NovaTodayDashboardOut(BaseModel):
     attention_now: list[NovaTodayCard]
     communications: list[NovaTodayCard]
@@ -76,12 +96,15 @@ class NovaTodayDashboardOut(BaseModel):
     product_counts: list[NovaTodayProductCount] = Field(default_factory=list)
     recommendations: list[NovaTodayCard]
     approval_queue: list[NovaTodayActionOut]
+    source_health: list[NovaTodaySourceHealth] = Field(default_factory=list)
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))
 
 
 class NovaTodayBrainRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
     organization_id: str | None = None
+    action_id: str | None = Field(default=None, max_length=32)
+    source_ref_id: str | None = Field(default=None, max_length=80)
 
 
 class NovaTodayBrainOut(BaseModel):

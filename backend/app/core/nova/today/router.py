@@ -71,6 +71,24 @@ def ask_today(
         _raise(exc)
 
 
+@router.get("/actions/{action_id}", response_model=NovaTodayActionOut)
+def get_today_action(
+    action_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.get_action(
+            db,
+            action_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
 @router.get("/actions", response_model=list[NovaTodayActionOut])
 def list_today_actions(
     organization_id: str | None = None,

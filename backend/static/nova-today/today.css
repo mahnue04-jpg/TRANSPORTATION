@@ -85,6 +85,26 @@ button,
   color: var(--nova-muted);
   line-height: 1.45;
 }
+.workflow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0;
+  margin: 0 0 16px;
+  list-style: decimal inside;
+  color: var(--nova-muted);
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0;
+  color: var(--nova-muted);
+  font-size: 0.88rem;
+}
+.item.selected {
+  border-color: var(--nova-accent);
+}
 
 .banner {
   padding: 12px 14px;

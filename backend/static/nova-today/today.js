@@ -53,36 +53,63 @@
       ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Mrs. Nova Brain"
       : "Sign in to use Nova Today.";
   }
-  function cardHtml(card) {
-    var actions = "";
+  var selectedActionId = "";
+  function cardMeta(card) {
+    return "<div class=\"meta\">" +
+      "<span>Source: " + escapeHtml(card.source_label || card.source_module || "") + "</span>" +
+      "<span>Priority: " + escapeHtml(card.priority_band || String(card.priority || "")) + "</span>" +
+      "<span>Next: " + escapeHtml(card.recommended_action || "") + "</span>" +
+      (card.sender ? "<span>From: " + escapeHtml(card.sender) + "</span>" : "") +
+      "</div>" +
+      "<div class=\"hint\">" + escapeHtml(card.explanation || card.detail || card.recommended_action) + "</div>";
+  }
+  function cardActions(card) {
+    var open = "<a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a>";
+    var review = card.action_id
+      ? "<button type=\"button\" class=\"secondary\" data-review=\"" + escapeHtml(card.action_id) + "\">Review</button>"
+      : "";
     if (card.action_id && card.status === "proposed") {
-      actions =
-        "<div class=\"card-actions\">" +
-        "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>" +
+      var draft = card.recommended_action === "create_draft"
+        ? "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Prepare draft</button>"
+        : "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>";
+      return "<div class=\"card-actions\">" +
+        draft +
         "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(card.action_id) + "\">Snooze 24h</button>" +
         "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(card.action_id) + "\">Dismiss</button>" +
-        "<a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a>" +
+        review + open +
         "</div>";
-    } else {
-      actions = "<div class=\"card-actions\"><a class=\"secondary\" href=\"" + escapeHtml(card.href || "/nova/today") + "\">Open</a></div>";
     }
+    return "<div class=\"card-actions\">" + review + open + "</div>";
+  }
+  function cardHtml(card) {
     return "<article class=\"item\">" +
       "<span class=\"trust\">" + escapeHtml(card.trust_label) + "</span>" +
       "<strong>" + escapeHtml(card.title) + "</strong>" +
-      "<div class=\"hint\">" + escapeHtml(card.detail || card.recommended_action) + "</div>" +
-      actions +
+      cardMeta(card) +
+      cardActions(card) +
       "</article>";
   }
   function queueHtml(row) {
     return "<article class=\"item\">" +
       "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
       "<strong>" + escapeHtml(row.title) + "</strong>" +
-      "<div class=\"hint\">" + escapeHtml(row.recommended_action) + " · " + escapeHtml(row.source_module) + "</div>" +
-      "<div class=\"card-actions\">" +
-      "<button type=\"button\" data-approve=\"" + escapeHtml(row.action_id) + "\">Approve</button>" +
-      "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(row.action_id) + "\">Snooze 24h</button>" +
-      "<button type=\"button\" class=\"secondary\" data-dismiss=\"" + escapeHtml(row.action_id) + "\">Dismiss</button>" +
-      "</div></article>";
+      cardMeta(row) +
+      "<div class=\"hint\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
+      "<div class=\"hint\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      "<div class=\"hint\">Why: " + escapeHtml(row.why_recommended || row.recommended_action) + "</div>" +
+      cardActions(row) +
+      "</article>";
+  }
+  function reviewHtml(row) {
+    if (!row) return "No item selected.";
+    return "<article class=\"item selected\">" +
+      "<span class=\"trust\">" + escapeHtml(row.trust_label || "ACTION REQUIRES APPROVAL") + "</span>" +
+      "<strong>" + escapeHtml(row.title) + "</strong>" +
+      cardMeta(row) +
+      "<div class=\"hint\">If approved: " + escapeHtml(row.if_approved || "") + "</div>" +
+      "<div class=\"hint\">Will not happen: " + escapeHtml(row.will_not_happen || "") + "</div>" +
+      cardActions(row) +
+      "</article>";
   }
   function renderList(id, items, empty) {
     if (!items || !items.length) {
@@ -126,10 +153,10 @@
     }
     var dash = await api("/api/nova/today/dashboard");
     setSignedIn(true);
-    renderList("attention-box", dash.attention_now, "Nothing needs attention now.");
-    renderList("communications-box", dash.communications, "No communications attention items.");
-    renderList("government-box", dash.government, "No government deadlines or grants.");
-    renderList("business-box", dash.business, "No business follow-ups or opportunities.");
+    renderList("attention-box", dash.attention_now, "Nothing needs attention now. No real items were invented.");
+    renderList("communications-box", dash.communications, "No real unread or important communications.");
+    renderList("government-box", dash.government, "No saved government or compliance items.");
+    renderList("business-box", dash.business, "No saved business or operations follow-ups.");
     renderList("workspace-box", dash.workspace, "No recent workspace work.");
     try {
       renderProductCounts(dash.product_counts);
@@ -137,10 +164,14 @@
       renderProductCounts([]);
     }
     renderList("links-box", dash.product_links, "Product links unavailable.");
-    renderList("recommendations-box", dash.recommendations, "No recommendations.");
+    renderList("recommendations-box", dash.recommendations, "No recommendations from real records.");
     $("queue-box").innerHTML = (dash.approval_queue && dash.approval_queue.length)
       ? dash.approval_queue.map(queueHtml).join("")
       : "No items waiting for approval.";
+    if (selectedActionId) {
+      var selected = (dash.approval_queue || []).find(function (row) { return row.action_id === selectedActionId; });
+      $("review-box").innerHTML = reviewHtml(selected);
+    }
   }
   async function runBrain(event) {
     event.preventDefault();
@@ -151,7 +182,10 @@
     }
     var result = await api("/api/nova/today/ask", {
       method: "POST",
-      body: JSON.stringify({ question: $("ask-input").value.trim() })
+      body: JSON.stringify({
+        question: $("ask-input").value.trim(),
+        action_id: selectedActionId || null
+      })
     });
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or filed.", true);
@@ -173,6 +207,13 @@
     var approve = event.target && event.target.getAttribute && event.target.getAttribute("data-approve");
     var snooze = event.target && event.target.getAttribute && event.target.getAttribute("data-snooze");
     var dismiss = event.target && event.target.getAttribute && event.target.getAttribute("data-dismiss");
+    var review = event.target && event.target.getAttribute && event.target.getAttribute("data-review");
+    if (review) {
+      selectedActionId = review;
+      refresh().catch(function (err) { showBanner(err.message || String(err)); });
+      $("ask-input").focus();
+      return;
+    }
     if (approve) {
       decide(approve, "approve").catch(function (err) { showBanner(err.message || String(err)); });
     }

@@ -38,6 +38,7 @@ from app.core.nova.today.schemas import (
     NovaTodayCard,
     NovaTodayDashboardOut,
     NovaTodayProductCount,
+    NovaTodaySourceHealth,
 )
 from app.core.nova.workspace.service import dashboard as workspace_dashboard
 from app.helpers import now, uuid4
@@ -172,7 +173,59 @@ def _owner_filter(query, user: UserContext):
     return query.filter(NovaV2CommandAction.owner_user_id == user.user_id)
 
 
+_SOURCE_LABELS = {
+    "communications": "Nova Communications",
+    "government": "Nova Government / Compliance",
+    "business": "Nova Business / Operations",
+    "workspace": "Nova Workspace",
+    "link": "Product shortcut",
+}
+
+
+def priority_band(priority: int) -> str:
+    if int(priority or 0) >= 85:
+        return "critical"
+    if int(priority or 0) >= 70:
+        return "high"
+    if int(priority or 0) >= 50:
+        return "normal"
+    return "low"
+
+
+def action_consequences(recommended_action: str) -> tuple[str, str, str]:
+    if recommended_action == "open_link":
+        return (
+            "Open the existing record so you can review it yourself.",
+            "Nova returns a safe in-app link. No new product record is created.",
+            "No email send, government filing, payment, Stripe charge, ledger post, or phone call.",
+        )
+    if recommended_action == "create_draft":
+        return (
+            "Prepare a Communications draft for you to edit. Sending stays a separate Communications step.",
+            "A draft is saved in Nova Communications. Nothing is sent.",
+            "No email send, filing, payment, Stripe charge, ledger post, or phone call.",
+        )
+    if recommended_action == "create_task":
+        return (
+            "Create a Business follow-up task you can track later.",
+            "A Business task is created. This is not accounting, payroll, or a filing.",
+            "No email send, government filing, payment, Stripe charge, ledger post, or phone call.",
+        )
+    if recommended_action == "acknowledge":
+        return (
+            "Mark that you have seen this item. No external action is taken.",
+            "The item is recorded as acknowledged on Nova Today.",
+            "No email send, filing, payment, Stripe charge, ledger post, or phone call.",
+        )
+    return (
+        "This action is not supported on Nova Today.",
+        "Nothing will be executed.",
+        "No email send, filing, payment, Stripe charge, ledger post, or phone call.",
+    )
+
+
 def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
+    why, if_approved, will_not = action_consequences(row.recommended_action)
     return NovaTodayActionOut(
         action_id=row.action_id,
         organization_id=row.organization_id,
@@ -181,11 +234,17 @@ def action_out(row: NovaV2CommandAction) -> NovaTodayActionOut:
         source_ref_id=row.source_ref_id,
         title=row.title,
         detail=row.detail,
+        explanation=row.detail,
+        source_label=_SOURCE_LABELS.get(row.source_module, row.source_module),
         href=row.href,
         trust_label=row.trust_label,
         priority=row.priority,
+        priority_band=priority_band(row.priority),
         status=row.status,
         recommended_action=row.recommended_action,
+        why_recommended=why,
+        if_approved=if_approved,
+        will_not_happen=will_not,
         result_ref_id=row.result_ref_id,
         created_at=row.created_at,
         decided_at=row.decided_at,
@@ -238,16 +297,28 @@ def _card(
     trust_label: str,
     priority: int,
     recommended_action: str,
+    explanation: str | None = None,
+    sender: str | None = None,
+    subject: str | None = None,
 ) -> NovaTodayCard:
+    why, if_approved, will_not = action_consequences(recommended_action)
     return NovaTodayCard(
         source_module=source_module,
         source_ref_id=source_ref_id,
         title=title,
         detail=detail,
+        explanation=explanation or detail,
+        source_label=_SOURCE_LABELS.get(source_module, source_module),
+        sender=sender,
+        subject=subject,
         href=href,
         trust_label=trust_label,
         priority=priority,
+        priority_band=priority_band(priority),
         recommended_action=recommended_action,
+        why_recommended=why,
+        if_approved=if_approved,
+        will_not_happen=will_not,
     )
 
 
@@ -328,176 +399,235 @@ def _attach_action(card: NovaTodayCard, rows: dict[tuple[str, str, str], NovaV2C
     return card
 
 
+def _safe_source(loader):
+    try:
+        return loader(), "ok"
+    except Exception:
+        return None, "unavailable"
+
+
+def _health(source: str, status: str, *, count: int = 0) -> NovaTodaySourceHealth:
+    if status == "unavailable":
+        return NovaTodaySourceHealth(
+            source=source,
+            status="unavailable",
+            detail="This Nova source is unavailable. Today did not invent records.",
+        )
+    if count == 0:
+        return NovaTodaySourceHealth(
+            source=source,
+            status="empty",
+            detail="No real records in this source today.",
+        )
+    return NovaTodaySourceHealth(source=source, status="ok", detail=f"{count} real items.")
+
+
 def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -> dict[str, list[NovaTodayCard]]:
-    workspace = workspace_dashboard(db, organization_id=organization_id, user=user)
-    communications = communications_dashboard(db, organization_id=organization_id, user=user)
-    government = government_dashboard(db, organization_id=organization_id, user=user)
-    business = business_dashboard(db, organization_id=organization_id, user=user)
+    workspace, workspace_status = _safe_source(
+        lambda: workspace_dashboard(db, organization_id=organization_id, user=user)
+    )
+    communications, comms_status = _safe_source(
+        lambda: communications_dashboard(db, organization_id=organization_id, user=user)
+    )
+    government, gov_status = _safe_source(
+        lambda: government_dashboard(db, organization_id=organization_id, user=user)
+    )
+    business, biz_status = _safe_source(
+        lambda: business_dashboard(db, organization_id=organization_id, user=user)
+    )
 
     comms_cards: list[NovaTodayCard] = []
-    for row in communications.important:
-        comms_cards.append(
-            _card(
-                source_module="communications",
-                source_ref_id=row.message_id,
-                title=f"Important: {row.subject}",
-                detail=row.snippet or row.sender,
-                href="/nova/communications",
-                trust_label="USER-SAVED INFORMATION",
-                priority=82,
-                recommended_action="create_draft",
-            )
-        )
-    for row in communications.today:
-        comms_cards.append(
-            _card(
-                source_module="communications",
-                source_ref_id=row.event_id,
-                title=f"Today: {row.title}",
-                detail=row.location,
-                href="/nova/communications",
-                trust_label="USER-SAVED INFORMATION",
-                priority=60,
-                recommended_action="open_link",
-            )
-        )
-    for row in communications.drafts[:6]:
-        comms_cards.append(
-            _card(
-                source_module="communications",
-                source_ref_id=row.draft_id,
-                title=f"Draft: {row.subject}",
-                detail="Saved draft. Nothing was sent.",
-                href="/nova/communications",
-                trust_label="USER-SAVED INFORMATION",
-                priority=55,
-                recommended_action="open_link",
-            )
-        )
-
-    gov_cards: list[NovaTodayCard] = []
-    for row in government.overdue:
-        gov_cards.append(
-            _card(
-                source_module="government",
-                source_ref_id=row.item_id,
-                title=f"Overdue: {row.title}",
-                detail=row.agency,
-                href="/nova/government",
-                trust_label="USER-SAVED INFORMATION",
-                priority=95,
-                recommended_action="create_task",
-            )
-        )
-    for row in government.upcoming_deadlines:
-        gov_cards.append(
-            _card(
-                source_module="government",
-                source_ref_id=row.item_id,
-                title=f"Deadline: {row.title}",
-                detail=f"Due {row.due_date}" if row.due_date else row.agency,
-                href="/nova/government",
-                trust_label="USER-SAVED INFORMATION",
-                priority=78,
-                recommended_action="open_link",
-            )
-        )
-    for row in government.renewals:
-        gov_cards.append(
-            _card(
-                source_module="government",
-                source_ref_id=f"{row.item_id}:renewal",
-                title=f"Renewal: {row.title}",
-                detail=f"Renewal {row.renewal_date}" if row.renewal_date else row.agency,
-                href="/nova/government",
-                trust_label="USER-SAVED INFORMATION",
-                priority=74,
-                recommended_action="create_task",
-            )
-        )
-    for row in government.programs:
-        if row.deadline:
-            gov_cards.append(
+    seen_messages: set[str] = set()
+    if communications is not None:
+        for row in list(communications.important) + list(communications.inbox):
+            if row.message_id in seen_messages:
+                continue
+            if not row.important and row.read:
+                continue
+            seen_messages.add(row.message_id)
+            label = "Important" if row.important else "Unread"
+            comms_cards.append(
                 _card(
-                    source_module="government",
-                    source_ref_id=row.program_id,
-                    title=f"Grant deadline: {row.program_name}",
-                    detail=row.agency,
-                    href="/nova/government",
+                    source_module="communications",
+                    source_ref_id=row.message_id,
+                    title=f"{label}: {row.subject}",
+                    detail=row.snippet or row.sender,
+                    explanation=f"From {row.sender}. {row.snippet or 'Saved message. Prepare a draft only.'}",
+                    href="/nova/communications",
                     trust_label="USER-SAVED INFORMATION",
-                    priority=76,
+                    priority=82 if row.important else 75,
+                    recommended_action="create_draft",
+                    sender=row.sender,
+                    subject=row.subject,
+                )
+            )
+        for row in communications.today:
+            comms_cards.append(
+                _card(
+                    source_module="communications",
+                    source_ref_id=row.event_id,
+                    title=f"Today: {row.title}",
+                    detail=row.location,
+                    explanation=row.location or "Calendar item saved in Nova Communications.",
+                    href="/nova/communications",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=60,
                     recommended_action="open_link",
+                    subject=row.title,
+                )
+            )
+        for row in communications.drafts[:6]:
+            comms_cards.append(
+                _card(
+                    source_module="communications",
+                    source_ref_id=row.draft_id,
+                    title=f"Draft: {row.subject}",
+                    detail="Saved draft. Nothing was sent.",
+                    explanation="This is a saved Communications draft. Nova Today will not send it.",
+                    href="/nova/communications",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=55,
+                    recommended_action="open_link",
+                    subject=row.subject,
                 )
             )
 
+    gov_cards: list[NovaTodayCard] = []
+    if government is not None:
+        for row in government.overdue:
+            gov_cards.append(
+                _card(
+                    source_module="government",
+                    source_ref_id=row.item_id,
+                    title=f"Overdue: {row.title}",
+                    detail=row.agency,
+                    explanation=f"Saved compliance item is overdue{f' at {row.agency}' if row.agency else ''}. Nova will not file this.",
+                    href="/nova/government",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=95,
+                    recommended_action="create_task",
+                )
+            )
+        for row in government.upcoming_deadlines:
+            gov_cards.append(
+                _card(
+                    source_module="government",
+                    source_ref_id=row.item_id,
+                    title=f"Deadline: {row.title}",
+                    detail=f"Due {row.due_date}" if row.due_date else row.agency,
+                    explanation=f"Upcoming deadline from a user-saved Government record. Due {row.due_date}." if row.due_date else "Upcoming deadline from a user-saved Government record.",
+                    href="/nova/government",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=78,
+                    recommended_action="open_link",
+                )
+            )
+        for row in government.renewals:
+            gov_cards.append(
+                _card(
+                    source_module="government",
+                    source_ref_id=f"{row.item_id}:renewal",
+                    title=f"Renewal: {row.title}",
+                    detail=f"Renewal {row.renewal_date}" if row.renewal_date else row.agency,
+                    explanation="Saved renewal date. This is not a government notice invented by Nova.",
+                    href="/nova/government",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=74,
+                    recommended_action="create_task",
+                )
+            )
+        for row in government.programs:
+            if row.deadline:
+                gov_cards.append(
+                    _card(
+                        source_module="government",
+                        source_ref_id=row.program_id,
+                        title=f"Grant deadline: {row.program_name}",
+                        detail=row.agency,
+                        explanation="Program deadline from saved Government records. Nova will not file an application.",
+                        href="/nova/government",
+                        trust_label="USER-SAVED INFORMATION",
+                        priority=76,
+                        recommended_action="open_link",
+                    )
+                )
+
     biz_cards: list[NovaTodayCard] = []
-    for row in business.overdue_tasks:
-        biz_cards.append(
-            _card(
-                source_module="business",
-                source_ref_id=row.task_id,
-                title=f"Overdue task: {row.title}",
-                detail=None,
-                href="/nova/business",
-                trust_label="USER-SAVED INFORMATION",
-                priority=88,
-                recommended_action="open_link",
+    if business is not None:
+        for row in business.overdue_tasks:
+            biz_cards.append(
+                _card(
+                    source_module="business",
+                    source_ref_id=row.task_id,
+                    title=f"Overdue task: {row.title}",
+                    detail=row.notes,
+                    explanation="Overdue Business task from saved workspace data.",
+                    href="/nova/business",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=88,
+                    recommended_action="open_link",
+                )
             )
-        )
-    for row in business.follow_ups_due:
-        biz_cards.append(
-            _card(
-                source_module="business",
-                source_ref_id=row.customer_id,
-                title=f"Follow up: {row.name}",
-                detail=f"Next follow-up {row.next_follow_up}" if row.next_follow_up else None,
-                href="/nova/business",
-                trust_label="USER-SAVED INFORMATION",
-                priority=70,
-                recommended_action="create_draft",
+        for row in business.follow_ups_due:
+            biz_cards.append(
+                _card(
+                    source_module="business",
+                    source_ref_id=row.customer_id,
+                    title=f"Follow up: {row.name}",
+                    detail=f"Next follow-up {row.next_follow_up}" if row.next_follow_up else None,
+                    explanation="Saved customer follow-up. Prepare a draft only; nothing is sent.",
+                    href="/nova/business",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=70,
+                    recommended_action="create_draft",
+                    sender=row.name,
+                )
             )
-        )
-    for row in business.open_opportunities[:8]:
-        biz_cards.append(
-            _card(
-                source_module="business",
-                source_ref_id=row.opportunity_id,
-                title=f"Opportunity: {row.title}",
-                detail=row.next_action,
-                href="/nova/business",
-                trust_label="USER-SAVED INFORMATION",
-                priority=58,
-                recommended_action="create_task",
+        for row in business.open_opportunities[:8]:
+            biz_cards.append(
+                _card(
+                    source_module="business",
+                    source_ref_id=row.opportunity_id,
+                    title=f"Opportunity: {row.title}",
+                    detail=row.next_action,
+                    explanation=row.next_action or "Open opportunity from saved Business records.",
+                    href="/nova/business",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=58,
+                    recommended_action="create_task",
+                )
             )
-        )
 
     workspace_cards: list[NovaTodayCard] = []
-    for row in workspace.recent_work[:8]:
-        workspace_cards.append(
-            _card(
-                source_module="workspace",
-                source_ref_id=row.activity_id,
-                title=row.title,
-                detail=row.kind,
-                href="/nova/workspace",
-                trust_label="USER-SAVED INFORMATION",
-                priority=35,
-                recommended_action="open_link",
+    if workspace is not None:
+        for row in workspace.recent_work[:8]:
+            workspace_cards.append(
+                _card(
+                    source_module="workspace",
+                    source_ref_id=row.activity_id,
+                    title=row.title,
+                    detail=row.kind,
+                    explanation=f"Recent workspace activity ({row.kind}).",
+                    href="/nova/workspace",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=35,
+                    recommended_action="open_link",
+                )
             )
-        )
-    for row in workspace.active_projects[:6]:
-        workspace_cards.append(
-            _card(
-                source_module="workspace",
-                source_ref_id=row.workspace_id,
-                title=f"Project: {row.title}",
-                detail=row.status,
-                href="/nova/workspace",
-                trust_label="USER-SAVED INFORMATION",
-                priority=32,
-                recommended_action="open_link",
+        for row in workspace.active_projects[:6]:
+            workspace_cards.append(
+                _card(
+                    source_module="workspace",
+                    source_ref_id=row.workspace_id,
+                    title=f"Project: {row.title}",
+                    detail=row.status,
+                    explanation=f"Active project status: {row.status}.",
+                    href="/nova/workspace",
+                    trust_label="USER-SAVED INFORMATION",
+                    priority=32,
+                    recommended_action="open_link",
+                )
             )
-        )
 
     product_links = [
         _card(
@@ -532,28 +662,33 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
         ),
     ]
 
-    recommendations = [
-        _card(
-            source_module="business",
-            source_ref_id="rec-attention",
-            title="Review today's follow-ups and overdue work",
-            detail="Mrs. Nova Brain suggestion from existing Business and Government records.",
-            href="/nova/today",
-            trust_label="AI SUGGESTION",
-            priority=40,
-            recommended_action="acknowledge",
-        ),
-        _card(
-            source_module="communications",
-            source_ref_id="rec-drafts",
-            title="Keep replies in drafts until you confirm send in Communications",
-            detail="Today will not send email.",
-            href="/nova/communications",
-            trust_label="AI SUGGESTION",
-            priority=38,
-            recommended_action="acknowledge",
-        ),
-    ]
+    has_real_work = bool(comms_cards or gov_cards or biz_cards)
+    recommendations: list[NovaTodayCard] = []
+    if has_real_work:
+        recommendations = [
+            _card(
+                source_module="business",
+                source_ref_id="rec-attention",
+                title="Review today's follow-ups and overdue work",
+                detail="Mrs. Nova Brain suggestion from existing Business and Government records.",
+                explanation="AI suggestion based on real saved records already listed on Today. Not a new deadline.",
+                href="/nova/today",
+                trust_label="AI SUGGESTION",
+                priority=40,
+                recommended_action="acknowledge",
+            ),
+            _card(
+                source_module="communications",
+                source_ref_id="rec-drafts",
+                title="Keep replies in drafts until you confirm send in Communications",
+                detail="Today will not send email.",
+                explanation="Standing safety reminder. Approve only acknowledges this guidance.",
+                href="/nova/communications",
+                trust_label="AI SUGGESTION",
+                priority=38,
+                recommended_action="acknowledge",
+            ),
+        ]
 
     return {
         "communications": comms_cards,
@@ -562,19 +697,18 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
         "workspace": workspace_cards,
         "product_links": product_links,
         "recommendations": recommendations,
+        "source_health": [
+            _health("communications", comms_status, count=len(comms_cards)),
+            _health("government", gov_status, count=len(gov_cards)),
+            _health("business", biz_status, count=len(biz_cards)),
+            _health("workspace", workspace_status, count=len(workspace_cards)),
+        ],
     }
 
 
 def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTodayDashboardOut:
     groups = _collect_v1_cards(db, organization_id=organization_id, user=user)
-    persistable = (
-        groups["communications"]
-        + groups["government"]
-        + groups["business"]
-        + groups["workspace"]
-        + groups["product_links"]
-        + groups["recommendations"]
-    )
+    persistable = groups["communications"] + groups["government"] + groups["business"] + groups["recommendations"]
     for card in persistable:
         _upsert_proposed(db, card, organization_id=organization_id, user=user)
     db.commit()
@@ -622,12 +756,17 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         product_counts=counts,
         recommendations=recommendations,
         approval_queue=approval_queue,
+        source_health=list(groups.get("source_health") or []),
         trust_labels=list(TRUST_LABELS),
     )
 
 
 def list_actions(db: Session, *, organization_id: str, user: UserContext) -> list[NovaTodayActionOut]:
     return [action_out(row) for row in _list_actions(db, organization_id=organization_id, user=user)]
+
+
+def get_action(db: Session, action_id: str, *, organization_id: str, user: UserContext) -> NovaTodayActionOut:
+    return action_out(_get_action(db, action_id, organization_id=organization_id, user=user))
 
 
 def create_action(
@@ -784,6 +923,20 @@ def ask_today(
     user: UserContext,
 ) -> NovaTodayBrainOut:
     dash = dashboard(db, organization_id=organization_id, user=user)
+    selected = ""
+    if payload.action_id:
+        try:
+            row = _get_action(db, payload.action_id, organization_id=organization_id, user=user)
+            selected = (
+                f" Owner is reviewing action {row.action_id}: {row.title}. "
+                f"Recommended {row.recommended_action}. Source {row.source_module}/{row.source_ref_id}."
+            )
+        except NovaTodayError:
+            selected = " The requested action was not visible to this owner."
+    elif payload.source_ref_id:
+        match = next((card for card in dash.attention_now if card.source_ref_id == payload.source_ref_id), None)
+        if match:
+            selected = f" Owner is reviewing {match.trust_label} item {match.title}."
     context = (
         "You are Mrs. Nova Brain on Nova Today. Use VERIFIED DATA, USER-SAVED INFORMATION, "
         "AI SUGGESTION, and ACTION REQUIRES APPROVAL. Do not send email, file with an agency, "
@@ -796,6 +949,7 @@ def ask_today(
         f"Approval queue: {len(dash.approval_queue)}.\n"
         "Top attention: "
         + "; ".join(f"{card.trust_label} {card.title}" for card in dash.attention_now[:8])
+        + selected
         + f"\n\n{payload.question.strip()}"
     )
     asked = NovaCoreService.ask(db, organization_id=organization_id, mode="founder_advisor", question=context)
