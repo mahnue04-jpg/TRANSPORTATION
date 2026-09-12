@@ -126,11 +126,15 @@
   function speakText(text) {
     if (window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
       window.AmiCorHumanVoice.createEngine({ browserFallbackEnabled: true }).speak(text);
+      showBanner("Reading summary aloud locally. Nothing was sent.", true);
       return;
     }
     if (window.speechSynthesis) {
       window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      showBanner("Reading summary aloud locally. Nothing was sent.", true);
+      return;
     }
+    showBanner("Browser speech is not available on this device.");
   }
 
   if (session() && session().restore) session().restore();
