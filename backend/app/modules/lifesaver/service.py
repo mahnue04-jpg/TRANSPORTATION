@@ -174,9 +174,22 @@ def serialize_consent(row: LifesaverConsent) -> dict[str, Any]:
 
 
 def product_meta() -> dict[str, Any]:
+    from app.modules.lifesaver.hardware.hardware_mode import hardware_mode
+    from app.modules.lifesaver.staging import identity
+
+    staging = identity()
     return {
         "product": PRODUCT_NAME,
         "version": PRODUCT_VERSION,
+        "environment": staging["environment"],
+        "staging_isolated": staging["staging_isolated"],
+        "hardware_mode": hardware_mode(),
+        "simulated_device_mode": True,
+        "home_hub_public": False,
+        "stripe_enabled": False,
+        "twilio_enabled": False,
+        "email_sending_enabled": False,
+        "emergency_services_enabled": False,
         "disclaimer": PRODUCT_DISCLAIMER,
         "sos_disclaimer": SOS_DISCLAIMER,
         "ai_disclaimer": AI_DISCLAIMER,

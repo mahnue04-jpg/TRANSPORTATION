@@ -16,8 +16,10 @@ from app.responses import normalize_success
 
 
 def _reject_if_production() -> None:
+    from app.modules.lifesaver.staging import lifesaver_staging_isolated
+
     env = (os.getenv("AMICOR_ENVIRONMENT") or "").strip().lower()
-    if env in {"production", "prod"}:
+    if env in {"production", "prod"} or lifesaver_staging_isolated():
         raise HTTPException(status_code=404, detail="Mock Pi is local-only.")
 
 router = APIRouter(prefix="/mock-pi", tags=["lifesaver-mock-pi"])

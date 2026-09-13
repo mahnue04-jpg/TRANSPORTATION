@@ -17,7 +17,9 @@ def is_production() -> bool:
 
 
 def hardware_mode() -> str:
-    if is_production():
+    from app.modules.lifesaver.staging import lifesaver_staging_isolated
+
+    if is_production() or lifesaver_staging_isolated():
         return MODE_MOCK
     raw = (os.getenv("AMICOR_LIFESAVER_HARDWARE_MODE") or MODE_MOCK).strip().lower()
     if raw in VALID_MODES:
@@ -30,7 +32,9 @@ def local_pi_enabled() -> bool:
 
 
 def prototype_panel_available() -> bool:
-    return not is_production()
+    from app.modules.lifesaver.staging import lifesaver_staging_isolated
+
+    return not is_production() and not lifesaver_staging_isolated()
 
 
 def configured_pi_host() -> str:

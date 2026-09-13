@@ -70,6 +70,11 @@ from app.auth import (  # type: ignore
 )
 from app import observability                     # type: ignore
 from app.tenant_auth_middleware import TenantAuthValidationMiddleware  # type: ignore
+from app.modules.lifesaver.staging import (  # type: ignore
+    LifesaverStagingIsolationMiddleware,
+    initialize_isolated_staging_runtime,
+    lifesaver_staging_isolated,
+)
 from app import ecosystem as ecosystem_module     # type: ignore
 from app import voice as voice_module             # type: ignore
 from app import responses as responses_module     # type: ignore
@@ -266,7 +271,18 @@ async def lifespan(app: FastAPI):
         )
 
     db_ok = app_startup.startup_recovery(max_retries=3, delay_s=1.0)
-    if db_ok:
+    isolated_lifesaver = lifesaver_staging_isolated()
+    if isolated_lifesaver:
+        try:
+            created = initialize_isolated_staging_runtime()
+            logger.info(
+                "Lifesaver staging schema ready auth=%s lifesaver=%s",
+                ",".join(created["auth_tables"]),
+                ",".join(created["lifesaver_tables"]),
+            )
+        except Exception as exc:
+            logger.error("Lifesaver staging schema initialization failed: %s", exc)
+    elif db_ok:
         try:
             init_db()
             logger.info("Database initialised.")
@@ -276,40 +292,41 @@ async def lifespan(app: FastAPI):
         logger.critical("Database unavailable after retries — chat persistence disabled.")
 
     # ── Platform DB (SQLAlchemy) ──────────────────────────────────────────
-    try:
-        from app.db.session import init_platform_db  # type: ignore
-        init_platform_db()
-        logger.info("Platform database tables ready.")
+    if not isolated_lifesaver:
         try:
-            auth_module.ensure_auth_schema()
-            seeded = auth_module.seed_default_users()
-            if seeded:
-                logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
-            else:
-                logger.info("Default auth users already present.")
-        except Exception as auth_exc:
-            logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+            from app.db.session import init_platform_db  # type: ignore
+            init_platform_db()
+            logger.info("Platform database tables ready.")
+            try:
+                auth_module.ensure_auth_schema()
+                seeded = auth_module.seed_default_users()
+                if seeded:
+                    logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
+                else:
+                    logger.info("Default auth users already present.")
+            except Exception as auth_exc:
+                logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+
+            try:
+                from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
+                ensure_health_isf_schema()
+                logger.info("Health ISF schema verified.")
+                from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
+                ensure_driver_mobile_login_schema()
+                logger.info("Driver mobile login schema verified.")
+            except Exception as health_schema_exc:
+                logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
+        except Exception as exc:
+            logger.error("Platform DB init failed: %s", exc)
 
         try:
-            from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
-            ensure_health_isf_schema()
-            logger.info("Health ISF schema verified.")
-            from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
-            ensure_driver_mobile_login_schema()
-            logger.info("Driver mobile login schema verified.")
-        except Exception as health_schema_exc:
-            logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
-    except Exception as exc:
-        logger.error("Platform DB init failed: %s", exc)
+            from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+            from app.db.session import engine as platform_engine
 
-    try:
-        from app.core.nova.today.schema_ensure import ensure_nova_today_schema
-        from app.db.session import engine as platform_engine
-
-        ensure_nova_today_schema(platform_engine)
-        logger.info("Nova Today schema verified.")
-    except Exception as today_schema_exc:
-        logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
+            ensure_nova_today_schema(platform_engine)
+            logger.info("Nova Today schema verified.")
+        except Exception as today_schema_exc:
+            logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
 
     from app.deployment.release_version import resolve_app_version
 
@@ -321,6 +338,8 @@ async def lifespan(app: FastAPI):
     async def _deferred_startup_runner() -> None:
         from app.deployment.background_startup import run_deferred_platform_startup
 
+        if isolated_lifesaver:
+            return
         await asyncio.to_thread(run_deferred_platform_startup, runtime_environment=RUNTIME_ENVIRONMENT)
         try:
             from app.monitoring.runtime_logger import record_supervision_event
@@ -436,6 +455,7 @@ app.add_middleware(TenantAuthValidationMiddleware)
 # Phase 7: ErrorBoundaryMiddleware added last → outermost layer in Starlette's
 # reversed-stack build order; catches all unhandled exceptions and returns safe JSON.
 app.add_middleware(ErrorBoundaryMiddleware)
+app.add_middleware(LifesaverStagingIsolationMiddleware)
 
 
 @app.middleware("http")

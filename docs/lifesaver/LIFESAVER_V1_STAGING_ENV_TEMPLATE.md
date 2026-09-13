@@ -19,6 +19,8 @@ Use a dedicated staging secret store. Never copy production values into staging.
 | `LIFESAVER_SMOKE_PASSWORD` | Required for authenticated smoke; **must be staging-only** | *(secret store only)* | Never embed in git or chat. |
 | `LIFESAVER_SMOKE_DRY_RUN` | Optional | `1` | Public endpoints only. Use `1` until staging credentials exist. |
 | `LIFESAVER_SMOKE_ALLOW_PRODUCTION` | **Must remain disabled in staging** | unset / `0` | Do not set to `1`. |
+| `AMICOR_ENVIRONMENT` | Required for isolated public staging | `lifesaver_staging` | Enables Lifesaver-only hostname isolation. Do not set this on Health ISF production. |
+| `AMICOR_LIFESAVER_STAGING_ISOLATED` | Recommended on the staging service | `1` | Explicit isolation flag. No-op when unset. |
 | `AMICOR_RESTRICT_SEED_ACCOUNTS` | Required unless a dedicated seed is approved | `1` | Keep restricted. Do not open production seed accounts on staging. |
 | `AMICOR_SEED_PASSWORD` | Optional; **must be staging-only** if used | *(secret store only)* | Only for a dedicated staging seed. Never the production rider/driver seed. |
 | `TESTING` | **Must remain disabled in staging** | unset / `0` | Local/test isolation flag. Not for staging. |
