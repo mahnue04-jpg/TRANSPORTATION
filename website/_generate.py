@@ -259,7 +259,7 @@ add(
         <article class="panel featured" style="margin:28px 0 24px">
           <span class="chip chip-early">Featured early access</span>
           <h3>Autonomous Operations Agent</h3>
-          <p>The first AMICOR Technologies product: AI that watches an operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
+          <p>The first AMICOR Technologies product: AI that reviews operational state, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
           <div class="cta-row">
             <a class="btn btn-primary" href="/technologies/autonomous-operations-agent/">View software</a>
             <a class="btn btn-ghost" href="/early-access/?product=Autonomous%20Operations%20Agent">Request Early Access</a>
@@ -392,7 +392,7 @@ add(
         <article class="panel">
           <span class="chip chip-early">Early Access / In Development</span>
           <h2>AMICOR Autonomous Operations Agent</h2>
-          <p>AI that watches your operation, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
+          <p>AI that reviews operational state, recommends the next action, keeps humans in control, verifies results, and maintains an audit trail.</p>
           <a class="btn btn-primary" href="/technologies/autonomous-operations-agent/">View product</a>
         </article>
       </div>
@@ -426,7 +426,7 @@ AOA_BODY = f"""
         <h2>What it does</h2>
         <p class="lede">The product loop is observe, recommend, human approval, verify, and audit. After a person approves, existing operational systems perform the action. The agent does not run unattended production execution.</p>
         <div class="steps">
-          {icon_step("1", "observe", "Observe", "Read live operational state from the systems you already run.")}
+          {icon_step("1", "observe", "Observe", "Review current operational state from the systems you already run.")}
           {icon_step("2", "recommend", "Recommend", "Propose the next action using operational intelligence. A recommendation is not execution.")}
           {icon_step("3", "approval", "Human Approval", "Stop for a human decision. Operators, dispatchers, or administrators stay in control. Approved work continues through your current systems.")}
           {icon_step("4", "verify", "Verify", "Compare expected and actual state. Inconsistencies are reported, not silently repaired.")}
@@ -438,7 +438,7 @@ AOA_BODY = f"""
       <div class="wrap">
         <h2>Capabilities</h2>
         <div class="grid grid-3">
-          {icon_card("live", "Live operational observation", "Watch live operational signals without replacing the source of truth.")}
+          {icon_card("live", "Operational state review", "Review current operational signals without replacing the source of truth.")}
           {icon_card("intel", "Intelligent recommendations", "Surface the next recommended action. Recommendation is not dispatch execution.")}
           {icon_card("controls", "Human approval controls", "The agent stops at approval. Unattended production execution is not enabled.")}
           {icon_card("exception", "Exception detection", "Surface stale work, conflicting state, and missing handoffs for human review.")}
@@ -452,7 +452,7 @@ AOA_BODY = f"""
         <h2>Who it is for</h2>
         <p class="lede">The Autonomous Operations Agent is for operators who want supervised intelligence on work they already run. It is not a booking marketplace and not a live delivery or licensed-ride service.</p>
         <div class="grid grid-2">
-          {icon_card("transport", "Transportation", "Operators who need a supervised recommendation layer on live trip and assignment work.")}
+          {icon_card("transport", "Transportation", "Operators who need a supervised recommendation layer on current trip and assignment work.")}
           {icon_card("nemt", "NEMT", "Non-emergency medical transportation teams that keep humans in the approval path.")}
           {icon_card("courier", "Courier / Delivery", "Courier and local delivery operations that want observation and audit without unattended execution.")}
           {icon_card("fleet", "Fleet operations", "Fleet coordinators who need recommended next actions and a verifiable record.")}
@@ -480,7 +480,7 @@ AOA_BODY = f"""
             <strong>planned $29/month</strong>
             <ul class="plan-features">
               <li>1 operations workspace</li>
-              <li>Live operational observation dashboard</li>
+              <li>Operational state review dashboard</li>
               <li>Intelligent recommendations</li>
               <li>Human approval workflow</li>
               <li>Basic verification status</li>
