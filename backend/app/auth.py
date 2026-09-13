@@ -7,6 +7,7 @@ Endpoints (all under /api/auth):
   POST /refresh    — exchange refresh token → new access token
   POST /logout     — revoke refresh token
   POST /switch-role — validate and issue JWT for an authorized workspace role
+  POST /admin/reset-password — admin-only reset of an existing account password
   GET  /me         — return current user info (requires Bearer token)
   GET  /session    — return active JWT session role claims (requires Bearer token)
 """
@@ -647,6 +648,32 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+def reset_existing_user_password(db: Session, email: str, new_password: str) -> str:
+    """Hash and store a new password for an existing account only.
+
+    Returns the stored email. Raises HTTPException 404 if no account exists.
+    Does not create users or change role, tenant, or active status.
+    """
+    from app.db.models import User as UserModel
+
+    normalized = _validate_email(email)
+    _validate_password(new_password)
+    matches = (
+        db.query(UserModel)
+        .filter(func.lower(UserModel.email) == normalized)
+        .all()
+    )
+    if not matches:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if len(matches) != 1:
+        raise HTTPException(status_code=409, detail="Duplicate accounts for email")
+    user = matches[0]
+    user.hashed_password = hash_password(new_password)
+    db.add(user)
+    db.commit()
+    return str(user.email)
+
+
 # ── Rate limiting: per-IP sliding window ──────────────────────────────────────
 _RATE_WINDOW_S = 60
 _RATE_LIMIT_AUTH = int(os.getenv("RATE_LIMIT_AUTH", "20"))   # auth endpoints / minute
@@ -912,6 +939,32 @@ class UserContext(BaseModel):
     role: str
     organization_name: str | None = None
     organization_id: str | None = None
+
+
+class AdminResetPasswordRequest(BaseModel):
+    email: str
+    new_password: str
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v: str) -> str:
+        if not _EMAIL_RE.match(v.strip().lower()):
+            raise ValueError("Invalid email address")
+        return v.strip().lower()
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < _MIN_PASSWORD_LEN:
+            raise ValueError(f"Password must be ≥{_MIN_PASSWORD_LEN} characters")
+        if len(v) > _MAX_PASSWORD_LEN:
+            raise ValueError(f"Password must be ≤{_MAX_PASSWORD_LEN} characters")
+        return v
+
+
+class AdminResetPasswordResponse(BaseModel):
+    status: str = "ok"
+    email: str
 
 
 # ── Router ─────────────────────────────────────────────────────────────────────
@@ -1364,6 +1417,21 @@ def me(
         "created_at": user.created_at.isoformat(),
         "last_login": user.last_login.isoformat() if user.last_login else None,
     }
+
+
+@router.post("/admin/reset-password", response_model=AdminResetPasswordResponse)
+def admin_reset_password(
+    req: AdminResetPasswordRequest,
+    request: Request,
+    admin=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    """Reset an existing platform_users password. Admin-only. Never creates accounts."""
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
+    check_rate_limit(f"admin-reset:{admin.id}:{ip}", limit=_RATE_LIMIT_AUTH)
+    stored_email = reset_existing_user_password(db, req.email, req.new_password)
+    logger.info("Admin password reset completed actor_id=%s target_email=%s", admin.id, stored_email)
+    return AdminResetPasswordResponse(status="ok", email=_validate_email(stored_email))
 
 
 @router.get("/session")
