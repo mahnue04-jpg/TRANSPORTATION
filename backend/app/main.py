@@ -83,6 +83,7 @@ from app.core.nova.government.router import router as nova_government_router  # 
 from app.core.nova.business.router import router as nova_business_router  # type: ignore
 from app.core.nova.today.router import router as nova_today_router  # type: ignore
 from app.core.nova.autonomy.router import router as nova_autonomy_router  # type: ignore
+from app.core.nova.autonomy.v2_router import router as nova_autonomy_v2_router  # type: ignore
 from app.core.nova.accounting.router import router as nova_accounting_router  # type: ignore
 from app.core.nova.payments.router import router as nova_payments_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
@@ -475,6 +476,7 @@ app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_today_router)
 app.include_router(nova_autonomy_router)
+app.include_router(nova_autonomy_v2_router)
 app.include_router(nova_accounting_router)
 app.include_router(nova_payments_router)
 
