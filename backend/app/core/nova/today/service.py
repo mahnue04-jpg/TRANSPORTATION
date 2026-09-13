@@ -496,8 +496,16 @@ def _card(
     )
 
 
-def _list_actions(db: Session, *, organization_id: str, user: UserContext) -> list[NovaV2CommandAction]:
+def _list_actions(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    include_deactivated: bool = True,
+) -> list[NovaV2CommandAction]:
     query = db.query(NovaV2CommandAction).filter(NovaV2CommandAction.organization_id == organization_id)
+    if not include_deactivated:
+        query = query.filter(NovaV2CommandAction.status != "deactivated")
     return _owner_filter(query, user).order_by(NovaV2CommandAction.priority.desc(), NovaV2CommandAction.created_at.desc()).all()
 
 
@@ -522,6 +530,7 @@ def find_in_org_today_action(
             NovaV2CommandAction.source_module == source_module,
             NovaV2CommandAction.source_ref_id == source_ref_id,
             NovaV2CommandAction.recommended_action == recommended_action,
+            NovaV2CommandAction.status != "deactivated",
         )
         .order_by(NovaV2CommandAction.created_at.asc())
         .first()
@@ -586,6 +595,8 @@ def _canonical_action_map(rows: list[NovaV2CommandAction]) -> dict[tuple[str, st
     ordered = sorted(rows, key=lambda row: (row.created_at is None, row.created_at or row.action_id, row.action_id))
     keyed: dict[tuple[str, str, str], NovaV2CommandAction] = {}
     for row in ordered:
+        if str(row.status or "") == "deactivated":
+            continue
         key = (row.source_module, row.source_ref_id, row.recommended_action)
         if key in keyed and not is_standing_synthetic(row.source_module, row.source_ref_id):
             continue
@@ -1127,7 +1138,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         _upsert_proposed(db, card, organization_id=organization_id, user=user)
     db.commit()
 
-    rows = _list_actions(db, organization_id=organization_id, user=user)
+    rows = _list_actions(db, organization_id=organization_id, user=user, include_deactivated=False)
     keyed = _canonical_action_map(rows)
     hidden = {
         (row.source_module, row.source_ref_id, row.recommended_action)

@@ -13,7 +13,7 @@ TRUST_LABELS = (
     "ACTION REQUIRES APPROVAL",
 )
 RECOMMENDED_ACTIONS = ("open_link", "create_draft", "create_task", "acknowledge", "recheck_source")
-ACTION_STATUSES = ("proposed", "approved", "dismissed", "done", "snoozed")
+ACTION_STATUSES = ("proposed", "approved", "dismissed", "done", "snoozed", "deactivated")
 SNOOZE_HOURS = (1, 4, 24, 72)
 SOURCE_MODULES = (
     "workspace",
