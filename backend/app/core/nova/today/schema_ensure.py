@@ -26,3 +26,6 @@ def ensure_nova_today_schema(engine) -> None:
         from app.core.nova.today.models import NovaV2RecheckEvent
 
         NovaV2RecheckEvent.__table__.create(bind=engine, checkfirst=True)
+    from app.core.nova.today.historical_hide import hide_verified_excess_today_rows
+
+    hide_verified_excess_today_rows(engine)
