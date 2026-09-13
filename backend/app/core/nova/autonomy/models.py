@@ -1,15 +1,31 @@
-"""Autonomy Phase 1 SQLAlchemy + API models. Append-only ledger; no secrets."""
+"""Autonomy Phase 1 ledger plus Phase 2A schema models. No secrets or message bodies."""
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Index, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
 from app.helpers import now, uuid4
+
+
+def new_workflow_id() -> str:
+    return "NWF-" + uuid4().replace("-", "")[:12].upper()
+
+
+def new_step_id() -> str:
+    return "NWS-" + uuid4().replace("-", "")[:12].upper()
+
+
+def new_approval_id() -> str:
+    return "NWA-" + uuid4().replace("-", "")[:12].upper()
+
+
+def new_attempt_id() -> str:
+    return "NWT-" + uuid4().replace("-", "")[:12].upper()
 
 
 class NovaAutonomyLedger(Base):
@@ -21,6 +37,7 @@ class NovaAutonomyLedger(Base):
         Index("ix_nova_autonomy_correlation", "organization_id", "correlation_id"),
         Index("ix_nova_autonomy_idempotency", "organization_id", "idempotency_key"),
         Index("ix_nova_autonomy_org_created", "organization_id", "created_at"),
+        Index("ix_nova_autonomy_ledger_workflow", "organization_id", "workflow_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
@@ -43,6 +60,142 @@ class NovaAutonomyLedger(Base):
     verification_result: Mapped[str | None] = mapped_column(String(40), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    workflow_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    step_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_module: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    approver_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class NovaAutonomyWorkflow(Base):
+    """Phase 2A workflow header. No execution. Restrict deletes so audit history stays."""
+
+    __tablename__ = "nova_autonomy_workflows"
+    __table_args__ = (
+        Index("ix_nova_autonomy_wf_org_status", "organization_id", "status"),
+        Index("ix_nova_autonomy_wf_org_correlation", "organization_id", "correlation_id"),
+        Index("ix_nova_autonomy_wf_org_owner", "organization_id", "owner_user_id"),
+    )
+
+    workflow_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_workflow_id)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    workflow_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    initiating_module: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_ref_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed")
+    current_step: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NovaAutonomyWorkflowStep(Base):
+    """Phase 2A ordered step. Idempotency is unique per organization."""
+
+    __tablename__ = "nova_autonomy_workflow_steps"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "sequence_number", name="uq_nova_autonomy_step_order"),
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_nova_autonomy_step_idemp"),
+        Index("ix_nova_autonomy_step_org_workflow", "organization_id", "workflow_id"),
+        Index("ix_nova_autonomy_step_org_status", "organization_id", "status"),
+    )
+
+    step_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_step_id)
+    workflow_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflows.workflow_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_module: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_module: Mapped[str] = mapped_column(String(40), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed")
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    result_ref_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NovaAutonomyApproval(Base):
+    """Phase 2A tenant-scoped approval grant. Expiry and revoke are stored only."""
+
+    __tablename__ = "nova_autonomy_approvals"
+    __table_args__ = (
+        Index("ix_nova_autonomy_appr_org_workflow", "organization_id", "workflow_id"),
+        Index("ix_nova_autonomy_appr_org_status", "organization_id", "status"),
+    )
+
+    approval_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_approval_id)
+    workflow_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflows.workflow_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    step_id: Mapped[str | None] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflow_steps.step_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    approver_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    approval_scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="granted")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaAutonomyExecutionAttempt(Base):
+    """Append-only execution attempt history. No update helper is provided."""
+
+    __tablename__ = "nova_autonomy_execution_attempts"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "step_id", "attempt_number", name="uq_nova_autonomy_attempt_seq"),
+        Index("ix_nova_autonomy_attempt_org_workflow", "organization_id", "workflow_id"),
+    )
+
+    attempt_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_attempt_id)
+    workflow_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflows.workflow_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    step_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflow_steps.step_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    result_ref_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    verification_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NovaAutonomyOrgFlag(Base):
+    """Per-organization Phase 2 switches. Defaults remain OFF."""
+
+    __tablename__ = "nova_autonomy_org_flags"
+
+    organization_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    phase2_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    emergency_stop: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
 class AutonomyIntentCreate(BaseModel):

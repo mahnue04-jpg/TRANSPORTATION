@@ -1,18 +1,16 @@
 """Append-only Autonomy Phase 1 ledger. No secrets, tokens, or message bodies."""
 from __future__ import annotations
 
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
 from app.core.nova.autonomy.models import AutonomyIntentOut, NovaAutonomyLedger
+from app.core.nova.autonomy.schema_ensure import ensure_autonomy_schema as _ensure_autonomy_schema
 from app.helpers import now, uuid4
 
 
 def ensure_autonomy_schema(engine) -> None:
-    inspector = inspect(engine)
-    if "nova_autonomy_ledger" not in set(inspector.get_table_names()):
-        NovaAutonomyLedger.__table__.create(bind=engine, checkfirst=True)
+    _ensure_autonomy_schema(engine)
 
 
 def _audit_id() -> str:
@@ -39,6 +37,11 @@ def append(
     result: str = "recorded",
     verification_result: str | None = None,
     detail: str | None = None,
+    workflow_id: str | None = None,
+    step_id: str | None = None,
+    target_module: str | None = None,
+    approver_user_id: str | None = None,
+    attempt_number: int | None = None,
 ) -> NovaAutonomyLedger:
     row = NovaAutonomyLedger(
         audit_id=audit_id or _audit_id(),
@@ -60,6 +63,11 @@ def append(
         verification_result=verification_result,
         detail=(detail or "")[:400] or None,
         created_at=now(),
+        workflow_id=workflow_id,
+        step_id=step_id,
+        target_module=target_module,
+        approver_user_id=approver_user_id,
+        attempt_number=attempt_number,
     )
     db.add(row)
     db.commit()
