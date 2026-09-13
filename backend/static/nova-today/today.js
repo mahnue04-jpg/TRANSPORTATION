@@ -166,12 +166,27 @@
         "</span>";
     }).join("");
   }
+  function logicalKey(item) {
+    return [item.source_module || "", item.source_ref_id || "", item.recommended_action || item.action_type || ""].join("|");
+  }
+  function dedupeLogical(items) {
+    var seen = {};
+    var kept = [];
+    (items || []).forEach(function (item) {
+      var key = logicalKey(item);
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      kept.push(item);
+    });
+    return kept;
+  }
   function renderList(id, items, empty) {
-    if (!items || !items.length) {
+    var unique = dedupeLogical(items);
+    if (!unique || !unique.length) {
       $(id).innerHTML = empty;
       return;
     }
-    $(id).innerHTML = items.map(cardHtml).join("");
+    $(id).innerHTML = unique.map(cardHtml).join("");
   }
   function renderProductCounts(cards) {
     var host = $("product-counts-box");
@@ -220,8 +235,9 @@
     }
     renderList("links-box", dash.product_links, "Product links unavailable.");
     renderList("recommendations-box", dash.recommendations, "No recommendations from real records.");
-    $("queue-box").innerHTML = (dash.approval_queue && dash.approval_queue.length)
-      ? dash.approval_queue.map(queueHtml).join("")
+    var queue = dedupeLogical(dash.approval_queue);
+    $("queue-box").innerHTML = queue.length
+      ? queue.map(queueHtml).join("")
       : "No items waiting for approval.";
     $("activity-box").innerHTML = (dash.recent_activity && dash.recent_activity.length)
       ? dash.recent_activity.map(activityHtml).join("")

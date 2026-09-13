@@ -36,6 +36,33 @@ def is_standing_synthetic(source_module: str | None, source_ref_id: str | None) 
     return module == "link" and ref in PRODUCT_PAGES
 
 
+_WORKFLOW_FIXTURE_TITLE = (
+    "live acceptance",
+    "smoke approve",
+    "smoke dismiss",
+    "isolation probe",
+    "deploy probe",
+    "disposable probe",
+    "disposable snooze",
+)
+_WORKFLOW_FIXTURE_REF_PREFIXES = (
+    "v2live-",
+    "ui-smoke-",
+    "smoke-",
+    "smoke-iso-",
+    "v2-p2-deploy-probe",
+)
+
+
+def is_workflow_fixture(title: str | None, source_ref_id: str | None) -> bool:
+    """Test/smoke rows kept as audit history, hidden from the normal Today workflow."""
+    ref = str(source_ref_id or "").strip().lower()
+    title_blob = str(title or "").strip().lower()
+    if any(ref.startswith(prefix) for prefix in _WORKFLOW_FIXTURE_REF_PREFIXES):
+        return True
+    return any(marker in title_blob for marker in _WORKFLOW_FIXTURE_TITLE)
+
+
 def bare_source_ref(source_ref_id: str) -> str:
     ref = str(source_ref_id or "")
     if ref.endswith(":renewal"):
