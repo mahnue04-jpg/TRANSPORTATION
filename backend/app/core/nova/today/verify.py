@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 VerificationState = Literal["verified", "missing", "unavailable", "unknown"]
 
 
+class DraftTenantDenied(PermissionError):
+    """Raised when a draft exists but belongs to another tenant."""
+
+
 def verify_result(
     db: Session,
     row: NovaV2CommandAction,
@@ -17,23 +21,50 @@ def verify_result(
     organization_id: str,
     user: UserContext,
 ) -> VerificationState:
+    if row.recommended_action == "create_draft" and not row.result_ref_id:
+        return "unknown"
     if not row.result_ref_id:
         return "unknown"
     if row.recommended_action == "create_draft":
-        return _verify_draft(db, row.result_ref_id, user=user)
+        try:
+            return verify_draft_by_ref(
+                db, row.result_ref_id, organization_id=organization_id, user=user
+            )
+        except DraftTenantDenied:
+            return "missing"
     if row.recommended_action == "create_task":
         return _verify_task(db, row.result_ref_id, organization_id=organization_id, user=user)
     return "unknown"
 
 
-def _verify_draft(db: Session, draft_id: str, *, user: UserContext) -> VerificationState:
+def verify_draft_by_ref(
+    db: Session,
+    draft_id: str | None,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> VerificationState:
+    """Load the exact draft by id. Tenant-safe. Does not use current-user list_drafts."""
+    if not draft_id:
+        return "unknown"
     try:
-        from app.core.nova.communications.service import list_drafts
+        from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, normalize_role
+        from app.db.models import EmailDraftRecord
+        from app.db.models import User as UserModel
 
-        drafts = list_drafts(db, user=user)
-        if any(str(item.id) == str(draft_id) for item in drafts):
-            return "verified"
-        return "missing"
+        draft = db.query(EmailDraftRecord).filter(EmailDraftRecord.id == str(draft_id)).first()
+        if draft is None:
+            return "missing"
+        owner = db.query(UserModel).filter(UserModel.id == draft.user_id).first()
+        owner_org = getattr(owner, "organization_id", None) if owner is not None else None
+        if organization_id and owner_org and owner_org != organization_id:
+            raise DraftTenantDenied("Cross-tenant draft lookup is denied")
+        viewer_is_admin = normalize_role(user.role) in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}
+        if user.user_id != draft.user_id and not viewer_is_admin:
+            return "missing"
+        return "verified"
+    except DraftTenantDenied:
+        raise
     except Exception:
         return "unavailable"
 

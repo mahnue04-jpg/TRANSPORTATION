@@ -72,13 +72,16 @@ def init_platform_db() -> None:
     from app.core.nova.government import models as nova_government_models  # noqa: F401
     from app.core.nova.business import models as nova_business_models  # noqa: F401
     from app.core.nova.today import models as nova_today_models  # noqa: F401
+    from app.core.nova.autonomy import models as nova_autonomy_models  # noqa: F401
     os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
     tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
     Base.metadata.create_all(bind=engine, tables=tables)
     from app.core.nova.freight.schema_ensure import ensure_nova_freight_schema
     from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+    from app.core.nova.autonomy.ledger import ensure_autonomy_schema
     ensure_nova_today_schema(engine)
+    ensure_autonomy_schema(engine)
     ensure_nova_freight_schema(engine)
 
 

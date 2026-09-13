@@ -38,6 +38,9 @@ class NovaTodayCard(BaseModel):
     priority: int
     priority_band: str | None = None
     recommended_action: str
+    risk_class: str | None = None
+    approval_state: str | None = None
+    execution_state: str | None = None
     why_recommended: str | None = None
     if_approved: str | None = None
     will_not_happen: str | None = None
@@ -67,6 +70,9 @@ class NovaTodayActionOut(BaseModel):
     priority_band: str | None = None
     status: str
     recommended_action: str
+    risk_class: str | None = None
+    approval_state: str | None = None
+    execution_state: str | None = None
     why_recommended: str | None = None
     if_approved: str | None = None
     will_not_happen: str | None = None

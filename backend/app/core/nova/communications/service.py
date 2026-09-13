@@ -291,6 +291,30 @@ def create_draft(
     return row
 
 
+def record_send_request(
+    db,
+    *,
+    organization_id: str,
+    user,
+    source_ref_id: str,
+    correlation_id: str | None = None,
+    idempotency_key: str | None = None,
+):
+    """Persist a MEDIUM send request only. Never sends mail."""
+    from app.core.nova.autonomy.executor import record_medium_request
+
+    return record_medium_request(
+        db,
+        user=user,
+        organization_id=organization_id,
+        action_type="send_email",
+        source_ref_id=source_ref_id,
+        source_module="communications",
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+    )
+
+
 def send_blocked(payload: NovaCommsSendRequest) -> None:
     if not payload.confirm_send:
         raise NovaCommunicationsError(

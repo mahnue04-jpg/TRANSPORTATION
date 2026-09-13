@@ -20,10 +20,20 @@ PRODUCT_PAGES = {
     "delivery": "/app",
     "freight": "/nova/freight",
 }
+STANDING_SOURCE_REFS = frozenset({"rec-attention", "rec-drafts", "health", "delivery", "freight"})
 
 
 def is_synthetic_ref(source_ref_id: str | None) -> bool:
     return str(source_ref_id or "").startswith("rec-")
+
+
+def is_standing_synthetic(source_module: str | None, source_ref_id: str | None) -> bool:
+    """Org-wide standing recommendation/shortcut cards. Not per-viewer work items."""
+    ref = str(source_ref_id or "")
+    module = str(source_module or "")
+    if ref.startswith("rec-"):
+        return True
+    return module == "link" and ref in PRODUCT_PAGES
 
 
 def bare_source_ref(source_ref_id: str) -> str:

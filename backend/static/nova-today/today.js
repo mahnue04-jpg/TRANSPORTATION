@@ -60,6 +60,9 @@
       "<span>Source: " + escapeHtml(card.source_label || card.source_module || "") + "</span>" +
       "<span>Priority: " + escapeHtml(card.priority_band || String(card.priority || "")) + "</span>" +
       "<span>Next: " + escapeHtml(card.recommended_action || "") + "</span>" +
+      (card.risk_class ? "<span>Risk: " + escapeHtml(card.risk_class) + "</span>" : "") +
+      (card.approval_state ? "<span>Approval: " + escapeHtml(card.approval_state) + "</span>" : "") +
+      (card.execution_state ? "<span>Execution: " + escapeHtml(card.execution_state) + "</span>" : "") +
       (card.sender ? "<span>From: " + escapeHtml(card.sender) + "</span>" : "") +
       (card.received_at ? "<span>Received: " + escapeHtml(card.received_at) + "</span>" : "") +
       (card.unread != null ? "<span>" + (card.unread ? "Unread" : "Read") + "</span>" : "") +
