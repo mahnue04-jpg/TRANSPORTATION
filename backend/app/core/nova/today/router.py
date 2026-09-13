@@ -16,6 +16,11 @@ from app.core.nova.today.schemas import (
     NovaTodayBrainOut,
     NovaTodayBrainRequest,
     NovaTodayDashboardOut,
+    NovaTodayHistoryItem,
+    NovaTodayMailboxOut,
+    NovaTodayReadinessOut,
+    NovaTodayRecheckOut,
+    NovaTodayRecheckRequest,
     NovaTodaySnoozeRequest,
 )
 from app.db.session import get_db
@@ -65,6 +70,75 @@ def ask_today(
             db,
             payload,
             organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/mailbox", response_model=NovaTodayMailboxOut)
+def today_mailbox(
+    organization_id: str | None = None,
+    connector_account_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.list_mailbox(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            connector_account_id=connector_account_id,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/recheck", response_model=NovaTodayRecheckOut)
+def today_recheck(
+    payload: NovaTodayRecheckRequest | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or NovaTodayRecheckRequest()
+    try:
+        return service.recheck_source(
+            db,
+            organization_id=_resolve_org(user, body.organization_id),
+            user=user,
+            action_id=body.action_id,
+            connector_account_id=body.connector_account_id,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/readiness", response_model=NovaTodayReadinessOut)
+def today_readiness(user: UserContext = Depends(get_current_user_context)):
+    return service.readiness_checklist()
+
+
+@router.get("/history", response_model=list[NovaTodayHistoryItem])
+def today_history(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return service.list_history(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.get("/actions/{action_id}", response_model=NovaTodayActionOut)
+def get_today_action(
+    action_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.get_action(
+            db,
+            action_id,
+            organization_id=_resolve_org(user, organization_id),
             user=user,
         )
     except Exception as exc:
