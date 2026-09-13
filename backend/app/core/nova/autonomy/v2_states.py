@@ -19,6 +19,9 @@ RESUME_FROM = frozenset({"paused"})
 RETRY_FROM = frozenset({"failed"})
 STEP_APPROVE_FROM = frozenset({"approved", "waiting"})
 INTERNAL_TEST_ACTION = "internal_test"
+MAX_STEP_RETRIES = 2
+MAX_WORKFLOW_RETRIES = 6
+MAX_INTERNAL_STEPS = 3
 
 
 def next_status(current: str, action: str) -> str | None:

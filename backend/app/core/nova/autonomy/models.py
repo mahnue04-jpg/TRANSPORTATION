@@ -277,6 +277,12 @@ class AutonomyWorkflowCreate(BaseModel):
     action_type: str | None = Field(default=None, max_length=64)
     organization_id: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=80)
+    step_count: int | None = Field(default=None, ge=1, le=3)
+
+
+class AutonomyWorkflowApproveRequest(BaseModel):
+    organization_id: str | None = None
+    step_count: int | None = Field(default=None, ge=1, le=3)
 
 
 class AutonomyWorkflowStepOut(BaseModel):

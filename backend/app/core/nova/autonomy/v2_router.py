@@ -108,6 +108,7 @@ def get_workflow_approvals(
 def approve_workflow(
     workflow_id: str,
     organization_id: str | None = None,
+    step_count: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -119,6 +120,7 @@ def approve_workflow(
             user=user,
             requested_org=organization_id,
             idempotency_key=idempotency_key,
+            step_count=step_count,
         )
     except Exception as exc:
         _raise(exc)
