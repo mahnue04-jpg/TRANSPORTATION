@@ -21,6 +21,7 @@ from app.core.nova.autonomy.models import (
     new_step_id,
     new_workflow_id,
 )
+from app.core.nova.autonomy import v2_adapters
 from app.core.nova.autonomy.policy import can_act, classify, is_blocked
 from app.core.nova.autonomy.v2_states import (
     INTERNAL_TEST_ACTION,
@@ -376,11 +377,12 @@ def _planned_step_count(db: Session, workflow: NovaAutonomyWorkflow, requested: 
 
 
 def _step_verified(step: NovaAutonomyWorkflowStep) -> bool:
+    ref = str(step.result_ref_id or "")
     return (
         step.status == "completed"
-        and bool(step.result_ref_id)
+        and bool(ref)
         and step.verified_at is not None
-        and str(step.result_ref_id).startswith("INT-")
+        and (ref.startswith("INT-") or ref.startswith("ADP-"))
     )
 
 
@@ -461,6 +463,223 @@ def _ensure_approval(
     return approval
 
 
+def _block_step(
+    db: Session,
+    *,
+    user: UserContext,
+    workflow: NovaAutonomyWorkflow,
+    step: NovaAutonomyWorkflowStep,
+    detail: str,
+) -> AutonomyWorkflowOut:
+    step.status = "blocked_by_policy"
+    step.updated_at = now()
+    workflow.status = "blocked_by_policy"
+    workflow.updated_at = now()
+    db.commit()
+    db.refresh(workflow)
+    _audit(
+        db,
+        user=user,
+        workflow=workflow,
+        action_type=step.action_type,
+        approval_state="blocked",
+        result="blocked_by_policy",
+        detail=detail,
+        executed=False,
+        step_id=step.step_id,
+    )
+    return _workflow_out(db, workflow)
+
+
+def _fail_step(
+    db: Session,
+    *,
+    user: UserContext,
+    workflow: NovaAutonomyWorkflow,
+    step: NovaAutonomyWorkflowStep,
+    detail: str,
+    attempt_number: int | None = None,
+) -> AutonomyWorkflowOut:
+    stamp = now()
+    step.status = "failed"
+    step.updated_at = stamp
+    workflow.status = "failed"
+    workflow.updated_at = stamp
+    db.commit()
+    db.refresh(workflow)
+    _audit(
+        db,
+        user=user,
+        workflow=workflow,
+        action_type=step.action_type,
+        approval_state="failed",
+        result="adapter_failed",
+        detail=detail,
+        executed=False,
+        step_id=step.step_id,
+        attempt_number=attempt_number,
+    )
+    return _workflow_out(db, workflow)
+
+
+def _finish_verified_step(
+    db: Session,
+    *,
+    user: UserContext,
+    workflow: NovaAutonomyWorkflow,
+    step: NovaAutonomyWorkflowStep,
+    steps: list[NovaAutonomyWorkflowStep],
+    result_ref: str,
+    detail: str,
+    executed: bool,
+    key: str,
+    attempt_number: int,
+) -> AutonomyWorkflowOut:
+    stamp = now()
+    db.add(
+        NovaAutonomyExecutionAttempt(
+            attempt_id=new_attempt_id(),
+            workflow_id=workflow.workflow_id,
+            step_id=step.step_id,
+            organization_id=workflow.organization_id,
+            attempt_number=attempt_number,
+            executed=executed,
+            result_ref_id=result_ref,
+            verification_status="verified",
+            created_at=stamp,
+            completed_at=stamp,
+        )
+    )
+    step.status = "completed"
+    step.result_ref_id = result_ref
+    step.executed_at = stamp if executed else None
+    step.verified_at = stamp
+    step.updated_at = stamp
+    if not _step_verified(step):
+        return _fail_step(
+            db,
+            user=user,
+            workflow=workflow,
+            step=step,
+            detail="result_not_verified",
+            attempt_number=attempt_number,
+        )
+    nxt = next((row for row in steps if row.sequence_number > step.sequence_number), None)
+    if nxt is None:
+        workflow.status = "completed"
+        workflow.completed_at = stamp
+    else:
+        nxt.status = "waiting"
+        nxt.updated_at = stamp
+        workflow.status = "waiting"
+        workflow.current_step = nxt.step_id
+    workflow.updated_at = stamp
+    db.commit()
+    db.refresh(workflow)
+    _audit(
+        db,
+        user=user,
+        workflow=workflow,
+        action_type=step.action_type,
+        approval_state="completed" if workflow.status == "completed" else "waiting",
+        result="adapter_verified" if str(result_ref).startswith("ADP-") else "internal_test_verified",
+        detail=detail,
+        executed=executed,
+        step_id=step.step_id,
+        result_ref_id=result_ref,
+        idempotency_key=key,
+        attempt_number=attempt_number,
+    )
+    return _workflow_out(db, workflow)
+
+
+def _approve_adapter_step(
+    db: Session,
+    *,
+    workflow: NovaAutonomyWorkflow,
+    step: NovaAutonomyWorkflowStep,
+    steps: list[NovaAutonomyWorkflowStep],
+    user: UserContext,
+    organization_id: str,
+    idempotency_key: str | None,
+) -> AutonomyWorkflowOut:
+    module = v2_adapters.adapter_module_for(step)
+    action = step.action_type
+    risk = classify(action)
+    if v2_adapters.is_write_forbidden(module, action):
+        return _block_step(db, user=user, workflow=workflow, step=step, detail="module_write_blocked")
+    if is_blocked(risk):
+        return _block_step(db, user=user, workflow=workflow, step=step, detail="high_or_prohibited")
+    if risk == "MEDIUM":
+        step.status = "awaiting_approval"
+        step.updated_at = now()
+        workflow.status = "waiting"
+        workflow.updated_at = now()
+        db.commit()
+        db.refresh(workflow)
+        _audit(
+            db,
+            user=user,
+            workflow=workflow,
+            action_type=action,
+            approval_state="awaiting_approval",
+            result="medium_parked",
+            detail="medium_not_executed",
+            executed=False,
+            step_id=step.step_id,
+        )
+        return _workflow_out(db, workflow)
+    try:
+        result = v2_adapters.invoke(
+            db,
+            user=user,
+            organization_id=organization_id,
+            module=module,
+            action_type=action,
+            source_ref_id=workflow.source_ref_id,
+            correlation_id=workflow.correlation_id,
+            workflow_id=workflow.workflow_id,
+            step_id=step.step_id,
+        )
+    except v2_adapters.AdapterError as exc:
+        raise Phase2BError(str(exc), status_code=exc.status_code) from exc
+    if not result.ok or not result.result_ref_id:
+        return _fail_step(
+            db,
+            user=user,
+            workflow=workflow,
+            step=step,
+            detail=result.reason or result.detail,
+        )
+    key = (idempotency_key or f"{organization_id}:{workflow.workflow_id}:{step.step_id}:approve").strip()
+    _ensure_approval(db, workflow=workflow, user=user, scope="step", step_id=step.step_id)
+    attempt_number = (
+        db.query(NovaAutonomyExecutionAttempt)
+        .filter(
+            NovaAutonomyExecutionAttempt.organization_id == organization_id,
+            NovaAutonomyExecutionAttempt.workflow_id == workflow.workflow_id,
+            NovaAutonomyExecutionAttempt.step_id == step.step_id,
+        )
+        .count()
+        + 1
+    )
+    workflow.status = "running"
+    workflow.updated_at = now()
+    db.flush()
+    return _finish_verified_step(
+        db,
+        user=user,
+        workflow=workflow,
+        step=step,
+        steps=steps,
+        result_ref=result.result_ref_id,
+        detail=result.detail,
+        executed=result.executed,
+        key=key,
+        attempt_number=attempt_number,
+    )
+
+
 def approve_workflow(
     db: Session,
     workflow_id: str,
@@ -533,46 +752,15 @@ def approve_step(
     _require_current_step(workflow, step)
     _require_prior_steps_verified(steps, step)
     if step.action_type != INTERNAL_TEST_ACTION:
-        risk = classify(step.action_type)
-        if is_blocked(risk):
-            step.status = "blocked_by_policy"
-            step.updated_at = now()
-            workflow.status = "blocked_by_policy"
-            workflow.updated_at = now()
-            db.commit()
-            db.refresh(workflow)
-            _audit(
-                db,
-                user=user,
-                workflow=workflow,
-                action_type=step.action_type,
-                approval_state="blocked",
-                result="blocked_by_policy",
-                detail="high_or_prohibited",
-                executed=False,
-                step_id=step.step_id,
-            )
-            return _workflow_out(db, workflow)
-        if risk == "MEDIUM":
-            step.status = "awaiting_approval"
-            step.updated_at = now()
-            workflow.status = "waiting"
-            workflow.updated_at = now()
-            db.commit()
-            db.refresh(workflow)
-            _audit(
-                db,
-                user=user,
-                workflow=workflow,
-                action_type=step.action_type,
-                approval_state="awaiting_approval",
-                result="medium_parked",
-                detail="medium_not_executed",
-                executed=False,
-                step_id=step.step_id,
-            )
-            return _workflow_out(db, workflow)
-        raise Phase2BError("External step execution is not enabled", status_code=409)
+        return _approve_adapter_step(
+            db,
+            workflow=workflow,
+            step=step,
+            steps=steps,
+            user=user,
+            organization_id=organization_id,
+            idempotency_key=idempotency_key,
+        )
     key = (idempotency_key or f"{organization_id}:{workflow_id}:{step_id}:approve").strip()
     _ensure_approval(db, workflow=workflow, user=user, scope="step", step_id=step.step_id)
     attempt_number = (
