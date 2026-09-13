@@ -21,9 +21,12 @@ from app.core.nova.autonomy.models import (
     new_step_id,
     new_workflow_id,
 )
-from app.core.nova.autonomy.policy import can_act
+from app.core.nova.autonomy.policy import can_act, classify, is_blocked
 from app.core.nova.autonomy.v2_states import (
     INTERNAL_TEST_ACTION,
+    MAX_INTERNAL_STEPS,
+    MAX_STEP_RETRIES,
+    MAX_WORKFLOW_RETRIES,
     OPEN_STATUSES,
     STEP_APPROVE_FROM,
     next_status,
@@ -150,7 +153,7 @@ def create_workflow(
         result_ref_id=workflow.workflow_id,
         target=workflow.workflow_type,
         result="workflow_proposed",
-        detail="header_only",
+        detail=_header_detail(payload.step_count),
         workflow_id=workflow.workflow_id,
         target_module=initiating_module,
     )
@@ -222,7 +225,12 @@ def workflow_history(
             "approval_state": row.approval_state,
             "executed": bool(row.executed),
             "result": row.result,
+            "result_ref_id": row.result_ref_id,
             "organization_id": row.organization_id,
+            "step_id": row.step_id,
+            "attempt_number": row.attempt_number,
+            "actor_user_id": row.actor_user_id,
+            "approver_user_id": row.approver_user_id,
             "timestamp": row.created_at,
             "detail": row.detail,
         }
@@ -318,34 +326,104 @@ def _audit(
     )
 
 
-def _ensure_internal_step(db: Session, workflow: NovaAutonomyWorkflow) -> NovaAutonomyWorkflowStep:
-    existing = (
+def _header_detail(step_count: int | None) -> str:
+    count = _normalize_step_count(step_count)
+    if count <= 1:
+        return "header_only"
+    return f"header_only steps={count}"
+
+
+def _normalize_step_count(step_count: int | None) -> int:
+    try:
+        count = int(step_count or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(count, MAX_INTERNAL_STEPS))
+
+
+def _ordered_steps(db: Session, workflow: NovaAutonomyWorkflow) -> list[NovaAutonomyWorkflowStep]:
+    return (
         db.query(NovaAutonomyWorkflowStep)
         .filter(
             NovaAutonomyWorkflowStep.organization_id == workflow.organization_id,
             NovaAutonomyWorkflowStep.workflow_id == workflow.workflow_id,
         )
         .order_by(NovaAutonomyWorkflowStep.sequence_number.asc())
+        .all()
+    )
+
+
+def _planned_step_count(db: Session, workflow: NovaAutonomyWorkflow, requested: int | None) -> int:
+    if requested is not None:
+        return _normalize_step_count(requested)
+    row = (
+        db.query(NovaAutonomyLedger)
+        .filter(
+            NovaAutonomyLedger.organization_id == workflow.organization_id,
+            NovaAutonomyLedger.workflow_id == workflow.workflow_id,
+            NovaAutonomyLedger.action_type == "propose_workflow",
+        )
+        .order_by(NovaAutonomyLedger.created_at.asc())
         .first()
     )
-    if existing is not None:
-        return existing
-    step = NovaAutonomyWorkflowStep(
-        step_id=new_step_id(),
-        workflow_id=workflow.workflow_id,
-        organization_id=workflow.organization_id,
-        sequence_number=1,
-        source_module="autonomy",
-        target_module="autonomy",
-        action_type=INTERNAL_TEST_ACTION,
-        risk_class="LOW",
-        status="waiting",
-        idempotency_key=f"{workflow.workflow_id}-internal-test-1",
-        created_at=now(),
-        updated_at=now(),
+    detail = str(getattr(row, "detail", "") or "")
+    if "steps=" in detail:
+        try:
+            return _normalize_step_count(int(detail.split("steps=", 1)[1].split()[0]))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
+def _step_verified(step: NovaAutonomyWorkflowStep) -> bool:
+    return (
+        step.status == "completed"
+        and bool(step.result_ref_id)
+        and step.verified_at is not None
+        and str(step.result_ref_id).startswith("INT-")
     )
-    db.add(step)
-    return step
+
+
+def _ensure_internal_steps(
+    db: Session, workflow: NovaAutonomyWorkflow, *, step_count: int
+) -> NovaAutonomyWorkflowStep:
+    existing = _ordered_steps(db, workflow)
+    if existing:
+        return existing[0]
+    stamp = now()
+    first = None
+    for sequence in range(1, _normalize_step_count(step_count) + 1):
+        step = NovaAutonomyWorkflowStep(
+            step_id=new_step_id(),
+            workflow_id=workflow.workflow_id,
+            organization_id=workflow.organization_id,
+            sequence_number=sequence,
+            source_module="autonomy",
+            target_module="autonomy",
+            action_type=INTERNAL_TEST_ACTION,
+            risk_class="LOW",
+            status="waiting" if sequence == 1 else "proposed",
+            idempotency_key=f"{workflow.workflow_id}-internal-test-{sequence}",
+            created_at=stamp,
+            updated_at=stamp,
+        )
+        db.add(step)
+        if first is None:
+            first = step
+    return first
+
+
+def _require_current_step(workflow: NovaAutonomyWorkflow, step: NovaAutonomyWorkflowStep) -> None:
+    if workflow.current_step and workflow.current_step != step.step_id:
+        raise Phase2BError("Only the current step may be approved", status_code=409)
+
+
+def _require_prior_steps_verified(steps: list[NovaAutonomyWorkflowStep], step: NovaAutonomyWorkflowStep) -> None:
+    for prior in steps:
+        if prior.sequence_number >= step.sequence_number:
+            break
+        if not _step_verified(prior):
+            raise Phase2BError("Previous step must be completed and verified", status_code=409)
 
 
 def _ensure_approval(
@@ -390,6 +468,7 @@ def approve_workflow(
     user: UserContext,
     requested_org: str | None = None,
     idempotency_key: str | None = None,
+    step_count: int | None = None,
 ) -> AutonomyWorkflowOut:
     _require_actor(user)
     organization_id = _caller_org(user, requested_org)
@@ -400,7 +479,8 @@ def approve_workflow(
         return _workflow_out(db, workflow)
     if next_status(workflow.status, "approve") is None:
         raise Phase2BError("Illegal workflow transition", status_code=409)
-    step = _ensure_internal_step(db, workflow)
+    count = _planned_step_count(db, workflow, step_count)
+    step = _ensure_internal_steps(db, workflow, step_count=count)
     _ensure_approval(db, workflow=workflow, user=user, scope="workflow")
     workflow.status = "waiting"
     workflow.current_step = step.step_id
@@ -445,13 +525,55 @@ def approve_step(
     )
     if step is None:
         raise Phase2BError("Workflow step not found", status_code=404)
-    if step.status == "completed" and step.result_ref_id:
+    if _step_verified(step):
         return _workflow_out(db, workflow)
     if workflow.status not in STEP_APPROVE_FROM:
         raise Phase2BError("Illegal workflow transition", status_code=409)
+    steps = _ordered_steps(db, workflow)
+    _require_current_step(workflow, step)
+    _require_prior_steps_verified(steps, step)
     if step.action_type != INTERNAL_TEST_ACTION:
+        risk = classify(step.action_type)
+        if is_blocked(risk):
+            step.status = "blocked_by_policy"
+            step.updated_at = now()
+            workflow.status = "blocked_by_policy"
+            workflow.updated_at = now()
+            db.commit()
+            db.refresh(workflow)
+            _audit(
+                db,
+                user=user,
+                workflow=workflow,
+                action_type=step.action_type,
+                approval_state="blocked",
+                result="blocked_by_policy",
+                detail="high_or_prohibited",
+                executed=False,
+                step_id=step.step_id,
+            )
+            return _workflow_out(db, workflow)
+        if risk == "MEDIUM":
+            step.status = "awaiting_approval"
+            step.updated_at = now()
+            workflow.status = "waiting"
+            workflow.updated_at = now()
+            db.commit()
+            db.refresh(workflow)
+            _audit(
+                db,
+                user=user,
+                workflow=workflow,
+                action_type=step.action_type,
+                approval_state="awaiting_approval",
+                result="medium_parked",
+                detail="medium_not_executed",
+                executed=False,
+                step_id=step.step_id,
+            )
+            return _workflow_out(db, workflow)
         raise Phase2BError("External step execution is not enabled", status_code=409)
-    key = (idempotency_key or f"{workflow_id}:{step_id}:approve").strip()
+    key = (idempotency_key or f"{organization_id}:{workflow_id}:{step_id}:approve").strip()
     _ensure_approval(db, workflow=workflow, user=user, scope="step", step_id=step.step_id)
     attempt_number = (
         db.query(NovaAutonomyExecutionAttempt)
@@ -463,6 +585,9 @@ def approve_step(
         .count()
         + 1
     )
+    workflow.status = "running"
+    workflow.updated_at = now()
+    db.flush()
     result_ref = "INT-" + uuid4().replace("-", "")[:12].upper()
     stamp = now()
     db.add(
@@ -484,9 +609,34 @@ def approve_step(
     step.executed_at = stamp
     step.verified_at = stamp
     step.updated_at = stamp
-    workflow.status = "completed"
-    workflow.current_step = step.step_id
-    workflow.completed_at = stamp
+    if not _step_verified(step):
+        step.status = "failed"
+        workflow.status = "failed"
+        workflow.updated_at = stamp
+        db.commit()
+        db.refresh(workflow)
+        _audit(
+            db,
+            user=user,
+            workflow=workflow,
+            action_type=INTERNAL_TEST_ACTION,
+            approval_state="failed",
+            result="verification_failed",
+            detail="result_not_verified",
+            executed=False,
+            step_id=step.step_id,
+            attempt_number=attempt_number,
+        )
+        return _workflow_out(db, workflow)
+    nxt = next((row for row in steps if row.sequence_number > step.sequence_number), None)
+    if nxt is None:
+        workflow.status = "completed"
+        workflow.completed_at = stamp
+    else:
+        nxt.status = "waiting"
+        nxt.updated_at = stamp
+        workflow.status = "waiting"
+        workflow.current_step = nxt.step_id
     workflow.updated_at = stamp
     db.commit()
     db.refresh(workflow)
@@ -495,7 +645,7 @@ def approve_step(
         user=user,
         workflow=workflow,
         action_type=INTERNAL_TEST_ACTION,
-        approval_state="completed",
+        approval_state="completed" if workflow.status == "completed" else "waiting",
         result="internal_test_verified",
         detail="internal_test_only",
         executed=True,
@@ -615,11 +765,26 @@ def retry_workflow(
     organization_id = _caller_org(user, requested_org)
     _require_not_stopped(db, organization_id)
     workflow = _load_workflow(db, workflow_id, organization_id)
-    if next_status(workflow.status, "retry") is None:
+    steps = _ordered_steps(db, workflow)
+    current = next((row for row in steps if row.step_id == workflow.current_step), None)
+    if current is not None and _step_verified(current):
+        raise Phase2BError("Verified result cannot be retried", status_code=409)
+    if int(workflow.retry_count or 0) >= MAX_WORKFLOW_RETRIES:
+        raise Phase2BError("Retry limit exceeded", status_code=409)
+    if current is not None and int(current.retry_count or 0) >= MAX_STEP_RETRIES:
+        raise Phase2BError("Retry limit exceeded", status_code=409)
+    retryable = workflow.status == "failed" or (current is not None and current.status in {"failed", "waiting"} and not _step_verified(current) and (current.executed_at is None or current.verified_at is None))
+    if not retryable or (next_status(workflow.status, "retry") is None and workflow.status != "waiting"):
         raise Phase2BError("Illegal workflow transition", status_code=409)
+    if current is not None and current.status == "completed" and current.verified_at is not None:
+        raise Phase2BError("Verified result cannot be retried", status_code=409)
     workflow.status = "waiting"
     workflow.retry_count = int(workflow.retry_count or 0) + 1
     workflow.updated_at = now()
+    if current is not None:
+        current.status = "waiting"
+        current.retry_count = int(current.retry_count or 0) + 1
+        current.updated_at = now()
     db.commit()
     db.refresh(workflow)
     _audit(
@@ -630,7 +795,9 @@ def retry_workflow(
         approval_state="waiting",
         result="workflow_retry_waiting",
         detail="supervised_retry_no_execute",
-        idempotency_key=f"{workflow_id}:retry:{workflow.retry_count}",
+        executed=False,
+        step_id=current.step_id if current is not None else None,
+        idempotency_key=f"{workflow.organization_id}:{workflow_id}:{getattr(current, 'step_id', 'none')}:retry:{workflow.retry_count}",
     )
     return _workflow_out(db, workflow)
 
