@@ -230,6 +230,19 @@ def test_bootstrap_refuses_alembic_heads_and_inits_dedicated_sqlite(tmp_path, mo
     assert "production" in refused.stderr.lower()
 
 
+def test_smoke_script_allows_lifesaver_staging_and_refuses_health_isf():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("lifesaver_staging_smoke", REPO / "scripts" / "lifesaver_staging_smoke.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    assert module.host_is_refused("https://amicor-lifesaver-staging.onrender.com") is False
+    assert module.host_is_refused("https://amicor-health-isf-py.onrender.com") is True
+    assert module.host_is_refused("https://other-app.onrender.com") is True
+    assert module.host_is_refused("https://amicor-health-isf-py.onrender.com", allow_prod=True) is False
+
+
 def test_home_hub_start_script_stays_private():
     source = HOME_HUB_START.read_text(encoding="utf-8")
     assert "127.0.0.1" in source

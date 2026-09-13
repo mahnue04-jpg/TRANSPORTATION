@@ -18,7 +18,20 @@ import sys
 import urllib.error
 import urllib.request
 
-PROD_HOST_HINTS = ("onrender.com", "amicor-health-isf")
+PROD_HOST_HINTS = ("amicor-health-isf",)
+STAGING_HOST_ALLOW = ("amicor-lifesaver-staging",)
+
+
+def host_is_refused(base: str, allow_prod: bool = False) -> bool:
+    """Refuse Health ISF production. Allow the dedicated Lifesaver staging hostname."""
+    host = (base or "").strip().lower()
+    if any(hint in host for hint in STAGING_HOST_ALLOW):
+        return False
+    if any(hint in host for hint in PROD_HOST_HINTS):
+        return not allow_prod
+    if "onrender.com" in host:
+        return not allow_prod
+    return False
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -88,10 +101,10 @@ def main() -> int:
     base = env("LIFESAVER_SMOKE_BASE_URL", required=True).rstrip("/")
     dry_run = env("LIFESAVER_SMOKE_DRY_RUN") in {"1", "true", "yes"}
     allow_prod = env("LIFESAVER_SMOKE_ALLOW_PRODUCTION") in {"1", "true", "yes"}
-    host = base.lower()
-    if any(hint in host for hint in PROD_HOST_HINTS) and not allow_prod:
+    if host_is_refused(base, allow_prod):
         fail(
-            "refusing production-looking host. Set LIFESAVER_SMOKE_ALLOW_PRODUCTION=1 only after explicit approval.",
+            "refusing production-looking host. Dedicated Lifesaver staging is allowed; "
+            "Health ISF / other onrender.com hosts are not.",
             2,
         )
 

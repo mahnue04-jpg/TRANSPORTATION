@@ -17,7 +17,7 @@ Isolation is request-time. Production `app.main` stays unchanged unless `AMICOR_
 | `AMICOR_LIFESAVER_STAGING_ISOLATED` | Recommended | Explicit isolation flag if environment name is not used | `1` | Yes | No | No |
 | `LOG_LEVEL` | Optional | Log verbosity | `INFO` | Yes | No | No |
 | `AMICOR_SKIP_WMI_PLATFORM_QUERY` | Optional | Avoid a Windows WMI stall on jump hosts | `1` | Yes | No | No |
-| `LIFESAVER_SMOKE_BASE_URL` | Smoke only | Smoke target | Final staging HTTPS URL | After hostname exists | Confirm | Yes |
+| `LIFESAVER_SMOKE_BASE_URL` | Smoke only | Smoke target | `https://amicor-lifesaver-staging.onrender.com` | After hostname exists | Confirm | Yes |
 | `LIFESAVER_SMOKE_EMAIL` | Smoke only | Dedicated staging member | `lifesaver.staging.member@example.com` | Can propose | Owner creates the user | No |
 | `LIFESAVER_SMOKE_PASSWORD` | Smoke only | Staging member password | Secret store only | Yes, into secret store | Owner stores it | No |
 | `LIFESAVER_SMOKE_DRY_RUN` | Smoke only | Public endpoints only until credentials exist | `1` until first authenticated smoke | Yes | No | No |
