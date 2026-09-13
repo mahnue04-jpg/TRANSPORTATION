@@ -25,6 +25,8 @@ from app.core.nova.communications.service import dashboard as communications_das
 from app.core.nova.government.service import dashboard as government_dashboard
 from app.core.nova.service import NovaCoreService
 from app.core.nova.today.links import (
+    is_standing_synthetic,
+    is_workflow_fixture,
     prior_status_for,
     result_type_for,
     source_details,
@@ -511,6 +513,7 @@ def find_in_org_today_action(
 
     Exception: V2 create/upsert still writes owner-scoped unique rows for
     user-specific mailbox/task items when no in-org match exists yet.
+    Standing org-wide cards omit owner from the uniqueness check.
     """
     return (
         db.query(NovaV2CommandAction)
@@ -553,6 +556,43 @@ def _get_action(db: Session, action_id: str, *, organization_id: str, user: User
     return row
 
 
+def _logical_key(item) -> tuple[str, str, str]:
+    return (
+        str(getattr(item, "source_module", None) or ""),
+        str(getattr(item, "source_ref_id", None) or ""),
+        str(getattr(item, "recommended_action", None) or ""),
+    )
+
+
+def _is_workflow_fixture_item(item) -> bool:
+    return is_workflow_fixture(getattr(item, "title", None), getattr(item, "source_ref_id", None))
+
+
+def _dedupe_logical(items: list):
+    """Keep one item per logical key inside a single section. Oldest / first wins."""
+    seen: set[tuple[str, str, str]] = set()
+    kept = []
+    for item in items:
+        key = _logical_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(item)
+    return kept
+
+
+def _canonical_action_map(rows: list[NovaV2CommandAction]) -> dict[tuple[str, str, str], NovaV2CommandAction]:
+    """Prefer the oldest in-org row for standing cards; otherwise first seen."""
+    ordered = sorted(rows, key=lambda row: (row.created_at is None, row.created_at or row.action_id, row.action_id))
+    keyed: dict[tuple[str, str, str], NovaV2CommandAction] = {}
+    for row in ordered:
+        key = (row.source_module, row.source_ref_id, row.recommended_action)
+        if key in keyed and not is_standing_synthetic(row.source_module, row.source_ref_id):
+            continue
+        keyed.setdefault(key, row)
+    return keyed
+
+
 def _upsert_proposed(
     db: Session,
     card: NovaTodayCard,
@@ -560,17 +600,27 @@ def _upsert_proposed(
     organization_id: str,
     user: UserContext,
 ) -> NovaV2CommandAction:
-    existing = (
-        db.query(NovaV2CommandAction)
-        .filter(
-            NovaV2CommandAction.organization_id == organization_id,
-            NovaV2CommandAction.owner_user_id == user.user_id,
-            NovaV2CommandAction.source_module == card.source_module,
-            NovaV2CommandAction.source_ref_id == card.source_ref_id,
-            NovaV2CommandAction.recommended_action == card.recommended_action,
+    standing = is_standing_synthetic(card.source_module, card.source_ref_id)
+    if standing:
+        existing = find_in_org_today_action(
+            db,
+            organization_id=organization_id,
+            source_module=card.source_module,
+            source_ref_id=card.source_ref_id,
+            recommended_action=card.recommended_action,
         )
-        .first()
-    )
+    else:
+        existing = (
+            db.query(NovaV2CommandAction)
+            .filter(
+                NovaV2CommandAction.organization_id == organization_id,
+                NovaV2CommandAction.owner_user_id == user.user_id,
+                NovaV2CommandAction.source_module == card.source_module,
+                NovaV2CommandAction.source_ref_id == card.source_ref_id,
+                NovaV2CommandAction.recommended_action == card.recommended_action,
+            )
+            .first()
+        )
     if existing is not None:
         if existing.status == "snoozed" and _is_active_snooze(existing):
             return existing
@@ -1066,13 +1116,19 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
 
 def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTodayDashboardOut:
     groups = _collect_v1_cards(db, organization_id=organization_id, user=user)
-    persistable = groups["communications"] + groups["government"] + groups["business"] + groups["recommendations"]
+    persistable = (
+        groups["communications"]
+        + groups["government"]
+        + groups["business"]
+        + groups["recommendations"]
+        + groups["product_links"]
+    )
     for card in persistable:
         _upsert_proposed(db, card, organization_id=organization_id, user=user)
     db.commit()
 
     rows = _list_actions(db, organization_id=organization_id, user=user)
-    keyed = {(row.source_module, row.source_ref_id, row.recommended_action): row for row in rows}
+    keyed = _canonical_action_map(rows)
     hidden = {
         (row.source_module, row.source_ref_id, row.recommended_action)
         for row in rows
@@ -1085,8 +1141,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
             key = (card.source_module, card.source_ref_id, card.recommended_action)
             if key in hidden:
                 continue
+            if _is_workflow_fixture_item(card):
+                continue
             kept.append(_attach_action(card, keyed))
-        return sorted(kept, key=rank_score, reverse=True)
+        return _dedupe_logical(sorted(kept, key=rank_score, reverse=True))
 
     communications = visible(groups["communications"])
     government = visible(groups["government"])
@@ -1094,21 +1152,38 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
     workspace = visible(groups["workspace"])
     product_links = visible(groups["product_links"])
     recommendations = visible(groups["recommendations"])
-    attention_now = sorted(
-        communications + government + business + workspace,
-        key=rank_score,
-        reverse=True,
-    )[:16]
-    approval_queue = [
-        action_out(
-            row,
-            resolved_href=_resolved_source_href(db, row, organization_id=organization_id, user=user),
-            use_resolved=True,
+    attention_now = _dedupe_logical(
+        sorted(
+            communications + government + business + workspace,
+            key=rank_score,
+            reverse=True,
         )
-        for row in rows
-        if row.status == "proposed"
+    )[:16]
+    approval_queue = []
+    for row in rows:
+        if row.status != "proposed":
+            continue
+        if _is_workflow_fixture_item(row):
+            continue
+        if is_standing_synthetic(row.source_module, row.source_ref_id) and row.source_module == "link":
+            continue
+        if is_standing_synthetic(row.source_module, row.source_ref_id):
+            canonical = keyed.get((row.source_module, row.source_ref_id, row.recommended_action))
+            if canonical is None or canonical.action_id != row.action_id:
+                continue
+        approval_queue.append(
+            action_out(
+                row,
+                resolved_href=_resolved_source_href(db, row, organization_id=organization_id, user=user),
+                use_resolved=True,
+            )
+        )
+    approval_queue = _dedupe_logical(approval_queue)
+    recent_activity = [
+        item
+        for item in list_history(db, organization_id=organization_id, user=user)
+        if not _is_workflow_fixture_item(item)
     ]
-    recent_activity = list_history(db, organization_id=organization_id, user=user)
     try:
         counts = product_counts(db, organization_id=organization_id, user=user)
     except Exception:
