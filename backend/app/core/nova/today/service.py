@@ -206,6 +206,36 @@ def priority_band(priority: int) -> str:
     return "low"
 
 
+def _maybe_autonomy_ledger(
+    db: Session,
+    *,
+    user: UserContext,
+    organization_id: str,
+    action,
+    result: str,
+    verification_result: str | None = None,
+    executed: bool = True,
+) -> None:
+    try:
+        from app.core.nova.autonomy.executor import record_today_wrapper
+
+        record_today_wrapper(
+            db,
+            user=user,
+            organization_id=organization_id,
+            action_type=action.recommended_action,
+            source_module=action.source_module,
+            source_ref_id=action.source_ref_id,
+            today_action_id=action.action_id,
+            result_ref_id=getattr(action, "result_ref_id", None),
+            result=result,
+            verification_result=verification_result,
+            executed=executed,
+        )
+    except Exception:
+        return
+
+
 def action_consequences(recommended_action: str) -> tuple[str, str, str]:
     if recommended_action == "open_link":
         return (
@@ -257,6 +287,9 @@ def action_out(
     href = resolved_href if use_resolved else (resolved_href or row.href)
     result = result_type_for(row)
     verify_state = verification_status
+    from app.core.nova.autonomy.policy import labels_for
+
+    labels = labels_for(row.recommended_action, row.status)
     return NovaTodayActionOut(
         action_id=row.action_id,
         organization_id=row.organization_id,
@@ -273,6 +306,9 @@ def action_out(
         priority_band=priority_band(row.priority),
         status=row.status,
         recommended_action=row.recommended_action,
+        risk_class=labels["risk_class"],
+        approval_state=labels["approval_state"],
+        execution_state=labels["execution_state"],
         why_recommended=why,
         if_approved=if_approved,
         will_not_happen=will_not,
@@ -426,6 +462,9 @@ def _card(
     connector_status: str | None = None,
 ) -> NovaTodayCard:
     why, if_approved, will_not = action_consequences(recommended_action)
+    from app.core.nova.autonomy.policy import labels_for
+
+    labels = labels_for(recommended_action)
     return NovaTodayCard(
         source_module=source_module,
         source_ref_id=source_ref_id,
@@ -440,6 +479,9 @@ def _card(
         priority=priority,
         priority_band=priority_band(priority),
         recommended_action=recommended_action,
+        risk_class=labels["risk_class"],
+        approval_state=labels["approval_state"],
+        execution_state=labels["execution_state"],
         why_recommended=why,
         if_approved=if_approved,
         will_not_happen=will_not,
@@ -455,6 +497,49 @@ def _card(
 def _list_actions(db: Session, *, organization_id: str, user: UserContext) -> list[NovaV2CommandAction]:
     query = db.query(NovaV2CommandAction).filter(NovaV2CommandAction.organization_id == organization_id)
     return _owner_filter(query, user).order_by(NovaV2CommandAction.priority.desc(), NovaV2CommandAction.created_at.desc()).all()
+
+
+def find_in_org_today_action(
+    db: Session,
+    *,
+    organization_id: str,
+    source_module: str,
+    source_ref_id: str,
+    recommended_action: str,
+) -> NovaV2CommandAction | None:
+    """Reuse the oldest in-org logical Today row. Owner is not part of this key.
+
+    Exception: V2 create/upsert still writes owner-scoped unique rows for
+    user-specific mailbox/task items when no in-org match exists yet.
+    """
+    return (
+        db.query(NovaV2CommandAction)
+        .filter(
+            NovaV2CommandAction.organization_id == organization_id,
+            NovaV2CommandAction.source_module == source_module,
+            NovaV2CommandAction.source_ref_id == source_ref_id,
+            NovaV2CommandAction.recommended_action == recommended_action,
+        )
+        .order_by(NovaV2CommandAction.created_at.asc())
+        .first()
+    )
+
+
+def get_in_org_today_action_by_id(
+    db: Session,
+    action_id: str,
+    *,
+    organization_id: str,
+) -> NovaV2CommandAction | None:
+    """Load a Today row by id within the organization. Owner is not required."""
+    return (
+        db.query(NovaV2CommandAction)
+        .filter(
+            NovaV2CommandAction.action_id == action_id,
+            NovaV2CommandAction.organization_id == organization_id,
+        )
+        .first()
+    )
 
 
 def _get_action(db: Session, action_id: str, *, organization_id: str, user: UserContext) -> NovaV2CommandAction:
@@ -1117,7 +1202,17 @@ def dismiss_action(db: Session, action_id: str, *, organization_id: str, user: U
     row.snoozed_until = None
     db.commit()
     db.refresh(row)
-    return action_out(row)
+    out = action_out(row)
+    _maybe_autonomy_ledger(
+        db,
+        user=user,
+        organization_id=organization_id,
+        action=out,
+        result="dismissed",
+        verification_result="verified",
+        executed=True,
+    )
+    return out
 
 
 def snooze_action(
@@ -1139,7 +1234,17 @@ def snooze_action(
     row.snoozed_until = stamp + timedelta(hours=hours)
     db.commit()
     db.refresh(row)
-    return action_out(row)
+    out = action_out(row)
+    _maybe_autonomy_ledger(
+        db,
+        user=user,
+        organization_id=organization_id,
+        action=out,
+        result=row.status,
+        verification_result="verified",
+        executed=True,
+    )
+    return out
 
 
 def approve_action(
@@ -1171,8 +1276,12 @@ def approve_action(
         row.decided_at = now()
         db.commit()
         db.refresh(row)
+        out = action_out(row)
+        _maybe_autonomy_ledger(
+            db, user=user, organization_id=organization_id, action=out, result="open_link", verification_result="verified"
+        )
         return NovaTodayApproveOut(
-            action=action_out(row),
+            action=out,
             href=row.href,
             message="Open the existing V1 record. No new product data was created.",
             fact_label="VERIFIED DATA",
@@ -1182,8 +1291,12 @@ def approve_action(
         row.decided_at = now()
         db.commit()
         db.refresh(row)
+        out = action_out(row)
+        _maybe_autonomy_ledger(
+            db, user=user, organization_id=organization_id, action=out, result="acknowledged", verification_result="verified"
+        )
         return NovaTodayApproveOut(
-            action=action_out(row),
+            action=out,
             message="Acknowledged. Nothing was sent, filed, or charged.",
             fact_label="USER-SAVED INFORMATION",
         )
@@ -1204,8 +1317,12 @@ def approve_action(
         db.commit()
         db.refresh(row)
         verified = verify_result(db, row, organization_id=organization_id, user=user)
+        out = action_out(row, verification_status=verified)
+        _maybe_autonomy_ledger(
+            db, user=user, organization_id=organization_id, action=out, result="draft_created", verification_result=verified
+        )
         return NovaTodayApproveOut(
-            action=action_out(row, verification_status=verified),
+            action=out,
             href="/nova/communications",
             draft_id=draft.id,
             message="Communications draft saved. External send was not performed.",
@@ -1223,8 +1340,17 @@ def approve_action(
         row.decided_at = now()
         db.commit()
         db.refresh(row)
+        out = action_out(row, verification_status=checked.verification_status)
+        _maybe_autonomy_ledger(
+            db,
+            user=user,
+            organization_id=organization_id,
+            action=out,
+            result="source_rechecked",
+            verification_result=checked.verification_status,
+        )
         return NovaTodayApproveOut(
-            action=action_out(row, verification_status=checked.verification_status),
+            action=out,
             href=row.href,
             message=checked.message,
             fact_label="VERIFIED DATA",
@@ -1244,8 +1370,12 @@ def approve_action(
         db.commit()
         db.refresh(row)
         verified = verify_result(db, row, organization_id=organization_id, user=user)
+        out = action_out(row, verification_status=verified)
+        _maybe_autonomy_ledger(
+            db, user=user, organization_id=organization_id, action=out, result="task_created", verification_result=verified
+        )
         return NovaTodayApproveOut(
-            action=action_out(row, verification_status=verified),
+            action=out,
             href="/nova/business",
             task_id=task.task_id,
             message="Business task created. This is not accounting, payroll, or a filing.",
