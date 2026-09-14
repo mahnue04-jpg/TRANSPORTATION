@@ -1,6 +1,7 @@
-"""Phase 2H/2K/2L supervised job queue. Bounded ticks only. No background runner."""
+"""Phase 2H/2K/2L/2M supervised job queue. Bounded ticks only. No background runner."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
@@ -736,6 +737,7 @@ def process_batch_jobs(
     user: UserContext,
     max_jobs: int | None = None,
     requested_org: str | None = None,
+    should_claim: Callable[[], bool] | None = None,
 ) -> AutonomyProcessBatchOut:
     _require_actor(user)
     organization_id = _caller_org(user, requested_org)
@@ -752,6 +754,9 @@ def process_batch_jobs(
     stopped_reason = "max_jobs_reached"
 
     for _tick in range(requested):
+        if should_claim is not None and not should_claim():
+            stopped_reason = "shutdown_requested"
+            break
         if _stopped(db, organization_id):
             stopped_reason = "emergency_stop"
             break
