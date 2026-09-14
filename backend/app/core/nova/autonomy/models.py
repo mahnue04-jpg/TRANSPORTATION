@@ -28,6 +28,10 @@ def new_attempt_id() -> str:
     return "NWT-" + uuid4().replace("-", "")[:12].upper()
 
 
+def new_job_id() -> str:
+    return "NWJ-" + uuid4().replace("-", "")[:12].upper()
+
+
 class NovaAutonomyLedger(Base):
     """Append-only autonomy audit row. Never stores secrets, tokens, or message bodies."""
 
@@ -198,6 +202,51 @@ class NovaAutonomyOrgFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class NovaAutonomyJob(Base):
+    """Phase 2H supervised queue row. No background runner claims these automatically."""
+
+    __tablename__ = "nova_autonomy_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "workflow_id",
+            "step_id",
+            "action_type",
+            name="uq_nova_autonomy_job_idemp",
+        ),
+        Index("ix_nova_autonomy_job_org_status", "organization_id", "status"),
+        Index("ix_nova_autonomy_job_org_workflow", "organization_id", "workflow_id"),
+        Index("ix_nova_autonomy_job_org_available", "organization_id", "available_at"),
+    )
+
+    job_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_job_id)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workflow_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflows.workflow_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    step_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("nova_autonomy_workflow_steps.step_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    correlation_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_module: Mapped[str] = mapped_column(String(40), nullable=False)
+    risk_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    result_ref_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
 class AutonomyIntentCreate(BaseModel):
     action_type: str = Field(min_length=2, max_length=64)
     source_module: Literal["workspace", "communications", "government", "business", "link", "autonomy"] = "autonomy"
@@ -318,6 +367,60 @@ class AutonomyOrgFlagOut(BaseModel):
     emergency_stop: bool = False
     disabled_at: datetime | None = None
     disabled_by: str | None = None
+
+
+class AutonomyJobQueueRequest(BaseModel):
+    workflow_id: str = Field(min_length=3, max_length=32)
+    step_id: str = Field(min_length=3, max_length=32)
+    organization_id: str | None = None
+
+
+class AutonomyJobOut(BaseModel):
+    job_id: str
+    organization_id: str
+    workflow_id: str
+    step_id: str
+    correlation_id: str
+    action_type: str
+    target_module: str
+    risk_class: str
+    approval_id: str | None = None
+    status: str
+    attempt_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+    available_at: datetime
+    locked_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_error: str | None = None
+    result_ref_id: str | None = None
+    executed: bool = False
+    mutated_external: bool = False
+
+    @classmethod
+    def from_row(cls, row: "NovaAutonomyJob") -> "AutonomyJobOut":
+        return cls(
+            job_id=row.job_id,
+            organization_id=row.organization_id,
+            workflow_id=row.workflow_id,
+            step_id=row.step_id,
+            correlation_id=row.correlation_id,
+            action_type=row.action_type,
+            target_module=row.target_module,
+            risk_class=row.risk_class,
+            approval_id=row.approval_id,
+            status=row.status,
+            attempt_count=int(row.attempt_count or 0),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            available_at=row.available_at,
+            locked_at=row.locked_at,
+            completed_at=row.completed_at,
+            last_error=row.last_error,
+            result_ref_id=row.result_ref_id,
+            executed=bool(row.status == "succeeded" and row.result_ref_id),
+            mutated_external=False,
+        )
 
 
 class AutonomyWorkflowOut(BaseModel):

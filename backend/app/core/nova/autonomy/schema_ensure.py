@@ -6,6 +6,7 @@ from sqlalchemy import inspect, text
 from app.core.nova.autonomy.models import (
     NovaAutonomyApproval,
     NovaAutonomyExecutionAttempt,
+    NovaAutonomyJob,
     NovaAutonomyLedger,
     NovaAutonomyOrgFlag,
     NovaAutonomyWorkflow,
@@ -25,6 +26,7 @@ _PHASE2_TABLES = (
     NovaAutonomyApproval,
     NovaAutonomyExecutionAttempt,
     NovaAutonomyOrgFlag,
+    NovaAutonomyJob,
 )
 
 
