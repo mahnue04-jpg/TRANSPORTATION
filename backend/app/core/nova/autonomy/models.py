@@ -423,6 +423,15 @@ class AutonomyJobOut(BaseModel):
         )
 
 
+class AutonomyProcessOneOut(BaseModel):
+    processed: int = 0
+    released_stale_locks: int = 0
+    mutated_external: bool = False
+    phase2_enabled: bool = False
+    verification_result: str | None = None
+    job: AutonomyJobOut | None = None
+
+
 class AutonomyWorkflowOut(BaseModel):
     workflow_id: str
     organization_id: str

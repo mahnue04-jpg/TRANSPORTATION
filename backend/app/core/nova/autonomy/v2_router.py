@@ -1,4 +1,4 @@
-"""Phase 2B CRUD, Phase 2C transitions, and Phase 2H supervised jobs. No background runner."""
+"""Phase 2B CRUD, Phase 2C transitions, Phase 2H jobs, and Phase 2K single-shot tick."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -11,6 +11,7 @@ from app.core.nova.autonomy.models import (
     AutonomyJobOut,
     AutonomyJobQueueRequest,
     AutonomyOrgFlagOut,
+    AutonomyProcessOneOut,
     AutonomyWorkflowCreate,
     AutonomyWorkflowOut,
 )
@@ -252,6 +253,18 @@ def claim_next_job(
 ):
     try:
         return v2_jobs.claim_next_job(db, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/process-one", response_model=AutonomyProcessOneOut)
+def process_one_job(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.process_one_job(db, user=user, requested_org=organization_id)
     except Exception as exc:
         _raise(exc)
 
