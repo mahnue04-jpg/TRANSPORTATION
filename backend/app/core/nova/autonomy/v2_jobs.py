@@ -1,4 +1,4 @@
-"""Phase 2H supervised job queue. Single-shot claim/run only. No background runner."""
+"""Phase 2H/2K/2L supervised job queue. Bounded ticks only. No background runner."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext
 from app.core.nova.autonomy import ledger
 from app.core.nova.autonomy.models import (
+    AutonomyBatchJobResult,
     AutonomyJobOut,
+    AutonomyProcessBatchOut,
     AutonomyProcessOneOut,
     NovaAutonomyApproval,
     NovaAutonomyExecutionAttempt,
@@ -42,6 +44,8 @@ CANCELABLE_STATES = frozenset({"queued", "claimed", "running", "failed"})
 MAX_JOB_ATTEMPTS = MAX_STEP_RETRIES
 LOCK_STALE_SECONDS = 300
 FAIL_CLOSED_REF = "job-fail-closed"
+DEFAULT_BATCH_MAX_JOBS = 1
+HARD_BATCH_MAX_JOBS = 5
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -87,6 +91,44 @@ def _queue_permitted(action_type: str) -> bool:
     if action == INTERNAL_TEST_ACTION:
         return True
     return _action_risk(action) == "LOW" and action in READ_ONLY_ACTIONS
+
+
+def _phase2_on(db: Session, organization_id: str) -> bool:
+    flag = _org_flag(db, organization_id)
+    return flag is not None and bool(flag.phase2_enabled)
+
+
+def _normalize_max_jobs(max_jobs: int | None) -> int:
+    if max_jobs is None:
+        return DEFAULT_BATCH_MAX_JOBS
+    try:
+        value = int(max_jobs)
+    except (TypeError, ValueError) as exc:
+        raise Phase2BError("max_jobs must be between 1 and 5", status_code=400) from exc
+    if value < 1 or value > HARD_BATCH_MAX_JOBS:
+        raise Phase2BError("max_jobs must be between 1 and 5", status_code=400)
+    return value
+
+
+def _pick_eligible(db: Session, organization_id: str) -> NovaAutonomyJob | None:
+    candidates = (
+        db.query(NovaAutonomyJob)
+        .filter(
+            NovaAutonomyJob.organization_id == organization_id,
+            NovaAutonomyJob.status == "queued",
+            NovaAutonomyJob.available_at <= now(),
+        )
+        .order_by(NovaAutonomyJob.available_at.asc(), NovaAutonomyJob.created_at.asc())
+        .all()
+    )
+    return next((row for row in candidates if _tick_eligible(row)), None)
+
+
+def _job_verification(job: AutonomyJobOut) -> str:
+    ref = str(job.result_ref_id or "")
+    if job.status == "succeeded" and ref.startswith("INT-"):
+        return "verified"
+    return job.status or "failed"
 
 
 def _load_job(db: Session, job_id: str, organization_id: str) -> NovaAutonomyJob:
@@ -662,22 +704,12 @@ def process_one_job(
     _require_phase2_enabled(db, organization_id)
     _require_not_stopped(db, organization_id)
     released = recover_stale_locks(db, user=user, organization_id=organization_id)
-    candidates = (
-        db.query(NovaAutonomyJob)
-        .filter(
-            NovaAutonomyJob.organization_id == organization_id,
-            NovaAutonomyJob.status == "queued",
-            NovaAutonomyJob.available_at <= now(),
-        )
-        .order_by(NovaAutonomyJob.available_at.asc(), NovaAutonomyJob.created_at.asc())
-        .all()
-    )
-    selected = next((row for row in candidates if _tick_eligible(row)), None)
+    selected = _pick_eligible(db, organization_id)
     if selected is None:
         raise Phase2BError("No eligible job", status_code=404)
     claimed = _claim_row(db, user=user, job=selected)
     ran = run_job(db, claimed.job_id, user=user, requested_org=organization_id)
-    verification = "verified" if ran.status == "succeeded" and ran.result_ref_id else ran.status
+    verification = _job_verification(ran)
     _audit_job(
         db,
         user=user,
@@ -695,4 +727,105 @@ def process_one_job(
         phase2_enabled=True,
         verification_result=verification,
         job=ran,
+    )
+
+
+def process_batch_jobs(
+    db: Session,
+    *,
+    user: UserContext,
+    max_jobs: int | None = None,
+    requested_org: str | None = None,
+) -> AutonomyProcessBatchOut:
+    _require_actor(user)
+    organization_id = _caller_org(user, requested_org)
+    requested = _normalize_max_jobs(max_jobs)
+    _require_phase2_enabled(db, organization_id)
+    _require_not_stopped(db, organization_id)
+
+    processed_ids: list[str] = []
+    job_rows: list[AutonomyBatchJobResult] = []
+    succeeded = 0
+    failed = 0
+    blocked = 0
+    released_total = 0
+    stopped_reason = "max_jobs_reached"
+
+    for _tick in range(requested):
+        if _stopped(db, organization_id):
+            stopped_reason = "emergency_stop"
+            break
+        if not _phase2_on(db, organization_id):
+            stopped_reason = "phase2_disabled"
+            break
+        released_total += recover_stale_locks(db, user=user, organization_id=organization_id)
+        selected = _pick_eligible(db, organization_id)
+        if selected is None:
+            stopped_reason = "no_eligible_jobs"
+            break
+        if selected.organization_id != organization_id:
+            stopped_reason = "tenant_mismatch"
+            break
+        if is_blocked(_action_risk(selected.action_type)):
+            stopped_reason = "high_or_prohibited"
+            break
+        if int(selected.attempt_count or 0) >= MAX_JOB_ATTEMPTS:
+            stopped_reason = "retry_limit"
+            break
+        claimed = _claim_row(db, user=user, job=selected)
+        ran = run_job(db, claimed.job_id, user=user, requested_org=organization_id)
+        verification = _job_verification(ran)
+        mutated = bool(ran.mutated_external)
+        _audit_job(
+            db,
+            user=user,
+            job=_load_job(db, ran.job_id, organization_id),
+            old_status=ran.status,
+            new_status=ran.status,
+            result="process_batch_tick",
+            executed=bool(ran.executed),
+            verification_result=verification,
+        )
+        processed_ids.append(ran.job_id)
+        job_rows.append(
+            AutonomyBatchJobResult(
+                job_id=ran.job_id,
+                status=ran.status,
+                verification_result=verification,
+                mutated_external=mutated,
+            )
+        )
+        if ran.status == "succeeded":
+            succeeded += 1
+        elif ran.status == "blocked":
+            blocked += 1
+        else:
+            failed += 1
+        if mutated:
+            stopped_reason = "external_mutation"
+            break
+        if is_blocked(_action_risk(ran.action_type)) or ran.status == "blocked":
+            stopped_reason = "high_or_prohibited"
+            break
+        if verification != "verified":
+            stopped_reason = "verification_failure"
+            break
+        if ran.status == "failed" and int(ran.attempt_count or 0) >= MAX_JOB_ATTEMPTS:
+            stopped_reason = "retry_limit"
+            break
+    else:
+        stopped_reason = "max_jobs_reached"
+
+    return AutonomyProcessBatchOut(
+        requested_max_jobs=requested,
+        processed_count=len(processed_ids),
+        succeeded_count=succeeded,
+        failed_count=failed,
+        blocked_count=blocked,
+        stopped_reason=stopped_reason,
+        processed_job_ids=processed_ids,
+        jobs=job_rows,
+        mutated_external=False,
+        phase2_enabled=_phase2_on(db, organization_id),
+        released_stale_locks=released_total,
     )

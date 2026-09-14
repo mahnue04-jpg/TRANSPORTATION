@@ -1,4 +1,4 @@
-"""Phase 2B CRUD, Phase 2C transitions, Phase 2H jobs, and Phase 2K single-shot tick."""
+"""Phase 2B CRUD, Phase 2C transitions, Phase 2H jobs, Phase 2K tick, Phase 2L bounded batch."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -11,6 +11,7 @@ from app.core.nova.autonomy.models import (
     AutonomyJobOut,
     AutonomyJobQueueRequest,
     AutonomyOrgFlagOut,
+    AutonomyProcessBatchOut,
     AutonomyProcessOneOut,
     AutonomyWorkflowCreate,
     AutonomyWorkflowOut,
@@ -265,6 +266,21 @@ def process_one_job(
 ):
     try:
         return v2_jobs.process_one_job(db, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/process-batch", response_model=AutonomyProcessBatchOut)
+def process_batch_jobs(
+    max_jobs: int | None = None,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.process_batch_jobs(
+            db, user=user, max_jobs=max_jobs, requested_org=organization_id
+        )
     except Exception as exc:
         _raise(exc)
 
