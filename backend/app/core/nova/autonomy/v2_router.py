@@ -1,13 +1,15 @@
-"""Phase 2B CRUD plus Phase 2C supervised transitions. No worker or Phase 2 flag."""
+"""Phase 2B CRUD, Phase 2C transitions, and Phase 2H supervised jobs. No background runner."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
-from app.core.nova.autonomy import v2_service
+from app.core.nova.autonomy import v2_jobs, v2_service
 from app.core.nova.autonomy.models import (
     AutonomyApprovalOut,
+    AutonomyJobOut,
+    AutonomyJobQueueRequest,
     AutonomyOrgFlagOut,
     AutonomyWorkflowCreate,
     AutonomyWorkflowOut,
@@ -208,5 +210,112 @@ def emergency_stop(
 ):
     try:
         return v2_service.emergency_stop(db, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/jobs", response_model=list[AutonomyJobOut])
+def list_jobs(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.list_jobs(db, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs", response_model=AutonomyJobOut)
+def queue_job(
+    payload: AutonomyJobQueueRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.queue_job(
+            db,
+            user=user,
+            workflow_id=payload.workflow_id,
+            step_id=payload.step_id,
+            requested_org=payload.organization_id,
+        )
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/claim-next", response_model=AutonomyJobOut)
+def claim_next_job(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.claim_next_job(db, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.get("/jobs/{job_id}", response_model=AutonomyJobOut)
+def get_job(
+    job_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.get_job(db, job_id, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/{job_id}/claim", response_model=AutonomyJobOut)
+def claim_job(
+    job_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.claim_job(db, job_id, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/{job_id}/run", response_model=AutonomyJobOut)
+def run_job(
+    job_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.run_job(db, job_id, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=AutonomyJobOut)
+def cancel_job(
+    job_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.cancel_job(db, job_id, user=user, requested_org=organization_id)
+    except Exception as exc:
+        _raise(exc)
+
+
+@router.post("/jobs/{job_id}/retry", response_model=AutonomyJobOut)
+def retry_job(
+    job_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_jobs.retry_job(db, job_id, user=user, requested_org=organization_id)
     except Exception as exc:
         _raise(exc)
