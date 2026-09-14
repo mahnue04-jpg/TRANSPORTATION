@@ -432,6 +432,27 @@ class AutonomyProcessOneOut(BaseModel):
     job: AutonomyJobOut | None = None
 
 
+class AutonomyBatchJobResult(BaseModel):
+    job_id: str
+    status: str
+    verification_result: str | None = None
+    mutated_external: bool = False
+
+
+class AutonomyProcessBatchOut(BaseModel):
+    requested_max_jobs: int = 1
+    processed_count: int = 0
+    succeeded_count: int = 0
+    failed_count: int = 0
+    blocked_count: int = 0
+    stopped_reason: str = "no_eligible_jobs"
+    processed_job_ids: list[str] = Field(default_factory=list)
+    jobs: list[AutonomyBatchJobResult] = Field(default_factory=list)
+    mutated_external: bool = False
+    phase2_enabled: bool = False
+    released_stale_locks: int = 0
+
+
 class AutonomyWorkflowOut(BaseModel):
     workflow_id: str
     organization_id: str
