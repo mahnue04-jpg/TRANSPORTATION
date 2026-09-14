@@ -10,6 +10,7 @@ from app.auth import UserContext
 from app.core.nova.autonomy import ledger
 from app.core.nova.autonomy.models import (
     AutonomyJobOut,
+    AutonomyProcessOneOut,
     NovaAutonomyApproval,
     NovaAutonomyExecutionAttempt,
     NovaAutonomyJob,
@@ -55,9 +56,23 @@ def _job_out(row: NovaAutonomyJob) -> AutonomyJobOut:
     return AutonomyJobOut.from_row(row)
 
 
+def _require_phase2_enabled(db: Session, organization_id: str) -> None:
+    flag = _org_flag(db, organization_id)
+    if flag is None or not bool(flag.phase2_enabled):
+        raise Phase2BError("Phase 2 worker tick is not enabled for this organization", status_code=403)
+
+
 def _stopped(db: Session, organization_id: str) -> bool:
     flag = _org_flag(db, organization_id)
     return flag is not None and bool(flag.emergency_stop)
+
+
+def _tick_eligible(job: NovaAutonomyJob) -> bool:
+    action = normalize_action_type(job.action_type)
+    risk = _action_risk(action)
+    if is_blocked(risk) or risk == "MEDIUM":
+        return False
+    return _queue_permitted(action)
 
 
 def _action_risk(action_type: str) -> str:
@@ -637,3 +652,47 @@ def retry_job(
     db.refresh(job)
     _audit_job(db, user=user, job=job, old_status=old, new_status="queued", result="job_retried")
     return _job_out(job)
+
+
+def process_one_job(
+    db: Session, *, user: UserContext, requested_org: str | None = None
+) -> AutonomyProcessOneOut:
+    _require_actor(user)
+    organization_id = _caller_org(user, requested_org)
+    _require_phase2_enabled(db, organization_id)
+    _require_not_stopped(db, organization_id)
+    released = recover_stale_locks(db, user=user, organization_id=organization_id)
+    candidates = (
+        db.query(NovaAutonomyJob)
+        .filter(
+            NovaAutonomyJob.organization_id == organization_id,
+            NovaAutonomyJob.status == "queued",
+            NovaAutonomyJob.available_at <= now(),
+        )
+        .order_by(NovaAutonomyJob.available_at.asc(), NovaAutonomyJob.created_at.asc())
+        .all()
+    )
+    selected = next((row for row in candidates if _tick_eligible(row)), None)
+    if selected is None:
+        raise Phase2BError("No eligible job", status_code=404)
+    claimed = _claim_row(db, user=user, job=selected)
+    ran = run_job(db, claimed.job_id, user=user, requested_org=organization_id)
+    verification = "verified" if ran.status == "succeeded" and ran.result_ref_id else ran.status
+    _audit_job(
+        db,
+        user=user,
+        job=_load_job(db, ran.job_id, organization_id),
+        old_status=ran.status,
+        new_status=ran.status,
+        result="process_one_tick",
+        executed=bool(ran.executed),
+        verification_result=verification,
+    )
+    return AutonomyProcessOneOut(
+        processed=1,
+        released_stale_locks=released,
+        mutated_external=False,
+        phase2_enabled=True,
+        verification_result=verification,
+        job=ran,
+    )
