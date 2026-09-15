@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.auth import ensure_auth_schema, hash_password, seed_default_users
+from app.auth import SEED_PASSWORD, ensure_auth_schema, hash_password, seed_default_users
 from app.core.nova.autonomy.ledger import ensure_autonomy_schema
 from app.core.nova.signup.models import (
     STATUS_TRIALING,
@@ -192,6 +192,8 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert client.get("/workspace", headers=headers).status_code == 403
         assert client.get("/nova/freight", headers=headers).status_code == 403
         assert client.get("/admin", headers=headers).status_code == 403
+        assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
+        assert client.get("/api/admin/metrics", headers=headers).status_code == 403
         assert client.post(
             "/api/nova/tenants/provision",
             headers=headers,
@@ -370,3 +372,58 @@ def test_live_stripe_keys_are_rejected(monkeypatch) -> None:
     created = client.post("/api/nova/signup", json=_signup_payload())
     assert created.status_code == 503
     assert "Live Stripe" in created.text or "not allowed" in created.text.lower()
+
+
+def test_api_admin_prefix_is_blocked_for_nova_customers_only() -> None:
+    from app.core.nova.signup.isolation import path_blocked_for_nova_customer
+
+    assert path_blocked_for_nova_customer("/api/admin/dashboard") is True
+    assert path_blocked_for_nova_customer("/api/admin/metrics") is True
+    assert path_blocked_for_nova_customer("/api/admin/unknown-platform-endpoint") is True
+    assert path_blocked_for_nova_customer("/api/nova/today/dashboard") is False
+    assert path_blocked_for_nova_customer("/nova/workspace") is False
+
+
+def test_nova_saas_admin_cannot_access_platform_admin_apis() -> None:
+    fake = FakeNovaSaasStripeClient()
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload()
+        _activate(client, fake, payload=payload)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        )
+        assert login.status_code == 200, login.text
+        customer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        internal = client.post(
+            "/api/auth/login",
+            json={"email": "admin@amicor.local", "password": SEED_PASSWORD},
+        )
+        assert internal.status_code == 200, internal.text
+        admin = {"Authorization": f"Bearer {internal.json()['access_token']}"}
+
+        admin_paths = sorted(
+            {
+                str(getattr(route, "path", "") or "")
+                for route in app.routes
+                if str(getattr(route, "path", "") or "").startswith("/api/admin")
+            }
+        )
+        assert "/api/admin/dashboard" in admin_paths
+        assert "/api/admin/metrics" in admin_paths
+        for path in admin_paths:
+            denied = client.get(path, headers=customer)
+            assert denied.status_code == 403, f"{path} {denied.status_code} {denied.text}"
+            assert "Nova customer access is limited to AMICOR Nova." in denied.text
+            allowed = client.get(path, headers=admin)
+            assert allowed.status_code == 200, f"{path} {allowed.status_code} {allowed.text}"
+
+        unknown = client.get("/api/admin/not-a-real-platform-endpoint", headers=customer)
+        assert unknown.status_code == 403
+        today = client.get("/api/nova/today/dashboard", headers=customer)
+        assert today.status_code == 200, today.text
+    finally:
+        set_nova_saas_stripe_override(None)
+

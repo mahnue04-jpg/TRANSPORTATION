@@ -12,6 +12,7 @@ from app.auth import decode_access_token
 from app.db.session import SessionLocal
 
 BLOCKED_PREFIXES = (
+    "/api/admin",
     "/api/health-isf",
     "/api/payments",
     "/api/platform-ops",
