@@ -80,7 +80,11 @@ export async function onRequest(context) {
     return json(400, { ok: false, error: "invalid_json" });
   }
 
-  if (plain(raw.company_website, 200) || plain(raw.website, 200)) {
+  if (
+    plain(raw.middle_name_confirm, 200) ||
+    plain(raw.company_website, 200) ||
+    plain(raw.website, 200)
+  ) {
     return json(204, { ok: true });
   }
 

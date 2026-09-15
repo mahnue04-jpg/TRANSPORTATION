@@ -60,7 +60,7 @@
     var data = Object.fromEntries(new FormData(form).entries());
     var ok = true;
 
-    if ((data.company_website || "").trim()) {
+    if ((data.middle_name_confirm || "").trim()) {
       show(errorBox, true);
       if (errorBox) errorBox.textContent = "Request could not be sent.";
       return;

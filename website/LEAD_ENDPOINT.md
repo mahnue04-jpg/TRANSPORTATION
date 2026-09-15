@@ -41,7 +41,6 @@ The Cloudflare Pages Function in `functions/api/leads.js` implements this contra
   "product": "Autonomous Operations Agent",
   "message": "I would like a product demo.",
   "consent": true,
-  "company_website": "",
   "source": "amicor-public-website-w8"
 }
 ```
@@ -86,7 +85,7 @@ Success body: `{ "ok": true, "stored": true, "notified": false }`
 - Enforce field length limits
 - Require consent
 - Reject unknown products
-- Ignore / no-op honeypot field `company_website`
+- Ignore / no-op honeypot field `middle_name_confirm`
 - No secret values in the function source
 - KV write is enough for 202
 - Optional destination URL and bearer token come from Pages environment variables only:

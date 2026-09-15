@@ -7,7 +7,7 @@ The public form does **not** contain SMTP passwords, API keys, Stripe secrets, o
 `formEndpoint` is `/api/leads`. Public contact email is `info@getamicor.com`.
 
 1. Browser validates required fields, email format, and privacy consent.
-2. Honeypot field `company_website` is not sent as a real lead.
+2. Honeypot field `middle_name_confirm` is not sent as a real lead.
 3. A success message is shown only after `POST /api/leads` returns 2xx.
 4. If KV storage fails, the page says AMICOR did not receive the request and saves a local fallback.
 5. Optional `LEAD_WEBHOOK_URL` notification is best-effort. Email Routing is not required for form success.
