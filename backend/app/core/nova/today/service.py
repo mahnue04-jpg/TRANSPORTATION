@@ -1627,8 +1627,16 @@ def ask_today(
     organization_id: str,
     user: UserContext,
 ) -> NovaTodayBrainOut:
-    dash = dashboard(db, organization_id=organization_id, user=user)
-    history = dash.recent_activity
+    include_supporting = today_supporting_context_relevant(
+        payload.question,
+        selected_item=bool(payload.action_id or payload.source_ref_id),
+    )
+    dash = (
+        dashboard(db, organization_id=organization_id, user=user)
+        if include_supporting
+        else None
+    )
+    history = dash.recent_activity if dash is not None else []
     selected = ""
     referenced_action_id = None
     referenced_source_ref_id = payload.source_ref_id
@@ -1659,7 +1667,8 @@ def ask_today(
         except NovaTodayError:
             selected = " The requested action was not visible to this owner."
     elif payload.source_ref_id:
-        match = next((card for card in dash.attention_now if card.source_ref_id == payload.source_ref_id), None)
+        cards = dash.attention_now if dash is not None else []
+        match = next((card for card in cards if card.source_ref_id == payload.source_ref_id), None)
         if match:
             resolved = match.source_href
             selected = (
@@ -1668,14 +1677,10 @@ def ask_today(
             )
         else:
             selected = " The requested source record is not visible on Today."
-    include_supporting = today_supporting_context_relevant(
-        payload.question,
-        selected_item=bool(payload.action_id or payload.source_ref_id),
-    )
     mailbox_line = ""
     comms_line = ""
     history_line = ""
-    if include_supporting:
+    if include_supporting and dash is not None:
         mailbox_line = _mailbox_supporting_line(dash.connector_health)
         rechecks = list_recheck_events(db, organization_id=organization_id, user=user, limit=4)
         if rechecks:
@@ -1710,7 +1715,7 @@ def ask_today(
     next_actions: list[str] = []
     if resolved:
         next_actions.append(f"Open existing source: {resolved}")
-    if include_supporting and (
+    if include_supporting and dash is not None and (
         (dash.connector_health or {}).get("recheck_available") == "yes"
         or (reviewed is not None and reviewed.verification_status in {"missing", "unavailable", "unknown"})
     ):
