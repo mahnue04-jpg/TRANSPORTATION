@@ -1,8 +1,8 @@
 """Platform-support Nova tenant provision API. Not public registration. No billing.
 
 POST /provision is ROLE_SUPER_ADMIN_SUPPORT only. A customer ROLE_ADMIN cannot
-mint another tenant. Health ISF still treats ROLE_ADMIN as is_super_admin; that
-residual is recorded for a later protected-path review and is not changed here.
+mint another tenant. Health ISF list/read scope also requires platform support
+to select another organization_id; customer ROLE_ADMIN stays in its own org.
 """
 from __future__ import annotations
 

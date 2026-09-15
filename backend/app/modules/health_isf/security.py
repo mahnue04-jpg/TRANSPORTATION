@@ -15,7 +15,6 @@ from app.auth import (
     ROLE_ANALYTICS_READONLY,
     ROLE_SUPER_ADMIN_SUPPORT,
     normalize_role,
-    is_super_admin,
 )
 
 
@@ -49,9 +48,14 @@ def _canonicalize_subscription_type(subscription_type: str) -> str:
     return _SUBSCRIPTION_ALIASES.get(raw, raw)
 
 
+def is_platform_support(user: UserContext) -> bool:
+    """Platform support may choose another organization_id. Customer ROLE_ADMIN may not."""
+    return normalize_role(user.role) == ROLE_SUPER_ADMIN_SUPPORT
+
+
 def enforce_tenant_scope(user: UserContext, requested_org_id: str | None) -> str:
     """Return effective org_id if permitted; raise on cross-tenant access."""
-    if is_super_admin(user):
+    if is_platform_support(user):
         effective_org_id = requested_org_id or user.organization_id
         if not effective_org_id:
             raise HTTPException(status_code=400, detail="organization_id required for super-admin scope")
@@ -71,7 +75,7 @@ def enforce_tenant_scope(user: UserContext, requested_org_id: str | None) -> str
 
 
 def enforce_entity_tenant(user: UserContext, entity_org_id: str | None) -> None:
-    if is_super_admin(user):
+    if is_platform_support(user):
         return
     if not entity_org_id:
         return

@@ -3539,7 +3539,7 @@ async def websocket_live_updates(
             await websocket.close(code=1008, reason="Token user mismatch")
             return
 
-        if token_role not in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT} and token_org_id != organization_id:
+        if token_role != ROLE_SUPER_ADMIN_SUPPORT and token_org_id != organization_id:
             SuspiciousActivityService.log_activity(
                 db,
                 activity_type="websocket_cross_tenant_attempt",
@@ -4075,7 +4075,7 @@ async def websocket_live_updates(
                             )
                             continue
 
-                        if refreshed_role not in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT} and refreshed_org != organization_id:
+                        if refreshed_role != ROLE_SUPER_ADMIN_SUPPORT and refreshed_org != organization_id:
                             SuspiciousActivityService.log_activity(
                                 db,
                                 activity_type="websocket_auth_refresh_cross_tenant",

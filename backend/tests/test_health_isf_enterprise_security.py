@@ -69,6 +69,24 @@ def test_super_admin_can_scope_any_tenant():
     assert enforce_tenant_scope(super_admin, "org_9") == "org_9"
 
 
+def test_customer_admin_cannot_scope_other_tenant():
+    admin = _ctx(ROLE_ADMIN, org_id="org_1")
+    assert enforce_tenant_scope(admin, None) == "org_1"
+    assert enforce_tenant_scope(admin, "org_1") == "org_1"
+    with pytest.raises(HTTPException) as denied:
+        enforce_tenant_scope(admin, "org_2")
+    assert denied.value.status_code == 403
+
+
+def test_customer_admin_entity_stays_in_own_tenant():
+    admin = _ctx(ROLE_ADMIN, org_id="org_1")
+    enforce_entity_tenant(admin, "org_1")
+    with pytest.raises(HTTPException) as denied:
+        enforce_entity_tenant(admin, "org_2")
+    assert denied.value.status_code == 403
+    enforce_entity_tenant(_ctx(ROLE_SUPER_ADMIN_SUPPORT, org_id=None), "org_9")
+
+
 def test_cross_tenant_entity_access_blocked():
     user = _ctx(ROLE_DISPATCHER, org_id="org_1")
     enforce_entity_tenant(user, "org_1")
