@@ -206,6 +206,52 @@ def test_conversational_ask_does_not_stuff_today_ops(
     _assert_conversational_prompt(prompts[-1], question)
 
 
+def test_conversational_ask_does_not_write_today_dashboard(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.core.nova.today.service as today_service
+
+    _enable_llm(monkeypatch)
+    calls = {"n": 0}
+    real = today_service.dashboard
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(today_service, "dashboard", wrapped)
+    asked = client.post(
+        "/api/nova/today/ask",
+        headers=_headers(client),
+        json={"question": "What is the weather today?"},
+    )
+    assert asked.status_code == 200, asked.text
+    assert calls["n"] == 0
+
+
+def test_operational_ask_still_reads_today_dashboard(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.core.nova.today.service as today_service
+
+    _enable_llm(monkeypatch)
+    calls = {"n": 0}
+    real = today_service.dashboard
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(today_service, "dashboard", wrapped)
+    asked = client.post(
+        "/api/nova/today/ask",
+        headers=_headers(client),
+        json={"question": "What needs my attention today?"},
+    )
+    assert asked.status_code == 200, asked.text
+    assert calls["n"] == 1
+
+
 def test_operational_attention_ask_keeps_today_supporting_context(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
