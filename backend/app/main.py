@@ -87,6 +87,8 @@ from app.core.nova.autonomy.v2_router import router as nova_autonomy_v2_router  
 from app.core.nova.accounting.router import router as nova_accounting_router  # type: ignore
 from app.core.nova.payments.router import router as nova_payments_router  # type: ignore
 from app.core.nova.tenants.router import router as nova_tenants_router  # type: ignore
+from app.core.nova.signup.router import router as nova_signup_router  # type: ignore
+from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -436,6 +438,7 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestTracingMiddleware)
 app.add_middleware(TenantAuthValidationMiddleware)
+app.add_middleware(NovaCustomerProductGuardMiddleware)
 # Phase 7: ErrorBoundaryMiddleware added last → outermost layer in Starlette's
 # reversed-stack build order; catches all unhandled exceptions and returns safe JSON.
 app.add_middleware(ErrorBoundaryMiddleware)
@@ -481,6 +484,7 @@ app.include_router(nova_autonomy_v2_router)
 app.include_router(nova_accounting_router)
 app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
+app.include_router(nova_signup_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3959,6 +3963,23 @@ def serve_nova_today() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Today page not found"}, status_code=404)
+
+
+@app.get("/nova/signup")
+@app.get("/nova/early-access")
+def serve_nova_signup() -> Response:
+    page = os.path.join(_static_dir, "nova-signup", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova signup page not found"}, status_code=404)
+
+
+@app.get("/nova/signup/success")
+def serve_nova_signup_success() -> Response:
+    page = os.path.join(_static_dir, "nova-signup", "success.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova signup success page not found"}, status_code=404)
 
 
 @app.get("/nova/accounting")

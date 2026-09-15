@@ -284,7 +284,8 @@ def provision_isolated_nova_tenant(
     organization_name: str = DEMO_ORGANIZATION_NAME,
     owner_email: str = DEMO_OWNER_EMAIL,
     owner_display_name: str = DEMO_OWNER_DISPLAY_NAME,
-    owner_password: str,
+    owner_password: str | None = None,
+    hashed_password: str | None = None,
     actor_user_id: str | None = None,
 ) -> IsolatedNovaTenant:
     """Create or return one isolated Nova tenant. Password is never logged or returned."""
@@ -295,7 +296,13 @@ def provision_isolated_nova_tenant(
     organization_name = _require_isolated_name(organization_name)
     owner_email = _validate_email(owner_email)
     owner_display_name = _norm_name(owner_display_name) or DEMO_OWNER_DISPLAY_NAME
-    _validate_password(owner_password)
+    if hashed_password:
+        password_value = hashed_password
+    else:
+        if not owner_password:
+            raise TenantProvisionError("Password is required", status_code=422)
+        _validate_password(owner_password)
+        password_value = hash_password(owner_password)
 
     if owner_email in _seed_emails():
         raise TenantProvisionError("Seed/operator emails cannot be used for a customer tenant", status_code=400)
@@ -345,7 +352,7 @@ def provision_isolated_nova_tenant(
 
     owner = UserModel(
         email=owner_email,
-        hashed_password=hash_password(owner_password),
+        hashed_password=password_value,
         display_name=owner_display_name,
         role=ROLE_ADMIN,
         authorized_roles=_serialize_authorized_roles(ROLE_DEFAULT_AUTHORIZED[ROLE_ADMIN]),

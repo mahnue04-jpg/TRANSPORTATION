@@ -26,6 +26,11 @@ from app.core.nova.freight.models import (  # noqa: F401 — register Nova freig
     NovaFreightShipment,
     NovaFreightShipmentEvent,
 )
+from app.core.nova.signup.models import (  # noqa: F401 — register Nova SaaS signup tables
+    NovaCustomerTenant,
+    NovaSignupAccount,
+    NovaSignupWebhookEvent,
+)
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova — Signup complete</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-signup/signup.css" />
+</head>
+<body>
+  <header class="signup-header amicor-brand-lockup">
+    <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+    <div>
+      <p class="brand-kicker">AMICOR NOVA</p>
+      <h1>Introductory access</h1>
+    </div>
+  </header>
+  <main class="signup-main">
+    <section class="offer-card">
+      <p id="status-copy">Checkout returned. Waiting for Nova to activate your isolated tenant.</p>
+      <p class="hint" id="offer-copy">First 10 paying businesses: 7 days introductory access, then $59/month for the first 3 paid months, then $99/month.</p>
+      <p class="hint" id="login-hint">When activation completes, sign in below and open Nova Today / Command Center.</p>
+    </section>
+    <div id="banner" class="banner hidden" role="status"></div>
+    <form id="login-form" class="signup-form">
+      <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+      <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+      <button type="submit">Sign in to Nova</button>
+    </form>
+    <p class="hint"><a href="/nova/today">Open Nova Today</a> · <a href="/nova/signup">Back to signup</a></p>
+  </main>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-signup/success.js"></script>
+</body>
+</html>

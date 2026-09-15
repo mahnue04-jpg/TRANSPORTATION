@@ -178,10 +178,20 @@ def _read_one_product_count(db: Session, *, organization_id: str, user: UserCont
         return _product_count_card(spec, count=None, status="unavailable")
 
 
+def _hide_frozen_products(db: Session, organization_id: str) -> bool:
+    try:
+        from app.core.nova.signup.isolation import is_nova_saas_customer_org
+
+        return is_nova_saas_customer_org(db, organization_id)
+    except Exception:
+        return False
+
+
 def product_counts(db: Session, *, organization_id: str, user: UserContext) -> list[NovaTodayProductCount]:
+    specs = () if _hide_frozen_products(db, organization_id) else _PRODUCT_COUNT_SPECS
     return [
         _read_one_product_count(db, organization_id=organization_id, user=user, spec=spec)
-        for spec in _PRODUCT_COUNT_SPECS
+        for spec in specs
     ]
 
 
@@ -1084,6 +1094,8 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
             recommended_action="open_link",
         ),
     ]
+    if _hide_frozen_products(db, organization_id):
+        product_links = []
 
     has_real_work = bool(comms_cards or gov_cards or biz_cards)
     recommendations: list[NovaTodayCard] = []
@@ -1215,7 +1227,8 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         counts = product_counts(db, organization_id=organization_id, user=user)
     except Exception:
         recover_today_session(db)
-        counts = [_product_count_card(spec, count=None, status="unavailable") for spec in _PRODUCT_COUNT_SPECS]
+        specs = () if _hide_frozen_products(db, organization_id) else _PRODUCT_COUNT_SPECS
+        counts = [_product_count_card(spec, count=None, status="unavailable") for spec in specs]
     return NovaTodayDashboardOut(
         attention_now=attention_now,
         communications=communications,
