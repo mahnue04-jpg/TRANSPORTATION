@@ -380,4 +380,13 @@
   });
   if (session() && session().restore) session().restore();
   refresh().catch(function (err) { showBanner(err.message || String(err)); });
+  api("/api/nova/signup/me/access").then(function (access) {
+    if (!access || !access.nova_saas_customer) return;
+    document.querySelectorAll(".today-nav a").forEach(function (el) {
+      var href = el.getAttribute("href") || "";
+      if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
+        el.classList.add("hidden");
+      }
+    });
+  }).catch(function () {});
 })();
