@@ -353,8 +353,11 @@ def read_mailbox(
     if account is None:
         return [], _health_for_account(
             None,
-            status="disconnected",
-            detail="No mailbox connector is connected. Today did not invent messages.",
+            status="not_configured",
+            detail=(
+                "Mailbox is not configured. Gmail/Outlook has never been connected for this owner. "
+                "This is not an error."
+            ),
         )
     attempted_at = _mark_attempt(account)
     if account.provider == "smtp":
