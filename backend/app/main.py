@@ -86,6 +86,7 @@ from app.core.nova.autonomy.router import router as nova_autonomy_router  # type
 from app.core.nova.autonomy.v2_router import router as nova_autonomy_v2_router  # type: ignore
 from app.core.nova.accounting.router import router as nova_accounting_router  # type: ignore
 from app.core.nova.payments.router import router as nova_payments_router  # type: ignore
+from app.core.nova.tenants.router import router as nova_tenants_router  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
 from app.core.nova.operational_hydration_router import router as ops_hydration_router  # type: ignore
@@ -479,6 +480,7 @@ app.include_router(nova_autonomy_router)
 app.include_router(nova_autonomy_v2_router)
 app.include_router(nova_accounting_router)
 app.include_router(nova_payments_router)
+app.include_router(nova_tenants_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:

@@ -6,7 +6,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.auth import UserContext, is_super_admin
+from app.auth import ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.event_bus import nova_event_bus
 from app.core.nova.events import build_operational_events
 from app.core.nova.memory import memory_store
@@ -52,14 +52,19 @@ class NovaCoreService:
         requested_organization_id: str | None,
     ) -> str:
         if requested_organization_id:
-            if not is_super_admin(user) and requested_organization_id != user.organization_id:
+            if requested_organization_id != user.organization_id and not cls._can_scope_across_tenants(user):
                 raise ValueError("Cross-tenant Nova access denied")
             return requested_organization_id
         if user.organization_id:
             return user.organization_id
-        if is_super_admin(user):
+        if cls._can_scope_across_tenants(user):
             return "global"
         raise ValueError("Organization scope is required for Nova")
+
+    @staticmethod
+    def _can_scope_across_tenants(user: UserContext) -> bool:
+        """Platform support only. Tenant owner/admin stays inside their organization."""
+        return normalize_role(user.role) == ROLE_SUPER_ADMIN_SUPPORT
 
     @staticmethod
     def _now() -> str:
