@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 from app.auth import UserContext
+from app.core.nova.today.db_recovery import recover_today_session
 from app.core.nova.today.models import NovaV2CommandAction
 from sqlalchemy.orm import Session
 
@@ -66,6 +67,7 @@ def verify_draft_by_ref(
     except DraftTenantDenied:
         raise
     except Exception:
+        recover_today_session(db)
         return "unavailable"
 
 
@@ -84,8 +86,10 @@ def _verify_task(
     except NovaBusinessError as exc:
         if getattr(exc, "status_code", 400) == 404:
             return "missing"
+        recover_today_session(db)
         return "unavailable"
     except Exception:
+        recover_today_session(db)
         return "unavailable"
 
 
