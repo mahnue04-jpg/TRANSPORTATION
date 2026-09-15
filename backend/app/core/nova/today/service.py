@@ -701,14 +701,16 @@ def _health(
             source=source,
             status="unavailable",
             detail="This Nova source is unavailable. Today did not invent records.",
-            connector="unavailable" if mailbox_status == "unavailable" else ("n/a" if connector == "n/a" else "disconnected"),
+            connector="unavailable" if mailbox_status == "unavailable" else ("n/a" if connector == "n/a" else mailbox_status or connector),
             last_sync_at=last_sync_at,
         )
     if source == "communications" and email_connected is not None:
-        if mailbox_status in {"connected", "degraded", "stale", "unavailable"}:
+        if mailbox_status in {"connected", "degraded", "stale", "unavailable", "disconnected"}:
             connector_value = mailbox_status
+        elif email_connected:
+            connector_value = "connected"
         else:
-            connector_value = "connected" if email_connected else "disconnected"
+            connector_value = "not_configured"
         if email_connected and count > 0:
             return NovaTodaySourceHealth(
                 source=source,
@@ -726,18 +728,27 @@ def _health(
                 last_sync_at=last_sync_at,
             )
         if not email_connected and count > 0:
+            not_configured = connector_value == "not_configured"
             return NovaTodaySourceHealth(
                 source=source,
                 status="partial",
-                detail="Local saved messages only. No mailbox connector is connected.",
-                connector=connector_value if connector_value != "n/a" else "disconnected",
+                detail=(
+                    "Local saved messages only. Gmail/Outlook has never been connected. This is not an error."
+                    if not_configured
+                    else "Local saved messages only. No mailbox connector is connected."
+                ),
+                connector=connector_value if connector_value != "n/a" else "not_configured",
                 last_sync_at=last_sync_at,
             )
         return NovaTodaySourceHealth(
             source=source,
             status="empty",
-            detail="No mailbox connector. No saved messages were invented.",
-            connector=connector_value if connector_value != "n/a" else "disconnected",
+            detail=(
+                "Mailbox is not configured. Gmail/Outlook has never been connected for this owner. This is not an error."
+                if connector_value == "not_configured"
+                else "No mailbox connector. No saved messages were invented."
+            ),
+            connector=connector_value if connector_value != "n/a" else "not_configured",
             last_sync_at=last_sync_at,
         )
     if count == 0:
@@ -1477,6 +1488,138 @@ def approve_action(
     raise NovaTodayError("Unsupported Today action", status_code=422)
 
 
+_TODAY_EXTERNAL_HINTS = (
+    "weather",
+    "forecast",
+    "news",
+    "headline",
+    "my name",
+    "i am ",
+    "i'm ",
+    "hello",
+    "hi there",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "who are you",
+    "who am i",
+    "joke",
+    "sports score",
+    "stock price",
+)
+_TODAY_OPERATIONAL_HINTS = (
+    "attention",
+    "what needs",
+    "needs my",
+    "approval",
+    "mailbox",
+    "inbox",
+    "connector",
+    "email",
+    "communications",
+    "dashboard",
+    "follow-up",
+    "follow up",
+    "overdue",
+    "recheck",
+    "operational",
+    "standing",
+    "drafts",
+    "nova today",
+    "today's work",
+    "todays work",
+    "what should i do with this",
+    "summarize this mailbox",
+    "summarize this source",
+    "summarize this action",
+)
+
+
+def today_supporting_context_relevant(question: str, *, selected_item: bool) -> bool:
+    """Today dashboard is supporting context only for operational Today intent."""
+    if selected_item:
+        return True
+    text = f" {question.lower().strip()} "
+    if any(hint in text for hint in _TODAY_EXTERNAL_HINTS):
+        return False
+    return any(hint in text for hint in _TODAY_OPERATIONAL_HINTS)
+
+
+def _mailbox_supporting_line(health: dict[str, str | None] | None) -> str:
+    if not health:
+        return ""
+    status = health.get("status") or "n/a"
+    if status == "not_configured":
+        return (
+            " Mailbox is not configured. Gmail/Outlook has never been connected for this owner. "
+            "This is not an error and does not require repair."
+        )
+    line = (
+        f" Mailbox connector {status}."
+        f" Provider {health.get('provider') or 'none'}."
+        f" Freshness {health.get('freshness') or 'unknown'}."
+    )
+    if status == "disconnected":
+        line += " A previously configured mailbox connector is disconnected."
+    if status == "stale" or health.get("freshness") == "stale":
+        line += " This connector is stale."
+    if status == "unavailable":
+        line += " This is a connector error, not an unconfigured mailbox."
+    if health.get("last_success_at"):
+        line += f" Last successful read was {health.get('last_success_at')}."
+    if health.get("last_attempted_at"):
+        line += f" Last attempted read was {health.get('last_attempted_at')}."
+    if health.get("recheck_available") == "yes":
+        line += " You can re-check the source."
+    return line
+
+
+def _build_today_ask_prompt(
+    *,
+    question: str,
+    selected: str,
+    include_supporting: bool,
+    dash: NovaTodayDashboardOut | None,
+    mailbox_line: str = "",
+    comms_line: str = "",
+    history_line: str = "",
+) -> str:
+    primary = (
+        "PRIMARY USER PROMPT (this is the user's actual text; answer it directly):\n"
+        f"{question.strip()}\n\n"
+        "Rules: The user prompt is the primary intent. "
+        "Do not substitute AMICOR operational data for requested live or external information "
+        "such as weather or news. If that live/external information is not available, say so plainly "
+        "and do not invent unrelated next actions. "
+        "Conversational statements and questions get relevant conversational replies. "
+        "Do not send email, file, pay, call, or execute external actions."
+    )
+    if not include_supporting:
+        return primary + (
+            "\n\nNo Today dashboard, mailbox, attention, approval, or history context is provided "
+            "because it is not relevant to this prompt."
+        )
+    assert dash is not None
+    supporting = (
+        "SUPPORTING TODAY CONTEXT (use only if relevant to the user prompt; "
+        "do not treat this as today's news, weather, or a request to repair an unconfigured mailbox):\n"
+        f"Attention items: {len(dash.attention_now)}. "
+        f"Communications: {len(dash.communications)}. "
+        f"Government: {len(dash.government)}. "
+        f"Business: {len(dash.business)}. "
+        f"Workspace: {len(dash.workspace)}. "
+        f"Approval queue: {len(dash.approval_queue)}. "
+        f"Recent activity: {len(dash.recent_activity)}.\n"
+        "Top attention: "
+        + "; ".join(f"{card.trust_label} {card.title}" for card in dash.attention_now[:8])
+        + mailbox_line
+        + comms_line
+        + history_line
+        + selected
+    )
+    return primary + "\n\n" + supporting
+
+
 def ask_today(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -1525,64 +1668,51 @@ def ask_today(
             )
         else:
             selected = " The requested source record is not visible on Today."
-    mailbox_line = ""
-    if dash.connector_health:
-        health = dash.connector_health
-        mailbox_line = (
-            f" Mailbox connector {health.get('status') or 'n/a'}."
-            f" Provider {health.get('provider') or 'none'}."
-            f" Freshness {health.get('freshness') or 'unknown'}."
-        )
-        if (health.get("status") == "stale") or (health.get("freshness") == "stale"):
-            mailbox_line += " This connector is stale."
-        if health.get("last_success_at"):
-            mailbox_line += f" Last successful read was {health.get('last_success_at')}."
-        if health.get("last_attempted_at"):
-            mailbox_line += f" Last attempted read was {health.get('last_attempted_at')}."
-        if health.get("recheck_available") == "yes":
-            mailbox_line += " You can re-check the source."
-    rechecks = list_recheck_events(db, organization_id=organization_id, user=user, limit=4)
-    if rechecks:
-        mailbox_line += " Recent re-checks: " + "; ".join(
-            f"{row.detail} ({row.prior_verification or 'unknown'} → {row.new_verification or 'unknown'})"
-            for row in rechecks
-        )
-    comms_line = ""
-    if dash.communications:
-        comms_line = " Recent mailbox/communications: " + "; ".join(
-            f"{card.sender or ''} {card.subject or card.title}" for card in dash.communications[:5]
-        )
-    history_line = ""
-    if history:
-        history_line = " Recent owner results: " + "; ".join(
-            f"{item.verification_label or item.result_type} {item.title}" for item in history[:6]
-        )
-    context = (
-        "You are Mrs. Nova Brain on Nova Today. Use VERIFIED DATA, USER-SAVED INFORMATION, "
-        "AI SUGGESTION, and ACTION REQUIRES APPROVAL. Explain, summarize, recommend, and point "
-        "to existing source links only. Do not send email, file with an agency, charge a card, "
-        "create a ledger, place a call, or execute any external action.\n\n"
-        f"Attention items: {len(dash.attention_now)}. "
-        f"Communications: {len(dash.communications)}. "
-        f"Government: {len(dash.government)}. "
-        f"Business: {len(dash.business)}. "
-        f"Workspace: {len(dash.workspace)}. "
-        f"Approval queue: {len(dash.approval_queue)}. "
-        f"Recent activity: {len(history)}.\n"
-        "Top attention: "
-        + "; ".join(f"{card.trust_label} {card.title}" for card in dash.attention_now[:8])
-        + mailbox_line
-        + comms_line
-        + history_line
-        + selected
-        + f"\n\n{payload.question.strip()}"
+    include_supporting = today_supporting_context_relevant(
+        payload.question,
+        selected_item=bool(payload.action_id or payload.source_ref_id),
     )
-    asked = NovaCoreService.ask(db, organization_id=organization_id, mode="founder_advisor", question=context)
-    next_actions = list(asked.next_actions or [])
+    mailbox_line = ""
+    comms_line = ""
+    history_line = ""
+    if include_supporting:
+        mailbox_line = _mailbox_supporting_line(dash.connector_health)
+        rechecks = list_recheck_events(db, organization_id=organization_id, user=user, limit=4)
+        if rechecks:
+            mailbox_line += " Recent re-checks: " + "; ".join(
+                f"{row.detail} ({row.prior_verification or 'unknown'} → {row.new_verification or 'unknown'})"
+                for row in rechecks
+            )
+        if dash.communications:
+            comms_line = " Recent mailbox/communications: " + "; ".join(
+                f"{card.sender or ''} {card.subject or card.title}" for card in dash.communications[:5]
+            )
+        if history:
+            history_line = " Recent owner results: " + "; ".join(
+                f"{item.verification_label or item.result_type} {item.title}" for item in history[:6]
+            )
+    context = _build_today_ask_prompt(
+        question=payload.question,
+        selected=selected if include_supporting else "",
+        include_supporting=include_supporting,
+        dash=dash if include_supporting else None,
+        mailbox_line=mailbox_line,
+        comms_line=comms_line,
+        history_line=history_line,
+    )
+    asked = NovaCoreService.ask(
+        db,
+        organization_id=organization_id,
+        mode="founder_advisor",
+        question=context,
+        require_operational_next_actions=False,
+    )
+    next_actions: list[str] = []
     if resolved:
-        next_actions = [f"Open existing source: {resolved}"] + next_actions
-    if (dash.connector_health or {}).get("recheck_available") == "yes" or (
-        reviewed is not None and reviewed.verification_status in {"missing", "unavailable", "unknown"}
+        next_actions.append(f"Open existing source: {resolved}")
+    if include_supporting and (
+        (dash.connector_health or {}).get("recheck_available") == "yes"
+        or (reviewed is not None and reviewed.verification_status in {"missing", "unavailable", "unknown"})
     ):
         next_actions = ["Re-check the source"] + next_actions
     next_actions = [item for item in next_actions if "send" not in item.lower() and "file" not in item.lower()][:6]

@@ -247,7 +247,8 @@
     if (connector) {
       var health = dash.connector_health || {};
       var parts = [];
-      if (health.status) parts.push("Mailbox: " + health.status);
+      if (health.status === "not_configured") parts.push("Mailbox: not configured");
+      else if (health.status) parts.push("Mailbox: " + health.status);
       if (health.provider) parts.push(health.provider);
       if (health.freshness) parts.push("Freshness: " + health.freshness);
       if (health.last_success_at) parts.push("Last successful read: " + health.last_success_at);

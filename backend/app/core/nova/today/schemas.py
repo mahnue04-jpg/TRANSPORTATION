@@ -106,7 +106,7 @@ class NovaTodaySourceHealth(BaseModel):
     source: str
     status: Literal["ok", "empty", "unavailable", "partial"]
     detail: str
-    connector: Literal["connected", "disconnected", "degraded", "unavailable", "stale", "n/a"] = "n/a"
+    connector: Literal["connected", "not_configured", "disconnected", "degraded", "unavailable", "stale", "n/a"] = "n/a"
     last_sync_at: datetime | None = None
 
 

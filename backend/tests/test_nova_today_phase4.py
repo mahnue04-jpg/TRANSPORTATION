@@ -131,7 +131,7 @@ def test_nova_today_phase4_connector_unavailable_and_disconnected(
     staff, _staff_id = _login(client, "staff@amicor.local")
     empty = client.get("/api/nova/today/mailbox", headers=staff)
     assert empty.status_code == 200
-    assert empty.json()["connector_health"]["status"] == "disconnected"
+    assert empty.json()["connector_health"]["status"] == "not_configured"
     assert empty.json()["items"] == []
 
     owner, user_id = _login(client)

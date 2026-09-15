@@ -152,29 +152,72 @@ class NovaCoreService:
         mode: NovaMode,
         question: str,
         context: NovaContextResponse,
+        *,
+        require_operational_next_actions: bool = True,
     ) -> tuple[str, str]:
         if not cls._can_use_llm():
+            if not require_operational_next_actions:
+                return cls._prompt_primary_answer(question), "deterministic_fallback"
             return cls._deterministic_answer(mode, question, context), "deterministic_fallback"
 
         try:
             from app.ai import ask_openai
 
-            runtime_context = cls._build_runtime_context(context)
-            prompt = (
-                MODE_SYSTEM_GUIDANCE[mode]
-                + "\nYou are operating inside the Amicor runtime. Use only provided context."
-                + "\nRespond with:\n1) direct answer\n2) short rationale\n3) 3 concrete next actions"
-                + "\nContext JSON:\n"
-                + str(runtime_context)
-                + "\nUser question:\n"
-                + question.strip()
-            )
+            if require_operational_next_actions:
+                runtime_context = cls._build_runtime_context(context)
+                prompt = (
+                    MODE_SYSTEM_GUIDANCE[mode]
+                    + "\nYou are operating inside the Amicor runtime. Use only provided context."
+                    + "\nRespond with:\n1) direct answer\n2) short rationale\n3) 3 concrete next actions"
+                    + "\nContext JSON:\n"
+                    + str(runtime_context)
+                    + "\nUser question:\n"
+                    + question.strip()
+                )
+            else:
+                prompt = (
+                    "Answer as Mrs. Nova Brain. The user's prompt is the primary intent.\n"
+                    "Any AMICOR or Today information in the message is supporting context only if relevant.\n"
+                    "Never substitute internal operational information for requested live or external "
+                    "information such as weather or news.\n"
+                    "If live/external data is not available, say so plainly. "
+                    "Do not invent unrelated next actions, mailbox repairs, or approvals.\n"
+                    "Conversational statements and questions get relevant conversational replies.\n"
+                    "Do not send email, file, pay, call, or execute external actions.\n\n"
+                    + question.strip()
+                )
             answer = ask_openai(prompt)
             if not answer or not str(answer).strip():
+                if not require_operational_next_actions:
+                    return cls._prompt_primary_answer(question), "deterministic_empty_llm"
                 return cls._deterministic_answer(mode, question, context), "deterministic_empty_llm"
             return str(answer).strip(), "openai"
         except Exception:
+            if not require_operational_next_actions:
+                return cls._prompt_primary_answer(question), "deterministic_error_fallback"
             return cls._deterministic_answer(mode, question, context), "deterministic_error_fallback"
+
+    @classmethod
+    def _prompt_primary_answer(cls, question: str) -> str:
+        user_text = question
+        marker = "answer it directly):\n"
+        if marker in question:
+            user_text = question.split(marker, 1)[1].split("\n\n", 1)[0].strip()
+        lowered = user_text.lower()
+        if "my name" in lowered:
+            return (
+                f"Understood. You said: {user_text} "
+                "That is a conversational statement, not a Today operations request."
+            )
+        if any(token in lowered for token in ("weather", "news")):
+            return (
+                "I do not currently have that live weather or news information. "
+                "I will not substitute AMICOR operational data for it."
+            )
+        return (
+            "I do not currently have that live or external information in Nova Today. "
+            "I will not substitute AMICOR operational data for it."
+        )
 
     @classmethod
     def _get_health_isf_context(cls, db: Session, organization_id: str) -> dict[str, Any]:
@@ -329,11 +372,20 @@ class NovaCoreService:
         organization_id: str,
         mode: NovaMode,
         question: str,
+        *,
+        require_operational_next_actions: bool = True,
     ) -> NovaAskResponse:
         context = cls.get_context(db, organization_id)
-        answer, execution_mode = cls._llm_answer(mode, question, context)
+        answer, execution_mode = cls._llm_answer(
+            mode,
+            question,
+            context,
+            require_operational_next_actions=require_operational_next_actions,
+        )
 
-        next_actions = cls._build_next_action_list(mode, context)
+        next_actions = (
+            cls._build_next_action_list(mode, context) if require_operational_next_actions else []
+        )
 
         cls._record_memory_event(
             organization_id,
@@ -345,6 +397,7 @@ class NovaCoreService:
             metadata={
                 "execution_mode": execution_mode,
                 "next_actions_count": len(next_actions),
+                "require_operational_next_actions": require_operational_next_actions,
             },
         )
 

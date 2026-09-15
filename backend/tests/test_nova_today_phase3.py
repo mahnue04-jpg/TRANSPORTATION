@@ -136,9 +136,9 @@ def test_nova_today_phase3_communications_connector_states(
     disconnected = client.get("/api/nova/today/dashboard", headers=owner)
     health = {row["source"]: row for row in disconnected.json()["source_health"]}
     assert health["communications"]["status"] in {"ok", "partial", "empty"}
-    assert health["communications"]["connector"] == "disconnected"
+    assert health["communications"]["connector"] == "not_configured"
     if health["communications"]["status"] == "partial":
-        assert "no mailbox connector" in health["communications"]["detail"].lower()
+        assert "never been connected" in health["communications"]["detail"].lower() or "not an error" in health["communications"]["detail"].lower()
 
     monkeypatch.setattr("app.core.nova.communications.service._connected", lambda *_args, **_kwargs: True)
     connected = client.get("/api/nova/today/dashboard", headers=owner)
@@ -327,7 +327,7 @@ def test_nova_today_phase3_source_health_partial_helper() -> None:
 
     empty_disconnected = _health("communications", "ok", count=0, email_connected=False)
     assert empty_disconnected.status == "empty"
-    assert empty_disconnected.connector == "disconnected"
+    assert empty_disconnected.connector == "not_configured"
     partial = _health("communications", "ok", count=2, email_connected=False)
     assert partial.status == "partial"
     connected = _health("communications", "ok", count=2, email_connected=True)
