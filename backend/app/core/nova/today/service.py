@@ -32,6 +32,7 @@ from app.core.nova.today.links import (
     source_details,
     source_href,
 )
+from app.core.nova.today.db_recovery import recover_today_session
 from app.core.nova.today.mailbox import ConnectorHealth, MailboxItem, read_mailbox
 from app.core.nova.today.models import NovaV2CommandAction, NovaV2RecheckEvent
 from app.core.nova.today.readiness import beta_readiness_checklist
@@ -173,6 +174,7 @@ def _read_one_product_count(db: Session, *, organization_id: str, user: UserCont
         count = counters[spec["key"]](db, organization_id)
         return _product_count_card(spec, count=int(count), status="ok")
     except Exception:
+        recover_today_session(db)
         return _product_count_card(spec, count=None, status="unavailable")
 
 
@@ -675,10 +677,11 @@ def _attach_action(card: NovaTodayCard, rows: dict[tuple[str, str, str], NovaV2C
     return card
 
 
-def _safe_source(loader):
+def _safe_source(db: Session, loader):
     try:
         return loader(), "ok"
     except Exception:
+        recover_today_session(db)
         return None, "unavailable"
 
 
@@ -765,26 +768,28 @@ def _collect_v1_cards(db: Session, *, organization_id: str, user: UserContext) -
             db, organization_id=organization_id, user=user, persist=True
         )
     except PermissionError:
+        recover_today_session(db)
         mailbox_health = ConnectorHealth(
             status="unavailable",
             detail="Cross-owner or cross-org connector access is denied.",
         )
     except Exception:
+        recover_today_session(db)
         mailbox_health = ConnectorHealth(
             status="unavailable",
             detail="Mailbox connector is unavailable. Today did not invent messages.",
         )
     workspace, workspace_status = _safe_source(
-        lambda: workspace_dashboard(db, organization_id=organization_id, user=user)
+        db, lambda: workspace_dashboard(db, organization_id=organization_id, user=user)
     )
     communications, comms_status = _safe_source(
-        lambda: communications_dashboard(db, organization_id=organization_id, user=user)
+        db, lambda: communications_dashboard(db, organization_id=organization_id, user=user)
     )
     government, gov_status = _safe_source(
-        lambda: government_dashboard(db, organization_id=organization_id, user=user)
+        db, lambda: government_dashboard(db, organization_id=organization_id, user=user)
     )
     business, biz_status = _safe_source(
-        lambda: business_dashboard(db, organization_id=organization_id, user=user)
+        db, lambda: business_dashboard(db, organization_id=organization_id, user=user)
     )
 
     comms_cards: list[NovaTodayCard] = []
@@ -1198,6 +1203,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
     try:
         counts = product_counts(db, organization_id=organization_id, user=user)
     except Exception:
+        recover_today_session(db)
         counts = [_product_count_card(spec, count=None, status="unavailable") for spec in _PRODUCT_COUNT_SPECS]
     return NovaTodayDashboardOut(
         attention_now=attention_now,
@@ -1610,6 +1616,7 @@ def list_mailbox(
     except PermissionError as exc:
         raise NovaTodayError(str(exc), status_code=403) from exc
     except Exception:
+        recover_today_session(db)
         items, health = [], ConnectorHealth(
             status="unavailable",
             detail="Mailbox connector is unavailable. Today did not invent messages.",
@@ -1699,6 +1706,7 @@ def recheck_source(
         except PermissionError as exc:
             raise NovaTodayError(str(exc), status_code=403) from exc
         except Exception:
+            recover_today_session(db)
             health = ConnectorHealth(
                 status="unavailable",
                 detail="Mailbox connector is unavailable. Today did not invent messages.",

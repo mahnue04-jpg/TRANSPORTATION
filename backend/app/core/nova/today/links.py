@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
+from app.core.nova.today.db_recovery import recover_today_session
 from app.core.nova.today.models import NovaV2CommandAction
 from sqlalchemy.orm import Session
 
@@ -100,6 +101,7 @@ def source_record_visible(
                 get_item(db, ref, organization_id=organization_id, user=user)
                 return True
             except Exception:
+                recover_today_session(db)
                 return any(
                     row.program_id == ref
                     for row in list_programs(db, organization_id=organization_id, user=user)
@@ -109,6 +111,7 @@ def source_record_visible(
         if source_module == "workspace":
             return _workspace_visible(db, ref, organization_id=organization_id, user=user)
     except Exception:
+        recover_today_session(db)
         return False
     return False
 
@@ -169,6 +172,7 @@ def source_details(
                     "agency": item.agency or "",
                 }
             except Exception:
+                recover_today_session(db)
                 program = next(
                     (
                         row
@@ -191,6 +195,7 @@ def source_details(
         if source_module == "link":
             return {"kind": "product_link", "title": source_ref_id, "page": module_page("link", source_ref_id) or ""}
     except Exception:
+        recover_today_session(db)
         return None
     return None
 
@@ -232,7 +237,7 @@ def _communications_visible(db: Session, ref: str, *, organization_id: str, user
         get_message(db, ref, organization_id=organization_id, user=user, mark_read=False)
         return True
     except Exception:
-        pass
+        recover_today_session(db)
     if any(row.id == ref for row in list_drafts(db, user=user)):
         return True
     return any(row.id == ref for row in list_events(db, user=user))
@@ -254,7 +259,7 @@ def _communications_details(db: Session, ref: str, *, organization_id: str, user
             "important": "important" if out.important else "normal",
         }
     except Exception:
-        pass
+        recover_today_session(db)
     for draft in list_drafts(db, user=user):
         if draft.id == ref:
             return {"kind": "draft", "subject": draft.subject, "status": draft.status}
@@ -272,6 +277,7 @@ def _business_visible(db: Session, ref: str, *, organization_id: str, user: User
             loader(db, ref, organization_id=organization_id, user=user)
             return True
         except Exception:
+            recover_today_session(db)
             continue
     return False
 
@@ -289,12 +295,12 @@ def _business_details(db: Session, ref: str, *, organization_id: str, user: User
     try:
         return {"kind": "task", "title": task_out(get_task(db, ref, organization_id=organization_id, user=user)).title}
     except Exception:
-        pass
+        recover_today_session(db)
     try:
         customer = customer_out(get_customer(db, ref, organization_id=organization_id, user=user))
         return {"kind": "customer", "title": customer.name}
     except Exception:
-        pass
+        recover_today_session(db)
     opportunity = opportunity_out(get_opportunity(db, ref, organization_id=organization_id, user=user))
     return {"kind": "opportunity", "title": opportunity.title}
 
@@ -307,7 +313,7 @@ def _workspace_visible(db: Session, ref: str, *, organization_id: str, user: Use
         get_project(db, ref, organization_id=organization_id, user=user, touch=False)
         return True
     except Exception:
-        pass
+        recover_today_session(db)
     query = db.query(NovaWorkspaceActivity).filter(
         NovaWorkspaceActivity.activity_id == ref,
         NovaWorkspaceActivity.organization_id == organization_id,
@@ -325,7 +331,7 @@ def _workspace_details(db: Session, ref: str, *, organization_id: str, user: Use
         project = project_out(get_project(db, ref, organization_id=organization_id, user=user, touch=False))
         return {"kind": "project", "title": project.title, "status": project.status}
     except Exception:
-        pass
+        recover_today_session(db)
     query = db.query(NovaWorkspaceActivity).filter(
         NovaWorkspaceActivity.activity_id == ref,
         NovaWorkspaceActivity.organization_id == organization_id,
