@@ -83,6 +83,54 @@ def get_nova_saas_stripe_override() -> NovaSaasStripeClient | None:
     return _CLIENT_OVERRIDE
 
 
+def stripe_phase_duration(phase: dict[str, Any]) -> dict[str, Any] | None:
+    """Stripe Basil+ rejected phases.iterations. Founding uses duration months instead."""
+    duration = phase.get("duration") if isinstance(phase.get("duration"), dict) else None
+    if duration and duration.get("interval_count"):
+        return {
+            "interval": str(duration.get("interval") or INTERVAL),
+            "interval_count": int(duration["interval_count"]),
+        }
+    if phase.get("iterations"):
+        return {"interval": INTERVAL, "interval_count": int(phase["iterations"])}
+    return None
+
+
+def build_stripe_schedule_phases(
+    plan: dict[str, Any],
+    *,
+    catalog: dict[str, str],
+    start_date: Any = None,
+    trial_end: Any = None,
+) -> list[dict[str, Any]]:
+    """Stripe schedule update payload. Never sends phases.iterations."""
+    phases: list[dict[str, Any]] = []
+    for index, phase in enumerate(plan.get("phases") or []):
+        lookup = str(phase.get("price_lookup") or "")
+        item: dict[str, Any] = {
+            "items": [{"price": catalog[lookup], "quantity": 1}],
+        }
+        if index == 0 and start_date is not None:
+            item["start_date"] = start_date
+        duration = stripe_phase_duration(phase if isinstance(phase, dict) else {})
+        if duration is not None:
+            item["duration"] = duration
+        if index == 0 and trial_end:
+            item["trial_end"] = trial_end
+        phases.append(item)
+    return phases
+
+
+def schedule_id_from_subscription(subscription: dict[str, Any] | None) -> str | None:
+    raw = (subscription or {}).get("schedule")
+    if isinstance(raw, dict):
+        value = raw.get("id")
+        return str(value) if value else None
+    if raw:
+        return str(raw)
+    return None
+
+
 def get_nova_saas_stripe_client() -> NovaSaasStripeClient:
     if _CLIENT_OVERRIDE is not None:
         return _CLIENT_OVERRIDE
@@ -100,7 +148,12 @@ class FakeNovaSaasStripeClient:
     def __init__(self) -> None:
         self.sessions: dict[str, dict[str, Any]] = {}
         self.schedules: list[dict[str, Any]] = []
+        self.subscription_schedules: dict[str, str] = {}
         self.created_count = 0
+        self.schedule_create_calls = 0
+        self.schedule_update_calls = 0
+        self.fail_next_update = False
+        self.last_stripe_phases: list[dict[str, Any]] = []
         self.prices = {
             FOUNDING_PRICE_LOOKUP: "price_nova_founding_test",
             STANDARD_PRICE_LOOKUP: "price_nova_standard_test",
@@ -147,15 +200,62 @@ class FakeNovaSaasStripeClient:
             record["subscription"] = None
         return dict(record)
 
+    def attach_partial_schedule(self, subscription_id: str) -> dict[str, Any]:
+        existing_id = self.subscription_schedules.get(subscription_id)
+        if existing_id:
+            return dict(self._schedule_by_id(existing_id) or {"id": existing_id, "subscription": subscription_id})
+        schedule = {
+            "id": f"sub_sched_test_{uuid4()[:10]}",
+            "subscription": subscription_id,
+            "plan": {},
+            "phases": [],
+            "stripe_phases": [],
+            "partial": True,
+        }
+        self.schedules.append(schedule)
+        self.subscription_schedules[subscription_id] = str(schedule["id"])
+        return dict(schedule)
+
+    def _schedule_by_id(self, schedule_id: str) -> dict[str, Any] | None:
+        for item in self.schedules:
+            if item.get("id") == schedule_id:
+                return item
+        return None
+
     def apply_subscription_schedule(self, *, subscription_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+        stripe_phases = build_stripe_schedule_phases(plan, catalog=self.prices)
+        existing_id = self.subscription_schedules.get(subscription_id)
+        if existing_id:
+            self.schedule_update_calls += 1
+            if self.fail_next_update:
+                self.fail_next_update = False
+                raise RuntimeError("Received unknown parameter: phases[iterations]")
+            schedule = self._schedule_by_id(existing_id) or {
+                "id": existing_id,
+                "subscription": subscription_id,
+            }
+            schedule["plan"] = plan
+            schedule["phases"] = list(plan.get("phases") or [])
+            schedule["stripe_phases"] = stripe_phases
+            schedule["partial"] = False
+            self.last_stripe_phases = stripe_phases
+            return dict(schedule)
+        self.schedule_create_calls += 1
         schedule = {
             "id": f"sub_sched_test_{uuid4()[:10]}",
             "subscription": subscription_id,
             "plan": plan,
             "phases": list(plan.get("phases") or []),
+            "stripe_phases": stripe_phases,
+            "partial": False,
         }
         self.schedules.append(schedule)
-        return schedule
+        self.subscription_schedules[subscription_id] = str(schedule["id"])
+        self.last_stripe_phases = stripe_phases
+        if self.fail_next_update:
+            self.fail_next_update = False
+            raise RuntimeError("Received unknown parameter: phases[iterations]")
+        return dict(schedule)
 
 
 class LiveNovaSaasStripeClient:
@@ -212,6 +312,7 @@ class LiveNovaSaasStripeClient:
             "payment_status": getattr(created, "payment_status", None),
             "customer": getattr(created, "customer", None),
             "subscription": getattr(created, "subscription", None),
+            "schedule": getattr(created, "schedule", None),
             "metadata": getattr(created, "metadata", {}) or {},
         }
 
@@ -288,9 +389,14 @@ class LiveNovaSaasStripeClient:
     def apply_subscription_schedule(self, *, subscription_id: str, plan: dict[str, Any]) -> dict[str, Any]:
         client = self._build_client()
         catalog = self.catalog(client)
-        created = client.v1.subscription_schedules.create({"from_subscription": subscription_id})
-        schedule_id = created["id"] if isinstance(created, dict) else getattr(created, "id", None)
-        current = created if isinstance(created, dict) else getattr(created, "to_dict", lambda: {})()
+        subscription = self._as_dict(client.v1.subscriptions.retrieve(str(subscription_id)))
+        schedule_id = schedule_id_from_subscription(subscription)
+        if schedule_id:
+            current = self._as_dict(client.v1.subscription_schedules.retrieve(str(schedule_id)))
+        else:
+            created = client.v1.subscription_schedules.create({"from_subscription": subscription_id})
+            current = self._as_dict(created)
+            schedule_id = str(current.get("id") or "") or None
         phases_in = current.get("phases") if isinstance(current, dict) else None
         start_date = None
         trial_end = None
@@ -298,18 +404,12 @@ class LiveNovaSaasStripeClient:
             first = phases_in[0] if isinstance(phases_in[0], dict) else {}
             start_date = first.get("start_date")
             trial_end = first.get("trial_end")
-        phases: list[dict[str, Any]] = []
-        for index, phase in enumerate(plan.get("phases") or []):
-            item = {
-                "items": [{"price": catalog[str(phase["price_lookup"])], "quantity": 1}],
-            }
-            if index == 0 and start_date is not None:
-                item["start_date"] = start_date
-            if phase.get("iterations"):
-                item["iterations"] = int(phase["iterations"])
-            if index == 0 and trial_end:
-                item["trial_end"] = trial_end
-            phases.append(item)
+        phases = build_stripe_schedule_phases(
+            plan,
+            catalog=catalog,
+            start_date=start_date,
+            trial_end=trial_end,
+        )
         updated = client.v1.subscription_schedules.update(str(schedule_id), {"phases": phases})
         payload = self._as_dict(updated)
         payload["plan"] = plan

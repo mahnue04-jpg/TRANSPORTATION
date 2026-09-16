@@ -11,14 +11,18 @@ from app.auth import SEED_PASSWORD, ensure_auth_schema, hash_password, seed_defa
 from app.core.nova.autonomy.ledger import ensure_autonomy_schema
 from app.core.nova.signup.models import (
     STATUS_TRIALING,
+    NovaCustomerTenant,
     NovaSignupAccount,
+    NovaSignupWebhookEvent,
 )
 from app.core.nova.signup.offer import (
     FOUNDING_CAP,
     FOUNDING_COPY,
     FOUNDING_PAID_MONTHS,
+    FOUNDING_PRICE_LOOKUP,
     FOUNDING_UNIT_AMOUNT,
     INTRO_DAYS,
+    STANDARD_PRICE_LOOKUP,
     STANDARD_UNIT_AMOUNT,
     assert_no_rejected_prices,
     billing_plan,
@@ -29,8 +33,10 @@ from app.core.nova.signup.offer import (
 from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
 from app.core.nova.signup.stripe_client import (
     FakeNovaSaasStripeClient,
+    build_stripe_schedule_phases,
     set_nova_saas_stripe_override,
 )
+from app.db.models import User as UserModel
 from app.core.nova.today.schema_ensure import ensure_nova_today_schema
 from app.db.session import SessionLocal, engine, init_platform_db
 from app.helpers import now, uuid4
@@ -117,6 +123,7 @@ def test_offer_and_billing_plan_match_approved_founding_rule() -> None:
     assert founding["trial_period_days"] == INTRO_DAYS
     assert founding["phases"][0]["unit_amount"] == FOUNDING_UNIT_AMOUNT
     assert founding["phases"][0]["iterations"] == FOUNDING_PAID_MONTHS
+    assert founding["phases"][0]["duration"] == {"interval": "month", "interval_count": FOUNDING_PAID_MONTHS}
     assert founding["phases"][1]["unit_amount"] == STANDARD_UNIT_AMOUNT
     assert standard["phases"][0]["unit_amount"] == STANDARD_UNIT_AMOUNT
     assert expected_unit_amount(founding=True, paid_month_index=0) == 0
@@ -163,6 +170,9 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert status["plan"]["phases"][1]["unit_amount"] == 9900
         assert fake.schedules
         assert fake.schedules[0]["phases"][0]["unit_amount"] == 5900
+        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        assert "iterations" not in fake.last_stripe_phases[0]
+        assert "iterations" not in fake.last_stripe_phases[1]
 
         login = client.post(
             "/api/auth/login",
@@ -348,6 +358,9 @@ def test_customer_eleven_does_not_receive_founding_pricing() -> None:
         assert webhook.json()["plan"]["tier"] == "standard"
     finally:
         set_nova_saas_stripe_override(None)
+        with SessionLocal() as db:
+            db.query(NovaSignupAccount).filter(NovaSignupAccount.contact_name == "Occupied").delete()
+            db.commit()
 
 
 def test_health_register_is_not_the_nova_signup_path() -> None:
@@ -424,6 +437,162 @@ def test_nova_saas_admin_cannot_access_platform_admin_apis() -> None:
         assert unknown.status_code == 403
         today = client.get("/api/nova/today/dashboard", headers=customer)
         assert today.status_code == 200, today.text
+    finally:
+        set_nova_saas_stripe_override(None)
+
+
+def _completed_webhook(client: TestClient, session: dict, event_id: str):
+    return client.post(
+        "/api/nova/signup/stripe/webhook",
+        json={
+            "id": event_id,
+            "type": "checkout.session.completed",
+            "data": {"object": session},
+        },
+    )
+
+
+def _counts_for_email(email: str, signup_id: str) -> dict[str, int]:
+    with SessionLocal() as db:
+        return {
+            "users": int(db.query(UserModel).filter(UserModel.email == email).count()),
+            "tenants": int(
+                db.query(NovaCustomerTenant).filter(NovaCustomerTenant.signup_id == signup_id).count()
+            ),
+        }
+
+
+def test_founding_schedule_uses_current_stripe_duration_api() -> None:
+    founding = billing_plan(founding_eligible=True)
+    catalog = {
+        FOUNDING_PRICE_LOOKUP: "price_nova_founding_test",
+        STANDARD_PRICE_LOOKUP: "price_nova_standard_test",
+    }
+    phases = build_stripe_schedule_phases(founding, catalog=catalog, start_date=1_700_000_000, trial_end=1_700_604_800)
+    assert phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+    assert "iterations" not in phases[0]
+    assert "iterations" not in phases[1]
+    assert phases[0]["items"][0]["price"] == "price_nova_founding_test"
+    assert phases[1]["items"][0]["price"] == "price_nova_standard_test"
+    assert expected_unit_amount(founding=True, paid_month_index=3) == 5900
+    assert expected_unit_amount(founding=True, paid_month_index=4) == 9900
+
+
+def test_existing_schedule_is_updated_instead_of_recreated() -> None:
+    fake = FakeNovaSaasStripeClient()
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload()
+        created = client.post("/api/nova/signup", json=payload)
+        assert created.status_code == 200, created.text
+        assert created.json()["founding_eligible"] is True
+        session = fake.complete_session(created.json()["checkout_session_id"])
+        attached = fake.attach_partial_schedule(str(session["subscription"]))
+        webhook = _completed_webhook(client, session, f"evt_existing_{uuid4()[:12]}")
+        assert webhook.status_code == 200, webhook.text
+        assert webhook.json()["activated"] is True
+        assert fake.schedule_create_calls == 0
+        assert fake.schedule_update_calls == 1
+        assert len(fake.schedules) == 1
+        assert fake.schedules[0]["id"] == attached["id"]
+        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        assert "iterations" not in fake.last_stripe_phases[0]
+        status = client.get(f"/api/nova/signup/{created.json()['signup_id']}").json()
+        assert status["status"] == "trialing"
+        assert status["founding_slot"] == created.json()["founding_slot"]
+    finally:
+        set_nova_saas_stripe_override(None)
+
+
+def test_retry_after_partial_schedule_creation_succeeds() -> None:
+    fake = FakeNovaSaasStripeClient()
+    fake.fail_next_update = True
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload(business_name=f"Nova Retry Courier {uuid4()[:8]}")
+        created = client.post("/api/nova/signup", json=payload)
+        assert created.status_code == 200, created.text
+        assert created.json()["founding_eligible"] is True
+        signup_id = created.json()["signup_id"]
+        slot = created.json()["founding_slot"]
+        session = fake.complete_session(created.json()["checkout_session_id"])
+        event_id = f"evt_retry_{uuid4()[:12]}"
+        first = _completed_webhook(client, session, event_id)
+        assert first.status_code == 503, first.text
+        assert "iterations" in first.text or "schedule" in first.text.lower()
+        assert fake.schedule_create_calls == 1
+        assert fake.schedule_update_calls == 0
+        assert len(fake.schedules) == 1
+        assert client.get(f"/api/nova/signup/{signup_id}").json()["status"] == "checkout_open"
+        assert _counts_for_email(payload["email"], signup_id)["tenants"] == 0
+
+        second = _completed_webhook(client, session, event_id)
+        assert second.status_code == 200, second.text
+        assert second.json()["activated"] is True
+        assert fake.schedule_create_calls == 1
+        assert fake.schedule_update_calls == 1
+        assert len(fake.schedules) == 1
+        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        status = client.get(f"/api/nova/signup/{signup_id}").json()
+        assert status["status"] == "trialing"
+        assert status["founding_slot"] == slot
+        counts = _counts_for_email(payload["email"], signup_id)
+        assert counts["tenants"] == 1
+        assert counts["users"] == 1
+        with SessionLocal() as db:
+            event_rows = (
+                db.query(NovaSignupWebhookEvent)
+                .filter(NovaSignupWebhookEvent.stripe_event_id == event_id)
+                .all()
+            )
+            assert len(event_rows) == 1
+            assert event_rows[0].processing_result == "activated"
+    finally:
+        set_nova_saas_stripe_override(None)
+
+
+def test_duplicate_checkout_completed_webhook_is_idempotent() -> None:
+    fake = FakeNovaSaasStripeClient()
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload(business_name=f"Nova Dup Courier {uuid4()[:8]}")
+        created = client.post("/api/nova/signup", json=payload)
+        assert created.status_code == 200, created.text
+        assert created.json()["founding_eligible"] is True
+        signup_id = created.json()["signup_id"]
+        session = fake.complete_session(created.json()["checkout_session_id"])
+        event_id = f"evt_dup_{uuid4()[:12]}"
+        first = _completed_webhook(client, session, event_id)
+        assert first.status_code == 200, first.text
+        first_counts = _counts_for_email(payload["email"], signup_id)
+        assert first_counts["tenants"] == 1
+        assert first_counts["users"] == 1
+        create_calls = fake.schedule_create_calls
+        update_calls = fake.schedule_update_calls
+
+        second = _completed_webhook(client, session, event_id)
+        assert second.status_code == 200, second.text
+        assert second.json().get("duplicate") is True
+        assert fake.schedule_create_calls == create_calls
+        assert fake.schedule_update_calls == update_calls
+        assert len(fake.schedules) == 1
+        second_counts = _counts_for_email(payload["email"], signup_id)
+        assert second_counts == first_counts
+        with SessionLocal() as db:
+            assert (
+                db.query(NovaSignupWebhookEvent)
+                .filter(NovaSignupWebhookEvent.stripe_event_id == event_id)
+                .count()
+                == 1
+            )
+            assert (
+                db.query(NovaCustomerTenant).filter(NovaCustomerTenant.signup_id == signup_id).count()
+                == 1
+            )
+            assert db.query(UserModel).filter(UserModel.email == payload["email"]).count() == 1
     finally:
         set_nova_saas_stripe_override(None)
 

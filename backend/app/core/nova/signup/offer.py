@@ -70,6 +70,7 @@ def billing_plan(*, founding_eligible: bool) -> dict[str, Any]:
                     "product_name": FOUNDING_PRODUCT_NAME,
                     "unit_amount": FOUNDING_UNIT_AMOUNT,
                     "iterations": FOUNDING_PAID_MONTHS,
+                    "duration": {"interval": INTERVAL, "interval_count": FOUNDING_PAID_MONTHS},
                     "trial_period_days": INTRO_DAYS,
                 },
                 {
