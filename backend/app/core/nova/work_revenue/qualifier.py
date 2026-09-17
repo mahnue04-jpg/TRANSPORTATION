@@ -46,6 +46,10 @@ _ACCOUNT_RE = re.compile(r"\b(create an account|sign up on the portal|register a
 _PORTFOLIO_RE = re.compile(r"\b(portfolio|work sample required|attach a sample)\b", re.I)
 _CLEARANCE_RE = re.compile(r"\b(security clearance|government clearance|secret clearance)\b", re.I)
 _SUPPORT_RE = re.compile(r"\b(live customer support|answer phones|call center)\b", re.I)
+_EMPLOYEE_RE = re.compile(r"\b(w-2|w2 employee|full[- ]time employee|must be an employee)\b", re.I)
+_EQUIPMENT_RE = re.compile(r"\b(company vehicle|forklift|provided laptop|own tools|ppe required)\b", re.I)
+_SENSITIVE_RE = re.compile(r"\b(phi\b|hipaa|ssn|social security|confidential client data|credit card)\b", re.I)
+_INSURANCE_RE = re.compile(r"\b(professional liability|e&o insurance|workers.? comp|coi\b)\b", re.I)
 
 _DIGITAL_SKILL_MAP = {
     "email": "EMAIL_DRAFTING",
@@ -58,6 +62,14 @@ _DIGITAL_SKILL_MAP = {
     "data entry": "CRM_DATA_ORGANIZATION",
     "summar": "DATA_SUMMARIZATION",
     "proposal": "PROPOSAL_DRAFTING",
+    "questionnaire": "QUESTIONNAIRE_DRAFTING",
+    "rfp": "RFP_RESPONSE_PREPARATION",
+    "statement of work": "SOW_DRAFTING",
+    "sow": "SOW_DRAFTING",
+    "bid": "BID_PREPARATION",
+    "meeting": "MEETING_PREPARATION",
+    "appointment": "MEETING_PREPARATION",
+    "weekly report": "WEEKLY_CLIENT_REPORTING",
     "marketing": "MARKETING_DRAFTING",
     "calendar": "CALENDAR_PREPARATION",
     "schedul": "SCHEDULING_SUPPORT",
@@ -209,6 +221,22 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         owner_actions.append("PRICING_COMMITMENT")
         owner_participation.append("Pricing commitment")
         reasons.append("requires owner approval of pricing")
+    employee_status_required = _flag(_EMPLOYEE_RE, text)
+    equipment_required = _flag(_EQUIPMENT_RE, text)
+    sensitive_data_required = _flag(_SENSITIVE_RE, text)
+    if employee_status_required:
+        human_tasks.append("Human employee status")
+        reasons.append("requires employee status")
+        other_human.append("A human employee of the client, not Nova")
+    if equipment_required:
+        human_tasks.append("Physical equipment operation")
+        reasons.append("requires equipment")
+    if sensitive_data_required:
+        owner_tasks.append("Handle any sensitive data offline; do not paste secrets here")
+        reasons.append("requires sensitive data handling")
+    if _flag(_INSURANCE_RE, text):
+        missing.append("insurance_information")
+        reasons.append("requires insurance information")
 
     skills = [str(item).lower() for item in (opportunity.get("skills_required") or [])]
     skill_blob = " ".join(skills) + " " + text.lower()
@@ -300,4 +328,20 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "owner_actions": unique_actions,
         "deceptive_score_used": False,
         "matched_capabilities": matched_caps,
+        "employee_status_required": employee_status_required,
+        "equipment_required": equipment_required,
+        "sensitive_data_required": sensitive_data_required,
+        "payment_structure": (
+            f"{opportunity.get('compensation_type') or OWNER_INPUT_REQUIRED} "
+            f"{opportunity.get('compensation_amount') if opportunity.get('compensation_amount') is not None else OWNER_INPUT_REQUIRED}"
+        ),
+        "work_split": {
+            "nova_can_do": nova_tasks or ["Prepare internal drafts after owner review"],
+            "owner_must_do": list(dict.fromkeys(owner_tasks + owner_participation)),
+            "unsupported": list(dict.fromkeys(human_tasks + other_human)),
+        },
+        "risks": unique_reasons,
+        "required_materials": ["owner approval"] + (["portfolio_or_work_sample"] if "portfolio_or_work_sample" in missing else []),
+        "client_name": opportunity.get("company_name") or OWNER_INPUT_REQUIRED,
+        "work_summary": opportunity.get("opportunity_title") or OWNER_INPUT_REQUIRED,
     }

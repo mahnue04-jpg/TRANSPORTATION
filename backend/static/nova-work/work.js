@@ -125,6 +125,9 @@
     $("count-submitted").textContent = counts.submitted || 0;
     $("count-closed").textContent = counts.closed || 0;
     $("count-actions").textContent = counts.owner_action_required || 0;
+    var summary = data.revenue_summary || {};
+    if ($("count-pipeline")) $("count-pipeline").textContent = summary.estimated_pipeline || 0;
+    if ($("count-received")) $("count-received").textContent = summary.owner_confirmed_received || 0;
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
@@ -137,7 +140,19 @@
         "</span> · " + escapeHtml(row.action_type) +
         "<div class=\"muted\">" + escapeHtml(row.explanation) + "</div></div>";
     });
-    $("revenue-box").textContent = data.revenue_placeholder || "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.";
+    $("revenue-box").textContent = (summary.disclaimer || data.revenue_placeholder || "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.") +
+      " Pipeline " + (summary.estimated_pipeline || 0) +
+      " · contracted " + (summary.contracted_value || 0) +
+      " · owner-confirmed received " + (summary.owner_confirmed_received || 0) +
+      ". These are not Stripe charges.";
+    if ($("engagement-list")) {
+      $("engagement-list").innerHTML = listHtml(data.engagements, "No internal engagements.", function (row) {
+        return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
+          "<div class=\"muted\">" + escapeHtml(row.service) + " · " + escapeHtml(row.frequency) +
+          " · " + escapeHtml(row.status) + " · payment " + escapeHtml(row.payment_status) +
+          " (tracking only)</div></div>";
+      });
+    }
     $("audit-list").innerHTML = listHtml(audit, "No activity yet.", function (row) {
       return "<div class=\"item\">" + escapeHtml(row.event_type) +
         "<div class=\"muted\">" + escapeHtml(row.summary) + "</div></div>";
@@ -156,12 +171,17 @@
       var history = tracker.status_history || [];
       var actions = tracker.owner_actions || [];
       var facts = detail.missing_owner_facts || [];
+      var checklist = detail.owner_input_checklist || [];
+      var split = detail.work_split || {};
       var match = ((opp.qualification || {}).matched_capabilities || []).join(", ") || "none recorded";
       var controls = "<div class=\"action-row\">";
       if (!app) {
         controls += actionButton("prepare", opportunityId, "Prepare application drafts");
       } else {
         controls += applicationActions(app);
+      }
+      if (!detail.engagement) {
+        controls += actionButton("engage", opportunityId, "Create internal engagement (not a contract)");
       }
       controls += actionButton("archive", opportunityId, "Archive");
       controls += "</div>";
@@ -176,6 +196,13 @@
         "<div class=\"detail-block\">Missing owner facts: " +
         escapeHtml(facts.length ? facts.join(", ") : "none flagged") +
         " — [OWNER INPUT REQUIRED]</div>" +
+        "<div class=\"detail-block\">Owner input checklist: " +
+        listHtml(checklist, "none", function (row) {
+          return "<div class=\"muted\">" + escapeHtml(row.label) + " " + escapeHtml(row.marker) + "</div>";
+        }) + "</div>" +
+        "<div class=\"detail-block\">Nova can do: " + escapeHtml((split.nova_can_do || []).join("; ") || "none yet") + "</div>" +
+        "<div class=\"detail-block\">Owner must do: " + escapeHtml((split.owner_must_do || []).join("; ") || "review and approve") + "</div>" +
+        "<div class=\"detail-block\">Unsupported: " + escapeHtml((split.unsupported || []).join("; ") || "none flagged") + "</div>" +
         "<div class=\"detail-block\">Source URL (not fetched): " +
         escapeHtml(detail.source_url_display || "none") + "</div>" +
         "<div class=\"detail-block\">Owner-entered revenue: status " +
@@ -252,6 +279,19 @@
     } else if (action === "record-manual") {
       await api("/api/nova/work/applications/" + id + "/record-manual-submission", { method: "POST" });
       showBanner("Manual submission recorded. Nova did not contact the source.", true);
+    } else if (action === "engage") {
+      var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
+      var opp = ((detail.tracker || {}).opportunity) || {};
+      await api("/api/nova/work/engagements", {
+        method: "POST",
+        body: JSON.stringify({
+          opportunity_id: id,
+          client_name: opp.company_name || "Unknown client",
+          service: opp.opportunity_title || "Internal work tracking",
+          frequency: "one_time"
+        })
+      });
+      showBanner("Internal engagement created. Not a signed contract. Nova did not contact the client.", true);
     } else if (action === "archive") {
       await api("/api/nova/work/opportunities/" + id, {
         method: "PATCH",

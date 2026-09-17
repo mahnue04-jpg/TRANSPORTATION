@@ -8,6 +8,7 @@ from app.auth import UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.work_revenue import service
+from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -16,6 +17,7 @@ from app.core.nova.work_revenue.schemas import (
     AuditEventOut,
     CapabilityOut,
     DashboardOut,
+    EngagementCreate,
     OpportunityCreate,
     OpportunityDetailOut,
     OpportunityOut,
@@ -23,6 +25,7 @@ from app.core.nova.work_revenue.schemas import (
     OwnerActionOut,
     ProviderOut,
     QualificationOut,
+    TaskCreate,
     TodaySummaryOut,
     TrackerOut,
 )
@@ -76,6 +79,11 @@ def work_capabilities(user: UserContext = Depends(get_current_user_context)):
 @router.get("/providers", response_model=list[ProviderOut])
 def work_providers(user: UserContext = Depends(get_current_user_context)):
     return service.providers()
+
+
+@router.get("/guardrails")
+def work_guardrails(user: UserContext = Depends(get_current_user_context)):
+    return engine_guardrails()
 
 
 @router.get("/profile")
@@ -337,3 +345,54 @@ def list_audit(
         )
         for row in service.list_audit(db, organization_id=org_id, user=user)
     ]
+
+
+@router.get("/engagements")
+def list_engagements(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return service.list_engagements(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/engagements")
+def create_engagement(
+    payload: EngagementCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    org_id = _resolve_org(user, payload.organization_id)
+    try:
+        return service.create_engagement(db, payload, organization_id=org_id, user=user)
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/engagements/{engagement_id}")
+def get_engagement(
+    engagement_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.get_engagement(
+            db, engagement_id, organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/engagements/{engagement_id}/tasks")
+def create_task(
+    engagement_id: str,
+    payload: TaskCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    org_id = _resolve_org(user, payload.organization_id)
+    try:
+        return service.create_task(db, engagement_id, payload, organization_id=org_id, user=user)
+    except service.NovaWorkError as exc:
+        _raise(exc)

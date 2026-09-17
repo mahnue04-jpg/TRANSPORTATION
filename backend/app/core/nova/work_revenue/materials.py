@@ -234,6 +234,69 @@ def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMIC
                 f"- Do not authorize Nova to submit, sign, or send banking/tax data\n"
             ),
         },
+        {
+            "kind": "owner_input_checklist",
+            "title": "Owner input checklist",
+            "body": (
+                f"DRAFT — OWNER REVIEW REQUIRED. {identity}\n\n"
+                f"COMPANY EXPERIENCE REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"PRICING REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"REFERENCE REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"LICENSE INFORMATION REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"INSURANCE INFORMATION REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"AVAILABILITY REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"DEADLINE CONFIRMATION REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"OWNER SIGNATURE REQUIRED: {OWNER_INPUT_REQUIRED}\n"
+                f"Do not invent any of these facts.\n"
+            ),
+        },
+        {
+            "kind": "client_discovery_questions",
+            "title": "Client discovery questions (DRAFT)",
+            "body": (
+                f"DRAFT — OWNER REVIEW REQUIRED. Nothing was sent to {company}.\n\n"
+                f"1. What outcome does the client actually need? {OWNER_INPUT_REQUIRED}\n"
+                f"2. What is in-scope versus out-of-scope? {OWNER_INPUT_REQUIRED}\n"
+                f"3. What is the expected start date? {OWNER_INPUT_REQUIRED}\n"
+                f"4. What is the payment structure? {OWNER_INPUT_REQUIRED}\n\n"
+                f"{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "work_plan",
+            "title": f"Internal work plan for {title}",
+            "body": (
+                f"DRAFT — OWNER REVIEW REQUIRED. Internal tracking only. Not a contract.\n\n{party}\n\n"
+                f"Nova tasks: draft, organize, and summarize with owner review.\n"
+                f"Owner tasks: approve, confirm facts, sign, and any live human steps.\n"
+                f"Unsupported: physical presence, licensed practice, payments, external send.\n"
+                f"Status of this plan: NOT STARTED until the owner creates an internal engagement.\n\n"
+                f"{forbidden}"
+            ),
+        },
+        {
+            "kind": "weekly_report_template",
+            "title": "Weekly client report template (DRAFT)",
+            "body": (
+                f"DRAFT — OWNER REVIEW REQUIRED. Do not send this to a client yet.\n\n"
+                f"Client: {company}\nPeriod: {OWNER_INPUT_REQUIRED}\n"
+                f"Work completed: {OWNER_INPUT_REQUIRED}\n"
+                f"Blockers: {OWNER_INPUT_REQUIRED}\n"
+                f"Next week: {OWNER_INPUT_REQUIRED}\n"
+                f"Nova did not contact the client.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "invoice_support_summary",
+            "title": "Invoice support summary (DRAFT)",
+            "body": (
+                f"DRAFT — OWNER REVIEW REQUIRED. This is not an invoice and was not sent.\n\n"
+                f"Amount: {OWNER_INPUT_REQUIRED}\n"
+                f"Period: {OWNER_INPUT_REQUIRED}\n"
+                f"Owner-confirmed received: no unless the owner later confirms it.\n"
+                f"Nova will not create a Stripe invoice, charge, or payout.\n\n{forbidden}"
+            ),
+        },
     ]
     for item in drafts:
         item["status"] = "DRAFT"
@@ -260,4 +323,37 @@ def missing_owner_facts(opportunity: dict[str, Any]) -> list[str]:
         facts.append("portfolio_or_work_sample")
     if "attach" in text or "upload" in text:
         facts.append("requested_attachment")
+    if "insur" in text:
+        facts.append("insurance_information")
+    if "reference" in text:
+        facts.append("reference")
+    if "pric" in text or "rate" in text or "bid" in text:
+        facts.append("pricing")
+    if "availab" in text:
+        facts.append("availability")
+    if "deadline" in text or "due date" in text:
+        facts.append("deadline_confirmation")
+    if "sign" in text or "contract" in text:
+        facts.append("owner_signature")
     return list(dict.fromkeys(facts))
+
+
+def owner_input_checklist(opportunity: dict[str, Any]) -> list[dict[str, str]]:
+    labels = {
+        "legal_business_name": "COMPANY LEGAL NAME REQUIRED",
+        "owner_contact_info": "OWNER CONTACT REQUIRED",
+        "verified_experience": "COMPANY EXPERIENCE REQUIRED",
+        "required_certification": "LICENSE INFORMATION REQUIRED",
+        "portfolio_or_work_sample": "WORK SAMPLE REQUIRED",
+        "requested_attachment": "REQUESTED ATTACHMENT REQUIRED",
+        "insurance_information": "INSURANCE INFORMATION REQUIRED",
+        "reference": "REFERENCE REQUIRED",
+        "pricing": "PRICING REQUIRED",
+        "availability": "AVAILABILITY REQUIRED",
+        "deadline_confirmation": "DEADLINE CONFIRMATION REQUIRED",
+        "owner_signature": "OWNER SIGNATURE REQUIRED",
+    }
+    return [
+        {"code": code, "label": labels.get(code, code.replace("_", " ").upper() + " REQUIRED"), "marker": OWNER_INPUT_REQUIRED}
+        for code in missing_owner_facts(opportunity)
+    ]

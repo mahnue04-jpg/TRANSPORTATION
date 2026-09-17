@@ -11,14 +11,17 @@ from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
-from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, sanitize_untrusted
+from app.core.nova.work_revenue.flags import engine_guardrails, EXTERNAL_SUBMISSION_ENABLED
+from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, owner_input_checklist, sanitize_untrusted
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkEngagement,
     NovaWorkMaterial,
     NovaWorkOpportunity,
     NovaWorkOwnerAction,
     NovaWorkStatusHistory,
+    NovaWorkTask,
 )
 from app.core.nova.work_revenue.providers import get_provider, list_providers, opportunity_fingerprint
 from app.core.nova.work_revenue.qualifier import qualify_opportunity
@@ -28,6 +31,7 @@ from app.core.nova.work_revenue.schemas import (
     OPPORTUNITY_STATUSES,
     OWNER_ACTION_TYPES,
     REVENUE_STATUSES,
+    TASK_STATUSES,
     ApplicationCreate,
     ApplicationDecision,
     ApplicationOut,
@@ -35,6 +39,7 @@ from app.core.nova.work_revenue.schemas import (
     AuditEventOut,
     CapabilityOut,
     DashboardOut,
+    EngagementCreate,
     MaterialOut,
     OpportunityCreate,
     OpportunityDetailOut,
@@ -44,6 +49,7 @@ from app.core.nova.work_revenue.schemas import (
     ProviderOut,
     QualificationOut,
     StatusHistoryOut,
+    TaskCreate,
     TodaySummaryOut,
     TrackerOut,
 )
@@ -94,6 +100,29 @@ class NovaWorkError(ValueError):
     def __init__(self, message: str, *, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _safe_source_url(value: str | None) -> str | None:
+    cleaned = sanitize_untrusted(value)
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered.startswith(("javascript:", "data:", "vbscript:", "file:")):
+        raise NovaWorkError("Source URL scheme is not allowed")
+    return cleaned[:800]
+
+
+def _validate_amount(value: float | None, *, label: str) -> float | None:
+    if value is None:
+        return None
+    if value < 0 or value > 1_000_000_000:
+        raise NovaWorkError(f"{label} must be between 0 and 1000000000")
+    return value
+
+
+def _validate_date_range(start: datetime | None, end: datetime | None) -> None:
+    if start and end and end < start:
+        raise NovaWorkError("expected_end_date cannot be before expected_start_date")
 
 
 def _new_id(prefix: str) -> str:
@@ -269,6 +298,12 @@ def opportunity_out(
         revenue_status=getattr(row, "revenue_status", None) or "NONE",
         invoice_required=bool(getattr(row, "invoice_required", False)),
         owner_confirmed_payment_received=bool(getattr(row, "owner_confirmed_payment_received", False)),
+        invoice_value=getattr(row, "invoice_value", None),
+        amount_received=getattr(row, "amount_received", None),
+        expenses=getattr(row, "expenses", None),
+        estimated_net=getattr(row, "estimated_net", None),
+        confirmed_net=getattr(row, "confirmed_net", None),
+        payment_status=getattr(row, "payment_status", None) or "NONE",
         missing_owner_facts=missing_owner_facts(_opportunity_payload(row)),
     )
 
@@ -370,7 +405,7 @@ def _create_opportunity_row(
     source_type = str(payload.get("source_type") or "manual")
     title = sanitize_untrusted(payload.get("opportunity_title"))[:220]
     company = sanitize_untrusted(payload.get("company_name"))[:220]
-    source_url = sanitize_untrusted(payload.get("source_url")) or None
+    source_url = _safe_source_url(payload.get("source_url"))
     fingerprint = opportunity_fingerprint(
         organization_id=organization_id,
         company_name=company,
@@ -483,24 +518,50 @@ def list_opportunities(
     selected: list[NovaWorkOpportunity] = []
     for row in rows:
         app = apps.get(row.opportunity_id)
-        if view_filter == "qualified" and (
-            row.qualification_outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}
-            or row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY", "APPLICATION_PREPARED"}
-        ):
-            selected.append(row)
-        elif view_filter == "owner_action" and row.opportunity_id in actions:
-            selected.append(row)
-        elif view_filter == "draft_ready" and app is not None and app.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}:
-            selected.append(row)
-        elif view_filter == "approved" and app is not None and app.approved_for_future_submission:
-            selected.append(row)
-        elif view_filter == "rejected" and row.status == "REJECTED":
-            selected.append(row)
-        elif view_filter == "archived" and (getattr(row, "archived", False) or row.status in {"CLOSED", "REJECTED"}):
-            selected.append(row)
-        elif view_filter == "submitted" and row.status == "SUBMITTED":
+        if _matches_view(row, app, actions, view_filter):
             selected.append(row)
     return selected
+
+
+def _matches_view(
+    row: NovaWorkOpportunity,
+    app: NovaWorkApplication | None,
+    actions: set[str],
+    view_filter: str,
+) -> bool:
+    archived = bool(getattr(row, "archived", False))
+    if view_filter in {"new", "discovered"}:
+        return row.status == "DISCOVERED" and not archived
+    if view_filter == "needs_review":
+        return row.status in {"REVIEWING", "OWNER_REVIEW"}
+    if view_filter == "qualified":
+        return (
+            row.qualification_outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}
+            or row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY", "APPLICATION_PREPARED"}
+        )
+    if view_filter == "not_qualified":
+        return row.status == "NOT_QUALIFIED" or row.qualification_outcome in {"NOT_SUITABLE", "INSUFFICIENT_INFORMATION"}
+    if view_filter == "owner_action":
+        return row.opportunity_id in actions
+    if view_filter == "missing_information":
+        return row.qualification_outcome == "INSUFFICIENT_INFORMATION" or bool(missing_owner_facts(_opportunity_payload(row)))
+    if view_filter == "draft_ready":
+        return app is not None and app.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW", "NEEDS_CHANGES"}
+    if view_filter == "approved":
+        return app is not None and app.approved_for_future_submission
+    if view_filter == "submitted" or view_filter == "manually_submitted":
+        return (app is not None and app.manual_submission_recorded) or row.status == "SUBMITTED"
+    if view_filter == "active":
+        return row.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}
+    if view_filter == "won":
+        return row.status == "WON"
+    if view_filter == "lost":
+        return row.status in {"REJECTED", "CLOSED"} and row.status != "WON"
+    if view_filter == "rejected":
+        return row.status == "REJECTED" or (app is not None and app.approval_state == "REJECTED")
+    if view_filter == "archived":
+        return archived or row.status in {"CLOSED", "REJECTED"}
+    return False
 
 
 def list_opportunity_outs(
@@ -572,36 +633,79 @@ def update_opportunity(
             _apply_status(db, row, "INTERVIEW", user, "Interview date recorded")
     if payload.archived is True:
         row.archived = True
+        _record_audit(
+            db,
+            organization_id=row.organization_id,
+            user=user,
+            event_type="OPPORTUNITY_ARCHIVED",
+            summary=f"Owner archived {row.opportunity_id}",
+            ref_id=row.opportunity_id,
+        )
         if row.status not in {"CLOSED", "REJECTED", "WON"}:
             try:
                 _apply_status(db, row, "CLOSED", user, "Owner archived opportunity")
             except NovaWorkError:
                 pass
-    if payload.estimated_value is not None:
-        row.estimated_value = payload.estimated_value
-    if payload.quoted_amount is not None:
-        row.quoted_amount = payload.quoted_amount
-    if payload.contract_amount is not None:
-        row.contract_amount = payload.contract_amount
+    start = payload.expected_start_date if payload.expected_start_date is not None else row.expected_start_date
+    end = payload.expected_end_date if payload.expected_end_date is not None else row.expected_end_date
+    _validate_date_range(start, end)
+    for field_name in ("estimated_value", "quoted_amount", "contract_amount", "invoice_value", "amount_received", "expenses"):
+        incoming = getattr(payload, field_name, None)
+        if incoming is not None:
+            setattr(row, field_name, _validate_amount(incoming, label=field_name))
     if payload.expected_payment_frequency is not None:
         row.expected_payment_frequency = sanitize_untrusted(payload.expected_payment_frequency)[:40]
     if payload.expected_start_date is not None:
         row.expected_start_date = payload.expected_start_date
     if payload.expected_end_date is not None:
         row.expected_end_date = payload.expected_end_date
+    previous_revenue = row.revenue_status
     if payload.revenue_status is not None:
         if payload.revenue_status not in REVENUE_STATUSES:
             raise NovaWorkError("Unknown revenue status")
-        if payload.revenue_status == "OWNER_CONFIRMED_RECEIVED" and not payload.owner_confirmed_payment_received:
+        if payload.revenue_status in {"OWNER_CONFIRMED_RECEIVED", "RECEIVED"} and not (
+            payload.owner_confirmed_payment_received or row.owner_confirmed_payment_received
+        ):
             raise NovaWorkError("Payment received may only be marked with owner confirmation")
         row.revenue_status = payload.revenue_status
+        if previous_revenue != row.revenue_status:
+            _record_audit(
+                db,
+                organization_id=row.organization_id,
+                user=user,
+                event_type="REVENUE_STATUS_CHANGED",
+                summary=f"Revenue status {previous_revenue} → {row.revenue_status}. Not an actual payment.",
+                ref_id=row.opportunity_id,
+            )
+    if payload.payment_status is not None:
+        if payload.payment_status in {"RECEIVED", "OWNER_CONFIRMED_RECEIVED"} and not (
+            payload.owner_confirmed_payment_received or row.owner_confirmed_payment_received
+        ):
+            raise NovaWorkError("Payment received may only be marked with owner confirmation")
+        row.payment_status = payload.payment_status
     if payload.invoice_required is not None:
         row.invoice_required = payload.invoice_required
     if payload.owner_confirmed_payment_received is True:
         row.owner_confirmed_payment_received = True
         row.revenue_status = "OWNER_CONFIRMED_RECEIVED"
+        row.payment_status = "OWNER_CONFIRMED_RECEIVED"
+        _record_audit(
+            db,
+            organization_id=row.organization_id,
+            user=user,
+            event_type="RECEIPT_CONFIRMED",
+            summary="Owner confirmed a receipt. Nova did not collect payment.",
+            ref_id=row.opportunity_id,
+        )
     elif payload.owner_confirmed_payment_received is False:
         row.owner_confirmed_payment_received = False
+    gross = row.contract_amount if row.contract_amount is not None else row.quoted_amount
+    if gross is None:
+        gross = row.estimated_value
+    expenses = row.expenses or 0
+    if gross is not None:
+        row.estimated_net = gross - expenses
+        row.confirmed_net = (row.amount_received or 0) - expenses if row.owner_confirmed_payment_received else None
     row.updated_at = now()
     db.commit()
     db.refresh(row)
@@ -714,7 +818,23 @@ def qualify(
 
 
 def qualification_out(opportunity_id: str, result: dict[str, Any]) -> QualificationOut:
-    return QualificationOut(opportunity_id=opportunity_id, **{k: result[k] for k in QualificationOut.model_fields if k != "opportunity_id"})
+    payload = {}
+    for key in QualificationOut.model_fields:
+        if key == "opportunity_id":
+            continue
+        if key in result:
+            payload[key] = result[key]
+    return QualificationOut(opportunity_id=opportunity_id, **payload)
+
+
+def refuse_external_submission() -> None:
+    if EXTERNAL_SUBMISSION_ENABLED:
+        raise NovaWorkError("External submission flag is true but no live adapter is implemented", status_code=409)
+    raise NovaWorkError(
+        "External application submission is not enabled in Phase 1. "
+        "APPROVED means APPROVED_FOR_FUTURE_SUBMISSION only. Nothing was sent.",
+        status_code=409,
+    )
 
 
 def create_application(
@@ -894,14 +1014,6 @@ def decide_application(
     return application
 
 
-def refuse_external_submission() -> None:
-    raise NovaWorkError(
-        "External application submission is not enabled in Phase 1. "
-        "APPROVED means APPROVED_FOR_FUTURE_SUBMISSION only. Nothing was sent.",
-        status_code=409,
-    )
-
-
 def record_manual_submission(
     db: Session,
     application_id: str,
@@ -914,6 +1026,8 @@ def record_manual_submission(
         raise NovaWorkError("Manual submission may be recorded only after owner APPROVED", status_code=409)
     if application.externally_submitted:
         raise NovaWorkError("Phase 1 does not send external applications", status_code=409)
+    if application.manual_submission_recorded:
+        raise NovaWorkError("Manual submission already recorded", status_code=409)
     application.manual_submission_recorded = True
     application.updated_at = now()
     opportunity = get_opportunity(db, application.opportunity_id, organization_id=organization_id, user=user)
@@ -1116,23 +1230,37 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     approvals = [item for item in applications if item.approval_state == "READY_FOR_OWNER_REVIEW"]
     draft_ready = [item for item in applications if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
     approved = [item for item in applications if item.approved_for_future_submission]
-    submitted = [item for item in outs if item.status == "SUBMITTED"]
+    submitted = [item for item in outs if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"]
     needs_owner = [item for item in outs if item.owner_action_required or item.missing_owner_facts]
+    lost = [item for item in outs if item.status in {"REJECTED", "CLOSED"}]
+    active = [item for item in outs if item.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}]
+    missing_info = [item for item in outs if item.qualification_outcome == "INSUFFICIENT_INFORMATION"]
+    pipeline = sum((item.estimated_value or 0) for item in outs if not item.owner_confirmed_payment_received)
+    contracted = sum((item.contract_amount or 0) for item in outs)
+    received = sum((item.amount_received or 0) for item in outs if item.owner_confirmed_payment_received)
+    engagement_rows = list_engagements(db, organization_id=organization_id, user=user)
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
             "opportunities_found": len(opportunities),
+            "new": len([item for item in outs if item.status == "DISCOVERED"]),
+            "needs_review": len([item for item in outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
             "qualified": len(qualified),
+            "not_qualified": len([item for item in outs if item.status == "NOT_QUALIFIED"]),
             "needs_owner_input": len(needs_owner),
+            "missing_information": len(missing_info),
             "draft_ready": len(draft_ready),
             "approved_for_future_submission": len(approved),
             "submitted": len(submitted),
+            "active_work": len(active),
             "closed": len(archived),
+            "lost": len(lost),
             "applications_needing_approval": len(approvals),
             "follow_ups_due": len(follow_ups),
             "interviews": len(interviews),
             "owner_action_required": len(actions),
             "work_won": len(won),
+            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "ACTIVE"}]),
         },
         opportunity_inbox=inbox,
         qualified_work=qualified,
@@ -1144,6 +1272,14 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         owner_actions=[owner_action_out(item) for item in actions],
         rejected_or_archived=archived,
         opportunity_list=outs,
+        engagements=engagement_rows,
+        revenue_summary={
+            "estimated_pipeline": pipeline,
+            "contracted_value": contracted,
+            "owner_confirmed_received": received,
+            "disclaimer": "Estimated pipeline is not received revenue. Nova does not collect payment.",
+        },
+        guardrails=engine_guardrails(),
         revenue_placeholder=REVENUE_PLACEHOLDER,
         identity_disclaimer=IDENTITY_DISCLAIMER,
     )
@@ -1197,13 +1333,189 @@ def opportunity_detail(
     user: UserContext,
 ) -> OpportunityDetailOut:
     tracked = tracker(db, opportunity_id, organization_id=organization_id, user=user)
+    qual = tracked.opportunity.qualification or {}
+    engagement = next(
+        (
+            item
+            for item in list_engagements(db, organization_id=organization_id, user=user)
+            if item.get("opportunity_id") == opportunity_id
+        ),
+        None,
+    )
     return OpportunityDetailOut(
         tracker=tracked,
         missing_owner_facts=tracked.opportunity.missing_owner_facts,
+        owner_input_checklist=owner_input_checklist(_opportunity_payload(
+            get_opportunity(db, opportunity_id, organization_id=organization_id, user=user)
+        )),
+        work_split=qual.get("work_split") or {},
+        engagement=engagement,
         source_url_display=tracked.opportunity.source_url,
         source_url_fetched=False,
         revenue_disclaimer=REVENUE_PLACEHOLDER,
+        guardrails=engine_guardrails(),
     )
+
+
+def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = None) -> dict[str, Any]:
+    return {
+        "engagement_id": row.engagement_id,
+        "opportunity_id": row.opportunity_id,
+        "client_name": row.client_name,
+        "service": row.service,
+        "frequency": row.frequency,
+        "status": row.status,
+        "expected_payment": row.expected_payment,
+        "payment_status": row.payment_status,
+        "start_date": row.start_date.isoformat() if row.start_date else None,
+        "end_date": row.end_date.isoformat() if row.end_date else None,
+        "notes": row.notes,
+        "tasks": [
+            {
+                "task_id": item.task_id,
+                "title": item.title,
+                "responsible_party": item.responsible_party,
+                "classification": item.classification,
+                "status": item.status,
+                "priority": item.priority,
+                "required_owner_input": item.required_owner_input,
+                "deliverable": item.deliverable,
+                "review_required": item.review_required,
+            }
+            for item in (tasks or [])
+        ],
+    }
+
+
+def list_engagements(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+    _ensure()
+    query = db.query(NovaWorkEngagement).filter(NovaWorkEngagement.organization_id == organization_id)
+    query = _owner_filter(query, NovaWorkEngagement, user)
+    rows = query.order_by(NovaWorkEngagement.updated_at.desc()).limit(200).all()
+    task_rows = (
+        _owner_filter(
+            db.query(NovaWorkTask).filter(NovaWorkTask.organization_id == organization_id),
+            NovaWorkTask,
+            user,
+        )
+        .all()
+    )
+    by_eng: dict[str, list[NovaWorkTask]] = {}
+    for task in task_rows:
+        by_eng.setdefault(task.engagement_id, []).append(task)
+    return [_engagement_out(row, by_eng.get(row.engagement_id, [])) for row in rows]
+
+
+def create_engagement(
+    db: Session,
+    payload: EngagementCreate,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    _ensure()
+    _validate_amount(payload.expected_payment, label="expected_payment")
+    _validate_date_range(payload.start_date, payload.end_date)
+    if payload.opportunity_id:
+        get_opportunity(db, payload.opportunity_id, organization_id=organization_id, user=user)
+        duplicate = (
+            db.query(NovaWorkEngagement)
+            .filter(
+                NovaWorkEngagement.organization_id == organization_id,
+                NovaWorkEngagement.opportunity_id == payload.opportunity_id,
+            )
+            .first()
+        )
+        if duplicate is not None:
+            raise NovaWorkError("An internal engagement already exists for this opportunity", status_code=409)
+    row = NovaWorkEngagement(
+        engagement_id=_new_id("NWG-"),
+        organization_id=organization_id,
+        owner_user_id=user.user_id,
+        opportunity_id=payload.opportunity_id,
+        client_name=sanitize_untrusted(payload.client_name)[:220],
+        service=sanitize_untrusted(payload.service)[:220],
+        frequency=sanitize_untrusted(payload.frequency)[:40] or "one_time",
+        status="NOT_STARTED",
+        expected_payment=payload.expected_payment,
+        payment_status="NONE",
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        notes=sanitize_untrusted(payload.notes) or None,
+    )
+    db.add(row)
+    db.flush()
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="ENGAGEMENT_CREATED",
+        summary=f"Internal engagement created for {row.client_name}. Not a signed contract.",
+        ref_id=row.engagement_id,
+    )
+    db.commit()
+    db.refresh(row)
+    return _engagement_out(row, [])
+
+
+def get_engagement(db: Session, engagement_id: str, *, organization_id: str, user: UserContext) -> dict[str, Any]:
+    _ensure()
+    query = db.query(NovaWorkEngagement).filter(
+        NovaWorkEngagement.organization_id == organization_id,
+        NovaWorkEngagement.engagement_id == engagement_id,
+    )
+    row = _owner_filter(query, NovaWorkEngagement, user).first()
+    if row is None:
+        raise NovaWorkError("Engagement not found", status_code=404)
+    tasks = (
+        db.query(NovaWorkTask)
+        .filter(
+            NovaWorkTask.organization_id == organization_id,
+            NovaWorkTask.engagement_id == engagement_id,
+        )
+        .all()
+    )
+    return _engagement_out(row, tasks)
+
+
+def create_task(
+    db: Session,
+    engagement_id: str,
+    payload: TaskCreate,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    engagement = get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+    if payload.status not in TASK_STATUSES:
+        raise NovaWorkError("Unknown task status")
+    row = NovaWorkTask(
+        task_id=_new_id("NWT-"),
+        engagement_id=engagement_id,
+        organization_id=organization_id,
+        owner_user_id=user.user_id,
+        opportunity_id=engagement.get("opportunity_id"),
+        title=sanitize_untrusted(payload.title)[:220],
+        responsible_party=payload.responsible_party,
+        classification=payload.classification,
+        status=payload.status,
+        priority=sanitize_untrusted(payload.priority)[:16] or "normal",
+        due_date=payload.due_date,
+        required_owner_input=sanitize_untrusted(payload.required_owner_input) or None,
+        deliverable=sanitize_untrusted(payload.deliverable)[:220] or None,
+        review_required=payload.review_required,
+    )
+    db.add(row)
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="TASK_CREATED",
+        summary=f"Internal task created: {row.title}",
+        ref_id=row.task_id,
+    )
+    db.commit()
+    return get_engagement(db, engagement_id, organization_id=organization_id, user=user)
 
 
 def capabilities() -> list[CapabilityOut]:

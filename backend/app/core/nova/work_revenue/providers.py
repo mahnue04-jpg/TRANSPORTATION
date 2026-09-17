@@ -217,7 +217,11 @@ def list_providers() -> list[dict[str, Any]]:
             "label": provider.label,
             "phase1_enabled": provider.phase1_enabled,
             "notes": _NOTES[provider.provider_id],
-            "capabilities": dict(provider.capabilities),
+            "capabilities": {
+                **dict(provider.capabilities),
+                "LIVE_DISCOVERY_ENABLED": False,
+                "EXTERNAL_SUBMISSION_ENABLED": False,
+            },
         }
         for provider in PROVIDERS.values()
     ]

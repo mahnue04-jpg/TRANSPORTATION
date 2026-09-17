@@ -56,16 +56,26 @@
       <article class="card compact"><h3>SUBMITTED</h3><p id="count-submitted">0</p></article>
       <article class="card compact"><h3>CLOSED</h3><p id="count-closed">0</p></article>
       <article class="card compact"><h3>OWNER ACTION REQUIRED</h3><p id="count-actions">0</p></article>
+      <article class="card compact"><h3>ESTIMATED PIPELINE</h3><p id="count-pipeline">0</p></article>
+      <article class="card compact"><h3>OWNER-CONFIRMED RECEIVED</h3><p id="count-received">0</p></article>
     </section>
 
     <section class="command-card" aria-label="Opportunity filters">
       <h2>Opportunity list</h2>
-      <div class="command-actions" id="filter-row">
+      <div class="command-actions" id="filter-row" role="group" aria-label="Opportunity filters">
         <button type="button" class="secondary" data-filter="">All</button>
+        <button type="button" class="secondary" data-filter="new">New</button>
+        <button type="button" class="secondary" data-filter="needs_review">Needs review</button>
         <button type="button" class="secondary" data-filter="qualified">Qualified</button>
+        <button type="button" class="secondary" data-filter="not_qualified">Not qualified</button>
         <button type="button" class="secondary" data-filter="owner_action">Owner action required</button>
+        <button type="button" class="secondary" data-filter="missing_information">Missing information</button>
         <button type="button" class="secondary" data-filter="draft_ready">Draft ready</button>
         <button type="button" class="secondary" data-filter="approved">Approved for future submission</button>
+        <button type="button" class="secondary" data-filter="manually_submitted">Manually submitted</button>
+        <button type="button" class="secondary" data-filter="active">Active work</button>
+        <button type="button" class="secondary" data-filter="won">Won</button>
+        <button type="button" class="secondary" data-filter="lost">Lost</button>
         <button type="button" class="secondary" data-filter="rejected">Rejected</button>
         <button type="button" class="secondary" data-filter="archived">Archived</button>
       </div>
@@ -116,7 +126,14 @@
       <article class="card"><h2>Interviews</h2><div id="interview-list">None.</div></article>
       <article class="card"><h2>Won Work</h2><div id="won-list">None.</div></article>
       <article class="card"><h2>Owner Actions</h2><div id="action-list">None.</div></article>
-      <article class="card"><h2>Revenue</h2><div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div></article>
+      <article class="card"><h2>Revenue</h2>
+        <p class="hint">Estimated pipeline is not received revenue.</p>
+        <div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div>
+      </article>
+      <article class="card"><h2>Internal engagements</h2>
+        <p class="hint">Tracking only. Not a signed contract. Nova does not contact the client.</p>
+        <div id="engagement-list">None.</div>
+      </article>
       <article class="card"><h2>Activity</h2><div id="audit-list">None.</div></article>
       <article class="card wide-card"><h2>Opportunity detail</h2>
         <p class="hint">Source URLs are shown as text only and are not fetched.</p>

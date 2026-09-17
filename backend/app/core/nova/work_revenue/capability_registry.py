@@ -150,15 +150,120 @@ CAPABILITIES: tuple[dict[str, str], ...] = (
         "evidence": "Billing and payment-processor work is owned by a separate agent and is out of scope.",
         "notes": "No invoices, bank transfers, or payment collection in this engine.",
     },
+    {
+        "capability_id": "QUESTIONNAIRE_DRAFTING",
+        "label": "Questionnaire drafting",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "This engine drafts questionnaire responses from verified facts only.",
+        "notes": "Unknown answers are marked OWNER INPUT REQUIRED.",
+    },
+    {
+        "capability_id": "RFP_RESPONSE_PREPARATION",
+        "label": "RFP response preparation",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Bid/RFP draft materials are prepared locally and remain DRAFT.",
+        "notes": "Nova will not submit an RFP response.",
+    },
+    {
+        "capability_id": "SOW_DRAFTING",
+        "label": "Statement of work drafting",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "SOW outlines are drafted as internal documents only.",
+        "notes": "Not a signed contract. Owner must review every term.",
+    },
+    {
+        "capability_id": "BID_PREPARATION",
+        "label": "Bid preparation",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Bid drafts never include a committed price unless the owner entered one.",
+        "notes": "Pricing remains OWNER INPUT REQUIRED.",
+    },
+    {
+        "capability_id": "MEETING_PREPARATION",
+        "label": "Meeting and appointment preparation",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Interview/meeting notes can be drafted from verified capabilities.",
+        "notes": "Nova cannot attend live meetings.",
+    },
+    {
+        "capability_id": "WEEKLY_CLIENT_REPORTING",
+        "label": "Weekly client reporting",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Weekly report templates are local drafts.",
+        "notes": "Does not contact the client. Owner must send any report.",
+    },
+    {
+        "capability_id": "INVOICE_PREPARATION_SUPPORT",
+        "label": "Invoice preparation support",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Internal invoice-support summaries from owner-entered amounts only.",
+        "notes": "Does not create, send, or collect invoices. No Stripe.",
+    },
+    {
+        "capability_id": "REVENUE_TRACKING_SUPPORT",
+        "label": "Revenue tracking support",
+        "availability": AVAILABLE,
+        "evidence": "Owner-entered estimates, quotes, contracts, and confirmed receipts.",
+        "notes": "Estimated pipeline is never mixed with received revenue.",
+    },
+    {
+        "capability_id": "BUSINESS_INTELLIGENCE_SUMMARIES",
+        "label": "Business intelligence summaries",
+        "availability": AVAILABLE_WITH_OWNER_REVIEW,
+        "evidence": "Summarization of owner-provided or local operational text.",
+        "notes": "Does not invent metrics, customers, or revenue.",
+    },
 )
 
 
-def list_capabilities() -> list[dict[str, str]]:
-    return [dict(item) for item in CAPABILITIES]
+def _structured(item: dict[str, str]) -> dict[str, Any]:
+    availability = item["availability"]
+    if availability == AVAILABLE:
+        nova_can = "YES"
+        human_review = "NO"
+        readiness = "SUPPORTED"
+    elif availability == AVAILABLE_WITH_OWNER_REVIEW:
+        nova_can = "PARTIAL"
+        human_review = "YES"
+        readiness = "PARTIALLY_SUPPORTED"
+    elif availability == HUMAN_REQUIRED:
+        nova_can = "NO"
+        human_review = "YES"
+        readiness = "HUMAN_REQUIRED"
+    elif availability == PROHIBITED:
+        nova_can = "NO"
+        human_review = "YES"
+        readiness = "UNSUPPORTED"
+    else:
+        nova_can = "NO"
+        human_review = "YES"
+        readiness = "UNSUPPORTED"
+    return {
+        **item,
+        "description": item.get("notes") or item["label"],
+        "nova_can_perform": nova_can,
+        "human_review_required": human_review,
+        "owner_approval_required": "NO" if availability == AVAILABLE else "YES",
+        "external_action_required": "NO",
+        "physical_presence_required": "YES" if item["capability_id"] in {"PHYSICAL_LABOR", "DRIVING"} else "NO",
+        "license_credential_required": "YES" if item["capability_id"] in {"LICENSED_PROFESSIONAL_PRACTICE", "DRIVING"} else "NO",
+        "sensitive_data": "POSSIBLE" if item["capability_id"] in {"INVOICE_PREPARATION_SUPPORT", "REVENUE_TRACKING_SUPPORT"} else "NO",
+        "readiness_level": readiness,
+        "examples": [item["label"]],
+        "unsupported_conditions": (
+            ["Any live send, signature, payment, or impersonation"]
+            if availability != PROHIBITED
+            else [item["notes"]]
+        ),
+    }
 
 
-def capability_map() -> dict[str, dict[str, str]]:
-    return {item["capability_id"]: dict(item) for item in CAPABILITIES}
+def list_capabilities() -> list[dict[str, Any]]:
+    return [_structured(item) for item in CAPABILITIES]
+
+
+def capability_map() -> dict[str, dict[str, Any]]:
+    return {item["capability_id"]: item for item in list_capabilities()}
 
 
 def availability_for(capability_id: str) -> str:

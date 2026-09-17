@@ -7,10 +7,12 @@ from sqlalchemy.engine import Engine
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkEngagement,
     NovaWorkMaterial,
     NovaWorkOpportunity,
     NovaWorkOwnerAction,
     NovaWorkStatusHistory,
+    NovaWorkTask,
 )
 from app.db.session import Base, engine as default_engine
 
@@ -21,6 +23,8 @@ WORK_TABLES = (
     NovaWorkOwnerAction.__table__,
     NovaWorkStatusHistory.__table__,
     NovaWorkAuditEvent.__table__,
+    NovaWorkEngagement.__table__,
+    NovaWorkTask.__table__,
 )
 
 _OPP_COLUMNS = {
@@ -35,6 +39,12 @@ _OPP_COLUMNS = {
     "invoice_required": "BOOLEAN",
     "owner_confirmed_payment_received": "BOOLEAN",
     "archived": "BOOLEAN",
+    "invoice_value": "FLOAT",
+    "amount_received": "FLOAT",
+    "expenses": "FLOAT",
+    "estimated_net": "FLOAT",
+    "confirmed_net": "FLOAT",
+    "payment_status": "VARCHAR(40)",
 }
 
 

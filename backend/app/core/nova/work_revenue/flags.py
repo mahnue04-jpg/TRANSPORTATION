@@ -1,0 +1,17 @@
+"""Hard-disabled external and financial capabilities. Phase 2 may flip these later with owner authorization."""
+
+LIVE_DISCOVERY_ENABLED = False
+EXTERNAL_SUBMISSION_ENABLED = False
+FINANCIAL_ACTIONS_ENABLED = False
+AUTONOMOUS_CLIENT_CONTACT_ENABLED = False
+
+
+def engine_guardrails() -> dict[str, bool]:
+    return {
+        "LIVE_DISCOVERY_ENABLED": LIVE_DISCOVERY_ENABLED,
+        "EXTERNAL_SUBMISSION_ENABLED": EXTERNAL_SUBMISSION_ENABLED,
+        "FINANCIAL_ACTIONS_ENABLED": FINANCIAL_ACTIONS_ENABLED,
+        "AUTONOMOUS_CLIENT_CONTACT_ENABLED": AUTONOMOUS_CLIENT_CONTACT_ENABLED,
+        "APPROVED_EQUALS_SUBMITTED": False,
+        "OWNER_APPROVAL_REQUIRED": True,
+    }
