@@ -134,6 +134,9 @@ button {
 .owner-flag { color: var(--nova-warn); font-weight: 700; }
 .wide-card { grid-column: 1 / -1; }
 .filters, .detail-block { margin-top: 8px; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.action-row button { min-height: 40px; font-size: 0.85rem; }
+.filter-on { border-color: var(--nova-accent) !important; color: var(--nova-accent) !important; }
 
 @media (max-width: 720px) {
   .work-header, .work-main { width: min(100% - 20px, 720px); }

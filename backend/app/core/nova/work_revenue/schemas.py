@@ -296,6 +296,7 @@ class ApplicationOut(BaseModel):
     follow_up_at: datetime | None
     interview_at: datetime | None
     notes: str | None
+    opportunity_title: str | None = None
     materials: list[MaterialOut] = Field(default_factory=list)
     owner_actions: list[OwnerActionOut] = Field(default_factory=list)
 

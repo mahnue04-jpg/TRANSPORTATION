@@ -77,10 +77,14 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "APPROVED FOR FUTURE SUBMISSION" in WORK_HTML
     assert "data-filter=\"qualified\"" in WORK_HTML
     assert "Opportunity detail" in WORK_HTML
+    assert "Approve means APPROVED FOR FUTURE SUBMISSION" in WORK_HTML
+    assert "opp-source-url" in WORK_HTML
     assert "@media (max-width: 720px)" in WORK_CSS
     assert "escapeHtml" in WORK_JS
     assert "window.open" not in WORK_JS
-    assert "source_url_fetched" not in WORK_JS or "false" in WORK_JS.lower()
+    assert "Approve for future submission" in WORK_JS
+    assert "Record manual submission (Nova will not send)" in WORK_JS
+    assert "Prepare application drafts" in WORK_JS
 
 
 def test_signed_out_blocks_apis(client: TestClient) -> None:
@@ -197,6 +201,7 @@ def test_owner_approval_required_and_no_external_submit(client: TestClient) -> N
     assert application["approval_state"] == "DRAFT"
     assert application["approved_for_future_submission"] is False
     assert application["externally_submitted"] is False
+    assert application["opportunity_title"] == "Approval gate role"
     assert any(OWNER_INPUT_REQUIRED in item["body"] for item in application["materials"])
     submit = client.post(f"/api/nova/work/applications/{application['application_id']}/submit", headers=headers)
     assert submit.status_code == 409

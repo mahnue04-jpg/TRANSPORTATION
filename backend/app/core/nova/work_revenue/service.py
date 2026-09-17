@@ -328,6 +328,14 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         follow_up_at=row.follow_up_at,
         interview_at=row.interview_at,
         notes=row.notes,
+        opportunity_title=(
+            db.query(NovaWorkOpportunity.opportunity_title)
+            .filter(
+                NovaWorkOpportunity.opportunity_id == row.opportunity_id,
+                NovaWorkOpportunity.organization_id == row.organization_id,
+            )
+            .scalar()
+        ),
         materials=[material_out(item) for item in materials],
         owner_actions=[owner_action_out(item) for item in actions],
     )
@@ -463,7 +471,7 @@ def list_opportunities(
 ) -> list[NovaWorkOpportunity]:
     _ensure()
     query = _opp_query(db, organization_id, user).order_by(NovaWorkOpportunity.updated_at.desc())
-    rows = query.all()
+    rows = query.limit(200).all()
     if not view_filter:
         return rows
     apps = {item.opportunity_id: item for item in list_applications(db, organization_id=organization_id, user=user)}

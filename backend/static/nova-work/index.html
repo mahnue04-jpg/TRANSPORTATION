@@ -97,6 +97,7 @@
         <label>Compensation type<input id="opp-comp-type" placeholder="hourly / salary / unknown" /></label>
         <label>Amount<input id="opp-amount" type="number" step="0.01" /></label>
         <label>Skills (comma separated)<input id="opp-skills" placeholder="email, crm, reporting" /></label>
+        <label class="wide">Source URL (stored as text, not opened)<input id="opp-source-url" maxlength="800" placeholder="https://example.invalid/role" /></label>
         <label class="wide">Description<textarea id="opp-desc" rows="4"></textarea></label>
         <label class="wide">Requirements<textarea id="opp-req" rows="3"></textarea></label>
         <button type="submit">Save opportunity</button>
@@ -107,7 +108,10 @@
       <article class="card"><h2>Opportunity Inbox</h2><div id="inbox-list">Sign in to load.</div></article>
       <article class="card"><h2>Qualified Work</h2><div id="qualified-list">None.</div></article>
       <article class="card"><h2>Applications</h2><div id="app-list">None.</div></article>
-      <article class="card"><h2>Owner Approvals</h2><div id="approval-list">None.</div></article>
+      <article class="card"><h2>Owner Approvals</h2>
+        <p class="hint">Approve means APPROVED FOR FUTURE SUBMISSION only. Nova will not send an application.</p>
+        <div id="approval-list">None.</div>
+      </article>
       <article class="card"><h2>Follow-Ups</h2><div id="follow-list">None.</div></article>
       <article class="card"><h2>Interviews</h2><div id="interview-list">None.</div></article>
       <article class="card"><h2>Won Work</h2><div id="won-list">None.</div></article>
