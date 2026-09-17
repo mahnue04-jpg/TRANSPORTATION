@@ -9,6 +9,8 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
+from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -17,15 +19,25 @@ from app.core.nova.work_revenue.schemas import (
     AuditEventOut,
     CapabilityOut,
     DashboardOut,
+    DeliverableConfirm,
+    DeliverableCreate,
+    DeliverableOut,
+    DeliverableUpdate,
     EngagementCreate,
+    MaterialRevise,
     OpportunityCreate,
     OpportunityDetailOut,
     OpportunityOut,
     OpportunityUpdate,
     OwnerActionOut,
+    OwnerActionUpdate,
     ProviderOut,
     QualificationOut,
+    RevenueConfirm,
+    RevenueEntryCreate,
+    RevenueEntryOut,
     TaskCreate,
+    TaskUpdate,
     TodaySummaryOut,
     TrackerOut,
 )
@@ -98,12 +110,29 @@ def work_profile(
 def list_opportunities(
     organization_id: str | None = None,
     view_filter: str | None = None,
+    source: str | None = None,
+    priority: str | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
+    offset: int = 0,
+    owner_action_required: bool | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org(user, organization_id)
     return service.list_opportunity_outs(
-        db, organization_id=org_id, user=user, view_filter=view_filter
+        db,
+        organization_id=org_id,
+        user=user,
+        view_filter=view_filter,
+        source=source,
+        priority=priority,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
+        owner_action_required=owner_action_required,
     )
 
 
@@ -331,6 +360,7 @@ def list_owner_actions(
 @router.get("/audit", response_model=list[AuditEventOut])
 def list_audit(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
@@ -342,8 +372,10 @@ def list_audit(
             summary=row.summary,
             ref_id=row.ref_id,
             created_at=row.created_at,
+            actor_category=getattr(row, "actor_category", None) or "NOVA",
+            entity_type=getattr(row, "entity_type", None),
         )
-        for row in service.list_audit(db, organization_id=org_id, user=user)
+        for row in service.list_audit(db, organization_id=org_id, user=user, limit=limit)
     ]
 
 
@@ -394,5 +426,262 @@ def create_task(
     org_id = _resolve_org(user, payload.organization_id)
     try:
         return service.create_task(db, engagement_id, payload, organization_id=org_id, user=user)
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/owner-facts")
+def owner_facts(
+    applicant_party: str = "AMICOR",
+    user: UserContext = Depends(get_current_user_context),
+):
+    return ops.owner_facts(applicant_party=applicant_party)
+
+
+@router.get("/lifecycle")
+def work_lifecycle(user: UserContext = Depends(get_current_user_context)):
+    return {
+        "stages": list(LIFECYCLE_STAGES),
+        "approved_equals_submitted": False,
+        "external_submission_enabled": False,
+        "live_discovery_enabled": False,
+        "financial_actions_enabled": False,
+    }
+
+
+@router.get("/recurring-templates")
+def recurring_templates(user: UserContext = Depends(get_current_user_context)):
+    return ops.recurring_catalog()
+
+
+@router.get("/analytics")
+def work_analytics(
+    organization_id: str | None = None,
+    period: str = "all",
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.analytics(db, organization_id=_resolve_org(user, organization_id), user=user, period=period)
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/tasks")
+def list_tasks(
+    organization_id: str | None = None,
+    engagement_id: str | None = None,
+    status: str | None = None,
+    nova_capable: bool | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return ops.list_tasks(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        engagement_id=engagement_id,
+        status=status,
+        nova_capable=nova_capable,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(
+    task_id: str,
+    payload: TaskUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.update_task(
+            db, task_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/deliverables", response_model=list[DeliverableOut])
+def list_deliverables(
+    organization_id: str | None = None,
+    engagement_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return ops.list_deliverables(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        engagement_id=engagement_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/deliverables", response_model=DeliverableOut)
+def create_deliverable(
+    payload: DeliverableCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.create_deliverable(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/deliverables/{deliverable_id}", response_model=DeliverableOut)
+def get_deliverable(
+    deliverable_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.deliverable_out(
+            ops.get_deliverable(
+                db, deliverable_id, organization_id=_resolve_org(user, organization_id), user=user
+            )
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.patch("/deliverables/{deliverable_id}", response_model=DeliverableOut)
+def update_deliverable(
+    deliverable_id: str,
+    payload: DeliverableUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.update_deliverable(
+            db, deliverable_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/deliverables/{deliverable_id}/confirm", response_model=DeliverableOut)
+def confirm_deliverable(
+    deliverable_id: str,
+    payload: DeliverableConfirm,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.confirm_deliverable(
+            db, deliverable_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/revenue-entries", response_model=list[RevenueEntryOut])
+def list_revenue_entries(
+    organization_id: str | None = None,
+    engagement_id: str | None = None,
+    stage: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return ops.list_revenue_entries(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        engagement_id=engagement_id,
+        stage=stage,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/revenue-entries", response_model=RevenueEntryOut)
+def create_revenue_entry(
+    payload: RevenueEntryCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.create_revenue_entry(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as ext:
+        _raise(ext)
+
+
+@router.post("/revenue-entries/{entry_id}/stage", response_model=RevenueEntryOut)
+def update_revenue_stage(
+    entry_id: str,
+    stage: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.update_revenue_stage(
+            db, entry_id, stage, organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/revenue-entries/{entry_id}/confirm", response_model=RevenueEntryOut)
+def confirm_revenue(
+    entry_id: str,
+    payload: RevenueConfirm,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.confirm_revenue_received(
+            db, entry_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/applications/{application_id}/materials/{material_id}/revise")
+def revise_material(
+    application_id: str,
+    material_id: str,
+    payload: MaterialRevise,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.revise_material(
+            db,
+            application_id,
+            material_id,
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.patch("/owner-actions/{action_id}")
+def update_owner_action(
+    action_id: str,
+    payload: OwnerActionUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ops.update_owner_action(
+            db, action_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
     except service.NovaWorkError as exc:
         _raise(exc)

@@ -12,10 +12,17 @@ from sqlalchemy.orm import Session
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
 from app.core.nova.work_revenue.flags import engine_guardrails, EXTERNAL_SUBMISSION_ENABLED
+from app.core.nova.work_revenue.lifecycle import (
+    LIST_MAX_LIMIT,
+    OPPORTUNITY_PRIORITIES,
+    category_for_action,
+    normalize_task_status,
+)
 from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, owner_input_checklist, sanitize_untrusted
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkDeliverable,
     NovaWorkEngagement,
     NovaWorkMaterial,
     NovaWorkOpportunity,
@@ -23,11 +30,13 @@ from app.core.nova.work_revenue.models import (
     NovaWorkStatusHistory,
     NovaWorkTask,
 )
+from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
 from app.core.nova.work_revenue.providers import get_provider, list_providers, opportunity_fingerprint
 from app.core.nova.work_revenue.qualifier import qualify_opportunity
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.core.nova.work_revenue.schemas import (
     MATERIAL_KINDS,
+    ENGAGEMENT_STATUSES,
     OPPORTUNITY_STATUSES,
     OWNER_ACTION_TYPES,
     REVENUE_STATUSES,
@@ -103,13 +112,10 @@ class NovaWorkError(ValueError):
 
 
 def _safe_source_url(value: str | None) -> str | None:
-    cleaned = sanitize_untrusted(value)
-    if not cleaned:
-        return None
-    lowered = cleaned.lower()
-    if lowered.startswith(("javascript:", "data:", "vbscript:", "file:")):
-        raise NovaWorkError("Source URL scheme is not allowed")
-    return cleaned[:800]
+    try:
+        return validate_source_url(value)
+    except UnsafeSourceUrl as exc:
+        raise NovaWorkError(str(exc)) from exc
 
 
 def _validate_amount(value: float | None, *, label: str) -> float | None:
@@ -176,6 +182,19 @@ def _parse_qual(raw: str | None) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+_OWNER_AUDIT_EVENTS = {
+    "OWNER_APPROVED_APPLICATION",
+    "OWNER_REJECTED_APPLICATION",
+    "OWNER_APPROVED",
+    "OWNER_REJECTED",
+    "RECEIPT_CONFIRMED",
+    "REVENUE_RECEIVED_CONFIRMED",
+    "DELIVERABLE_CONFIRMED",
+    "OPPORTUNITY_ARCHIVED",
+    "ARCHIVED",
+}
+
+
 def _record_audit(
     db: Session,
     *,
@@ -184,7 +203,10 @@ def _record_audit(
     event_type: str,
     summary: str,
     ref_id: str | None = None,
+    entity_type: str | None = None,
+    actor_category: str | None = None,
 ) -> None:
+    actor = actor_category or ("OWNER" if event_type in _OWNER_AUDIT_EVENTS else "NOVA")
     db.add(
         NovaWorkAuditEvent(
             event_id=_new_id("NWE-"),
@@ -193,6 +215,8 @@ def _record_audit(
             event_type=event_type,
             summary=_safe_summary(summary),
             ref_id=ref_id,
+            actor_category=actor,
+            entity_type=entity_type,
         )
     )
 
@@ -305,6 +329,12 @@ def opportunity_out(
         confirmed_net=getattr(row, "confirmed_net", None),
         payment_status=getattr(row, "payment_status", None) or "NONE",
         missing_owner_facts=missing_owner_facts(_opportunity_payload(row)),
+        category=getattr(row, "category", None),
+        priority=getattr(row, "priority", None) or "normal",
+        tags=_json_list(getattr(row, "tags_json", None)),
+        blocked_reason=getattr(row, "blocked_reason", None),
+        archive_reason=getattr(row, "archive_reason", None),
+        qualification_reason=getattr(row, "qualification_reason", None),
     )
 
 
@@ -317,6 +347,8 @@ def material_out(row: NovaWorkMaterial) -> MaterialOut:
         body=row.body,
         status=row.status,
         owner_input_required=row.owner_input_required,
+        revision=int(getattr(row, "revision", 1) or 1),
+        parent_material_id=getattr(row, "parent_material_id", None),
     )
 
 
@@ -329,6 +361,8 @@ def owner_action_out(row: NovaWorkOwnerAction) -> OwnerActionOut:
         display_label=row.display_label,
         explanation=row.explanation,
         status=row.status,
+        category=getattr(row, "category", None) or category_for_action(row.action_type),
+        owner_notes=getattr(row, "owner_notes", None),
     )
 
 
@@ -373,6 +407,8 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         ),
         materials=[material_out(item) for item in materials],
         owner_actions=[owner_action_out(item) for item in actions],
+        owner_notes=getattr(row, "owner_notes", None),
+        decided_at=getattr(row, "decided_at", None),
     )
 
 
@@ -457,6 +493,13 @@ def _create_opportunity_row(
         invoice_required=False,
         owner_confirmed_payment_received=False,
         archived=False,
+        category=sanitize_untrusted(payload.get("category"))[:40] or None,
+        priority=(
+            str(payload.get("priority") or "normal").strip().lower()
+            if str(payload.get("priority") or "normal").strip().lower() in OPPORTUNITY_PRIORITIES
+            else "normal"
+        ),
+        tags_json=_dump_list(payload.get("tags") or []),
     )
     db.add(row)
     db.flush()
@@ -503,12 +546,32 @@ def list_opportunities(
     organization_id: str,
     user: UserContext,
     view_filter: str | None = None,
+    source: str | None = None,
+    priority: str | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
+    offset: int = 0,
+    owner_action_required: bool | None = None,
 ) -> list[NovaWorkOpportunity]:
     _ensure()
-    query = _opp_query(db, organization_id, user).order_by(NovaWorkOpportunity.updated_at.desc())
-    rows = query.limit(200).all()
-    if not view_filter:
-        return rows
+    query = _opp_query(db, organization_id, user)
+    if source:
+        query = query.filter(NovaWorkOpportunity.source_type == source)
+    if priority:
+        query = query.filter(NovaWorkOpportunity.priority == priority)
+    sort_map = {
+        "updated_at": NovaWorkOpportunity.updated_at,
+        "discovered_at": NovaWorkOpportunity.discovered_at,
+        "deadline": NovaWorkOpportunity.application_deadline,
+        "estimated_value": NovaWorkOpportunity.estimated_value,
+        "company_name": NovaWorkOpportunity.company_name,
+        "title": NovaWorkOpportunity.opportunity_title,
+        "priority": NovaWorkOpportunity.priority,
+    }
+    sort_col = sort_map.get(sort, NovaWorkOpportunity.updated_at)
+    query = query.order_by(sort_col.asc() if order == "asc" else sort_col.desc())
+    rows = query.limit(LIST_MAX_LIMIT).all()
     apps = {item.opportunity_id: item for item in list_applications(db, organization_id=organization_id, user=user)}
     actions = {
         item.opportunity_id
@@ -518,9 +581,16 @@ def list_opportunities(
     selected: list[NovaWorkOpportunity] = []
     for row in rows:
         app = apps.get(row.opportunity_id)
-        if _matches_view(row, app, actions, view_filter):
-            selected.append(row)
-    return selected
+        if view_filter and not _matches_view(row, app, actions, view_filter):
+            continue
+        if owner_action_required is True and row.opportunity_id not in actions:
+            continue
+        if owner_action_required is False and row.opportunity_id in actions:
+            continue
+        selected.append(row)
+    start = max(int(offset or 0), 0)
+    cap = LIST_MAX_LIMIT if limit is None else max(1, min(int(limit), LIST_MAX_LIMIT))
+    return selected[start:start + cap]
 
 
 def _matches_view(
@@ -561,6 +631,14 @@ def _matches_view(
         return row.status == "REJECTED" or (app is not None and app.approval_state == "REJECTED")
     if view_filter == "archived":
         return archived or row.status in {"CLOSED", "REJECTED"}
+    if view_filter == "qualifying":
+        return row.status in {"DISCOVERED", "REVIEWING"} or row.qualification_outcome == "INSUFFICIENT_INFORMATION"
+    if view_filter == "blocked":
+        return bool(getattr(row, "blocked_reason", None)) or row.status == "OWNER_REVIEW"
+    if view_filter == "ready":
+        return row.status in {"QUALIFIED", "APPROVED_TO_APPLY", "APPLICATION_PREPARED"} and row.opportunity_id not in actions
+    if view_filter == "in_progress":
+        return row.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}
     return False
 
 
@@ -570,8 +648,27 @@ def list_opportunity_outs(
     organization_id: str,
     user: UserContext,
     view_filter: str | None = None,
+    source: str | None = None,
+    priority: str | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
+    offset: int = 0,
+    owner_action_required: bool | None = None,
 ) -> list[OpportunityOut]:
-    rows = list_opportunities(db, organization_id=organization_id, user=user, view_filter=view_filter)
+    rows = list_opportunities(
+        db,
+        organization_id=organization_id,
+        user=user,
+        view_filter=view_filter,
+        source=source,
+        priority=priority,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
+        owner_action_required=owner_action_required,
+    )
     apps_map = {item.opportunity_id: item for item in list_applications(db, organization_id=organization_id, user=user)}
     action_ids = {
         item.opportunity_id
@@ -633,6 +730,8 @@ def update_opportunity(
             _apply_status(db, row, "INTERVIEW", user, "Interview date recorded")
     if payload.archived is True:
         row.archived = True
+        if payload.archive_reason is not None:
+            row.archive_reason = sanitize_untrusted(payload.archive_reason) or row.archive_reason
         _record_audit(
             db,
             organization_id=row.organization_id,
@@ -699,6 +798,17 @@ def update_opportunity(
         )
     elif payload.owner_confirmed_payment_received is False:
         row.owner_confirmed_payment_received = False
+    if payload.category is not None:
+        row.category = sanitize_untrusted(payload.category)[:40] or None
+    if payload.priority is not None:
+        token = str(payload.priority).strip().lower()
+        row.priority = token if token in OPPORTUNITY_PRIORITIES else row.priority
+    if payload.tags is not None:
+        row.tags_json = _dump_list(payload.tags)
+    if payload.blocked_reason is not None:
+        row.blocked_reason = sanitize_untrusted(payload.blocked_reason) or None
+    if payload.archive_reason is not None:
+        row.archive_reason = sanitize_untrusted(payload.archive_reason) or None
     gross = row.contract_amount if row.contract_amount is not None else row.quoted_amount
     if gross is None:
         gross = row.estimated_value
@@ -764,6 +874,7 @@ def _upsert_owner_actions(
                 display_label="OWNER ACTION REQUIRED",
                 explanation=explanations.get(action_type, "Owner action is required. Nova will not bypass this control."),
                 status="OPEN",
+                category=category_for_action(action_type),
             )
         )
         safe_type = (
@@ -790,8 +901,10 @@ def qualify(
 ) -> tuple[NovaWorkOpportunity, dict[str, Any]]:
     row = get_opportunity(db, opportunity_id, organization_id=organization_id, user=user)
     result = qualify_opportunity(_opportunity_payload(row))
+    result["qualified_at"] = now().isoformat()
     row.qualification_outcome = result["outcome"]
     row.qualification_json = json.dumps(result)
+    row.qualification_reason = (result.get("reasons") or [result.get("decision") or ""])[0][:400]
     row.updated_at = now()
     target = OUTCOME_TO_STATUS.get(result["outcome"], "REVIEWING")
     if row.status in {"DISCOVERED", "REVIEWING", "QUALIFIED", "NOT_QUALIFIED", "OWNER_REVIEW"}:
@@ -880,6 +993,7 @@ def create_application(
                 body=draft["body"],
                 status="DRAFT",
                 owner_input_required=bool(draft.get("owner_input_required")),
+                revision=1,
             )
         )
     if row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY"}:
@@ -902,6 +1016,7 @@ def create_application(
         event_type="APPLICATION_DRAFT_CREATED",
         summary=f"Draft materials created for {row.opportunity_title}",
         ref_id=application.application_id,
+        entity_type="application",
     )
     db.commit()
     db.refresh(application)
@@ -961,6 +1076,8 @@ def decide_application(
     previous = application.approval_state
     application.approval_state = payload.decision
     application.notes = sanitize_untrusted(payload.notes) or application.notes
+    application.owner_notes = sanitize_untrusted(payload.notes) or getattr(application, "owner_notes", None)
+    application.decided_at = now()
     application.approved_for_future_submission = payload.decision == "APPROVED"
     application.updated_at = now()
     if payload.decision == "APPROVED":
@@ -1008,6 +1125,8 @@ def decide_application(
         event_type=event_type,
         summary=summary,
         ref_id=application.application_id,
+        entity_type="application",
+        actor_category="OWNER",
     )
     db.commit()
     db.refresh(application)
@@ -1116,11 +1235,12 @@ def list_owner_actions(db: Session, *, organization_id: str, user: UserContext, 
     return query.order_by(NovaWorkOwnerAction.created_at.desc()).all()
 
 
-def list_audit(db: Session, *, organization_id: str, user: UserContext) -> list[NovaWorkAuditEvent]:
+def list_audit(db: Session, *, organization_id: str, user: UserContext, limit: int | None = None) -> list[NovaWorkAuditEvent]:
     _ensure()
     query = db.query(NovaWorkAuditEvent).filter(NovaWorkAuditEvent.organization_id == organization_id)
     query = _owner_filter(query, NovaWorkAuditEvent, user)
-    return query.order_by(NovaWorkAuditEvent.created_at.desc()).limit(200).all()
+    cap = LIST_MAX_LIMIT if limit is None else max(1, min(int(limit), LIST_MAX_LIMIT))
+    return query.order_by(NovaWorkAuditEvent.created_at.desc()).limit(cap).all()
 
 
 def tracker(db: Session, opportunity_id: str, *, organization_id: str, user: UserContext) -> TrackerOut:
@@ -1239,6 +1359,15 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     contracted = sum((item.contract_amount or 0) for item in outs)
     received = sum((item.amount_received or 0) for item in outs if item.owner_confirmed_payment_received)
     engagement_rows = list_engagements(db, organization_id=organization_id, user=user)
+    pending_deliverables = (
+        _owner_filter(
+            db.query(NovaWorkDeliverable).filter(NovaWorkDeliverable.organization_id == organization_id),
+            NovaWorkDeliverable,
+            user,
+        )
+        .filter(NovaWorkDeliverable.owner_confirmed_delivered.is_(False))
+        .count()
+    )
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
@@ -1260,7 +1389,15 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "interviews": len(interviews),
             "owner_action_required": len(actions),
             "work_won": len(won),
-            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "ACTIVE"}]),
+            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "READY", "ACTIVE"}]),
+            "blocked_engagements": len([item for item in engagement_rows if item["status"] == "BLOCKED" or item.get("blockers")]),
+            "tasks_due": sum(
+                1
+                for item in engagement_rows
+                for task in item.get("tasks") or []
+                if task.get("status") not in {"COMPLETE", "CANCELLED"}
+            ),
+            "deliverables_pending": int(pending_deliverables or 0),
         },
         opportunity_inbox=inbox,
         qualified_work=qualified,
@@ -1275,9 +1412,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         engagements=engagement_rows,
         revenue_summary={
             "estimated_pipeline": pipeline,
+            "quoted_pipeline": sum((item.quoted_amount or 0) for item in outs),
             "contracted_value": contracted,
             "owner_confirmed_received": received,
-            "disclaimer": "Estimated pipeline is not received revenue. Nova does not collect payment.",
+            "disclaimer": "Estimated pipeline is not received revenue. Nova does not collect payment. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.",
         },
         guardrails=engine_guardrails(),
         revenue_placeholder=REVENUE_PLACEHOLDER,
@@ -1299,6 +1437,8 @@ def today_cards(counts: dict[str, int]) -> list[dict[str, Any]]:
         ("interviews", "INTERVIEWS"),
         ("owner_action_required", "OWNER ACTION REQUIRED"),
         ("work_won", "WORK WON"),
+        ("tasks_due", "TASKS DUE"),
+        ("active_engagements", "ACTIVE WORK"),
     )
     return [
         {"key": key, "label": label, "count": int(counts.get(key) or 0), "href": "/nova/work"}
@@ -1348,6 +1488,15 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
     dash = dashboard(db, organization_id=organization_id, user=user)
     guards = dash.guardrails or engine_guardrails()
     revenue = dict(dash.revenue_summary or {})
+    pending_deliverables = (
+        _owner_filter(
+            db.query(NovaWorkDeliverable).filter(NovaWorkDeliverable.organization_id == organization_id),
+            NovaWorkDeliverable,
+            user,
+        )
+        .filter(NovaWorkDeliverable.owner_confirmed_delivered.is_(False))
+        .count()
+    )
     return TodaySummaryOut(
         work_opportunities=dash.counts["work_opportunities"],
         applications_needing_approval=dash.counts["applications_needing_approval"],
@@ -1373,6 +1522,10 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         external_submission_enabled=bool(guards.get("EXTERNAL_SUBMISSION_ENABLED")),
         financial_actions_enabled=bool(guards.get("FINANCIAL_ACTIONS_ENABLED")),
         revenue_disclaimer=str(revenue.get("disclaimer") or dash.revenue_placeholder or REVENUE_PLACEHOLDER),
+        tasks_due=int(dash.counts.get("tasks_due") or 0),
+        deliverables_pending=int(pending_deliverables or 0),
+        quoted_pipeline=float(revenue.get("quoted_pipeline") or 0),
+        contracted_revenue=float(revenue.get("contracted_value") or 0),
     )
 
 
@@ -1421,10 +1574,20 @@ def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = 
         "start_date": row.start_date.isoformat() if row.start_date else None,
         "end_date": row.end_date.isoformat() if row.end_date else None,
         "notes": row.notes,
+        "title": getattr(row, "title", None) or row.service,
+        "service_type": getattr(row, "service_type", None),
+        "agreed_value": getattr(row, "agreed_value", None),
+        "estimated_revenue": getattr(row, "estimated_revenue", None) or row.expected_payment,
+        "quoted_revenue": getattr(row, "quoted_revenue", None),
+        "contracted_revenue": getattr(row, "contracted_revenue", None),
+        "received_revenue": getattr(row, "received_revenue", None),
+        "risks": getattr(row, "risks", None),
+        "blockers": getattr(row, "blockers", None),
         "tasks": [
             {
                 "task_id": item.task_id,
                 "title": item.title,
+                "description": getattr(item, "description", None),
                 "responsible_party": item.responsible_party,
                 "classification": item.classification,
                 "status": item.status,
@@ -1432,6 +1595,11 @@ def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = 
                 "required_owner_input": item.required_owner_input,
                 "deliverable": item.deliverable,
                 "review_required": item.review_required,
+                "depends_on_task_id": getattr(item, "depends_on_task_id", None),
+                "blocked_reason": getattr(item, "blocked_reason", None),
+                "completed_at": item.completed_at.isoformat() if getattr(item, "completed_at", None) else None,
+                "owner_notes": getattr(item, "owner_notes", None),
+                "due_date": item.due_date.isoformat() if item.due_date else None,
             }
             for item in (tasks or [])
         ],
@@ -1493,9 +1661,49 @@ def create_engagement(
         start_date=payload.start_date,
         end_date=payload.end_date,
         notes=sanitize_untrusted(payload.notes) or None,
+        title=sanitize_untrusted(payload.title)[:220] or None,
+        service_type=sanitize_untrusted(payload.service_type)[:80] or None,
+        agreed_value=_validate_amount(payload.agreed_value, label="agreed_value"),
+        estimated_revenue=payload.expected_payment,
+        contracted_revenue=_validate_amount(payload.agreed_value, label="agreed_value"),
+        risks=sanitize_untrusted(payload.risks) or None,
+        blockers=sanitize_untrusted(payload.blockers) or None,
     )
     db.add(row)
     db.flush()
+    starter_tasks = [
+        ("Prepare internal work outline", "NOVA", "NOVA"),
+        ("Owner review of work plan", "OWNER", "HUMAN"),
+    ]
+    if str(payload.frequency or "").lower() in {"weekly", "monthly"}:
+        starter_tasks.append((f"Prepare {payload.frequency} internal report draft", "NOVA", "NOVA"))
+    created_tasks: list[NovaWorkTask] = []
+    for title, party, classification in starter_tasks:
+        task = NovaWorkTask(
+            task_id=_new_id("NWT-"),
+            engagement_id=row.engagement_id,
+            organization_id=organization_id,
+            owner_user_id=user.user_id,
+            opportunity_id=payload.opportunity_id,
+            title=title,
+            responsible_party=party,
+            classification=classification,
+            status="NOT_STARTED",
+            priority="normal",
+            review_required=True,
+            description="Generated internally from the engagement. No external action.",
+        )
+        db.add(task)
+        created_tasks.append(task)
+        _record_audit(
+            db,
+            organization_id=organization_id,
+            user=user,
+            event_type="TASK_CREATED",
+            summary=f"Internal task created: {title}",
+            ref_id=task.task_id,
+            entity_type="task",
+        )
     _record_audit(
         db,
         organization_id=organization_id,
@@ -1506,7 +1714,7 @@ def create_engagement(
     )
     db.commit()
     db.refresh(row)
-    return _engagement_out(row, [])
+    return _engagement_out(row, created_tasks)
 
 
 def get_engagement(db: Session, engagement_id: str, *, organization_id: str, user: UserContext) -> dict[str, Any]:
@@ -1538,8 +1746,21 @@ def create_task(
     user: UserContext,
 ) -> dict[str, Any]:
     engagement = get_engagement(db, engagement_id, organization_id=organization_id, user=user)
-    if payload.status not in TASK_STATUSES:
+    status = normalize_task_status(payload.status)
+    if status not in TASK_STATUSES:
         raise NovaWorkError("Unknown task status")
+    if payload.depends_on_task_id:
+        parent = (
+            db.query(NovaWorkTask)
+            .filter(
+                NovaWorkTask.organization_id == organization_id,
+                NovaWorkTask.task_id == payload.depends_on_task_id,
+                NovaWorkTask.engagement_id == engagement_id,
+            )
+            .first()
+        )
+        if parent is None:
+            raise NovaWorkError("Task dependency not found on this engagement", status_code=404)
     row = NovaWorkTask(
         task_id=_new_id("NWT-"),
         engagement_id=engagement_id,
@@ -1549,12 +1770,15 @@ def create_task(
         title=sanitize_untrusted(payload.title)[:220],
         responsible_party=payload.responsible_party,
         classification=payload.classification,
-        status=payload.status,
+        status=status,
         priority=sanitize_untrusted(payload.priority)[:16] or "normal",
         due_date=payload.due_date,
         required_owner_input=sanitize_untrusted(payload.required_owner_input) or None,
         deliverable=sanitize_untrusted(payload.deliverable)[:220] or None,
         review_required=payload.review_required,
+        description=sanitize_untrusted(payload.description) or None,
+        depends_on_task_id=payload.depends_on_task_id,
+        blocked_reason=sanitize_untrusted(payload.blocked_reason) or None,
     )
     db.add(row)
     _record_audit(
@@ -1564,6 +1788,7 @@ def create_task(
         event_type="TASK_CREATED",
         summary=f"Internal task created: {row.title}",
         ref_id=row.task_id,
+        entity_type="task",
     )
     db.commit()
     return get_engagement(db, engagement_id, organization_id=organization_id, user=user)
