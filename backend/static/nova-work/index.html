@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Work &amp; Revenue</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-work/work.css" />
+</head>
+<body>
+  <header class="work-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Work &amp; Revenue Engine</h1>
+      </div>
+    </div>
+    <nav class="work-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/workspace">Workspace</a>
+      <a href="/nova/communications">Communications</a>
+      <a href="/nova/business">Business</a>
+      <a href="/nova/work" aria-current="page">Work</a>
+      <a href="/workspace">Health</a>
+      <a href="/app">Delivery</a>
+      <a href="/nova/freight">Freight</a>
+    </nav>
+  </header>
+
+  <main class="work-main">
+    <p class="disclaimer">Nova is an AI system/tool under AMICOR/owner authorization. Nova is not a human employee. Phase 2 does not send external applications, accept contracts, or collect payment. APPROVED is not SUBMITTED. Estimated, contracted, invoiced, and received revenue stay separate. Missing credentials are marked [OWNER INPUT REQUIRED].</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="command-card" aria-label="Sign in">
+      <p id="session-meta" class="hint">Sign in to use the Work &amp; Revenue Engine.</p>
+      <div class="command-actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="login-grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="counts" aria-label="Work counts">
+      <article class="card compact"><h3>WORK OPPORTUNITIES</h3><p id="count-opps">0</p></article>
+      <article class="card compact"><h3>QUALIFIED</h3><p id="count-qualified">0</p></article>
+      <article class="card compact"><h3>NEEDS OWNER INPUT</h3><p id="count-owner-input">0</p></article>
+      <article class="card compact"><h3>DRAFT READY</h3><p id="count-draft">0</p></article>
+      <article class="card compact"><h3>APPROVED FOR FUTURE SUBMISSION</h3><p id="count-approved">0</p></article>
+      <article class="card compact"><h3>SUBMITTED</h3><p id="count-submitted">0</p></article>
+      <article class="card compact"><h3>CLOSED</h3><p id="count-closed">0</p></article>
+      <article class="card compact"><h3>OWNER ACTION REQUIRED</h3><p id="count-actions">0</p></article>
+      <article class="card compact"><h3>ESTIMATED PIPELINE</h3><p id="count-pipeline">0</p></article>
+      <article class="card compact"><h3>QUOTED PIPELINE</h3><p id="count-quoted">0</p></article>
+      <article class="card compact"><h3>CONTRACTED REVENUE</h3><p id="count-contracted">0</p></article>
+      <article class="card compact"><h3>OWNER-CONFIRMED RECEIVED</h3><p id="count-received">0</p></article>
+      <article class="card compact"><h3>TASKS DUE</h3><p id="count-tasks">0</p></article>
+      <article class="card compact"><h3>DELIVERABLES</h3><p id="count-deliverables">0</p></article>
+    </section>
+
+    <section class="command-card" aria-label="Opportunity filters">
+      <h2>Opportunity list</h2>
+      <div class="command-actions" id="filter-row" role="group" aria-label="Opportunity filters">
+        <button type="button" class="secondary" data-filter="">All</button>
+        <button type="button" class="secondary" data-filter="new">New</button>
+        <button type="button" class="secondary" data-filter="needs_review">Needs review</button>
+        <button type="button" class="secondary" data-filter="qualified">Qualified</button>
+        <button type="button" class="secondary" data-filter="not_qualified">Not qualified</button>
+        <button type="button" class="secondary" data-filter="owner_action">Owner action required</button>
+        <button type="button" class="secondary" data-filter="missing_information">Missing information</button>
+        <button type="button" class="secondary" data-filter="draft_ready">Draft ready</button>
+        <button type="button" class="secondary" data-filter="approved">Approved for future submission</button>
+        <button type="button" class="secondary" data-filter="manually_submitted">Manually submitted</button>
+        <button type="button" class="secondary" data-filter="active">Active work</button>
+        <button type="button" class="secondary" data-filter="won">Won</button>
+        <button type="button" class="secondary" data-filter="lost">Lost</button>
+        <button type="button" class="secondary" data-filter="rejected">Rejected</button>
+        <button type="button" class="secondary" data-filter="in_progress">In progress</button>
+        <button type="button" class="secondary" data-filter="qualifying">Qualifying</button>
+        <button type="button" class="secondary" data-filter="ready">Ready</button>
+        <button type="button" class="secondary" data-filter="blocked">Blocked</button>
+        <button type="button" class="secondary" data-filter="archived">Archived</button>
+      </div>
+      <div id="filtered-list">Sign in to load opportunities.</div>
+    </section>
+
+    <section class="command-card">
+      <h2>Record an opportunity</h2>
+      <p class="hint">Manual entry only. Source URLs are stored as text and are not opened or fetched.</p>
+      <form id="opp-form" class="compose-grid">
+        <label>Company<input id="opp-company" required maxlength="220" /></label>
+        <label>Title<input id="opp-title" required maxlength="220" /></label>
+        <label>Location<input id="opp-location" maxlength="220" /></label>
+        <label>Remote status
+          <select id="opp-remote">
+            <option value="remote">remote</option>
+            <option value="hybrid">hybrid</option>
+            <option value="on-site">on-site</option>
+            <option value="unknown">unknown</option>
+          </select>
+        </label>
+        <label>Physical presence
+          <select id="opp-physical">
+            <option value="unknown">unknown</option>
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </label>
+        <label>Compensation type<input id="opp-comp-type" placeholder="hourly / salary / unknown" /></label>
+        <label>Amount<input id="opp-amount" type="number" step="0.01" /></label>
+        <label>Skills (comma separated)<input id="opp-skills" placeholder="email, crm, reporting" /></label>
+        <label class="wide">Source URL (stored as text, not opened)<input id="opp-source-url" maxlength="800" placeholder="https://example.invalid/role" /></label>
+        <label class="wide">Description<textarea id="opp-desc" rows="4"></textarea></label>
+        <label class="wide">Requirements<textarea id="opp-req" rows="3"></textarea></label>
+        <button type="submit">Save opportunity</button>
+      </form>
+    </section>
+
+    <section class="command-card" aria-label="Dashboard sections">
+      <h2>Work &amp; Revenue sections</h2>
+      <p class="hint">Informational local tracking. External submit, pay, and live discovery remain disabled.</p>
+      <div class="command-actions" id="tab-row" role="tablist" aria-label="Work sections">
+        <button type="button" class="secondary filter-on" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+        <button type="button" class="secondary" data-tab="opportunities" role="tab" aria-selected="false">Opportunities</button>
+        <button type="button" class="secondary" data-tab="applications" role="tab" aria-selected="false">Applications</button>
+        <button type="button" class="secondary" data-tab="owner-actions" role="tab" aria-selected="false">Owner Actions</button>
+        <button type="button" class="secondary" data-tab="engagements" role="tab" aria-selected="false">Engagements</button>
+        <button type="button" class="secondary" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
+        <button type="button" class="secondary" data-tab="deliverables" role="tab" aria-selected="false">Deliverables</button>
+        <button type="button" class="secondary" data-tab="revenue" role="tab" aria-selected="false">Revenue</button>
+        <button type="button" class="secondary" data-tab="archive" role="tab" aria-selected="false">Archive</button>
+      </div>
+    </section>
+
+    <section class="dashboard" aria-label="Work dashboard">
+      <article class="card" data-panel="opportunities"><h2>Opportunity Inbox</h2><div id="inbox-list">Sign in to load.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Qualified Work</h2><div id="qualified-list">None.</div></article>
+      <article class="card" data-panel="applications"><h2>Applications</h2><div id="app-list">None.</div></article>
+      <article class="card" data-panel="applications owner-actions"><h2>Owner Approvals</h2>
+        <p class="hint">Approve means APPROVED FOR FUTURE SUBMISSION only. Nova will not send an application.</p>
+        <div id="approval-list">None.</div>
+      </article>
+      <article class="card" data-panel="opportunities"><h2>Follow-Ups</h2><div id="follow-list">None.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Interviews</h2><div id="interview-list">None.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Won Work</h2><div id="won-list">None.</div></article>
+      <article class="card" data-panel="owner-actions"><h2>Owner Actions</h2><div id="action-list">None.</div></article>
+      <article class="card" data-panel="revenue"><h2>Revenue</h2>
+        <p class="hint">Estimated pipeline is not received revenue. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.</p>
+        <div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div>
+      </article>
+      <article class="card" data-panel="engagements"><h2>Internal engagements</h2>
+        <p class="hint">Tracking only. Not a signed contract. Nova does not contact the client.</p>
+        <div id="engagement-list">None.</div>
+      </article>
+      <article class="card" data-panel="tasks"><h2>Tasks</h2>
+        <p class="hint">Internal work only. Nova-capable tasks still require owner review before any external use.</p>
+        <div id="task-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="deliverables"><h2>Deliverables</h2>
+        <p class="hint">Delivered requires owner confirmation. Nova does not transmit files.</p>
+        <div id="deliverable-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="archive"><h2>Archive</h2><div id="archive-list">None.</div></article>
+      <article class="card" data-panel="overview"><h2>Activity</h2><div id="audit-list">None.</div></article>
+      <article class="card wide-card"><h2>Opportunity detail</h2>
+        <p class="hint">Source URLs are shown as text only and are not fetched.</p>
+        <div id="detail-box">Select an opportunity to see capability match, missing owner facts, materials, and history.</div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-work/work.js"></script>
+</body>
+</html>

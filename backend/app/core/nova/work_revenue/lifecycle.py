@@ -1,0 +1,148 @@
+"""Phase 2 internal lifecycle. Aliases preserve Phase 1 stored values. No live execution."""
+from __future__ import annotations
+
+LIFECYCLE_STAGES = (
+    "DISCOVER",
+    "QUALIFY",
+    "PREPARE",
+    "OWNER_REVIEW",
+    "APPROVE",
+    "MANUAL_EXTERNAL_HANDOFF",
+    "ENGAGEMENT",
+    "WORK_EXECUTION",
+    "DELIVERABLE",
+    "INVOICE_SUPPORT",
+    "PAYMENT_STATUS",
+    "REVENUE_RECONCILIATION",
+    "ARCHIVE",
+)
+
+QUALIFICATION_DECISIONS = (
+    "NOVA_CAN_PERFORM",
+    "NOVA_CAN_PREPARE",
+    "OWNER_ACTION_REQUIRED",
+    "INSUFFICIENT_INFORMATION",
+    "NOT_SUITABLE",
+    "NOT_SUPPORTED",
+    "PROHIBITED",
+)
+
+FACT_STATUSES = (
+    "KNOWN_VERIFIED_FACT",
+    "OWNER_PROVIDED_FACT",
+    "MISSING_FACT",
+    "UNVERIFIED_FACT",
+    "NOT_APPLICABLE",
+)
+
+OPPORTUNITY_PRIORITIES = ("low", "normal", "high", "urgent")
+
+DELIVERABLE_TYPES = (
+    "REPORT",
+    "DOCUMENT",
+    "ANALYSIS",
+    "PROPOSAL",
+    "DATA_FILE",
+    "PRESENTATION",
+    "FOLLOW_UP_PACKAGE",
+    "OTHER",
+)
+
+DELIVERABLE_STATUSES = (
+    "DRAFT",
+    "READY_FOR_REVIEW",
+    "OWNER_APPROVED",
+    "CONFIRMED_DELIVERED",
+    "CANCELLED",
+)
+
+REVENUE_STAGES = (
+    "ESTIMATED",
+    "QUOTED",
+    "CONTRACTED",
+    "INVOICE_DRAFT",
+    "INVOICED_EXTERNALLY",
+    "PAYMENT_PENDING",
+    "PARTIALLY_PAID",
+    "PAID",
+    "OVERDUE",
+    "WRITTEN_OFF",
+    "CANCELLED",
+)
+
+PAID_STAGES = {"PAID", "PARTIALLY_PAID"}
+
+TASK_STATUS_ALIASES = {
+    "TODO": "NOT_STARTED",
+    "WAITING": "OWNER_REVIEW",
+    "DONE": "COMPLETE",
+}
+
+ENGAGEMENT_STATUS_ALIASES = {
+    "PLANNED": "NOT_STARTED",
+}
+
+APPROVAL_STATUS_ALIASES = {
+    "CHANGES_REQUESTED": "NEEDS_CHANGES",
+    "READY_FOR_REVIEW": "READY_FOR_OWNER_REVIEW",
+    "APPROVED_FOR_FUTURE_SUBMISSION": "APPROVED",
+}
+
+OWNER_ACTION_CATEGORIES = (
+    "REVIEW_DRAFT",
+    "PROVIDE_INFORMATION",
+    "UPLOAD_DOCUMENT",
+    "VERIFY_REQUIREMENT",
+    "MANUAL_SUBMISSION",
+    "SIGNATURE_REQUIRED",
+    "LOGIN_REQUIRED",
+    "CAPTCHA_REQUIRED",
+    "INTERVIEW_REQUIRED",
+    "PAYMENT_REQUIRED",
+    "LEGAL_REVIEW_REQUIRED",
+)
+
+ACTION_TYPE_TO_CATEGORY = {
+    "CAPTCHA": "CAPTCHA_REQUIRED",
+    "IDENTITY_VERIFICATION": "VERIFY_REQUIREMENT",
+    "LIVE_INTERVIEW": "INTERVIEW_REQUIRED",
+    "PHONE_CALL": "INTERVIEW_REQUIRED",
+    "LIVE_MEETING": "INTERVIEW_REQUIRED",
+    "LEGAL_SIGNATURE": "SIGNATURE_REQUIRED",
+    "CONTRACT_ACCEPTANCE": "LEGAL_REVIEW_REQUIRED",
+    "BANK_INFORMATION": "PAYMENT_REQUIRED",
+    "PAYOUT_SETUP": "PAYMENT_REQUIRED",
+    "TAX_INFORMATION": "PROVIDE_INFORMATION",
+    "SSN": "PROVIDE_INFORMATION",
+    "BACKGROUND_CHECK": "VERIFY_REQUIREMENT",
+    "LICENSE_VERIFICATION": "VERIFY_REQUIREMENT",
+    "PRICING_COMMITMENT": "REVIEW_DRAFT",
+    "FINANCIAL_COMMITMENT": "PAYMENT_REQUIRED",
+    "LEGAL_CERTIFICATION": "LEGAL_REVIEW_REQUIRED",
+    "ACCOUNT_CREATION": "LOGIN_REQUIRED",
+    "PLATFORM_REQUIRES_HUMAN": "LOGIN_REQUIRED",
+}
+
+ANALYTICS_PERIODS = ("today", "week", "month", "all")
+
+LIST_DEFAULT_LIMIT = 100
+LIST_MAX_LIMIT = 200
+
+
+def normalize_task_status(value: str | None) -> str:
+    token = str(value or "NOT_STARTED").strip().upper()
+    return TASK_STATUS_ALIASES.get(token, token if token else "NOT_STARTED")
+
+
+def normalize_engagement_status(value: str | None) -> str:
+    token = str(value or "NOT_STARTED").strip().upper()
+    return ENGAGEMENT_STATUS_ALIASES.get(token, token if token else "NOT_STARTED")
+
+
+def normalize_approval_state(value: str | None) -> str:
+    token = str(value or "DRAFT").strip().upper()
+    return APPROVAL_STATUS_ALIASES.get(token, token)
+
+
+def category_for_action(action_type: str) -> str:
+    return ACTION_TYPE_TO_CATEGORY.get(action_type, "PROVIDE_INFORMATION")
