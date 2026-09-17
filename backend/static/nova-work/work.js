@@ -1,6 +1,7 @@
 "use strict";
 
 (function () {
+  var activeFilter = "";
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
@@ -57,31 +58,46 @@
       ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Work & Revenue"
       : "Sign in to use the Work & Revenue Engine.";
   }
+  function approvalLabel(row) {
+    if (row.manual_submission_recorded) return "submitted externally (manual record only)";
+    if (row.approved_for_future_submission) return "approved for future submission";
+    if (row.approval_state === "READY_FOR_OWNER_REVIEW") return "ready for review";
+    if (row.approval_state === "REJECTED") return "closed/rejected";
+    if (row.approval_state === "DRAFT") return "draft only";
+    return row.approval_state || "none";
+  }
   function oppItem(row) {
-    return "<div class=\"item\"><strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
-      "<div class=\"muted\">" + escapeHtml(row.company_name) + " · " + escapeHtml(row.status) +
+    return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
+      "<strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
+      "<div class=\"muted\">" + escapeHtml(row.company_name) +
+      " · source " + escapeHtml(row.source || row.source_type) +
+      " · " + escapeHtml(row.status) +
       (row.qualification_outcome ? " · " + escapeHtml(row.qualification_outcome) : "") +
+      (row.lifecycle_outcome ? " · " + escapeHtml(row.lifecycle_outcome) : "") +
+      (row.owner_action_required ? " · OWNER ACTION REQUIRED" : "") +
+      (row.application_state ? " · application " + escapeHtml(row.application_state) : "") +
+      (row.updated_at ? " · updated " + escapeHtml(row.updated_at) : "") +
       "</div></div>";
   }
   function renderDashboard(data, audit) {
     var counts = data.counts || {};
-    $("count-opps").textContent = counts.work_opportunities || 0;
-    $("count-approvals").textContent = counts.applications_needing_approval || 0;
-    $("count-followups").textContent = counts.follow_ups_due || 0;
-    $("count-interviews").textContent = counts.interviews || 0;
+    $("count-opps").textContent = counts.opportunities_found || counts.work_opportunities || 0;
+    $("count-qualified").textContent = counts.qualified || 0;
+    $("count-owner-input").textContent = counts.needs_owner_input || 0;
+    $("count-draft").textContent = counts.draft_ready || 0;
+    $("count-approved").textContent = counts.approved_for_future_submission || 0;
+    $("count-submitted").textContent = counts.submitted || 0;
+    $("count-closed").textContent = counts.closed || 0;
     $("count-actions").textContent = counts.owner_action_required || 0;
-    $("count-won").textContent = counts.work_won || 0;
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", function (row) {
       return "<div class=\"item\"><strong>" + escapeHtml(row.application_id) + "</strong>" +
-        "<div class=\"muted\">" + escapeHtml(row.approval_state) +
-        (row.approved_for_future_submission ? " · APPROVED_FOR_FUTURE_SUBMISSION" : "") +
-        "</div></div>";
+        "<div class=\"muted\">" + escapeHtml(approvalLabel(row)) + "</div></div>";
     });
     $("approval-list").innerHTML = listHtml(data.owner_approvals, "No applications waiting for owner approval.", function (row) {
       return "<div class=\"item\">" + escapeHtml(row.application_id) +
-        "<div class=\"muted\">" + escapeHtml(row.approval_state) + "</div></div>";
+        "<div class=\"muted\">" + escapeHtml(approvalLabel(row)) + "</div></div>";
     });
     $("follow-list").innerHTML = listHtml(data.follow_ups, "No follow-ups due.", oppItem);
     $("interview-list").innerHTML = listHtml(data.interviews, "No interviews recorded.", oppItem);
@@ -91,11 +107,60 @@
         "</span> · " + escapeHtml(row.action_type) +
         "<div class=\"muted\">" + escapeHtml(row.explanation) + "</div></div>";
     });
-    $("revenue-box").textContent = data.revenue_placeholder || "COMING IN LATER PHASE";
+    $("revenue-box").textContent = data.revenue_placeholder || "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.";
     $("audit-list").innerHTML = listHtml(audit, "No activity yet.", function (row) {
       return "<div class=\"item\">" + escapeHtml(row.event_type) +
         "<div class=\"muted\">" + escapeHtml(row.summary) + "</div></div>";
     });
+    $("filtered-list").innerHTML = listHtml(data.opportunity_list, "No opportunities yet.", oppItem);
+    bindOpportunityClicks();
+  }
+  function bindOpportunityClicks() {
+    var nodes = document.querySelectorAll("[data-opportunity-id]");
+    nodes.forEach(function (node) {
+      node.addEventListener("click", function () {
+        loadDetail(node.getAttribute("data-opportunity-id"));
+      });
+    });
+  }
+  async function loadDetail(opportunityId) {
+    try {
+      var detail = await api("/api/nova/work/opportunities/" + opportunityId + "/detail");
+      var tracker = detail.tracker || {};
+      var opp = tracker.opportunity || {};
+      var app = tracker.application;
+      var materials = app && app.materials ? app.materials : [];
+      var history = tracker.status_history || [];
+      var actions = tracker.owner_actions || [];
+      var facts = detail.missing_owner_facts || [];
+      var match = ((opp.qualification || {}).matched_capabilities || []).join(", ") || "none recorded";
+      $("detail-box").innerHTML =
+        "<div class=\"detail-block\"><strong>" + escapeHtml(opp.opportunity_title) + "</strong>" +
+        "<div class=\"muted\">Status " + escapeHtml(opp.status) +
+        " · qualification " + escapeHtml(opp.qualification_outcome || "none") +
+        (opp.lifecycle_outcome ? " · " + escapeHtml(opp.lifecycle_outcome) : "") +
+        "</div></div>" +
+        "<div class=\"detail-block\">Capability match: " + escapeHtml(match) + "</div>" +
+        "<div class=\"detail-block\">Missing owner facts: " +
+        escapeHtml(facts.length ? facts.join(", ") : "none flagged") +
+        " — [OWNER INPUT REQUIRED]</div>" +
+        "<div class=\"detail-block\">Source URL (not fetched): " +
+        escapeHtml(detail.source_url_display || "none") + "</div>" +
+        "<div class=\"detail-block\">Human actions: " +
+        listHtml(actions, "none", function (row) {
+          return "<div class=\"muted\">" + escapeHtml(row.display_label) + " · " + escapeHtml(row.action_type) + "</div>";
+        }) + "</div>" +
+        "<div class=\"detail-block\">Materials: " +
+        listHtml(materials, "none prepared", function (row) {
+          return "<div class=\"muted\">" + escapeHtml(row.kind) + " · " + escapeHtml(row.status) + "</div>";
+        }) + "</div>" +
+        "<div class=\"detail-block\">History: " +
+        listHtml(history, "none", function (row) {
+          return "<div class=\"muted\">" + escapeHtml(row.from_status || "start") + " → " + escapeHtml(row.to_status) + "</div>";
+        }) + "</div>";
+    } catch (err) {
+      showBanner(err.message);
+    }
   }
   async function refresh() {
     if (!token()) {
@@ -107,7 +172,19 @@
     var audit = [];
     try { audit = await api("/api/nova/work/audit"); } catch (_) { audit = []; }
     renderDashboard(data, audit);
+    if (activeFilter) {
+      var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter));
+      $("filtered-list").innerHTML = listHtml(filtered, "No matching opportunities.", oppItem);
+      bindOpportunityClicks();
+    }
   }
+  $("filter-row").addEventListener("click", async function (event) {
+    var target = event.target;
+    if (!target || !target.getAttribute) return;
+    if (!target.hasAttribute("data-filter")) return;
+    activeFilter = target.getAttribute("data-filter") || "";
+    try { await refresh(); } catch (err) { showBanner(err.message); }
+  });
   $("opp-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try {
@@ -122,6 +199,7 @@
           physical_presence_required: $("opp-physical").value,
           compensation_type: $("opp-comp-type").value || null,
           compensation_amount: amount === "" ? null : Number(amount),
+          estimated_value: amount === "" ? null : Number(amount),
           skills_required: $("opp-skills").value.split(",").map(function (item) { return item.trim(); }).filter(Boolean),
           description: $("opp-desc").value || null,
           requirements: $("opp-req").value || null

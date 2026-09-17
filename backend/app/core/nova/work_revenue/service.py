@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
-from app.core.nova.work_revenue.materials import generate_drafts, sanitize_untrusted
+from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, sanitize_untrusted
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
@@ -20,13 +20,14 @@ from app.core.nova.work_revenue.models import (
     NovaWorkOwnerAction,
     NovaWorkStatusHistory,
 )
-from app.core.nova.work_revenue.providers import get_provider, list_providers
+from app.core.nova.work_revenue.providers import get_provider, list_providers, opportunity_fingerprint
 from app.core.nova.work_revenue.qualifier import qualify_opportunity
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.core.nova.work_revenue.schemas import (
     MATERIAL_KINDS,
     OPPORTUNITY_STATUSES,
     OWNER_ACTION_TYPES,
+    REVENUE_STATUSES,
     ApplicationCreate,
     ApplicationDecision,
     ApplicationOut,
@@ -36,6 +37,7 @@ from app.core.nova.work_revenue.schemas import (
     DashboardOut,
     MaterialOut,
     OpportunityCreate,
+    OpportunityDetailOut,
     OpportunityOut,
     OpportunityUpdate,
     OwnerActionOut,
@@ -78,7 +80,10 @@ OUTCOME_TO_STATUS = {
     "INSUFFICIENT_INFORMATION": "REVIEWING",
 }
 
-REVENUE_PLACEHOLDER = "COMING IN LATER PHASE — revenue is not tracked and must not be fabricated."
+REVENUE_PLACEHOLDER = (
+    "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue. "
+    "Nova does not create invoices, charges, or payouts."
+)
 IDENTITY_DISCLAIMER = (
     "Nova is an AI system/tool under AMICOR/owner authorization. "
     "Nova is not a human employee. External applications are not sent in Phase 1."
@@ -214,7 +219,13 @@ def get_application(db: Session, application_id: str, *, organization_id: str, u
     return row
 
 
-def opportunity_out(row: NovaWorkOpportunity) -> OpportunityOut:
+def opportunity_out(
+    row: NovaWorkOpportunity,
+    *,
+    application_state: str | None = None,
+    owner_action_required: bool = False,
+) -> OpportunityOut:
+    qual = _parse_qual(row.qualification_json) or {}
     return OpportunityOut(
         opportunity_id=row.opportunity_id,
         organization_id=row.organization_id,
@@ -240,9 +251,25 @@ def opportunity_out(row: NovaWorkOpportunity) -> OpportunityOut:
         status=row.status,
         notes=row.notes,
         qualification_outcome=row.qualification_outcome,
-        qualification=_parse_qual(row.qualification_json),
+        qualification=qual or None,
         follow_up_at=row.follow_up_at,
         interview_at=row.interview_at,
+        updated_at=row.updated_at,
+        fingerprint=getattr(row, "fingerprint", None),
+        owner_action_required=owner_action_required,
+        application_state=application_state,
+        lifecycle_outcome=(qual or {}).get("lifecycle_outcome"),
+        archived=bool(getattr(row, "archived", False)),
+        estimated_value=getattr(row, "estimated_value", None),
+        quoted_amount=getattr(row, "quoted_amount", None),
+        contract_amount=getattr(row, "contract_amount", None),
+        expected_payment_frequency=getattr(row, "expected_payment_frequency", None),
+        expected_start_date=getattr(row, "expected_start_date", None),
+        expected_end_date=getattr(row, "expected_end_date", None),
+        revenue_status=getattr(row, "revenue_status", None) or "NONE",
+        invoice_required=bool(getattr(row, "invoice_required", False)),
+        owner_confirmed_payment_received=bool(getattr(row, "owner_confirmed_payment_received", False)),
+        missing_owner_facts=missing_owner_facts(_opportunity_payload(row)),
     )
 
 
@@ -333,15 +360,37 @@ def _create_opportunity_row(
     if physical not in {"true", "false", "unknown"}:
         physical = "unknown"
     source_type = str(payload.get("source_type") or "manual")
+    title = sanitize_untrusted(payload.get("opportunity_title"))[:220]
+    company = sanitize_untrusted(payload.get("company_name"))[:220]
+    source_url = sanitize_untrusted(payload.get("source_url")) or None
+    fingerprint = opportunity_fingerprint(
+        organization_id=organization_id,
+        company_name=company,
+        opportunity_title=title,
+        source_url=source_url,
+    )
+    duplicate = (
+        db.query(NovaWorkOpportunity)
+        .filter(
+            NovaWorkOpportunity.organization_id == organization_id,
+            NovaWorkOpportunity.fingerprint == fingerprint,
+        )
+        .first()
+    )
+    if duplicate is not None:
+        raise NovaWorkError("Duplicate opportunity already recorded for this organization", status_code=409)
+    estimated = payload.get("estimated_value")
+    if estimated is None:
+        estimated = payload.get("compensation_amount")
     row = NovaWorkOpportunity(
         opportunity_id=_new_id("NWO-"),
         organization_id=organization_id,
         owner_user_id=user.user_id,
         source=str(payload.get("source") or "manual")[:80],
-        source_url=sanitize_untrusted(payload.get("source_url")) or None,
+        source_url=source_url,
         source_type=source_type[:40],
-        company_name=sanitize_untrusted(payload.get("company_name"))[:220],
-        opportunity_title=sanitize_untrusted(payload.get("opportunity_title"))[:220],
+        company_name=company,
+        opportunity_title=title,
         description=sanitize_untrusted(payload.get("description")) or None,
         location=sanitize_untrusted(payload.get("location"))[:220] or None,
         remote_status=sanitize_untrusted(payload.get("remote_status"))[:40] or None,
@@ -358,6 +407,13 @@ def _create_opportunity_row(
         notes=sanitize_untrusted(payload.get("notes")) or None,
         status="DISCOVERED",
         discovered_at=now(),
+        fingerprint=fingerprint,
+        estimated_value=estimated,
+        expected_payment_frequency=sanitize_untrusted(payload.get("expected_payment_frequency"))[:40] or None,
+        revenue_status="ESTIMATED" if estimated is not None else "NONE",
+        invoice_required=False,
+        owner_confirmed_payment_received=False,
+        archived=False,
     )
     db.add(row)
     db.flush()
@@ -398,13 +454,62 @@ def create_opportunity(
     return row
 
 
-def list_opportunities(db: Session, *, organization_id: str, user: UserContext) -> list[NovaWorkOpportunity]:
+def list_opportunities(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    view_filter: str | None = None,
+) -> list[NovaWorkOpportunity]:
     _ensure()
-    return (
-        _opp_query(db, organization_id, user)
-        .order_by(NovaWorkOpportunity.updated_at.desc())
-        .all()
-    )
+    query = _opp_query(db, organization_id, user).order_by(NovaWorkOpportunity.updated_at.desc())
+    rows = query.all()
+    if not view_filter:
+        return rows
+    apps = {item.opportunity_id: item for item in list_applications(db, organization_id=organization_id, user=user)}
+    actions = {
+        item.opportunity_id
+        for item in list_owner_actions(db, organization_id=organization_id, user=user)
+        if item.opportunity_id
+    }
+    selected: list[NovaWorkOpportunity] = []
+    for row in rows:
+        app = apps.get(row.opportunity_id)
+        if view_filter == "qualified" and (
+            row.qualification_outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}
+            or row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY", "APPLICATION_PREPARED"}
+        ):
+            selected.append(row)
+        elif view_filter == "owner_action" and row.opportunity_id in actions:
+            selected.append(row)
+        elif view_filter == "draft_ready" and app is not None and app.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}:
+            selected.append(row)
+        elif view_filter == "approved" and app is not None and app.approved_for_future_submission:
+            selected.append(row)
+        elif view_filter == "rejected" and row.status == "REJECTED":
+            selected.append(row)
+        elif view_filter == "archived" and (getattr(row, "archived", False) or row.status in {"CLOSED", "REJECTED"}):
+            selected.append(row)
+        elif view_filter == "submitted" and row.status == "SUBMITTED":
+            selected.append(row)
+    return selected
+
+
+def list_opportunity_outs(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    view_filter: str | None = None,
+) -> list[OpportunityOut]:
+    rows = list_opportunities(db, organization_id=organization_id, user=user, view_filter=view_filter)
+    apps_map = {item.opportunity_id: item for item in list_applications(db, organization_id=organization_id, user=user)}
+    action_ids = {
+        item.opportunity_id
+        for item in list_owner_actions(db, organization_id=organization_id, user=user)
+        if item.opportunity_id
+    }
+    return [_enriched_out(row, apps_map, action_ids) for row in rows]
 
 
 def _apply_status(db: Session, row: NovaWorkOpportunity, new_status: str, user: UserContext, note: str | None = None) -> None:
@@ -457,6 +562,38 @@ def update_opportunity(
         row.interview_at = payload.interview_at
         if payload.status is None and row.status in {"SUBMITTED", "FOLLOW_UP_DUE", "APPLICATION_PREPARED"}:
             _apply_status(db, row, "INTERVIEW", user, "Interview date recorded")
+    if payload.archived is True:
+        row.archived = True
+        if row.status not in {"CLOSED", "REJECTED", "WON"}:
+            try:
+                _apply_status(db, row, "CLOSED", user, "Owner archived opportunity")
+            except NovaWorkError:
+                pass
+    if payload.estimated_value is not None:
+        row.estimated_value = payload.estimated_value
+    if payload.quoted_amount is not None:
+        row.quoted_amount = payload.quoted_amount
+    if payload.contract_amount is not None:
+        row.contract_amount = payload.contract_amount
+    if payload.expected_payment_frequency is not None:
+        row.expected_payment_frequency = sanitize_untrusted(payload.expected_payment_frequency)[:40]
+    if payload.expected_start_date is not None:
+        row.expected_start_date = payload.expected_start_date
+    if payload.expected_end_date is not None:
+        row.expected_end_date = payload.expected_end_date
+    if payload.revenue_status is not None:
+        if payload.revenue_status not in REVENUE_STATUSES:
+            raise NovaWorkError("Unknown revenue status")
+        if payload.revenue_status == "OWNER_CONFIRMED_RECEIVED" and not payload.owner_confirmed_payment_received:
+            raise NovaWorkError("Payment received may only be marked with owner confirmation")
+        row.revenue_status = payload.revenue_status
+    if payload.invoice_required is not None:
+        row.invoice_required = payload.invoice_required
+    if payload.owner_confirmed_payment_received is True:
+        row.owner_confirmed_payment_received = True
+        row.revenue_status = "OWNER_CONFIRMED_RECEIVED"
+    elif payload.owner_confirmed_payment_received is False:
+        row.owner_confirmed_payment_received = False
     row.updated_at = now()
     db.commit()
     db.refresh(row)
@@ -482,20 +619,24 @@ def _upsert_owner_actions(
         .all()
     }
     explanations = {
-        "CAPTCHA": "A CAPTCHA or robot-check is indicated. Nova will not solve or bypass it.",
-        "IDENTITY_VERIFICATION": "Identity verification must be completed by the owner. Nova will not impersonate a person.",
-        "LIVE_INTERVIEW": "A live interview is indicated. A human must attend.",
-        "LEGAL_SIGNATURE": "A legal signature is required. Nova cannot sign.",
-        "CONTRACT_ACCEPTANCE": "Contract acceptance requires the owner. Nova will not accept contracts.",
-        "BANK_INFORMATION": "Bank information is requested. Owner must handle this offline. Values are not stored here.",
-        "TAX_INFORMATION": "Tax information is requested. Owner must handle this offline. Values are not stored here.",
-        "SSN": "Government identity numbers are requested. Do not enter them here. Owner action only.",
-        "BACKGROUND_CHECK": "A background check is indicated. Owner must complete any human identity steps.",
-        "LICENSE_VERIFICATION": "A professional or driving license appears required. Nova has no verified license on file.",
-        "PRICING_COMMITMENT": "A pricing or bid commitment is indicated. Owner must set price.",
-        "FINANCIAL_COMMITMENT": "A financial commitment is indicated. Nova will not commit funds.",
-        "LEGAL_CERTIFICATION": "A legal certification is indicated. Owner must certify.",
-        "PLATFORM_REQUIRES_HUMAN": "The source appears to require a human on the platform.",
+        "CAPTCHA": "OWNER ACTION REQUIRED: CAPTCHA. Nova will not solve or bypass it.",
+        "IDENTITY_VERIFICATION": "OWNER ACTION REQUIRED: identity verification. Nova will not impersonate a person.",
+        "LIVE_INTERVIEW": "OWNER ACTION REQUIRED: live interview. A human must attend.",
+        "PHONE_CALL": "OWNER ACTION REQUIRED: phone call. Nova cannot place the call.",
+        "LIVE_MEETING": "OWNER ACTION REQUIRED: live meeting. A human must attend.",
+        "LEGAL_SIGNATURE": "OWNER ACTION REQUIRED: legal signature. Nova cannot sign.",
+        "CONTRACT_ACCEPTANCE": "OWNER ACTION REQUIRED: contract acceptance. Nova will not accept contracts.",
+        "BANK_INFORMATION": "OWNER ACTION REQUIRED: banking/payout setup. Do not enter bank values here.",
+        "PAYOUT_SETUP": "OWNER ACTION REQUIRED: payout setup. Owner must complete this offline.",
+        "TAX_INFORMATION": "OWNER ACTION REQUIRED: tax form. Do not enter tax identifiers here.",
+        "SSN": "OWNER ACTION REQUIRED: government identity numbers. Do not enter them here.",
+        "BACKGROUND_CHECK": "OWNER ACTION REQUIRED: background check. Owner must complete human identity steps.",
+        "LICENSE_VERIFICATION": "OWNER ACTION REQUIRED: license verification. Nova has no verified license on file.",
+        "PRICING_COMMITMENT": "OWNER ACTION REQUIRED: pricing commitment. Owner must set price.",
+        "FINANCIAL_COMMITMENT": "OWNER ACTION REQUIRED: financial commitment. Nova will not commit funds.",
+        "LEGAL_CERTIFICATION": "OWNER ACTION REQUIRED: legal certification. Owner must certify.",
+        "ACCOUNT_CREATION": "OWNER ACTION REQUIRED: account creation on an external portal.",
+        "PLATFORM_REQUIRES_HUMAN": "OWNER ACTION REQUIRED: the source appears to require a human on the platform.",
     }
     for action_type in action_types:
         if action_type not in OWNER_ACTION_TYPES or action_type in existing:
@@ -683,6 +824,8 @@ def decide_application(
     user: UserContext,
 ) -> NovaWorkApplication:
     application = get_application(db, application_id, organization_id=organization_id, user=user)
+    if application.approval_state == "APPROVED" and payload.decision == "APPROVED":
+        raise NovaWorkError("Application is already approved for future submission", status_code=409)
     if application.approval_state != "READY_FOR_OWNER_REVIEW":
         raise NovaWorkError("Owner decision requires READY_FOR_OWNER_REVIEW")
     if payload.decision not in {"APPROVED", "REJECTED", "NEEDS_CHANGES"}:
@@ -825,7 +968,12 @@ def ingest_simulated(
     provider = get_provider("simulated")
     created: list[NovaWorkOpportunity] = []
     for item in provider.ingest({"fixture_ids": fixture_ids} if fixture_ids else None):
-        created.append(_create_opportunity_row(db, item, organization_id=organization_id, user=user))
+        try:
+            created.append(_create_opportunity_row(db, item, organization_id=organization_id, user=user))
+        except NovaWorkError as exc:
+            if exc.status_code == 409:
+                continue
+            raise
     db.commit()
     for row in created:
         db.refresh(row)
@@ -913,19 +1061,65 @@ def _due(value: datetime | None) -> bool:
     return value <= current
 
 
+def _application_state_label(app: NovaWorkApplication | None) -> str | None:
+    if app is None:
+        return None
+    if app.manual_submission_recorded:
+        return "submitted_externally_recorded"
+    if app.approved_for_future_submission:
+        return "approved_for_future_submission"
+    return app.approval_state
+
+
+def _enriched_out(
+    row: NovaWorkOpportunity,
+    apps: dict[str, NovaWorkApplication],
+    action_ids: set[str],
+) -> OpportunityOut:
+    return opportunity_out(
+        row,
+        application_state=_application_state_label(apps.get(row.opportunity_id)),
+        owner_action_required=row.opportunity_id in action_ids,
+    )
+
+
 def dashboard(db: Session, *, organization_id: str, user: UserContext) -> DashboardOut:
     opportunities = list_opportunities(db, organization_id=organization_id, user=user)
-    applications = [application_out(db, row) for row in list_applications(db, organization_id=organization_id, user=user)]
+    app_rows = list_applications(db, organization_id=organization_id, user=user)
+    applications = [application_out(db, row) for row in app_rows]
+    apps_map = {row.opportunity_id: row for row in app_rows}
     actions = list_owner_actions(db, organization_id=organization_id, user=user)
-    inbox = [opportunity_out(row) for row in opportunities if row.status in {"DISCOVERED", "REVIEWING"}]
-    qualified = [opportunity_out(row) for row in opportunities if row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY"}]
-    follow_ups = [opportunity_out(row) for row in opportunities if row.status == "FOLLOW_UP_DUE" or _due(row.follow_up_at)]
-    interviews = [opportunity_out(row) for row in opportunities if row.status == "INTERVIEW" or row.interview_at]
-    won = [opportunity_out(row) for row in opportunities if row.status == "WON"]
+    action_ids = {item.opportunity_id for item in actions if item.opportunity_id}
+    outs = [_enriched_out(row, apps_map, action_ids) for row in opportunities]
+    inbox = [item for item in outs if item.status in {"DISCOVERED", "REVIEWING"}]
+    qualified = [item for item in outs if item.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY"}]
+    follow_ups = [
+        _enriched_out(row, apps_map, action_ids)
+        for row in opportunities
+        if row.status == "FOLLOW_UP_DUE" or _due(row.follow_up_at)
+    ]
+    interviews = [
+        _enriched_out(row, apps_map, action_ids)
+        for row in opportunities
+        if row.status == "INTERVIEW" or row.interview_at
+    ]
+    won = [item for item in outs if item.status == "WON"]
+    archived = [item for item in outs if item.archived or item.status in {"CLOSED", "REJECTED"}]
     approvals = [item for item in applications if item.approval_state == "READY_FOR_OWNER_REVIEW"]
+    draft_ready = [item for item in applications if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
+    approved = [item for item in applications if item.approved_for_future_submission]
+    submitted = [item for item in outs if item.status == "SUBMITTED"]
+    needs_owner = [item for item in outs if item.owner_action_required or item.missing_owner_facts]
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
+            "opportunities_found": len(opportunities),
+            "qualified": len(qualified),
+            "needs_owner_input": len(needs_owner),
+            "draft_ready": len(draft_ready),
+            "approved_for_future_submission": len(approved),
+            "submitted": len(submitted),
+            "closed": len(archived),
             "applications_needing_approval": len(approvals),
             "follow_ups_due": len(follow_ups),
             "interviews": len(interviews),
@@ -940,9 +1134,32 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         interviews=interviews,
         won_work=won,
         owner_actions=[owner_action_out(item) for item in actions],
+        rejected_or_archived=archived,
+        opportunity_list=outs,
         revenue_placeholder=REVENUE_PLACEHOLDER,
         identity_disclaimer=IDENTITY_DISCLAIMER,
     )
+
+
+def today_cards(counts: dict[str, int]) -> list[dict[str, Any]]:
+    specs = (
+        ("work_opportunities", "WORK OPPORTUNITIES"),
+        ("qualified", "QUALIFIED"),
+        ("needs_owner_input", "NEEDS OWNER INPUT"),
+        ("draft_ready", "DRAFT READY"),
+        ("approved_for_future_submission", "APPROVED FOR FUTURE SUBMISSION"),
+        ("submitted", "SUBMITTED"),
+        ("closed", "CLOSED"),
+        ("applications_needing_approval", "APPLICATIONS NEEDING APPROVAL"),
+        ("follow_ups_due", "FOLLOW-UPS DUE"),
+        ("interviews", "INTERVIEWS"),
+        ("owner_action_required", "OWNER ACTION REQUIRED"),
+        ("work_won", "WORK WON"),
+    )
+    return [
+        {"key": key, "label": label, "count": int(counts.get(key) or 0), "href": "/nova/work"}
+        for key, label in specs
+    ]
 
 
 def today_summary(db: Session, *, organization_id: str, user: UserContext) -> TodaySummaryOut:
@@ -954,6 +1171,30 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         interviews=dash.counts["interviews"],
         owner_action_required=dash.counts["owner_action_required"],
         work_won=dash.counts["work_won"],
+        qualified=dash.counts["qualified"],
+        needs_owner_input=dash.counts["needs_owner_input"],
+        draft_ready=dash.counts["draft_ready"],
+        approved_for_future_submission=dash.counts["approved_for_future_submission"],
+        submitted=dash.counts["submitted"],
+        closed=dash.counts["closed"],
+        cards=today_cards(dash.counts),
+    )
+
+
+def opportunity_detail(
+    db: Session,
+    opportunity_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> OpportunityDetailOut:
+    tracked = tracker(db, opportunity_id, organization_id=organization_id, user=user)
+    return OpportunityDetailOut(
+        tracker=tracked,
+        missing_owner_facts=tracked.opportunity.missing_owner_facts,
+        source_url_display=tracked.opportunity.source_url,
+        source_url_fetched=False,
+        revenue_disclaimer=REVENUE_PLACEHOLDER,
     )
 
 

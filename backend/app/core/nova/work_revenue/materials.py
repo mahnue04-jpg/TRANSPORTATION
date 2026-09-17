@@ -163,8 +163,101 @@ def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMIC
                 f"{identity}"
             ),
         },
+        {
+            "kind": "statement_of_work",
+            "title": f"Statement of work outline for {title}",
+            "body": (
+                f"DRAFT statement of work. Not a signed contract.\n\n{party}\n\n"
+                f"Period of performance: {OWNER_INPUT_REQUIRED}\n"
+                f"Deliverables: {OWNER_INPUT_REQUIRED}\n"
+                f"Pricing: {OWNER_INPUT_REQUIRED}\n"
+                f"Nova will not accept this SOW. Owner signature is required later.\n\n"
+                f"{forbidden}\n\n{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "bid_response",
+            "title": f"Bid response draft for {title}",
+            "body": (
+                f"DRAFT bid response. No price is committed.\n\n"
+                f"Bid amount: {OWNER_INPUT_REQUIRED}\n"
+                f"Availability: {OWNER_INPUT_REQUIRED}\n"
+                f"{identity}\n\n{forbidden}\n\n{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "questionnaire_response",
+            "title": "Questionnaire response draft",
+            "body": (
+                f"DRAFT questionnaire responses.\n\n"
+                f"Legal business name: {OWNER_INPUT_REQUIRED}\n"
+                f"Owner/contact: {OWNER_INPUT_REQUIRED}\n"
+                f"Insurance: {OWNER_INPUT_REQUIRED}\n"
+                f"Government registrations: {OWNER_INPUT_REQUIRED}\n"
+                f"References: {OWNER_INPUT_REQUIRED}\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "clarification_questions",
+            "title": "Clarification questions (DRAFT)",
+            "body": (
+                f"DRAFT questions for the owner to send later if appropriate. Nothing was sent.\n\n"
+                f"Unknown facts remain {OWNER_INPUT_REQUIRED}.\n"
+                f"1. Confirm whether physical presence is required.\n"
+                f"2. Confirm whether a professional license is required.\n"
+                f"3. Confirm compensation and contract party.\n"
+                f"4. Confirm whether identity verification or CAPTCHA will be required.\n\n"
+                f"{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "interview_prep",
+            "title": "Interview preparation notes (DRAFT)",
+            "body": (
+                f"DRAFT interview notes. Nova cannot attend a live interview.\n\n"
+                f"Identity disclosure: {identity}\n"
+                f"Talking points from verified capabilities only:\n{caps}\n\n"
+                f"Prior clients, revenue, and availability: {OWNER_INPUT_REQUIRED}.\n"
+                f"Do not invent prior clients or revenue.\n"
+                f"Owner must attend any live interview.\n\n{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "owner_action_checklist",
+            "title": "Owner action checklist",
+            "body": (
+                f"OWNER ACTION CHECKLIST for {title} at {company}.\n\n"
+                f"- Confirm legal contracting party: {OWNER_INPUT_REQUIRED}\n"
+                f"- Confirm contact details: {OWNER_INPUT_REQUIRED}\n"
+                f"- Confirm certifications if requested: {OWNER_INPUT_REQUIRED}\n"
+                f"- Complete CAPTCHA / identity / signature steps in person if required\n"
+                f"- Do not authorize Nova to submit, sign, or send banking/tax data\n"
+            ),
+        },
     ]
     for item in drafts:
         item["status"] = "DRAFT"
         item["owner_input_required"] = OWNER_INPUT_REQUIRED in item["body"]
     return drafts
+
+
+def missing_owner_facts(opportunity: dict[str, Any]) -> list[str]:
+    facts = [
+        "legal_business_name",
+        "owner_contact_info",
+        "verified_experience",
+    ]
+    text = " ".join(
+        [
+            str(opportunity.get("description") or ""),
+            str(opportunity.get("requirements") or ""),
+            " ".join(opportunity.get("credentials_required") or []),
+        ]
+    ).lower()
+    if opportunity.get("credentials_required") or "certif" in text or "license" in text:
+        facts.append("required_certification")
+    if "portfolio" in text or "work sample" in text:
+        facts.append("portfolio_or_work_sample")
+    if "attach" in text or "upload" in text:
+        facts.append("requested_attachment")
+    return list(dict.fromkeys(facts))

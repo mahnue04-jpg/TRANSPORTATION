@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.schemas import (
     CapabilityOut,
     DashboardOut,
     OpportunityCreate,
+    OpportunityDetailOut,
     OpportunityOut,
     OpportunityUpdate,
     OwnerActionOut,
@@ -88,11 +89,14 @@ def work_profile(
 @router.get("/opportunities", response_model=list[OpportunityOut])
 def list_opportunities(
     organization_id: str | None = None,
+    view_filter: str | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org(user, organization_id)
-    return [service.opportunity_out(row) for row in service.list_opportunities(db, organization_id=org_id, user=user)]
+    return service.list_opportunity_outs(
+        db, organization_id=org_id, user=user, view_filter=view_filter
+    )
 
 
 @router.post("/opportunities", response_model=OpportunityOut)
@@ -163,6 +167,20 @@ def opportunity_tracker(
     org_id = _resolve_org(user, organization_id)
     try:
         return service.tracker(db, opportunity_id, organization_id=org_id, user=user)
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/opportunities/{opportunity_id}/detail", response_model=OpportunityDetailOut)
+def opportunity_detail(
+    opportunity_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    org_id = _resolve_org(user, organization_id)
+    try:
+        return service.opportunity_detail(db, opportunity_id, organization_id=org_id, user=user)
     except service.NovaWorkError as exc:
         _raise(exc)
 

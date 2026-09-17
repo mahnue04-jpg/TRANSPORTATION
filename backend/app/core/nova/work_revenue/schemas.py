@@ -48,15 +48,24 @@ MATERIAL_KINDS = (
     "application_responses",
     "work_sample_outline",
     "follow_up_message",
+    "statement_of_work",
+    "bid_response",
+    "questionnaire_response",
+    "clarification_questions",
+    "interview_prep",
+    "owner_action_checklist",
 )
 
 OWNER_ACTION_TYPES = (
     "CAPTCHA",
     "IDENTITY_VERIFICATION",
     "LIVE_INTERVIEW",
+    "PHONE_CALL",
+    "LIVE_MEETING",
     "LEGAL_SIGNATURE",
     "CONTRACT_ACCEPTANCE",
     "BANK_INFORMATION",
+    "PAYOUT_SETUP",
     "TAX_INFORMATION",
     "SSN",
     "BACKGROUND_CHECK",
@@ -64,7 +73,16 @@ OWNER_ACTION_TYPES = (
     "PRICING_COMMITMENT",
     "FINANCIAL_COMMITMENT",
     "LEGAL_CERTIFICATION",
+    "ACCOUNT_CREATION",
     "PLATFORM_REQUIRES_HUMAN",
+)
+
+REVENUE_STATUSES = (
+    "NONE",
+    "ESTIMATED",
+    "QUOTED",
+    "CONTRACTED",
+    "OWNER_CONFIRMED_RECEIVED",
 )
 
 SOURCE_TYPES = (
@@ -114,6 +132,8 @@ class OpportunityCreate(BaseModel):
     physical_presence_required: Literal["true", "false", "unknown"] = "unknown"
     application_deadline: datetime | None = None
     notes: str | None = None
+    estimated_value: float | None = None
+    expected_payment_frequency: str | None = Field(default=None, max_length=40)
 
 
 class OpportunityUpdate(BaseModel):
@@ -122,6 +142,16 @@ class OpportunityUpdate(BaseModel):
     notes: str | None = None
     follow_up_at: datetime | None = None
     interview_at: datetime | None = None
+    archived: bool | None = None
+    estimated_value: float | None = None
+    quoted_amount: float | None = None
+    contract_amount: float | None = None
+    expected_payment_frequency: str | None = None
+    expected_start_date: datetime | None = None
+    expected_end_date: datetime | None = None
+    revenue_status: str | None = None
+    invoice_required: bool | None = None
+    owner_confirmed_payment_received: bool | None = None
 
 
 class OpportunityOut(BaseModel):
@@ -152,11 +182,29 @@ class OpportunityOut(BaseModel):
     qualification: dict[str, Any] | None = None
     follow_up_at: datetime | None
     interview_at: datetime | None
+    updated_at: datetime | None = None
+    fingerprint: str | None = None
+    owner_action_required: bool = False
+    application_state: str | None = None
+    lifecycle_outcome: str | None = None
+    archived: bool = False
+    estimated_value: float | None = None
+    quoted_amount: float | None = None
+    contract_amount: float | None = None
+    expected_payment_frequency: str | None = None
+    expected_start_date: datetime | None = None
+    expected_end_date: datetime | None = None
+    revenue_status: str = "NONE"
+    invoice_required: bool = False
+    owner_confirmed_payment_received: bool = False
+    missing_owner_facts: list[str] = Field(default_factory=list)
 
 
 class QualificationOut(BaseModel):
     opportunity_id: str
     outcome: str
+    lifecycle_outcome: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
     nova_task_share: str
     owner_participation: list[str]
     other_human_required: list[str]
@@ -282,6 +330,8 @@ class DashboardOut(BaseModel):
     interviews: list[OpportunityOut]
     won_work: list[OpportunityOut]
     owner_actions: list[OwnerActionOut]
+    rejected_or_archived: list[OpportunityOut] = Field(default_factory=list)
+    opportunity_list: list[OpportunityOut] = Field(default_factory=list)
     revenue_placeholder: str
     identity_disclaimer: str
 
@@ -293,7 +343,14 @@ class TodaySummaryOut(BaseModel):
     interviews: int
     owner_action_required: int
     work_won: int
+    qualified: int = 0
+    needs_owner_input: int = 0
+    draft_ready: int = 0
+    approved_for_future_submission: int = 0
+    submitted: int = 0
+    closed: int = 0
     href: str = "/nova/work"
+    cards: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProviderOut(BaseModel):
@@ -301,3 +358,12 @@ class ProviderOut(BaseModel):
     label: str
     phase1_enabled: bool
     notes: str
+    capabilities: dict[str, bool] = Field(default_factory=dict)
+
+
+class OpportunityDetailOut(BaseModel):
+    tracker: TrackerOut
+    missing_owner_facts: list[str]
+    source_url_display: str | None
+    source_url_fetched: bool = False
+    revenue_disclaimer: str

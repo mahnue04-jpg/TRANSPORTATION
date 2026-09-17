@@ -130,7 +130,10 @@ button {
   padding: 12px 0;
 }
 
+.item[data-opportunity-id] { cursor: pointer; }
 .owner-flag { color: var(--nova-warn); font-weight: 700; }
+.wide-card { grid-column: 1 / -1; }
+.filters, .detail-block { margin-top: 8px; }
 
 @media (max-width: 720px) {
   .work-header, .work-main { width: min(100% - 20px, 720px); }

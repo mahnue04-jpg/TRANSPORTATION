@@ -49,11 +49,27 @@
 
     <section class="counts" aria-label="Work counts">
       <article class="card compact"><h3>WORK OPPORTUNITIES</h3><p id="count-opps">0</p></article>
-      <article class="card compact"><h3>APPLICATIONS NEEDING APPROVAL</h3><p id="count-approvals">0</p></article>
-      <article class="card compact"><h3>FOLLOW-UPS DUE</h3><p id="count-followups">0</p></article>
-      <article class="card compact"><h3>INTERVIEWS</h3><p id="count-interviews">0</p></article>
+      <article class="card compact"><h3>QUALIFIED</h3><p id="count-qualified">0</p></article>
+      <article class="card compact"><h3>NEEDS OWNER INPUT</h3><p id="count-owner-input">0</p></article>
+      <article class="card compact"><h3>DRAFT READY</h3><p id="count-draft">0</p></article>
+      <article class="card compact"><h3>APPROVED FOR FUTURE SUBMISSION</h3><p id="count-approved">0</p></article>
+      <article class="card compact"><h3>SUBMITTED</h3><p id="count-submitted">0</p></article>
+      <article class="card compact"><h3>CLOSED</h3><p id="count-closed">0</p></article>
       <article class="card compact"><h3>OWNER ACTION REQUIRED</h3><p id="count-actions">0</p></article>
-      <article class="card compact"><h3>WORK WON</h3><p id="count-won">0</p></article>
+    </section>
+
+    <section class="command-card" aria-label="Opportunity filters">
+      <h2>Opportunity list</h2>
+      <div class="command-actions" id="filter-row">
+        <button type="button" class="secondary" data-filter="">All</button>
+        <button type="button" class="secondary" data-filter="qualified">Qualified</button>
+        <button type="button" class="secondary" data-filter="owner_action">Owner action required</button>
+        <button type="button" class="secondary" data-filter="draft_ready">Draft ready</button>
+        <button type="button" class="secondary" data-filter="approved">Approved for future submission</button>
+        <button type="button" class="secondary" data-filter="rejected">Rejected</button>
+        <button type="button" class="secondary" data-filter="archived">Archived</button>
+      </div>
+      <div id="filtered-list">Sign in to load opportunities.</div>
     </section>
 
     <section class="command-card">
@@ -96,8 +112,12 @@
       <article class="card"><h2>Interviews</h2><div id="interview-list">None.</div></article>
       <article class="card"><h2>Won Work</h2><div id="won-list">None.</div></article>
       <article class="card"><h2>Owner Actions</h2><div id="action-list">None.</div></article>
-      <article class="card"><h2>Revenue</h2><div id="revenue-box">COMING IN LATER PHASE</div></article>
+      <article class="card"><h2>Revenue</h2><div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div></article>
       <article class="card"><h2>Activity</h2><div id="audit-list">None.</div></article>
+      <article class="card wide-card"><h2>Opportunity detail</h2>
+        <p class="hint">Source URLs are shown as text only and are not fetched.</p>
+        <div id="detail-box">Select an opportunity to see capability match, missing owner facts, materials, and history.</div>
+      </article>
     </section>
   </main>
 

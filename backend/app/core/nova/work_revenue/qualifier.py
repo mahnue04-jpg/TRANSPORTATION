@@ -35,11 +35,17 @@ _IDENTITY_RE = re.compile(
     re.I,
 )
 _INTERVIEW_RE = re.compile(r"\b(interview|phone screen|video interview|live interview)\b", re.I)
+_PHONE_RE = re.compile(r"\b(phone call|telephone|call the hiring|must call)\b", re.I)
+_MEETING_RE = re.compile(r"\b(live meeting|zoom interview|teams meeting|in-person meeting)\b", re.I)
 _CAPTCHA_RE = re.compile(r"\b(captcha|are you a robot)\b", re.I)
-_BANK_RE = re.compile(r"\b(bank account|direct deposit|routing number)\b", re.I)
-_TAX_RE = re.compile(r"\b(w-9|w9|ein required|tax id)\b", re.I)
+_BANK_RE = re.compile(r"\b(bank account|direct deposit|routing number|payout setup)\b", re.I)
+_TAX_RE = re.compile(r"\b(w-9|w9|ein required|tax id|tax form)\b", re.I)
 _CONTRACT_RE = re.compile(r"\b(clickwrap|accept (the )?contract|e-sign|electronic signature)\b", re.I)
 _PRICING_RE = re.compile(r"\b(set your rate|bid required|name your price)\b", re.I)
+_ACCOUNT_RE = re.compile(r"\b(create an account|sign up on the portal|register an account)\b", re.I)
+_PORTFOLIO_RE = re.compile(r"\b(portfolio|work sample required|attach a sample)\b", re.I)
+_CLEARANCE_RE = re.compile(r"\b(security clearance|government clearance|secret clearance)\b", re.I)
+_SUPPORT_RE = re.compile(r"\b(live customer support|answer phones|call center)\b", re.I)
 
 _DIGITAL_SKILL_MAP = {
     "email": "EMAIL_DRAFTING",
@@ -132,45 +138,77 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         human_tasks.append("Driving / vehicle operation")
         other_human.append("A licensed human driver")
         owner_actions.append("LICENSE_VERIFICATION")
-        reasons.append("Driving cannot be performed by Nova.")
+        reasons.append("requires driving")
     if physical == "true":
         human_tasks.append("Physical / on-site presence")
         other_human.append("A human who can be physically present")
-        reasons.append("Physical presence is required.")
+        reasons.append("requires physical presence")
     if licenses or regulated:
         human_tasks.append("Licensed or regulated professional work")
         other_human.append("A separately qualified licensed human")
         owner_actions.append("LICENSE_VERIFICATION")
-        reasons.append("Licensed or regulated professional judgment is outside Nova authorization.")
+        reasons.append("requires professional license")
     if identity:
         owner_tasks.append("Complete identity verification in person")
         owner_participation.append("Identity verification")
         owner_actions.append("IDENTITY_VERIFICATION")
+        reasons.append("requires identity verification")
         if _flag(re.compile(r"\bssn\b|social security", re.I), text):
             owner_actions.append("SSN")
         if _flag(re.compile(r"background check", re.I), text):
             owner_actions.append("BACKGROUND_CHECK")
+            reasons.append("requires background check")
     if interview:
         owner_tasks.append("Attend any live interview")
         owner_participation.append("Live interview")
         owner_actions.append("LIVE_INTERVIEW")
         human_tasks.append("Human interview")
+        reasons.append("requires live interview")
     if captcha:
         owner_tasks.append("Solve any CAPTCHA or human-check")
         owner_actions.append("CAPTCHA")
+        reasons.append("requires CAPTCHA")
+    if _flag(_PHONE_RE, text):
+        owner_actions.append("PHONE_CALL")
+        owner_participation.append("Phone call")
+        human_tasks.append("Phone call")
+        reasons.append("requires phone calls")
+    if _flag(_MEETING_RE, text):
+        owner_actions.append("LIVE_MEETING")
+        owner_participation.append("Live meeting")
+        reasons.append("requires live meeting")
+    if _flag(_ACCOUNT_RE, text):
+        owner_actions.append("ACCOUNT_CREATION")
+        owner_participation.append("External portal account")
+        reasons.append("requires external portal account")
+    if _flag(_PORTFOLIO_RE, text):
+        missing.append("portfolio_or_work_sample")
+        reasons.append("requires portfolio")
+    if _flag(_CLEARANCE_RE, text):
+        owner_actions.append("IDENTITY_VERIFICATION")
+        reasons.append("requires government clearance")
+        other_human.append("A human eligible for the required clearance")
+    if _flag(_SUPPORT_RE, text):
+        human_tasks.append("Live customer support")
+        reasons.append("requires live customer support")
     if _flag(_BANK_RE, text):
         owner_actions.append("BANK_INFORMATION")
+        owner_actions.append("PAYOUT_SETUP")
         owner_participation.append("Bank information")
+        reasons.append("requires banking/payment setup")
     if _flag(_TAX_RE, text):
         owner_actions.append("TAX_INFORMATION")
         owner_participation.append("Tax information")
+        reasons.append("requires tax form")
     if _flag(_CONTRACT_RE, text):
         owner_actions.append("CONTRACT_ACCEPTANCE")
         owner_actions.append("LEGAL_SIGNATURE")
         owner_participation.append("Legal signature / contract acceptance")
+        reasons.append("requires manual signature")
     if _flag(_PRICING_RE, text):
         owner_actions.append("PRICING_COMMITMENT")
         owner_participation.append("Pricing commitment")
+        reasons.append("requires owner approval of pricing")
 
     skills = [str(item).lower() for item in (opportunity.get("skills_required") or [])]
     skill_blob = " ".join(skills) + " " + text.lower()
@@ -222,8 +260,27 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
             reasons.append("Unable to confirm Nova can perform this work without guessing.")
 
     unique_actions = list(dict.fromkeys(owner_actions))
+    unique_reasons = list(dict.fromkeys(reasons)) or ["Qualification completed without a deceptive numeric score."]
+    if unique_actions:
+        unique_reasons.append("requires owner approval")
+    if driving or regulated:
+        lifecycle = "PROHIBITED"
+    elif outcome == "NOT_SUITABLE":
+        lifecycle = "NOT_SUPPORTED"
+    elif outcome == "HUMAN_REQUIRED" and unique_actions:
+        lifecycle = "OWNER_ACTION_REQUIRED"
+    elif outcome == "HUMAN_REQUIRED":
+        lifecycle = "NOT_SUPPORTED"
+    elif outcome == "NOVA_WITH_OWNER_REVIEW":
+        lifecycle = "OWNER_ACTION_REQUIRED" if unique_actions else "NOVA_CAN_PREPARE_OWNER_REVIEW"
+    elif outcome == "NOVA_CAN_PERFORM":
+        lifecycle = "NOVA_CAN_PERFORM"
+    else:
+        lifecycle = "INSUFFICIENT_INFORMATION"
     return {
         "outcome": outcome,
+        "lifecycle_outcome": lifecycle,
+        "reason_codes": unique_reasons,
         "nova_task_share": nova_share,
         "owner_participation": list(dict.fromkeys(owner_participation)),
         "other_human_required": list(dict.fromkeys(other_human)),
@@ -239,7 +296,7 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "nova_tasks": nova_tasks,
         "owner_tasks": list(dict.fromkeys(owner_tasks)),
         "human_tasks": list(dict.fromkeys(human_tasks)),
-        "reasons": reasons or ["Qualification completed without a deceptive numeric score."],
+        "reasons": unique_reasons,
         "owner_actions": unique_actions,
         "deceptive_score_used": False,
         "matched_capabilities": matched_caps,
