@@ -6,18 +6,20 @@ Local owner-controlled work system. Nova drafts and tracks. The owner decides. N
 
 Help the owner find, qualify, prepare, approve, and track paid work for AMICOR without autonomous external action.
 
-## Major components
+## Current architecture
 
 - `/api/nova/work` — tenant-scoped APIs
 - `/nova/work` — owner dashboard
 - `/nova/today` — informational Work & Revenue cards
-- Capability registry — what Nova may claim
-- Qualification engine V2 — structured evaluations, no win scores
-- Owner/business fact catalog — missing vs verified vs not applicable
-- Application materials — local drafts marked `[OWNER INPUT REQUIRED]`
-- Owner approval gate — `APPROVED` means future submission only
-- Internal engagements, tasks, deliverables — tracking, not contracts
-- Revenue entries — owner-entered stages, never a payment processor
+- Capability registry, qualification V2, application drafts, owner approval
+- Internal engagements, tasks, deliverables
+- Recurring managed-work series (internal only)
+- Weekly managed-service report drafts (generate ≠ send)
+- Invoice-support drafts (not Stripe invoices)
+- Revenue entries and reconciliation summaries
+- Owner-action center, business-fact catalog, disclosure and platform-policy metadata
+
+All live flags remain off: live discovery, external submission, financial execution, report send, invoice send.
 
 ## Lifecycle
 
@@ -34,106 +36,125 @@ This is an internal state model. Nova does not execute the external steps.
 
 Opportunity statuses: `DISCOVERED` through `WON` / `REJECTED` / `CLOSED`.
 
-Application approval: `DRAFT` → `READY_FOR_OWNER_REVIEW` → `APPROVED` | `REJECTED` | `NEEDS_CHANGES`. Aliases: `CHANGES_REQUESTED` → `NEEDS_CHANGES`, `APPROVED_FOR_FUTURE_SUBMISSION` → `APPROVED`.
+Application approval: `DRAFT` → `READY_FOR_OWNER_REVIEW` → `APPROVED` | `REJECTED` | `NEEDS_CHANGES`.
 
-Task statuses: `NOT_STARTED` / `READY` / `IN_PROGRESS` / `OWNER_REVIEW` / `BLOCKED` / `COMPLETE` / `CANCELLED`. Aliases: `TODO` → `NOT_STARTED`, `DONE` → `COMPLETE`.
+**APPROVED != SUBMITTED.** **APPROVED != PAID.** **COMPLETE != PAID.**
 
-Deliverable: `DRAFT` → `READY_FOR_REVIEW` → `OWNER_APPROVED` → `CONFIRMED_DELIVERED`. **Delivered requires owner confirmation. Nova does not transmit files.**
+Task statuses: `NOT_STARTED` / `READY` / `IN_PROGRESS` / `OWNER_REVIEW` / `BLOCKED` / `COMPLETE` / `CANCELLED`.
 
-Revenue stages: `ESTIMATED` → `QUOTED` → `CONTRACTED` → `INVOICE_DRAFT` / `INVOICED_EXTERNALLY` → `PAYMENT_PENDING` → `PARTIALLY_PAID` / `PAID`. `PAID` cannot be created directly and cannot be reached silently.
+Deliverable: `DRAFT` → `READY_FOR_REVIEW` → `OWNER_APPROVED` → `CONFIRMED_DELIVERED`. Delivered requires owner confirmation. Nova does not transmit files.
 
-## Owner approval boundary
+Internal work queue statuses: `NEW`, `READY`, `ACTIVE`, `BLOCKED`, `OWNER_ACTION_REQUIRED`, `COMPLETE`, `ARCHIVED`. Stored engagement values such as `NOT_STARTED` map to `NEW` for queue views.
 
-Nova may prepare drafts and recommend next actions. Nova must not submit applications, accept contracts, sign, impersonate, bypass CAPTCHA, send messages, or move money.
+## Recurring managed work
 
-**APPROVED != SUBMITTED.** External submit always returns 409 while `EXTERNAL_SUBMISSION_ENABLED` is false.
+Internal series only. Fields: frequency (`daily` / `weekly` / `monthly`), expected next work date, status (`ACTIVE` / `PAUSED` / `ARCHIVED`), generated tasks, completion records, overdue/internal attention. The next work date advances only after an occurrence is completed, so the same period cannot be generated twice.
 
-## Nova capability boundary
+- Pause, resume, and archive are internal.
+- Duplicate series titles on the same engagement are rejected.
+- Duplicate period keys on the same series are rejected.
+- Nova does not send notifications, contact customers, create calendars, or make network requests.
 
-Nova may assist with authorized digital drafting, organization, and summarization. Nova may not invent experience, certifications, references, or pricing. Missing facts stay `[OWNER INPUT REQUIRED]`.
+## Engagement / task model
 
-Qualification decisions: `NOVA_CAN_PERFORM`, `NOVA_CAN_PREPARE`, `OWNER_ACTION_REQUIRED`, `INSUFFICIENT_INFORMATION`, `NOT_SUITABLE`, `NOT_SUPPORTED`, `PROHIBITED`. Stored Phase 1 outcomes remain compatible.
+Engagements are tracking records, not contracts. Tasks are internal. Queue list/filter/sort supports status, priority, source, client/engagement, due date (`due_before`), owner action, and last update. Tenant isolation is preserved. No outbound messages.
 
-## Tenant isolation
+## Weekly report workflow
 
-Every query is organization-scoped and owner-filtered unless the caller is an org-wide admin. Cross-tenant IDs return 404 or 403. This applies to opportunities, applications, engagements, tasks, deliverables, owner actions, revenue entries, and audit events.
+`POST /api/nova/work/reports/weekly` builds an internal draft covering activity, completed work, pending work, blockers, owner actions, opportunity pipeline, estimated revenue, contracted revenue, and owner-confirmed received revenue.
 
-## Revenue definitions
+States: `DRAFT` → `READY_FOR_OWNER_REVIEW` → `APPROVED_FOR_MANUAL_USE` → `ARCHIVED`.
 
-Keep these amounts separate:
+Generating a report is not sending it. `POST .../send` returns 409. There is no email, SMS, or client delivery.
 
-- **ESTIMATED** — possible value. Not earned.
+## Invoice-support workflow
+
+Internal draft with engagement, client, work period, deliverable IDs, quantity, rate, calculated subtotal, adjustment notes, invoice-required flag, and owner review.
+
+States: `DRAFT` → `READY_FOR_OWNER_REVIEW` → `APPROVED` → `ARCHIVED`.
+
+Allowed: internal totals from owner-entered data and a printable summary payload.
+
+Not allowed: Stripe invoice creation, payment intents, charges, payouts, bank actions, external send, or automatically marking money received.
+
+## Revenue-state rules
+
+Keep these separate:
+
+- **ESTIMATED** — possible value. Not received.
 - **QUOTED** — owner-entered quote. Not a contract.
 - **CONTRACTED** — owner-entered agreed value. Not an invoice and not cash.
-- **INVOICED** — owner-entered invoice-support record. Not collected by Nova.
-- **RECEIVED** — owner-confirmed cash. Nova did not collect it.
+- **INVOICED / MANUAL_RECORD_ONLY** — owner-entered invoice-support or manual invoice record. Not collected by Nova.
+- **OWNER_CONFIRMED_RECEIVED** — only after explicit owner confirmation on an existing entry.
 
-**ESTIMATED != CONTRACTED.**  
-**CONTRACTED != INVOICED.**  
-**INVOICED != RECEIVED.**
+Nova never infers payment from contract existence, task completion, draft invoice, approval, application acceptance, or estimated opportunity value.
 
-Negative amounts are rejected. Currency must be a 3-letter code. Received revenue requires explicit owner confirmation.
+`GET /api/nova/work/reconciliation` summarizes estimated pipeline, quoted, contracted, awaiting invoice, manually recorded invoice, awaiting owner payment confirmation, and owner-confirmed received.
 
-## Live-action feature flags
+## Owner-action model
 
-All remain **DISABLED**:
+Informational/internal actions. Categories include `VERIFY_BUSINESS_FACT`, `REVIEW_DRAFT`, `PROVIDE_MISSING_INFORMATION`, `APPROVE_MANUAL_SUBMISSION`, `CONFIRM_DELIVERABLE`, `CONFIRM_CONTRACT`, `CONFIRM_PAYMENT_RECEIVED`, `REVIEW_WEEKLY_REPORT`, and `RESOLVE_BLOCKER`.
+
+Owner approval does not execute an external action. APPROVED is not submitted and not paid.
+
+## Business-fact model
+
+Catalog keys stay defined even when values are missing. Value statuses: `MISSING`, `OWNER_PROVIDED`, `VERIFIED`, `EXPIRED`, with optional verification date, expiration date, source description, and notes.
+
+Nova does not fabricate legal name, insurance, licenses, tax data, W-9 status, bank details, experience, pricing, or certifications. Sensitive keys accept readiness flags only. Secrets and banking credentials are rejected.
+
+## Disclosure / policy framework
+
+Internal AI/subcontractor disclosure records: whether AI assistance is used, whether subcontractor assistance is allowed, whether disclosure is required, whether owner acknowledgment is required, and policy status. No live platform-policy scraping. No automated acceptance of third-party terms.
+
+Platform-policy metadata flags: `LOGIN_REQUIRED`, `CAPTCHA_REQUIRED`, `HUMAN_SUBMISSION_ONLY`, `TERMS_RESTRICT_AUTOMATION`, `EXTERNAL_AUTOMATION_UNKNOWN`, `MANUAL_REVIEW_REQUIRED`. Nova does not bypass CAPTCHA, login, MFA, anti-bot measures, or website restrictions.
+
+## Safety boundaries
+
+- Tenant isolation and IDOR protection on every Work & Revenue query
+- Source URLs stored as text; `http`/`https` only; never fetched
+- Untrusted opportunity text is quoted, not executed
+- Dashboard HTML is escaped
+- Negative amounts and malformed dates are rejected
+- Invalid lifecycle transitions are rejected
+- Audit events record tenant, entity, action, previous/new state, actor, and timestamp without secrets
+- No shell or arbitrary code execution
+- No outbound HTTP from this engine
+
+## Disabled live features
 
 - `LIVE_DISCOVERY_ENABLED = False`
 - `EXTERNAL_SUBMISSION_ENABLED = False`
 - `FINANCIAL_ACTIONS_ENABLED = False`
 - `AUTONOMOUS_CLIENT_CONTACT_ENABLED = False`
+- `REPORT_SEND_ENABLED = False`
+- `INVOICE_SEND_ENABLED = False`
 
-Do not enable them in this engine without a separate owner-authorized adapter and tests.
+## Remaining V1 gaps
 
-## Prohibited actions
+Blocked by owner input:
 
-- Live job-board / RFP scraping
-- External application send
-- Contract acceptance
-- Payments, invoices, payouts, Stripe objects
-- Email / SMS / client messages
-- Secret or tax/bank collection in this module
-- Health, Delivery, Freight, Lifesaver, or production changes
+- Real verified legal name, insurance, licenses, experience, pricing, and similar facts
+- Owner policy decisions about AI/subcontractor disclosure on specific platforms
 
-## Phase 2 architecture
-
-Additive schema only (`ensure_work_revenue_schema`). New tables: `nova_work_deliverables`, `nova_work_revenue_entries`. Extra columns on opportunities, applications, materials, owner actions, engagements, tasks, and audit events. No drops, no Stripe tables, no Health/Delivery/Freight tables.
-
-Source URLs are validated (`http`/`https` only; no `javascript:`, `data:`, `file:`, localhost, or embedded credentials) and **never fetched**.
-
-Opportunity and web text is untrusted. Hostile prompt text is stored/displayed only.
-
-Recurring templates are internal catalogs. No calendars, emails, or external schedules.
-
-## Remaining implementation
-
-- Live discovery adapters (owner-authorized later)
-- Controlled live submission
-- Client contact send
-- Real invoice / payment-processor integration
-- Owner-verified business profile values (must be provided by the owner; not invented)
-
-## Testing strategy
-
-`backend/tests/test_nova_work_revenue.py` covers creation, isolation, qualification, drafts, approval, engagements, tasks, deliverables, revenue stages, audit, filters, pagination, unsafe URLs, prompt-injection fixtures, Today cards, and dashboard access. Do not run Stripe tests from this workstream.
-
-## Nova Today
-
-`/api/nova/work/today-summary` feeds informational Work & Revenue cards on `/nova/today`. Cards remain informational. There is no submit, pay, send, live discovery, or contract-accept control.
-
-## Currently deferred
+Blocked by live integration / deferred:
 
 - Live opportunity discovery
 - Approved provider connectors that fetch the network
 - Controlled live application submission
-- Client contact / reporting send
-- Invoice and payment-processor integration
+- Outbound client contact / report delivery
+- Stripe or other payment-processor invoices, charges, payouts
+- External calendars and notifications
 - Populating real owner tax, banking, or identity values
 
-## Future external integration points
+## Testing strategy
 
-Provider flags include `DISCOVERY_SUPPORTED`, `SUBMISSION_SUPPORTED`, `LIVE_DISCOVERY_ENABLED`, and `EXTERNAL_SUBMISSION_ENABLED`. All default false. Do not enable them without an owner-authorized, tested adapter that cannot act silently.
+`backend/tests/test_nova_work_revenue.py` covers Phase 1/foundation behavior.
+
+`backend/tests/test_nova_work_revenue_completion.py` covers recurring work, queue filters, weekly reports, invoice-support, reconciliation, owner actions, facts, disclosure, and platform policy.
+
+Do not run Stripe object-creation tests from this workstream.
 
 ## Schema / migration notes
 
-Phase 2 changes are additive `CREATE TABLE` / `ALTER TABLE ADD COLUMN`. SQLite test databases and local files gain columns automatically. No destructive rename. If a future production migrate is needed, add columns only; do not drop Work & Revenue tables.
+Changes are additive `CREATE TABLE` / `ALTER TABLE ADD COLUMN` via `ensure_work_revenue_schema`. New tables include recurring series/occurrences, weekly reports, invoice-support, business facts, disclosure policies, and platform policies. No Stripe, Health, Delivery, Freight, or Lifesaver tables.
