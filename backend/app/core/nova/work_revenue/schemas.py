@@ -459,6 +459,17 @@ class TodaySummaryOut(BaseModel):
     closed: int = 0
     href: str = "/nova/work"
     cards: list[dict[str, Any]] = Field(default_factory=list)
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    approval_states: dict[str, int] = Field(default_factory=dict)
+    active_engagements: int = 0
+    active_tasks: int = 0
+    revenue_summary: dict[str, Any] = Field(default_factory=dict)
+    guardrails: dict[str, bool] = Field(default_factory=dict)
+    opportunity_mode: str = "manual_simulated_only"
+    live_discovery_enabled: bool = False
+    external_submission_enabled: bool = False
+    financial_actions_enabled: bool = False
+    revenue_disclaimer: str = "Estimated pipeline is not received revenue. Nova does not collect payment."
 
 
 class ProviderOut(BaseModel):

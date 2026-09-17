@@ -58,6 +58,10 @@ Keep estimated pipeline, contracted value, and owner-confirmed received **separa
 - Sensitive tokens are omitted from audit summaries
 - Simulated fixtures are blocked in production
 
+## Nova Today
+
+`/api/nova/work/today-summary` feeds informational Work & Revenue cards on `/nova/today`. The cards show recorded opportunities, owner-approval states, internal managed work, and separated revenue. They do not submit, contract, message, or move money.
+
 ## Currently deferred
 
 - Live opportunity discovery
@@ -65,7 +69,6 @@ Keep estimated pipeline, contracted value, and owner-confirmed received **separa
 - Controlled live application submission
 - Client contact / reporting send
 - Invoice and payment-processor integration
-- Nova Today UI cards (backend `/today-summary` exists; Today UI not modified)
 
 ## Future external integration points
 

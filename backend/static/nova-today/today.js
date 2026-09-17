@@ -215,6 +215,133 @@
         "</article>";
     }).join("");
   }
+  function moneyText(value) {
+    var amount = Number(value);
+    if (!isFinite(amount)) amount = 0;
+    return amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+  function workOpenLink() {
+    return "<a class=\"secondary\" href=\"/nova/work\">Open Work dashboard</a>";
+  }
+  function renderWorkRevenueError() {
+    var mode = $("work-mode");
+    var host = $("work-revenue-box");
+    if (mode) {
+      mode.textContent = "Work & Revenue summary could not be loaded. Other Today sections are unchanged.";
+    }
+    if (!host) return;
+    host.innerHTML = "<article class=\"product-count-card\">" +
+      "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+      "<h3>Work &amp; Revenue</h3>" +
+      "<p class=\"work-empty\">Work &amp; Revenue summary could not be loaded. Other Today sections are unchanged.</p>" +
+      workOpenLink() +
+      "</article>";
+  }
+  function renderWorkRevenue(summary) {
+    var host = $("work-revenue-box");
+    var mode = $("work-mode");
+    if (!host) return;
+    if (!summary) {
+      renderWorkRevenueError();
+      return;
+    }
+    var sources = summary.source_counts || {};
+    var approvals = summary.approval_states || {};
+    var revenue = summary.revenue_summary || {};
+    var liveOff = summary.live_discovery_enabled !== true;
+    var submitOff = summary.external_submission_enabled !== true;
+    var financeOff = summary.financial_actions_enabled !== true;
+    var modeParts = [];
+    if (liveOff) modeParts.push("Opportunities are manual or simulated. Live discovery is disabled. Nova did not search the live internet.");
+    if (submitOff) modeParts.push("External submission is disabled. Approved is not submitted.");
+    if (financeOff) modeParts.push("Financial execution is disabled. Nova cannot charge, invoice, or transfer money.");
+    if (mode) mode.textContent = modeParts.join(" ");
+    var total = Number(summary.work_opportunities || 0);
+    var opportunityEmpty = total <= 0
+      ? "<p class=\"work-empty\">No work opportunities recorded yet.</p>"
+      : "";
+    var waiting = Number(approvals.draft || 0) + Number(approvals.ready_for_review || 0);
+    var approvalEmpty = waiting <= 0
+      ? "<p class=\"work-empty\">No owner approvals waiting.</p>"
+      : "";
+    var engagements = Number(summary.active_engagements || 0);
+    var tasks = Number(summary.active_tasks || 0);
+    var activeEmpty = engagements <= 0 && tasks <= 0
+      ? "<p class=\"work-empty\">No active managed work.</p>"
+      : "";
+    var received = Number(revenue.owner_confirmed_received || 0);
+    var receivedEmpty = received <= 0
+      ? "<p class=\"work-empty\">No received revenue recorded.</p>"
+      : "";
+    host.innerHTML =
+      "<article class=\"product-count-card\" data-work-card=\"opportunities\">" +
+        "<span class=\"trust\">USER-SAVED INFORMATION</span>" +
+        "<h3>Work Opportunities</h3>" +
+        "<p class=\"count-metric\">Recorded opportunities</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(total)) + "</p>" +
+        "<ul class=\"work-state-list\">" +
+          "<li><span class=\"state-label\">MANUAL</span> " + escapeHtml(String(sources.manual || 0)) + "</li>" +
+          "<li><span class=\"state-label\">SIMULATED / TEST</span> " + escapeHtml(String(sources.simulated || 0)) + "</li>" +
+        "</ul>" +
+        opportunityEmpty +
+        "<p class=\"hint\">These counts are from recorded manual or simulated entries. They are not live job-board search results.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"approvals\">" +
+        "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+        "<h3>Owner Approvals</h3>" +
+        "<p class=\"count-metric\">Application review states</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(waiting)) + " waiting</p>" +
+        "<ul class=\"work-state-list\">" +
+          "<li><span class=\"state-label\">DRAFT</span> " + escapeHtml(String(approvals.draft || 0)) + "</li>" +
+          "<li><span class=\"state-label\">READY FOR REVIEW</span> " + escapeHtml(String(approvals.ready_for_review || 0)) + "</li>" +
+          "<li><span class=\"state-label\">APPROVED</span> " + escapeHtml(String(approvals.approved || 0)) + " — future submission only</li>" +
+          "<li><span class=\"state-label\">SUBMITTED</span> " + escapeHtml(String(approvals.submitted || 0)) + " — owner-recorded only</li>" +
+        "</ul>" +
+        approvalEmpty +
+        "<p class=\"hint\">APPROVED is not SUBMITTED. Nova cannot send an external application from Today.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"active-work\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Active Work</h3>" +
+        "<p class=\"count-metric\">Internal managed-work tracking</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(engagements)) + "</p>" +
+        "<ul class=\"work-state-list\">" +
+          "<li><span class=\"state-label\">ENGAGEMENTS</span> " + escapeHtml(String(engagements)) + "</li>" +
+          "<li><span class=\"state-label\">OPEN TASKS</span> " + escapeHtml(String(tasks)) + "</li>" +
+        "</ul>" +
+        activeEmpty +
+        "<p class=\"hint\">Internal tracking only. An engagement is not an external contract unless a stored record says so.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"revenue\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Revenue</h3>" +
+        "<p class=\"count-metric\">Separated owner-entered amounts</p>" +
+        "<ul class=\"work-state-list\">" +
+          "<li><span class=\"state-label\">ESTIMATED</span> " + escapeHtml(moneyText(revenue.estimated_pipeline)) + " — not money earned</li>" +
+          "<li><span class=\"state-label\">CONTRACTED</span> " + escapeHtml(moneyText(revenue.contracted_value)) + " — not money earned</li>" +
+          "<li><span class=\"state-label\">RECEIVED</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — owner-confirmed only</li>" +
+        "</ul>" +
+        receivedEmpty +
+        "<p class=\"hint\">" + escapeHtml(summary.revenue_disclaimer || "Estimated pipeline is not received revenue. Nova does not collect payment.") + "</p>" +
+        workOpenLink() +
+      "</article>";
+  }
+  async function loadWorkRevenue() {
+    if (!$("work-revenue-box")) return;
+    if (!token()) {
+      if ($("work-mode")) $("work-mode").textContent = "Sign in to load Work & Revenue mode.";
+      return;
+    }
+    try {
+      var summary = await api("/api/nova/work/today-summary");
+      renderWorkRevenue(summary);
+    } catch (_) {
+      renderWorkRevenueError();
+    }
+  }
   async function refresh() {
     if (!token()) {
       $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
@@ -256,6 +383,11 @@
       if (health.recheck_available === "yes") parts.push("Manual re-check available");
       if (health.detail) parts.push(health.detail);
       connector.textContent = parts.length ? parts.join(" · ") : "No mailbox connector status.";
+    }
+    try {
+      await loadWorkRevenue();
+    } catch (_) {
+      renderWorkRevenueError();
     }
     if (selectedActionId) {
       try {
@@ -347,6 +479,7 @@
       session().logout();
     }
     setSignedIn(false);
+    if ($("work-mode")) $("work-mode").textContent = "Sign in to load Work & Revenue mode.";
     showBanner("Signed out.", true);
   });
   $("login-form").addEventListener("submit", function (event) {
@@ -379,7 +512,10 @@
     });
   });
   if (session() && session().restore) session().restore();
-  refresh().catch(function (err) { showBanner(err.message || String(err)); });
+  refresh().catch(function (err) {
+    showBanner(err.message || String(err));
+    loadWorkRevenue().catch(function () { renderWorkRevenueError(); });
+  });
   api("/api/nova/signup/me/access").then(function (access) {
     if (!access || !access.nova_saas_customer) return;
     document.querySelectorAll(".today-nav a").forEach(function (el) {

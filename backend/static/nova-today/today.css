@@ -254,6 +254,29 @@ pre {
   min-height: 44px;
 }
 
+.work-state-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  color: var(--nova-muted);
+  font-size: 0.88rem;
+}
+
+.work-state-list li {
+  margin: 4px 0;
+}
+
+.work-state-list .state-label {
+  color: var(--nova-text);
+  font-weight: 600;
+}
+
+.work-empty {
+  margin: 8px 0 12px;
+  color: var(--nova-muted);
+  font-size: 0.9rem;
+}
+
 .trust {
   display: inline-block;
   margin-bottom: 8px;

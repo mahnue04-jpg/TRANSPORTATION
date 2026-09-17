@@ -94,6 +94,9 @@ def test_nova_today_trust_labels_and_responsive() -> None:
     assert "min-height: 44px" in TODAY_CSS
     assert "Snooze 24h" in TODAY_JS
     assert "/actions/" in TODAY_JS and "snooze" in TODAY_JS
+    assert "Work &amp; Revenue" in TODAY_HTML
+    assert "/api/nova/work/today-summary" in TODAY_JS
+    assert "Submit Application" not in TODAY_JS
     assert "hardware" not in TODAY_JS.lower()
     assert "gpio" not in TODAY_JS.lower()
     assert "nfc" not in TODAY_JS.lower()

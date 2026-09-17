@@ -1306,8 +1306,48 @@ def today_cards(counts: dict[str, int]) -> list[dict[str, Any]]:
     ]
 
 
+def _today_source_counts(opportunities: list[OpportunityOut]) -> dict[str, int]:
+    counts = {"manual": 0, "simulated": 0, "other": 0}
+    for item in opportunities:
+        kind = str(item.source_type or item.source or "manual").strip().lower()
+        if kind == "simulated":
+            counts["simulated"] += 1
+        elif kind == "manual":
+            counts["manual"] += 1
+        else:
+            counts["other"] += 1
+    return counts
+
+
+def _today_approval_states(applications: list[ApplicationOut]) -> dict[str, int]:
+    counts = {"draft": 0, "ready_for_review": 0, "approved": 0, "submitted": 0}
+    for item in applications:
+        if item.manual_submission_recorded:
+            counts["submitted"] += 1
+        elif item.approved_for_future_submission or item.approval_state == "APPROVED":
+            counts["approved"] += 1
+        elif item.approval_state == "READY_FOR_OWNER_REVIEW":
+            counts["ready_for_review"] += 1
+        elif item.approval_state == "DRAFT":
+            counts["draft"] += 1
+    return counts
+
+
+def _today_active_tasks(engagements: list[dict[str, Any]]) -> int:
+    total = 0
+    for item in engagements:
+        if item.get("status") not in {"NOT_STARTED", "ACTIVE"}:
+            continue
+        for task in item.get("tasks") or []:
+            if task.get("status") != "COMPLETE":
+                total += 1
+    return total
+
+
 def today_summary(db: Session, *, organization_id: str, user: UserContext) -> TodaySummaryOut:
     dash = dashboard(db, organization_id=organization_id, user=user)
+    guards = dash.guardrails or engine_guardrails()
+    revenue = dict(dash.revenue_summary or {})
     return TodaySummaryOut(
         work_opportunities=dash.counts["work_opportunities"],
         applications_needing_approval=dash.counts["applications_needing_approval"],
@@ -1322,6 +1362,17 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         submitted=dash.counts["submitted"],
         closed=dash.counts["closed"],
         cards=today_cards(dash.counts),
+        source_counts=_today_source_counts(dash.opportunity_list),
+        approval_states=_today_approval_states(dash.applications),
+        active_engagements=int(dash.counts.get("active_engagements") or 0),
+        active_tasks=_today_active_tasks(dash.engagements),
+        revenue_summary=revenue,
+        guardrails=guards,
+        opportunity_mode="manual_simulated_only",
+        live_discovery_enabled=bool(guards.get("LIVE_DISCOVERY_ENABLED")),
+        external_submission_enabled=bool(guards.get("EXTERNAL_SUBMISSION_ENABLED")),
+        financial_actions_enabled=bool(guards.get("FINANCIAL_ACTIONS_ENABLED")),
+        revenue_disclaimer=str(revenue.get("disclaimer") or dash.revenue_placeholder or REVENUE_PLACEHOLDER),
     )
 
 

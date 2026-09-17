@@ -21,6 +21,8 @@ STATIC = ROOT / "static"
 WORK_HTML = (STATIC / "nova-work" / "index.html").read_text(encoding="utf-8")
 WORK_JS = (STATIC / "nova-work" / "work.js").read_text(encoding="utf-8")
 WORK_CSS = (STATIC / "nova-work" / "work.css").read_text(encoding="utf-8")
+TODAY_HTML = (STATIC / "nova-today" / "index.html").read_text(encoding="utf-8")
+TODAY_JS = (STATIC / "nova-today" / "today.js").read_text(encoding="utf-8")
 WORK_PY = ROOT / "app" / "core" / "nova" / "work_revenue"
 
 
@@ -851,3 +853,161 @@ def test_guardrails_validation_engagements_and_revenue(client: TestClient) -> No
     assert detail.json()["guardrails"]["EXTERNAL_SUBMISSION_ENABLED"] is False
     new_view = client.get("/api/nova/work/opportunities?view_filter=new", headers=headers)
     assert new_view.status_code == 200
+
+
+def test_today_work_cards_are_informational_and_action_safe() -> None:
+    assert "Work &amp; Revenue" in TODAY_HTML
+    assert 'data-work-card="opportunities"' in TODAY_HTML
+    assert 'data-work-card="approvals"' in TODAY_HTML
+    assert 'data-work-card="active-work"' in TODAY_HTML
+    assert 'data-work-card="revenue"' in TODAY_HTML
+    assert 'href="/nova/work">Work</a>' in TODAY_HTML
+    assert "/api/nova/work/today-summary" in TODAY_JS
+    assert "MANUAL" in TODAY_JS
+    assert "SIMULATED / TEST" in TODAY_JS
+    assert "APPROVED is not SUBMITTED" in TODAY_JS
+    assert "future submission only" in TODAY_JS
+    assert "ESTIMATED" in TODAY_JS
+    assert "CONTRACTED" in TODAY_JS
+    assert "RECEIVED" in TODAY_JS
+    assert "not money earned" in TODAY_JS
+    assert "No work opportunities recorded yet." in TODAY_JS
+    assert "No owner approvals waiting." in TODAY_JS
+    assert "No active managed work." in TODAY_JS
+    assert "No received revenue recorded." in TODAY_JS
+    assert "Work & Revenue summary could not be loaded" in TODAY_JS
+    assert "Submit Application" not in TODAY_JS
+    assert "Submit Application" not in TODAY_HTML
+    assert "Checkout Session" not in TODAY_JS
+    lowered = TODAY_JS.lower()
+    assert "sk_live" not in lowered
+    assert "whsec_" not in TODAY_JS
+    assert "live discovery is disabled" in lowered
+    assert "external submission is disabled" in lowered
+    assert "financial execution is disabled" in lowered
+
+
+def test_today_summary_empty_states_and_disabled_gates(client: TestClient) -> None:
+    headers = _headers(client, "driver@amicor.local")
+    summary = client.get("/api/nova/work/today-summary", headers=headers)
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["work_opportunities"] == 0
+    assert body["source_counts"] == {"manual": 0, "simulated": 0, "other": 0}
+    assert body["approval_states"] == {"draft": 0, "ready_for_review": 0, "approved": 0, "submitted": 0}
+    assert body["active_engagements"] == 0
+    assert body["active_tasks"] == 0
+    assert body["revenue_summary"]["estimated_pipeline"] == 0
+    assert body["revenue_summary"]["contracted_value"] == 0
+    assert body["revenue_summary"]["owner_confirmed_received"] == 0
+    assert "earned" not in body["revenue_summary"]["disclaimer"].lower()
+    assert body["live_discovery_enabled"] is False
+    assert body["external_submission_enabled"] is False
+    assert body["financial_actions_enabled"] is False
+    assert body["opportunity_mode"] == "manual_simulated_only"
+    assert body["guardrails"]["LIVE_DISCOVERY_ENABLED"] is False
+    assert body["guardrails"]["EXTERNAL_SUBMISSION_ENABLED"] is False
+    assert body["guardrails"]["FINANCIAL_ACTIONS_ENABLED"] is False
+    assert body["guardrails"]["APPROVED_EQUALS_SUBMITTED"] is False
+    assert all("earned" not in card["label"].lower() for card in body["cards"])
+
+
+def test_today_summary_labels_sources_approvals_work_and_revenue(client: TestClient) -> None:
+    headers = _headers(client)
+    manual = _create_opp(client, headers, opportunity_title="Today card manual role")
+    client.patch(
+        f"/api/nova/work/opportunities/{manual['opportunity_id']}",
+        headers=headers,
+        json={
+            "estimated_value": 1200,
+            "contract_amount": 800,
+            "amount_received": 250,
+            "owner_confirmed_payment_received": True,
+        },
+    )
+    ingested = client.post("/api/nova/work/ingest/simulated", headers=headers)
+    assert ingested.status_code == 200, ingested.text
+    listed = client.get("/api/nova/work/opportunities", headers=headers).json()
+    assert any((row.get("source_type") or row.get("source")) == "simulated" for row in listed)
+    baseline = client.get("/api/nova/work/today-summary", headers=headers).json()
+    baseline_submitted = baseline["approval_states"]["submitted"]
+    baseline_approved = baseline["approval_states"]["approved"]
+    client.post(f"/api/nova/work/opportunities/{manual['opportunity_id']}/qualify", headers=headers)
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={"opportunity_id": manual["opportunity_id"], "applicant_party": "AMICOR"},
+    )
+    assert app_resp.status_code == 200, app_resp.text
+    application_id = app_resp.json()["application_id"]
+    draft_summary = client.get("/api/nova/work/today-summary", headers=headers)
+    assert draft_summary.json()["approval_states"]["draft"] >= 1
+    assert draft_summary.json()["approval_states"]["submitted"] == baseline_submitted
+    client.post(f"/api/nova/work/applications/{application_id}/ready-for-review", headers=headers)
+    ready_summary = client.get("/api/nova/work/today-summary", headers=headers).json()
+    assert ready_summary["approval_states"]["ready_for_review"] >= 1
+    assert ready_summary["approval_states"]["submitted"] == baseline_submitted
+    client.post(
+        f"/api/nova/work/applications/{application_id}/decision",
+        headers=headers,
+        json={"decision": "APPROVED"},
+    )
+    approved_summary = client.get("/api/nova/work/today-summary", headers=headers).json()
+    assert approved_summary["approval_states"]["approved"] == baseline_approved + 1
+    assert approved_summary["approved_for_future_submission"] >= 1
+    assert approved_summary["approval_states"]["submitted"] == baseline_submitted
+    submit = client.post(f"/api/nova/work/applications/{application_id}/submit", headers=headers)
+    assert submit.status_code == 409
+    still_approved = client.get("/api/nova/work/today-summary", headers=headers).json()
+    assert still_approved["approval_states"]["approved"] == baseline_approved + 1
+    assert still_approved["approval_states"]["submitted"] == baseline_submitted
+    assert still_approved["live_discovery_enabled"] is False
+    assert still_approved["external_submission_enabled"] is False
+    assert still_approved["financial_actions_enabled"] is False
+    eng = client.post(
+        "/api/nova/work/engagements",
+        headers=headers,
+        json={
+            "opportunity_id": manual["opportunity_id"],
+            "client_name": "Today Card Client",
+            "service": "Internal reporting",
+        },
+    )
+    if eng.status_code == 409:
+        listed = client.get("/api/nova/work/engagements", headers=headers)
+        engagement_id = next(
+            row["engagement_id"]
+            for row in listed.json()
+            if row.get("opportunity_id") == manual["opportunity_id"]
+        )
+    else:
+        assert eng.status_code == 200, eng.text
+        engagement_id = eng.json()["engagement_id"]
+    task = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/tasks",
+        headers=headers,
+        json={"title": "Today card draft task", "responsible_party": "NOVA", "status": "NOT_STARTED"},
+    )
+    assert task.status_code == 200, task.text
+    body = client.get("/api/nova/work/today-summary", headers=headers).json()
+    assert body["source_counts"]["manual"] >= 1
+    assert body["source_counts"]["simulated"] >= 1
+    assert body["active_engagements"] >= 1
+    assert body["active_tasks"] >= 1
+    revenue = body["revenue_summary"]
+    assert revenue["estimated_pipeline"] >= 0
+    assert revenue["contracted_value"] >= 0
+    assert revenue["owner_confirmed_received"] >= 0
+    assert "estimated_pipeline" in revenue
+    assert "contracted_value" in revenue
+    assert "owner_confirmed_received" in revenue
+    assert revenue["estimated_pipeline"] != revenue["owner_confirmed_received"] or revenue["estimated_pipeline"] == 0
+    other = _headers(client, "driver@amicor.local")
+    hidden = client.get("/api/nova/work/today-summary", headers=other)
+    assert hidden.status_code == 200
+    other_body = hidden.json()
+    assert other_body["work_opportunities"] == 0
+    assert other_body["active_engagements"] == 0
+    assert other_body["revenue_summary"]["owner_confirmed_received"] == 0
+    cross = client.get("/api/nova/work/today-summary", headers=headers, params={"organization_id": "org-not-the-caller"})
+    assert cross.status_code == 403
