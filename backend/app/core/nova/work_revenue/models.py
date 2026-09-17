@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -63,6 +63,12 @@ class NovaWorkOpportunity(Base):
     confirmed_net: Mapped[float | None] = mapped_column(Float, nullable=True)
     payment_status: Mapped[str] = mapped_column(String(40), nullable=False, default="NONE")
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
+    tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qualification_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -87,6 +93,9 @@ class NovaWorkApplication(Base):
     follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     interview_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -105,6 +114,8 @@ class NovaWorkMaterial(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="DRAFT")
     owner_input_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    parent_material_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -123,6 +134,8 @@ class NovaWorkOwnerAction(Base):
     display_label: Mapped[str] = mapped_column(String(40), nullable=False, default="OWNER ACTION REQUIRED")
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
+    category: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -154,6 +167,8 @@ class NovaWorkAuditEvent(Base):
     event_type: Mapped[str] = mapped_column(String(48), nullable=False)
     summary: Mapped[str] = mapped_column(String(400), nullable=False)
     ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actor_category: Mapped[str] = mapped_column(String(24), nullable=False, default="NOVA")
+    entity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
@@ -175,6 +190,15 @@ class NovaWorkEngagement(Base):
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(String(220), nullable=True)
+    service_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    agreed_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quoted_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    contracted_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    received_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blockers: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -198,5 +222,56 @@ class NovaWorkTask(Base):
     required_owner_input: Mapped[str | None] = mapped_column(Text, nullable=True)
     deliverable: Mapped[str | None] = mapped_column(String(220), nullable=True)
     review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    depends_on_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkDeliverable(Base):
+    __tablename__ = "nova_work_deliverables"
+    __table_args__ = (Index("ix_nova_work_deliv_id", "deliverable_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    deliverable_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    engagement_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deliverable_type: Mapped[str] = mapped_column(String(40), nullable=False, default="OTHER")
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    draft_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
+    owner_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    delivery_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
+    owner_confirmed_delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkRevenueEntry(Base):
+    __tablename__ = "nova_work_revenue_entries"
+    __table_args__ = (Index("ix_nova_work_rev_id", "entry_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    entry_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stage: Mapped[str] = mapped_column(String(40), nullable=False, default="ESTIMATED")
+    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(12), nullable=False, default="USD")
+    expected_payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invoice_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    owner_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reconciliation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

@@ -305,9 +305,38 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         lifecycle = "NOVA_CAN_PERFORM"
     else:
         lifecycle = "INSUFFICIENT_INFORMATION"
+    decision_map = {
+        "NOVA_CAN_PERFORM": "NOVA_CAN_PERFORM",
+        "NOVA_WITH_OWNER_REVIEW": "NOVA_CAN_PREPARE",
+        "HUMAN_REQUIRED": "OWNER_ACTION_REQUIRED",
+        "INSUFFICIENT_INFORMATION": "INSUFFICIENT_INFORMATION",
+        "NOT_SUITABLE": "PROHIBITED" if driving or regulated else "NOT_SUITABLE",
+    }
+    evaluations = {
+        "capability_match": (
+            "YES" if outcome == "NOVA_CAN_PERFORM" and matched_caps else
+            "PARTIAL" if matched_caps else
+            "UNKNOWN" if outcome == "INSUFFICIENT_INFORMATION" else
+            "NO"
+        ),
+        "location_eligibility": "NO" if physical == "true" else ("YES" if physical == "false" else "UNKNOWN"),
+        "business_age_requirement": "MISSING_FACT",
+        "insurance_requirement": "MISSING_FACT" if _flag(_INSURANCE_RE, text) else "NOT_APPLICABLE",
+        "licensing_requirement": "YES" if licenses or regulated else "NO",
+        "experience_requirement": "MISSING_FACT",
+        "revenue_requirement": "MISSING_FACT",
+        "certification_requirement": "MISSING_FACT" if credentials else "NOT_APPLICABLE",
+        "technology_requirement": "PARTIAL" if matched_caps else "UNKNOWN",
+        "deadline_viability": "UNKNOWN",
+        "owner_action_requirement": "YES" if unique_actions else "NO",
+        "prohibited_activity": "YES" if driving or regulated else "NO",
+        "unsupported_activity": "YES" if outcome in {"NOT_SUITABLE", "HUMAN_REQUIRED"} and not matched_caps else "NO",
+    }
     return {
         "outcome": outcome,
         "lifecycle_outcome": lifecycle,
+        "decision": decision_map.get(outcome, lifecycle),
+        "evaluations": evaluations,
         "reason_codes": unique_reasons,
         "nova_task_share": nova_share,
         "owner_participation": list(dict.fromkeys(owner_participation)),

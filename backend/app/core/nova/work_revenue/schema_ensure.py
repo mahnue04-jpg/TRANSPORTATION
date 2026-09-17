@@ -7,10 +7,12 @@ from sqlalchemy.engine import Engine
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkDeliverable,
     NovaWorkEngagement,
     NovaWorkMaterial,
     NovaWorkOpportunity,
     NovaWorkOwnerAction,
+    NovaWorkRevenueEntry,
     NovaWorkStatusHistory,
     NovaWorkTask,
 )
@@ -25,27 +27,78 @@ WORK_TABLES = (
     NovaWorkAuditEvent.__table__,
     NovaWorkEngagement.__table__,
     NovaWorkTask.__table__,
+    NovaWorkDeliverable.__table__,
+    NovaWorkRevenueEntry.__table__,
 )
 
-_OPP_COLUMNS = {
-    "fingerprint": "VARCHAR(80)",
-    "estimated_value": "FLOAT",
-    "quoted_amount": "FLOAT",
-    "contract_amount": "FLOAT",
-    "expected_payment_frequency": "VARCHAR(40)",
-    "expected_start_date": "DATETIME",
-    "expected_end_date": "DATETIME",
-    "revenue_status": "VARCHAR(40)",
-    "invoice_required": "BOOLEAN",
-    "owner_confirmed_payment_received": "BOOLEAN",
-    "archived": "BOOLEAN",
-    "invoice_value": "FLOAT",
-    "amount_received": "FLOAT",
-    "expenses": "FLOAT",
-    "estimated_net": "FLOAT",
-    "confirmed_net": "FLOAT",
-    "payment_status": "VARCHAR(40)",
+_EXTRA_COLUMNS: dict[str, dict[str, str]] = {
+    "nova_work_opportunities": {
+        "fingerprint": "VARCHAR(80)",
+        "estimated_value": "FLOAT",
+        "quoted_amount": "FLOAT",
+        "contract_amount": "FLOAT",
+        "expected_payment_frequency": "VARCHAR(40)",
+        "expected_start_date": "DATETIME",
+        "expected_end_date": "DATETIME",
+        "revenue_status": "VARCHAR(40)",
+        "invoice_required": "BOOLEAN",
+        "owner_confirmed_payment_received": "BOOLEAN",
+        "archived": "BOOLEAN",
+        "invoice_value": "FLOAT",
+        "amount_received": "FLOAT",
+        "expenses": "FLOAT",
+        "estimated_net": "FLOAT",
+        "confirmed_net": "FLOAT",
+        "payment_status": "VARCHAR(40)",
+        "category": "VARCHAR(40)",
+        "priority": "VARCHAR(16)",
+        "tags_json": "TEXT",
+        "blocked_reason": "TEXT",
+        "archive_reason": "TEXT",
+        "qualification_reason": "TEXT",
+    },
+    "nova_work_applications": {
+        "owner_notes": "TEXT",
+        "decided_at": "DATETIME",
+        "expires_at": "DATETIME",
+    },
+    "nova_work_materials": {
+        "revision": "INTEGER",
+        "parent_material_id": "VARCHAR(32)",
+    },
+    "nova_work_owner_actions": {
+        "category": "VARCHAR(48)",
+        "owner_notes": "TEXT",
+    },
+    "nova_work_engagements": {
+        "title": "VARCHAR(220)",
+        "service_type": "VARCHAR(80)",
+        "agreed_value": "FLOAT",
+        "estimated_revenue": "FLOAT",
+        "quoted_revenue": "FLOAT",
+        "contracted_revenue": "FLOAT",
+        "received_revenue": "FLOAT",
+        "risks": "TEXT",
+        "blockers": "TEXT",
+    },
+    "nova_work_tasks": {
+        "description": "TEXT",
+        "depends_on_task_id": "VARCHAR(32)",
+        "blocked_reason": "TEXT",
+        "completed_at": "DATETIME",
+        "owner_notes": "TEXT",
+    },
+    "nova_work_audit_events": {
+        "actor_category": "VARCHAR(24)",
+        "entity_type": "VARCHAR(32)",
+    },
 }
+
+
+def _column_sql(sql_type: str, dialect: str) -> str:
+    if dialect.startswith("postgres") and sql_type == "DATETIME":
+        return "TIMESTAMPTZ"
+    return sql_type
 
 
 def ensure_work_revenue_schema(engine: Engine | None = None) -> None:
@@ -53,23 +106,22 @@ def ensure_work_revenue_schema(engine: Engine | None = None) -> None:
     Base.metadata.create_all(bind=bind, tables=list(WORK_TABLES))
     inspector = inspect(bind)
     names = set(inspector.get_table_names())
-    if "nova_work_opportunities" not in names:
-        return
-    existing = {col["name"] for col in inspector.get_columns("nova_work_opportunities")}
     dialect = str(getattr(bind.dialect, "name", "") or "")
-    statements = []
-    for name, sql_type in _OPP_COLUMNS.items():
-        if name in existing:
+    statements: list[str] = []
+    for table_name, columns in _EXTRA_COLUMNS.items():
+        if table_name not in names:
             continue
-        col_type = sql_type
-        if dialect.startswith("postgres"):
-            if sql_type == "DATETIME":
-                col_type = "TIMESTAMPTZ"
-            statements.append(
-                f"ALTER TABLE nova_work_opportunities ADD COLUMN IF NOT EXISTS {name} {col_type}"
-            )
-        else:
-            statements.append(f"ALTER TABLE nova_work_opportunities ADD COLUMN {name} {col_type}")
+        existing = {col["name"] for col in inspector.get_columns(table_name)}
+        for name, sql_type in columns.items():
+            if name in existing:
+                continue
+            col_type = _column_sql(sql_type, dialect)
+            if dialect.startswith("postgres"):
+                statements.append(
+                    f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {col_type}"
+                )
+            else:
+                statements.append(f"ALTER TABLE {table_name} ADD COLUMN {name} {col_type}")
     if not statements:
         return
     with bind.begin() as conn:

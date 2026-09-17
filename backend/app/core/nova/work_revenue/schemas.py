@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
+
 
 OPPORTUNITY_STATUSES = (
     "DISCOVERED",
@@ -30,6 +32,8 @@ QUALIFICATION_OUTCOMES = (
     "HUMAN_REQUIRED",
     "NOT_SUITABLE",
     "INSUFFICIENT_INFORMATION",
+    "NOT_SUPPORTED",
+    "PROHIBITED",
 )
 
 APPROVAL_STATES = (
@@ -59,6 +63,14 @@ MATERIAL_KINDS = (
     "work_plan",
     "weekly_report_template",
     "invoice_support_summary",
+    "quote_response",
+    "client_introduction",
+    "project_summary",
+    "executive_summary",
+    "qualifications_narrative",
+    "experience_narrative",
+    "pricing_placeholder",
+    "scope_of_work",
 )
 
 OWNER_ACTION_TYPES = (
@@ -127,14 +139,24 @@ VIEW_FILTERS = (
     "lost",
     "rejected",
     "archived",
+    "qualifying",
+    "blocked",
+    "ready",
+    "in_progress",
 )
 
 ENGAGEMENT_STATUSES = (
     "NOT_STARTED",
+    "READY",
     "ACTIVE",
+    "WAITING_ON_OWNER",
+    "WAITING_ON_CLIENT",
+    "BLOCKED",
+    "DELIVERABLE_READY",
     "PAUSED",
     "COMPLETE",
     "CANCELLED",
+    "ARCHIVED",
 )
 
 TASK_STATUSES = (
@@ -144,6 +166,7 @@ TASK_STATUSES = (
     "IN_PROGRESS",
     "OWNER_REVIEW",
     "COMPLETE",
+    "CANCELLED",
 )
 
 SOURCE_TYPES = (
@@ -174,6 +197,19 @@ AUDIT_EVENT_TYPES = (
     "REVENUE_STATUS_CHANGED",
     "RECEIPT_CONFIRMED",
     "OPPORTUNITY_ARCHIVED",
+    "OWNER_ACTION_CREATED",
+    "DRAFT_CREATED",
+    "DRAFT_REVISED",
+    "OWNER_APPROVED",
+    "OWNER_REJECTED",
+    "TASK_COMPLETED",
+    "DELIVERABLE_CREATED",
+    "DELIVERABLE_CONFIRMED",
+    "REVENUE_ESTIMATED",
+    "REVENUE_CONTRACTED",
+    "PAYMENT_STATUS_CHANGED",
+    "REVENUE_RECEIVED_CONFIRMED",
+    "ARCHIVED",
 )
 
 
@@ -200,16 +236,19 @@ class OpportunityCreate(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
     estimated_value: float | None = Field(default=None, ge=0, le=1_000_000_000)
     expected_payment_frequency: str | None = Field(default=None, max_length=40)
+    category: str | None = Field(default=None, max_length=40)
+    priority: str = "normal"
+    tags: list[str] = Field(default_factory=list)
 
     @field_validator("source_url")
     @classmethod
     def reject_unsafe_source_url(cls, value: str | None) -> str | None:
         if not value:
             return value
-        lowered = value.strip().lower()
-        if lowered.startswith(("javascript:", "data:", "vbscript:", "file:")):
-            raise ValueError("Source URL scheme is not allowed")
-        return value
+        try:
+            return validate_source_url(value)
+        except UnsafeSourceUrl as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class OpportunityUpdate(BaseModel):
@@ -232,6 +271,11 @@ class OpportunityUpdate(BaseModel):
     amount_received: float | None = None
     expenses: float | None = None
     payment_status: str | None = None
+    category: str | None = Field(default=None, max_length=40)
+    priority: str | None = None
+    tags: list[str] | None = None
+    blocked_reason: str | None = None
+    archive_reason: str | None = None
 
 
 class OpportunityOut(BaseModel):
@@ -284,6 +328,12 @@ class OpportunityOut(BaseModel):
     confirmed_net: float | None = None
     payment_status: str = "NONE"
     missing_owner_facts: list[str] = Field(default_factory=list)
+    category: str | None = None
+    priority: str = "normal"
+    tags: list[str] = Field(default_factory=list)
+    blocked_reason: str | None = None
+    archive_reason: str | None = None
+    qualification_reason: str | None = None
 
 
 class QualificationOut(BaseModel):
@@ -316,6 +366,9 @@ class QualificationOut(BaseModel):
     payment_structure: str | None = None
     client_name: str | None = None
     work_summary: str | None = None
+    decision: str | None = None
+    evaluations: dict[str, str] = Field(default_factory=dict)
+    qualified_at: datetime | None = None
 
 
 class ApplicationCreate(BaseModel):
@@ -327,8 +380,15 @@ class ApplicationCreate(BaseModel):
 
 class ApplicationDecision(BaseModel):
     organization_id: str | None = None
-    decision: Literal["APPROVED", "REJECTED", "NEEDS_CHANGES"]
+    decision: Literal["APPROVED", "REJECTED", "NEEDS_CHANGES", "CHANGES_REQUESTED"]
     notes: str | None = None
+
+    @field_validator("decision")
+    @classmethod
+    def normalize_decision(cls, value: str) -> str:
+        if value == "CHANGES_REQUESTED":
+            return "NEEDS_CHANGES"
+        return value
 
 
 class ApplicationStatusUpdate(BaseModel):
@@ -347,6 +407,8 @@ class MaterialOut(BaseModel):
     body: str
     status: str
     owner_input_required: bool
+    revision: int = 1
+    parent_material_id: str | None = None
 
 
 class OwnerActionOut(BaseModel):
@@ -357,6 +419,8 @@ class OwnerActionOut(BaseModel):
     display_label: str
     explanation: str
     status: str
+    category: str | None = None
+    owner_notes: str | None = None
 
 
 class AuditEventOut(BaseModel):
@@ -365,6 +429,8 @@ class AuditEventOut(BaseModel):
     summary: str
     ref_id: str | None
     created_at: datetime
+    actor_category: str = "NOVA"
+    entity_type: str | None = None
 
 
 class StatusHistoryOut(BaseModel):
@@ -392,6 +458,8 @@ class ApplicationOut(BaseModel):
     opportunity_title: str | None = None
     materials: list[MaterialOut] = Field(default_factory=list)
     owner_actions: list[OwnerActionOut] = Field(default_factory=list)
+    owner_notes: str | None = None
+    decided_at: datetime | None = None
 
 
 class TrackerOut(BaseModel):
@@ -470,6 +538,10 @@ class TodaySummaryOut(BaseModel):
     external_submission_enabled: bool = False
     financial_actions_enabled: bool = False
     revenue_disclaimer: str = "Estimated pipeline is not received revenue. Nova does not collect payment."
+    tasks_due: int = 0
+    deliverables_pending: int = 0
+    quoted_pipeline: float = 0
+    contracted_revenue: float = 0
 
 
 class ProviderOut(BaseModel):
@@ -502,6 +574,11 @@ class EngagementCreate(BaseModel):
     start_date: datetime | None = None
     end_date: datetime | None = None
     notes: str | None = None
+    title: str | None = Field(default=None, max_length=220)
+    service_type: str | None = Field(default=None, max_length=80)
+    agreed_value: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    risks: str | None = None
+    blockers: str | None = None
 
 
 class TaskCreate(BaseModel):
@@ -515,3 +592,122 @@ class TaskCreate(BaseModel):
     required_owner_input: str | None = None
     deliverable: str | None = None
     review_required: bool = True
+    description: str | None = None
+    depends_on_task_id: str | None = None
+    blocked_reason: str | None = None
+
+
+class TaskUpdate(BaseModel):
+    organization_id: str | None = None
+    status: str | None = None
+    blocked_reason: str | None = None
+    owner_notes: str | None = None
+    depends_on_task_id: str | None = None
+
+
+class DeliverableCreate(BaseModel):
+    organization_id: str | None = None
+    engagement_id: str
+    deliverable_type: str = "OTHER"
+    description: str = Field(min_length=1, max_length=4000)
+    due_date: datetime | None = None
+    notes: str | None = None
+
+
+class RevenueEntryCreate(BaseModel):
+    organization_id: str | None = None
+    engagement_id: str | None = None
+    opportunity_id: str | None = None
+    stage: str = "ESTIMATED"
+    amount: float = Field(ge=0, le=1_000_000_000)
+    currency: str = Field(default="USD", max_length=12)
+    expected_payment_date: datetime | None = None
+    invoice_reference: str | None = Field(default=None, max_length=120)
+    owner_confirmed: bool = False
+    reconciliation_notes: str | None = None
+
+
+class DeliverableOut(BaseModel):
+    deliverable_id: str
+    engagement_id: str
+    opportunity_id: str | None = None
+    deliverable_type: str
+    description: str
+    due_date: datetime | None = None
+    draft_status: str
+    review_status: str
+    owner_approved: bool
+    delivery_status: str
+    owner_confirmed_delivered: bool
+    completed_at: datetime | None = None
+    notes: str | None = None
+
+
+class DeliverableUpdate(BaseModel):
+    organization_id: str | None = None
+    draft_status: str | None = None
+    review_status: str | None = None
+    owner_approved: bool | None = None
+    notes: str | None = None
+
+
+class DeliverableConfirm(BaseModel):
+    organization_id: str | None = None
+    owner_confirmed_delivered: bool = True
+    notes: str | None = None
+
+
+class RevenueEntryOut(BaseModel):
+    entry_id: str
+    engagement_id: str | None = None
+    opportunity_id: str | None = None
+    stage: str
+    amount: float
+    currency: str
+    expected_payment_date: datetime | None = None
+    invoice_reference: str | None = None
+    received_date: datetime | None = None
+    owner_confirmed: bool
+    reconciliation_notes: str | None = None
+
+
+class RevenueConfirm(BaseModel):
+    organization_id: str | None = None
+    owner_confirmed: bool = True
+    received_date: datetime | None = None
+    reconciliation_notes: str | None = None
+    amount: float | None = Field(default=None, ge=0, le=1_000_000_000)
+
+
+class MaterialRevise(BaseModel):
+    organization_id: str | None = None
+    body: str = Field(min_length=1, max_length=20000)
+    title: str | None = Field(default=None, max_length=220)
+
+
+class OwnerActionUpdate(BaseModel):
+    organization_id: str | None = None
+    owner_notes: str | None = None
+    status: str | None = None
+
+
+class AnalyticsOut(BaseModel):
+    period: str
+    new_opportunities: int = 0
+    qualified_opportunities: int = 0
+    owner_actions_pending: int = 0
+    active_engagements: int = 0
+    blocked_engagements: int = 0
+    tasks_due: int = 0
+    completed_work: int = 0
+    estimated_pipeline: float = 0
+    quoted_pipeline: float = 0
+    contracted_revenue: float = 0
+    invoiced_revenue: float = 0
+    received_revenue: float = 0
+    disclaimer: str = (
+        "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. "
+        "Nova does not collect payment."
+    )
+    guardrails: dict[str, bool] = Field(default_factory=dict)
+

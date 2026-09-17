@@ -297,6 +297,75 @@ def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMIC
                 f"Nova will not create a Stripe invoice, charge, or payout.\n\n{forbidden}"
             ),
         },
+        {
+            "kind": "quote_response",
+            "title": f"Quote response placeholder for {title}",
+            "body": (
+                f"DRAFT quote response. Pricing is {OWNER_INPUT_REQUIRED}. "
+                f"Nova will not agree to a rate.\n\n{party}\n\n{forbidden}\n\n{untrusted_desc}"
+            ),
+        },
+        {
+            "kind": "client_introduction",
+            "title": "Client introduction (DRAFT — not sent)",
+            "body": (
+                f"DRAFT introduction. Nothing was sent.\n\n{identity}\n\n"
+                f"Recipient: {OWNER_INPUT_REQUIRED}\nRegarding: {title} at {company}.\n"
+                f"{forbidden}"
+            ),
+        },
+        {
+            "kind": "project_summary",
+            "title": f"Project summary draft for {title}",
+            "body": (
+                f"DRAFT project summary from untrusted source text only.\n\n{untrusted_desc}\n\n"
+                f"Verified capabilities:\n{caps}\n\n{unknown}"
+            ),
+        },
+        {
+            "kind": "executive_summary",
+            "title": f"Executive summary draft for {title}",
+            "body": (
+                f"DRAFT executive summary. Do not treat this as a bid.\n\n{party}\n"
+                f"Opportunity: {title} / {company}.\nPricing: {OWNER_INPUT_REQUIRED}.\n"
+                f"Experience: {OWNER_INPUT_REQUIRED}.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "qualifications_narrative",
+            "title": "Qualifications narrative (DRAFT)",
+            "body": (
+                f"DRAFT qualifications narrative.\n\n{identity}\n{caps}\n\n{unknown}\n\n"
+                f"Do not invent certifications or licenses.\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "experience_narrative",
+            "title": "Experience narrative (DRAFT)",
+            "body": (
+                f"DRAFT experience narrative.\n\nPrior clients: {OWNER_INPUT_REQUIRED}.\n"
+                f"Years of experience: {OWNER_INPUT_REQUIRED}.\n"
+                f"Do not invent employment history.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "pricing_placeholder",
+            "title": "Pricing placeholder (DRAFT)",
+            "body": (
+                f"DRAFT pricing placeholder. No price is offered.\n\n"
+                f"Rate: {OWNER_INPUT_REQUIRED}\n"
+                f"Nova cannot agree to pricing.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "scope_of_work",
+            "title": f"Scope of work draft for {title}",
+            "body": (
+                f"DRAFT scope of work. Not a contract.\n\n{untrusted_desc}\n\n"
+                f"Nova-assisted tasks require owner review. Owner signature: {OWNER_INPUT_REQUIRED}.\n"
+                f"{forbidden}"
+            ),
+        },
     ]
     for item in drafts:
         item["status"] = "DRAFT"
