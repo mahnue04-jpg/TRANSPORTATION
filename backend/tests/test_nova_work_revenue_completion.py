@@ -10,6 +10,7 @@ from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.lifecycle import queue_status_for
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
+from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
 from app.db.session import engine
 from app.main import app
 from tests.test_nova_work_revenue import TODAY_JS, WORK_HTML, WORK_JS
@@ -424,3 +425,64 @@ def test_malformed_dates_and_cross_tenant_queue(client: TestClient) -> None:
     )
     assert hidden.status_code == 404
     ensure_work_revenue_schema(engine)
+
+
+def test_private_and_encoded_urls_are_rejected() -> None:
+    blocked = (
+        "javascript:alert(1)",
+        "javascript%3Aalert(1)",
+        "data:text/html,hi",
+        "file:///etc/passwd",
+        "http://localhost/secret",
+        "http://127.0.0.1/admin",
+        "http://127.0.0.2/loopback",
+        "http://[::1]/",
+        "http://[::ffff:127.0.0.1]/mapped",
+        "http://169.254.10.10/link-local",
+        "http://10.1.2.3/private",
+        "http://192.168.1.20/lan",
+        "http://172.16.0.8/rfc1918",
+        "http://2130706433/decimal",
+        "https://user:pass@example.invalid/x",
+    )
+    for value in blocked:
+        with pytest.raises(UnsafeSourceUrl):
+            validate_source_url(value)
+    assert validate_source_url("https://example.invalid/role") == "https://example.invalid/role"
+
+
+def test_reconciliation_does_not_double_count_opportunity_fields(client: TestClient) -> None:
+    headers = _headers(client)
+    before = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    engagement = _eng(client, headers)
+    created = client.post(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        json={"engagement_id": engagement["engagement_id"], "stage": "ESTIMATED", "amount": 50, "currency": "USD"},
+    )
+    assert created.status_code == 200
+    recon = client.get("/api/nova/work/reconciliation", headers=headers)
+    assert recon.status_code == 200
+    body = recon.json()
+    assert body["authoritative_source"] == "nova_work_revenue_entries"
+    assert body["rules"]["opportunity_fields_are_authoritative"] is False
+    assert body["estimated_pipeline"] >= before["estimated_pipeline"] + 50
+    assert "opportunity_context" in body
+    assert body["owner_confirmed_received"] == before["owner_confirmed_received"]
+
+
+def test_list_limits_and_approval_is_not_submit(client: TestClient) -> None:
+    headers = _headers(client)
+    limited = client.get("/api/nova/work/recurring", headers=headers, params={"limit": 1})
+    assert limited.status_code == 200
+    assert len(limited.json()) <= 1
+    reports = client.get("/api/nova/work/reports", headers=headers, params={"limit": 1})
+    assert reports.status_code == 200
+    assert len(reports.json()) <= 1
+    apps = client.get("/api/nova/work/applications", headers=headers, params={"limit": 1})
+    assert apps.status_code == 200
+    assert len(apps.json()) <= 1
+    for row in apps.json():
+        assert row["externally_ready"] is False
+        assert row["approved_equals_submitted"] is False
+        assert row["externally_submitted"] is False
