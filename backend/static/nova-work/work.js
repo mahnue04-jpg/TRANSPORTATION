@@ -133,6 +133,10 @@
     if ($("count-received")) $("count-received").textContent = summary.owner_confirmed_received || 0;
     if ($("count-tasks")) $("count-tasks").textContent = counts.tasks_due || 0;
     if ($("count-deliverables")) $("count-deliverables").textContent = counts.deliverables_pending || 0;
+    if ($("count-recurring")) $("count-recurring").textContent = counts.recurring_overdue || 0;
+    if ($("count-reports")) $("count-reports").textContent = counts.reports_awaiting_review || 0;
+    if ($("count-invoices")) $("count-invoices").textContent = counts.invoice_support_drafts || 0;
+    if ($("count-blocked")) $("count-blocked").textContent = counts.blocked_work || 0;
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
@@ -181,6 +185,16 @@
         return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
           "<div class=\"muted\">" + escapeHtml(row.client) + " · " + escapeHtml(row.party) +
           " · " + escapeHtml(row.status) + "</div></div>";
+      });
+    }
+    if ($("engagement-list")) {
+      $("engagement-list").innerHTML = listHtml(data.engagements, "No internal engagements.", function (row) {
+        return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
+          "<div class=\"muted\">" + escapeHtml(row.service) + " · queue " + escapeHtml(row.queue_status || row.status) +
+          " · " + escapeHtml(row.priority || "normal") +
+          (row.due_date ? " · due " + escapeHtml(row.due_date) : "") +
+          " · payment " + escapeHtml(row.payment_status) +
+          " (tracking only)</div></div>";
       });
     }
     if ($("deliverable-list")) {
@@ -299,6 +313,45 @@
               "<div class=\"muted\">" + escapeHtml(row.delivery_status) +
               (row.owner_confirmed_delivered ? " · owner confirmed" : " · not transmitted") +
               "</div></div>";
+          });
+        }
+      } catch (_) {}
+    }
+    if (activeTab === "recurring") {
+      try {
+        var series = await api("/api/nova/work/recurring");
+        if ($("recurring-list")) {
+          $("recurring-list").innerHTML = listHtml(series, "No recurring series.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.frequency) + " · " + escapeHtml(row.status) +
+              " · " + escapeHtml(row.attention_state) +
+              " · next " + escapeHtml(row.next_work_date || "none") +
+              " · notifications off</div></div>";
+          });
+        }
+      } catch (_) {}
+    }
+    if (activeTab === "reports") {
+      try {
+        var reports = await api("/api/nova/work/reports");
+        if ($("report-list")) {
+          $("report-list").innerHTML = listHtml(reports, "No weekly report drafts.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.status) +
+              " · send disabled · generating a report is not sending it</div></div>";
+          });
+        }
+      } catch (_) {}
+    }
+    if (activeTab === "invoice-support") {
+      try {
+        var invoices = await api("/api/nova/work/invoice-support");
+        if ($("invoice-list")) {
+          $("invoice-list").innerHTML = listHtml(invoices, "No invoice-support drafts.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.status) +
+              " · subtotal " + escapeHtml(row.draft_subtotal) +
+              " · not a Stripe invoice</div></div>";
           });
         }
       } catch (_) {}

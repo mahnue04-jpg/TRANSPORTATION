@@ -62,6 +62,10 @@
       <article class="card compact"><h3>OWNER-CONFIRMED RECEIVED</h3><p id="count-received">0</p></article>
       <article class="card compact"><h3>TASKS DUE</h3><p id="count-tasks">0</p></article>
       <article class="card compact"><h3>DELIVERABLES</h3><p id="count-deliverables">0</p></article>
+      <article class="card compact"><h3>RECURRING OVERDUE</h3><p id="count-recurring">0</p></article>
+      <article class="card compact"><h3>REPORTS AWAITING REVIEW</h3><p id="count-reports">0</p></article>
+      <article class="card compact"><h3>INVOICE-SUPPORT DRAFTS</h3><p id="count-invoices">0</p></article>
+      <article class="card compact"><h3>BLOCKED WORK</h3><p id="count-blocked">0</p></article>
     </section>
 
     <section class="command-card" aria-label="Opportunity filters">
@@ -134,6 +138,9 @@
         <button type="button" class="secondary" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="secondary" data-tab="deliverables" role="tab" aria-selected="false">Deliverables</button>
         <button type="button" class="secondary" data-tab="revenue" role="tab" aria-selected="false">Revenue</button>
+        <button type="button" class="secondary" data-tab="recurring" role="tab" aria-selected="false">Recurring</button>
+        <button type="button" class="secondary" data-tab="reports" role="tab" aria-selected="false">Reports</button>
+        <button type="button" class="secondary" data-tab="invoice-support" role="tab" aria-selected="false">Invoice support</button>
         <button type="button" class="secondary" data-tab="archive" role="tab" aria-selected="false">Archive</button>
       </div>
     </section>
@@ -165,6 +172,18 @@
       <article class="card" data-panel="deliverables"><h2>Deliverables</h2>
         <p class="hint">Delivered requires owner confirmation. Nova does not transmit files.</p>
         <div id="deliverable-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="recurring"><h2>Recurring managed work</h2>
+        <p class="hint">Internal recurrence only. Nova does not send notifications, create calendars, or contact customers.</p>
+        <div id="recurring-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="reports"><h2>Weekly reports</h2>
+        <p class="hint">Generating a report is not sending it. There is no Send action.</p>
+        <div id="report-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="invoice-support"><h2>Invoice-support drafts</h2>
+        <p class="hint">Internal totals from owner-entered quantity and rate. Nova does not create Stripe invoices or collect payment.</p>
+        <div id="invoice-list">Sign in to load.</div>
       </article>
       <article class="card" data-panel="archive"><h2>Archive</h2><div id="archive-list">None.</div></article>
       <article class="card" data-panel="overview"><h2>Activity</h2><div id="audit-list">None.</div></article>

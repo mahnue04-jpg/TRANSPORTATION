@@ -363,6 +363,38 @@
         "</ul>" +
         "<p class=\"hint\">Quoted is not contracted. Contracted is not invoiced. Invoiced is not received.</p>" +
         workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"recurring\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Recurring Work</h3>" +
+        "<p class=\"count-metric\">Overdue internal series</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.recurring_overdue || 0)) + "</p>" +
+        "<p class=\"hint\">Internal recurrence only. Nova does not send reminders or create calendars.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"reports\">" +
+        "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+        "<h3>Reports Awaiting Review</h3>" +
+        "<p class=\"count-metric\">Internal weekly drafts</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.reports_awaiting_review || 0)) + "</p>" +
+        "<p class=\"hint\">Generating a report is not sending it. There is no Send control on Today.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"invoice-support\">" +
+        "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+        "<h3>Invoice-support drafts</h3>" +
+        "<p class=\"count-metric\">Internal invoice preparation</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.invoice_support_drafts || 0)) + "</p>" +
+        "<p class=\"hint\">Not a Stripe invoice. Approval does not charge or send.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"blocked\">" +
+        "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+        "<h3>Blocked Work</h3>" +
+        "<p class=\"count-metric\">Internal blocked or owner-action queue</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.blocked_work || 0)) + "</p>" +
+        "<p class=\"hint\">Internal status only. Nova does not message the client.</p>" +
+        workOpenLink() +
       "</article>";
   }
   async function loadWorkRevenue() {
