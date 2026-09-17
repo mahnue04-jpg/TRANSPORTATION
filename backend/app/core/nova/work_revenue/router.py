@@ -1,6 +1,8 @@
 """Nova Work & Revenue Engine APIs. Local-only Phase 1. No Stripe and no external apply."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,28 +13,39 @@ from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
 from app.core.nova.work_revenue import ops
+from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
     ApplicationOut,
     ApplicationStatusUpdate,
     AuditEventOut,
+    BusinessFactUpdate,
     CapabilityOut,
     DashboardOut,
     DeliverableConfirm,
     DeliverableCreate,
     DeliverableOut,
     DeliverableUpdate,
+    DisclosureAcknowledge,
+    DisclosurePolicyCreate,
     EngagementCreate,
+    EngagementUpdate,
+    InvoiceSupportCreate,
+    InvoiceSupportDecision,
     MaterialRevise,
     OpportunityCreate,
     OpportunityDetailOut,
     OpportunityOut,
     OpportunityUpdate,
+    OwnerActionCreate,
     OwnerActionOut,
     OwnerActionUpdate,
+    PlatformPolicyCreate,
     ProviderOut,
     QualificationOut,
+    RecurringComplete,
+    RecurringSeriesCreate,
     RevenueConfirm,
     RevenueEntryCreate,
     RevenueEntryOut,
@@ -40,6 +53,8 @@ from app.core.nova.work_revenue.schemas import (
     TaskUpdate,
     TodaySummaryOut,
     TrackerOut,
+    WeeklyReportCreate,
+    WeeklyReportDecision,
 )
 from app.db.session import get_db
 
@@ -374,6 +389,8 @@ def list_audit(
             created_at=row.created_at,
             actor_category=getattr(row, "actor_category", None) or "NOVA",
             entity_type=getattr(row, "entity_type", None),
+            previous_state=getattr(row, "previous_state", None),
+            new_state=getattr(row, "new_state", None),
         )
         for row in service.list_audit(db, organization_id=org_id, user=user, limit=limit)
     ]
@@ -382,10 +399,33 @@ def list_audit(
 @router.get("/engagements")
 def list_engagements(
     organization_id: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    source: str | None = None,
+    client: str | None = None,
+    owner_action: bool | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return service.list_engagements(db, organization_id=_resolve_org(user, organization_id), user=user)
+    try:
+        return managed.list_work_queue(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            status=status,
+            priority=priority,
+            source=source,
+            client=client,
+            owner_action=owner_action,
+            sort=sort,
+            order=order,
+            limit=limit,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
 
 
 @router.post("/engagements")
@@ -433,9 +473,16 @@ def create_task(
 @router.get("/owner-facts")
 def owner_facts(
     applicant_party: str = "AMICOR",
+    organization_id: str | None = None,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ):
-    return ops.owner_facts(applicant_party=applicant_party)
+    return managed.owner_fact_catalog(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        applicant_party=applicant_party,
+    )
 
 
 @router.get("/lifecycle")
@@ -685,3 +732,436 @@ def update_owner_action(
         )
     except service.NovaWorkError as exc:
         _raise(exc)
+
+
+@router.patch("/engagements/{engagement_id}")
+def update_engagement(
+    engagement_id: str,
+    payload: EngagementUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.update_engagement(
+            db, engagement_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/queue")
+def work_queue(
+    organization_id: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    source: str | None = None,
+    client: str | None = None,
+    owner_action: bool | None = None,
+    due_before: datetime | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.list_work_queue(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            status=status,
+            priority=priority,
+            source=source,
+            client=client,
+            owner_action=owner_action,
+            due_before=due_before,
+            sort=sort,
+            order=order,
+            limit=limit,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/recurring")
+def create_recurring(
+    payload: RecurringSeriesCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.create_recurring_series(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/recurring")
+def list_recurring(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.list_recurring_series(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/recurring/{series_id}/generate")
+def generate_recurring(
+    series_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.generate_recurring_occurrence(
+            db, series_id, organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/recurring/{series_id}/pause")
+def pause_recurring(
+    series_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.set_recurring_status(
+            db, series_id, "PAUSED", organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/recurring/{series_id}/resume")
+def resume_recurring(
+    series_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.set_recurring_status(
+            db, series_id, "ACTIVE", organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/recurring/{series_id}/archive")
+def archive_recurring(
+    series_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.set_recurring_status(
+            db, series_id, "ARCHIVED", organization_id=_resolve_org(user, organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/recurring/{series_id}/complete")
+def complete_recurring(
+    series_id: str,
+    payload: RecurringComplete,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.complete_recurring_occurrence(
+            db, series_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/reports/weekly")
+def create_weekly_report(
+    payload: WeeklyReportCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.generate_weekly_report(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/reports")
+def list_reports(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.list_weekly_reports(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/reports/{report_id}/review")
+def review_report(
+    report_id: str,
+    payload: WeeklyReportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_weekly_report(
+            db,
+            report_id,
+            "READY_FOR_OWNER_REVIEW",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/reports/{report_id}/approve")
+def approve_report(
+    report_id: str,
+    payload: WeeklyReportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_weekly_report(
+            db,
+            report_id,
+            "APPROVED_FOR_MANUAL_USE",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/reports/{report_id}/archive")
+def archive_report(
+    report_id: str,
+    payload: WeeklyReportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_weekly_report(
+            db,
+            report_id,
+            "ARCHIVED",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/reports/{report_id}/send")
+def refuse_report_send(report_id: str, user: UserContext = Depends(get_current_user_context)):
+    try:
+        managed.refuse_report_send()
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/invoice-support")
+def create_invoice_support(
+    payload: InvoiceSupportCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.create_invoice_support(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/invoice-support")
+def list_invoice_support(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.list_invoice_supports(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/invoice-support/{invoice_support_id}/review")
+def review_invoice_support(
+    invoice_support_id: str,
+    payload: InvoiceSupportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_invoice_support(
+            db,
+            invoice_support_id,
+            "READY_FOR_OWNER_REVIEW",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/invoice-support/{invoice_support_id}/approve")
+def approve_invoice_support(
+    invoice_support_id: str,
+    payload: InvoiceSupportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_invoice_support(
+            db,
+            invoice_support_id,
+            "APPROVED",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/invoice-support/{invoice_support_id}/archive")
+def archive_invoice_support(
+    invoice_support_id: str,
+    payload: InvoiceSupportDecision,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.transition_invoice_support(
+            db,
+            invoice_support_id,
+            "ARCHIVED",
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/invoice-support/{invoice_support_id}/send")
+def refuse_invoice_send(invoice_support_id: str, user: UserContext = Depends(get_current_user_context)):
+    try:
+        managed.refuse_invoice_send()
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/reconciliation")
+def revenue_reconciliation(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.reconciliation(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/owner-actions")
+def create_owner_action(
+    payload: OwnerActionCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.create_owner_action(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.put("/owner-facts/{fact_key}")
+def update_owner_fact(
+    fact_key: str,
+    payload: BusinessFactUpdate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.update_business_fact(
+            db, fact_key, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/disclosure-policies")
+def create_disclosure_policy(
+    payload: DisclosurePolicyCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.create_disclosure_policy(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/disclosure-policies")
+def list_disclosure_policies(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.list_disclosure_policies(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.post("/disclosure-policies/{policy_id}/acknowledge")
+def acknowledge_disclosure(
+    policy_id: str,
+    payload: DisclosureAcknowledge,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.acknowledge_disclosure(
+            db, policy_id, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/platform-policies/catalog")
+def platform_policy_catalog(user: UserContext = Depends(get_current_user_context)):
+    return managed.platform_policy_catalog()
+
+
+@router.post("/platform-policies")
+def create_platform_policy(
+    payload: PlatformPolicyCreate,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return managed.create_platform_policy(
+            db, payload, organization_id=_resolve_org(user, payload.organization_id), user=user
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/platform-policies")
+def list_platform_policies(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return managed.list_platform_policies(db, organization_id=_resolve_org(user, organization_id), user=user)

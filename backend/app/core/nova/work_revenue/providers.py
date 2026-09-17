@@ -26,8 +26,17 @@ def _flags(**overrides: bool) -> dict[str, bool]:
         "IDENTITY_REQUIRED": False,
         "TERMS_RESTRICT_AUTOMATION": True,
         "MANUAL_ONLY": True,
+        "LOGIN_REQUIRED": True,
+        "CAPTCHA_REQUIRED": True,
+        "HUMAN_SUBMISSION_ONLY": True,
+        "EXTERNAL_AUTOMATION_UNKNOWN": True,
+        "MANUAL_REVIEW_REQUIRED": True,
     }
     flags.update(overrides)
+    if "OWNER_LOGIN_REQUIRED" in overrides:
+        flags["LOGIN_REQUIRED"] = bool(overrides["OWNER_LOGIN_REQUIRED"])
+    if "CAPTCHA_POSSIBLE" in overrides:
+        flags["CAPTCHA_REQUIRED"] = bool(overrides["CAPTCHA_POSSIBLE"])
     return flags
 
 

@@ -136,6 +136,9 @@ class NovaWorkOwnerAction(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
     category: Mapped[str | None] = mapped_column(String(48), nullable=True)
     owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -169,6 +172,8 @@ class NovaWorkAuditEvent(Base):
     ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     actor_category: Mapped[str] = mapped_column(String(24), nullable=False, default="NOVA")
     entity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    previous_state: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    new_state: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
@@ -199,6 +204,9 @@ class NovaWorkEngagement(Base):
     received_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
     risks: Mapped[str | None] = mapped_column(Text, nullable=True)
     blockers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -273,5 +281,165 @@ class NovaWorkRevenueEntry(Base):
     received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     owner_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reconciliation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkRecurringSeries(Base):
+    __tablename__ = "nova_work_recurring_series"
+    __table_args__ = (
+        Index("ix_nova_work_recur_id", "series_id", unique=True),
+        Index("ix_nova_work_recur_org", "organization_id", "status", "next_work_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    series_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    engagement_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    template_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    frequency: Mapped[str] = mapped_column(String(40), nullable=False, default="weekly")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="ACTIVE")
+    next_work_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_period_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkRecurringOccurrence(Base):
+    __tablename__ = "nova_work_recurring_occurrences"
+    __table_args__ = (
+        Index("ix_nova_work_occur_id", "occurrence_id", unique=True),
+        Index("ix_nova_work_occur_period", "organization_id", "series_id", "period_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    occurrence_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    series_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    engagement_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    period_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="OPEN")
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkWeeklyReport(Base):
+    __tablename__ = "nova_work_weekly_reports"
+    __table_args__ = (
+        Index("ix_nova_work_report_id", "report_id", unique=True),
+        Index("ix_nova_work_report_org", "organization_id", "status", "period_start"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    report_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    body_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkInvoiceSupport(Base):
+    __tablename__ = "nova_work_invoice_supports"
+    __table_args__ = (
+        Index("ix_nova_work_inv_id", "invoice_support_id", unique=True),
+        Index("ix_nova_work_inv_org", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    invoice_support_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    engagement_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    client_name: Mapped[str] = mapped_column(String(220), nullable=False)
+    work_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    work_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deliverable_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1)
+    rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    draft_subtotal: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    adjustment_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkBusinessFact(Base):
+    __tablename__ = "nova_work_business_facts"
+    __table_args__ = (
+        Index("ix_nova_work_fact_id", "fact_record_id", unique=True),
+        Index("ix_nova_work_fact_key", "organization_id", "fact_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    fact_record_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    fact_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    display_label: Mapped[str] = mapped_column(String(220), nullable=False)
+    value_status: Mapped[str] = mapped_column(String(32), nullable=False, default="MISSING")
+    value_display: Mapped[str] = mapped_column(String(400), nullable=False, default="[OWNER INPUT REQUIRED]")
+    verification_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiration_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_description: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkDisclosurePolicy(Base):
+    __tablename__ = "nova_work_disclosure_policies"
+    __table_args__ = (Index("ix_nova_work_disc_id", "policy_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    policy_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_assistance_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    subcontractor_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    disclosure_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    owner_acknowledgment_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    owner_acknowledged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    policy_status: Mapped[str] = mapped_column(String(40), nullable=False, default="MANUAL_REVIEW_REQUIRED")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkPlatformPolicy(Base):
+    __tablename__ = "nova_work_platform_policies"
+    __table_args__ = (Index("ix_nova_work_plat_id", "policy_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    policy_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_label: Mapped[str] = mapped_column(String(120), nullable=False, default="unknown")
+    login_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    captcha_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    human_submission_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    terms_restrict_automation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    external_automation_unknown: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    manual_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

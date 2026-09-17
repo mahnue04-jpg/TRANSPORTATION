@@ -7,14 +7,21 @@ from sqlalchemy.engine import Engine
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkBusinessFact,
     NovaWorkDeliverable,
+    NovaWorkDisclosurePolicy,
     NovaWorkEngagement,
+    NovaWorkInvoiceSupport,
     NovaWorkMaterial,
     NovaWorkOpportunity,
     NovaWorkOwnerAction,
+    NovaWorkPlatformPolicy,
+    NovaWorkRecurringOccurrence,
+    NovaWorkRecurringSeries,
     NovaWorkRevenueEntry,
     NovaWorkStatusHistory,
     NovaWorkTask,
+    NovaWorkWeeklyReport,
 )
 from app.db.session import Base, engine as default_engine
 
@@ -29,6 +36,13 @@ WORK_TABLES = (
     NovaWorkTask.__table__,
     NovaWorkDeliverable.__table__,
     NovaWorkRevenueEntry.__table__,
+    NovaWorkRecurringSeries.__table__,
+    NovaWorkRecurringOccurrence.__table__,
+    NovaWorkWeeklyReport.__table__,
+    NovaWorkInvoiceSupport.__table__,
+    NovaWorkBusinessFact.__table__,
+    NovaWorkDisclosurePolicy.__table__,
+    NovaWorkPlatformPolicy.__table__,
 )
 
 _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
@@ -69,6 +83,9 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
     "nova_work_owner_actions": {
         "category": "VARCHAR(48)",
         "owner_notes": "TEXT",
+        "engagement_id": "VARCHAR(32)",
+        "ref_type": "VARCHAR(32)",
+        "ref_id": "VARCHAR(32)",
     },
     "nova_work_engagements": {
         "title": "VARCHAR(220)",
@@ -80,6 +97,9 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
         "received_revenue": "FLOAT",
         "risks": "TEXT",
         "blockers": "TEXT",
+        "priority": "VARCHAR(16)",
+        "source": "VARCHAR(80)",
+        "due_date": "DATETIME",
     },
     "nova_work_tasks": {
         "description": "TEXT",
@@ -91,6 +111,8 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
     "nova_work_audit_events": {
         "actor_category": "VARCHAR(24)",
         "entity_type": "VARCHAR(32)",
+        "previous_state": "VARCHAR(40)",
+        "new_state": "VARCHAR(40)",
     },
 }
 

@@ -92,6 +92,15 @@ OWNER_ACTION_TYPES = (
     "LEGAL_CERTIFICATION",
     "ACCOUNT_CREATION",
     "PLATFORM_REQUIRES_HUMAN",
+    "VERIFY_BUSINESS_FACT",
+    "REVIEW_DRAFT",
+    "PROVIDE_MISSING_INFORMATION",
+    "APPROVE_MANUAL_SUBMISSION",
+    "CONFIRM_DELIVERABLE",
+    "CONFIRM_CONTRACT",
+    "CONFIRM_PAYMENT_RECEIVED",
+    "REVIEW_WEEKLY_REPORT",
+    "RESOLVE_BLOCKER",
 )
 
 REVENUE_STATUSES = (
@@ -147,9 +156,11 @@ VIEW_FILTERS = (
 
 ENGAGEMENT_STATUSES = (
     "NOT_STARTED",
+    "NEW",
     "READY",
     "ACTIVE",
     "WAITING_ON_OWNER",
+    "OWNER_ACTION_REQUIRED",
     "WAITING_ON_CLIENT",
     "BLOCKED",
     "DELIVERABLE_READY",
@@ -210,6 +221,16 @@ AUDIT_EVENT_TYPES = (
     "PAYMENT_STATUS_CHANGED",
     "REVENUE_RECEIVED_CONFIRMED",
     "ARCHIVED",
+    "RECURRING_CREATED",
+    "RECURRING_GENERATED",
+    "RECURRING_COMPLETED",
+    "REPORT_CREATED",
+    "REPORT_APPROVED",
+    "INVOICE_SUPPORT_CREATED",
+    "INVOICE_SUPPORT_APPROVED",
+    "FACT_UPDATED",
+    "DISCLOSURE_ACKNOWLEDGED",
+    "QUEUE_STATUS_CHANGED",
 )
 
 
@@ -421,6 +442,9 @@ class OwnerActionOut(BaseModel):
     status: str
     category: str | None = None
     owner_notes: str | None = None
+    engagement_id: str | None = None
+    ref_type: str | None = None
+    ref_id: str | None = None
 
 
 class AuditEventOut(BaseModel):
@@ -431,6 +455,8 @@ class AuditEventOut(BaseModel):
     created_at: datetime
     actor_category: str = "NOVA"
     entity_type: str | None = None
+    previous_state: str | None = None
+    new_state: str | None = None
 
 
 class StatusHistoryOut(BaseModel):
@@ -542,6 +568,11 @@ class TodaySummaryOut(BaseModel):
     deliverables_pending: int = 0
     quoted_pipeline: float = 0
     contracted_revenue: float = 0
+    recurring_overdue: int = 0
+    reports_awaiting_review: int = 0
+    invoice_support_drafts: int = 0
+    blocked_work: int = 0
+    owner_confirmed_received: float = 0
 
 
 class ProviderOut(BaseModel):
@@ -579,6 +610,18 @@ class EngagementCreate(BaseModel):
     agreed_value: float | None = Field(default=None, ge=0, le=1_000_000_000)
     risks: str | None = None
     blockers: str | None = None
+    priority: str = "normal"
+    source: str | None = Field(default=None, max_length=80)
+    due_date: datetime | None = None
+
+
+class EngagementUpdate(BaseModel):
+    organization_id: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    blockers: str | None = None
+    notes: str | None = None
+    due_date: datetime | None = None
 
 
 class TaskCreate(BaseModel):
@@ -669,6 +712,7 @@ class RevenueEntryOut(BaseModel):
     received_date: datetime | None = None
     owner_confirmed: bool
     reconciliation_notes: str | None = None
+    display_stage: str | None = None
 
 
 class RevenueConfirm(BaseModel):
@@ -710,4 +754,102 @@ class AnalyticsOut(BaseModel):
         "Nova does not collect payment."
     )
     guardrails: dict[str, bool] = Field(default_factory=dict)
+
+
+class RecurringSeriesCreate(BaseModel):
+    organization_id: str | None = None
+    engagement_id: str
+    title: str = Field(min_length=1, max_length=220)
+    frequency: str = "weekly"
+    template_id: str | None = Field(default=None, max_length=80)
+    next_work_date: datetime | None = None
+    notes: str | None = None
+
+
+class RecurringComplete(BaseModel):
+    organization_id: str | None = None
+    notes: str | None = None
+
+
+class WeeklyReportCreate(BaseModel):
+    organization_id: str | None = None
+    engagement_id: str | None = None
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+
+
+class WeeklyReportDecision(BaseModel):
+    organization_id: str | None = None
+    owner_notes: str | None = None
+
+
+class InvoiceSupportCreate(BaseModel):
+    organization_id: str | None = None
+    engagement_id: str
+    client_name: str | None = Field(default=None, max_length=220)
+    work_period_start: datetime | None = None
+    work_period_end: datetime | None = None
+    deliverable_ids: list[str] = Field(default_factory=list)
+    quantity: float = Field(default=1, ge=0, le=1_000_000_000)
+    rate: float = Field(default=0, ge=0, le=1_000_000_000)
+    adjustment_notes: str | None = None
+    invoice_required: bool = True
+    owner_notes: str | None = None
+
+
+class InvoiceSupportDecision(BaseModel):
+    organization_id: str | None = None
+    owner_notes: str | None = None
+
+
+class BusinessFactUpdate(BaseModel):
+    organization_id: str | None = None
+    value_status: str = "OWNER_PROVIDED"
+    value_display: str | None = Field(default=None, max_length=400)
+    verification_date: datetime | None = None
+    expiration_date: datetime | None = None
+    source_description: str | None = Field(default=None, max_length=400)
+    notes: str | None = None
+
+
+class DisclosurePolicyCreate(BaseModel):
+    organization_id: str | None = None
+    opportunity_id: str | None = None
+    engagement_id: str | None = None
+    ai_assistance_used: bool = True
+    subcontractor_allowed: bool = False
+    disclosure_required: bool = True
+    owner_acknowledgment_required: bool = True
+    notes: str | None = None
+
+
+class DisclosureAcknowledge(BaseModel):
+    organization_id: str | None = None
+    owner_acknowledged: bool = True
+    notes: str | None = None
+
+
+class PlatformPolicyCreate(BaseModel):
+    organization_id: str | None = None
+    opportunity_id: str | None = None
+    source_label: str = Field(default="unknown", max_length=120)
+    login_required: bool = True
+    captcha_required: bool = True
+    human_submission_only: bool = True
+    terms_restrict_automation: bool = True
+    external_automation_unknown: bool = True
+    manual_review_required: bool = True
+    notes: str | None = None
+
+
+class OwnerActionCreate(BaseModel):
+    organization_id: str | None = None
+    action_type: str
+    category: str | None = None
+    explanation: str = Field(min_length=1, max_length=4000)
+    opportunity_id: str | None = None
+    application_id: str | None = None
+    engagement_id: str | None = None
+    ref_type: str | None = None
+    ref_id: str | None = None
 

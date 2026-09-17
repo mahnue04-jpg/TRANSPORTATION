@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.lifecycle import (
     OPPORTUNITY_PRIORITIES,
     category_for_action,
     normalize_task_status,
+    queue_status_for,
 )
 from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, owner_input_checklist, sanitize_untrusted
 from app.core.nova.work_revenue.models import (
@@ -205,6 +206,8 @@ def _record_audit(
     ref_id: str | None = None,
     entity_type: str | None = None,
     actor_category: str | None = None,
+    previous_state: str | None = None,
+    new_state: str | None = None,
 ) -> None:
     actor = actor_category or ("OWNER" if event_type in _OWNER_AUDIT_EVENTS else "NOVA")
     db.add(
@@ -217,6 +220,8 @@ def _record_audit(
             ref_id=ref_id,
             actor_category=actor,
             entity_type=entity_type,
+            previous_state=previous_state,
+            new_state=new_state,
         )
     )
 
@@ -363,6 +368,9 @@ def owner_action_out(row: NovaWorkOwnerAction) -> OwnerActionOut:
         status=row.status,
         category=getattr(row, "category", None) or category_for_action(row.action_type),
         owner_notes=getattr(row, "owner_notes", None),
+        engagement_id=getattr(row, "engagement_id", None),
+        ref_type=getattr(row, "ref_type", None),
+        ref_id=getattr(row, "ref_id", None),
     )
 
 
@@ -1368,6 +1376,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         .filter(NovaWorkDeliverable.owner_confirmed_delivered.is_(False))
         .count()
     )
+    from app.core.nova.work_revenue.managed import completion_counts, reconciliation
+
+    extra = completion_counts(db, organization_id=organization_id, user=user)
+    recon = reconciliation(db, organization_id=organization_id, user=user)
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
@@ -1389,8 +1401,8 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "interviews": len(interviews),
             "owner_action_required": len(actions),
             "work_won": len(won),
-            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "READY", "ACTIVE"}]),
-            "blocked_engagements": len([item for item in engagement_rows if item["status"] == "BLOCKED" or item.get("blockers")]),
+            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "NEW", "READY", "ACTIVE"}]),
+            "blocked_engagements": len([item for item in engagement_rows if item["status"] in {"BLOCKED", "OWNER_ACTION_REQUIRED"} or item.get("blockers")]),
             "tasks_due": sum(
                 1
                 for item in engagement_rows
@@ -1398,6 +1410,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
                 if task.get("status") not in {"COMPLETE", "CANCELLED"}
             ),
             "deliverables_pending": int(pending_deliverables or 0),
+            "recurring_overdue": extra["recurring_overdue"],
+            "reports_awaiting_review": extra["reports_awaiting_review"],
+            "invoice_support_drafts": extra["invoice_support_drafts"],
+            "blocked_work": extra["blocked_work"],
         },
         opportunity_inbox=inbox,
         qualified_work=qualified,
@@ -1415,6 +1431,9 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "quoted_pipeline": sum((item.quoted_amount or 0) for item in outs),
             "contracted_value": contracted,
             "owner_confirmed_received": received,
+            "awaiting_invoice": recon.get("awaiting_invoice") or 0,
+            "manually_recorded_invoice": recon.get("manually_recorded_invoice") or 0,
+            "awaiting_owner_payment_confirmation": recon.get("awaiting_owner_payment_confirmation") or 0,
             "disclaimer": "Estimated pipeline is not received revenue. Nova does not collect payment. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.",
         },
         guardrails=engine_guardrails(),
@@ -1439,6 +1458,10 @@ def today_cards(counts: dict[str, int]) -> list[dict[str, Any]]:
         ("work_won", "WORK WON"),
         ("tasks_due", "TASKS DUE"),
         ("active_engagements", "ACTIVE WORK"),
+        ("recurring_overdue", "RECURRING OVERDUE"),
+        ("reports_awaiting_review", "REPORTS AWAITING REVIEW"),
+        ("invoice_support_drafts", "INVOICE-SUPPORT DRAFTS"),
+        ("blocked_work", "BLOCKED WORK"),
     )
     return [
         {"key": key, "label": label, "count": int(counts.get(key) or 0), "href": "/nova/work"}
@@ -1526,6 +1549,11 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         deliverables_pending=int(pending_deliverables or 0),
         quoted_pipeline=float(revenue.get("quoted_pipeline") or 0),
         contracted_revenue=float(revenue.get("contracted_value") or 0),
+        recurring_overdue=int(dash.counts.get("recurring_overdue") or 0),
+        reports_awaiting_review=int(dash.counts.get("reports_awaiting_review") or 0),
+        invoice_support_drafts=int(dash.counts.get("invoice_support_drafts") or 0),
+        blocked_work=int(dash.counts.get("blocked_work") or 0),
+        owner_confirmed_received=float(revenue.get("owner_confirmed_received") or 0),
     )
 
 
@@ -1569,6 +1597,7 @@ def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = 
         "service": row.service,
         "frequency": row.frequency,
         "status": row.status,
+        "queue_status": queue_status_for(row.status),
         "expected_payment": row.expected_payment,
         "payment_status": row.payment_status,
         "start_date": row.start_date.isoformat() if row.start_date else None,
@@ -1583,6 +1612,10 @@ def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = 
         "received_revenue": getattr(row, "received_revenue", None),
         "risks": getattr(row, "risks", None),
         "blockers": getattr(row, "blockers", None),
+        "priority": getattr(row, "priority", None) or "normal",
+        "source": getattr(row, "source", None),
+        "due_date": row.due_date.isoformat() if getattr(row, "due_date", None) else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "tasks": [
             {
                 "task_id": item.task_id,
@@ -1668,6 +1701,9 @@ def create_engagement(
         contracted_revenue=_validate_amount(payload.agreed_value, label="agreed_value"),
         risks=sanitize_untrusted(payload.risks) or None,
         blockers=sanitize_untrusted(payload.blockers) or None,
+        priority=sanitize_untrusted(payload.priority)[:16] or "normal",
+        source=sanitize_untrusted(payload.source)[:80] or None,
+        due_date=payload.due_date,
     )
     db.add(row)
     db.flush()
