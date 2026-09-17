@@ -3,6 +3,7 @@
 (function () {
   var activeFilter = "";
   var selectedOpportunityId = "";
+  var activeTab = "overview";
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
@@ -127,7 +128,11 @@
     $("count-actions").textContent = counts.owner_action_required || 0;
     var summary = data.revenue_summary || {};
     if ($("count-pipeline")) $("count-pipeline").textContent = summary.estimated_pipeline || 0;
+    if ($("count-quoted")) $("count-quoted").textContent = summary.quoted_pipeline || 0;
+    if ($("count-contracted")) $("count-contracted").textContent = summary.contracted_value || 0;
     if ($("count-received")) $("count-received").textContent = summary.owner_confirmed_received || 0;
+    if ($("count-tasks")) $("count-tasks").textContent = counts.tasks_due || 0;
+    if ($("count-deliverables")) $("count-deliverables").textContent = counts.deliverables_pending || 0;
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
@@ -157,8 +162,47 @@
       return "<div class=\"item\">" + escapeHtml(row.event_type) +
         "<div class=\"muted\">" + escapeHtml(row.summary) + "</div></div>";
     });
+    if ($("archive-list")) {
+      $("archive-list").innerHTML = listHtml(data.rejected_or_archived, "No archived opportunities.", oppItem);
+    }
+    if ($("task-list")) {
+      var tasks = [];
+      (data.engagements || []).forEach(function (eng) {
+        (eng.tasks || []).forEach(function (task) {
+          tasks.push({
+            title: task.title,
+            status: task.status,
+            party: task.responsible_party,
+            client: eng.client_name
+          });
+        });
+      });
+      $("task-list").innerHTML = listHtml(tasks, "No internal tasks.", function (row) {
+        return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
+          "<div class=\"muted\">" + escapeHtml(row.client) + " · " + escapeHtml(row.party) +
+          " · " + escapeHtml(row.status) + "</div></div>";
+      });
+    }
+    if ($("deliverable-list")) {
+      $("deliverable-list").innerHTML = "Sign in to load deliverables, or open an engagement. Delivered requires owner confirmation.";
+    }
     $("filtered-list").innerHTML = listHtml(data.opportunity_list, "No opportunities yet.", oppItem);
     markActiveFilter();
+    applyTab();
+  }
+  function applyTab() {
+    var panels = document.querySelectorAll("[data-panel]");
+    panels.forEach(function (panel) {
+      var names = (panel.getAttribute("data-panel") || "").split(/\s+/);
+      var show = activeTab === "overview" || names.indexOf(activeTab) !== -1;
+      panel.classList.toggle("hidden-panel", !show);
+    });
+    var buttons = document.querySelectorAll("#tab-row [data-tab]");
+    buttons.forEach(function (button) {
+      var on = (button.getAttribute("data-tab") || "") === activeTab;
+      button.classList.toggle("filter-on", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+    });
   }
   async function loadDetail(opportunityId) {
     selectedOpportunityId = opportunityId;
@@ -236,13 +280,28 @@
       return;
     }
     setSignedIn(true);
+    if ($("filtered-list")) $("filtered-list").setAttribute("aria-busy", "true");
     var data = await api("/api/nova/work/dashboard");
     var audit = [];
     try { audit = await api("/api/nova/work/audit"); } catch (_) { audit = []; }
     renderDashboard(data, audit);
     if (activeFilter) {
-      var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter));
+      var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter) + "&limit=100");
       $("filtered-list").innerHTML = listHtml(filtered, "No matching opportunities.", oppItem);
+    }
+    if ($("filtered-list")) $("filtered-list").removeAttribute("aria-busy");
+    if (activeTab === "deliverables") {
+      try {
+        var dels = await api("/api/nova/work/deliverables?limit=100");
+        if ($("deliverable-list")) {
+          $("deliverable-list").innerHTML = listHtml(dels, "No internal deliverables.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.deliverable_type) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.delivery_status) +
+              (row.owner_confirmed_delivered ? " · owner confirmed" : " · not transmitted") +
+              "</div></div>";
+          });
+        }
+      } catch (_) {}
     }
     if (selectedOpportunityId) {
       await loadDetail(selectedOpportunityId);
@@ -334,6 +393,14 @@
     activeFilter = target.getAttribute("data-filter") || "";
     try { await refresh(); } catch (err) { showBanner(err.message); }
   });
+  if ($("tab-row")) {
+    $("tab-row").addEventListener("click", function (event) {
+      var target = event.target;
+      if (!target || !target.getAttribute || !target.hasAttribute("data-tab")) return;
+      activeTab = target.getAttribute("data-tab") || "overview";
+      applyTab();
+    });
+  }
   $("opp-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try {

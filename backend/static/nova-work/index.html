@@ -31,7 +31,7 @@
   </header>
 
   <main class="work-main">
-    <p class="disclaimer">Nova is an AI system/tool under AMICOR/owner authorization. Nova is not a human employee. Phase 1 does not send external applications, accept contracts, or collect payment. Missing credentials are marked [OWNER INPUT REQUIRED]. Revenue tracking is COMING IN LATER PHASE.</p>
+    <p class="disclaimer">Nova is an AI system/tool under AMICOR/owner authorization. Nova is not a human employee. Phase 2 does not send external applications, accept contracts, or collect payment. APPROVED is not SUBMITTED. Estimated, contracted, invoiced, and received revenue stay separate. Missing credentials are marked [OWNER INPUT REQUIRED].</p>
     <div id="banner" class="banner hidden"></div>
 
     <section class="command-card" aria-label="Sign in">
@@ -57,7 +57,11 @@
       <article class="card compact"><h3>CLOSED</h3><p id="count-closed">0</p></article>
       <article class="card compact"><h3>OWNER ACTION REQUIRED</h3><p id="count-actions">0</p></article>
       <article class="card compact"><h3>ESTIMATED PIPELINE</h3><p id="count-pipeline">0</p></article>
+      <article class="card compact"><h3>QUOTED PIPELINE</h3><p id="count-quoted">0</p></article>
+      <article class="card compact"><h3>CONTRACTED REVENUE</h3><p id="count-contracted">0</p></article>
       <article class="card compact"><h3>OWNER-CONFIRMED RECEIVED</h3><p id="count-received">0</p></article>
+      <article class="card compact"><h3>TASKS DUE</h3><p id="count-tasks">0</p></article>
+      <article class="card compact"><h3>DELIVERABLES</h3><p id="count-deliverables">0</p></article>
     </section>
 
     <section class="command-card" aria-label="Opportunity filters">
@@ -77,6 +81,10 @@
         <button type="button" class="secondary" data-filter="won">Won</button>
         <button type="button" class="secondary" data-filter="lost">Lost</button>
         <button type="button" class="secondary" data-filter="rejected">Rejected</button>
+        <button type="button" class="secondary" data-filter="in_progress">In progress</button>
+        <button type="button" class="secondary" data-filter="qualifying">Qualifying</button>
+        <button type="button" class="secondary" data-filter="ready">Ready</button>
+        <button type="button" class="secondary" data-filter="blocked">Blocked</button>
         <button type="button" class="secondary" data-filter="archived">Archived</button>
       </div>
       <div id="filtered-list">Sign in to load opportunities.</div>
@@ -114,27 +122,52 @@
       </form>
     </section>
 
+    <section class="command-card" aria-label="Dashboard sections">
+      <h2>Work &amp; Revenue sections</h2>
+      <p class="hint">Informational local tracking. External submit, pay, and live discovery remain disabled.</p>
+      <div class="command-actions" id="tab-row" role="tablist" aria-label="Work sections">
+        <button type="button" class="secondary filter-on" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+        <button type="button" class="secondary" data-tab="opportunities" role="tab" aria-selected="false">Opportunities</button>
+        <button type="button" class="secondary" data-tab="applications" role="tab" aria-selected="false">Applications</button>
+        <button type="button" class="secondary" data-tab="owner-actions" role="tab" aria-selected="false">Owner Actions</button>
+        <button type="button" class="secondary" data-tab="engagements" role="tab" aria-selected="false">Engagements</button>
+        <button type="button" class="secondary" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
+        <button type="button" class="secondary" data-tab="deliverables" role="tab" aria-selected="false">Deliverables</button>
+        <button type="button" class="secondary" data-tab="revenue" role="tab" aria-selected="false">Revenue</button>
+        <button type="button" class="secondary" data-tab="archive" role="tab" aria-selected="false">Archive</button>
+      </div>
+    </section>
+
     <section class="dashboard" aria-label="Work dashboard">
-      <article class="card"><h2>Opportunity Inbox</h2><div id="inbox-list">Sign in to load.</div></article>
-      <article class="card"><h2>Qualified Work</h2><div id="qualified-list">None.</div></article>
-      <article class="card"><h2>Applications</h2><div id="app-list">None.</div></article>
-      <article class="card"><h2>Owner Approvals</h2>
+      <article class="card" data-panel="opportunities"><h2>Opportunity Inbox</h2><div id="inbox-list">Sign in to load.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Qualified Work</h2><div id="qualified-list">None.</div></article>
+      <article class="card" data-panel="applications"><h2>Applications</h2><div id="app-list">None.</div></article>
+      <article class="card" data-panel="applications owner-actions"><h2>Owner Approvals</h2>
         <p class="hint">Approve means APPROVED FOR FUTURE SUBMISSION only. Nova will not send an application.</p>
         <div id="approval-list">None.</div>
       </article>
-      <article class="card"><h2>Follow-Ups</h2><div id="follow-list">None.</div></article>
-      <article class="card"><h2>Interviews</h2><div id="interview-list">None.</div></article>
-      <article class="card"><h2>Won Work</h2><div id="won-list">None.</div></article>
-      <article class="card"><h2>Owner Actions</h2><div id="action-list">None.</div></article>
-      <article class="card"><h2>Revenue</h2>
-        <p class="hint">Estimated pipeline is not received revenue.</p>
+      <article class="card" data-panel="opportunities"><h2>Follow-Ups</h2><div id="follow-list">None.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Interviews</h2><div id="interview-list">None.</div></article>
+      <article class="card" data-panel="opportunities"><h2>Won Work</h2><div id="won-list">None.</div></article>
+      <article class="card" data-panel="owner-actions"><h2>Owner Actions</h2><div id="action-list">None.</div></article>
+      <article class="card" data-panel="revenue"><h2>Revenue</h2>
+        <p class="hint">Estimated pipeline is not received revenue. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.</p>
         <div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div>
       </article>
-      <article class="card"><h2>Internal engagements</h2>
+      <article class="card" data-panel="engagements"><h2>Internal engagements</h2>
         <p class="hint">Tracking only. Not a signed contract. Nova does not contact the client.</p>
         <div id="engagement-list">None.</div>
       </article>
-      <article class="card"><h2>Activity</h2><div id="audit-list">None.</div></article>
+      <article class="card" data-panel="tasks"><h2>Tasks</h2>
+        <p class="hint">Internal work only. Nova-capable tasks still require owner review before any external use.</p>
+        <div id="task-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="deliverables"><h2>Deliverables</h2>
+        <p class="hint">Delivered requires owner confirmation. Nova does not transmit files.</p>
+        <div id="deliverable-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="archive"><h2>Archive</h2><div id="archive-list">None.</div></article>
+      <article class="card" data-panel="overview"><h2>Activity</h2><div id="audit-list">None.</div></article>
       <article class="card wide-card"><h2>Opportunity detail</h2>
         <p class="hint">Source URLs are shown as text only and are not fetched.</p>
         <div id="detail-box">Select an opportunity to see capability match, missing owner facts, materials, and history.</div>

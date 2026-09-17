@@ -137,6 +137,8 @@ button {
 .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .action-row button { min-height: 40px; font-size: 0.85rem; }
 .filter-on { border-color: var(--nova-accent) !important; color: var(--nova-accent) !important; }
+.hidden-panel { display: none; }
+#tab-row button { min-height: 44px; }
 
 @media (max-width: 720px) {
   .work-header, .work-main { width: min(100% - 20px, 720px); }

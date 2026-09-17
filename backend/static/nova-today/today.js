@@ -327,6 +327,42 @@
         receivedEmpty +
         "<p class=\"hint\">" + escapeHtml(summary.revenue_disclaimer || "Estimated pipeline is not received revenue. Nova does not collect payment.") + "</p>" +
         workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"owner-actions\">" +
+        "<span class=\"trust\">ACTION REQUIRES APPROVAL</span>" +
+        "<h3>Owner Actions</h3>" +
+        "<p class=\"count-metric\">Open owner-required items</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.owner_action_required || 0)) + "</p>" +
+        "<p class=\"hint\">Nova does not complete CAPTCHA, login, signature, or payment steps.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"tasks-due\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Tasks Due</h3>" +
+        "<p class=\"count-metric\">Internal tasks still open</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.tasks_due || 0)) + "</p>" +
+        "<p class=\"hint\">Internal tracking only. Nova does not contact the client.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"deliverables\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Deliverables</h3>" +
+        "<p class=\"count-metric\">Pending owner-confirmed delivery</p>" +
+        "<p class=\"count-value\">" + escapeHtml(String(summary.deliverables_pending || 0)) + "</p>" +
+        "<p class=\"hint\">Delivered requires owner confirmation. Nova does not transmit files externally.</p>" +
+        workOpenLink() +
+      "</article>" +
+      "<article class=\"product-count-card\" data-work-card=\"pipeline\">" +
+        "<span class=\"trust\">VERIFIED DATA</span>" +
+        "<h3>Revenue Pipeline</h3>" +
+        "<p class=\"count-metric\">Quoted vs contracted vs received</p>" +
+        "<ul class=\"work-state-list\">" +
+          "<li><span class=\"state-label\">QUOTED</span> " + escapeHtml(moneyText(summary.quoted_pipeline)) + " — not money earned</li>" +
+          "<li><span class=\"state-label\">CONTRACTED REVENUE</span> " + escapeHtml(moneyText(summary.contracted_revenue || revenue.contracted_value)) + " — not cash received</li>" +
+          "<li><span class=\"state-label\">RECEIVED REVENUE</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — owner-confirmed only</li>" +
+        "</ul>" +
+        "<p class=\"hint\">Quoted is not contracted. Contracted is not invoiced. Invoiced is not received.</p>" +
+        workOpenLink() +
       "</article>";
   }
   async function loadWorkRevenue() {
