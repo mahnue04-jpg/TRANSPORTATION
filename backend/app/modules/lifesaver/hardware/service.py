@@ -22,7 +22,13 @@ from app.modules.lifesaver.hardware.command_contract import (
 from app.modules.lifesaver.hardware.hardware_mode import hardware_mode, local_pi_enabled
 from app.modules.lifesaver.hardware.motor_contract import motor_snapshot
 from app.modules.lifesaver.hardware.sensor_contract import SENSOR_REVIEW_COPY, is_sensor_event, normalize_sensor_event
-from app.modules.lifesaver.hardware.events import new_fall_event, serialize_event
+from app.modules.lifesaver.hardware.events import new_fall_event, new_power_event, serialize_event
+from app.modules.lifesaver.hardware.power_state import (
+    POWER_COMMANDS,
+    POWER_COMMAND_TARGETS,
+    evaluate_transition,
+    snapshot as power_snapshot,
+)
 from app.modules.lifesaver.hardware.health import build_health
 from app.modules.lifesaver.hardware.models import (
     LifesaverDevice,
@@ -122,7 +128,12 @@ def serialize_device(device: LifesaverDevice) -> dict[str, Any]:
         "local_host_label": getattr(device, "local_ip", None) or "local",
         "motor_state": motor["moving_state"],
         "requested_angle": motor["requested_angle"],
-        "power_status": state.get("power") or "mains",
+        "power_status": power_snapshot(state)["power_status"],
+        "power_state": power_snapshot(state)["power_state"],
+        "last_power_transition": power_snapshot(state)["last_power_transition"],
+        "physical_battery_connected": False,
+        "power_simulated": True,
+        "power_label": power_snapshot(state)["power_label"],
         "last_command": state.get("last_command"),
         "last_acknowledgement": state.get("last_acknowledgement"),
         "safety_event_status": state.get("safety_event_status") or "none",
@@ -354,6 +365,30 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
         extra["device_token"] = payload.device_token
     elif local_pi_enabled() and getattr(row, "pairing_token", None) and (payload.adapter_type or row.adapter_type) in {"local_pi", "raspberry_pi"}:
         extra["device_token"] = row.pairing_token
+    power_result = None
+    if command in POWER_COMMANDS or payload.power_state:
+        target = payload.power_state or POWER_COMMAND_TARGETS.get(command)
+        last = state.get("last_power_transition") if isinstance(state.get("last_power_transition"), dict) else None
+        last_at = None
+        if last and last.get("at"):
+            from datetime import datetime
+
+            try:
+                last_at = datetime.fromisoformat(str(last["at"]).replace("Z", "+00:00"))
+            except ValueError:
+                last_at = None
+        power_result = evaluate_transition(
+            state.get("power_state") or state.get("power"),
+            target,
+            event_at=payload.event_at,
+            last_transition_at=last_at,
+        )
+        if power_result.invalid:
+            raise HTTPException(status_code=422, detail=power_result.reason)
+        extra["power_state"] = target
+        extra["event_at"] = payload.event_at
+        extra["power_result"] = power_result
+        extra["previous_status"] = row.status
     if command == "START_VIDEO_SESSION" and state.get("privacy_mode"):
         raise HTTPException(status_code=409, detail="Privacy mode prevents automatic video start.")
     started = now()
@@ -366,6 +401,7 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
     )
     next_state["last_command"] = command
     next_state["last_acknowledgement"] = lifecycle
+    emitted = next_state.pop("_power_transition", None) or (power_result.as_dict() if power_result else None)
     _save_state(row, next_state, status)
     if getattr(row, "pairing_state", None) != "UNPAIRED":
         if status == "OFFLINE" or lifecycle == "TIMED_OUT":
@@ -396,6 +432,29 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
         completed_at=now(),
     )
     db.add(log)
+    recorded_events: list[str] = []
+    if emitted and emitted.get("applied"):
+        from datetime import datetime
+
+        event_at = None
+        if emitted.get("event_at"):
+            try:
+                event_at = datetime.fromisoformat(str(emitted["event_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                event_at = None
+        for event_type in emitted.get("events") or []:
+            db.add(
+                new_power_event(
+                    organization_id=actor.organization_id,
+                    device_id=row.id,
+                    profile_id=actor.id,
+                    event_type=event_type,
+                    from_state=emitted.get("from_state") or "",
+                    to_state=emitted.get("to_state") or "",
+                    event_at=event_at,
+                )
+            )
+            recorded_events.append(event_type)
     write_audit(
         db,
         organization_id=actor.organization_id,
@@ -417,6 +476,8 @@ def run_command(db: Session, ctx: UserContext, device_id: str, payload: Hardware
         "adapter_type": adapter_kind,
         "simulated": True,
         "external_device_contacted": False,
+        "power_transition": emitted,
+        "power_events": recorded_events,
     }
 
 

@@ -1,6 +1,8 @@
 """Pydantic contracts for Lifesaver hardware simulation."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +19,8 @@ class HardwareCommand(BaseModel):
     adapter_type: str | None = Field(default=None, max_length=32)
     angle: float | None = None
     device_token: str | None = Field(default=None, max_length=64)
+    power_state: str | None = Field(default=None, max_length=32)
+    event_at: datetime | None = None
 
 
 class VideoSessionCreate(BaseModel):

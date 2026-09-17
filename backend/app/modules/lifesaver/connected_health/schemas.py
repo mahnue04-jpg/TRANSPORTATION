@@ -26,6 +26,10 @@ class ConnectedReadingCreate(BaseModel):
     data_quality: str | None = Field(default="unknown", max_length=16)
     flag_for_review: bool = False
     member_profile_id: str | None = Field(default=None, max_length=36)
+    captured_at: datetime | None = None
+    source: str | None = Field(default="connected_simulated", max_length=32)
+    source_type: str | None = Field(default=None, max_length=32)
+    client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class HomeTestKitCreate(BaseModel):

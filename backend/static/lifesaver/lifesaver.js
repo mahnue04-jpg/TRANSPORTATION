@@ -242,10 +242,12 @@
         const value = row.reading_type === "blood_pressure"
           ? row.value_primary + "/" + row.value_secondary
           : row.value_primary;
-        const sim = row.source === "simulated_device" ? " · SIMULATED — NOT FROM A MEDICAL DEVICE" : "";
+        const sim = row.source === "simulated_device" || row.simulated ? " · SIMULATED — NOT FROM A MEDICAL DEVICE" : "";
+        const quality = row.quality_status ? " · quality: " + row.quality_status : "";
+        const proven = row.provenance_id ? " · source " + row.provenance_id : "";
         return "<li><strong>" + escapeHtml(row.reading_type) + "</strong> " +
           escapeHtml(value) + " " + escapeHtml(row.unit) +
-          "<div class='meta'>source: " + escapeHtml(row.source) + " · not device-sourced" + sim + "</div></li>";
+          "<div class='meta'>source: " + escapeHtml(row.source) + " · not device-sourced" + sim + quality + proven + "</div></li>";
       }),
       "<form id='device-form'><h3>Simulated device reading</h3>",
       "<p class='disclaimer'>SIMULATED — NOT FROM A MEDICAL DEVICE</p>",
@@ -548,7 +550,14 @@
       "<p><strong>IP / host: " + escapeHtml(device.local_host_label || device.local_ip || "local") + "</strong></p>",
       "<p><strong>Adapter: " + escapeHtml(device.adapter_type || device.adapter || "simulated") + "</strong></p>",
       "<p><strong>Firmware: " + escapeHtml(device.firmware_version || "n/a") + "</strong></p>",
-      "<p><strong>Power: " + escapeHtml(device.power_status || device.power || "n/a") + "</strong></p>",
+      "<p><strong>Power: " + escapeHtml(device.power_state || device.power_status || device.power || "n/a") + "</strong></p>",
+      "<p class='meta'>" + escapeHtml(device.power_label || "SIMULATED virtual power state. No physical battery is connected.") + "</p>",
+      "<p class='meta'>Last power transition: " + escapeHtml(
+        device.last_power_transition
+          ? ((device.last_power_transition.from_state || "") + " → " + (device.last_power_transition.to_state || "") +
+            (device.last_power_transition.at ? " at " + device.last_power_transition.at : ""))
+          : "none"
+      ) + "</p>",
       "<p><strong>Temp: " + escapeHtml(String(device.temperature_c == null ? "n/a" : device.temperature_c)) + " C</strong></p>",
       "<p><strong>Last command: " + escapeHtml(device.last_command || "none") + "</strong></p>",
       "<p><strong>Last acknowledgement: " + escapeHtml(device.last_acknowledgement || "none") + "</strong></p>",
@@ -600,6 +609,11 @@
       "<button type='button' class='hub-stop' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='ROTATE_STOP'>Stop</button>",
       "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_ONLINE'>Online</button>",
       "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_OFFLINE'>Offline</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_POWER_STATE' data-power-state='BACKUP_POWER'>Sim. backup power</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_POWER_STATE' data-power-state='LOW_BATTERY'>Sim. low battery</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_POWER_STATE' data-power-state='SHUTDOWN_PENDING'>Sim. shutdown warn</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_POWER_STATE' data-power-state='RESTORING'>Sim. restore</button>",
+      "<button type='button' class='secondary' data-hub-cmd='" + escapeHtml(device.id) + "' data-command='SET_POWER_STATE' data-power-state='NORMAL'>Sim. recovered</button>",
       "<button type='button' class='danger' data-sim-fall='" + escapeHtml(device.id) + "'>Simulate Fall Event · SIMULATION</button>",
       "</div>"
     ].join("");
@@ -1117,6 +1131,7 @@
       if (target.dataset.hubCmd && target.dataset.command) {
         const commandBody = { command: target.dataset.command };
         if (target.dataset.angle) commandBody.angle = Number(target.dataset.angle);
+        if (target.dataset.powerState) commandBody.power_state = target.dataset.powerState;
         if (state.deviceTokens && state.deviceTokens[target.dataset.hubCmd]) {
           commandBody.device_token = state.deviceTokens[target.dataset.hubCmd];
         }
@@ -1501,6 +1516,9 @@
         const log = document.getElementById("chat-log");
         log.innerHTML += "<div class='bubble user'>" + escapeHtml(data.get("message")) + "</div>";
         log.innerHTML += "<div class='bubble'>" + escapeHtml(result.reply) + "</div>";
+        if (result.provenance && result.provenance.source_record_ids && result.provenance.source_record_ids.length) {
+          log.innerHTML += "<div class='meta'>Sources: " + escapeHtml(result.provenance.source_record_ids.join(", ")) + "</div>";
+        }
         form.reset();
       }
       showBanner("Saved.", "ok");

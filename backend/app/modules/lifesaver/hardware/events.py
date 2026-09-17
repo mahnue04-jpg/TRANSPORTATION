@@ -37,6 +37,47 @@ def serialize_event(row: LifesaverDeviceEvent) -> dict[str, Any]:
     }
 
 
+def new_power_event(
+    *,
+    organization_id: str,
+    device_id: str,
+    profile_id: str,
+    event_type: str,
+    from_state: str,
+    to_state: str,
+    event_at=None,
+) -> LifesaverDeviceEvent:
+    stamped = event_at or now()
+    return LifesaverDeviceEvent(
+        organization_id=organization_id,
+        device_id=device_id,
+        profile_id=profile_id,
+        event_type=event_type,
+        status="recorded",
+        summary=(
+            f"Simulated power event {event_type}: {from_state} -> {to_state}. "
+            "Virtual power state only. No physical battery is connected."
+        ),
+        emergency_services_contacted=False,
+        simulated=True,
+        confidence="n/a",
+        review_status="ACKNOWLEDGED",
+        escalation_state="none",
+        source="simulated",
+        metadata_json=json.dumps(
+            {
+                "from_state": from_state,
+                "to_state": to_state,
+                "physical_battery_connected": False,
+                "simulated": True,
+                "media_stored": False,
+                "external_call": False,
+            }
+        ),
+        created_at=stamped,
+    )
+
+
 def new_fall_event(*, organization_id: str, device_id: str, profile_id: str) -> LifesaverDeviceEvent:
     return LifesaverDeviceEvent(
         organization_id=organization_id,

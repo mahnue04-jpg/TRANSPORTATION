@@ -4,6 +4,17 @@ from __future__ import annotations
 from typing import Any
 
 from app.modules.lifesaver.hardware.adapters import audio_adapter, camera_adapter, rotation_adapter, sensor_adapter
+from app.modules.lifesaver.hardware.power_state import (
+    POWER_COMMANDS,
+    POWER_COMMAND_TARGETS,
+    POWER_MAINS,
+    POWER_OFFLINE,
+    apply_to_state,
+    current_power_state,
+    device_status_for,
+    ensure_power_fields,
+    evaluate_transition,
+)
 from app.modules.lifesaver.hardware.registry import (
     CMD_AUDIO_TEST,
     CMD_CAMERA_DISABLE,
@@ -47,6 +58,15 @@ def default_state() -> dict[str, Any]:
         "battery_percent": 98,
         "temperature_c": 31.2,
         "power": "mains",
+        "power_state": "MAINS_POWER",
+        "physical_battery_connected": False,
+        "power_simulated": True,
+        "power_source_kind": "simulated_external_ups",
+        "power_label": (
+            "SIMULATED virtual power state. No physical battery is connected. "
+            "First-prototype backup is modeled as an external UPS / external backup-power concept."
+        ),
+        "last_power_transition": None,
         "touchscreen": True,
         "wifi": True,
         "bluetooth": True,
@@ -66,14 +86,48 @@ def apply_privacy(state: dict[str, Any], enabled: bool) -> dict[str, Any]:
     return state
 
 
+def _apply_power(state: dict[str, Any], target: str | None, extra: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    ensure_power_fields(state)
+    last = state.get("last_power_transition") if isinstance(state.get("last_power_transition"), dict) else None
+    last_at = None
+    if last and last.get("at"):
+        from datetime import datetime
+
+        try:
+            last_at = datetime.fromisoformat(str(last["at"]).replace("Z", "+00:00"))
+        except ValueError:
+            last_at = None
+    result = extra.get("power_result") or evaluate_transition(
+        current_power_state(state),
+        target,
+        event_at=extra.get("event_at"),
+        last_transition_at=last_at,
+    )
+    apply_to_state(state, result)
+    mapped = device_status_for(
+        current_power_state(state),
+        privacy=bool(state.get("privacy_mode")),
+        previous_status=extra.get("previous_status"),
+    )
+    if mapped:
+        return state, mapped
+    return state, STATUS_PRIVACY_MODE if state.get("privacy_mode") else STATUS_ONLINE
+
+
 def apply_command(state: dict[str, Any], command: str, extra: dict[str, Any] | None = None) -> tuple[dict[str, Any], str]:
     extra = extra or {}
+    ensure_power_fields(state)
     if command in {CMD_DEVICE_PING, "GET_STATUS", "GET_DEVICE_HEALTH", "START_VIDEO_SESSION", "END_VIDEO_SESSION"}:
         return state, STATUS_ONLINE if not state.get("privacy_mode") else STATUS_PRIVACY_MODE
     if command == CMD_SET_ONLINE:
+        if current_power_state(state) == POWER_OFFLINE:
+            return _apply_power(state, POWER_MAINS, extra)
         return state, STATUS_ONLINE
     if command == CMD_SET_OFFLINE:
-        return state, STATUS_OFFLINE
+        return _apply_power(state, POWER_OFFLINE, extra)
+    if command in POWER_COMMANDS:
+        target = extra.get("power_state") or POWER_COMMAND_TARGETS.get(command)
+        return _apply_power(state, target, extra)
     if command == CMD_PRIVACY_ENABLE:
         return apply_privacy(state, True), STATUS_PRIVACY_MODE
     if command == CMD_PRIVACY_DISABLE:

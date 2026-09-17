@@ -37,6 +37,7 @@ from app.modules.lifesaver.connected_health.constants import (
     UNSUPPORTED_DEVICE_TYPES,
 )
 from app.modules.lifesaver.connected_health.hub_display import cards_from_rows, publish
+from app.modules.lifesaver.observation_quality import apply_fields, assess
 from app.modules.lifesaver.connected_health.models import (
     LifesaverConnectedDevice,
     LifesaverConnectedReading,
@@ -134,6 +135,16 @@ def serialize_reading(row: LifesaverConnectedReading) -> dict[str, Any]:
         "diagnosis_generated": False,
         "simulated": True,
         "recorded_at": _iso(row.recorded_at),
+        "captured_at": _iso(getattr(row, "captured_at", None) or row.recorded_at),
+        "received_at": _iso(getattr(row, "received_at", None)),
+        "source": getattr(row, "source", None) or "connected_simulated",
+        "source_type": getattr(row, "source_type", None) or "simulated",
+        "measurement_type": row.reading_kind,
+        "value": row.value_primary,
+        "quality_status": getattr(row, "quality_status", None) or "VALID",
+        "quality_reason": getattr(row, "quality_reason", None),
+        "trusted": bool(getattr(row, "trusted", True)),
+        "provenance_id": getattr(row, "provenance_id", None) or row.id,
         "banner": DEVICE_SIM_BANNER,
         "review_copy": NO_DIAGNOSIS_BANNER if row.human_review_required else None,
     }
@@ -363,31 +374,79 @@ def revoke_device(db: Session, ctx: UserContext, device_id: str, member_profile_
 def add_reading(db: Session, ctx: UserContext, device_id: str, payload) -> dict[str, Any]:
     _actor, subject, device = _device(db, ctx, device_id, payload.member_profile_id)
     kind = (payload.reading_kind or "").strip()
-    if kind not in READING_KINDS:
-        raise HTTPException(status_code=422, detail="Unsupported reading kind.")
+    if getattr(payload, "client_request_id", None):
+        existing = (
+            db.query(LifesaverConnectedReading)
+            .filter(
+                LifesaverConnectedReading.organization_id == device.organization_id,
+                LifesaverConnectedReading.profile_id == subject.id,
+                LifesaverConnectedReading.device_id == device.id,
+                LifesaverConnectedReading.client_request_id == payload.client_request_id,
+            )
+            .first()
+        )
+        if existing:
+            return serialize_reading(existing)
     quality = payload.data_quality or "unknown"
     if quality not in DATA_QUALITY:
         quality = "unknown"
-    review = "NEEDS_HUMAN_REVIEW" if payload.flag_for_review else "none"
+    priors = (
+        db.query(LifesaverConnectedReading)
+        .filter(
+            LifesaverConnectedReading.profile_id == subject.id,
+            LifesaverConnectedReading.reading_kind == kind,
+        )
+        .all()
+    )
+    fingerprints = [
+        getattr(row, "observation_fingerprint", None)
+        for row in priors
+        if getattr(row, "observation_fingerprint", None)
+    ]
+    latest = None
+    for prior in priors:
+        stamp = getattr(prior, "captured_at", None) or prior.recorded_at
+        if stamp is not None and (latest is None or stamp > latest):
+            latest = stamp
+    unit_value = payload.unit
+    unit_explicitly_missing = unit_value is not None and str(unit_value).strip() == ""
+    assessment = assess(
+        measurement_type=kind,
+        value=payload.value_primary,
+        value_secondary=payload.value_secondary,
+        unit=unit_value,
+        source=getattr(payload, "source", None) or "connected_simulated",
+        source_type=getattr(payload, "source_type", None),
+        captured_at=getattr(payload, "captured_at", None),
+        prior_fingerprints=fingerprints,
+        latest_captured_at=latest,
+        unit_explicitly_missing=unit_explicitly_missing,
+    )
+    can_alert = assessment.would_alert and bool(payload.flag_for_review)
+    review = "NEEDS_HUMAN_REVIEW" if can_alert else "none"
     row = LifesaverConnectedReading(
         organization_id=device.organization_id,
         profile_id=subject.id,
         device_id=device.id,
-        reading_kind=kind,
+        reading_kind=kind or "unsupported",
         value_primary=payload.value_primary,
         value_secondary=payload.value_secondary,
         unit=payload.unit,
         data_quality=quality,
         review_status=review,
-        human_review_required=bool(payload.flag_for_review),
+        human_review_required=can_alert,
         emergency_services_contacted=False,
         diagnosis_generated=False,
         simulated=True,
-        recorded_at=now(),
+        recorded_at=assessment.captured_at,
+        source=assessment.source,
+        client_request_id=getattr(payload, "client_request_id", None),
     )
     device.last_seen_at = now()
     device.updated_at = now()
     db.add(row)
+    db.flush()
+    apply_fields(row, assessment, provenance_id=row.id)
     _audit(
         db,
         ctx,

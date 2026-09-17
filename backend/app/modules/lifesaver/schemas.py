@@ -54,6 +54,8 @@ class ReadingCreate(BaseModel):
     value_secondary: float | None = None
     source: str = "user_entered"
     note: str | None = Field(default=None, max_length=256)
+    captured_at: datetime | None = None
+    unit: str | None = Field(default=None, max_length=32)
 
 
 class TransportUpdate(BaseModel):

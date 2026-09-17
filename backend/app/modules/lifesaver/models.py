@@ -162,6 +162,14 @@ class LifesaverHealthReading(Base):
     device_alias: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ingestion_status: Mapped[str] = mapped_column(String(32), nullable=False, default="accepted")
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quality_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    quality_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provenance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trusted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    observation_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -384,16 +392,34 @@ def ensure_lifesaver_schema() -> None:
                 alters.append(
                     "ALTER TABLE lifesaver_health_readings ADD COLUMN ingestion_status VARCHAR(32) DEFAULT 'accepted'"
                 )
+            if "captured_at" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN captured_at DATETIME")
+            if "received_at" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN received_at DATETIME")
+            if "quality_status" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN quality_status VARCHAR(16)")
+            if "quality_reason" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN quality_reason VARCHAR(160)")
+            if "source_type" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN source_type VARCHAR(32)")
+            if "provenance_id" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN provenance_id VARCHAR(64)")
+            if "trusted" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN trusted BOOLEAN")
+            if "observation_fingerprint" not in cols:
+                alters.append("ALTER TABLE lifesaver_health_readings ADD COLUMN observation_fingerprint VARCHAR(64)")
             if alters:
                 with engine.begin() as conn:
                     for stmt in alters:
                         conn.execute(text(stmt))
                 logger.info("lifesaver reading columns ensured")
+        from app.modules.lifesaver.connected_health.models import CONNECTED_COLUMN_ENSURES
         from app.modules.lifesaver.hardware.models import HARDWARE_COLUMN_ENSURES
 
         current_tables = set(inspect(engine).get_table_names())
         extra_alters = []
-        for table, columns in HARDWARE_COLUMN_ENSURES.items():
+        column_ensures = {**HARDWARE_COLUMN_ENSURES, **CONNECTED_COLUMN_ENSURES}
+        for table, columns in column_ensures.items():
             if table not in current_tables:
                 continue
             have = {col["name"] for col in inspect(engine).get_columns(table)}

@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext
 from app.db.models import User as PlatformUser
 from app.helpers import json_dumps, json_loads_or, now
+from app.modules.lifesaver.ai_provenance import looks_like_observation_question, summarize_from_records
 from app.modules.lifesaver.audit import write_audit
+from app.modules.lifesaver.observation_quality import apply_fields, assess, normalize_record
 from app.modules.lifesaver.constants import (
     AI_DISCLAIMER,
     CAREGIVER_PERMISSIONS,
@@ -836,6 +838,55 @@ def list_readings(db: Session, ctx: UserContext, member_profile_id: str | None =
     return [_serialize_reading(row) for row in rows]
 
 
+def _prior_health_context(db: Session, profile_id: str, reading_type: str) -> tuple[list[str], datetime | None]:
+    rows = (
+        db.query(LifesaverHealthReading)
+        .filter(
+            LifesaverHealthReading.profile_id == profile_id,
+            LifesaverHealthReading.reading_type == reading_type,
+        )
+        .all()
+    )
+    fingerprints = [getattr(row, "observation_fingerprint", None) for row in rows if getattr(row, "observation_fingerprint", None)]
+    latest = None
+    for row in rows:
+        stamp = getattr(row, "captured_at", None) or row.recorded_at
+        if stamp is not None and (latest is None or stamp > latest):
+            latest = stamp
+    return fingerprints, latest
+
+
+def _collect_observation_records(db: Session, profile) -> list[dict[str, Any]]:
+    health = (
+        db.query(LifesaverHealthReading)
+        .filter(
+            LifesaverHealthReading.organization_id == profile.organization_id,
+            LifesaverHealthReading.profile_id == profile.id,
+        )
+        .order_by(LifesaverHealthReading.recorded_at.desc())
+        .limit(50)
+        .all()
+    )
+    records = [normalize_record(row) for row in health]
+    try:
+        from app.modules.lifesaver.connected_health.models import LifesaverConnectedReading
+
+        connected = (
+            db.query(LifesaverConnectedReading)
+            .filter(
+                LifesaverConnectedReading.organization_id == profile.organization_id,
+                LifesaverConnectedReading.profile_id == profile.id,
+            )
+            .order_by(LifesaverConnectedReading.recorded_at.desc())
+            .limit(50)
+            .all()
+        )
+        records.extend(normalize_record(row, default_source="connected_simulated") for row in connected)
+    except Exception:
+        pass
+    return records
+
+
 def create_reading(db: Session, ctx: UserContext, payload) -> dict[str, Any]:
     profile = get_or_create_profile(db, ctx)
     require_consent(db, ctx, profile, "health_readings", action="reading.create", resource_type="reading")
@@ -849,21 +900,37 @@ def create_reading(db: Session, ctx: UserContext, payload) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Readings must be user_entered or simulated.")
     if payload.reading_type == "blood_pressure" and payload.value_secondary is None:
         raise HTTPException(status_code=422, detail="Blood pressure requires a diastolic value.")
+    unit_value = getattr(payload, "unit", None)
+    unit_explicitly_missing = unit_value is not None and str(unit_value).strip() == ""
+    fingerprints, latest = _prior_health_context(db, profile.id, payload.reading_type)
+    assessment = assess(
+        measurement_type=payload.reading_type,
+        value=payload.value_primary,
+        value_secondary=payload.value_secondary,
+        unit=unit_value,
+        source=payload.source,
+        captured_at=getattr(payload, "captured_at", None),
+        prior_fingerprints=fingerprints,
+        latest_captured_at=latest,
+        unit_explicitly_missing=unit_explicitly_missing,
+    )
+    stored_unit = assessment.unit or READING_UNITS[payload.reading_type]
     row = LifesaverHealthReading(
         organization_id=profile.organization_id,
         profile_id=profile.id,
         reading_type=payload.reading_type,
         value_primary=float(payload.value_primary),
         value_secondary=None if payload.value_secondary is None else float(payload.value_secondary),
-        unit=READING_UNITS[payload.reading_type],
+        unit=stored_unit or READING_UNITS[payload.reading_type],
         source=payload.source,
         note=(payload.note or "").strip()[:256] or None,
         device_alias=None,
-        ingestion_status="accepted",
-        recorded_at=now(),
+        ingestion_status="accepted" if assessment.trusted else "stored_untrusted",
+        recorded_at=assessment.captured_at,
     )
     db.add(row)
     db.flush()
+    apply_fields(row, assessment, provenance_id=row.id)
     write_audit(
         db,
         organization_id=profile.organization_id,
@@ -1564,22 +1631,27 @@ def converse(db: Session, ctx: UserContext, payload) -> dict[str, Any]:
         .count()
     )
     counts = peek_coordination_counts(db, ctx, profile.id)
-    result = nova_adapter.ask(
-        payload.message,
-        context={
-            "reminder_count": reminder_count,
-            "consent_granted": consent_count,
-            "appointment_count": appointment_count,
-            "task_count": task_count,
-            "pending_handoffs": pending_handoffs,
-            "open_alerts": open_alerts,
-            "transport_open": transport_open,
-            "high": counts["high"],
-            "medium": counts["medium"],
-            "low": counts["low"],
-            "needs_review": counts["needs_review"],
-        },
-    )
+    if not nova_adapter.refuses_clinical(payload.message) and looks_like_observation_question(payload.message):
+        result = summarize_from_records(_collect_observation_records(db, profile))
+        result["uses_nova_engine"] = False
+        result["writes_nova_tables"] = False
+    else:
+        result = nova_adapter.ask(
+            payload.message,
+            context={
+                "reminder_count": reminder_count,
+                "consent_granted": consent_count,
+                "appointment_count": appointment_count,
+                "task_count": task_count,
+                "pending_handoffs": pending_handoffs,
+                "open_alerts": open_alerts,
+                "transport_open": transport_open,
+                "high": counts["high"],
+                "medium": counts["medium"],
+                "low": counts["low"],
+                "needs_review": counts["needs_review"],
+            },
+        )
     db.add(
         LifesaverConversationMessage(
             organization_id=profile.organization_id,
@@ -1616,6 +1688,7 @@ def converse(db: Session, ctx: UserContext, payload) -> dict[str, Any]:
         "disclaimer": result["disclaimer"],
         "uses_nova_engine": False,
         "writes_nova_tables": False,
+        "provenance": result.get("provenance"),
     }
 
 
@@ -2268,6 +2341,17 @@ def create_simulated_device_reading(db: Session, ctx: UserContext, payload) -> d
     )
     if ingest["reading_type"] == "blood_pressure" and payload.value_secondary is None:
         raise HTTPException(status_code=422, detail="Blood pressure requires a diastolic value.")
+    fingerprints, latest = _prior_health_context(db, profile.id, ingest["reading_type"])
+    assessment = assess(
+        measurement_type=ingest["reading_type"],
+        value=payload.value_primary,
+        value_secondary=payload.value_secondary,
+        unit=ingest["unit"],
+        source=SOURCE_SIMULATED_DEVICE,
+        captured_at=ingest["recorded_at"],
+        prior_fingerprints=fingerprints,
+        latest_captured_at=latest,
+    )
     row = LifesaverHealthReading(
         organization_id=profile.organization_id,
         profile_id=profile.id,
@@ -2278,11 +2362,12 @@ def create_simulated_device_reading(db: Session, ctx: UserContext, payload) -> d
         source=SOURCE_SIMULATED_DEVICE,
         note=DEVICE_SIM_LABEL,
         device_alias=ingest["device_alias"],
-        ingestion_status=ingest["ingestion_status"],
-        recorded_at=ingest["recorded_at"],
+        ingestion_status=ingest["ingestion_status"] if assessment.trusted else "stored_untrusted",
+        recorded_at=assessment.captured_at,
     )
     db.add(row)
     db.flush()
+    apply_fields(row, assessment, provenance_id=row.id)
     write_audit(
         db,
         organization_id=profile.organization_id,
@@ -2435,6 +2520,14 @@ def _serialize_reading(row: LifesaverHealthReading) -> dict[str, Any]:
         "label": flags["label"] or (DEVICE_SIM_LABEL if row.source == SOURCE_SIMULATED_DEVICE else None),
         "note": row.note,
         "recorded_at": _iso(row.recorded_at),
+        "captured_at": _iso(getattr(row, "captured_at", None) or row.recorded_at),
+        "received_at": _iso(getattr(row, "received_at", None)),
+        "quality_status": getattr(row, "quality_status", None) or "VALID",
+        "quality_reason": getattr(row, "quality_reason", None),
+        "source_type": getattr(row, "source_type", None) or ("manual_entry" if row.source == SOURCE_USER_ENTERED else "simulated"),
+        "trusted": bool(getattr(row, "trusted", row.ingestion_status in {"accepted", "accepted_simulated"})),
+        "simulated": row.source in {SOURCE_SIMULATED, SOURCE_SIMULATED_DEVICE},
+        "provenance_id": getattr(row, "provenance_id", None) or row.id,
         "disclaimer": DEVICE_SIM_LABEL if row.source == SOURCE_SIMULATED_DEVICE else READING_SOURCE_DISCLAIMER,
     }
 

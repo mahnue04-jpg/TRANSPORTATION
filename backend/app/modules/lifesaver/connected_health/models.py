@@ -59,7 +59,33 @@ class LifesaverConnectedReading(Base):
     diagnosis_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quality_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    quality_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provenance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trusted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    observation_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+CONNECTED_COLUMN_ENSURES = {
+    "lifesaver_connected_readings": {
+        "captured_at": "DATETIME",
+        "received_at": "DATETIME",
+        "quality_status": "VARCHAR(16)",
+        "quality_reason": "VARCHAR(160)",
+        "source": "VARCHAR(32)",
+        "source_type": "VARCHAR(32)",
+        "provenance_id": "VARCHAR(64)",
+        "trusted": "BOOLEAN",
+        "observation_fingerprint": "VARCHAR(64)",
+        "client_request_id": "VARCHAR(64)",
+    },
+}
 
 
 class LifesaverHomeTestKit(Base):

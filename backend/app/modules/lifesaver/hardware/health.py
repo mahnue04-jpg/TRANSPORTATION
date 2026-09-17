@@ -7,6 +7,7 @@ from app.modules.lifesaver.hardware.camera_contract import camera_status
 from app.modules.lifesaver.hardware.hardware_mode import local_pi_enabled
 from app.modules.lifesaver.hardware.models import LifesaverDevice
 from app.modules.lifesaver.hardware.motor_contract import motor_snapshot
+from app.modules.lifesaver.hardware.power_state import snapshot as power_snapshot
 from app.modules.lifesaver.hardware.registry import DEVICE_CAR_HUB, DEVICE_HOME_HUB, capabilities_for
 
 
@@ -47,7 +48,12 @@ def build_health(device: LifesaverDevice, state: dict[str, Any]) -> dict[str, An
         "paired": getattr(device, "pairing_state", "PAIRED") not in {"UNPAIRED", "DISCOVERED", "PENDING_PAIR"},
         "local_host_label": getattr(device, "local_ip", None) or "local",
         "motor_state": motor_snapshot(state)["moving_state"],
-        "power_status": state.get("power") or "mains",
+        "power_status": power_snapshot(state)["power_status"],
+        "power_state": power_snapshot(state)["power_state"],
+        "last_power_transition": power_snapshot(state)["last_power_transition"],
+        "physical_battery_connected": False,
+        "power_simulated": True,
+        "power_label": power_snapshot(state)["power_label"],
         "last_command": state.get("last_command"),
         "last_acknowledgement": state.get("last_acknowledgement"),
         "safety_event_status": state.get("safety_event_status") or "none",
