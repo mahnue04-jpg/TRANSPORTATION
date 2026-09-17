@@ -31,6 +31,10 @@ from app.core.nova.signup.models import (  # noqa: F401 — register Nova SaaS s
     NovaSignupAccount,
     NovaSignupWebhookEvent,
 )
+from app.core.nova.billing.models import (  # noqa: F401 — register Nova SaaS billing tables
+    NovaBillingWebhookEvent,
+    NovaTenantSubscription,
+)
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
