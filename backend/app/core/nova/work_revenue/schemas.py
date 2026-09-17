@@ -486,6 +486,8 @@ class ApplicationOut(BaseModel):
     owner_actions: list[OwnerActionOut] = Field(default_factory=list)
     owner_notes: str | None = None
     decided_at: datetime | None = None
+    externally_ready: bool = False
+    approved_equals_submitted: bool = False
 
 
 class TrackerOut(BaseModel):

@@ -417,6 +417,8 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         owner_actions=[owner_action_out(item) for item in actions],
         owner_notes=getattr(row, "owner_notes", None),
         decided_at=getattr(row, "decided_at", None),
+        externally_ready=False,
+        approved_equals_submitted=False,
     )
 
 
@@ -1087,6 +1089,7 @@ def decide_application(
     application.owner_notes = sanitize_untrusted(payload.notes) or getattr(application, "owner_notes", None)
     application.decided_at = now()
     application.approved_for_future_submission = payload.decision == "APPROVED"
+    application.externally_submitted = False
     application.updated_at = now()
     if payload.decision == "APPROVED":
         opportunity = get_opportunity(db, application.opportunity_id, organization_id=organization_id, user=user)
@@ -1229,18 +1232,34 @@ def ingest_simulated(
     return created
 
 
-def list_applications(db: Session, *, organization_id: str, user: UserContext) -> list[NovaWorkApplication]:
+def list_applications(db: Session, *, organization_id: str, user: UserContext, limit: int | None = None) -> list[NovaWorkApplication]:
     _ensure()
-    return _app_query(db, organization_id, user).order_by(NovaWorkApplication.updated_at.desc()).all()
+    from app.core.nova.work_revenue.lifecycle import clamp_list_limit
+
+    return (
+        _app_query(db, organization_id, user)
+        .order_by(NovaWorkApplication.updated_at.desc())
+        .limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT))
+        .all()
+    )
 
 
-def list_owner_actions(db: Session, *, organization_id: str, user: UserContext, open_only: bool = True) -> list[NovaWorkOwnerAction]:
+def list_owner_actions(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    open_only: bool = True,
+    limit: int | None = None,
+) -> list[NovaWorkOwnerAction]:
     _ensure()
+    from app.core.nova.work_revenue.lifecycle import clamp_list_limit
+
     query = db.query(NovaWorkOwnerAction).filter(NovaWorkOwnerAction.organization_id == organization_id)
     query = _owner_filter(query, NovaWorkOwnerAction, user)
     if open_only:
         query = query.filter(NovaWorkOwnerAction.status == "OPEN")
-    return query.order_by(NovaWorkOwnerAction.created_at.desc()).all()
+    return query.order_by(NovaWorkOwnerAction.created_at.desc()).limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT)).all()
 
 
 def list_audit(db: Session, *, organization_id: str, user: UserContext, limit: int | None = None) -> list[NovaWorkAuditEvent]:

@@ -16,6 +16,7 @@ from app.core.nova.work_revenue.lifecycle import (
     FACT_VALUE_STATUSES,
     INVOICE_SUPPORT_STATUSES,
     LIST_MAX_LIMIT,
+    clamp_list_limit,
     OCCURRENCE_STATUSES,
     OWNER_ACTION_CATEGORIES,
     QUEUE_STATUSES,
@@ -247,7 +248,7 @@ def list_work_queue(
             return "1" if item.get("queue_status") == "OWNER_ACTION_REQUIRED" else "0"
         return str(item.get("updated_at") or item.get("due_date") or "")
     filtered.sort(key=sort_value, reverse=reverse)
-    cap = min(max(int(limit or LIST_MAX_LIMIT), 1), LIST_MAX_LIMIT)
+    cap = clamp_list_limit(limit, default=LIST_MAX_LIMIT)
     return filtered[:cap]
 
 
@@ -353,10 +354,27 @@ def create_recurring_series(
     return _series_out(row, [])
 
 
-def list_recurring_series(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+def list_recurring_series(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     _ensure()
-    rows = _query(db, NovaWorkRecurringSeries, organization_id, user).order_by(NovaWorkRecurringSeries.updated_at.desc()).all()
-    occ_rows = _query(db, NovaWorkRecurringOccurrence, organization_id, user).all()
+    cap = clamp_list_limit(limit, default=LIST_MAX_LIMIT)
+    rows = (
+        _query(db, NovaWorkRecurringSeries, organization_id, user)
+        .order_by(NovaWorkRecurringSeries.updated_at.desc())
+        .limit(cap)
+        .all()
+    )
+    series_ids = [row.series_id for row in rows]
+    occ_query = _query(db, NovaWorkRecurringOccurrence, organization_id, user)
+    if series_ids:
+        occ_rows = occ_query.filter(NovaWorkRecurringOccurrence.series_id.in_(series_ids)).all()
+    else:
+        occ_rows = []
     by_series: dict[str, list[NovaWorkRecurringOccurrence]] = {}
     for item in occ_rows:
         by_series.setdefault(item.series_id, []).append(item)
@@ -565,7 +583,7 @@ def generate_weekly_report(
         engagements = [item for item in engagements if item.get("engagement_id") == payload.engagement_id]
     opportunities = list_opportunities(db, organization_id=organization_id, user=user)
     actions = list_owner_actions(db, organization_id=organization_id, user=user)
-    tasks = _query(db, NovaWorkTask, organization_id, user).all()
+    tasks = _query(db, NovaWorkTask, organization_id, user).limit(LIST_MAX_LIMIT).all()
     if payload.engagement_id:
         tasks = [item for item in tasks if item.engagement_id == payload.engagement_id]
     completed = [item for item in tasks if item.status == "COMPLETE"]
@@ -640,9 +658,20 @@ def generate_weekly_report(
     return _report_out(row)
 
 
-def list_weekly_reports(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+def list_weekly_reports(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     _ensure()
-    rows = _query(db, NovaWorkWeeklyReport, organization_id, user).order_by(NovaWorkWeeklyReport.updated_at.desc()).all()
+    rows = (
+        _query(db, NovaWorkWeeklyReport, organization_id, user)
+        .order_by(NovaWorkWeeklyReport.updated_at.desc())
+        .limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT))
+        .all()
+    )
     return [_report_out(item) for item in rows]
 
 
@@ -788,9 +817,20 @@ def create_invoice_support(
     return _invoice_out(row)
 
 
-def list_invoice_supports(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+def list_invoice_supports(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     _ensure()
-    rows = _query(db, NovaWorkInvoiceSupport, organization_id, user).order_by(NovaWorkInvoiceSupport.updated_at.desc()).all()
+    rows = (
+        _query(db, NovaWorkInvoiceSupport, organization_id, user)
+        .order_by(NovaWorkInvoiceSupport.updated_at.desc())
+        .limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT))
+        .all()
+    )
     return [_invoice_out(item) for item in rows]
 
 
@@ -850,25 +890,30 @@ def refuse_invoice_send() -> None:
 
 def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> dict[str, Any]:
     _ensure()
-    entries = _query(db, NovaWorkRevenueEntry, organization_id, user).all()
-    opportunities = list_opportunities(db, organization_id=organization_id, user=user)
-    invoices = _query(db, NovaWorkInvoiceSupport, organization_id, user).all()
+    entries = (
+        _query(db, NovaWorkRevenueEntry, organization_id, user)
+        .order_by(NovaWorkRevenueEntry.updated_at.desc())
+        .limit(LIST_MAX_LIMIT)
+        .all()
+    )
+    opportunities = list_opportunities(db, organization_id=organization_id, user=user, limit=LIST_MAX_LIMIT)
+    invoices = (
+        _query(db, NovaWorkInvoiceSupport, organization_id, user)
+        .order_by(NovaWorkInvoiceSupport.updated_at.desc())
+        .limit(LIST_MAX_LIMIT)
+        .all()
+    )
 
     def _sum(predicate) -> float:
         return round(sum(item.amount for item in entries if predicate(item)), 2)
 
     estimated = _sum(lambda item: item.stage == "ESTIMATED")
-    estimated += round(sum((item.estimated_value or 0) for item in opportunities), 2)
     quoted = _sum(lambda item: item.stage == "QUOTED")
-    quoted += round(sum((item.quoted_amount or 0) for item in opportunities), 2)
     contracted = _sum(lambda item: item.stage == "CONTRACTED")
-    contracted += round(sum((item.contract_amount or 0) for item in opportunities), 2)
     awaiting_invoice = _sum(lambda item: item.stage in {"CONTRACTED", "INVOICE_DRAFT"})
-    awaiting_invoice += round(sum(item.draft_subtotal for item in invoices if item.status in {"DRAFT", "READY_FOR_OWNER_REVIEW"}), 2)
     manual_invoice = _sum(lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
     awaiting_confirm = _sum(lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed)
     received = _sum(lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
-    received += round(sum((item.amount_received or 0) for item in opportunities if item.owner_confirmed_payment_received), 2)
     return {
         "estimated_pipeline": estimated,
         "quoted": quoted,
@@ -877,6 +922,24 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         "manually_recorded_invoice": manual_invoice,
         "awaiting_owner_payment_confirmation": awaiting_confirm,
         "owner_confirmed_received": received,
+        "authoritative_source": "nova_work_revenue_entries",
+        "opportunity_context": {
+            "estimated_pipeline": round(sum((item.estimated_value or 0) for item in opportunities), 2),
+            "quoted": round(sum((item.quoted_amount or 0) for item in opportunities), 2),
+            "contracted": round(sum((item.contract_amount or 0) for item in opportunities), 2),
+            "owner_confirmed_received": round(
+                sum((item.amount_received or 0) for item in opportunities if item.owner_confirmed_payment_received),
+                2,
+            ),
+            "note": "Opportunity fields are pipeline context only. They are not added into the authoritative totals.",
+        },
+        "invoice_support_context": {
+            "draft_subtotal": round(
+                sum(item.draft_subtotal for item in invoices if item.status in {"DRAFT", "READY_FOR_OWNER_REVIEW"}),
+                2,
+            ),
+            "note": "Invoice-support drafts are not Stripe invoices and are not received revenue.",
+        },
         "rules": {
             "APPROVED_EQUALS_SUBMITTED": False,
             "APPROVED_EQUALS_PAID": False,
@@ -886,6 +949,7 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
             "inferred_from_task_completion": False,
             "inferred_from_draft_invoice": False,
             "inferred_from_approval": False,
+            "opportunity_fields_are_authoritative": False,
         },
         "disclaimer": "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. Nova does not collect payment.",
         "guardrails": engine_guardrails(),
@@ -1096,9 +1160,20 @@ def create_disclosure_policy(
     return _disclosure_out(row)
 
 
-def list_disclosure_policies(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+def list_disclosure_policies(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     _ensure()
-    rows = _query(db, NovaWorkDisclosurePolicy, organization_id, user).order_by(NovaWorkDisclosurePolicy.updated_at.desc()).all()
+    rows = (
+        _query(db, NovaWorkDisclosurePolicy, organization_id, user)
+        .order_by(NovaWorkDisclosurePolicy.updated_at.desc())
+        .limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT))
+        .all()
+    )
     return [_disclosure_out(item) for item in rows]
 
 
@@ -1217,9 +1292,20 @@ def create_platform_policy(
     }
 
 
-def list_platform_policies(db: Session, *, organization_id: str, user: UserContext) -> list[dict[str, Any]]:
+def list_platform_policies(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     _ensure()
-    rows = _query(db, NovaWorkPlatformPolicy, organization_id, user).order_by(NovaWorkPlatformPolicy.updated_at.desc()).all()
+    rows = (
+        _query(db, NovaWorkPlatformPolicy, organization_id, user)
+        .order_by(NovaWorkPlatformPolicy.updated_at.desc())
+        .limit(clamp_list_limit(limit, default=LIST_MAX_LIMIT))
+        .all()
+    )
     return [
         {
             "policy_id": item.policy_id,

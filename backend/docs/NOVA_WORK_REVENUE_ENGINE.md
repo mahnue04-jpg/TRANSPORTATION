@@ -89,7 +89,9 @@ Keep these separate:
 
 Nova never infers payment from contract existence, task completion, draft invoice, approval, application acceptance, or estimated opportunity value.
 
-`GET /api/nova/work/reconciliation` summarizes estimated pipeline, quoted, contracted, awaiting invoice, manually recorded invoice, awaiting owner payment confirmation, and owner-confirmed received.
+`GET /api/nova/work/reconciliation` treats `nova_work_revenue_entries` as the authoritative source for estimated / quoted / contracted / invoiced / received totals. Opportunity revenue fields and invoice-support drafts are returned as separate context only and are not added into those totals. This avoids double-counting.
+
+List endpoints cap results at 200 rows. Use `limit` where exposed. Source URLs reject `javascript:`, `data:`, `file:`, credentials, loopback, link-local, and RFC1918/private addresses. URLs are never fetched.
 
 ## Owner-action model
 
@@ -113,6 +115,7 @@ Platform-policy metadata flags: `LOGIN_REQUIRED`, `CAPTCHA_REQUIRED`, `HUMAN_SUB
 
 - Tenant isolation and IDOR protection on every Work & Revenue query
 - Source URLs stored as text; `http`/`https` only; never fetched
+- Local, private, and link-local hosts are rejected, including encoded and IPv4-mapped forms
 - Untrusted opportunity text is quoted, not executed
 - Dashboard HTML is escaped
 - Negative amounts and malformed dates are rejected
@@ -147,11 +150,18 @@ Blocked by live integration / deferred:
 - External calendars and notifications
 - Populating real owner tax, banking, or identity values
 
+## Known risks / next safe blocks
+
+- Application dashboard still loads materials per application; keep list caps and do not add a background worker.
+- Opportunity revenue fields remain owner-entered pipeline context. Do not silently copy them into revenue entries.
+- Missing owner facts stay MISSING until the owner supplies them. Approval never marks an application externally ready.
+- Next safe implementation, only with later owner authorization: owner-supplied verified facts, then a separately tested live-discovery adapter that stays off by default.
+
 ## Testing strategy
 
 `backend/tests/test_nova_work_revenue.py` covers Phase 1/foundation behavior.
 
-`backend/tests/test_nova_work_revenue_completion.py` covers recurring work, queue filters, weekly reports, invoice-support, reconciliation, owner actions, facts, disclosure, and platform policy.
+`backend/tests/test_nova_work_revenue_completion.py` covers recurring work, queue filters, weekly reports, invoice-support, reconciliation, owner actions, facts, disclosure, platform policy, private-network URL rejection, list limits, and approval-is-not-submit.
 
 Do not run Stripe object-creation tests from this workstream.
 

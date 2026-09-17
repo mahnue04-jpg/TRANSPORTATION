@@ -216,6 +216,13 @@ LIST_DEFAULT_LIMIT = 100
 LIST_MAX_LIMIT = 200
 
 
+def clamp_list_limit(limit: int | None, *, default: int = LIST_DEFAULT_LIMIT) -> int:
+    value = default if limit is None else int(limit)
+    if value < 1:
+        return 1
+    return min(value, LIST_MAX_LIMIT)
+
+
 def normalize_task_status(value: str | None) -> str:
     token = str(value or "NOT_STARTED").strip().upper()
     return TASK_STATUS_ALIASES.get(token, token if token else "NOT_STARTED")

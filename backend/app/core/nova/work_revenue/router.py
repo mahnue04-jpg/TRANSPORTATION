@@ -254,11 +254,15 @@ def ingest_simulated(
 @router.get("/applications", response_model=list[ApplicationOut])
 def list_applications(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org(user, organization_id)
-    return [service.application_out(db, row) for row in service.list_applications(db, organization_id=org_id, user=user)]
+    return [
+        service.application_out(db, row)
+        for row in service.list_applications(db, organization_id=org_id, user=user, limit=limit)
+    ]
 
 
 @router.post("/applications", response_model=ApplicationOut)
@@ -800,10 +804,13 @@ def create_recurring(
 @router.get("/recurring")
 def list_recurring(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return managed.list_recurring_series(db, organization_id=_resolve_org(user, organization_id), user=user)
+    return managed.list_recurring_series(
+        db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
+    )
 
 
 @router.post("/recurring/{series_id}/generate")
@@ -898,10 +905,13 @@ def create_weekly_report(
 @router.get("/reports")
 def list_reports(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return managed.list_weekly_reports(db, organization_id=_resolve_org(user, organization_id), user=user)
+    return managed.list_weekly_reports(
+        db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
+    )
 
 
 @router.post("/reports/{report_id}/review")
@@ -989,10 +999,13 @@ def create_invoice_support(
 @router.get("/invoice-support")
 def list_invoice_support(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return managed.list_invoice_supports(db, organization_id=_resolve_org(user, organization_id), user=user)
+    return managed.list_invoice_supports(
+        db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
+    )
 
 
 @router.post("/invoice-support/{invoice_support_id}/review")
@@ -1118,10 +1131,13 @@ def create_disclosure_policy(
 @router.get("/disclosure-policies")
 def list_disclosure_policies(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return managed.list_disclosure_policies(db, organization_id=_resolve_org(user, organization_id), user=user)
+    return managed.list_disclosure_policies(
+        db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
+    )
 
 
 @router.post("/disclosure-policies/{policy_id}/acknowledge")
@@ -1161,7 +1177,10 @@ def create_platform_policy(
 @router.get("/platform-policies")
 def list_platform_policies(
     organization_id: str | None = None,
+    limit: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    return managed.list_platform_policies(db, organization_id=_resolve_org(user, organization_id), user=user)
+    return managed.list_platform_policies(
+        db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
+    )
