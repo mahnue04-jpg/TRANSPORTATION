@@ -45,6 +45,8 @@ def next_due_date(frequency: str, *, from_time: datetime | None = None) -> datet
     token = str(frequency or "weekly").strip().lower()
     if token == "monthly":
         return start + timedelta(days=30)
+    if token in {"daily", "day"}:
+        return start + timedelta(days=1)
     if token in {"one_time", "once"}:
         return start
     return start + timedelta(days=7)

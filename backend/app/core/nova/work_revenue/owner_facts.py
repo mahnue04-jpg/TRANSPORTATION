@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.nova.work_revenue.lifecycle import FACT_STATUSES
+from app.core.nova.work_revenue.lifecycle import FACT_STATUSES, FACT_VALUE_STATUSES
 from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED, profile_snapshot
 
 FACT_DEFINITIONS: tuple[dict[str, str], ...] = (
@@ -31,21 +31,64 @@ FACT_DEFINITIONS: tuple[dict[str, str], ...] = (
 )
 
 
-def fact_catalog(*, applicant_party: str = "AMICOR") -> dict[str, Any]:
+SENSITIVE_FACT_IDS = {
+    "financial_information",
+    "w9_readiness",
+    "tax_identifiers",
+    "banking_payment_readiness",
+}
+
+LEGACY_TO_VALUE_STATUS = {
+    "MISSING_FACT": "MISSING",
+    "OWNER_PROVIDED_FACT": "OWNER_PROVIDED",
+    "KNOWN_VERIFIED_FACT": "VERIFIED",
+    "UNVERIFIED_FACT": "OWNER_PROVIDED",
+    "NOT_APPLICABLE": "MISSING",
+}
+
+
+def fact_catalog(*, applicant_party: str = "AMICOR", stored: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     snapshot = profile_snapshot(applicant_party=applicant_party)
     facts = []
+    stored = stored or {}
     for item in FACT_DEFINITIONS:
         status = "MISSING_FACT"
         value = OWNER_INPUT_REQUIRED
+        value_status = "MISSING"
+        verification_date = None
+        expiration_date = None
+        source_description = None
+        notes = None
         if item["fact_id"] == "technology_capability":
             status = "KNOWN_VERIFIED_FACT"
             value = "Authorized digital drafting, organization, and summarization with owner review."
+            value_status = "VERIFIED"
+        overlay = stored.get(item["fact_id"])
+        if overlay:
+            value_status = str(overlay.get("value_status") or value_status)
+            status = {
+                "MISSING": "MISSING_FACT",
+                "OWNER_PROVIDED": "OWNER_PROVIDED_FACT",
+                "VERIFIED": "KNOWN_VERIFIED_FACT",
+                "EXPIRED": "UNVERIFIED_FACT",
+            }.get(value_status, status)
+            value = overlay.get("value_display") or value
+            verification_date = overlay.get("verification_date")
+            expiration_date = overlay.get("expiration_date")
+            source_description = overlay.get("source_description")
+            notes = overlay.get("notes")
         facts.append(
             {
                 **item,
                 "status": status,
+                "value_status": value_status,
                 "value_display": value,
+                "verification_date": verification_date,
+                "expiration_date": expiration_date,
+                "source_description": source_description,
+                "notes": notes,
                 "allowed_statuses": list(FACT_STATUSES),
+                "allowed_value_statuses": list(FACT_VALUE_STATUSES),
             }
         )
     return {

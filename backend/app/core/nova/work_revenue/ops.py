@@ -19,6 +19,7 @@ from app.core.nova.work_revenue.lifecycle import (
     PAID_STAGES,
     REVENUE_STAGES,
     category_for_action,
+    normalize_revenue_stage,
     normalize_task_status,
 )
 from app.core.nova.work_revenue.materials import sanitize_untrusted
@@ -161,6 +162,11 @@ def deliverable_out(row: NovaWorkDeliverable) -> DeliverableOut:
 
 
 def revenue_out(row: NovaWorkRevenueEntry) -> RevenueEntryOut:
+    display = row.stage
+    if bool(row.owner_confirmed) and row.stage in PAID_STAGES:
+        display = "OWNER_CONFIRMED_RECEIVED"
+    elif row.stage == "INVOICED_EXTERNALLY":
+        display = "MANUAL_RECORD_ONLY"
     return RevenueEntryOut(
         entry_id=row.entry_id,
         engagement_id=row.engagement_id,
@@ -173,6 +179,7 @@ def revenue_out(row: NovaWorkRevenueEntry) -> RevenueEntryOut:
         received_date=row.received_date,
         owner_confirmed=bool(row.owner_confirmed),
         reconciliation_notes=row.reconciliation_notes,
+        display_stage=display,
     )
 
 
@@ -491,7 +498,7 @@ def create_revenue_entry(
     amount = _validate_amount(payload.amount, label="amount")
     if amount is None:
         raise NovaWorkError("Amount is required")
-    stage = str(payload.stage or "ESTIMATED").strip().upper()
+    stage = normalize_revenue_stage(payload.stage or "ESTIMATED")
     if stage not in REVENUE_STAGES:
         raise NovaWorkError("Unknown revenue stage")
     if stage in PAID_STAGES:
@@ -538,7 +545,7 @@ def update_revenue_stage(
     user: UserContext,
 ) -> RevenueEntryOut:
     row = get_revenue_entry(db, entry_id, organization_id=organization_id, user=user)
-    target = str(stage or "").strip().upper()
+    target = normalize_revenue_stage(stage)
     if target not in REVENUE_STAGES:
         raise NovaWorkError("Unknown revenue stage")
     if target in PAID_STAGES:
