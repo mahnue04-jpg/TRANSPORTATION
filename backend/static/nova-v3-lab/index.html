@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMICOR Nova V3 Lab</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-v3-lab/lab.css" />
+</head>
+<body>
+  <header>
+    <p class="kicker">AMICOR NOVA V3 — SYNTHETIC LAB</p>
+    <h1>Live Work, Revenue, Growth &amp; Shield (Phase 3)</h1>
+    <p class="disclaimer">Engineering/pilot interface only. No live discovery, no real outreach, no real emails, no ads, no Stripe, no production worker, no public webhooks.</p>
+    <nav>
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/work">Work V1/V2</a>
+      <a href="/nova/v3-lab" aria-current="page">V3 Lab</a>
+    </nav>
+  </header>
+  <main>
+    <section>
+      <form id="login-form">
+        <label>Email<input id="email" type="email" required /></label>
+        <label>Password<input id="password" type="password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p id="session" class="hint">Sign in to load the lab snapshot.</p>
+      <p id="action-status" class="hint"></p>
+    </section>
+    <section id="counts" class="grid"></section>
+    <section class="actions">
+      <h2>SYNTHETIC ACTIONS</h2>
+      <p class="hint">Owner-scoped, audited, mock-only. Lifecycle rules still apply.</p>
+      <div class="action-grid">
+        <button data-action="ingest" type="button">Ingest synthetic opportunities</button>
+        <button data-action="approve_opportunity" type="button">Approve opportunity</button>
+        <button data-action="reject_opportunity" type="button">Reject opportunity</button>
+        <button data-action="prepare_proposal" type="button">Prepare proposal</button>
+        <button data-action="approve_proposal" type="button">Approve proposal</button>
+        <button data-action="mock_submit" type="button">Mock submit</button>
+        <button data-action="create_engagement" type="button">Create engagement</button>
+        <button data-action="create_task" type="button">Create task</button>
+        <button data-action="complete_synthetic_task" type="button">Complete synthetic task</button>
+        <button data-action="prepare_deliverable" type="button">Prepare deliverable</button>
+        <button data-action="approve_deliverable" type="button">Approve deliverable</button>
+        <button data-action="mock_deliver" type="button">Mock deliver</button>
+        <button data-action="generate_invoice" type="button">Generate invoice</button>
+        <button data-action="approve_invoice" type="button">Approve invoice</button>
+        <button data-action="mock_send_invoice" type="button">Mock send invoice</button>
+        <button data-action="record_synthetic_partial_payment" type="button">Record synthetic partial payment</button>
+        <button data-action="record_synthetic_final_payment" type="button">Record synthetic final payment</button>
+        <button data-action="pause_worker" type="button">Pause worker</button>
+        <button data-action="resume_worker" type="button">Resume worker</button>
+        <button data-action="retry_failed_worker" type="button">Retry failed worker</button>
+        <button data-action="revoke_approval" type="button">Revoke approval</button>
+        <button data-action="archive_engagement" type="button">Archive engagement</button>
+        <button data-action="tick_worker" type="button">Tick scheduler (synthetic)</button>
+        <button data-action="growth_discover" type="button">Discover synthetic lead</button>
+        <button data-action="growth_qualify" type="button">Qualify lead</button>
+        <button data-action="growth_outreach" type="button">Prepare outreach draft</button>
+        <button data-action="growth_synthetic_convert" type="button">Convert synthetic customer</button>
+      </div>
+    </section>
+    <section>
+      <h2>GROWTH COMMAND CENTER</h2>
+      <pre id="growth">{}</pre>
+    </section>
+    <section>
+      <h2>CUSTOMERS CONVERTED</h2>
+      <pre id="customers_converted">[]</pre>
+    </section>
+    <section>
+      <h2>NEW LEADS</h2>
+      <pre id="new_leads">[]</pre>
+    </section>
+    <section>
+      <h2>QUALIFIED</h2>
+      <pre id="qualified">[]</pre>
+    </section>
+    <section>
+      <h2>NEEDS OWNER REVIEW</h2>
+      <pre id="owner_review">[]</pre>
+    </section>
+    <section>
+      <h2>OUTREACH READY</h2>
+      <pre id="outreach_ready">[]</pre>
+    </section>
+    <section>
+      <h2>FOLLOW-UP</h2>
+      <pre id="follow_up">[]</pre>
+    </section>
+    <section>
+      <h2>DO NOT CONTACT</h2>
+      <pre id="do_not_contact">[]</pre>
+    </section>
+    <section>
+      <h2>SHIELD COMMAND CENTER</h2>
+      <pre id="shield">{}</pre>
+    </section>
+    <section>
+      <h2>OPPORTUNITIES</h2>
+      <pre id="opportunities">[]</pre>
+    </section>
+    <section>
+      <h2>CLIENTS</h2>
+      <pre id="clients">[]</pre>
+    </section>
+    <section>
+      <h2>APPLICATIONS</h2>
+      <pre id="applications">[]</pre>
+    </section>
+    <section>
+      <h2>ENGAGEMENTS</h2>
+      <pre id="engagements">[]</pre>
+    </section>
+    <section>
+      <h2>TASKS</h2>
+      <pre id="tasks">[]</pre>
+    </section>
+    <section>
+      <h2>ACTIVE WORK</h2>
+      <pre id="active_work">[]</pre>
+    </section>
+    <section>
+      <h2>DELIVERABLES</h2>
+      <pre id="deliverables">[]</pre>
+    </section>
+    <section>
+      <h2>APPROVALS</h2>
+      <pre id="approvals">[]</pre>
+    </section>
+    <section>
+      <h2>COMMUNICATIONS</h2>
+      <pre id="communications">[]</pre>
+    </section>
+    <section>
+      <h2>INVOICES</h2>
+      <pre id="invoices">[]</pre>
+    </section>
+    <section>
+      <h2>PAYMENTS</h2>
+      <pre id="payments">[]</pre>
+    </section>
+    <section>
+      <h2>WORKERS</h2>
+      <pre id="workers">[]</pre>
+    </section>
+    <section>
+      <h2>CONNECTORS</h2>
+      <pre id="connectors">[]</pre>
+    </section>
+    <section>
+      <h2>ALERTS</h2>
+      <pre id="alerts">{}</pre>
+    </section>
+    <section>
+      <h2>AUDIT</h2>
+      <pre id="audit">[]</pre>
+    </section>
+  </main>
+  <script src="/static/nova-v3-lab/lab.js"></script>
+</body>
+</html>
