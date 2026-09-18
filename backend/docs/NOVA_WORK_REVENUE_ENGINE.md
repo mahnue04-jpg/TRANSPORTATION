@@ -107,6 +107,8 @@ Partial owner confirmation uses the existing `PARTIALLY_PAID` stage: the ledger 
 
 Archived or cancelled engagement ledger rows remain visible as historical AMICOR records. They are labeled historical and are not added into current/active reconciliation or analytics totals. Archive is not delete.
 
+The default operator work queue excludes `COMPLETE` and `ARCHIVED` work from items and active counts. Use status `ALL` or attention `all` to include historical work. Explicit `COMPLETE` / `ARCHIVED` filters still return those rows. Owner-fact `PUT` is create-or-update on the organization fact key and does not fail on repeated writes of the same non-verified value.
+
 `LOGIN_REQUIRED` / `CAPTCHA_REQUIRED` describe the third-party platform. `False` is a legitimate descriptive state and does not bypass AMICOR owner approval, authentication, or disabled live submission. `HUMAN_SUBMISSION_ONLY`, `TERMS_RESTRICT_AUTOMATION`, and `MANUAL_REVIEW_REQUIRED` stay enforced.
 
 List endpoints cap results at 200 rows. Use `limit` where exposed. Source URLs reject `javascript:`, `data:`, `file:`, credentials, loopback, link-local, and RFC1918/private addresses. URLs are never fetched.
@@ -187,7 +189,7 @@ Blocked by live integration / deferred:
 - Application dashboard still loads materials per application; keep list caps and do not add a background worker.
 - Opportunity revenue fields remain owner-entered pipeline context. Do not silently copy them into revenue entries.
 - Missing owner facts stay MISSING until the owner supplies them. Approval never marks an application externally ready.
-- After Block 3, remaining V1 work is live-integration only. AMICOR ledger amounts are now labeled separately from client billed drafts and opportunity context. Live adapters stay off.
+- After Block 5 close-out, remaining V1 work is live-integration only. Default active queue counts exclude archived/complete work. Owner-fact PUT is safe create-or-update. AMICOR ledger amounts stay labeled separately from client billed drafts and opportunity context. Live adapters stay off.
 
 ## Testing strategy
 
@@ -199,7 +201,7 @@ Blocked by live integration / deferred:
 
 `backend/tests/test_nova_work_revenue_operator_ui.py` covers Block 2 operator queue/reconciliation UI, filter/sort/pagination validation, overdue/blocked/owner-action states, received-amount confirmation boundary, tenant isolation, and disabled external controls.
 
-`backend/tests/test_nova_work_revenue_labeling.py` covers Block 3 AMICOR vs client labeling, authoritative source selection, mismatch handling, owner-confirmed received boundaries, tenant isolation, and double-count protection.
+`backend/tests/test_nova_work_revenue_block5.py` covers Block 5 close-out: default active queue exclusion of archived/complete work, owner-fact PUT create-or-update, remaining AMICOR/partial/archived/owner-confirmation/platform-guard proofs.
 
 Do not run Stripe object-creation tests from this workstream.
 

@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
@@ -19,7 +20,9 @@ from app.core.nova.work_revenue.lifecycle import (
     clamp_list_limit,
     OCCURRENCE_STATUSES,
     OWNER_ACTION_CATEGORIES,
+    QUEUE_ALL_STATUSES_FILTER,
     QUEUE_STATUSES,
+    HISTORICAL_QUEUE_STATUSES,
     RECURRING_SERIES_STATUSES,
     REPORT_STATUSES,
     category_for_action,
@@ -69,6 +72,7 @@ from app.core.nova.work_revenue.schemas import (
 )
 from app.core.nova.work_revenue.service import (
     NovaWorkError,
+    _can_see_org_wide,
     _ensure,
     _new_id,
     _owner_filter,
@@ -261,6 +265,10 @@ def _filtered_work_queue(
     _ensure()
     rows = list_engagements(db, organization_id=organization_id, user=user)
     wanted = str(status or "").strip().upper() or None
+    include_historical = False
+    if wanted in {QUEUE_ALL_STATUSES_FILTER, "*"}:
+        include_historical = True
+        wanted = None
     if wanted == "WAITING_ON_OWNER":
         wanted = "OWNER_ACTION_REQUIRED"
     if wanted == "OVERDUE":
@@ -269,8 +277,13 @@ def _filtered_work_queue(
     if wanted and wanted not in QUEUE_STATUSES:
         raise NovaWorkError("Unknown queue status")
     attention_token = str(attention or "").strip().lower() or None
+    if attention_token in {"all", "all_including_archived"}:
+        include_historical = True
+        attention_token = None
     if attention_token and attention_token not in QUEUE_ATTENTIONS:
         raise NovaWorkError("Unknown queue attention filter")
+    if attention_token in {"complete", "archived"}:
+        include_historical = True
     sort_key = str(sort or "updated_at").strip().lower()
     if sort_key not in QUEUE_SORT_KEYS:
         raise NovaWorkError("Unknown queue sort")
@@ -310,6 +323,12 @@ def _filtered_work_queue(
         if attention_token == "complete" and item["queue_status"] != "COMPLETE":
             continue
         if attention_token == "archived" and item["queue_status"] != "ARCHIVED":
+            continue
+        if (
+            not include_historical
+            and not wanted
+            and item["queue_status"] in HISTORICAL_QUEUE_STATUSES
+        ):
             continue
         if due_before is not None:
             due_value = _parse_queue_due(item.get("due_date"))
@@ -430,16 +449,27 @@ def operator_work_queue(
     )
     page, cap, start = _slice_queue(filtered, limit=limit, offset=offset)
     overdue_count = sum(1 for item in filtered if item.get("overdue"))
+    status_token = str(status or "").strip().upper()
+    attention_token = str(attention or "").strip().lower()
+    historical_excluded = status_token not in {
+        QUEUE_ALL_STATUSES_FILTER,
+        "*",
+        "COMPLETE",
+        "ARCHIVED",
+    } and attention_token not in {"all", "all_including_archived", "complete", "archived"}
+    active_count = sum(1 for item in filtered if item.get("queue_status") not in HISTORICAL_QUEUE_STATUSES)
     return {
         "items": page,
         "total_matched": len(filtered),
+        "active_count": active_count,
+        "historical_excluded": historical_excluded,
         "limit": cap,
         "offset": start,
         "empty": len(filtered) == 0,
         "overdue_count": overdue_count,
         "blocked_count": sum(1 for item in filtered if item.get("queue_status") == "BLOCKED"),
         "owner_action_count": sum(1 for item in filtered if item.get("owner_action_required")),
-        "allowed_statuses": list(QUEUE_STATUSES),
+        "allowed_statuses": [*QUEUE_STATUSES, QUEUE_ALL_STATUSES_FILTER],
         "allowed_sorts": sorted(QUEUE_SORT_KEYS),
         "owner_fact_status": _safe_owner_fact_status(db, organization_id=organization_id, user=user),
         "executes_externally": False,
@@ -1410,7 +1440,27 @@ def update_business_fact(
     except OwnerFactError as exc:
         raise NovaWorkError(str(exc), status_code=exc.status_code)
     _validate_date_range(payload.verification_date, payload.expiration_date)
-    row = _query(db, NovaWorkBusinessFact, organization_id, user).filter(NovaWorkBusinessFact.fact_key == key).first()
+    row = (
+        _query(db, NovaWorkBusinessFact, organization_id, user)
+        .filter(NovaWorkBusinessFact.fact_key == key)
+        .first()
+    )
+    if row is None:
+        org_match = (
+            db.query(NovaWorkBusinessFact)
+            .filter(
+                NovaWorkBusinessFact.organization_id == organization_id,
+                NovaWorkBusinessFact.fact_key == key,
+            )
+            .first()
+        )
+        if org_match is not None:
+            if org_match.owner_user_id != user.user_id and not _can_see_org_wide(user):
+                raise NovaWorkError(
+                    "A matching owner fact already exists for this organization",
+                    status_code=409,
+                )
+            row = org_match
     if row is None:
         row = NovaWorkBusinessFact(
             fact_record_id=_new_id("NWBF-"),
@@ -1448,7 +1498,58 @@ def update_business_fact(
         previous_state=previous,
         new_state=status,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(NovaWorkBusinessFact)
+            .filter(
+                NovaWorkBusinessFact.organization_id == organization_id,
+                NovaWorkBusinessFact.fact_key == key,
+            )
+            .first()
+        )
+        if existing is None:
+            raise NovaWorkError("Owner fact could not be saved", status_code=409)
+        if existing.owner_user_id != user.user_id and not _can_see_org_wide(user):
+            raise NovaWorkError(
+                "A matching owner fact already exists for this organization",
+                status_code=409,
+            )
+        previous = normalize_fact_status(existing.value_status) if existing.value_status else "MISSING"
+        value_changed = (existing.value_display or "") != display or previous != status
+        if previous == "VERIFIED" and value_changed and not bool(getattr(payload, "confirm_overwrite", False)):
+            raise NovaWorkError(
+                "Verified facts are not overwritten silently. Set confirm_overwrite to replace them.",
+                status_code=409,
+            )
+        existing.value_status = status
+        existing.value_display = display
+        existing.verification_date = payload.verification_date
+        if status == "VERIFIED" and existing.verification_date is None:
+            existing.verification_date = now()
+        existing.expiration_date = payload.expiration_date
+        existing.source_description = sanitize_untrusted(payload.source_description)[:400] or FACT_SOURCE_OWNER
+        existing.notes = sanitize_untrusted(payload.notes) or None
+        existing.updated_at = now()
+        _record_audit(
+            db,
+            organization_id=organization_id,
+            user=user,
+            event_type="FACT_UPDATED",
+            summary=(
+                f"Owner fact {key} {previous} → {status}. Source=OWNER. "
+                "No application submitted, no client contacted, no payment recorded."
+            ),
+            ref_id=existing.fact_record_id,
+            entity_type="business_fact",
+            actor_category="OWNER",
+            previous_state=previous,
+            new_state=status,
+        )
+        db.commit()
+        row = existing
     db.refresh(row)
     catalog = owner_fact_catalog(db, organization_id=organization_id, user=user)
     catalog["updated_fact_id"] = key

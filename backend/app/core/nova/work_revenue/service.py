@@ -13,6 +13,7 @@ from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normaliz
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
 from app.core.nova.work_revenue.flags import engine_guardrails, EXTERNAL_SUBMISSION_ENABLED
 from app.core.nova.work_revenue.lifecycle import (
+    ACTIVE_ENGAGEMENT_COUNT_STATUSES,
     LIST_MAX_LIMIT,
     OPPORTUNITY_PRIORITIES,
     category_for_action,
@@ -1433,7 +1434,9 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "interviews": len(interviews),
             "owner_action_required": len(actions),
             "work_won": len(won),
-            "active_engagements": len([item for item in engagement_rows if item["status"] in {"NOT_STARTED", "NEW", "READY", "ACTIVE"}]),
+            "active_engagements": len(
+                [item for item in engagement_rows if item["status"] in ACTIVE_ENGAGEMENT_COUNT_STATUSES]
+            ),
             "blocked_engagements": len([item for item in engagement_rows if item["status"] in {"BLOCKED", "OWNER_ACTION_REQUIRED"} or item.get("blockers")]),
             "tasks_due": sum(
                 1

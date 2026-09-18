@@ -18,6 +18,7 @@ from app.core.nova.work_revenue.lifecycle import (
     OWNER_ACTION_CATEGORIES,
     PAID_STAGES,
     REVENUE_STAGES,
+    ACTIVE_ENGAGEMENT_COUNT_STATUSES,
     category_for_action,
     normalize_revenue_stage,
     normalize_task_status,
@@ -801,7 +802,9 @@ def analytics(
             [item for item in opps if item.qualification_outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"} or item.status in {"QUALIFIED", "OWNER_REVIEW", "APPLICATION_PREPARED"}]
         ),
         "owner_actions_pending": len(actions),
-        "active_engagements": len([item for item in engagements if item["status"] in {"NOT_STARTED", "READY", "ACTIVE"}]),
+        "active_engagements": len(
+            [item for item in engagements if item["status"] in ACTIVE_ENGAGEMENT_COUNT_STATUSES]
+        ),
         "blocked_engagements": len([item for item in engagements if item["status"] == "BLOCKED" or item.get("blockers")]),
         "tasks_due": tasks_due,
         "completed_work": len([item for item in deliverables if item.owner_confirmed_delivered]) + len([item for item in tasks if item.get("status") == "COMPLETE"]),
