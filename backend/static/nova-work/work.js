@@ -6,6 +6,8 @@
   var activeTab = "overview";
   var factFilter = "all";
   var factCatalog = null;
+  var queueOffset = 0;
+  var queueLimit = 25;
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
@@ -123,6 +125,7 @@
         " · expired " + (ready.expired_facts || 0) +
         " · " + (ready.percentage_complete || 0) + "% complete. Internal readiness only. Nothing was submitted or charged.";
     }
+    renderFactStatus(ready);
     var rows = (factCatalog.facts || []).filter(factMatchesFilter);
     $("fact-list").innerHTML = listHtml(rows, "No facts match this filter.", function (row) {
       var current = row.value_status === "MISSING" ? "" : (row.value_display || "");
@@ -147,6 +150,85 @@
         "<div class=\"action-row\"><button type=\"submit\">Save fact</button></div>" +
         "<div class=\"fact-error\" data-fact-error=\"" + escapeHtml(row.fact_id) + "\"></div>" +
         "</form></div>";
+    });
+  }
+  function renderFactStatus(ready) {
+    var text = "Owner facts: verified " + (ready.verified || ready.verified_facts || 0) +
+      " · missing " + (ready.missing || ready.missing_facts || 0) +
+      " · expired " + (ready.expired || ready.expired_facts || 0) +
+      " · " + (ready.percentage_complete || 0) + "% ready. Sensitive values are not shown.";
+    ["queue-fact-status", "recon-fact-status"].forEach(function (id) {
+      if ($(id)) $(id).textContent = text;
+    });
+  }
+  function queueParams() {
+    var params = new URLSearchParams();
+    var status = $("queue-status") ? $("queue-status").value : "";
+    var attention = $("queue-attention") ? $("queue-attention").value : "";
+    var sort = $("queue-sort") ? $("queue-sort").value : "updated_at";
+    var order = $("queue-order") ? $("queue-order").value : "desc";
+    if (status) params.set("status", status);
+    if (attention) params.set("attention", attention);
+    params.set("sort", sort || "updated_at");
+    params.set("order", order || "desc");
+    params.set("limit", String(queueLimit));
+    params.set("offset", String(queueOffset));
+    return params.toString();
+  }
+  function renderQueue(page) {
+    if (!$("queue-list")) return;
+    var items = (page && page.items) || [];
+    var facts = (page && page.owner_fact_status) || {};
+    renderFactStatus(facts);
+    if ($("count-queue")) $("count-queue").textContent = page.total_matched || 0;
+    if ($("count-overdue")) $("count-overdue").textContent = page.overdue_count || 0;
+    if ($("queue-meta")) {
+      $("queue-meta").textContent =
+        (page.empty ? "Queue is empty. " : (items.length + " shown of " + (page.total_matched || 0) + ". ")) +
+        "Overdue " + (page.overdue_count || 0) +
+        " · blocked " + (page.blocked_count || 0) +
+        " · owner action " + (page.owner_action_count || 0) +
+        ". Internal tracking only. Offset " + (page.offset || 0) + ".";
+    }
+    $("queue-list").innerHTML = listHtml(items, "No internal work items match these filters.", function (row) {
+      return "<div class=\"item\">" +
+        "<strong>" + escapeHtml(row.client_name || row.engagement_id) + "</strong>" +
+        "<div class=\"muted\">" + escapeHtml(row.queue_status || row.status) +
+        (row.overdue ? " · OVERDUE" : "") +
+        (row.owner_action_required ? " · OWNER ACTION REQUIRED" : "") +
+        (row.attention_state && row.attention_state !== row.queue_status ? " · " + escapeHtml(row.attention_state) : "") +
+        " · priority " + escapeHtml(row.priority || "normal") +
+        (row.due_date ? " · due " + escapeHtml(row.due_date) : "") +
+        (row.opportunity_id ? " · opportunity " + escapeHtml(row.opportunity_id) : "") +
+        " · engagement " + escapeHtml(row.engagement_id) +
+        (row.organization_id ? " · org " + escapeHtml(row.organization_id) : "") +
+        "</div>" +
+        (row.blockers ? "<div class=\"muted\">Blocked: " + escapeHtml(row.blockers) + "</div>" : "") +
+        "<div class=\"muted\">External submit disabled. Client contact disabled. Financial execution disabled.</div></div>";
+    });
+  }
+  function renderReconciliation(body) {
+    if (!$("recon-summary")) return;
+    var facts = (body && body.owner_fact_status) || {};
+    renderFactStatus(facts);
+    var mismatch = (body && body.mismatch) || {};
+    $("recon-summary").innerHTML =
+      "<div class=\"recon-grid\">" +
+      "<div class=\"item\"><strong>Estimated amount</strong><div class=\"muted\">" + escapeHtml(body.estimated_amount) + " · internal pipeline</div></div>" +
+      "<div class=\"item\"><strong>Contracted amount</strong><div class=\"muted\">" + escapeHtml(body.contracted_amount) + " · not received</div></div>" +
+      "<div class=\"item\"><strong>Invoice-support amount</strong><div class=\"muted\">" + escapeHtml(body.invoice_support_amount) + " · not a real invoice sent</div></div>" +
+      "<div class=\"item\"><strong>Owner-confirmed received</strong><div class=\"muted\">" + escapeHtml(body.owner_confirmed_received_amount) + " · owner action only</div></div>" +
+      "<div class=\"item\"><strong>Reconciliation state</strong><div class=\"muted\">" + escapeHtml(body.reconciliation_state) +
+      (mismatch.has_mismatch ? " · mismatch flagged" : "") + "</div></div>" +
+      "</div>" +
+      "<p class=\"hint\">" + escapeHtml(body.disclaimer) + " Processor confirmed payment: no. Stripe confirmed payment: no.</p>";
+    $("recon-entries").innerHTML = listHtml(body.entries, "No internal revenue entries.", function (row) {
+      return "<div class=\"item\"><strong>" + escapeHtml(row.stage) + " · " + escapeHtml(row.amount) + "</strong>" +
+        "<div class=\"muted\">" +
+        (row.engagement_id ? "engagement " + escapeHtml(row.engagement_id) + " · " : "") +
+        (row.opportunity_id ? "opportunity " + escapeHtml(row.opportunity_id) + " · " : "") +
+        (row.owner_confirmed ? "owner confirmed" : "not owner-confirmed") +
+        " · processor confirmed: no</div></div>";
     });
   }
   function oppItem(row) {
@@ -409,6 +491,16 @@
         renderFacts(await api("/api/nova/work/owner-facts"));
       } catch (_) {}
     }
+    if (activeTab === "queue" || $("queue-list")) {
+      try {
+        renderQueue(await api("/api/nova/work/queue?" + queueParams()));
+      } catch (_) {}
+    }
+    if (activeTab === "reconciliation" || $("recon-summary")) {
+      try {
+        renderReconciliation(await api("/api/nova/work/reconciliation"));
+      } catch (_) {}
+    }
     if (activeTab === "invoice-support") {
       try {
         var invoices = await api("/api/nova/work/invoice-support");
@@ -518,7 +610,7 @@
       if (!target || !target.getAttribute || !target.hasAttribute("data-tab")) return;
       activeTab = target.getAttribute("data-tab") || "overview";
       applyTab();
-      if (activeTab === "owner-facts") {
+      if (activeTab === "owner-facts" || activeTab === "queue" || activeTab === "reconciliation") {
         refresh().catch(function (err) { showBanner(err.message); });
       }
     });
@@ -533,6 +625,28 @@
         button.classList.toggle("filter-on", (button.getAttribute("data-fact-filter") || "") === factFilter);
       });
       renderFacts(factCatalog);
+    });
+  }
+  function applyQueueFilters() {
+    queueOffset = 0;
+    refresh().catch(function (err) { showBanner(err.message); });
+  }
+  if ($("queue-apply")) {
+    $("queue-apply").addEventListener("click", function () { applyQueueFilters(); });
+  }
+  ["queue-status", "queue-attention", "queue-sort", "queue-order"].forEach(function (id) {
+    if ($(id)) $(id).addEventListener("change", applyQueueFilters);
+  });
+  if ($("queue-prev")) {
+    $("queue-prev").addEventListener("click", function () {
+      queueOffset = Math.max(0, queueOffset - queueLimit);
+      refresh().catch(function (err) { showBanner(err.message); });
+    });
+  }
+  if ($("queue-next")) {
+    $("queue-next").addEventListener("click", function () {
+      queueOffset = queueOffset + queueLimit;
+      refresh().catch(function (err) { showBanner(err.message); });
     });
   }
   document.querySelector(".work-main").addEventListener("submit", async function (event) {

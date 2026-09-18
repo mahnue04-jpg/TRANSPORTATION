@@ -1642,6 +1642,8 @@ def _engagement_out(row: NovaWorkEngagement, tasks: list[NovaWorkTask] | None = 
         "source": getattr(row, "source", None),
         "due_date": row.due_date.isoformat() if getattr(row, "due_date", None) else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "organization_id": row.organization_id,
+        "owner_user_id": row.owner_user_id,
         "tasks": [
             {
                 "task_id": item.task_id,

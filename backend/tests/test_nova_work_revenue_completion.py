@@ -53,6 +53,8 @@ def test_completion_ui_has_internal_sections_only() -> None:
     assert 'data-tab="reports"' in WORK_HTML
     assert 'data-tab="invoice-support"' in WORK_HTML
     assert 'data-tab="owner-facts"' in WORK_HTML
+    assert 'data-tab="queue"' in WORK_HTML
+    assert 'data-tab="reconciliation"' in WORK_HTML
     assert "Do not enter EIN" in WORK_HTML
     assert "Generating a report is not sending it" in WORK_HTML
     assert "COMING IN LATER PHASE" in WORK_HTML
@@ -120,13 +122,20 @@ def test_recurring_managed_work_internal_only(client: TestClient) -> None:
     assert archived.json()["status"] == "ARCHIVED"
 
 
+def _queue_items(response) -> list:
+    body = response.json()
+    if isinstance(body, dict):
+        return list(body.get("items") or [])
+    return list(body or [])
+
+
 def test_queue_filters_and_invalid_transitions(client: TestClient) -> None:
     headers = _headers(client)
     engagement = _eng(client, headers, client_name="Queue Client")
     listed = client.get("/api/nova/work/queue", headers=headers, params={"status": "NEW", "sort": "priority"})
     assert listed.status_code == 200
-    assert any(row["engagement_id"] == engagement["engagement_id"] for row in listed.json())
-    assert all(row["queue_status"] == "NEW" for row in listed.json())
+    assert any(row["engagement_id"] == engagement["engagement_id"] for row in _queue_items(listed))
+    assert all(row["queue_status"] == "NEW" for row in _queue_items(listed))
     moved = client.patch(
         f"/api/nova/work/engagements/{engagement['engagement_id']}",
         headers=headers,
@@ -148,7 +157,7 @@ def test_queue_filters_and_invalid_transitions(client: TestClient) -> None:
     )
     assert blocked.json()["status"] == "BLOCKED"
     owner_q = client.get("/api/nova/work/queue", headers=headers, params={"status": "BLOCKED", "client": "Queue"})
-    assert any(row["engagement_id"] == engagement["engagement_id"] for row in owner_q.json())
+    assert any(row["engagement_id"] == engagement["engagement_id"] for row in _queue_items(owner_q))
     unknown = client.get("/api/nova/work/queue", headers=headers, params={"status": "SUBMITTED"})
     assert unknown.status_code == 400
     dated = _eng(
@@ -159,14 +168,14 @@ def test_queue_filters_and_invalid_transitions(client: TestClient) -> None:
     )
     due_sorted = client.get("/api/nova/work/queue", headers=headers, params={"sort": "due_date", "order": "asc"})
     assert due_sorted.status_code == 200
-    assert any(row["engagement_id"] == dated["engagement_id"] for row in due_sorted.json())
+    assert any(row["engagement_id"] == dated["engagement_id"] for row in _queue_items(due_sorted))
     before = client.get(
         "/api/nova/work/queue",
         headers=headers,
         params={"due_before": datetime.now(timezone.utc).isoformat()},
     )
     assert before.status_code == 200
-    assert all(row["engagement_id"] != dated["engagement_id"] for row in before.json())
+    assert all(row["engagement_id"] != dated["engagement_id"] for row in _queue_items(before))
 
 
 def test_weekly_report_is_not_a_send(client: TestClient) -> None:
@@ -471,6 +480,9 @@ def test_reconciliation_does_not_double_count_opportunity_fields(client: TestCli
     assert body["estimated_pipeline"] >= before["estimated_pipeline"] + 50
     assert "opportunity_context" in body
     assert body["owner_confirmed_received"] == before["owner_confirmed_received"]
+    assert body["processor_confirmed_payment"] is False
+    assert body["rules"]["OWNER_CONFIRMED_RECEIVED_EQUALS_PROCESSOR_CONFIRMED"] is False
+    assert body["rules"]["INVOICE_SUPPORT_EQUALS_INVOICE_SENT"] is False
 
 
 def test_list_limits_and_approval_is_not_submit(client: TestClient) -> None:

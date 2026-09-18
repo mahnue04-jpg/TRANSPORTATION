@@ -152,9 +152,8 @@ Blocked by owner input:
 
 Blocked by remaining internal V1 blocks:
 
-- Operator UI for queue and reconciliation
-- Distinct AMICOR-vs-client revenue labeling
-- Tests for those remaining operator surfaces
+- Distinct AMICOR-vs-client revenue labeling (Block 3)
+- Tests for AMICOR-vs-client revenue labeling
 
 Blocked by live integration / deferred:
 
@@ -171,7 +170,7 @@ Blocked by live integration / deferred:
 - Application dashboard still loads materials per application; keep list caps and do not add a background worker.
 - Opportunity revenue fields remain owner-entered pipeline context. Do not silently copy them into revenue entries.
 - Missing owner facts stay MISSING until the owner supplies them. Approval never marks an application externally ready.
-- After Block 1, the next safe implementation is Block 2 operator surfaces (facts already have a Work tab; queue and reconciliation still need first-class UI). Live adapters stay off.
+- After Block 2, the next safe implementation is Block 3 AMICOR-vs-client revenue labeling. Queue, reconciliation, and owner-fact status now have first-class Work UI. Live adapters stay off.
 
 ## Testing strategy
 
@@ -180,6 +179,8 @@ Blocked by live integration / deferred:
 `backend/tests/test_nova_work_revenue_completion.py` covers recurring work, queue filters, weekly reports, invoice-support, reconciliation, owner actions, facts, disclosure, platform policy, private-network URL rejection, list limits, and approval-is-not-submit.
 
 `backend/tests/test_nova_work_revenue_owner_facts.py` covers Block 1 owner-fact intake, secret rejection, tenant isolation, readiness percentage, and the rule that fact entry does not enable external action.
+
+`backend/tests/test_nova_work_revenue_operator_ui.py` covers Block 2 operator queue/reconciliation UI, filter/sort/pagination validation, overdue/blocked/owner-action states, received-amount confirmation boundary, tenant isolation, and disabled external controls.
 
 Do not run Stripe object-creation tests from this workstream.
 
