@@ -64,6 +64,13 @@ def is_live_stripe_key(secret: str) -> bool:
     return raw.startswith("sk_live_") or raw.startswith("rk_live_")
 
 
+def nova_live_stripe_enabled() -> bool:
+    """Fail-closed switch for Nova SaaS live Stripe usage."""
+    return str(os.getenv("NOVA_STRIPE_LIVE_ENABLED", "false") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
 def sanitize_stripe_error(message: Any, max_len: int = 240) -> str:
     text = str(message or "").replace("\n", " ").replace("\r", " ").strip()
     text = _SECRET_PATTERN.sub("[REDACTED]", text)
@@ -137,8 +144,8 @@ def get_nova_saas_stripe_client() -> NovaSaasStripeClient:
     secret = stripe_secret_key()
     if not secret:
         raise ValueError("Stripe TEST key is not configured for Nova SaaS signup.")
-    if is_live_stripe_key(secret):
-        raise ValueError("Live Stripe keys are not allowed for Nova SaaS signup. Use a TEST key.")
+    if is_live_stripe_key(secret) and not nova_live_stripe_enabled():
+        raise ValueError("Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled.")
     return LiveNovaSaasStripeClient(api_key=secret)
 
 
@@ -260,15 +267,15 @@ class FakeNovaSaasStripeClient:
 
 class LiveNovaSaasStripeClient:
     def __init__(self, *, api_key: str):
-        if is_live_stripe_key(api_key):
-            raise ValueError("Live Stripe keys are not allowed for Nova SaaS signup. Use a TEST key.")
+        if is_live_stripe_key(api_key) and not nova_live_stripe_enabled():
+            raise ValueError("Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled.")
         self.api_key = api_key
         self._price_ids: dict[str, str] = {}
 
     def publishable_key(self) -> str:
         key = stripe_publishable_key()
-        if key.startswith("pk_live_"):
-            raise ValueError("Live Stripe publishable keys are not allowed for Nova SaaS signup.")
+        if key.startswith("pk_live_") and not nova_live_stripe_enabled():
+            raise ValueError("Live Stripe publishable key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled.")
         return key
 
     def _build_client(self) -> Any:
