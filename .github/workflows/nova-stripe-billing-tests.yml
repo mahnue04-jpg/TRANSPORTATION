@@ -1,6 +1,13 @@
 name: Nova Stripe billing tests
 
 on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/app/core/nova/billing/**"
+      - "backend/app/core/nova/signup/stripe_client.py"
+      - "backend/tests/test_nova_stripe_subscriptions_phase1.py"
+      - ".github/workflows/nova-stripe-billing-tests.yml"
   pull_request:
     branches: [ "main" ]
     paths:
