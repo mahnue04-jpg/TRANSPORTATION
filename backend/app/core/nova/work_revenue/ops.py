@@ -61,7 +61,7 @@ from app.core.nova.work_revenue.service import (
 from app.helpers import now
 
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
-_PAID_JUMP_FROM = {"PAYMENT_PENDING", "PARTIALLY_PAID", "INVOICED_EXTERNALLY", "OVERDUE", "CONTRACTED"}
+_PAID_JUMP_FROM = {"PAYMENT_PENDING", "PARTIALLY_PAID", "INVOICED_EXTERNALLY", "OVERDUE"}
 REVENUE_TRANSITIONS: dict[str, set[str]] = {
     "ESTIMATED": {"QUOTED", "CONTRACTED", "CANCELLED"},
     "QUOTED": {"CONTRACTED", "INVOICE_DRAFT", "CANCELLED"},
@@ -582,7 +582,9 @@ def confirm_revenue_received(
     row = get_revenue_entry(db, entry_id, organization_id=organization_id, user=user)
     if payload.owner_confirmed is not True:
         raise NovaWorkError("Received revenue requires explicit owner confirmation")
-    if row.stage not in _PAID_JUMP_FROM and row.stage not in PAID_STAGES:
+    if row.stage == "PAID" and bool(row.owner_confirmed):
+        raise NovaWorkError("Received confirmation already recorded", status_code=409)
+    if row.stage not in _PAID_JUMP_FROM:
         raise NovaWorkError("Revenue cannot jump to PAID from the current stage")
     if payload.amount is not None:
         row.amount = _validate_amount(payload.amount, label="amount") or row.amount

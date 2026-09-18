@@ -14,6 +14,7 @@ from app.core.nova.work_revenue.lifecycle import (
     DISCLOSURE_STATUSES,
     ENGAGEMENT_TRANSITIONS,
     INVOICE_SUPPORT_STATUSES,
+    LIST_DEFAULT_LIMIT,
     LIST_MAX_LIMIT,
     clamp_list_limit,
     OCCURRENCE_STATUSES,
@@ -170,6 +171,196 @@ def get_engagement_row(db: Session, engagement_id: str, *, organization_id: str,
     return row
 
 
+QUEUE_SORT_KEYS = {
+    "updated_at",
+    "status",
+    "priority",
+    "source",
+    "client",
+    "engagement",
+    "client_name",
+    "due_date",
+    "due",
+    "owner_action",
+    "owner_action_required",
+}
+QUEUE_ORDERS = {"asc", "desc"}
+QUEUE_PRIORITIES = {"low", "normal", "high", "urgent"}
+QUEUE_ATTENTIONS = {
+    "overdue",
+    "blocked",
+    "owner_action",
+    "ready",
+    "active",
+    "complete",
+    "archived",
+}
+
+
+def _parse_queue_due(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _queue_item(item: dict[str, Any]) -> dict[str, Any]:
+    status = queue_status_for(item.get("status"))
+    due_value = _parse_queue_due(item.get("due_date"))
+    current = now()
+    if due_value is not None and due_value.tzinfo is None and getattr(current, "tzinfo", None) is not None:
+        due_value = due_value.replace(tzinfo=current.tzinfo)
+    overdue = bool(
+        due_value
+        and current
+        and due_value < current
+        and status not in {"COMPLETE", "ARCHIVED"}
+    )
+    owner_needed = status == "OWNER_ACTION_REQUIRED" or bool(item.get("blockers"))
+    if overdue:
+        attention = "OVERDUE"
+    elif owner_needed:
+        attention = "OWNER_ACTION_REQUIRED"
+    elif status == "BLOCKED":
+        attention = "BLOCKED"
+    else:
+        attention = status
+    return {
+        **item,
+        "queue_status": status,
+        "priority": item.get("priority") or "normal",
+        "overdue": overdue,
+        "owner_action_required": owner_needed,
+        "attention_state": attention,
+        "executes_externally": False,
+        "external_submit_enabled": False,
+        "client_contact_enabled": False,
+    }
+
+
+def _filtered_work_queue(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    status: str | None = None,
+    priority: str | None = None,
+    source: str | None = None,
+    client: str | None = None,
+    owner_action: bool | None = None,
+    due_before: datetime | None = None,
+    attention: str | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+) -> list[dict[str, Any]]:
+    _ensure()
+    rows = list_engagements(db, organization_id=organization_id, user=user)
+    wanted = str(status or "").strip().upper() or None
+    if wanted == "WAITING_ON_OWNER":
+        wanted = "OWNER_ACTION_REQUIRED"
+    if wanted == "OVERDUE":
+        attention = "overdue"
+        wanted = None
+    if wanted and wanted not in QUEUE_STATUSES:
+        raise NovaWorkError("Unknown queue status")
+    attention_token = str(attention or "").strip().lower() or None
+    if attention_token and attention_token not in QUEUE_ATTENTIONS:
+        raise NovaWorkError("Unknown queue attention filter")
+    sort_key = str(sort or "updated_at").strip().lower()
+    if sort_key not in QUEUE_SORT_KEYS:
+        raise NovaWorkError("Unknown queue sort")
+    order_token = str(order or "desc").strip().lower()
+    if order_token not in QUEUE_ORDERS:
+        raise NovaWorkError("Unknown queue order")
+    client_token = str(client or "").strip().lower()
+    source_token = str(source or "").strip().lower()
+    priority_token = str(priority or "").strip().lower()
+    if priority_token and priority_token not in QUEUE_PRIORITIES:
+        raise NovaWorkError("Unknown queue priority")
+    filtered: list[dict[str, Any]] = []
+    for raw in rows:
+        item = _queue_item(raw)
+        if wanted and item["queue_status"] != wanted:
+            continue
+        if priority_token and str(item.get("priority") or "").lower() != priority_token:
+            continue
+        if source_token and str(item.get("source") or "").lower() != source_token:
+            continue
+        if client_token and client_token not in str(item.get("client_name") or "").lower():
+            continue
+        if owner_action is True and not item["owner_action_required"]:
+            continue
+        if owner_action is False and item["owner_action_required"]:
+            continue
+        if attention_token == "overdue" and not item["overdue"]:
+            continue
+        if attention_token == "blocked" and item["queue_status"] != "BLOCKED":
+            continue
+        if attention_token == "owner_action" and not item["owner_action_required"]:
+            continue
+        if attention_token == "ready" and item["queue_status"] != "READY":
+            continue
+        if attention_token == "active" and item["queue_status"] != "ACTIVE":
+            continue
+        if attention_token == "complete" and item["queue_status"] != "COMPLETE":
+            continue
+        if attention_token == "archived" and item["queue_status"] != "ARCHIVED":
+            continue
+        if due_before is not None:
+            due_value = _parse_queue_due(item.get("due_date"))
+            if not due_value:
+                continue
+            compare = due_before
+            if due_value.tzinfo is None and compare.tzinfo is not None:
+                due_value = due_value.replace(tzinfo=compare.tzinfo)
+            if due_value > compare:
+                continue
+        filtered.append(item)
+
+    def sort_value(item: dict[str, Any]) -> str:
+        if sort_key == "status":
+            return str(item.get("queue_status") or "")
+        if sort_key == "priority":
+            return str(item.get("priority") or "")
+        if sort_key == "source":
+            return str(item.get("source") or "")
+        if sort_key in {"client", "engagement", "client_name"}:
+            return str(item.get("client_name") or "")
+        if sort_key in {"due_date", "due"}:
+            return str(item.get("due_date") or "")
+        if sort_key in {"owner_action", "owner_action_required"}:
+            return "1" if item.get("owner_action_required") else "0"
+        return str(item.get("updated_at") or item.get("due_date") or "")
+
+    filtered.sort(key=sort_value, reverse=order_token != "asc")
+    return filtered
+
+
+def _slice_queue(filtered: list[dict[str, Any]], *, limit: int | None, offset: int | None) -> tuple[list[dict[str, Any]], int, int]:
+    cap = clamp_list_limit(limit, default=LIST_DEFAULT_LIMIT)
+    start = max(int(offset or 0), 0)
+    return filtered[start : start + cap], cap, start
+
+
+def _safe_owner_fact_status(db: Session, *, organization_id: str, user: UserContext) -> dict[str, Any]:
+    catalog = owner_fact_catalog(db, organization_id=organization_id, user=user)
+    ready = catalog.get("readiness") or {}
+    return {
+        "verified": int(ready.get("verified_facts") or 0),
+        "missing": int(ready.get("missing_facts") or 0),
+        "expired": int(ready.get("expired_facts") or 0),
+        "provided": int(ready.get("provided_facts") or 0),
+        "percentage_complete": int(ready.get("percentage_complete") or 0),
+        "ready": bool(ready.get("missing_facts") == 0 and ready.get("expired_facts") == 0 and (ready.get("total_required_facts") or 0) > 0),
+        "secrets_shown": False,
+        "disclaimer": "Owner-fact status only. Sensitive values are not displayed. Readiness is not submission.",
+    }
+
+
 def list_work_queue(
     db: Session,
     *,
@@ -181,68 +372,83 @@ def list_work_queue(
     client: str | None = None,
     owner_action: bool | None = None,
     due_before: datetime | None = None,
+    attention: str | None = None,
     sort: str = "updated_at",
     order: str = "desc",
     limit: int | None = None,
+    offset: int | None = None,
 ) -> list[dict[str, Any]]:
-    _ensure()
-    rows = list_engagements(db, organization_id=organization_id, user=user)
-    wanted = str(status or "").strip().upper() or None
-    if wanted == "WAITING_ON_OWNER":
-        wanted = "OWNER_ACTION_REQUIRED"
-    if wanted and wanted not in QUEUE_STATUSES:
-        raise NovaWorkError("Unknown queue status")
-    client_token = str(client or "").strip().lower()
-    source_token = str(source or "").strip().lower()
-    priority_token = str(priority or "").strip().lower()
-    filtered: list[dict[str, Any]] = []
-    for item in rows:
-        item["queue_status"] = queue_status_for(item.get("status"))
-        item["source"] = item.get("source")
-        item["priority"] = item.get("priority") or "normal"
-        if wanted and item["queue_status"] != wanted:
-            continue
-        if priority_token and str(item.get("priority") or "").lower() != priority_token:
-            continue
-        if source_token and str(item.get("source") or "").lower() != source_token:
-            continue
-        if client_token and client_token not in str(item.get("client_name") or "").lower():
-            continue
-        has_owner = item["queue_status"] == "OWNER_ACTION_REQUIRED" or bool(item.get("blockers"))
-        if owner_action is True and not has_owner:
-            continue
-        if owner_action is False and has_owner:
-            continue
-        if due_before is not None:
-            due_raw = item.get("due_date")
-            if not due_raw:
-                continue
-            due_value = due_raw if isinstance(due_raw, datetime) else datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
-            compare = due_before
-            if due_value.tzinfo is None and compare.tzinfo is not None:
-                due_value = due_value.replace(tzinfo=compare.tzinfo)
-            if due_value > compare:
-                continue
-        filtered.append(item)
-    reverse = str(order or "desc").lower() != "asc"
-    key = str(sort or "updated_at")
-    def sort_value(item: dict[str, Any]) -> str:
-        if key == "status":
-            return str(item.get("queue_status") or "")
-        if key == "priority":
-            return str(item.get("priority") or "")
-        if key == "source":
-            return str(item.get("source") or "")
-        if key in {"client", "engagement", "client_name"}:
-            return str(item.get("client_name") or "")
-        if key in {"due_date", "due"}:
-            return str(item.get("due_date") or "")
-        if key in {"owner_action", "owner_action_required"}:
-            return "1" if item.get("queue_status") == "OWNER_ACTION_REQUIRED" else "0"
-        return str(item.get("updated_at") or item.get("due_date") or "")
-    filtered.sort(key=sort_value, reverse=reverse)
-    cap = clamp_list_limit(limit, default=LIST_MAX_LIMIT)
-    return filtered[:cap]
+    filtered = _filtered_work_queue(
+        db,
+        organization_id=organization_id,
+        user=user,
+        status=status,
+        priority=priority,
+        source=source,
+        client=client,
+        owner_action=owner_action,
+        due_before=due_before,
+        attention=attention,
+        sort=sort,
+        order=order,
+    )
+    page, _, _ = _slice_queue(filtered, limit=limit, offset=offset)
+    return page
+
+
+def operator_work_queue(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    status: str | None = None,
+    priority: str | None = None,
+    source: str | None = None,
+    client: str | None = None,
+    owner_action: bool | None = None,
+    due_before: datetime | None = None,
+    attention: str | None = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    limit: int | None = None,
+    offset: int | None = None,
+) -> dict[str, Any]:
+    filtered = _filtered_work_queue(
+        db,
+        organization_id=organization_id,
+        user=user,
+        status=status,
+        priority=priority,
+        source=source,
+        client=client,
+        owner_action=owner_action,
+        due_before=due_before,
+        attention=attention,
+        sort=sort,
+        order=order,
+    )
+    page, cap, start = _slice_queue(filtered, limit=limit, offset=offset)
+    overdue_count = sum(1 for item in filtered if item.get("overdue"))
+    return {
+        "items": page,
+        "total_matched": len(filtered),
+        "limit": cap,
+        "offset": start,
+        "empty": len(filtered) == 0,
+        "overdue_count": overdue_count,
+        "blocked_count": sum(1 for item in filtered if item.get("queue_status") == "BLOCKED"),
+        "owner_action_count": sum(1 for item in filtered if item.get("owner_action_required")),
+        "allowed_statuses": list(QUEUE_STATUSES),
+        "allowed_sorts": sorted(QUEUE_SORT_KEYS),
+        "owner_fact_status": _safe_owner_fact_status(db, organization_id=organization_id, user=user),
+        "executes_externally": False,
+        "live_discovery_enabled": False,
+        "external_submit_enabled": False,
+        "client_contact_enabled": False,
+        "financial_execution_enabled": False,
+        "disclaimer": "Internal work queue only. APPROVED != SUBMITTED. COMPLETE != PAID. Nova does not send, apply, or charge.",
+        "guardrails": engine_guardrails(),
+    }
 
 
 def update_engagement(
@@ -907,36 +1113,98 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
     manual_invoice = _sum(lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
     awaiting_confirm = _sum(lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed)
     received = _sum(lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
+    opportunity_estimated = round(sum((item.estimated_value or 0) for item in opportunities), 2)
+    opportunity_quoted = round(sum((item.quoted_amount or 0) for item in opportunities), 2)
+    opportunity_contracted = round(sum((item.contract_amount or 0) for item in opportunities), 2)
+    opportunity_received = round(
+        sum((item.amount_received or 0) for item in opportunities if item.owner_confirmed_payment_received),
+        2,
+    )
+    invoice_support_amount = round(
+        sum(item.draft_subtotal for item in invoices if item.status in {"DRAFT", "READY_FOR_OWNER_REVIEW"}),
+        2,
+    )
+
+    def _amount_mismatch(left: float, right: float) -> bool:
+        return abs(float(left or 0) - float(right or 0)) > 0.009
+
+    mismatch = {
+        "estimated_vs_opportunity": _amount_mismatch(estimated, opportunity_estimated),
+        "contracted_vs_opportunity": _amount_mismatch(contracted, opportunity_contracted),
+        "received_vs_opportunity": _amount_mismatch(received, opportunity_received),
+        "invoice_support_is_not_received": True,
+        "invoice_support_is_not_a_sent_invoice": True,
+    }
+    mismatch["has_mismatch"] = any(
+        mismatch[key]
+        for key in ("estimated_vs_opportunity", "contracted_vs_opportunity", "received_vs_opportunity")
+        if (key == "estimated_vs_opportunity" and opportunity_estimated)
+        or (key == "contracted_vs_opportunity" and opportunity_contracted)
+        or (key == "received_vs_opportunity" and opportunity_received)
+    )
+    if awaiting_confirm:
+        reconciliation_state = "AWAITING_OWNER_CONFIRMATION"
+    elif mismatch["has_mismatch"]:
+        reconciliation_state = "MISMATCH"
+    elif received:
+        reconciliation_state = "OWNER_CONFIRMED_RECEIVED"
+    elif contracted or manual_invoice:
+        reconciliation_state = "CONTRACTED_NOT_RECEIVED"
+    elif estimated or quoted:
+        reconciliation_state = "ESTIMATED_ONLY"
+    else:
+        reconciliation_state = "EMPTY"
     return {
         "estimated_pipeline": estimated,
+        "estimated_amount": estimated,
         "quoted": quoted,
         "contracted": contracted,
+        "contracted_amount": contracted,
+        "invoice_support_amount": invoice_support_amount,
         "awaiting_invoice": awaiting_invoice,
         "manually_recorded_invoice": manual_invoice,
         "awaiting_owner_payment_confirmation": awaiting_confirm,
         "owner_confirmed_received": received,
+        "owner_confirmed_received_amount": received,
+        "reconciliation_state": reconciliation_state,
+        "mismatch": mismatch,
+        "mismatch_state": "MISMATCH" if mismatch["has_mismatch"] else "ALIGNED_OR_CONTEXT_ONLY",
+        "tracking_kind": "INTERNAL_ONLY",
+        "processor_confirmed_payment": False,
+        "stripe_confirmed_payment": False,
+        "can_auto_mark_received": False,
         "authoritative_source": "nova_work_revenue_entries",
         "opportunity_context": {
-            "estimated_pipeline": round(sum((item.estimated_value or 0) for item in opportunities), 2),
-            "quoted": round(sum((item.quoted_amount or 0) for item in opportunities), 2),
-            "contracted": round(sum((item.contract_amount or 0) for item in opportunities), 2),
-            "owner_confirmed_received": round(
-                sum((item.amount_received or 0) for item in opportunities if item.owner_confirmed_payment_received),
-                2,
-            ),
+            "estimated_pipeline": opportunity_estimated,
+            "quoted": opportunity_quoted,
+            "contracted": opportunity_contracted,
+            "owner_confirmed_received": opportunity_received,
             "note": "Opportunity fields are pipeline context only. They are not added into the authoritative totals.",
         },
         "invoice_support_context": {
-            "draft_subtotal": round(
-                sum(item.draft_subtotal for item in invoices if item.status in {"DRAFT", "READY_FOR_OWNER_REVIEW"}),
-                2,
-            ),
-            "note": "Invoice-support drafts are not Stripe invoices and are not received revenue.",
+            "draft_subtotal": invoice_support_amount,
+            "note": "Invoice-support drafts are not Stripe invoices and are not received revenue. INVOICE SUPPORT != REAL INVOICE SENT.",
         },
+        "entries": [
+            {
+                "entry_id": item.entry_id,
+                "engagement_id": item.engagement_id,
+                "opportunity_id": item.opportunity_id,
+                "stage": item.stage,
+                "amount": item.amount,
+                "owner_confirmed": bool(item.owner_confirmed),
+                "invoice_reference": sanitize_untrusted(item.invoice_reference)[:120] if item.invoice_reference else None,
+                "processor_confirmed": False,
+            }
+            for item in entries[:50]
+        ],
+        "owner_fact_status": _safe_owner_fact_status(db, organization_id=organization_id, user=user),
         "rules": {
             "APPROVED_EQUALS_SUBMITTED": False,
             "APPROVED_EQUALS_PAID": False,
             "COMPLETE_EQUALS_PAID": False,
+            "INVOICE_SUPPORT_EQUALS_INVOICE_SENT": False,
+            "OWNER_CONFIRMED_RECEIVED_EQUALS_PROCESSOR_CONFIRMED": False,
             "owner_confirmation_required_for_received": True,
             "inferred_from_contract": False,
             "inferred_from_task_completion": False,
@@ -944,7 +1212,12 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
             "inferred_from_approval": False,
             "opportunity_fields_are_authoritative": False,
         },
-        "disclaimer": "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. Nova does not collect payment.",
+        "executes_externally": False,
+        "live_discovery_enabled": False,
+        "external_submit_enabled": False,
+        "client_contact_enabled": False,
+        "financial_execution_enabled": False,
+        "disclaimer": "Internal tracking only. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. Nova does not collect payment.",
         "guardrails": engine_guardrails(),
     }
 
@@ -1016,12 +1289,16 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
     current = now()
     if getattr(current, "tzinfo", None) is None:
         current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
         status = row.value_status
         expires = row.expiration_date
         if expires is not None and getattr(expires, "tzinfo", None) is None:
             expires = expires.replace(tzinfo=timezone.utc)
+        elif expires is not None:
+            expires = expires.astimezone(timezone.utc)
         if expires is not None and current is not None and expires < current:
             status = "EXPIRED"
         out[row.fact_key] = {

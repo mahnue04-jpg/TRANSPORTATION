@@ -762,14 +762,16 @@ def work_queue(
     client: str | None = None,
     owner_action: bool | None = None,
     due_before: datetime | None = None,
+    attention: str | None = None,
     sort: str = "updated_at",
     order: str = "desc",
     limit: int | None = None,
+    offset: int | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     try:
-        return managed.list_work_queue(
+        return managed.operator_work_queue(
             db,
             organization_id=_resolve_org(user, organization_id),
             user=user,
@@ -779,9 +781,11 @@ def work_queue(
             client=client,
             owner_action=owner_action,
             due_before=due_before,
+            attention=attention,
             sort=sort,
             order=order,
             limit=limit,
+            offset=offset,
         )
     except service.NovaWorkError as exc:
         _raise(exc)

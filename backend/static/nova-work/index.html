@@ -66,6 +66,8 @@
       <article class="card compact"><h3>REPORTS AWAITING REVIEW</h3><p id="count-reports">0</p></article>
       <article class="card compact"><h3>INVOICE-SUPPORT DRAFTS</h3><p id="count-invoices">0</p></article>
       <article class="card compact"><h3>BLOCKED WORK</h3><p id="count-blocked">0</p></article>
+      <article class="card compact"><h3>QUEUE ITEMS</h3><p id="count-queue">0</p></article>
+      <article class="card compact"><h3>QUEUE OVERDUE</h3><p id="count-overdue">0</p></article>
       <article class="card compact"><h3>FACTS MISSING</h3><p id="count-facts-missing">0</p></article>
       <article class="card compact"><h3>FACT READINESS</h3><p id="count-facts-ready">0%</p></article>
     </section>
@@ -137,6 +139,8 @@
         <button type="button" class="secondary" data-tab="applications" role="tab" aria-selected="false">Applications</button>
         <button type="button" class="secondary" data-tab="owner-actions" role="tab" aria-selected="false">Owner Actions</button>
         <button type="button" class="secondary" data-tab="owner-facts" role="tab" aria-selected="false">Owner Facts</button>
+        <button type="button" class="secondary" data-tab="queue" role="tab" aria-selected="false">Work Queue</button>
+        <button type="button" class="secondary" data-tab="reconciliation" role="tab" aria-selected="false">Reconciliation</button>
         <button type="button" class="secondary" data-tab="engagements" role="tab" aria-selected="false">Engagements</button>
         <button type="button" class="secondary" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="secondary" data-tab="deliverables" role="tab" aria-selected="false">Deliverables</button>
@@ -173,6 +177,68 @@
           <button type="button" class="secondary" data-fact-filter="required">Still required</button>
         </div>
         <div id="fact-list">Sign in to load owner facts.</div>
+      </article>
+      <article class="card wide-card" data-panel="queue">
+        <h2>Internal work queue</h2>
+        <p class="hint">Operator visibility only. APPROVED != SUBMITTED. COMPLETE != PAID. There is no live apply, send, contract, Stripe, charge, payout, or deploy control on this queue.</p>
+        <p id="queue-fact-status" class="hint">Owner-fact status loads with the queue.</p>
+        <div class="compose-grid" id="queue-filters">
+          <label>Status
+            <select id="queue-status">
+              <option value="">All statuses</option>
+              <option value="NEW">New</option>
+              <option value="READY">Ready</option>
+              <option value="ACTIVE">Active</option>
+              <option value="BLOCKED">Blocked</option>
+              <option value="OWNER_ACTION_REQUIRED">Owner action required</option>
+              <option value="COMPLETE">Complete</option>
+              <option value="ARCHIVED">Archived</option>
+              <option value="OVERDUE">Overdue</option>
+            </select>
+          </label>
+          <label>Attention
+            <select id="queue-attention">
+              <option value="">All</option>
+              <option value="overdue">Overdue</option>
+              <option value="blocked">Blocked</option>
+              <option value="owner_action">Owner action required</option>
+              <option value="ready">Ready</option>
+              <option value="active">Active</option>
+              <option value="complete">Complete</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <label>Sort
+            <select id="queue-sort">
+              <option value="updated_at">Updated</option>
+              <option value="due_date">Due date</option>
+              <option value="priority">Priority</option>
+              <option value="status">Status</option>
+              <option value="client">Client</option>
+              <option value="owner_action">Owner action</option>
+            </select>
+          </label>
+          <label>Order
+            <select id="queue-order">
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select>
+          </label>
+        </div>
+        <div class="action-row">
+          <button type="button" class="secondary" id="queue-apply">Apply filters</button>
+          <button type="button" class="secondary" id="queue-prev">Previous</button>
+          <button type="button" class="secondary" id="queue-next">Next</button>
+        </div>
+        <p id="queue-meta" class="hint">Sign in to load the internal queue.</p>
+        <div id="queue-list">Sign in to load the internal queue.</div>
+      </article>
+      <article class="card wide-card" data-panel="reconciliation">
+        <h2>Internal reconciliation</h2>
+        <p class="hint">Internal tracking only. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. INVOICE SUPPORT != REAL INVOICE SENT. Nova does not create Stripe objects or mark money received automatically.</p>
+        <p id="recon-fact-status" class="hint">Owner-fact status loads with reconciliation.</p>
+        <div id="recon-summary">Sign in to load reconciliation.</div>
+        <div id="recon-entries">None.</div>
       </article>
       <article class="card" data-panel="revenue"><h2>Revenue</h2>
         <p class="hint">Estimated pipeline is not received revenue. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.</p>
