@@ -39,6 +39,7 @@
     fill("outreach_ready", crm["OUTREACH READY"] || []);
     fill("follow_up", crm["FOLLOW-UP"] || []);
     fill("do_not_contact", crm["DO NOT CONTACT"] || []);
+    fill("customers_converted", (data.growth && data.growth.CUSTOMERS_CONVERTED) || crm["CUSTOMERS CONVERTED"] || []);
     var counts = $("counts");
     counts.innerHTML = "";
     [
@@ -55,6 +56,7 @@
       ["WORKERS", (data.workers || []).length],
       ["CONNECTORS", Array.isArray(data.connectors) ? data.connectors.length : 0],
       ["LEADS FOUND", (data.growth && data.growth["LEADS FOUND"]) || 0],
+      ["CUSTOMERS CONVERTED", ((data.growth && data.growth.CUSTOMERS_CONVERTED) || []).length],
       ["BLOCKED BY SHIELD", (data.growth && data.growth["BLOCKED BY SHIELD"]) || 0],
       ["ALERTS", data.alerts ? 1 : 0],
       ["AUDIT", (data.audit || []).length]
@@ -160,6 +162,16 @@
           body: JSON.stringify({ lead_id: outreachLead, kind: "introduction_email" })
         });
         $("action-status").textContent = o.ok ? "Outreach drafted (mock)." : "Outreach blocked: " + o.status;
+        await loadLab();
+        return;
+      }
+      if (action === "growth_synthetic_convert") {
+        var converted = await fetch("/api/nova/v3/lab/action", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ action: "growth_synthetic_convert", payload: { organization_name: "Convert Co" } })
+        });
+        $("action-status").textContent = converted.ok ? "Synthetic customer converted (mock)." : "Convert failed: " + converted.status;
         await loadLab();
         return;
       }

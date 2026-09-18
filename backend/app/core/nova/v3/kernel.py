@@ -939,22 +939,23 @@ class NovaV3Kernel:
         if row.status == "ON_HOLD" or row.workflow_state == "ON_HOLD":
             raise V3Error("PAUSED_WORKFLOW", "paused engagement rejects payment mutation")
         amount = round(float(total_received_so_far), 2)
+        expected = round(float(row.expected_amount or 0), 2)
         if amount < 0:
             raise V3Error("INVALID_AMOUNT", "received total cannot be negative", http_status=400)
-        if amount > row.expected_amount + 0.009:
+        if amount > expected + 0.009:
             raise V3Error("OVERPAYMENT_REQUIRES_OWNER_REVIEW", "overpayment refused")
         row.received_amount = amount
-        row.remaining_amount = round(row.expected_amount - amount, 2)
+        row.remaining_amount = round(expected - amount, 2)
         if amount == 0:
             row.status = "INVOICED"
             row.workflow_state = workflow_transition(row.workflow_state, "MOCK_INVOICE_SENT")
-        elif row.remaining_amount <= 0.009:
+        elif amount + 0.009 < expected:
+            row.status = "PARTIALLY_PAID"
+            row.workflow_state = workflow_transition(row.workflow_state, "PARTIALLY_PAID")
+        else:
             row.status = "PAID"
             row.remaining_amount = 0.0
             row.workflow_state = workflow_transition(row.workflow_state, "PAID")
-        else:
-            row.status = "PARTIALLY_PAID"
-            row.workflow_state = workflow_transition(row.workflow_state, "PARTIALLY_PAID")
         if idempotency_key:
             self.idempotency[(organization_id, owner_user_id, "confirm", idempotency_key)] = row.engagement_id
         self._audit("OWNER_CONFIRMED_RECEIVED", organization_id, engagement_id=engagement_id, received=amount)
@@ -1292,6 +1293,8 @@ class NovaV3Kernel:
         if self.worker_shutdown:
             return []
         ran: list[ScheduledJob] = []
+        lease_mismatches = 0
+        crashed = False
         for job in list(self.jobs.values()):
             if job.organization_id != organization_id or job.owner_user_id != owner_user_id:
                 continue
@@ -1340,11 +1343,15 @@ class NovaV3Kernel:
                 ran.append(job)
             except V3Error as exc:
                 if exc.code == "LEASE_MISMATCH":
-                    raise
+                    lease_mismatches += 1
+                    continue
                 if exc.code == "WORKER_CRASH":
+                    crashed = True
                     job.last_error = str(exc)
                     continue
                 job.last_error = str(exc)
+        if lease_mismatches and not ran and not crashed:
+            raise V3Error("LEASE_MISMATCH", "job is leased by another worker")
         return ran
 
     def retry_job(self, job_id: str, *, organization_id: str, owner_user_id: str) -> ScheduledJob:
@@ -1479,6 +1486,12 @@ class NovaV3Kernel:
         if name == "archive_engagement":
             return self.set_engagement_status(
                 payload["engagement_id"], organization_id=organization_id, owner_user_id=owner_user_id, status="ARCHIVED"
+            )
+        if name == "growth_synthetic_convert":
+            return get_growth_kernel().convert_synthetic_fixture(
+                organization_id=organization_id,
+                owner_user_id=owner_user_id,
+                organization_name=str(payload.get("organization_name") or "Convert Co"),
             )
         raise V3Error("UNKNOWN_LAB_ACTION", f"unsupported lab action {action}", http_status=400)
 

@@ -32,6 +32,7 @@ def _headers(client: TestClient) -> dict[str, str]:
 def test_growth_and_shield_lab_panes(client: TestClient) -> None:
     assert "GROWTH COMMAND CENTER" in LAB_HTML
     assert "SHIELD COMMAND CENTER" in LAB_HTML
+    assert "CUSTOMERS CONVERTED" in LAB_HTML
     assert "NEW LEADS" in LAB_HTML
     assert "/api/nova/v3/growth/leads" in LAB_JS
     page = client.get("/nova/v3-lab")

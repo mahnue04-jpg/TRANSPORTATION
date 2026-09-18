@@ -98,6 +98,38 @@ class GrowthKernel:
         if row_owner != owner_user_id:
             raise V3Error("FORBIDDEN", "owner isolation", http_status=403)
 
+    def assert_tenant(self, row_org: str, organization_id: str) -> None:
+        if row_org != organization_id:
+            raise V3Error("NOT_FOUND", "resource not found", http_status=404)
+
+    def get_customer(self, customer_id: str, *, organization_id: str, owner_user_id: str) -> Customer:
+        row = self.customers.get(customer_id)
+        if row is None or not row.organization_id or not row.owner_user_id:
+            raise V3Error("NOT_FOUND", "customer not found", http_status=404)
+        self.assert_tenant(row.organization_id, organization_id)
+        self.assert_owner(row.owner_user_id, owner_user_id)
+        return row
+
+    def list_customers(self, *, organization_id: str, owner_user_id: str) -> list[Customer]:
+        return [
+            item
+            for item in self.customers.values()
+            if item.organization_id == organization_id and item.owner_user_id == owner_user_id
+        ]
+
+    def customer_out(self, row: Customer) -> dict[str, Any]:
+        return {
+            "customer_id": row.customer_id,
+            "organization_id": row.organization_id,
+            "owner_user_id": row.owner_user_id,
+            "lead_id": row.lead_id,
+            "name": row.name,
+            "product": row.product,
+            "status": row.status,
+            "external_account_created": False,
+            "live": False,
+        }
+
     def get_lead(self, lead_id: str, *, organization_id: str, owner_user_id: str) -> Lead:
         row = self.leads.get(lead_id)
         if row is None or row.organization_id != organization_id:
@@ -111,12 +143,14 @@ class GrowthKernel:
         company = _plain(payload.get("organization_name"))
         email = _plain(payload.get("email_placeholder")) or None
         website = _plain(payload.get("website")) or None
-        fp = fingerprint(organization_id, company.lower(), (website or "").lower(), (email or "").lower())
+        fp = fingerprint(organization_id, owner_user_id, company.lower(), (website or "").lower(), (email or "").lower())
         existing = next(
             (
                 item
                 for item in self.leads.values()
-                if item.organization_id == organization_id and item.fingerprint == fp
+                if item.organization_id == organization_id
+                and item.owner_user_id == owner_user_id
+                and item.fingerprint == fp
             ),
             None,
         )
@@ -562,6 +596,8 @@ class GrowthKernel:
     def convert(self, lead_id: str, *, organization_id: str, owner_user_id: str, approval_id: str | None = None, reason: str = "owner_accepted_synthetic") -> Customer:
         if live_flags().get("REAL_CONTRACT_ACCEPTANCE") or live_flags().get("REAL_PAYMENT_EXECUTION"):
             raise V3Error("LIVE_DISABLED", "real conversion is off")
+        if not organization_id or not owner_user_id:
+            raise V3Error("FORBIDDEN", "owner and tenant are required to convert", http_status=403)
         lead = self.get_lead(lead_id, organization_id=organization_id, owner_user_id=owner_user_id)
         if lead.high_value and not approval_id:
             raise V3Error("MISSING_APPROVAL", "high-value conversion requires owner approval")
@@ -592,6 +628,34 @@ class GrowthKernel:
         self._note(lead_id, "CONVERTED", customer_id=customer.customer_id, external=False)
         return customer
 
+    def convert_synthetic_fixture(
+        self,
+        *,
+        organization_id: str,
+        owner_user_id: str,
+        organization_name: str = "Convert Co",
+        email_placeholder: str | None = None,
+    ) -> Customer:
+        from app.core.nova.v3.growth.fixtures import fixture
+
+        payload = fixture("C")
+        payload["organization_name"] = organization_name
+        payload["email_placeholder"] = email_placeholder or f"{organization_name.lower().replace(' ', '')}@example-smb.test"
+        lead = self.discover(payload, organization_id=organization_id, owner_user_id=owner_user_id)
+        self.qualify(lead.lead_id, organization_id=organization_id, owner_user_id=owner_user_id)
+        message = self.prepare_outreach(
+            lead.lead_id, "introduction_email", organization_id=organization_id, owner_user_id=owner_user_id
+        )
+        self.mock_send(message.message_id, organization_id=organization_id, owner_user_id=owner_user_id)
+        self.ingest_reply(lead.lead_id, "We want a demo", organization_id=organization_id, owner_user_id=owner_user_id)
+        demo = self.request_demo(
+            lead.lead_id, organization_id=organization_id, owner_user_id=owner_user_id, timezone_name="America/Chicago"
+        )
+        self.schedule_demo(demo.demo_id, organization_id=organization_id, owner_user_id=owner_user_id)
+        self.prepare_quote(lead.lead_id, "nova_ops_assist", organization_id=organization_id, owner_user_id=owner_user_id, kind="trial")
+        self.mark_negotiation(lead.lead_id, organization_id=organization_id, owner_user_id=owner_user_id)
+        return self.convert(lead.lead_id, organization_id=organization_id, owner_user_id=owner_user_id)
+
     def crm_views(self, *, organization_id: str, owner_user_id: str) -> dict[str, list[dict[str, Any]]]:
         mapping = {
             "NEW LEADS": {"DISCOVERED", "QUALIFYING"},
@@ -615,6 +679,9 @@ class GrowthKernel:
                 views[name] = [self.lead_out(item) for item in owned if item.follow_up_at and item.follow_up_at <= self.now and item.status not in {"WON", "LOST", "DO_NOT_CONTACT", "ARCHIVED"}]
             else:
                 views[name] = [self.lead_out(item) for item in owned if item.status in statuses]
+        views["CUSTOMERS CONVERTED"] = [
+            self.customer_out(item) for item in self.list_customers(organization_id=organization_id, owner_user_id=owner_user_id)
+        ]
         return views
 
     def lead_out(self, lead: Lead) -> dict[str, Any]:
@@ -678,21 +745,23 @@ class GrowthKernel:
 
     def growth_dashboard(self, *, organization_id: str, owner_user_id: str) -> dict[str, Any]:
         owned = [lead for lead in self.leads.values() if lead.organization_id == organization_id and lead.owner_user_id == owner_user_id]
-        msgs = [item for item in self.messages.values() if item.organization_id == organization_id]
-        shield_rows = [item for item in self.shield_log.values() if item.organization_id == organization_id]
-        waiting = [item for item in self.approvals.values() if item.organization_id == organization_id and item.status == "PENDING"]
+        msgs = [item for item in self.messages.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id]
+        shield_rows = [item for item in self.shield_log.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id]
+        waiting = [item for item in self.approvals.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id and item.status == "PENDING"]
+        converted = [self.customer_out(item) for item in self.list_customers(organization_id=organization_id, owner_user_id=owner_user_id)]
         return {
             "LEADS FOUND": len(owned),
             "QUALIFIED": len([item for item in owned if item.status in {"QUALIFIED", "OUTREACH_READY"}]),
             "OUTREACH READY": len([item for item in owned if item.status == "OUTREACH_READY"]),
             "FOLLOW-UPS DUE": len([item for item in owned if item.follow_up_at and item.follow_up_at <= self.now]),
-            "REPLIES": len([item for item in self.activities if item.kind == "REPLY" and item.organization_id == organization_id]),
+            "REPLIES": len([item for item in self.activities if item.kind == "REPLY" and item.organization_id == organization_id and item.owner_user_id == owner_user_id]),
             "INTERESTED": len([item for item in owned if item.status in {"ENGAGED", "DEMO_REQUESTED", "DEMO_SCHEDULED"}]),
             "DEMOS REQUESTED": len([item for item in owned if item.status == "DEMO_REQUESTED"]),
             "DEMOS SCHEDULED": len([item for item in owned if item.status == "DEMO_SCHEDULED"]),
-            "PROPOSALS": len([item for item in self.quotes.values() if item.organization_id == organization_id]),
+            "PROPOSALS": len([item for item in self.quotes.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id]),
             "WON": len([item for item in owned if item.status == "WON"]),
             "LOST": len([item for item in owned if item.status == "LOST"]),
+            "CUSTOMERS_CONVERTED": converted,
             "BLOCKED BY SHIELD": len([item for item in shield_rows if item.state in {"BLOCK", "DO_NOT_CONTACT", "RATE_LIMIT"}]),
             "WAITING OWNER APPROVAL": len(waiting) + len([item for item in shield_rows if item.state == "OWNER_APPROVAL_REQUIRED"]),
             "filters": {"product": None, "industry": None, "location": None, "status": None, "score": None, "source": None, "date": None},
@@ -702,15 +771,15 @@ class GrowthKernel:
         }
 
     def shield_dashboard(self, *, organization_id: str, owner_user_id: str) -> dict[str, Any]:
-        rows = [item for item in self.shield_log.values() if item.organization_id == organization_id]
+        rows = [item for item in self.shield_log.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id]
         return {
             "actions_allowed": len([item for item in rows if item.state == "ALLOW_SYNTHETIC"]),
             "actions_blocked": len([item for item in rows if item.state in {"BLOCK", "DO_NOT_CONTACT", "RATE_LIMIT"}]),
             "owner_approvals_required": len([item for item in rows if item.state == "OWNER_APPROVAL_REQUIRED"]),
             "privacy_warnings": len([item for item in rows if item.state == "PRIVACY_REVIEW_REQUIRED"]),
             "contact_frequency_warnings": len([item for item in rows if item.state == "RATE_LIMIT"]),
-            "do_not_contact_entries": [self.lead_out(item) for item in self.leads.values() if item.organization_id == organization_id and item.do_not_contact],
-            "rejected_messages": [item.__dict__ for item in self.messages.values() if item.organization_id == organization_id and item.status not in {"DRAFTED", "MOCK_SENT"}],
+            "do_not_contact_entries": [self.lead_out(item) for item in self.leads.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id and item.do_not_contact],
+            "rejected_messages": [item.__dict__ for item in self.messages.values() if item.organization_id == organization_id and item.owner_user_id == owner_user_id and item.status not in {"DRAFTED", "MOCK_SENT"}],
             "policy_reasons": [{"decision_id": item.decision_id, "state": item.state, "explain": item.explain, "action": item.action} for item in rows[-50:]],
             "audit_trail": [{"at": item.at.isoformat(), "state": item.state, "explain": item.explain, "lead_id": item.lead_id} for item in rows[-50:]],
             "live": False,

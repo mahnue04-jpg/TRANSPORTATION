@@ -664,6 +664,21 @@ def growth_qualify(lead_id: str, payload: OrgIn | None = None, user: UserContext
         _raise(exc)
 
 
+@router.post("/growth/leads/{lead_id}/convert")
+def growth_convert(lead_id: str, payload: GrowthActionIn | None = None, user: UserContext = Depends(get_current_user_context)):
+    body = payload or GrowthActionIn()
+    try:
+        row = get_growth_kernel().convert(
+            lead_id,
+            organization_id=_org(user, body.organization_id),
+            owner_user_id=user.user_id,
+            approval_id=body.approval_id,
+        )
+        return get_growth_kernel().customer_out(row)
+    except V3Error as exc:
+        _raise(exc)
+
+
 @router.post("/growth/outreach")
 def growth_outreach(payload: GrowthActionIn, user: UserContext = Depends(get_current_user_context)):
     try:
