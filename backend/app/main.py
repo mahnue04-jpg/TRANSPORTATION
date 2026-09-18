@@ -82,6 +82,7 @@ from app.core.nova.communications.router import router as nova_communications_ro
 from app.core.nova.government.router import router as nova_government_router  # type: ignore
 from app.core.nova.business.router import router as nova_business_router  # type: ignore
 from app.core.nova.work_revenue.router import router as nova_work_router  # type: ignore
+from app.core.nova.v3.router import router as nova_v3_router  # type: ignore
 from app.core.nova.today.router import router as nova_today_router  # type: ignore
 from app.core.nova.autonomy.router import router as nova_autonomy_router  # type: ignore
 from app.core.nova.autonomy.v2_router import router as nova_autonomy_v2_router  # type: ignore
@@ -481,6 +482,7 @@ app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_work_router)
+app.include_router(nova_v3_router)
 app.include_router(nova_today_router)
 app.include_router(nova_autonomy_router)
 app.include_router(nova_autonomy_v2_router)
@@ -3967,6 +3969,14 @@ def serve_nova_work() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Work page not found"}, status_code=404)
+
+
+@app.get("/nova/v3-lab")
+def serve_nova_v3_lab() -> Response:
+    page = os.path.join(_static_dir, "nova-v3-lab", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova V3 lab page not found"}, status_code=404)
 
 
 @app.get("/nova/today")
