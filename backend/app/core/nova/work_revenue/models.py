@@ -174,6 +174,10 @@ class NovaWorkAuditEvent(Base):
     entity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     previous_state: Mapped[str | None] = mapped_column(String(40), nullable=True)
     new_state: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    approval_ref: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
@@ -473,7 +477,7 @@ class NovaWorkSupervisedAction(Base):
     __table_args__ = (
         Index("ix_nova_work_sup_id", "supervised_action_id", unique=True),
         Index("ix_nova_work_sup_org", "organization_id", "status", "created_at"),
-        Index("ix_nova_work_sup_idem", "organization_id", "idempotency_key", unique=True),
+        Index("ix_nova_work_sup_idem", "organization_id", "owner_user_id", "idempotency_key", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
@@ -498,6 +502,12 @@ class NovaWorkSupervisedAction(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approval_status: Mapped[str] = mapped_column(String(24), nullable=False, default="NONE")
+    approval_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -533,7 +543,7 @@ class NovaWorkPaymentEvent(Base):
     __table_args__ = (
         Index("ix_nova_work_payevt_id", "event_id", unique=True),
         Index("ix_nova_work_payevt_org", "organization_id", "created_at"),
-        Index("ix_nova_work_payevt_idem", "organization_id", "idempotency_key", unique=True),
+        Index("ix_nova_work_payevt_idem", "organization_id", "owner_user_id", "idempotency_key", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
@@ -550,5 +560,30 @@ class NovaWorkPaymentEvent(Base):
     stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     applied_to_ledger: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    historical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkHistoricalCorrection(Base):
+    __tablename__ = "nova_work_historical_corrections"
+    __table_args__ = (
+        Index("ix_nova_work_hist_id", "correction_id", unique=True),
+        Index("ix_nova_work_hist_org", "organization_id", "created_at"),
+        Index("ix_nova_work_hist_idem", "organization_id", "owner_user_id", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    correction_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    entry_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(12), nullable=False, default="USD")
+    reason: Mapped[str] = mapped_column(String(400), nullable=False)
+    classification: Mapped[str] = mapped_column(String(40), nullable=False, default="HISTORICAL")
+    applied_to_current_totals: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

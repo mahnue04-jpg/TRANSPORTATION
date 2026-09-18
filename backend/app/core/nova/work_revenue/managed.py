@@ -493,6 +493,20 @@ def update_engagement(
 ) -> dict[str, Any]:
     row = get_engagement_row(db, engagement_id, organization_id=organization_id, user=user)
     previous = row.status
+    from app.core.nova.work_revenue.v2_freeze import FROZEN_ENGAGEMENT
+
+    if previous in FROZEN_ENGAGEMENT:
+        if payload.status is None or normalize_engagement_status(payload.status) == previous:
+            if any(value is not None for value in (payload.priority, payload.blockers, payload.notes, payload.due_date)):
+                raise NovaWorkError(
+                    "Frozen ARCHIVED/CLOSED/CANCELLED work cannot accept ordinary financial mutation",
+                    status_code=409,
+                )
+            return get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+        raise NovaWorkError(
+            "Frozen ARCHIVED/CLOSED/CANCELLED work cannot accept ordinary financial mutation",
+            status_code=409,
+        )
     if payload.status is not None:
         target = normalize_engagement_status(payload.status)
         allowed = ENGAGEMENT_TRANSITIONS.get(row.status, set())
@@ -544,6 +558,9 @@ def create_recurring_series(
     user: UserContext,
 ) -> dict[str, Any]:
     engagement = get_engagement_row(db, payload.engagement_id, organization_id=organization_id, user=user)
+    from app.core.nova.work_revenue.v2_freeze import assert_engagement_not_frozen
+
+    assert_engagement_not_frozen(engagement)
     frequency = sanitize_untrusted(payload.frequency)[:40] or "weekly"
     duplicate = (
         _query(db, NovaWorkRecurringSeries, organization_id, user)
@@ -630,6 +647,11 @@ def generate_recurring_occurrence(
     row = _get_series(db, series_id, organization_id=organization_id, user=user)
     if row.status != "ACTIVE":
         raise NovaWorkError("Recurring work can be generated only while ACTIVE")
+    from app.core.nova.work_revenue.v2_freeze import assert_ref_not_frozen
+
+    assert_ref_not_frozen(
+        db, organization_id=organization_id, user=user, engagement_id=row.engagement_id
+    )
     due = row.next_work_date or now()
     period = _period_key(row.frequency, due)
     existing = (

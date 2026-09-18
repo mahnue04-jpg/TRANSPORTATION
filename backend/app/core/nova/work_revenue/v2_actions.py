@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -25,6 +25,8 @@ from app.core.nova.work_revenue.service import (
     _record_audit,
     _safe_summary,
 )
+from app.core.nova.work_revenue.v2_freeze import assert_ref_not_frozen
+from app.core.nova.work_revenue.v2_idempotency import fingerprint, redact_secrets
 from app.helpers import now
 
 SUPERVISED_STATUSES = (
@@ -35,6 +37,7 @@ SUPERVISED_STATUSES = (
     "EXECUTED",
     "FAILED",
     "CANCELED",
+    "REJECTED",
 )
 
 ACTION_TYPES = {
@@ -53,15 +56,17 @@ CAPABILITY_TO_KIND = {value: key for key, value in KIND_TO_CAPABILITY.items()}
 
 TRANSITIONS = {
     "DRAFT": {"READY_FOR_REVIEW", "CANCELED"},
-    "READY_FOR_REVIEW": {"OWNER_APPROVED", "DRAFT", "CANCELED"},
+    "READY_FOR_REVIEW": {"OWNER_APPROVED", "DRAFT", "CANCELED", "REJECTED"},
     "OWNER_APPROVED": {"QUEUED", "CANCELED", "FAILED"},
     "QUEUED": {"FAILED", "CANCELED"},
     "EXECUTED": set(),
     "FAILED": {"CANCELED"},
     "CANCELED": set(),
+    "REJECTED": set(),
 }
 
 DEFAULT_TZ = "America/Chicago"
+DEFAULT_APPROVAL_TTL = timedelta(hours=24)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -94,6 +99,14 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def record_live_audit(
     db: Session,
     *,
@@ -113,7 +126,7 @@ def record_live_audit(
         owner_user_id=user.user_id,
         action_type=str(action_type or "")[:48],
         outcome=("allowed" if str(outcome).lower() == "allowed" else "blocked"),
-        reason=_safe_summary(reason)[:400],
+        reason=redact_secrets(_safe_summary(reason))[:400],
         external_target=sanitize_untrusted(external_target or "")[:220] or None,
         idempotency_key=(idempotency_key or "")[:120] or None,
         supervised_action_id=supervised_action_id,
@@ -129,14 +142,20 @@ def action_out(row: NovaWorkSupervisedAction) -> dict[str, Any]:
         "action_type": row.action_type,
         "capability": row.capability,
         "status": row.status,
+        "approval_status": row.approval_status or "NONE",
         "title": row.title,
         "summary": row.summary,
         "ref_type": row.ref_type,
         "ref_id": row.ref_id,
         "idempotency_key": row.idempotency_key,
+        "approval_fingerprint": row.approval_fingerprint,
         "timezone": row.timezone,
         "owner_approved": bool(row.owner_approved),
         "approved_at": _iso(row.approved_at),
+        "expires_at": _iso(row.expires_at),
+        "consumed_at": _iso(row.consumed_at),
+        "revoked_at": _iso(row.revoked_at),
+        "rejected_at": _iso(row.rejected_at),
         "queued_at": _iso(row.queued_at),
         "executed_at": _iso(row.executed_at),
         "canceled_at": _iso(row.canceled_at),
@@ -146,6 +165,8 @@ def action_out(row: NovaWorkSupervisedAction) -> dict[str, Any]:
         "live_execution": False,
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
+        "organization_id": row.organization_id,
+        "owner_user_id": row.owner_user_id,
     }
 
 
@@ -159,6 +180,23 @@ def get_action(
     if row is None:
         raise NovaWorkError("Supervised action not found", status_code=404)
     return row
+
+
+def _mark_expired(row: NovaWorkSupervisedAction) -> bool:
+    expires = _as_utc(row.expires_at)
+    if (
+        row.approval_status == "APPROVED"
+        and expires is not None
+        and expires < _as_utc(now())
+        and row.consumed_at is None
+        and row.revoked_at is None
+    ):
+        row.approval_status = "EXPIRED"
+        row.owner_approved = False
+        row.blocked_reason = "Approval expired"
+        row.updated_at = now()
+        return True
+    return False
 
 
 def create_action(
@@ -176,8 +214,25 @@ def create_action(
     idempotency_key = sanitize_untrusted(str(payload.get("idempotency_key") or "")).strip()
     if not idempotency_key or len(idempotency_key) > 120:
         raise NovaWorkError("idempotency_key is required")
-    title = _plain(str(payload.get("title") or action_type.replace("_", " ").title()), 220)
-    summary = _plain(str(payload.get("summary") or "Owner-controlled action. Approval is not execution."), 2000)
+    ref_type = sanitize_untrusted(str(payload.get("ref_type") or ""))[:32] or None
+    ref_id = sanitize_untrusted(str(payload.get("ref_id") or ""))[:32] or None
+    assert_ref_not_frozen(
+        db,
+        organization_id=organization_id,
+        user=user,
+        ref_type=ref_type,
+        ref_id=ref_id,
+    )
+    title = redact_secrets(_plain(str(payload.get("title") or action_type.replace("_", " ").title()), 220))
+    summary = redact_secrets(_plain(str(payload.get("summary") or "Owner-controlled action. Approval is not execution."), 2000))
+    approval_fp = fingerprint(
+        organization_id,
+        user.user_id,
+        action_type,
+        ref_type,
+        ref_id,
+        idempotency_key,
+    )
     row = NovaWorkSupervisedAction(
         supervised_action_id=_new_id("NWS-"),
         organization_id=organization_id,
@@ -187,10 +242,12 @@ def create_action(
         capability=ACTION_TYPES[action_type],
         title=title or action_type,
         summary=summary or "Owner-controlled action.",
-        ref_type=sanitize_untrusted(str(payload.get("ref_type") or ""))[:32] or None,
-        ref_id=sanitize_untrusted(str(payload.get("ref_id") or ""))[:32] or None,
+        ref_type=ref_type,
+        ref_id=ref_id,
         idempotency_key=idempotency_key,
         timezone=timezone_name,
+        approval_status="NONE",
+        approval_fingerprint=approval_fp,
         payload_json=json.dumps(
             {key: payload.get(key) for key in ("ref_type", "ref_id") if payload.get(key)},
             separators=(",", ":"),
@@ -212,6 +269,8 @@ def create_action(
         entity_type="supervised_action",
         actor_category="OWNER",
         new_state="DRAFT",
+        idempotency_key=idempotency_key,
+        source="v2_actions",
     )
     db.commit()
     db.refresh(row)
@@ -226,24 +285,39 @@ def _apply(
     organization_id: str,
     user: UserContext,
     notes: str | None = None,
+    expires_at: datetime | None = None,
 ) -> NovaWorkSupervisedAction:
     allowed = TRANSITIONS.get(row.status, set())
     if target not in allowed:
         raise NovaWorkError(f"Cannot transition supervised action from {row.status} to {target}")
     previous = row.status
+    previous_approval = row.approval_status
     row.status = target
     row.updated_at = now()
     if notes is not None:
         row.owner_notes = sanitize_untrusted(notes) or None
+    if target == "READY_FOR_REVIEW":
+        row.approval_status = "REQUESTED"
     if target == "OWNER_APPROVED":
         row.owner_approved = True
         row.approved_at = now()
         row.blocked_reason = None
+        row.approval_status = "APPROVED"
+        row.expires_at = _as_utc(expires_at) or (now() + DEFAULT_APPROVAL_TTL)
     if target == "QUEUED":
         row.queued_at = now()
     if target == "CANCELED":
         row.canceled_at = now()
         row.owner_approved = False
+        if previous_approval == "APPROVED":
+            row.approval_status = "REVOKED"
+            row.revoked_at = now()
+        else:
+            row.approval_status = "CANCELED"
+    if target == "REJECTED":
+        row.owner_approved = False
+        row.approval_status = "REJECTED"
+        row.rejected_at = now()
     if target == "FAILED":
         row.failure_reason = row.failure_reason or "Live execution is disabled."
     _record_audit(
@@ -257,6 +331,10 @@ def _apply(
         actor_category="OWNER",
         previous_state=previous,
         new_state=target,
+        approval_ref=row.supervised_action_id,
+        idempotency_key=row.idempotency_key,
+        reason=row.owner_notes,
+        source="v2_actions",
     )
     return row
 
@@ -272,10 +350,34 @@ def submit_for_review(
 
 
 def approve_action(
+    db: Session,
+    supervised_action_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    notes: str | None = None,
+    expires_at: datetime | None = None,
+) -> dict[str, Any]:
+    row = get_action(db, supervised_action_id, organization_id=organization_id, user=user)
+    _apply(
+        db,
+        row,
+        "OWNER_APPROVED",
+        organization_id=organization_id,
+        user=user,
+        notes=notes,
+        expires_at=expires_at,
+    )
+    db.commit()
+    db.refresh(row)
+    return action_out(row)
+
+
+def reject_action(
     db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext, notes: str | None = None
 ) -> dict[str, Any]:
     row = get_action(db, supervised_action_id, organization_id=organization_id, user=user)
-    _apply(db, row, "OWNER_APPROVED", organization_id=organization_id, user=user, notes=notes)
+    _apply(db, row, "REJECTED", organization_id=organization_id, user=user, notes=notes)
     db.commit()
     db.refresh(row)
     return action_out(row)
@@ -285,7 +387,10 @@ def queue_action(
     db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext
 ) -> dict[str, Any]:
     row = get_action(db, supervised_action_id, organization_id=organization_id, user=user)
-    if not row.owner_approved:
+    if _mark_expired(row):
+        db.commit()
+        raise NovaWorkError("Expired approval cannot execute", status_code=409)
+    if not row.owner_approved or row.approval_status != "APPROVED":
         raise NovaWorkError("Execution cannot be queued without owner approval")
     _apply(db, row, "QUEUED", organization_id=organization_id, user=user)
     db.commit()
@@ -303,18 +408,106 @@ def cancel_action(
     return action_out(row)
 
 
+def revoke_action(
+    db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext, notes: str | None = None
+) -> dict[str, Any]:
+    return cancel_action(
+        db,
+        supervised_action_id,
+        organization_id=organization_id,
+        user=user,
+        notes=notes or "Owner revoked approval",
+    )
+
+
+def expire_action(
+    db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext
+) -> dict[str, Any]:
+    row = get_action(db, supervised_action_id, organization_id=organization_id, user=user)
+    if row.approval_status != "APPROVED":
+        raise NovaWorkError("Only an approved action can expire")
+    row.expires_at = now() - timedelta(seconds=1)
+    if not _mark_expired(row):
+        raise NovaWorkError("Approval could not be expired")
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="SUPERVISED_ACTION_EXPIRED",
+        summary="Owner approval expired. Approval is not execution.",
+        ref_id=row.supervised_action_id,
+        entity_type="supervised_action",
+        actor_category="OWNER",
+        previous_state="APPROVED",
+        new_state="EXPIRED",
+        approval_ref=row.supervised_action_id,
+        idempotency_key=row.idempotency_key,
+        source="v2_actions",
+    )
+    db.commit()
+    db.refresh(row)
+    return action_out(row)
+
+
+def _refuse_execute(row: NovaWorkSupervisedAction) -> None:
+    if row.consumed_at is not None or row.approval_status == "CONSUMED":
+        raise NovaWorkError("Duplicate execution is blocked", status_code=409)
+    if row.status == "EXECUTED":
+        raise NovaWorkError("Duplicate execution is blocked", status_code=409)
+    if row.approval_status == "REVOKED" or row.status == "CANCELED":
+        raise NovaWorkError("Revoked approval stops queued execution", status_code=409)
+    if row.approval_status == "REJECTED" or row.status == "REJECTED":
+        raise NovaWorkError("Rejected approval cannot execute", status_code=409)
+    if row.approval_status == "EXPIRED":
+        raise NovaWorkError("Expired approval cannot execute", status_code=409)
+    if row.approval_status == "NONE" or row.status == "DRAFT":
+        raise NovaWorkError("Missing approval", status_code=409)
+    if row.status not in {"OWNER_APPROVED", "QUEUED"}:
+        raise NovaWorkError("Execution cannot happen without approval and queueing")
+    if not row.owner_approved or row.approval_status != "APPROVED":
+        raise NovaWorkError("Execution cannot happen without approval")
+
+
+def _consume(db: Session, row: NovaWorkSupervisedAction) -> None:
+    stamp = now()
+    updated = (
+        db.query(NovaWorkSupervisedAction)
+        .filter(
+            NovaWorkSupervisedAction.supervised_action_id == row.supervised_action_id,
+            NovaWorkSupervisedAction.consumed_at.is_(None),
+            NovaWorkSupervisedAction.approval_status == "APPROVED",
+        )
+        .update(
+            {
+                "consumed_at": stamp,
+                "approval_status": "CONSUMED",
+                "owner_approved": False,
+                "updated_at": stamp,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        raise NovaWorkError("Duplicate execution is blocked", status_code=409)
+    db.refresh(row)
+
+
 def execute_action(
     db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext
 ) -> dict[str, Any]:
     row = get_action(db, supervised_action_id, organization_id=organization_id, user=user)
-    if row.status == "EXECUTED":
-        raise NovaWorkError("Duplicate execution is blocked", status_code=409)
-    if row.status == "CANCELED":
-        raise NovaWorkError("Revoked approval stops queued execution", status_code=409)
-    if row.status not in {"OWNER_APPROVED", "QUEUED"}:
-        raise NovaWorkError("Execution cannot happen without approval and queueing")
-    if not row.owner_approved:
-        raise NovaWorkError("Execution cannot happen without approval")
+    if _mark_expired(row):
+        db.commit()
+        raise NovaWorkError("Expired approval cannot execute", status_code=409)
+    _refuse_execute(row)
+    assert_ref_not_frozen(
+        db,
+        organization_id=organization_id,
+        user=user,
+        ref_type=row.ref_type,
+        ref_id=row.ref_id,
+    )
+    _consume(db, row)
     kind = CAPABILITY_TO_KIND.get(row.capability, "external_submission")
     adapter = get_adapter(kind, dry_run=True)
     request = AdapterRequest(
@@ -322,7 +515,7 @@ def execute_action(
         owner_user_id=user.user_id,
         action_type=row.action_type,
         idempotency_key=row.idempotency_key,
-        owner_approved=bool(row.owner_approved),
+        owner_approved=False,
         dry_run=True,
         timezone=row.timezone,
         external_target=row.ref_id,
@@ -330,11 +523,11 @@ def execute_action(
     decision = evaluate_live_action(
         row.capability,
         tenant_authorized=True,
-        owner_approved=bool(row.owner_approved),
+        owner_approved=False,
         adapter_implemented=False,
         required_facts_available=False,
         terms_policy_satisfied=False,
-        not_duplicated=True,
+        not_duplicated=False,
         dry_run=True,
     )
     adapter_result = adapter.execute(request)
@@ -350,6 +543,7 @@ def execute_action(
         supervised_action_id=row.supervised_action_id,
         conditions=decision.conditions,
     )
+    previous = row.status
     row.status = "FAILED"
     row.failure_reason = decision.reason
     row.blocked_reason = decision.reason
@@ -359,12 +553,15 @@ def execute_action(
         organization_id=organization_id,
         user=user,
         event_type="SUPERVISED_ACTION_EXECUTION_BLOCKED",
-        summary="Live execution blocked. Approval is not execution. Nothing was sent.",
+        summary="Live execution blocked. Approval is not execution. Approval was consumed. Nothing was sent.",
         ref_id=row.supervised_action_id,
         entity_type="supervised_action",
         actor_category="NOVA",
-        previous_state="QUEUED" if row.queued_at else "OWNER_APPROVED",
+        previous_state=previous,
         new_state="FAILED",
+        approval_ref=row.supervised_action_id,
+        idempotency_key=row.idempotency_key,
+        source="v2_actions",
     )
     db.commit()
     db.refresh(row)
@@ -401,6 +598,9 @@ def queue_board(db: Session, *, organization_id: str, user: UserContext) -> dict
         "completed": [row for row in rows if row["status"] == "EXECUTED"],
         "failed": [row for row in rows if row["status"] == "FAILED"],
         "canceled": [row for row in rows if row["status"] == "CANCELED"],
+        "rejected": [row for row in rows if row["status"] == "REJECTED"],
+        "expired": [row for row in rows if row["approval_status"] == "EXPIRED"],
+        "consumed": [row for row in rows if row["approval_status"] == "CONSUMED"],
     }
     return {
         "approval_equals_execution": False,

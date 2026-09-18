@@ -12,7 +12,8 @@ from app.core.nova.work_revenue.config import capabilities_surface
 from app.core.nova.work_revenue.managed import reconciliation as v1_reconciliation
 from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.core.nova.work_revenue.service import NovaWorkError
-from app.core.nova.work_revenue import v2_actions, v2_revenue, v2_scheduler
+from app.core.nova.work_revenue import v2_actions, v2_pilot, v2_revenue, v2_scheduler, v2_status
+from app.core.nova.work_revenue.v2_idempotency import WEBHOOK_REUSE_CONTRACT
 from app.db.session import get_db
 
 router = APIRouter(prefix="/v2", tags=["nova-work-revenue-v2"])
@@ -32,6 +33,7 @@ class SupervisedActionCreate(BaseModel):
 class SupervisedActionNotes(BaseModel):
     organization_id: str | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    expires_at: str | None = None
 
 
 class SchedulerPrepare(BaseModel):
@@ -49,6 +51,16 @@ class PaymentEventIn(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=120)
     notes: str | None = Field(default=None, max_length=400)
     occurred_at: str | None = None
+
+
+class HistoricalCorrectionIn(BaseModel):
+    organization_id: str | None = None
+    entry_id: str | None = Field(default=None, max_length=32)
+    engagement_id: str | None = Field(default=None, max_length=32)
+    amount: float = Field(default=0, ge=0, le=1_000_000_000)
+    currency: str | None = Field(default="USD", max_length=12)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+    reason: str = Field(min_length=8, max_length=400)
 
 
 class SafetyProbe(BaseModel):
@@ -159,12 +171,21 @@ def v2_approve_action(
 ):
     body = payload or SupervisedActionNotes()
     try:
+        expires = None
+        if body.expires_at:
+            from datetime import datetime
+
+            try:
+                expires = datetime.fromisoformat(str(body.expires_at).replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise NovaWorkError("expires_at must be ISO-8601") from exc
         return v2_actions.approve_action(
             db,
             supervised_action_id,
             organization_id=_org(user, body.organization_id),
             user=user,
             notes=body.notes,
+            expires_at=expires,
         )
     except NovaWorkError as exc:
         _raise(exc)
@@ -201,6 +222,62 @@ def v2_cancel_action(
             organization_id=_org(user, body.organization_id),
             user=user,
             notes=body.notes,
+        )
+    except NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/actions/{supervised_action_id}/reject")
+def v2_reject_action(
+    supervised_action_id: str,
+    payload: SupervisedActionNotes | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or SupervisedActionNotes()
+    try:
+        return v2_actions.reject_action(
+            db,
+            supervised_action_id,
+            organization_id=_org(user, body.organization_id),
+            user=user,
+            notes=body.notes,
+        )
+    except NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/actions/{supervised_action_id}/revoke")
+def v2_revoke_action(
+    supervised_action_id: str,
+    payload: SupervisedActionNotes | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or SupervisedActionNotes()
+    try:
+        return v2_actions.revoke_action(
+            db,
+            supervised_action_id,
+            organization_id=_org(user, body.organization_id),
+            user=user,
+            notes=body.notes,
+        )
+    except NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/actions/{supervised_action_id}/expire")
+def v2_expire_action(
+    supervised_action_id: str,
+    payload: SupervisedActionNotes | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    body = payload or SupervisedActionNotes()
+    try:
+        return v2_actions.expire_action(
+            db, supervised_action_id, organization_id=_org(user, body.organization_id), user=user
         )
     except NovaWorkError as exc:
         _raise(exc)
@@ -296,3 +373,61 @@ def v2_revenue_preparation(
     org_id = _org(user, organization_id)
     recon = v1_reconciliation(db, organization_id=org_id, user=user)
     return v2_revenue.revenue_preparation(db, organization_id=org_id, user=user, reconciliation=recon)
+
+
+@router.post("/revenue/historical-corrections")
+def v2_historical_correction(
+    payload: HistoricalCorrectionIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return v2_revenue.record_historical_correction(
+            db, payload.model_dump(), organization_id=_org(user, payload.organization_id), user=user
+        )
+    except NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/revenue/historical-corrections")
+def v2_list_historical_corrections(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return v2_revenue.list_historical_corrections(
+        db, organization_id=_org(user, organization_id), user=user
+    )
+
+
+@router.get("/status")
+def v2_status_surface(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return v2_status.monitoring_snapshot(db, organization_id=_org(user, organization_id), user=user)
+
+
+@router.get("/pilot/workflow")
+def v2_pilot_workflow(
+    organization_id: str | None = None,
+    opportunity_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return v2_pilot.pilot_workflow(
+        db,
+        organization_id=_org(user, organization_id),
+        user=user,
+        opportunity_id=opportunity_id,
+    )
+
+
+@router.get("/idempotency/contract")
+def v2_idempotency_contract(user: UserContext = Depends(get_current_user_context)):
+    return {
+        **WEBHOOK_REUSE_CONTRACT,
+        "live_webhooks_enabled": False,
+        "stripe_touched": False,
+    }

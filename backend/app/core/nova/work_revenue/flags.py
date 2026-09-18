@@ -23,6 +23,8 @@ def engine_guardrails() -> dict[str, bool]:
             "COMPLETE_EQUALS_PAID": False,
             "OWNER_APPROVAL_REQUIRED": True,
             "APPROVAL_EQUALS_EXECUTION": False,
+            "BACKGROUND_WORKER_ENABLED": False,
+            "LIVE_CONNECTORS_ENABLED": False,
         }
     )
     return flags

@@ -201,6 +201,8 @@ def dashboard_revenue_summary(view: dict[str, Any]) -> dict[str, Any]:
         "quoted_pipeline": (amicor.get("quoted") or {}).get("amount") or 0,
         "contracted_value": (amicor.get("contracted") or {}).get("amount") or 0,
         "owner_confirmed_received": (amicor.get("owner_confirmed_received") or {}).get("amount") or 0,
+        "remaining_balance": view.get("remaining_balance") or 0,
+        "historical_archived_received": ((view.get("historical_archived") or {}).get("owner_confirmed_received") or 0),
         "amicor_expected_revenue": (amicor.get("expected_revenue") or {}).get("amount") or 0,
         "client_billed_amount": (client.get("billed_amount") or {}).get("amount") or 0,
         "contract_opportunity_amount": (client.get("contract_opportunity_amount") or {}).get("amount") or 0,

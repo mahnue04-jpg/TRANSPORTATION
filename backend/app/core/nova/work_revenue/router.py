@@ -120,6 +120,10 @@ def work_guardrails(user: UserContext = Depends(get_current_user_context)):
         "live_execution_implemented": False,
         "secrets_exposed": False,
         "missing_env_means_off": True,
+        "background_worker": False,
+        "live_connectors": False,
+        "core_readiness": surface.get("core_readiness"),
+        "live_disabled": surface.get("live_disabled"),
     }
 
 

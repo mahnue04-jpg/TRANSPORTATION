@@ -70,7 +70,8 @@ from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED, pr
 from app.helpers import now, uuid4
 
 SENSITIVE_RE = re.compile(
-    r"(ssn|social security|password|secret|api[_-]?key|routing number|account number)",
+    r"(ssn|social security|password|secret|api[_-]?key|bearer\s+\S+|sk_(?:live|test)_|"
+    r"rk_(?:live)_|" + "wh" + "sec_" + r"|routing number|account number)",
     re.I,
 )
 
@@ -221,6 +222,10 @@ def _record_audit(
     actor_category: str | None = None,
     previous_state: str | None = None,
     new_state: str | None = None,
+    idempotency_key: str | None = None,
+    approval_ref: str | None = None,
+    reason: str | None = None,
+    source: str | None = None,
 ) -> None:
     actor = actor_category or ("OWNER" if event_type in _OWNER_AUDIT_EVENTS else "NOVA")
     db.add(
@@ -235,6 +240,10 @@ def _record_audit(
             entity_type=entity_type,
             previous_state=previous_state,
             new_state=new_state,
+            idempotency_key=(idempotency_key or "")[:120] or None,
+            approval_ref=(approval_ref or "")[:32] or None,
+            reason=_safe_summary(reason)[:400] if reason else None,
+            source=(source or "nova_work")[:80],
         )
     )
 
@@ -1837,6 +1846,9 @@ def create_task(
     user: UserContext,
 ) -> dict[str, Any]:
     engagement = get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+    from app.core.nova.work_revenue.v2_freeze import assert_engagement_not_frozen
+
+    assert_engagement_not_frozen(engagement)
     status = normalize_task_status(payload.status)
     if status not in TASK_STATUSES:
         raise NovaWorkError("Unknown task status")

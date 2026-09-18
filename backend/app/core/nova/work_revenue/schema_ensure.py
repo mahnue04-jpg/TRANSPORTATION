@@ -11,6 +11,7 @@ from app.core.nova.work_revenue.models import (
     NovaWorkDeliverable,
     NovaWorkDisclosurePolicy,
     NovaWorkEngagement,
+    NovaWorkHistoricalCorrection,
     NovaWorkInvoiceSupport,
     NovaWorkLiveActionAudit,
     NovaWorkMaterial,
@@ -51,6 +52,7 @@ WORK_TABLES = (
     NovaWorkSupervisedAction.__table__,
     NovaWorkSchedulerJob.__table__,
     NovaWorkPaymentEvent.__table__,
+    NovaWorkHistoricalCorrection.__table__,
 )
 
 _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
@@ -125,6 +127,23 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
     "nova_work_revenue_entries": {
         "remaining_amount": "FLOAT",
     },
+    "nova_work_audit_events": {
+        "idempotency_key": "VARCHAR(120)",
+        "approval_ref": "VARCHAR(32)",
+        "reason": "VARCHAR(400)",
+        "source": "VARCHAR(80)",
+    },
+    "nova_work_supervised_actions": {
+        "approval_status": "VARCHAR(24)",
+        "approval_fingerprint": "VARCHAR(64)",
+        "expires_at": "DATETIME",
+        "consumed_at": "DATETIME",
+        "revoked_at": "DATETIME",
+        "rejected_at": "DATETIME",
+    },
+    "nova_work_payment_events": {
+        "historical": "BOOLEAN",
+    },
 }
 
 
@@ -155,8 +174,33 @@ def ensure_work_revenue_schema(engine: Engine | None = None) -> None:
                 )
             else:
                 statements.append(f"ALTER TABLE {table_name} ADD COLUMN {name} {col_type}")
-    if not statements:
-        return
     with bind.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
+        _repair_v2_indexes(conn, dialect, inspect(bind))
+
+
+def _repair_v2_indexes(conn, dialect: str, inspector) -> None:
+    """Replace org-only V2 unique indexes with owner-scoped unique indexes."""
+    names = set(inspector.get_table_names())
+    repairs = (
+        (
+            "nova_work_supervised_actions",
+            "ix_nova_work_sup_idem",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_nova_work_sup_idem ON nova_work_supervised_actions (organization_id, owner_user_id, idempotency_key)",
+        ),
+        (
+            "nova_work_payment_events",
+            "ix_nova_work_payevt_idem",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_nova_work_payevt_idem ON nova_work_payment_events (organization_id, owner_user_id, idempotency_key)",
+        ),
+    )
+    for table, index_name, create_sql in repairs:
+        if table not in names:
+            continue
+        existing = {item.get("name") for item in inspector.get_indexes(table)}
+        drop_sql = f"DROP INDEX IF EXISTS {index_name}"
+        if dialect.startswith("postgres"):
+            drop_sql = f"DROP INDEX IF EXISTS {index_name}"
+        conn.execute(text(drop_sql))
+        conn.execute(text(create_sql))

@@ -60,6 +60,7 @@ from app.core.nova.work_revenue.service import (
     list_opportunities,
     list_owner_actions,
 )
+from app.core.nova.work_revenue.v2_freeze import assert_engagement_not_frozen, assert_ref_not_frozen
 from app.helpers import now
 
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
@@ -368,6 +369,7 @@ def create_deliverable(
     user: UserContext,
 ) -> DeliverableOut:
     engagement = get_engagement(db, payload.engagement_id, organization_id=organization_id, user=user)
+    assert_engagement_not_frozen(engagement)
     dtype = str(payload.deliverable_type or "OTHER").strip().upper()
     if dtype not in DELIVERABLE_TYPES:
         raise NovaWorkError("Unknown deliverable type")
@@ -514,7 +516,8 @@ def create_revenue_entry(
     if stage in PAID_STAGES:
         raise NovaWorkError("Revenue cannot be created as PAID. Owner confirmation is required on an existing entry.")
     if payload.engagement_id:
-        get_engagement(db, payload.engagement_id, organization_id=organization_id, user=user)
+        engagement = get_engagement(db, payload.engagement_id, organization_id=organization_id, user=user)
+        assert_engagement_not_frozen(engagement)
     row = NovaWorkRevenueEntry(
         entry_id=_new_id("NWR-"),
         organization_id=organization_id,
@@ -597,10 +600,20 @@ def confirm_revenue_received(
         raise NovaWorkError("Received confirmation already recorded", status_code=409)
     if row.stage not in _PAID_JUMP_FROM:
         raise NovaWorkError("Revenue cannot jump to PAID from the current stage")
+    assert_ref_not_frozen(
+        db,
+        organization_id=organization_id,
+        user=user,
+        engagement_id=row.engagement_id,
+        opportunity_id=row.opportunity_id,
+        entry=row,
+    )
     remaining = float(getattr(row, "remaining_amount", 0) or 0)
     expected = float(row.amount or 0) + remaining
     confirmed = payload.amount if payload.amount is not None else expected
     confirmed = float(_validate_amount(confirmed, label="amount") or 0)
+    if confirmed > expected + 0.009:
+        raise NovaWorkError("OVERPAYMENT_REQUIRES_OWNER_REVIEW", status_code=409)
     if confirmed + 0.009 >= expected:
         row.stage = "PAID"
         row.amount = round(expected, 2)

@@ -9,7 +9,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
-from app.core.nova.work_revenue.materials import sanitize_untrusted
 from app.core.nova.work_revenue.models import (
     NovaWorkEngagement,
     NovaWorkOpportunity,
@@ -17,6 +16,7 @@ from app.core.nova.work_revenue.models import (
     NovaWorkSchedulerJob,
 )
 from app.core.nova.work_revenue.service import NovaWorkError, _ensure, _new_id, _owner_filter, _record_audit
+from app.core.nova.work_revenue.v2_freeze import FROZEN_ENGAGEMENT, FROZEN_OPPORTUNITY, FROZEN_SERIES
 from app.helpers import now
 
 JOB_KINDS = (
@@ -30,9 +30,14 @@ JOB_KINDS = (
 
 JOB_STATUSES = ("PREPARED", "SKIPPED", "CANCELED")
 DEFAULT_TZ = "America/Chicago"
-PAUSED_ENGAGEMENT = {"ARCHIVED", "CANCELLED", "COMPLETE"}
-PAUSED_SERIES = {"PAUSED", "ARCHIVED"}
-PAUSED_OPP = {"ARCHIVED", "CLOSED", "REJECTED"}
+TITLES = {
+    "RECURRING_TASK_PREPARE": "Prepare recurring internal tasks",
+    "FOLLOW_UP_REMINDER_PREPARE": "Prepare follow-up reminders",
+    "REPORT_PREPARE": "Prepare weekly report draft",
+    "INVOICE_PREPARE": "Prepare invoice-support draft",
+    "CLIENT_FOLLOW_UP_PREPARE": "Prepare client follow-up draft",
+    "OPPORTUNITY_RECHECK_PREPARE": "Prepare opportunity re-check",
+}
 
 
 def _validate_timezone(value: str | None) -> str:
@@ -80,6 +85,8 @@ def job_out(row: NovaWorkSchedulerJob) -> dict[str, Any]:
         "supervised_action_id": row.supervised_action_id,
         "title": row.title,
         "notes": row.notes,
+        "owner_user_id": row.owner_user_id,
+        "organization_id": row.organization_id,
         "send": False,
         "client_contact": False,
         "external_submission": False,
@@ -88,31 +95,41 @@ def job_out(row: NovaWorkSchedulerJob) -> dict[str, Any]:
     }
 
 
-def _series_paused(db: Session, organization_id: str, user: UserContext) -> set[str]:
+def _active_series(db: Session, organization_id: str, user: UserContext) -> list[NovaWorkRecurringSeries]:
     rows = _owner_filter(
         db.query(NovaWorkRecurringSeries).filter(NovaWorkRecurringSeries.organization_id == organization_id),
         NovaWorkRecurringSeries,
         user,
     ).all()
-    return {row.series_id for row in rows if row.status in PAUSED_SERIES}
+    return [row for row in rows if row.status not in FROZEN_SERIES]
 
 
-def _paused_engagements(db: Session, organization_id: str, user: UserContext) -> set[str]:
+def _active_engagements(db: Session, organization_id: str, user: UserContext) -> list[NovaWorkEngagement]:
     rows = _owner_filter(
         db.query(NovaWorkEngagement).filter(NovaWorkEngagement.organization_id == organization_id),
         NovaWorkEngagement,
         user,
     ).all()
-    return {row.engagement_id for row in rows if row.status in PAUSED_ENGAGEMENT}
+    return [row for row in rows if row.status not in FROZEN_ENGAGEMENT]
 
 
-def _paused_opportunities(db: Session, organization_id: str, user: UserContext) -> set[str]:
+def _active_opportunities(db: Session, organization_id: str, user: UserContext) -> list[NovaWorkOpportunity]:
     rows = _owner_filter(
         db.query(NovaWorkOpportunity).filter(NovaWorkOpportunity.organization_id == organization_id),
         NovaWorkOpportunity,
         user,
     ).all()
-    return {row.opportunity_id for row in rows if row.status in PAUSED_OPP or row.archived}
+    return [row for row in rows if row.status not in FROZEN_OPPORTUNITY and not row.archived]
+
+
+def _should_skip(kind: str, series, engagements, opportunities) -> str | None:
+    if kind == "RECURRING_TASK_PREPARE" and not series:
+        return "paused_or_archived_recurring_source"
+    if kind in {"INVOICE_PREPARE", "REPORT_PREPARE", "CLIENT_FOLLOW_UP_PREPARE", "FOLLOW_UP_REMINDER_PREPARE"} and not engagements:
+        return "paused_archived_or_cancelled_engagement"
+    if kind == "OPPORTUNITY_RECHECK_PREPARE" and not opportunities:
+        return "closed_or_archived_opportunity"
+    return None
 
 
 def prepare_jobs(
@@ -129,9 +146,9 @@ def prepare_jobs(
     invalid = [item for item in wanted if item not in JOB_KINDS]
     if invalid:
         raise NovaWorkError("Unknown scheduler job kind")
-    paused_eng = _paused_engagements(db, organization_id, user)
-    paused_opp = _paused_opportunities(db, organization_id, user)
-    _series_paused(db, organization_id, user)
+    series = _active_series(db, organization_id, user)
+    engagements = _active_engagements(db, organization_id, user)
+    opportunities = _active_opportunities(db, organization_id, user)
     created: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for kind in wanted:
@@ -148,56 +165,62 @@ def prepare_jobs(
         if existing is not None:
             skipped.append({"job_kind": kind, "period_key": key, "reason": "duplicate_period"})
             continue
-        if kind in {"RECURRING_TASK_PREPARE", "INVOICE_PREPARE", "REPORT_PREPARE"} and not paused_eng:
-            # Still prepare an org-level reminder even with no engagements; paused work is not sourced.
-            pass
-        title = {
-            "RECURRING_TASK_PREPARE": "Prepare recurring internal tasks",
-            "FOLLOW_UP_REMINDER_PREPARE": "Prepare follow-up reminders",
-            "REPORT_PREPARE": "Prepare weekly report draft",
-            "INVOICE_PREPARE": "Prepare invoice-support draft",
-            "CLIENT_FOLLOW_UP_PREPARE": "Prepare client follow-up draft",
-            "OPPORTUNITY_RECHECK_PREPARE": "Prepare opportunity re-check",
-        }[kind]
+        skip_reason = _should_skip(kind, series, engagements, opportunities)
+        status = "SKIPPED" if skip_reason else "PREPARED"
+        notes = (
+            f"Skipped: {skip_reason}. Prepare only. Nova did not send, contact a client, submit, or execute payment."
+            if skip_reason
+            else "Prepare only. Nova did not send, contact a client, submit, or execute payment."
+        )
         row = NovaWorkSchedulerJob(
             job_id=_new_id("NWJ-"),
             organization_id=organization_id,
             owner_user_id=user.user_id,
             job_kind=kind,
             period_key=key,
-            status="PREPARED",
+            status=status,
             timezone=tz,
             due_at=_zone_now(tz),
-            title=title,
-            notes="Prepare only. Nova did not send, contact a client, submit, or execute payment.",
+            title=TITLES[kind],
+            notes=notes,
         )
-        db.add(row)
         try:
-            db.flush()
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             skipped.append({"job_kind": kind, "period_key": key, "reason": "duplicate_period"})
-            _ensure()
             continue
         _record_audit(
             db,
             organization_id=organization_id,
             user=user,
             event_type="SCHEDULER_JOB_PREPARED",
-            summary=f"Prepared {kind} for {key} in {tz}. No live action.",
+            summary=f"{status} {kind} for {key} in {tz}. No live action.",
             ref_id=row.job_id,
             entity_type="scheduler_job",
             actor_category="NOVA",
-            new_state="PREPARED",
+            new_state=status,
+            source="v2_scheduler",
         )
         created.append(job_out(row))
+        if skip_reason:
+            skipped.append({"job_kind": kind, "period_key": key, "reason": skip_reason, "job_id": row.job_id})
     db.commit()
     return {
         "timezone": tz,
         "created": created,
         "skipped": skipped,
-        "paused_engagements_ignored": sorted(paused_eng),
-        "paused_opportunities_ignored": sorted(paused_opp),
+        "paused_engagements_ignored": sorted(row.engagement_id for row in _owner_filter(
+            db.query(NovaWorkEngagement).filter(NovaWorkEngagement.organization_id == organization_id),
+            NovaWorkEngagement,
+            user,
+        ).all() if row.status in FROZEN_ENGAGEMENT),
+        "paused_opportunities_ignored": sorted(row.opportunity_id for row in _owner_filter(
+            db.query(NovaWorkOpportunity).filter(NovaWorkOpportunity.organization_id == organization_id),
+            NovaWorkOpportunity,
+            user,
+        ).all() if row.status in FROZEN_OPPORTUNITY or row.archived),
         "send": False,
         "client_contact": False,
         "external_submission": False,
