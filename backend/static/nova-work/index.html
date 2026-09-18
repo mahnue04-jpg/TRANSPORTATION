@@ -56,10 +56,12 @@
       <article class="card compact"><h3>SUBMITTED</h3><p id="count-submitted">0</p></article>
       <article class="card compact"><h3>CLOSED</h3><p id="count-closed">0</p></article>
       <article class="card compact"><h3>OWNER ACTION REQUIRED</h3><p id="count-actions">0</p></article>
-      <article class="card compact"><h3>ESTIMATED PIPELINE</h3><p id="count-pipeline">0</p></article>
-      <article class="card compact"><h3>QUOTED PIPELINE</h3><p id="count-quoted">0</p></article>
-      <article class="card compact"><h3>CONTRACTED REVENUE</h3><p id="count-contracted">0</p></article>
-      <article class="card compact"><h3>OWNER-CONFIRMED RECEIVED</h3><p id="count-received">0</p></article>
+      <article class="card compact"><h3>AMICOR EXPECTED (EST.)</h3><p id="count-pipeline">0</p></article>
+      <article class="card compact"><h3>AMICOR QUOTED</h3><p id="count-quoted">0</p></article>
+      <article class="card compact"><h3>AMICOR CONTRACTED</h3><p id="count-contracted">0</p></article>
+      <article class="card compact"><h3>AMICOR RECEIVED (OWNER)</h3><p id="count-received">0</p></article>
+      <article class="card compact"><h3>CLIENT BILLED (DRAFT)</h3><p id="count-client-billed">0</p></article>
+      <article class="card compact"><h3>CLIENT/OPP CONTRACT (CONTEXT)</h3><p id="count-opp-contract">0</p></article>
       <article class="card compact"><h3>TASKS DUE</h3><p id="count-tasks">0</p></article>
       <article class="card compact"><h3>DELIVERABLES</h3><p id="count-deliverables">0</p></article>
       <article class="card compact"><h3>RECURRING OVERDUE</h3><p id="count-recurring">0</p></article>
@@ -235,13 +237,13 @@
       </article>
       <article class="card wide-card" data-panel="reconciliation">
         <h2>Internal reconciliation</h2>
-        <p class="hint">Internal tracking only. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. INVOICE SUPPORT != REAL INVOICE SENT. Nova does not create Stripe objects or mark money received automatically.</p>
+        <p class="hint">AMICOR ledger amounts are separate from client billed drafts and opportunity context. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. INVOICE SUPPORT != REAL INVOICE SENT. Nova does not create Stripe objects or mark money received automatically.</p>
         <p id="recon-fact-status" class="hint">Owner-fact status loads with reconciliation.</p>
         <div id="recon-summary">Sign in to load reconciliation.</div>
         <div id="recon-entries">None.</div>
       </article>
-      <article class="card" data-panel="revenue"><h2>Revenue</h2>
-        <p class="hint">Estimated pipeline is not received revenue. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.</p>
+      <article class="card" data-panel="revenue"><h2>AMICOR vs client revenue</h2>
+        <p class="hint">AMICOR ledger is authoritative. Client billed drafts and opportunity contracts are context only and are not added into AMICOR received totals. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.</p>
         <div id="revenue-box">COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.</div>
       </article>
       <article class="card" data-panel="engagements"><h2>Internal engagements</h2>
@@ -265,7 +267,7 @@
         <div id="report-list">Sign in to load.</div>
       </article>
       <article class="card" data-panel="invoice-support"><h2>Invoice-support drafts</h2>
-        <p class="hint">Internal totals from owner-entered quantity and rate. Nova does not create Stripe invoices or collect payment.</p>
+        <p class="hint">Client billed drafts from owner-entered quantity and rate. Not AMICOR received revenue. Nova does not create Stripe invoices or collect payment.</p>
         <div id="invoice-list">Sign in to load.</div>
       </article>
       <article class="card" data-panel="archive"><h2>Archive</h2><div id="archive-list">None.</div></article>

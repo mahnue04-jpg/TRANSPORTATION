@@ -51,6 +51,7 @@ from app.core.nova.work_revenue.owner_facts import (
     validate_fact_value,
 )
 from app.core.nova.work_revenue.recurring import next_due_date
+from app.core.nova.work_revenue.revenue_labels import labeled_revenue_view
 from app.core.nova.work_revenue.schemas import (
     OWNER_ACTION_TYPES,
     BusinessFactUpdate,
@@ -788,9 +789,10 @@ def generate_weekly_report(
     completed = [item for item in tasks if item.status == "COMPLETE"]
     pending = [item for item in tasks if item.status not in {"COMPLETE", "CANCELLED"}]
     blocked = [item for item in engagements if queue_status_for(item.get("status")) == "BLOCKED" or item.get("blockers")]
-    estimated = sum((item.estimated_value or 0) for item in opportunities)
-    contracted = sum((item.contract_amount or 0) for item in opportunities)
-    received = sum((item.amount_received or 0) for item in opportunities if item.owner_confirmed_payment_received)
+    recon = reconciliation(db, organization_id=organization_id, user=user)
+    estimated = recon.get("estimated_amount") or 0
+    contracted = recon.get("contracted_amount") or 0
+    received = recon.get("owner_confirmed_received") or 0
     body = {
         "weekly_activity_summary": {
             "engagements": len(engagements),
@@ -808,12 +810,18 @@ def generate_weekly_report(
         "opportunity_pipeline": {
             "count": len(opportunities),
             "titles": [sanitize_untrusted(item.opportunity_title)[:220] for item in opportunities[:20]],
+            "party": "CLIENT_CONTEXT",
+            "authoritative": False,
         },
         "estimated_revenue": estimated,
         "contracted_revenue": contracted,
         "owner_confirmed_received_revenue": received,
-        "disclaimer": "This is an internal draft. Generating a report is not sending it. Nova does not email, SMS, or deliver this to a client.",
-        "revenue_rules": "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. COMPLETE != PAID.",
+        "amicor": recon.get("amicor"),
+        "client_context": recon.get("client_context"),
+        "authoritative_source": recon.get("authoritative_source"),
+        "double_counted": False,
+        "disclaimer": "This is an internal draft. Generating a report is not sending it. Nova does not email, SMS, or deliver this to a client. AMICOR ledger amounts are not client billed drafts.",
+        "revenue_rules": "AMICOR ledger != client billed draft. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. COMPLETE != PAID.",
     }
     row = NovaWorkWeeklyReport(
         report_id=_new_id("NWWK-"),
@@ -938,7 +946,10 @@ def _invoice_out(row: NovaWorkInvoiceSupport) -> dict[str, Any]:
         "deliverable_ids": deliverable_ids,
         "quantity": row.quantity,
         "rate": row.rate,
-        "draft_subtotal": row.draft_subtotal,
+        "draft_subtotal": round(row.draft_subtotal, 2),
+        "party": "CLIENT_CONTEXT",
+        "amount_role": "client_billed_amount",
+        "authoritative_for_amicor_revenue": False,
         "adjustment_notes": row.adjustment_notes,
         "invoice_required": bool(row.invoice_required),
         "status": row.status,
@@ -951,9 +962,10 @@ def _invoice_out(row: NovaWorkInvoiceSupport) -> dict[str, Any]:
             "client_name": row.client_name,
             "quantity": row.quantity,
             "rate": row.rate,
-            "draft_subtotal": row.draft_subtotal,
+            "draft_subtotal": round(row.draft_subtotal, 2),
             "status": row.status,
-            "disclaimer": "Internal invoice-support draft only. Nova does not create Stripe invoices or collect payment.",
+            "party": "CLIENT_CONTEXT",
+            "disclaimer": "Internal invoice-support draft only. This is a client billed amount for manual use. Nova does not create Stripe invoices or collect payment.",
         },
     }
 
@@ -1102,17 +1114,38 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         .limit(LIST_MAX_LIMIT)
         .all()
     )
+    engagement_ids = {item.engagement_id for item in entries if item.engagement_id}
+    archived_ids: set[str] = set()
+    if engagement_ids:
+        archived_ids = {
+            row.engagement_id
+            for row in (
+                _query(db, NovaWorkEngagement, organization_id, user)
+                .filter(NovaWorkEngagement.engagement_id.in_(engagement_ids))
+                .all()
+            )
+            if row.status in {"ARCHIVED", "CANCELLED"}
+        }
+    current_entries = [item for item in entries if item.engagement_id not in archived_ids]
+    historical_entries = [item for item in entries if item.engagement_id in archived_ids]
 
-    def _sum(predicate) -> float:
-        return round(sum(item.amount for item in entries if predicate(item)), 2)
+    def _sum(items, predicate) -> float:
+        return round(sum(item.amount for item in items if predicate(item)), 2)
 
-    estimated = _sum(lambda item: item.stage == "ESTIMATED")
-    quoted = _sum(lambda item: item.stage == "QUOTED")
-    contracted = _sum(lambda item: item.stage == "CONTRACTED")
-    awaiting_invoice = _sum(lambda item: item.stage in {"CONTRACTED", "INVOICE_DRAFT"})
-    manual_invoice = _sum(lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
-    awaiting_confirm = _sum(lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed)
-    received = _sum(lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
+    estimated = _sum(current_entries, lambda item: item.stage == "ESTIMATED")
+    quoted = _sum(current_entries, lambda item: item.stage == "QUOTED")
+    contracted = _sum(current_entries, lambda item: item.stage == "CONTRACTED")
+    awaiting_invoice = _sum(current_entries, lambda item: item.stage in {"CONTRACTED", "INVOICE_DRAFT"})
+    manual_invoice = _sum(current_entries, lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
+    awaiting_confirm = _sum(
+        current_entries,
+        lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed,
+    )
+    received = _sum(current_entries, lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
+    historical_received = _sum(
+        historical_entries,
+        lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"},
+    )
     opportunity_estimated = round(sum((item.estimated_value or 0) for item in opportunities), 2)
     opportunity_quoted = round(sum((item.quoted_amount or 0) for item in opportunities), 2)
     opportunity_contracted = round(sum((item.contract_amount or 0) for item in opportunities), 2)
@@ -1142,6 +1175,19 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         or (key == "contracted_vs_opportunity" and opportunity_contracted)
         or (key == "received_vs_opportunity" and opportunity_received)
     )
+    labeled = labeled_revenue_view(
+        amicor_estimated=estimated,
+        amicor_quoted=quoted,
+        amicor_contracted=contracted,
+        amicor_received=received,
+        client_billed=invoice_support_amount,
+        opportunity_estimated=opportunity_estimated,
+        opportunity_quoted=opportunity_quoted,
+        opportunity_contracted=opportunity_contracted,
+        opportunity_received=opportunity_received,
+        mismatch=mismatch,
+    )
+    mismatch = labeled["mismatch"]
     if awaiting_confirm:
         reconciliation_state = "AWAITING_OWNER_CONFIRMATION"
     elif mismatch["has_mismatch"]:
@@ -1166,6 +1212,12 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         "awaiting_owner_payment_confirmation": awaiting_confirm,
         "owner_confirmed_received": received,
         "owner_confirmed_received_amount": received,
+        "historical_archived": {
+            "label": "Historical AMICOR ledger from archived or cancelled engagements. Not deleted. Not included in current/active totals.",
+            "owner_confirmed_received": historical_received,
+            "entry_count": len(historical_entries),
+            "included_in_current_totals": False,
+        },
         "reconciliation_state": reconciliation_state,
         "mismatch": mismatch,
         "mismatch_state": "MISMATCH" if mismatch["has_mismatch"] else "ALIGNED_OR_CONTEXT_ONLY",
@@ -1179,11 +1231,11 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
             "quoted": opportunity_quoted,
             "contracted": opportunity_contracted,
             "owner_confirmed_received": opportunity_received,
-            "note": "Opportunity fields are pipeline context only. They are not added into the authoritative totals.",
+            "note": "CLIENT_CONTEXT only. Opportunity fields are not AMICOR ledger amounts and are not added into authoritative totals.",
         },
         "invoice_support_context": {
             "draft_subtotal": invoice_support_amount,
-            "note": "Invoice-support drafts are not Stripe invoices and are not received revenue. INVOICE SUPPORT != REAL INVOICE SENT.",
+            "note": "CLIENT_CONTEXT billed draft only. Invoice-support drafts are not Stripe invoices, not AMICOR received revenue, and not a real invoice sent.",
         },
         "entries": [
             {
@@ -1192,12 +1244,21 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
                 "opportunity_id": item.opportunity_id,
                 "stage": item.stage,
                 "amount": item.amount,
+                "remaining_amount": round(float(getattr(item, "remaining_amount", 0) or 0), 2),
                 "owner_confirmed": bool(item.owner_confirmed),
                 "invoice_reference": sanitize_untrusted(item.invoice_reference)[:120] if item.invoice_reference else None,
                 "processor_confirmed": False,
+                "party": "AMICOR",
+                "authoritative": True,
+                "historical": item.engagement_id in archived_ids,
+                "included_in_current_totals": item.engagement_id not in archived_ids,
             }
             for item in entries[:50]
         ],
+        "amicor": labeled["amicor"],
+        "client_context": labeled["client_context"],
+        "double_counted": False,
+        "labeling": labeled["rules"],
         "owner_fact_status": _safe_owner_fact_status(db, organization_id=organization_id, user=user),
         "rules": {
             "APPROVED_EQUALS_SUBMITTED": False,
@@ -1211,13 +1272,16 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
             "inferred_from_draft_invoice": False,
             "inferred_from_approval": False,
             "opportunity_fields_are_authoritative": False,
+            "invoice_support_is_authoritative": False,
+            "double_count_opportunity_into_amicor": False,
+            "double_count_invoice_support_into_amicor": False,
         },
         "executes_externally": False,
         "live_discovery_enabled": False,
         "external_submit_enabled": False,
         "client_contact_enabled": False,
         "financial_execution_enabled": False,
-        "disclaimer": "Internal tracking only. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. Nova does not collect payment.",
+        "disclaimer": "Internal tracking only. AMICOR ledger != client billed draft. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. OWNER CONFIRMED RECEIVED != PROCESSOR CONFIRMED PAYMENT. Nova does not collect payment.",
         "guardrails": engine_guardrails(),
     }
 
@@ -1523,7 +1587,14 @@ def platform_policy_catalog() -> dict[str, Any]:
             "EXTERNAL_AUTOMATION_UNKNOWN": True,
             "MANUAL_REVIEW_REQUIRED": True,
         },
-        "policy": "Nova does not bypass CAPTCHA, login, MFA, anti-bot measures, or website restrictions. Flags are internal metadata only.",
+        "policy": (
+            "LOGIN_REQUIRED and CAPTCHA_REQUIRED describe the third-party platform. "
+            "False means that platform does not require login or CAPTCHA. "
+            "Those flags do not disable AMICOR owner approval, authentication, or submission guards. "
+            "HUMAN_SUBMISSION_ONLY, TERMS_RESTRICT_AUTOMATION, and MANUAL_REVIEW_REQUIRED stay enforced. "
+            "Nova does not bypass CAPTCHA, login, MFA, anti-bot measures, or website restrictions. "
+            "Flags are internal metadata only."
+        ),
         "live_fetch_enabled": False,
         "live_submit_enabled": False,
     }
@@ -1543,8 +1614,9 @@ def create_platform_policy(
         owner_user_id=user.user_id,
         opportunity_id=payload.opportunity_id,
         source_label=sanitize_untrusted(payload.source_label)[:120] or "unknown",
-        login_required=True if payload.login_required else bool(payload.login_required),
-        captcha_required=True if payload.captcha_required else bool(payload.captcha_required),
+        # Descriptive of the third-party platform only. False does not bypass AMICOR guards.
+        login_required=bool(payload.login_required),
+        captcha_required=bool(payload.captcha_required),
         human_submission_only=True,
         terms_restrict_automation=True,
         external_automation_unknown=True,

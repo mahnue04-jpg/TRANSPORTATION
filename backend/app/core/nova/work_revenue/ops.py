@@ -23,6 +23,7 @@ from app.core.nova.work_revenue.lifecycle import (
     normalize_task_status,
 )
 from app.core.nova.work_revenue.materials import sanitize_untrusted
+from app.core.nova.work_revenue.revenue_labels import labeled_revenue_view
 from app.core.nova.work_revenue.models import (
     NovaWorkDeliverable,
     NovaWorkMaterial,
@@ -163,8 +164,11 @@ def deliverable_out(row: NovaWorkDeliverable) -> DeliverableOut:
 
 def revenue_out(row: NovaWorkRevenueEntry) -> RevenueEntryOut:
     display = row.stage
-    if bool(row.owner_confirmed) and row.stage in PAID_STAGES:
+    remaining = float(getattr(row, "remaining_amount", 0) or 0)
+    if bool(row.owner_confirmed) and row.stage == "PAID":
         display = "OWNER_CONFIRMED_RECEIVED"
+    elif bool(row.owner_confirmed) and row.stage == "PARTIALLY_PAID":
+        display = "PARTIALLY_PAID"
     elif row.stage == "INVOICED_EXTERNALLY":
         display = "MANUAL_RECORD_ONLY"
     return RevenueEntryOut(
@@ -180,6 +184,11 @@ def revenue_out(row: NovaWorkRevenueEntry) -> RevenueEntryOut:
         owner_confirmed=bool(row.owner_confirmed),
         reconciliation_notes=row.reconciliation_notes,
         display_stage=display,
+        remaining_amount=round(remaining, 2),
+        party="AMICOR",
+        authoritative=True,
+        amount_role="amicor_ledger" if row.stage != "PARTIALLY_PAID" else "amicor_owner_confirmed_received",
+        processor_confirmed=False,
     )
 
 
@@ -517,6 +526,7 @@ def create_revenue_entry(
         expected_payment_date=payload.expected_payment_date,
         invoice_reference=sanitize_untrusted(payload.invoice_reference)[:120] or None,
         owner_confirmed=False,
+        remaining_amount=0,
         reconciliation_notes=sanitize_untrusted(payload.reconciliation_notes) or None,
     )
     db.add(row)
@@ -586,12 +596,19 @@ def confirm_revenue_received(
         raise NovaWorkError("Received confirmation already recorded", status_code=409)
     if row.stage not in _PAID_JUMP_FROM:
         raise NovaWorkError("Revenue cannot jump to PAID from the current stage")
-    if payload.amount is not None:
-        row.amount = _validate_amount(payload.amount, label="amount") or row.amount
-    row.owner_confirmed = True
-    row.stage = "PAID" if row.stage != "PARTIALLY_PAID" or (payload.amount is not None and payload.amount >= row.amount) else "PARTIALLY_PAID"
-    if row.stage == "PARTIALLY_PAID" and payload.amount is not None and payload.amount < (row.amount or 0):
+    remaining = float(getattr(row, "remaining_amount", 0) or 0)
+    expected = float(row.amount or 0) + remaining
+    confirmed = payload.amount if payload.amount is not None else expected
+    confirmed = float(_validate_amount(confirmed, label="amount") or 0)
+    if confirmed + 0.009 >= expected:
+        row.stage = "PAID"
+        row.amount = round(expected, 2)
+        row.remaining_amount = 0
+    else:
         row.stage = "PARTIALLY_PAID"
+        row.amount = round(confirmed, 2)
+        row.remaining_amount = round(expected - confirmed, 2)
+    row.owner_confirmed = True
     row.received_date = payload.received_date or now()
     if payload.reconciliation_notes is not None:
         row.reconciliation_notes = sanitize_untrusted(payload.reconciliation_notes) or None
@@ -729,6 +746,11 @@ def analytics(
     tasks = list_tasks(db, organization_id=organization_id, user=user, limit=LIST_MAX_LIMIT)
     deliverables = list_deliverables(db, organization_id=organization_id, user=user, limit=LIST_MAX_LIMIT)
     revenue = list_revenue_entries(db, organization_id=organization_id, user=user, limit=LIST_MAX_LIMIT)
+    historical_ids = {
+        item.get("engagement_id")
+        for item in engagements
+        if item.get("status") in {"ARCHIVED", "CANCELLED"}
+    }
     due_cutoff = now() + timedelta(days=1)
     tasks_due = 0
     for item in tasks:
@@ -742,9 +764,36 @@ def analytics(
     estimated = sum((item.estimated_value or 0) for item in opps)
     quoted = sum((item.quoted_amount or 0) for item in opps)
     contracted = sum((item.contract_amount or 0) for item in opps)
-    invoiced = sum(item.amount for item in revenue if item.stage in {"INVOICE_DRAFT", "INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"})
-    received = sum(item.amount for item in revenue if item.owner_confirmed and item.stage in PAID_STAGES)
-    received += sum((item.amount_received or 0) for item in opps if item.owner_confirmed_payment_received)
+    invoiced = sum(
+        item.amount
+        for item in revenue
+        if item.stage in {"INVOICE_DRAFT", "INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"}
+        and item.engagement_id not in historical_ids
+    )
+    received = sum(
+        item.amount
+        for item in revenue
+        if item.owner_confirmed
+        and item.stage in PAID_STAGES
+        and item.engagement_id not in historical_ids
+    )
+    historical_received = sum(
+        item.amount
+        for item in revenue
+        if item.owner_confirmed and item.stage in PAID_STAGES and item.engagement_id in historical_ids
+    )
+    current_revenue = [item for item in revenue if item.engagement_id not in historical_ids]
+    labeled = labeled_revenue_view(
+        amicor_estimated=sum(item.amount for item in current_revenue if item.stage == "ESTIMATED"),
+        amicor_quoted=sum(item.amount for item in current_revenue if item.stage == "QUOTED"),
+        amicor_contracted=sum(item.amount for item in current_revenue if item.stage == "CONTRACTED"),
+        amicor_received=received,
+        client_billed=0,
+        opportunity_estimated=estimated,
+        opportunity_quoted=quoted,
+        opportunity_contracted=contracted,
+        opportunity_received=sum((item.amount_received or 0) for item in opps if item.owner_confirmed_payment_received),
+    )
     return {
         "period": period or "all",
         "new_opportunities": len([item for item in opps if item.status == "DISCOVERED"]),
@@ -756,14 +805,19 @@ def analytics(
         "blocked_engagements": len([item for item in engagements if item["status"] == "BLOCKED" or item.get("blockers")]),
         "tasks_due": tasks_due,
         "completed_work": len([item for item in deliverables if item.owner_confirmed_delivered]) + len([item for item in tasks if item.get("status") == "COMPLETE"]),
-        "estimated_pipeline": estimated,
-        "quoted_pipeline": quoted,
-        "contracted_revenue": contracted,
+        "estimated_pipeline": labeled["amicor"]["estimated"]["amount"],
+        "quoted_pipeline": labeled["amicor"]["quoted"]["amount"],
+        "contracted_revenue": labeled["amicor"]["contracted"]["amount"],
         "invoiced_revenue": invoiced,
         "received_revenue": received,
+        "historical_archived_received": historical_received,
+        "amicor": labeled["amicor"],
+        "client_context": labeled["client_context"],
+        "authoritative_source": labeled["authoritative_source"],
+        "double_counted": False,
         "disclaimer": (
-            "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. "
-            "Nova does not collect payment."
+            "AMICOR ledger != client billed draft. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. "
+            "Opportunity amounts are context only and are not added into AMICOR received totals. Nova does not collect payment."
         ),
         "guardrails": engine_guardrails(),
         "due_cutoff": due_cutoff.isoformat(),

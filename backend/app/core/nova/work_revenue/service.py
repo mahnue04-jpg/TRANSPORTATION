@@ -1392,9 +1392,6 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     lost = [item for item in outs if item.status in {"REJECTED", "CLOSED"}]
     active = [item for item in outs if item.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}]
     missing_info = [item for item in outs if item.qualification_outcome == "INSUFFICIENT_INFORMATION"]
-    pipeline = sum((item.estimated_value or 0) for item in outs if not item.owner_confirmed_payment_received)
-    contracted = sum((item.contract_amount or 0) for item in outs)
-    received = sum((item.amount_received or 0) for item in outs if item.owner_confirmed_payment_received)
     engagement_rows = list_engagements(db, organization_id=organization_id, user=user)
     pending_deliverables = (
         _owner_filter(
@@ -1406,10 +1403,15 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         .count()
     )
     from app.core.nova.work_revenue.managed import completion_counts, owner_fact_catalog, reconciliation
+    from app.core.nova.work_revenue.revenue_labels import dashboard_revenue_summary
 
     extra = completion_counts(db, organization_id=organization_id, user=user)
     recon = reconciliation(db, organization_id=organization_id, user=user)
     fact_ready = (owner_fact_catalog(db, organization_id=organization_id, user=user) or {}).get("readiness") or {}
+    revenue_summary = dashboard_revenue_summary(recon)
+    revenue_summary["awaiting_invoice"] = recon.get("awaiting_invoice") or 0
+    revenue_summary["manually_recorded_invoice"] = recon.get("manually_recorded_invoice") or 0
+    revenue_summary["awaiting_owner_payment_confirmation"] = recon.get("awaiting_owner_payment_confirmation") or 0
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
@@ -1462,16 +1464,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         rejected_or_archived=archived,
         opportunity_list=outs,
         engagements=engagement_rows,
-        revenue_summary={
-            "estimated_pipeline": pipeline,
-            "quoted_pipeline": sum((item.quoted_amount or 0) for item in outs),
-            "contracted_value": contracted,
-            "owner_confirmed_received": received,
-            "awaiting_invoice": recon.get("awaiting_invoice") or 0,
-            "manually_recorded_invoice": recon.get("manually_recorded_invoice") or 0,
-            "awaiting_owner_payment_confirmation": recon.get("awaiting_owner_payment_confirmation") or 0,
-            "disclaimer": "Estimated pipeline is not received revenue. Nova does not collect payment. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED.",
-        },
+        revenue_summary=revenue_summary,
         guardrails=engine_guardrails(),
         revenue_placeholder=REVENUE_PLACEHOLDER,
         identity_disclaimer=IDENTITY_DISCLAIMER,
