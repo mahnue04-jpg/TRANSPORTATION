@@ -33,6 +33,10 @@ python website/_generate.py
 | AMICOR Deliver | COMING SOON / IN DEVELOPMENT |
 | Lifesaver AI Care Cloud | IN DEVELOPMENT |
 | Home Hub | FUTURE HARDWARE / IN DEVELOPMENT |
+| Car Hub | FUTURE HARDWARE / IN DEVELOPMENT |
+| AMICOR Nova Work & Revenue | EARLY ACCESS / IN DEVELOPMENT |
+| AMICOR Nova Today | EARLY ACCESS / IN DEVELOPMENT |
+| AMICOR Nova Create | IN DEVELOPMENT |
 
 Prices on the Operations Agent page are **preliminary pricing / subject to change**. There is no checkout.
 

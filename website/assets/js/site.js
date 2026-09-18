@@ -7,6 +7,19 @@
       var open = nav.classList.toggle("open");
       button.setAttribute("aria-expanded", open ? "true" : "false");
     });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && nav.classList.contains("open")) {
+        nav.classList.remove("open");
+        button.setAttribute("aria-expanded", "false");
+        button.focus();
+      }
+    });
+    nav.querySelectorAll("a").forEach(function (link) {
+      link.addEventListener("click", function () {
+        nav.classList.remove("open");
+        button.setAttribute("aria-expanded", "false");
+      });
+    });
   }
 
   var year = document.querySelector("[data-year]");

@@ -1,9 +1,13 @@
 const PRODUCTS = new Set([
   "Autonomous Operations Agent",
+  "AMICOR Nova Work & Revenue",
+  "AMICOR Nova Today",
+  "AMICOR Nova Create",
   "AMICOR Health",
   "AMICOR Deliver",
   "Lifesaver AI Care Cloud",
   "Home Hub",
+  "Car Hub",
   "Partnership",
   "Other",
 ]);
