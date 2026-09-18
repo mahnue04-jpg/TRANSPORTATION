@@ -1,0 +1,17 @@
+{
+  "name": "Amicor (FastAPI backend + static frontend)",
+  "user": "ubuntu",
+  "install": "bash scripts/cloud-agent-install.sh",
+  "terminals": [
+    {
+      "name": "amicor-app",
+      "command": "bash scripts/cloud-agent-start.sh"
+    }
+  ],
+  "ports": [
+    {
+      "name": "amicor-app",
+      "port": 8000
+    }
+  ]
+}
