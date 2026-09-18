@@ -35,7 +35,11 @@ from app.core.nova.billing.stripe_client import (
     nova_billing_webhook_secret,
     sanitize_stripe_error,
 )
-from app.core.nova.signup.stripe_client import is_live_stripe_key, stripe_secret_key
+from app.core.nova.signup.stripe_client import (
+    is_live_stripe_key,
+    nova_live_stripe_enabled,
+    stripe_secret_key,
+)
 from app.helpers import now
 
 logger = logging.getLogger("amicor.nova.billing")
@@ -133,16 +137,20 @@ def _trial_eligible(row: NovaTenantSubscription) -> bool:
     return True
 
 
-def _require_test_mode() -> None:
+def _require_stripe_mode() -> None:
+    """Require Stripe config while keeping live mode fail-closed by default."""
     from app.core.nova.billing.stripe_client import get_nova_billing_stripe_override
 
     if get_nova_billing_stripe_override() is not None:
         return
     secret = stripe_secret_key()
     if not secret:
-        raise BillingError("Stripe TEST key is not configured for Nova billing", status_code=503)
-    if is_live_stripe_key(secret):
-        raise BillingError("Live Stripe keys are not allowed for Nova billing", status_code=503)
+        raise BillingError("Stripe key is not configured for Nova billing", status_code=503)
+    if is_live_stripe_key(secret) and not nova_live_stripe_enabled():
+        raise BillingError(
+            "Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled",
+            status_code=503,
+        )
 
 
 def start_checkout(
@@ -161,7 +169,7 @@ def start_checkout(
     price_id = price_id_for_plan(plan)
     if not price_id:
         raise BillingError("Stripe price is not configured for this plan", status_code=503)
-    _require_test_mode()
+    _require_stripe_mode()
 
     row = _get_or_create_row(db, tenant)
     if row.subscription_status in {STATUS_TRIALING, STATUS_ACTIVE} and row.stripe_subscription_id:
@@ -277,7 +285,7 @@ def start_portal(db: Session, *, user: UserContext, tenant_id: str | None = None
     ensure_nova_billing_schema()
     _require_billing_role(user)
     tenant = _tenant_id(user, tenant_id)
-    _require_test_mode()
+    _require_stripe_mode()
     row = (
         db.query(NovaTenantSubscription)
         .filter(NovaTenantSubscription.tenant_id == tenant)
