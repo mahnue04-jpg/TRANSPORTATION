@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -47,4 +47,29 @@ class NovaBillingWebhookEvent(Base):
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     processing_result: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class NovaBillingRevenueEvent(Base):
+    """Persisted Stripe subscription revenue/refund event. No card data or secrets."""
+
+    __tablename__ = "nova_billing_revenue_events"
+    __table_args__ = (
+        Index("ix_nova_billing_revenue_events_event_id", "stripe_event_id", unique=True),
+        Index("ix_nova_billing_revenue_events_tenant", "tenant_id"),
+        Index("ix_nova_billing_revenue_events_customer", "stripe_customer_id"),
+        Index("ix_nova_billing_revenue_events_subscription", "stripe_subscription_id"),
+        Index("ix_nova_billing_revenue_events_invoice", "stripe_invoice_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    stripe_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stripe_invoice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stripe_charge_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
