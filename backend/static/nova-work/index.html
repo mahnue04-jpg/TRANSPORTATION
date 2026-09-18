@@ -187,7 +187,8 @@
         <div class="compose-grid" id="queue-filters">
           <label>Status
             <select id="queue-status">
-              <option value="">All statuses</option>
+              <option value="">Active queue</option>
+              <option value="ALL">All statuses</option>
               <option value="NEW">New</option>
               <option value="READY">Ready</option>
               <option value="ACTIVE">Active</option>
@@ -200,7 +201,8 @@
           </label>
           <label>Attention
             <select id="queue-attention">
-              <option value="">All</option>
+              <option value="">Active only</option>
+              <option value="all">All including archived</option>
               <option value="overdue">Overdue</option>
               <option value="blocked">Blocked</option>
               <option value="owner_action">Owner action required</option>

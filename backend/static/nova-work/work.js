@@ -180,11 +180,12 @@
     var items = (page && page.items) || [];
     var facts = (page && page.owner_fact_status) || {};
     renderFactStatus(facts);
-    if ($("count-queue")) $("count-queue").textContent = page.total_matched || 0;
+    if ($("count-queue")) $("count-queue").textContent = (page.active_count != null ? page.active_count : page.total_matched) || 0;
     if ($("count-overdue")) $("count-overdue").textContent = page.overdue_count || 0;
     if ($("queue-meta")) {
       $("queue-meta").textContent =
         (page.empty ? "Queue is empty. " : (items.length + " shown of " + (page.total_matched || 0) + ". ")) +
+        (page.historical_excluded ? "Archived and complete work are excluded from default active counts. " : "") +
         "Overdue " + (page.overdue_count || 0) +
         " · blocked " + (page.blocked_count || 0) +
         " · owner action " + (page.owner_action_count || 0) +
