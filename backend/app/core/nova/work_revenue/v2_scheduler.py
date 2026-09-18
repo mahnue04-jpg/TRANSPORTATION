@@ -15,7 +15,7 @@ from app.core.nova.work_revenue.models import (
     NovaWorkRecurringSeries,
     NovaWorkSchedulerJob,
 )
-from app.core.nova.work_revenue.service import NovaWorkError, _ensure, _new_id, _owner_filter, _record_audit
+from app.core.nova.work_revenue.service import NovaWorkError, _ensure_v2, _new_id, _owner_filter, _record_audit
 from app.core.nova.work_revenue.v2_freeze import FROZEN_ENGAGEMENT, FROZEN_OPPORTUNITY, FROZEN_SERIES
 from app.helpers import now
 
@@ -30,6 +30,7 @@ JOB_KINDS = (
 
 JOB_STATUSES = ("PREPARED", "SKIPPED", "CANCELED")
 DEFAULT_TZ = "America/Chicago"
+CATCH_UP_BOUND = 0
 TITLES = {
     "RECURRING_TASK_PREPARE": "Prepare recurring internal tasks",
     "FOLLOW_UP_REMINDER_PREPARE": "Prepare follow-up reminders",
@@ -56,12 +57,13 @@ def _zone_now(timezone_name: str) -> datetime:
 def period_key(kind: str, timezone_name: str, when: datetime | None = None) -> str:
     stamp = when or _zone_now(timezone_name)
     local = stamp.astimezone(ZoneInfo(timezone_name))
+    zone = timezone_name
     if kind in {"REPORT_PREPARE", "RECURRING_TASK_PREPARE"}:
         iso = local.isocalendar()
-        return f"{kind}:{iso.year}-W{iso.week:02d}"
+        return f"{kind}:{zone}:{iso.year}-W{iso.week:02d}"
     if kind == "INVOICE_PREPARE":
-        return f"{kind}:{local.strftime('%Y-%m')}"
-    return f"{kind}:{local.strftime('%Y-%m-%d')}"
+        return f"{kind}:{zone}:{local.strftime('%Y-%m')}"
+    return f"{kind}:{zone}:{local.strftime('%Y-%m-%d')}"
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -140,7 +142,7 @@ def prepare_jobs(
     timezone_name: str | None = None,
     kinds: list[str] | None = None,
 ) -> dict[str, Any]:
-    _ensure()
+    _ensure_v2()
     tz = _validate_timezone(timezone_name)
     wanted = [str(item).strip().upper() for item in (kinds or JOB_KINDS)]
     invalid = [item for item in wanted if item not in JOB_KINDS]
@@ -157,6 +159,7 @@ def prepare_jobs(
             db.query(NovaWorkSchedulerJob)
             .filter(
                 NovaWorkSchedulerJob.organization_id == organization_id,
+                NovaWorkSchedulerJob.owner_user_id == user.user_id,
                 NovaWorkSchedulerJob.job_kind == kind,
                 NovaWorkSchedulerJob.period_key == key,
             )
@@ -226,13 +229,15 @@ def prepare_jobs(
         "external_submission": False,
         "financial_action": False,
         "continuous_worker": False,
+        "catch_up_enabled": False,
+        "catch_up_bound": CATCH_UP_BOUND,
     }
 
 
 def list_jobs(
     db: Session, *, organization_id: str, user: UserContext, limit: int = 100
 ) -> list[dict[str, Any]]:
-    _ensure()
+    _ensure_v2()
     rows = (
         _owner_filter(
             db.query(NovaWorkSchedulerJob).filter(NovaWorkSchedulerJob.organization_id == organization_id),

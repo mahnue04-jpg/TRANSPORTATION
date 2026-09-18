@@ -19,7 +19,7 @@ from app.core.nova.work_revenue.models import NovaWorkLiveActionAudit, NovaWorkS
 from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.core.nova.work_revenue.service import (
     NovaWorkError,
-    _ensure,
+    _ensure_v2,
     _new_id,
     _owner_filter,
     _record_audit,
@@ -173,7 +173,7 @@ def action_out(row: NovaWorkSupervisedAction) -> dict[str, Any]:
 def get_action(
     db: Session, supervised_action_id: str, *, organization_id: str, user: UserContext
 ) -> NovaWorkSupervisedAction:
-    _ensure()
+    _ensure_v2()
     row = _query(db, organization_id, user).filter(
         NovaWorkSupervisedAction.supervised_action_id == supervised_action_id
     ).first()
@@ -206,7 +206,7 @@ def create_action(
     organization_id: str,
     user: UserContext,
 ) -> dict[str, Any]:
-    _ensure()
+    _ensure_v2()
     action_type = str(payload.get("action_type") or "").strip().upper()
     if action_type not in ACTION_TYPES:
         raise NovaWorkError("Unknown supervised action type")
@@ -580,7 +580,7 @@ def list_actions(
     status: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    _ensure()
+    _ensure_v2()
     query = _query(db, organization_id, user)
     token = (status or "").strip().upper()
     if token and token != "ALL":
@@ -634,7 +634,7 @@ def live_audit_out(row: NovaWorkLiveActionAudit) -> dict[str, Any]:
 def list_live_audits(
     db: Session, *, organization_id: str, user: UserContext, limit: int = 100
 ) -> list[dict[str, Any]]:
-    _ensure()
+    _ensure_v2()
     rows = (
         _owner_filter(
             db.query(NovaWorkLiveActionAudit).filter(NovaWorkLiveActionAudit.organization_id == organization_id),

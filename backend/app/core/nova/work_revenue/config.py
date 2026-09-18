@@ -157,6 +157,8 @@ def capabilities_surface() -> dict[str, Any]:
             "idempotency": True,
             "migration_readiness": True,
             "monitoring_readiness": True,
+            "canonical_alembic_production": True,
+            "lazy_v2_schema_in_production": False,
         },
         "semantic_guards": {
             "APPROVED_EQUALS_SUBMITTED": False,

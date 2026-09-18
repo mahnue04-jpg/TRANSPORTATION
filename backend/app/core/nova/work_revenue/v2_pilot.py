@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext
 from app.core.nova.work_revenue.managed import reconciliation as v1_reconciliation
 from app.core.nova.work_revenue.models import NovaWorkApplication
-from app.core.nova.work_revenue.service import _ensure, _owner_filter, get_opportunity
+from app.core.nova.work_revenue.service import _ensure_v2, _owner_filter, get_opportunity
 from app.core.nova.work_revenue.v2_revenue import revenue_preparation
 from app.core.nova.work_revenue.v2_status import LIVE_DISABLED
 
@@ -54,7 +54,7 @@ def pilot_workflow(
     user: UserContext,
     opportunity_id: str | None = None,
 ) -> dict[str, Any]:
-    _ensure()
+    _ensure_v2()
     opportunity = None
     application = None
     if opportunity_id:

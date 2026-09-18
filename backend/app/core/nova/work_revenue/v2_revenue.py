@@ -18,7 +18,7 @@ from app.core.nova.work_revenue.models import (
 from app.core.nova.work_revenue.ops import get_revenue_entry
 from app.core.nova.work_revenue.service import (
     NovaWorkError,
-    _ensure,
+    _ensure_v2,
     _new_id,
     _owner_filter,
     _record_audit,
@@ -85,7 +85,7 @@ def record_payment_event(
     user: UserContext,
 ) -> dict[str, Any]:
     """Record a processor-shaped event without changing AMICOR received cash."""
-    _ensure()
+    _ensure_v2()
     if not organization_id:
         raise NovaWorkError("organization_id is required", status_code=400)
     if not user.user_id:
@@ -199,7 +199,7 @@ def record_historical_correction(
     organization_id: str,
     user: UserContext,
 ) -> dict[str, Any]:
-    _ensure()
+    _ensure_v2()
     idempotency_key = sanitize_untrusted(str(payload.get("idempotency_key") or "")).strip()
     if not idempotency_key:
         raise NovaWorkError("idempotency_key is required")
@@ -287,7 +287,7 @@ def correction_out(row: NovaWorkHistoricalCorrection, *, duplicate: bool = False
 def list_historical_corrections(
     db: Session, *, organization_id: str, user: UserContext, limit: int = 100
 ) -> list[dict[str, Any]]:
-    _ensure()
+    _ensure_v2()
     rows = (
         _owner_filter(
             db.query(NovaWorkHistoricalCorrection).filter(

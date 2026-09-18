@@ -517,7 +517,7 @@ class NovaWorkSchedulerJob(Base):
     __table_args__ = (
         Index("ix_nova_work_sched_id", "job_id", unique=True),
         Index("ix_nova_work_sched_org", "organization_id", "status", "due_at"),
-        Index("ix_nova_work_sched_period", "organization_id", "job_kind", "period_key", unique=True),
+        Index("ix_nova_work_sched_period", "organization_id", "owner_user_id", "job_kind", "period_key", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)

@@ -37,7 +37,7 @@ from app.core.nova.work_revenue.models import (
 from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
 from app.core.nova.work_revenue.providers import get_provider, list_providers, opportunity_fingerprint
 from app.core.nova.work_revenue.qualifier import qualify_opportunity
-from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
+from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema, v2_schema_ready
 from app.core.nova.work_revenue.schemas import (
     MATERIAL_KINDS,
     ENGAGEMENT_STATUSES,
@@ -162,6 +162,12 @@ def _owner_filter(query, model, user: UserContext):
 
 def _ensure() -> None:
     ensure_work_revenue_schema()
+
+
+def _ensure_v2() -> None:
+    ensure_work_revenue_schema()
+    if not v2_schema_ready():
+        raise NovaWorkError("SCHEMA_MIGRATION_REQUIRED", status_code=503)
 
 
 def _json_list(raw: str | None) -> list[str]:

@@ -15,10 +15,12 @@ WEBHOOK_REUSE_CONTRACT = {
     "version": "v2-internal",
     "processor_events_never_apply_to_ledger_by_default": True,
     "stripe_objects_created": False,
+    "live_webhooks_enabled": False,
     "duplicate_lookup": ["organization_id", "owner_user_id", "idempotency_key"],
     "replay": "return the original canonical row without mutation",
     "consume": "durable timestamp, fail closed on second consume",
     "secrets": "never persist passwords, tokens, Stripe secrets, or account numbers",
+    "future_webhook_layer": "must call lookup_canonical then replay_without_mutation; must not apply cash",
 }
 
 _SECRET_RE = re.compile(

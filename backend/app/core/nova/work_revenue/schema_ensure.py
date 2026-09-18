@@ -1,6 +1,8 @@
 """Additive Work & Revenue tables/columns. Does not alter payment, Health, or Lifesaver tables."""
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
@@ -54,6 +56,18 @@ WORK_TABLES = (
     NovaWorkPaymentEvent.__table__,
     NovaWorkHistoricalCorrection.__table__,
 )
+
+V2_TABLE_NAMES = frozenset(
+    {
+        "nova_work_live_action_audits",
+        "nova_work_supervised_actions",
+        "nova_work_scheduler_jobs",
+        "nova_work_payment_events",
+        "nova_work_historical_corrections",
+    }
+)
+V2_TABLES = tuple(table for table in WORK_TABLES if table.name in V2_TABLE_NAMES)
+V1_TABLES = tuple(table for table in WORK_TABLES if table.name not in V2_TABLE_NAMES)
 
 _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
     "nova_work_opportunities": {
@@ -123,15 +137,13 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
         "entity_type": "VARCHAR(32)",
         "previous_state": "VARCHAR(40)",
         "new_state": "VARCHAR(40)",
-    },
-    "nova_work_revenue_entries": {
-        "remaining_amount": "FLOAT",
-    },
-    "nova_work_audit_events": {
         "idempotency_key": "VARCHAR(120)",
         "approval_ref": "VARCHAR(32)",
         "reason": "VARCHAR(400)",
         "source": "VARCHAR(80)",
+    },
+    "nova_work_revenue_entries": {
+        "remaining_amount": "FLOAT",
     },
     "nova_work_supervised_actions": {
         "approval_status": "VARCHAR(24)",
@@ -153,15 +165,44 @@ def _column_sql(sql_type: str, dialect: str) -> str:
     return sql_type
 
 
-def ensure_work_revenue_schema(engine: Engine | None = None) -> None:
+def _env_on(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def lazy_v2_schema_allowed() -> bool:
+    """Production must not create V2 tables before owner-authorized Alembic.
+
+    Pytest and explicit NOVA_WR_LAZY_V2_SCHEMA=1 remain the local/test path.
+    Never set that override on Render.
+    """
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+    if _env_on("NOVA_WR_LAZY_V2_SCHEMA"):
+        return True
+    from app.core.nova.work_revenue.config import is_production_runtime
+
+    return not is_production_runtime()
+
+
+def v2_schema_ready(engine: Engine | None = None) -> bool:
     bind = engine or default_engine
-    Base.metadata.create_all(bind=bind, tables=list(WORK_TABLES))
+    names = set(inspect(bind).get_table_names())
+    return V2_TABLE_NAMES.issubset(names)
+
+
+def ensure_work_revenue_schema(engine: Engine | None = None, *, include_v2: bool | None = None) -> None:
+    bind = engine or default_engine
+    create_v2 = lazy_v2_schema_allowed() if include_v2 is None else include_v2
+    tables = list(WORK_TABLES) if create_v2 else list(V1_TABLES)
+    Base.metadata.create_all(bind=bind, tables=tables)
     inspector = inspect(bind)
     names = set(inspector.get_table_names())
     dialect = str(getattr(bind.dialect, "name", "") or "")
     statements: list[str] = []
     for table_name, columns in _EXTRA_COLUMNS.items():
         if table_name not in names:
+            continue
+        if table_name in V2_TABLE_NAMES and not create_v2:
             continue
         existing = {col["name"] for col in inspector.get_columns(table_name)}
         for name, sql_type in columns.items():
@@ -177,7 +218,8 @@ def ensure_work_revenue_schema(engine: Engine | None = None) -> None:
     with bind.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
-        _repair_v2_indexes(conn, dialect, inspect(bind))
+        if create_v2:
+            _repair_v2_indexes(conn, dialect, inspect(bind))
 
 
 def _repair_v2_indexes(conn, dialect: str, inspector) -> None:
@@ -194,13 +236,14 @@ def _repair_v2_indexes(conn, dialect: str, inspector) -> None:
             "ix_nova_work_payevt_idem",
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_nova_work_payevt_idem ON nova_work_payment_events (organization_id, owner_user_id, idempotency_key)",
         ),
+        (
+            "nova_work_scheduler_jobs",
+            "ix_nova_work_sched_period",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_nova_work_sched_period ON nova_work_scheduler_jobs (organization_id, owner_user_id, job_kind, period_key)",
+        ),
     )
     for table, index_name, create_sql in repairs:
         if table not in names:
             continue
-        existing = {item.get("name") for item in inspector.get_indexes(table)}
-        drop_sql = f"DROP INDEX IF EXISTS {index_name}"
-        if dialect.startswith("postgres"):
-            drop_sql = f"DROP INDEX IF EXISTS {index_name}"
-        conn.execute(text(drop_sql))
+        conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
         conn.execute(text(create_sql))

@@ -224,10 +224,10 @@ V2 adds configuration, safety policy, adapter contracts, an owner approval queue
 - Scheduler `POST /api/nova/work/v2/scheduler/prepare` generates idempotent prepare jobs. No worker, cron, send, contact, or payment.
 - Processor-shaped payment events are stored without changing AMICOR received cash. Owner confirmation remains authoritative.
 
-See `backend/docs/NOVA_WORK_REVENUE_V2_MIGRATION.md` for production migration notes. Do not run production migrations without owner authorization.
+See `backend/docs/NOVA_WORK_REVENUE_V2_MIGRATION.md` for production migration notes. Production does **not** lazy-create V2 tables; Alembic is canonical. Do not run production migrations without owner authorization.
 
 `backend/tests/test_nova_work_revenue_v2.py` covers V2 config, safety, adapters, owner queue, scheduler, payment-event, tenant, and production-guard behavior.
 
 ## Schema / migration notes
 
-Changes are additive `CREATE TABLE` / `ALTER TABLE ADD COLUMN` via `ensure_work_revenue_schema`. New tables include recurring series/occurrences, weekly reports, invoice-support, business facts, disclosure policies, and platform policies. No Stripe, Health, Delivery, Freight, or Lifesaver tables.
+V1 Work tables/columns remain additive via `ensure_work_revenue_schema`. Production skips V2 table creation. New V1 tables include recurring series/occurrences, weekly reports, invoice-support, business facts, disclosure policies, and platform policies. No Stripe, Health, Delivery, Freight, or Lifesaver tables.
