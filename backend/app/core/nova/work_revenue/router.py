@@ -11,6 +11,7 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.config import capabilities_surface
 from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
 from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue import managed
@@ -110,7 +111,16 @@ def work_providers(user: UserContext = Depends(get_current_user_context)):
 
 @router.get("/guardrails")
 def work_guardrails(user: UserContext = Depends(get_current_user_context)):
-    return engine_guardrails()
+    surface = capabilities_surface()
+    flags = engine_guardrails()
+    return {
+        **flags,
+        "capabilities": surface["capabilities"],
+        "runtime_environment": surface["runtime_environment"],
+        "live_execution_implemented": False,
+        "secrets_exposed": False,
+        "missing_env_means_off": True,
+    }
 
 
 @router.get("/profile")
@@ -1188,3 +1198,8 @@ def list_platform_policies(
     return managed.list_platform_policies(
         db, organization_id=_resolve_org(user, organization_id), user=user, limit=limit
     )
+
+
+from app.core.nova.work_revenue.v2_router import router as nova_work_v2_router
+
+router.include_router(nova_work_v2_router)

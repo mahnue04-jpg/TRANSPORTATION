@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import UserContext
 from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.core.nova.work_revenue.lifecycle import (
     DISCLOSURE_STATUSES,
     ENGAGEMENT_TRANSITIONS,
@@ -959,7 +960,11 @@ def transition_weekly_report(
 
 
 def refuse_report_send() -> None:
-    raise NovaWorkError("Weekly reports cannot be sent. Generating a report is not sending it.", status_code=409)
+    decision = evaluate_live_action("REPORT_SEND", adapter_implemented=False, dry_run=False)
+    raise NovaWorkError(
+        "Weekly reports cannot be sent. Generating a report is not sending it. " + decision.reason,
+        status_code=409,
+    )
 
 
 def _invoice_out(row: NovaWorkInvoiceSupport) -> dict[str, Any]:
@@ -1126,7 +1131,11 @@ def transition_invoice_support(
 
 
 def refuse_invoice_send() -> None:
-    raise NovaWorkError("Invoice-support records cannot be sent or charged.", status_code=409)
+    decision = evaluate_live_action("INVOICE_SEND", adapter_implemented=False, dry_run=False)
+    raise NovaWorkError(
+        "Invoice-support records cannot be sent or charged. " + decision.reason,
+        status_code=409,
+    )
 
 
 def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> dict[str, Any]:
@@ -1242,6 +1251,10 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         "awaiting_owner_payment_confirmation": awaiting_confirm,
         "owner_confirmed_received": received,
         "owner_confirmed_received_amount": received,
+        "remaining_balance": round(
+            sum(float(getattr(item, "remaining_amount", 0) or 0) for item in current_entries if item.stage == "PARTIALLY_PAID"),
+            2,
+        ),
         "historical_archived": {
             "label": "Historical AMICOR ledger from archived or cancelled engagements. Not deleted. Not included in current/active totals.",
             "owner_confirmed_received": historical_received,

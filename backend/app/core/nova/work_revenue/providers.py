@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Protocol
 
+from app.core.nova.work_revenue.flags import engine_guardrails
+
 PROVIDER_FLAG_KEYS = (
     "DISCOVERY_SUPPORTED",
     "DETAIL_FETCH_SUPPORTED",
@@ -228,8 +230,8 @@ def list_providers() -> list[dict[str, Any]]:
             "notes": _NOTES[provider.provider_id],
             "capabilities": {
                 **dict(provider.capabilities),
-                "LIVE_DISCOVERY_ENABLED": False,
-                "EXTERNAL_SUBMISSION_ENABLED": False,
+                "LIVE_DISCOVERY_ENABLED": engine_guardrails()["LIVE_DISCOVERY_ENABLED"],
+                "EXTERNAL_SUBMISSION_ENABLED": engine_guardrails()["EXTERNAL_SUBMISSION_ENABLED"],
             },
         }
         for provider in PROVIDERS.values()

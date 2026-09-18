@@ -444,3 +444,111 @@ class NovaWorkPlatformPolicy(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkLiveActionAudit(Base):
+    __tablename__ = "nova_work_live_action_audits"
+    __table_args__ = (
+        Index("ix_nova_work_live_audit_id", "audit_id", unique=True),
+        Index("ix_nova_work_live_audit_org", "organization_id", "created_at"),
+        Index("ix_nova_work_live_audit_action", "organization_id", "action_type", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    audit_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False, default="blocked")
+    reason: Mapped[str] = mapped_column(String(400), nullable=False)
+    external_target: Mapped[str | None] = mapped_column(String(220), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    supervised_action_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    conditions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkSupervisedAction(Base):
+    __tablename__ = "nova_work_supervised_actions"
+    __table_args__ = (
+        Index("ix_nova_work_sup_id", "supervised_action_id", unique=True),
+        Index("ix_nova_work_sup_org", "organization_id", "status", "created_at"),
+        Index("ix_nova_work_sup_idem", "organization_id", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    supervised_action_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="DRAFT")
+    capability: Mapped[str] = mapped_column(String(48), nullable=False)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/Chicago")
+    owner_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkSchedulerJob(Base):
+    __tablename__ = "nova_work_scheduler_jobs"
+    __table_args__ = (
+        Index("ix_nova_work_sched_id", "job_id", unique=True),
+        Index("ix_nova_work_sched_org", "organization_id", "status", "due_at"),
+        Index("ix_nova_work_sched_period", "organization_id", "job_kind", "period_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    job_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    job_kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    period_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="PREPARED")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/Chicago")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    supervised_action_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkPaymentEvent(Base):
+    __tablename__ = "nova_work_payment_events"
+    __table_args__ = (
+        Index("ix_nova_work_payevt_id", "event_id", unique=True),
+        Index("ix_nova_work_payevt_org", "organization_id", "created_at"),
+        Index("ix_nova_work_payevt_idem", "organization_id", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    event_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    entry_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    engagement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    processor_status: Mapped[str] = mapped_column(String(40), nullable=False, default="RECORDED")
+    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(12), nullable=False, default="USD")
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    applied_to_ledger: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

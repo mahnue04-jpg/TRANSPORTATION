@@ -528,6 +528,42 @@
         }
       } catch (_) {}
     }
+    if (activeTab === "v2-actions" || activeTab === "overview") {
+      try {
+        var board = await api("/api/nova/work/v2/actions/board");
+        function v2Item(row) {
+          return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
+            "<div class=\"muted\">" + escapeHtml(row.action_type) + " · " + escapeHtml(row.status) +
+            " · approval is not execution · live execution off</div></div>";
+        }
+        if ($("v2-pending-list")) $("v2-pending-list").innerHTML = listHtml(board.pending_owner_approval, "No pending owner approvals.", v2Item);
+        if ($("v2-waiting-list")) $("v2-waiting-list").innerHTML = listHtml(board.approved_waiting, "Nothing approved and waiting.", v2Item);
+        if ($("v2-blocked-list")) $("v2-blocked-list").innerHTML = listHtml(board.blocked, "No blocked live actions.", v2Item);
+        if ($("v2-completed-list")) $("v2-completed-list").innerHTML = listHtml(board.completed, "No completed live actions. Live execution remains off.", v2Item);
+        if ($("v2-failed-list")) $("v2-failed-list").innerHTML = listHtml(board.failed, "No failed live-action attempts.", v2Item);
+        var trail = await api("/api/nova/work/v2/audit?limit=50");
+        if ($("v2-audit-list")) {
+          $("v2-audit-list").innerHTML = listHtml(trail, "No live-action audit records.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.action_type) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.outcome) + " · " + escapeHtml(row.reason) +
+              " · " + escapeHtml(row.timestamp || "") + "</div></div>";
+          });
+        }
+      } catch (_) {}
+    }
+    if (activeTab === "v2-capabilities") {
+      try {
+        var caps = await api("/api/nova/work/v2/capabilities");
+        var items = Object.keys(caps.capabilities || {}).map(function (key) { return caps.capabilities[key]; });
+        if ($("v2-capability-list")) {
+          $("v2-capability-list").innerHTML = listHtml(items, "No capabilities.", function (row) {
+            return "<div class=\"item\"><strong>" + escapeHtml(row.capability) + "</strong>" +
+              "<div class=\"muted\">" + (row.enabled ? "enabled" : "DISABLED") +
+              " · default off · live adapter not implemented · secrets not exposed</div></div>";
+          });
+        }
+      } catch (_) {}
+    }
     if (selectedOpportunityId) {
       await loadDetail(selectedOpportunityId);
     }
@@ -624,7 +660,7 @@
       if (!target || !target.getAttribute || !target.hasAttribute("data-tab")) return;
       activeTab = target.getAttribute("data-tab") || "overview";
       applyTab();
-      if (activeTab === "owner-facts" || activeTab === "queue" || activeTab === "reconciliation") {
+      if (activeTab === "owner-facts" || activeTab === "queue" || activeTab === "reconciliation" || activeTab === "v2-actions" || activeTab === "v2-capabilities") {
         refresh().catch(function (err) { showBanner(err.message); });
       }
     });

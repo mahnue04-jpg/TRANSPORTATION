@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.lifecycle import FACT_STATUSES, FACT_VALUE_STATUSES
 from app.core.nova.work_revenue.materials import sanitize_untrusted
 from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
@@ -346,10 +347,7 @@ def fact_catalog(*, applicant_party: str = "AMICOR", stored: dict[str, dict[str,
         ),
         "externally_ready": False,
         "guardrails": {
-            "LIVE_DISCOVERY_ENABLED": False,
-            "EXTERNAL_SUBMISSION_ENABLED": False,
-            "FINANCIAL_ACTIONS_ENABLED": False,
-            "AUTONOMOUS_CLIENT_CONTACT_ENABLED": False,
+            **engine_guardrails(),
             "FACT_ENTRY_EQUALS_APPROVAL": False,
             "FACT_ENTRY_EQUALS_SUBMIT": False,
             "FACT_ENTRY_EQUALS_PAYMENT": False,

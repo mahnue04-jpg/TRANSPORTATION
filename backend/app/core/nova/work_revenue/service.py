@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
-from app.core.nova.work_revenue.flags import engine_guardrails, EXTERNAL_SUBMISSION_ENABLED
+from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.runtime_contract import _resolve_runtime_environment
 from app.core.nova.work_revenue.lifecycle import (
     ACTIVE_ENGAGEMENT_COUNT_STATUSES,
@@ -963,11 +964,20 @@ def qualification_out(opportunity_id: str, result: dict[str, Any]) -> Qualificat
 
 
 def refuse_external_submission() -> None:
-    if EXTERNAL_SUBMISSION_ENABLED:
-        raise NovaWorkError("External submission flag is true but no live adapter is implemented", status_code=409)
+    decision = evaluate_live_action(
+        "EXTERNAL_SUBMISSION",
+        tenant_authorized=False,
+        owner_approved=False,
+        adapter_implemented=False,
+        required_facts_available=False,
+        terms_policy_satisfied=False,
+        not_duplicated=True,
+        dry_run=False,
+    )
     raise NovaWorkError(
-        "External application submission is not enabled in Phase 1. "
-        "APPROVED means APPROVED_FOR_FUTURE_SUBMISSION only. Nothing was sent.",
+        "External application submission is not enabled. "
+        "APPROVED means APPROVED_FOR_FUTURE_SUBMISSION only. Nothing was sent. "
+        + decision.reason,
         status_code=409,
     )
 

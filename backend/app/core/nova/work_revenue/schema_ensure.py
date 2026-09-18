@@ -12,14 +12,18 @@ from app.core.nova.work_revenue.models import (
     NovaWorkDisclosurePolicy,
     NovaWorkEngagement,
     NovaWorkInvoiceSupport,
+    NovaWorkLiveActionAudit,
     NovaWorkMaterial,
     NovaWorkOpportunity,
     NovaWorkOwnerAction,
+    NovaWorkPaymentEvent,
     NovaWorkPlatformPolicy,
     NovaWorkRecurringOccurrence,
     NovaWorkRecurringSeries,
     NovaWorkRevenueEntry,
+    NovaWorkSchedulerJob,
     NovaWorkStatusHistory,
+    NovaWorkSupervisedAction,
     NovaWorkTask,
     NovaWorkWeeklyReport,
 )
@@ -43,6 +47,10 @@ WORK_TABLES = (
     NovaWorkBusinessFact.__table__,
     NovaWorkDisclosurePolicy.__table__,
     NovaWorkPlatformPolicy.__table__,
+    NovaWorkLiveActionAudit.__table__,
+    NovaWorkSupervisedAction.__table__,
+    NovaWorkSchedulerJob.__table__,
+    NovaWorkPaymentEvent.__table__,
 )
 
 _EXTRA_COLUMNS: dict[str, dict[str, str]] = {

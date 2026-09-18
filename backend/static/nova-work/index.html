@@ -150,6 +150,8 @@
         <button type="button" class="secondary" data-tab="recurring" role="tab" aria-selected="false">Recurring</button>
         <button type="button" class="secondary" data-tab="reports" role="tab" aria-selected="false">Reports</button>
         <button type="button" class="secondary" data-tab="invoice-support" role="tab" aria-selected="false">Invoice support</button>
+        <button type="button" class="secondary" data-tab="v2-actions" role="tab" aria-selected="false">Pending Owner Approval</button>
+        <button type="button" class="secondary" data-tab="v2-capabilities" role="tab" aria-selected="false">Capabilities</button>
         <button type="button" class="secondary" data-tab="archive" role="tab" aria-selected="false">Archive</button>
       </div>
     </section>
@@ -271,6 +273,24 @@
       <article class="card" data-panel="invoice-support"><h2>Invoice-support drafts</h2>
         <p class="hint">Client billed drafts from owner-entered quantity and rate. Not AMICOR received revenue. Nova does not create Stripe invoices or collect payment.</p>
         <div id="invoice-list">Sign in to load.</div>
+      </article>
+      <article class="card wide-card" data-panel="v2-actions">
+        <h2>Pending Owner Approval</h2>
+        <p class="hint">Approval is not execution. Queued actions cannot run live tonight. Duplicate execution is blocked. Revoked approval stops queued execution.</p>
+        <div id="v2-pending-list">Sign in to load.</div>
+      </article>
+      <article class="card" data-panel="v2-actions"><h2>Approved / Waiting</h2><div id="v2-waiting-list">None.</div></article>
+      <article class="card" data-panel="v2-actions"><h2>Blocked</h2><div id="v2-blocked-list">None.</div></article>
+      <article class="card" data-panel="v2-actions"><h2>Completed</h2><div id="v2-completed-list">None.</div></article>
+      <article class="card" data-panel="v2-actions"><h2>Failed</h2><div id="v2-failed-list">None.</div></article>
+      <article class="card wide-card" data-panel="v2-actions overview"><h2>Audit Trail</h2>
+        <p class="hint">Live-action attempts are recorded as blocked or allowed. Secrets are never stored.</p>
+        <div id="v2-audit-list">None.</div>
+      </article>
+      <article class="card wide-card" data-panel="v2-capabilities">
+        <h2>Capability status</h2>
+        <p class="hint">Every live action defaults to OFF. A missing environment variable cannot enable production behavior.</p>
+        <div id="v2-capability-list">Sign in to load.</div>
       </article>
       <article class="card" data-panel="archive"><h2>Archive</h2><div id="archive-list">None.</div></article>
       <article class="card" data-panel="overview"><h2>Activity</h2><div id="audit-list">None.</div></article>
