@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
 from app.core.nova.work_revenue.flags import engine_guardrails, EXTERNAL_SUBMISSION_ENABLED
+from app.runtime_contract import _resolve_runtime_environment
 from app.core.nova.work_revenue.lifecycle import (
     ACTIVE_ENGAGEMENT_COUNT_STATUSES,
     LIST_MAX_LIMIT,
@@ -1216,6 +1217,15 @@ def update_application_status(
     return opportunity
 
 
+def _testing_runtime() -> bool:
+    return os.getenv("TESTING", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _is_production_runtime() -> bool:
+    """Use the same production detection as /api/health/live (AMICOR_ENVIRONMENT / HTTPS+Postgres)."""
+    return str(_resolve_runtime_environment() or "").strip().lower() in {"production", "prod"}
+
+
 def ingest_simulated(
     db: Session,
     *,
@@ -1224,9 +1234,7 @@ def ingest_simulated(
     fixture_ids: list[str] | None = None,
 ) -> list[NovaWorkOpportunity]:
     _ensure()
-    testing = os.getenv("TESTING", "").lower() == "true"
-    runtime = os.getenv("RUNTIME_ENVIRONMENT", os.getenv("APP_ENV", "development")).lower()
-    if not testing and runtime in {"production", "prod"}:
+    if not _testing_runtime() and _is_production_runtime():
         raise NovaWorkError("Simulated opportunities are not allowed in production", status_code=403)
     provider = get_provider("simulated")
     created: list[NovaWorkOpportunity] = []
