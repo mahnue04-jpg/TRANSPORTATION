@@ -59,7 +59,8 @@
       <article class="card compact"><h3>AMICOR EXPECTED (EST.)</h3><p id="count-pipeline">0</p></article>
       <article class="card compact"><h3>AMICOR QUOTED</h3><p id="count-quoted">0</p></article>
       <article class="card compact"><h3>AMICOR CONTRACTED</h3><p id="count-contracted">0</p></article>
-      <article class="card compact"><h3>AMICOR RECEIVED (OWNER)</h3><p id="count-received">0</p></article>
+      <article class="card compact"><h3>REMAINING (PARTIAL)</h3><p id="count-remaining">0</p></article>
+      <article class="card compact"><h3>HISTORICAL RECEIVED</h3><p id="count-historical">0</p></article>
       <article class="card compact"><h3>CLIENT BILLED (DRAFT)</h3><p id="count-client-billed">0</p></article>
       <article class="card compact"><h3>CLIENT/OPP CONTRACT (CONTEXT)</h3><p id="count-opp-contract">0</p></article>
       <article class="card compact"><h3>TASKS DUE</h3><p id="count-tasks">0</p></article>
@@ -150,6 +151,15 @@
         <button type="button" class="secondary" data-tab="recurring" role="tab" aria-selected="false">Recurring</button>
         <button type="button" class="secondary" data-tab="reports" role="tab" aria-selected="false">Reports</button>
         <button type="button" class="secondary" data-tab="invoice-support" role="tab" aria-selected="false">Invoice support</button>
+        <button type="button" class="secondary" data-tab="needs-review" role="tab" aria-selected="false">Needs Review</button>
+        <button type="button" class="secondary" data-tab="approved" role="tab" aria-selected="false">Approved</button>
+        <button type="button" class="secondary" data-tab="submitted" role="tab" aria-selected="false">Submitted / Manual Record</button>
+        <button type="button" class="secondary" data-tab="active-work" role="tab" aria-selected="false">Active Work</button>
+        <button type="button" class="secondary" data-tab="waiting" role="tab" aria-selected="false">Waiting</button>
+        <button type="button" class="secondary" data-tab="completed" role="tab" aria-selected="false">Completed</button>
+        <button type="button" class="secondary" data-tab="partial-payments" role="tab" aria-selected="false">Partial Payments</button>
+        <button type="button" class="secondary" data-tab="historical" role="tab" aria-selected="false">Historical / Archived</button>
+        <button type="button" class="secondary" data-tab="audit" role="tab" aria-selected="false">Audit</button>
         <button type="button" class="secondary" data-tab="v2-actions" role="tab" aria-selected="false">Pending Owner Approval</button>
         <button type="button" class="secondary" data-tab="v2-capabilities" role="tab" aria-selected="false">Capabilities</button>
         <button type="button" class="secondary" data-tab="archive" role="tab" aria-selected="false">Archive</button>
@@ -287,7 +297,46 @@
         <p class="hint">Live-action attempts are recorded as blocked or allowed. Secrets are never stored.</p>
         <div id="v2-audit-list">None.</div>
       </article>
+      <article class="card" data-panel="needs-review"><h2>Needs Review</h2>
+        <p class="hint">OWNER ACTION REQUIRED. NOVA PREPARED drafts stay internal. Approval is not execution.</p>
+        <div id="needs-review-list">None.</div>
+      </article>
+      <article class="card" data-panel="approved"><h2>Approved</h2>
+        <p class="hint">APPROVED FOR FUTURE SUBMISSION only. NOT SENT BY NOVA.</p>
+        <div id="approved-list">None.</div>
+      </article>
+      <article class="card" data-panel="submitted"><h2>Submitted / Manual Record</h2>
+        <p class="hint">MANUALLY SUBMITTED by the owner. Nova does not claim it submitted anything.</p>
+        <div id="submitted-list">None.</div>
+      </article>
+      <article class="card" data-panel="active-work"><h2>Active Work</h2>
+        <p class="hint">Internal engagements and tasks. PAYMENT NOT CONFIRMED until the owner records received cash.</p>
+        <div id="active-work-list">None.</div>
+      </article>
+      <article class="card" data-panel="waiting"><h2>Waiting</h2>
+        <p class="hint">OWNER ACTION REQUIRED. Approved/queued V2 actions are not live execution.</p>
+        <div id="waiting-list">None.</div>
+      </article>
+      <article class="card" data-panel="completed"><h2>Completed</h2>
+        <p class="hint">Complete work is not automatically received revenue. RECEIVED CONFIRMED BY OWNER is separate.</p>
+        <div id="completed-list">None.</div>
+      </article>
+      <article class="card" data-panel="partial-payments"><h2>Partial Payments</h2>
+        <p class="hint">Amount is total received so far. Remaining is unpaid expected. Overpayment requires owner review.</p>
+        <div id="partial-list">None.</div>
+      </article>
+      <article class="card" data-panel="historical archive"><h2>Historical / Archived</h2>
+        <p class="hint">Historical AMICOR ledger. Not deleted. Not mixed into current totals.</p>
+        <div id="historical-list">None.</div>
+      </article>
+      <article class="card wide-card" data-panel="audit overview"><h2>Audit</h2>
+        <p class="hint">Lifecycle transitions. Secrets are never stored.</p>
+        <div id="pilot-audit-list">None.</div>
+      </article>
       <article class="card wide-card" data-panel="v2-capabilities">
+        <h2>V2 status</h2>
+        <p class="hint">Live discovery, external submission, client contact, report send, invoice send, financial execution, background worker, and live connectors remain DISABLED.</p>
+        <div id="v2-status-box">Sign in to load.</div>
         <h2>Capability status</h2>
         <p class="hint">Every live action defaults to OFF. A missing environment variable cannot enable production behavior.</p>
         <div id="v2-capability-list">Sign in to load.</div>

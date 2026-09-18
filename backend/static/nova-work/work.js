@@ -281,6 +281,8 @@
     if ($("count-quoted")) $("count-quoted").textContent = summary.quoted_pipeline || 0;
     if ($("count-contracted")) $("count-contracted").textContent = summary.contracted_value || 0;
     if ($("count-received")) $("count-received").textContent = summary.owner_confirmed_received || 0;
+    if ($("count-remaining")) $("count-remaining").textContent = summary.remaining_balance || 0;
+    if ($("count-historical")) $("count-historical").textContent = summary.historical_archived_received || 0;
     if ($("count-client-billed")) $("count-client-billed").textContent = summary.client_billed_amount || 0;
     if ($("count-opp-contract")) $("count-opp-contract").textContent = summary.contract_opportunity_amount || 0;
     if ($("count-tasks")) $("count-tasks").textContent = counts.tasks_due || 0;
@@ -295,6 +297,28 @@
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
     $("approval-list").innerHTML = listHtml(data.owner_approvals, "No applications waiting for owner approval.", applicationItem);
+    if ($("needs-review-list")) $("needs-review-list").innerHTML = listHtml(data.owner_approvals, "Nothing needs owner review.", applicationItem);
+    if ($("approved-list")) $("approved-list").innerHTML = listHtml(
+      (data.applications || []).filter(function (row) { return row.approved_for_future_submission && !row.manual_submission_recorded; }),
+      "No approved-for-future-submission items.",
+      applicationItem
+    );
+    if ($("submitted-list")) $("submitted-list").innerHTML = listHtml(
+      (data.applications || []).filter(function (row) { return row.manual_submission_recorded; }),
+      "No manually submitted records. NOT SENT BY NOVA.",
+      applicationItem
+    );
+    if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
+      return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
+        "<div class=\"muted\">" + escapeHtml(row.status) + " · PAYMENT NOT CONFIRMED unless owner-confirmed received</div></div>";
+    });
+    if ($("completed-list")) $("completed-list").innerHTML = listHtml(
+      (data.engagements || []).filter(function (row) { return row.status === "COMPLETE" || row.queue_status === "COMPLETE"; }),
+      "No completed internal work.",
+      function (row) {
+        return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong><div class=\"muted\">Complete is not paid. RECEIVED CONFIRMED BY OWNER is separate.</div></div>";
+      }
+    );
     $("follow-list").innerHTML = listHtml(data.follow_ups, "No follow-ups due.", oppItem);
     $("interview-list").innerHTML = listHtml(data.interviews, "No interviews recorded.", oppItem);
     $("won-list").innerHTML = listHtml(data.won_work, "No won work.", oppItem);
@@ -323,6 +347,13 @@
       return "<div class=\"item\">" + escapeHtml(row.event_type) +
         "<div class=\"muted\">" + escapeHtml(row.summary) + "</div></div>";
     });
+    if ($("pilot-audit-list")) {
+      $("pilot-audit-list").innerHTML = listHtml(audit, "No audit events.", function (row) {
+        return "<div class=\"item\">" + escapeHtml(row.event_type) +
+          "<div class=\"muted\">" + escapeHtml(row.summary) + " · " + escapeHtml(row.entity_type || "") +
+          " · " + escapeHtml(row.previous_state || "") + " → " + escapeHtml(row.new_state || "") + "</div></div>";
+      });
+    }
     if ($("archive-list")) {
       $("archive-list").innerHTML = listHtml(data.rejected_or_archived, "No archived opportunities.", oppItem);
     }
@@ -538,6 +569,7 @@
         }
         if ($("v2-pending-list")) $("v2-pending-list").innerHTML = listHtml(board.pending_owner_approval, "No pending owner approvals.", v2Item);
         if ($("v2-waiting-list")) $("v2-waiting-list").innerHTML = listHtml(board.approved_waiting, "Nothing approved and waiting.", v2Item);
+        if ($("waiting-list")) $("waiting-list").innerHTML = listHtml(board.approved_waiting, "Nothing waiting on owner-controlled execution. Live execution remains off.", v2Item);
         if ($("v2-blocked-list")) $("v2-blocked-list").innerHTML = listHtml(board.blocked, "No blocked live actions.", v2Item);
         if ($("v2-completed-list")) $("v2-completed-list").innerHTML = listHtml(board.completed, "No completed live actions. Live execution remains off.", v2Item);
         if ($("v2-failed-list")) $("v2-failed-list").innerHTML = listHtml(board.failed, "No failed live-action attempts.", v2Item);
@@ -551,7 +583,7 @@
         }
       } catch (_) {}
     }
-    if (activeTab === "v2-capabilities") {
+    if (activeTab === "v2-capabilities" || activeTab === "partial-payments" || activeTab === "historical") {
       try {
         var caps = await api("/api/nova/work/v2/capabilities");
         var items = Object.keys(caps.capabilities || {}).map(function (key) { return caps.capabilities[key]; });
@@ -560,6 +592,29 @@
             return "<div class=\"item\"><strong>" + escapeHtml(row.capability) + "</strong>" +
               "<div class=\"muted\">" + (row.enabled ? "enabled" : "DISABLED") +
               " · default off · live adapter not implemented · secrets not exposed</div></div>";
+          });
+        }
+        var status = await api("/api/nova/work/v2/status");
+        if ($("v2-status-box")) {
+          $("v2-status-box").innerHTML =
+            "<div class=\"item\"><strong>Live execution</strong><div class=\"muted\">" + escapeHtml(status.live_execution_state) +
+            " · worker " + escapeHtml(String(status.continuous_worker)) +
+            " · scheduler " + escapeHtml(status.scheduler_state) + "</div></div>" +
+            "<div class=\"item\"><strong>Pending / expired / failed</strong><div class=\"muted\">pending " +
+            escapeHtml(status.pending_actions) + " · expired " + escapeHtml(status.approval_expirations) +
+            " · final failures " + escapeHtml(status.final_failures) + "</div></div>";
+        }
+        var prep = await api("/api/nova/work/v2/revenue/preparation");
+        if ($("partial-list")) {
+          $("partial-list").innerHTML = prep.partially_paid
+            ? "<div class=\"item\"><strong>PARTIALLY_PAID remaining " + escapeHtml(prep.remaining_balance) +
+              "</strong><div class=\"muted\">RECEIVED CONFIRMED BY OWNER. Processor events are not cash.</div></div>"
+            : "No partial payments.";
+        }
+        if ($("historical-list")) {
+          $("historical-list").innerHTML = listHtml(prep.historical_corrections, "No historical corrections. Archived received stays queryable in reconciliation.", function (row) {
+            return "<div class=\"item\"><strong>HISTORICAL " + escapeHtml(row.amount) + "</strong>" +
+              "<div class=\"muted\">" + escapeHtml(row.reason) + " · not applied to current totals</div></div>";
           });
         }
       } catch (_) {}

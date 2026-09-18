@@ -2,40 +2,38 @@
 
 Status: **not applied**. Do not run on Render or production without owner authorization.
 
-## Current production behavior
+## Canonical production-safe strategy
 
-V1 Work & Revenue tables are created additively at runtime by `ensure_work_revenue_schema` (`CREATE TABLE` / `ALTER TABLE ADD COLUMN`). Alembic `include_object` previously ignored `nova_work_*` tables.
+1. **Production** uses Alembic as the only schema source once owner-authorized.
+2. **Local/test** may still call `ensure_work_revenue_schema` (`CREATE TABLE` / additive `ALTER TABLE` / unique-index repair). That helper is a compatibility path for sqlite tests and empty local DBs.
+3. Do not rely on lazy ensure in production after the first authorized Alembic apply.
+4. This assignment does **not** apply either path to Render.
 
-V2 adds four tables:
+## Dual-path resolution
 
-- `nova_work_live_action_audits`
-- `nova_work_supervised_actions`
-- `nova_work_scheduler_jobs`
-- `nova_work_payment_events`
+If a process boots this SHA before Alembic is applied, `ensure_work_revenue_schema` will create the V2 tables additively. Alembic revisions use `IF NOT EXISTS` / existing-column checks, so a later `alembic upgrade` will skip objects that already exist.
 
-Local/test runtimes still call `ensure_work_revenue_schema`, so these tables appear without running Alembic.
-
-## What the Alembic revision does
-
-Revision: `20260918_nova_work_revenue_v2`
-
-- Additive only.
-- Creates the four V2 tables if they do not already exist.
-- Creates unique indexes used for idempotency (`organization_id` + `idempotency_key`, and scheduler `job_kind` + `period_key`).
-- Does not drop or rewrite V1 tables.
-- Does not touch Stripe, Health, Delivery, Freight, Lifesaver, payments, or platform tables.
-- Downgrade drops only the four V2 tables if present.
-
-## What a future V1 Alembic freeze would do (not in this revision)
-
-A later owner-authorized revision could snapshot the existing V1 `nova_work_*` tables with `IF NOT EXISTS` so production no longer depends on lazy schema ensure. That revision is not included tonight because production already has V1 tables from lazy ensure, and rewriting them in Alembic without a production backup window is unnecessary risk.
-
-## How to apply later (owner-authorized only)
-
-From `backend/`:
+Preferred order for a future owner-authorized production apply:
 
 ```
-alembic upgrade 20260918_nova_work_revenue_v2
+alembic upgrade 20260918_nova_work_revenue_v2_hardening
 ```
 
-Do not run this against production in this session.
+That upgrade includes:
+
+- `20260918_nova_work_revenue_v2` — four V2 tables
+- `20260918_nova_work_revenue_v2_hardening` — approval columns, owner-scoped unique indexes, historical correction table, audit metadata columns
+
+## What these revisions do not do
+
+- No DROP of V1 `nova_work_*` data
+- No rewrite of Health, Delivery, Freight, Lifesaver, or Stripe/payment tables
+- No production apply in this assignment
+
+## Rollback
+
+`downgrade` of the hardening revision drops only `nova_work_historical_corrections` if present.
+
+`downgrade` of `20260918_nova_work_revenue_v2` drops only the four original V2 tables if present.
+
+Additive columns on V1 `nova_work_audit_events` are left in place on hardening downgrade to avoid data loss. Owner-scoped unique indexes are not reverted because reverting them would reintroduce a tenant/owner isolation defect.

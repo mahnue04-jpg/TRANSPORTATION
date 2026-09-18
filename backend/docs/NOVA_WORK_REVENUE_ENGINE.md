@@ -215,7 +215,12 @@ V2 adds configuration, safety policy, adapter contracts, an owner approval queue
 - `GET /api/nova/work/v2/capabilities` is the status surface. Secrets are never returned.
 - Safety policy requires all of: capability enabled, correct environment, tenant authorized, owner approved, adapter implemented, required facts, terms/policy, not duplicated.
 - Adapter kinds exist as disabled/dry-run/mock contracts only.
-- Supervised actions: `DRAFT` → `READY_FOR_REVIEW` → `OWNER_APPROVED` → `QUEUED` → `FAILED`/`CANCELED`. `EXECUTED` is reserved and is not reached in V2 core.
+- Supervised approval lifecycle is durable: REQUESTED / APPROVED / REVOKED / EXPIRED / CONSUMED / REJECTED / CANCELED. Approval is never execution. Expired, revoked, consumed, and rejected approvals cannot execute. Replay is fail-closed.
+- Ordinary financial mutation is frozen on ARCHIVED / CLOSED / CANCELLED work. Historical corrections are a separate owner-authorized classification and do not change current totals.
+- Payment-event idempotency is owner-scoped. Duplicate replay returns the original row without mutation.
+- Owner-confirmed received is total-received-so-far. Overpayment returns `OVERPAYMENT_REQUIRES_OWNER_REVIEW`.
+- Scheduler prepare uses savepoints so one duplicate insert cannot roll back sibling jobs. Paused/archived/cancelled sources create SKIPPED prepare rows, not active work.
+- `GET /api/nova/work/v2/status` is the internal monitoring snapshot. Background worker and live connectors remain DISABLED.
 - Scheduler `POST /api/nova/work/v2/scheduler/prepare` generates idempotent prepare jobs. No worker, cron, send, contact, or payment.
 - Processor-shaped payment events are stored without changing AMICOR received cash. Owner confirmation remains authoritative.
 

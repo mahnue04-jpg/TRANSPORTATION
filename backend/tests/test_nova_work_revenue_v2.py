@@ -44,6 +44,10 @@ def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict
 
 def test_v2_ui_surfaces_present() -> None:
     assert "Pending Owner Approval" in WORK_HTML
+    assert "Partial Payments" in WORK_HTML
+    assert "Historical / Archived" in WORK_HTML
+    assert "NOT SENT BY NOVA" in WORK_HTML
+    assert "RECEIVED CONFIRMED BY OWNER" in WORK_HTML
     assert "Approved / Waiting" in WORK_HTML
     assert "Audit Trail" in WORK_HTML
     assert "Capability status" in WORK_HTML
@@ -196,6 +200,8 @@ def test_supervised_action_lifecycle_never_executes(client: TestClient) -> None:
     body = executed.json()
     assert body["status"] == "FAILED"
     assert body["live_execution"] is False
+    assert body["approval_status"] == "CONSUMED"
+    assert body["consumed_at"]
     assert body["safety"]["allowed"] is False
     assert body["adapter"]["executed"] is False
     duplicate = client.post(f"/api/nova/work/v2/actions/{action_id}/execute", headers=headers, json={})
@@ -220,6 +226,7 @@ def test_duplicate_idempotency_and_cancel_stops_queue(client: TestClient) -> Non
     client.post(f"/api/nova/work/v2/actions/{action_id}/queue", headers=headers, json={})
     canceled = client.post(f"/api/nova/work/v2/actions/{action_id}/cancel", headers=headers, json={"notes": "revoked"})
     assert canceled.json()["status"] == "CANCELED"
+    assert canceled.json()["approval_status"] == "REVOKED"
     blocked = client.post(f"/api/nova/work/v2/actions/{action_id}/execute", headers=headers, json={})
     assert blocked.status_code == 409
 
@@ -428,8 +435,9 @@ def test_payment_event_cross_tenant_and_archived(client: TestClient) -> None:
         headers=owner,
         json={"entry_id": entry_id, "amount": 50, "idempotency_key": "archived-pay"},
     )
-    assert archived_event.status_code == 200
-    assert archived_event.json()["applied_to_ledger"] is False
+    assert archived_event.status_code == 409
+    detail = str(archived_event.json().get("detail") or archived_event.text)
+    assert "Frozen" in detail or "ARCHIVED" in detail
 
 
 def test_v1_live_routes_still_blocked(client: TestClient) -> None:
