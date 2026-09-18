@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from app.core.nova.signup.stripe_client import (
     STRIPE_HTTP_TIMEOUT_SECONDS,
     is_live_stripe_key,
+    nova_live_stripe_enabled,
     sanitize_stripe_error,
     stripe_secret_key,
 )
@@ -51,8 +52,8 @@ def get_nova_billing_stripe_client() -> NovaBillingStripeClient:
     secret = stripe_secret_key()
     if not secret:
         raise ValueError("Stripe TEST key is not configured for Nova billing.")
-    if is_live_stripe_key(secret):
-        raise ValueError("Live Stripe keys are not allowed for Nova billing. Use a TEST key.")
+    if is_live_stripe_key(secret) and not nova_live_stripe_enabled():
+        raise ValueError("Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled.")
     return LiveNovaBillingStripeClient(api_key=secret)
 
 
@@ -123,8 +124,8 @@ class FakeNovaBillingStripeClient:
 
 class LiveNovaBillingStripeClient:
     def __init__(self, *, api_key: str):
-        if is_live_stripe_key(api_key):
-            raise ValueError("Live Stripe keys are not allowed for Nova billing. Use a TEST key.")
+        if is_live_stripe_key(api_key) and not nova_live_stripe_enabled():
+            raise ValueError("Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled.")
         self.api_key = api_key
 
     def _build_client(self) -> Any:

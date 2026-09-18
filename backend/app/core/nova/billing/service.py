@@ -9,7 +9,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
-from app.core.nova.billing.models import NovaBillingWebhookEvent, NovaTenantSubscription
+from app.core.nova.billing.models import (
+    NovaBillingRevenueEvent,
+    NovaBillingWebhookEvent,
+    NovaTenantSubscription,
+)
 from app.core.nova.billing.plans import (
     ACCESS_STATUSES,
     BILLING_ROLES,
@@ -35,7 +39,11 @@ from app.core.nova.billing.stripe_client import (
     nova_billing_webhook_secret,
     sanitize_stripe_error,
 )
-from app.core.nova.signup.stripe_client import is_live_stripe_key, stripe_secret_key
+from app.core.nova.signup.stripe_client import (
+    is_live_stripe_key,
+    nova_live_stripe_enabled,
+    stripe_secret_key,
+)
 from app.helpers import now
 
 logger = logging.getLogger("amicor.nova.billing")
@@ -133,16 +141,20 @@ def _trial_eligible(row: NovaTenantSubscription) -> bool:
     return True
 
 
-def _require_test_mode() -> None:
+def _require_stripe_mode() -> None:
+    """Require Stripe config while keeping live mode fail-closed by default."""
     from app.core.nova.billing.stripe_client import get_nova_billing_stripe_override
 
     if get_nova_billing_stripe_override() is not None:
         return
     secret = stripe_secret_key()
     if not secret:
-        raise BillingError("Stripe TEST key is not configured for Nova billing", status_code=503)
-    if is_live_stripe_key(secret):
-        raise BillingError("Live Stripe keys are not allowed for Nova billing", status_code=503)
+        raise BillingError("Stripe key is not configured for Nova billing", status_code=503)
+    if is_live_stripe_key(secret) and not nova_live_stripe_enabled():
+        raise BillingError(
+            "Live Stripe key detected but NOVA_STRIPE_LIVE_ENABLED is not explicitly enabled",
+            status_code=503,
+        )
 
 
 def start_checkout(
@@ -161,7 +173,7 @@ def start_checkout(
     price_id = price_id_for_plan(plan)
     if not price_id:
         raise BillingError("Stripe price is not configured for this plan", status_code=503)
-    _require_test_mode()
+    _require_stripe_mode()
 
     row = _get_or_create_row(db, tenant)
     if row.subscription_status in {STATUS_TRIALING, STATUS_ACTIVE} and row.stripe_subscription_id:
@@ -277,7 +289,7 @@ def start_portal(db: Session, *, user: UserContext, tenant_id: str | None = None
     ensure_nova_billing_schema()
     _require_billing_role(user)
     tenant = _tenant_id(user, tenant_id)
-    _require_test_mode()
+    _require_stripe_mode()
     row = (
         db.query(NovaTenantSubscription)
         .filter(NovaTenantSubscription.tenant_id == tenant)
@@ -353,6 +365,48 @@ def _event_object(event: dict[str, Any]) -> dict[str, Any]:
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     obj = data.get("object") if isinstance(data, dict) else None
     return obj if isinstance(obj, dict) else {}
+
+
+def _record_revenue_event(
+    db: Session,
+    *,
+    event_id: str,
+    event_type: str,
+    row: NovaTenantSubscription | None,
+    obj: dict[str, Any],
+) -> None:
+    if event_type not in {"invoice.paid", "charge.refunded"}:
+        return
+    customer_id = obj.get("customer")
+    if isinstance(customer_id, dict):
+        customer_id = customer_id.get("id")
+    subscription_id = obj.get("subscription")
+    if isinstance(subscription_id, dict):
+        subscription_id = subscription_id.get("id")
+    invoice_id = obj.get("id") if event_type == "invoice.paid" else obj.get("invoice")
+    if isinstance(invoice_id, dict):
+        invoice_id = invoice_id.get("id")
+    charge_id = obj.get("charge") or (obj.get("id") if event_type == "charge.refunded" else None)
+    amount = obj.get("amount_paid") if event_type == "invoice.paid" else obj.get("amount_refunded")
+    try:
+        amount_cents = int(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        amount_cents = None
+    if event_type == "charge.refunded" and amount_cents is not None:
+        amount_cents = -abs(amount_cents)
+    db.add(
+        NovaBillingRevenueEvent(
+            stripe_event_id=event_id,
+            event_type=event_type,
+            tenant_id=row.tenant_id if row is not None else _tenant_from_obj(obj),
+            stripe_customer_id=str(customer_id) if customer_id else None,
+            stripe_subscription_id=str(subscription_id) if subscription_id else None,
+            stripe_invoice_id=str(invoice_id) if invoice_id else None,
+            stripe_charge_id=str(charge_id) if charge_id else None,
+            amount_cents=amount_cents,
+            currency=str(obj.get("currency") or "").lower() or None,
+        )
+    )
 
 
 def _tenant_from_obj(obj: dict[str, Any]) -> str | None:
@@ -497,6 +551,16 @@ def process_webhook(db: Session, event: dict[str, Any]) -> dict[str, Any]:
         row.subscription_status = STATUS_PAST_DUE
         row.updated_at = now()
         result = "invoice_failed"
+    elif event_type == "charge.refunded":
+        result = "refund_recorded"
+
+    _record_revenue_event(
+        db,
+        event_id=event_id,
+        event_type=event_type,
+        row=row,
+        obj=obj,
+    )
 
     db.add(
         NovaBillingWebhookEvent(

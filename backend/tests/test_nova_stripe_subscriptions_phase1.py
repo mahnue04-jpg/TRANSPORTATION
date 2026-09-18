@@ -19,7 +19,11 @@ from app.auth import (
     hash_password,
     seed_default_users,
 )
-from app.core.nova.billing.models import NovaBillingWebhookEvent, NovaTenantSubscription
+from app.core.nova.billing.models import (
+    NovaBillingRevenueEvent,
+    NovaBillingWebhookEvent,
+    NovaTenantSubscription,
+)
 from app.core.nova.billing.plans import nova_subscription_enforcement_enabled
 from app.core.nova.billing.schema_ensure import ensure_nova_billing_schema
 from app.core.nova.billing.service import nova_subscription_has_access
@@ -49,6 +53,7 @@ def _signed_webhook(payload: dict, secret: str = WEBHOOK_SECRET) -> tuple[bytes,
 def _reset_billing() -> None:
     ensure_nova_billing_schema(engine)
     with SessionLocal() as db:
+        db.query(NovaBillingRevenueEvent).delete()
         db.query(NovaBillingWebhookEvent).delete()
         db.query(NovaTenantSubscription).delete()
         db.commit()
@@ -400,3 +405,105 @@ def test_enforcement_defaults_off_and_existing_nova_access(monkeypatch) -> None:
         assert status.json()["enforcement"] is False
     finally:
         set_nova_billing_stripe_override(None)
+
+
+def test_paid_invoice_and_refund_are_persisted_once(monkeypatch) -> None:
+    fake = _env(monkeypatch)
+    try:
+        client = _client()
+        headers = _login(client)
+        checkout = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
+        assert checkout.status_code == 200
+        tenant_id = _admin_org()
+        customer_id = next(iter(fake.customers))
+
+        completed = {
+            "id": "evt_rev_checkout",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": checkout.json()["checkout_session_id"],
+                    "customer": customer_id,
+                    "subscription": "sub_rev_1",
+                    "payment_status": "no_payment_required",
+                    "client_reference_id": tenant_id,
+                    "metadata": {"nova_tenant_id": tenant_id, "nova_plan_key": "starter"},
+                }
+            },
+        }
+        assert _post_event(client, completed).status_code == 200
+
+        paid = {
+            "id": "evt_rev_paid",
+            "type": "invoice.paid",
+            "data": {
+                "object": {
+                    "id": "in_rev_paid",
+                    "customer": customer_id,
+                    "subscription": "sub_rev_1",
+                    "charge": "ch_rev_1",
+                    "amount_paid": 9900,
+                    "currency": "usd",
+                    "metadata": {"nova_tenant_id": tenant_id},
+                }
+            },
+        }
+        first_paid = _post_event(client, paid)
+        assert first_paid.status_code == 200
+        duplicate_paid = _post_event(client, paid)
+        assert duplicate_paid.status_code == 200
+        assert duplicate_paid.json()["duplicate"] is True
+
+        refunded = {
+            "id": "evt_rev_refund",
+            "type": "charge.refunded",
+            "data": {
+                "object": {
+                    "id": "ch_rev_1",
+                    "customer": customer_id,
+                    "invoice": "in_rev_paid",
+                    "amount_refunded": 2500,
+                    "currency": "usd",
+                    "metadata": {"nova_tenant_id": tenant_id},
+                }
+            },
+        }
+        first_refund = _post_event(client, refunded)
+        assert first_refund.status_code == 200
+        assert first_refund.json()["result"] == "refund_recorded"
+        duplicate_refund = _post_event(client, refunded)
+        assert duplicate_refund.status_code == 200
+        assert duplicate_refund.json()["duplicate"] is True
+
+        with SessionLocal() as db:
+            events = (
+                db.query(NovaBillingRevenueEvent)
+                .filter(NovaBillingRevenueEvent.tenant_id == tenant_id)
+                .order_by(NovaBillingRevenueEvent.created_at.asc())
+                .all()
+            )
+            assert len(events) == 2
+            paid_row = next(item for item in events if item.event_type == "invoice.paid")
+            refund_row = next(item for item in events if item.event_type == "charge.refunded")
+            assert paid_row.amount_cents == 9900
+            assert paid_row.currency == "usd"
+            assert paid_row.stripe_invoice_id == "in_rev_paid"
+            assert paid_row.stripe_subscription_id == "sub_rev_1"
+            assert refund_row.amount_cents == -2500
+            assert refund_row.currency == "usd"
+            assert refund_row.stripe_charge_id == "ch_rev_1"
+            assert refund_row.stripe_invoice_id == "in_rev_paid"
+    finally:
+        set_nova_billing_stripe_override(None)
+
+
+def test_live_stripe_remains_fail_closed_without_explicit_enable(monkeypatch) -> None:
+    set_nova_billing_stripe_override(None)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_nova_placeholder")
+    monkeypatch.delenv("NOVA_STRIPE_LIVE_ENABLED", raising=False)
+    client = _client()
+    headers = _login(client)
+    monkeypatch.setenv("NOVA_STRIPE_PRICE_STARTER", PRICE_STARTER)
+    blocked = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
+    assert blocked.status_code == 503
+    assert "NOVA_STRIPE_LIVE_ENABLED" in blocked.text
