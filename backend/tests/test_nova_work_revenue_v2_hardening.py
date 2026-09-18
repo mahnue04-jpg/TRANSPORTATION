@@ -332,10 +332,19 @@ def test_scheduler_savepoint_dst_paused_archived(client: TestClient) -> None:
     assert any(item["reason"] == "duplicate_period" for item in mixed.json()["skipped"])
     dst = datetime(2026, 3, 8, 1, 30, tzinfo=ZoneInfo("America/Chicago"))
     after = datetime(2026, 3, 8, 3, 30, tzinfo=ZoneInfo("America/Chicago"))
+    next_day = datetime(2026, 3, 9, 0, 15, tzinfo=ZoneInfo("America/Chicago"))
+    spring_key = period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", dst)
+    assert spring_key == period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", after)
+    assert spring_key != period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", next_day)
     assert period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", dst)
     assert period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", after).startswith("FOLLOW_UP_REMINDER_PREPARE:")
     assert "-W" in period_key("REPORT_PREPARE", "America/Chicago", dst)
     assert period_key("INVOICE_PREPARE", "America/Chicago", dst).endswith("2026-03")
+    fall = datetime(2026, 11, 1, 1, 15, tzinfo=ZoneInfo("America/Chicago"))
+    fall_later = datetime(2026, 11, 1, 1, 45, tzinfo=ZoneInfo("America/Chicago"))
+    assert period_key("FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", fall) == period_key(
+        "FOLLOW_UP_REMINDER_PREPARE", "America/Chicago", fall_later
+    )
     engagement = client.post(
         "/api/nova/work/engagements",
         headers=headers,
@@ -366,6 +375,8 @@ def test_scheduler_savepoint_dst_paused_archived(client: TestClient) -> None:
     )
     assert prepare.status_code == 200, prepare.text
     assert prepare.json()["continuous_worker"] is False
+    assert prepare.json()["catch_up_enabled"] is False
+    assert prepare.json()["catch_up_bound"] == 0
     jobs = client.get("/api/nova/work/v2/scheduler/jobs", headers=headers)
     assert jobs.status_code == 200
     other = _headers(client, "staff@amicor.local")
@@ -381,6 +392,8 @@ def test_status_pilot_idempotency_contract_and_secrets(client: TestClient) -> No
     assert body["live_execution_state"] == "DISABLED"
     assert body["continuous_worker"] is False
     assert body["secrets_exposed"] is False
+    assert body["lazy_v2_schema_in_production"] is False
+    assert body["schema_strategy"] == "alembic_canonical_production"
     assert body["live_capabilities"]["EXTERNAL_SUBMISSION"] == "DISABLED"
     caps = client.get("/api/nova/work/v2/capabilities", headers=headers).json()
     assert caps["live_disabled"]["BACKGROUND_WORKER"] is False
@@ -416,4 +429,37 @@ def test_status_pilot_idempotency_contract_and_secrets(client: TestClient) -> No
     html = (ROOT / "static" / "nova-work" / "index.html").read_text(encoding="utf-8")
     assert "OWNER ACTION REQUIRED" in html
     assert (ROOT / "migrations" / "versions" / "20260918_nova_work_revenue_v2_hardening.py").exists()
+    assert (ROOT / "migrations" / "versions" / "20260918_nova_work_revenue_v2_owner_scheduler.py").exists()
+
+
+def test_scheduler_owner_isolation_and_sibling_savepoint(client: TestClient) -> None:
+    owner = _headers(client, "dispatcher@amicor.local")
+    other = _headers(client, "staff@amicor.local")
+    tz = "Pacific/Auckland"
+    first = client.post(
+        "/api/nova/work/v2/scheduler/prepare",
+        headers=owner,
+        json={"timezone": tz, "kinds": ["REPORT_PREPARE"]},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["created"]
+    owner_job_id = first.json()["created"][0]["job_id"]
+    mixed = client.post(
+        "/api/nova/work/v2/scheduler/prepare",
+        headers=owner,
+        json={"timezone": tz, "kinds": ["REPORT_PREPARE", "OPPORTUNITY_RECHECK_PREPARE"]},
+    )
+    assert mixed.status_code == 200, mixed.text
+    assert any(item["reason"] == "duplicate_period" and item["job_kind"] == "REPORT_PREPARE" for item in mixed.json()["skipped"])
+    assert any(item["job_kind"] == "OPPORTUNITY_RECHECK_PREPARE" for item in mixed.json()["created"])
+    staff = client.post(
+        "/api/nova/work/v2/scheduler/prepare",
+        headers=other,
+        json={"timezone": tz, "kinds": ["REPORT_PREPARE"]},
+    )
+    assert staff.status_code == 200, staff.text
+    assert staff.json()["created"]
+    assert staff.json()["created"][0]["job_id"] != owner_job_id
+    staff_jobs = client.get("/api/nova/work/v2/scheduler/jobs", headers=other).json()
+    assert owner_job_id not in {row["job_id"] for row in staff_jobs}
 
