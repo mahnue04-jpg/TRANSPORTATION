@@ -383,7 +383,7 @@ def _record_revenue_event(
     subscription_id = obj.get("subscription")
     if isinstance(subscription_id, dict):
         subscription_id = subscription_id.get("id")
-    invoice_id = obj.get("invoice")
+    invoice_id = obj.get("id") if event_type == "invoice.paid" else obj.get("invoice")
     if isinstance(invoice_id, dict):
         invoice_id = invoice_id.get("id")
     charge_id = obj.get("charge") or (obj.get("id") if event_type == "charge.refunded" else None)
