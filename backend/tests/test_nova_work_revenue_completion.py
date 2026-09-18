@@ -52,6 +52,8 @@ def test_completion_ui_has_internal_sections_only() -> None:
     assert 'data-tab="recurring"' in WORK_HTML
     assert 'data-tab="reports"' in WORK_HTML
     assert 'data-tab="invoice-support"' in WORK_HTML
+    assert 'data-tab="owner-facts"' in WORK_HTML
+    assert "Do not enter EIN" in WORK_HTML
     assert "Generating a report is not sending it" in WORK_HTML
     assert "COMING IN LATER PHASE" in WORK_HTML
     assert "live apply" not in WORK_JS.lower()
@@ -315,7 +317,7 @@ def test_owner_actions_facts_disclosure_and_platform_policy(client: TestClient) 
     )
     assert updated.status_code == 200
     stored = [item for item in updated.json()["facts"] if item["fact_id"] == "legal_business_name"][0]
-    assert stored["value_status"] == "OWNER_PROVIDED"
+    assert stored["value_status"] == "PROVIDED"
     secret = client.put(
         "/api/nova/work/owner-facts/banking_payment_readiness",
         headers=headers,

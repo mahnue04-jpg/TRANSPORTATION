@@ -139,6 +139,10 @@ button {
 .filter-on { border-color: var(--nova-accent) !important; color: var(--nova-accent) !important; }
 .hidden-panel { display: none; }
 #tab-row button { min-height: 44px; }
+.fact-status { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.fact-status.missing, .fact-status.expired { color: var(--nova-warn); }
+.fact-form { display: grid; gap: 8px; margin-top: 8px; }
+.fact-error { color: #ffb4b4; font-size: 0.85rem; }
 
 @media (max-width: 720px) {
   .work-header, .work-main { width: min(100% - 20px, 720px); }

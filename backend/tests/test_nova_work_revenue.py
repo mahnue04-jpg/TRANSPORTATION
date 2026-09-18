@@ -1069,11 +1069,17 @@ def test_owner_fact_catalog_has_no_real_secrets() -> None:
     for required in (
         "legal_business_name",
         "dba",
+        "business_email",
+        "business_phone",
+        "authorized_signer",
+        "industries_served",
         "insurance",
         "licenses",
         "w9_readiness",
         "tax_identifiers",
         "banking_payment_readiness",
+        "ai_use_disclosure_decision",
+        "subcontractor_disclosure_decision",
     ):
         assert required in ids
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,7 +13,6 @@ from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.lifecycle import (
     DISCLOSURE_STATUSES,
     ENGAGEMENT_TRANSITIONS,
-    FACT_VALUE_STATUSES,
     INVOICE_SUPPORT_STATUSES,
     LIST_MAX_LIMIT,
     clamp_list_limit,
@@ -42,7 +41,14 @@ from app.core.nova.work_revenue.models import (
     NovaWorkTask,
     NovaWorkWeeklyReport,
 )
-from app.core.nova.work_revenue.owner_facts import FACT_DEFINITIONS, SENSITIVE_FACT_IDS, fact_catalog
+from app.core.nova.work_revenue.owner_facts import (
+    FACT_SOURCE_OWNER,
+    OwnerFactError,
+    definition_for,
+    fact_catalog,
+    normalize_fact_status,
+    validate_fact_value,
+)
 from app.core.nova.work_revenue.recurring import next_due_date
 from app.core.nova.work_revenue.schemas import (
     OWNER_ACTION_TYPES,
@@ -73,21 +79,8 @@ from app.core.nova.work_revenue.service import (
     list_opportunities,
     list_owner_actions,
 )
-from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED
 from app.helpers import now
 
-_SECRET_RE = re.compile(
-    r"(password|api[_-]?key|secret|ssn|routing number|account number|\b\d{8,}\b|sk_[a-z]+_|pk_[a-z]+_|wh[a-z]{3}_)",
-    re.I,
-)
-_SENSITIVE_READY_VALUES = {
-    "MISSING",
-    "OWNER_SAYS_READY",
-    "OWNER_SAYS_NOT_READY",
-    "NOT_APPLICABLE",
-    OWNER_INPUT_REQUIRED,
-    "[OWNER INPUT REQUIRED]",
-}
 REPORT_TRANSITIONS = {
     "DRAFT": {"READY_FOR_OWNER_REVIEW", "ARCHIVED"},
     "READY_FOR_OWNER_REVIEW": {"APPROVED_FOR_MANUAL_USE", "DRAFT", "ARCHIVED"},
@@ -1021,10 +1014,15 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
     _ensure()
     rows = _query(db, NovaWorkBusinessFact, organization_id, user).all()
     current = now()
+    if getattr(current, "tzinfo", None) is None:
+        current = current.replace(tzinfo=timezone.utc)
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
         status = row.value_status
-        if row.expiration_date and row.expiration_date < current:
+        expires = row.expiration_date
+        if expires is not None and getattr(expires, "tzinfo", None) is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires is not None and current is not None and expires < current:
             status = "EXPIRED"
         out[row.fact_key] = {
             "value_status": status,
@@ -1033,12 +1031,18 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
             "expiration_date": _iso(row.expiration_date),
             "source_description": row.source_description,
             "notes": row.notes,
+            "source": FACT_SOURCE_OWNER,
         }
     return out
 
 
 def owner_fact_catalog(db: Session, *, organization_id: str, user: UserContext, applicant_party: str = "AMICOR") -> dict[str, Any]:
-    return fact_catalog(applicant_party=applicant_party, stored=stored_facts(db, organization_id=organization_id, user=user))
+    catalog = fact_catalog(applicant_party=applicant_party, stored=stored_facts(db, organization_id=organization_id, user=user))
+    catalog["executes_externally"] = False
+    catalog["approved_application"] = False
+    catalog["submitted_application"] = False
+    catalog["payment_recorded"] = False
+    return catalog
 
 
 def update_business_fact(
@@ -1051,22 +1055,19 @@ def update_business_fact(
 ) -> dict[str, Any]:
     _ensure()
     key = str(fact_key or "").strip()
-    definition = next((item for item in FACT_DEFINITIONS if item["fact_id"] == key), None)
+    definition = definition_for(key)
     if definition is None:
         raise NovaWorkError("Unknown business fact key", status_code=404)
-    status = str(payload.value_status or "OWNER_PROVIDED").strip().upper()
-    if status not in FACT_VALUE_STATUSES:
-        raise NovaWorkError("Unknown fact value status")
-    display = sanitize_untrusted(payload.value_display)[:400] if payload.value_display else OWNER_INPUT_REQUIRED
-    if _SECRET_RE.search(display or ""):
-        raise NovaWorkError("Business facts cannot store secrets, tax identifiers, or banking credentials")
-    if key in SENSITIVE_FACT_IDS:
-        token = (display or "").strip()
-        if token not in _SENSITIVE_READY_VALUES:
-            raise NovaWorkError("Sensitive facts accept readiness flags only. Do not store numbers or credentials.")
-        display = token or OWNER_INPUT_REQUIRED
-    if status == "MISSING":
-        display = OWNER_INPUT_REQUIRED
+    try:
+        status = normalize_fact_status(payload.value_status or "PROVIDED")
+        display = validate_fact_value(
+            key,
+            value_status=status,
+            value_display=payload.value_display,
+            notes=payload.notes,
+        )
+    except OwnerFactError as exc:
+        raise NovaWorkError(str(exc), status_code=exc.status_code)
     _validate_date_range(payload.verification_date, payload.expiration_date)
     row = _query(db, NovaWorkBusinessFact, organization_id, user).filter(NovaWorkBusinessFact.fact_key == key).first()
     if row is None:
@@ -1078,12 +1079,17 @@ def update_business_fact(
             display_label=definition["label"],
         )
         db.add(row)
-    previous = row.value_status
+    previous = normalize_fact_status(row.value_status) if row.value_status else "MISSING"
+    value_changed = (row.value_display or "") != display or previous != status
+    if previous == "VERIFIED" and value_changed and not bool(getattr(payload, "confirm_overwrite", False)):
+        raise NovaWorkError("Verified facts are not overwritten silently. Set confirm_overwrite to replace them.", status_code=409)
     row.value_status = status
     row.value_display = display
     row.verification_date = payload.verification_date
+    if status == "VERIFIED" and row.verification_date is None:
+        row.verification_date = now()
     row.expiration_date = payload.expiration_date
-    row.source_description = sanitize_untrusted(payload.source_description)[:400] or None
+    row.source_description = sanitize_untrusted(payload.source_description)[:400] or FACT_SOURCE_OWNER
     row.notes = sanitize_untrusted(payload.notes) or None
     row.updated_at = now()
     _record_audit(
@@ -1091,7 +1097,10 @@ def update_business_fact(
         organization_id=organization_id,
         user=user,
         event_type="FACT_UPDATED",
-        summary=f"Owner fact {key} {previous} → {status}. Nova did not invent this value.",
+        summary=(
+            f"Owner fact {key} {previous} → {status}. Source=OWNER. "
+            "No application submitted, no client contacted, no payment recorded."
+        ),
         ref_id=row.fact_record_id,
         entity_type="business_fact",
         actor_category="OWNER",
@@ -1100,7 +1109,13 @@ def update_business_fact(
     )
     db.commit()
     db.refresh(row)
-    return owner_fact_catalog(db, organization_id=organization_id, user=user)
+    catalog = owner_fact_catalog(db, organization_id=organization_id, user=user)
+    catalog["updated_fact_id"] = key
+    catalog["executes_externally"] = False
+    catalog["approved_application"] = False
+    catalog["submitted_application"] = False
+    catalog["payment_recorded"] = False
+    return catalog
 
 
 def _disclosure_out(row: NovaWorkDisclosurePolicy) -> dict[str, Any]:

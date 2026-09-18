@@ -101,9 +101,19 @@ Owner approval does not execute an external action. APPROVED is not submitted an
 
 ## Business-fact model
 
-Catalog keys stay defined even when values are missing. Value statuses: `MISSING`, `OWNER_PROVIDED`, `VERIFIED`, `EXPIRED`, with optional verification date, expiration date, source description, and notes.
+Catalog keys stay defined even when values are missing. The owner supplies every real-world value. Nova does not invent, scrape, or auto-fill business facts.
 
-Nova does not fabricate legal name, insurance, licenses, tax data, W-9 status, bank details, experience, pricing, or certifications. Sensitive keys accept readiness flags only. Secrets and banking credentials are rejected.
+Value statuses: `MISSING`, `PROVIDED`, `VERIFIED`, `EXPIRED`, `NOT_APPLICABLE`. `OWNER_PROVIDED` is accepted as an alias of `PROVIDED`. Source is `OWNER`. Optional verification and expiration timestamps are stored. Verified facts are not overwritten unless the owner sets `confirm_overwrite`.
+
+Supported owner facts include legal name, DBA, address, business email, business phone, authorized signer, ownership / contracting party, service areas, industries served, business age, insurance status, license status, certifications, relevant experience, references, pricing, rates, availability, workforce, equipment, AI-use disclosure decision, and subcontractor disclosure decision.
+
+Sensitive financial facts are readiness flags only: `w9_readiness`, `financial_information`, `tax_identifiers`, and `banking_payment_readiness`. Allowed examples: `OWNER_SAYS_READY`, `w9_ready`, `tax_information_ready`, `banking_ready`, `NOT_APPLICABLE`.
+
+Prohibited in every field: EIN, SSN, tax ID numbers, bank account numbers, routing numbers, Stripe secret keys, API keys, passwords, authentication secrets, and payment card information. Unsafe URLs and script markup are rejected. Email and phone values are format-checked locally with no network lookup.
+
+Readiness is internal: required facts, provided, verified, missing, expired, and percentage complete. Readiness never submits an application, contacts a client, accepts a contract, creates an invoice, charges a payment, or enables live discovery. `externally_ready` remains false.
+
+Owner fact entry is not application approval, bid submission, quote send, contract acceptance, message send, or payment confirmation.
 
 ## Disclosure / policy framework
 
@@ -137,8 +147,14 @@ Platform-policy metadata flags: `LOGIN_REQUIRED`, `CAPTCHA_REQUIRED`, `HUMAN_SUB
 
 Blocked by owner input:
 
-- Real verified legal name, insurance, licenses, experience, pricing, and similar facts
-- Owner policy decisions about AI/subcontractor disclosure on specific platforms
+- The owner must still type real values into the catalog. Empty keys stay `MISSING`.
+- Per-platform AI/subcontractor wording beyond the stored decision flags
+
+Blocked by remaining internal V1 blocks:
+
+- Operator UI for queue and reconciliation
+- Distinct AMICOR-vs-client revenue labeling
+- Tests for those remaining operator surfaces
 
 Blocked by live integration / deferred:
 
@@ -148,20 +164,22 @@ Blocked by live integration / deferred:
 - Outbound client contact / report delivery
 - Stripe or other payment-processor invoices, charges, payouts
 - External calendars and notifications
-- Populating real owner tax, banking, or identity values
+- Populating real owner tax, banking, or identity numbers
 
 ## Known risks / next safe blocks
 
 - Application dashboard still loads materials per application; keep list caps and do not add a background worker.
 - Opportunity revenue fields remain owner-entered pipeline context. Do not silently copy them into revenue entries.
 - Missing owner facts stay MISSING until the owner supplies them. Approval never marks an application externally ready.
-- Next safe implementation, only with later owner authorization: owner-supplied verified facts, then a separately tested live-discovery adapter that stays off by default.
+- After Block 1, the next safe implementation is Block 2 operator surfaces (facts already have a Work tab; queue and reconciliation still need first-class UI). Live adapters stay off.
 
 ## Testing strategy
 
 `backend/tests/test_nova_work_revenue.py` covers Phase 1/foundation behavior.
 
 `backend/tests/test_nova_work_revenue_completion.py` covers recurring work, queue filters, weekly reports, invoice-support, reconciliation, owner actions, facts, disclosure, platform policy, private-network URL rejection, list limits, and approval-is-not-submit.
+
+`backend/tests/test_nova_work_revenue_owner_facts.py` covers Block 1 owner-fact intake, secret rejection, tenant isolation, readiness percentage, and the rule that fact entry does not enable external action.
 
 Do not run Stripe object-creation tests from this workstream.
 
