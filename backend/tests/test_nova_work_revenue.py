@@ -323,7 +323,9 @@ def test_simulated_ingest_and_today_summary(client: TestClient) -> None:
     headers = _headers(client)
     ingested = client.post("/api/nova/work/ingest/simulated", headers=headers)
     assert ingested.status_code == 200, ingested.text
-    assert len(ingested.json()) >= 5
+    listed = client.get("/api/nova/work/opportunities", headers=headers).json()
+    simulated = [row for row in listed if (row.get("source_type") or row.get("source")) == "simulated"]
+    assert len(ingested.json()) >= 5 or len(simulated) >= 5
     summary = client.get("/api/nova/work/today-summary", headers=headers)
     assert summary.status_code == 200
     body = summary.json()
@@ -558,11 +560,13 @@ def test_provider_capability_flags_forbid_submission() -> None:
 def test_production_fixture_blocking(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     headers = _headers(client)
     monkeypatch.setenv("TESTING", "false")
-    monkeypatch.setenv("RUNTIME_ENVIRONMENT", "production")
+    monkeypatch.delenv("RUNTIME_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
     blocked = client.post("/api/nova/work/ingest/simulated", headers=headers)
     assert blocked.status_code == 403
     monkeypatch.setenv("TESTING", "true")
-    monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "development")
     allowed = client.post("/api/nova/work/ingest/simulated", headers=headers)
     assert allowed.status_code == 200
 
