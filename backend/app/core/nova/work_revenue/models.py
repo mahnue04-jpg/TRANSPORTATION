@@ -275,6 +275,7 @@ class NovaWorkRevenueEntry(Base):
     opportunity_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     stage: Mapped[str] = mapped_column(String(40), nullable=False, default="ESTIMATED")
     amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    remaining_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(12), nullable=False, default="USD")
     expected_payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     invoice_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)

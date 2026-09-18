@@ -114,6 +114,9 @@ _EXTRA_COLUMNS: dict[str, dict[str, str]] = {
         "previous_state": "VARCHAR(40)",
         "new_state": "VARCHAR(40)",
     },
+    "nova_work_revenue_entries": {
+        "remaining_amount": "FLOAT",
+    },
 }
 
 

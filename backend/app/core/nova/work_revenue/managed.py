@@ -1114,17 +1114,38 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         .limit(LIST_MAX_LIMIT)
         .all()
     )
+    engagement_ids = {item.engagement_id for item in entries if item.engagement_id}
+    archived_ids: set[str] = set()
+    if engagement_ids:
+        archived_ids = {
+            row.engagement_id
+            for row in (
+                _query(db, NovaWorkEngagement, organization_id, user)
+                .filter(NovaWorkEngagement.engagement_id.in_(engagement_ids))
+                .all()
+            )
+            if row.status in {"ARCHIVED", "CANCELLED"}
+        }
+    current_entries = [item for item in entries if item.engagement_id not in archived_ids]
+    historical_entries = [item for item in entries if item.engagement_id in archived_ids]
 
-    def _sum(predicate) -> float:
-        return round(sum(item.amount for item in entries if predicate(item)), 2)
+    def _sum(items, predicate) -> float:
+        return round(sum(item.amount for item in items if predicate(item)), 2)
 
-    estimated = _sum(lambda item: item.stage == "ESTIMATED")
-    quoted = _sum(lambda item: item.stage == "QUOTED")
-    contracted = _sum(lambda item: item.stage == "CONTRACTED")
-    awaiting_invoice = _sum(lambda item: item.stage in {"CONTRACTED", "INVOICE_DRAFT"})
-    manual_invoice = _sum(lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
-    awaiting_confirm = _sum(lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed)
-    received = _sum(lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
+    estimated = _sum(current_entries, lambda item: item.stage == "ESTIMATED")
+    quoted = _sum(current_entries, lambda item: item.stage == "QUOTED")
+    contracted = _sum(current_entries, lambda item: item.stage == "CONTRACTED")
+    awaiting_invoice = _sum(current_entries, lambda item: item.stage in {"CONTRACTED", "INVOICE_DRAFT"})
+    manual_invoice = _sum(current_entries, lambda item: normalize_revenue_stage(item.stage) == "INVOICED_EXTERNALLY")
+    awaiting_confirm = _sum(
+        current_entries,
+        lambda item: item.stage in {"INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"} and not item.owner_confirmed,
+    )
+    received = _sum(current_entries, lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"})
+    historical_received = _sum(
+        historical_entries,
+        lambda item: bool(item.owner_confirmed) and item.stage in {"PAID", "PARTIALLY_PAID"},
+    )
     opportunity_estimated = round(sum((item.estimated_value or 0) for item in opportunities), 2)
     opportunity_quoted = round(sum((item.quoted_amount or 0) for item in opportunities), 2)
     opportunity_contracted = round(sum((item.contract_amount or 0) for item in opportunities), 2)
@@ -1191,6 +1212,12 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
         "awaiting_owner_payment_confirmation": awaiting_confirm,
         "owner_confirmed_received": received,
         "owner_confirmed_received_amount": received,
+        "historical_archived": {
+            "label": "Historical AMICOR ledger from archived or cancelled engagements. Not deleted. Not included in current/active totals.",
+            "owner_confirmed_received": historical_received,
+            "entry_count": len(historical_entries),
+            "included_in_current_totals": False,
+        },
         "reconciliation_state": reconciliation_state,
         "mismatch": mismatch,
         "mismatch_state": "MISMATCH" if mismatch["has_mismatch"] else "ALIGNED_OR_CONTEXT_ONLY",
@@ -1217,11 +1244,14 @@ def reconciliation(db: Session, *, organization_id: str, user: UserContext) -> d
                 "opportunity_id": item.opportunity_id,
                 "stage": item.stage,
                 "amount": item.amount,
+                "remaining_amount": round(float(getattr(item, "remaining_amount", 0) or 0), 2),
                 "owner_confirmed": bool(item.owner_confirmed),
                 "invoice_reference": sanitize_untrusted(item.invoice_reference)[:120] if item.invoice_reference else None,
                 "processor_confirmed": False,
                 "party": "AMICOR",
                 "authoritative": True,
+                "historical": item.engagement_id in archived_ids,
+                "included_in_current_totals": item.engagement_id not in archived_ids,
             }
             for item in entries[:50]
         ],
@@ -1557,7 +1587,14 @@ def platform_policy_catalog() -> dict[str, Any]:
             "EXTERNAL_AUTOMATION_UNKNOWN": True,
             "MANUAL_REVIEW_REQUIRED": True,
         },
-        "policy": "Nova does not bypass CAPTCHA, login, MFA, anti-bot measures, or website restrictions. Flags are internal metadata only.",
+        "policy": (
+            "LOGIN_REQUIRED and CAPTCHA_REQUIRED describe the third-party platform. "
+            "False means that platform does not require login or CAPTCHA. "
+            "Those flags do not disable AMICOR owner approval, authentication, or submission guards. "
+            "HUMAN_SUBMISSION_ONLY, TERMS_RESTRICT_AUTOMATION, and MANUAL_REVIEW_REQUIRED stay enforced. "
+            "Nova does not bypass CAPTCHA, login, MFA, anti-bot measures, or website restrictions. "
+            "Flags are internal metadata only."
+        ),
         "live_fetch_enabled": False,
         "live_submit_enabled": False,
     }
@@ -1577,8 +1614,9 @@ def create_platform_policy(
         owner_user_id=user.user_id,
         opportunity_id=payload.opportunity_id,
         source_label=sanitize_untrusted(payload.source_label)[:120] or "unknown",
-        login_required=True if payload.login_required else bool(payload.login_required),
-        captcha_required=True if payload.captcha_required else bool(payload.captcha_required),
+        # Descriptive of the third-party platform only. False does not bypass AMICOR guards.
+        login_required=bool(payload.login_required),
+        captcha_required=bool(payload.captcha_required),
         human_submission_only=True,
         terms_restrict_automation=True,
         external_automation_unknown=True,

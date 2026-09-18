@@ -54,6 +54,7 @@ def test_ui_labels_amicor_versus_client() -> None:
     assert "client billed draft" in WORK_JS.lower()
     assert "Sources are not added together" in WORK_JS
     assert "mismatch flagged between AMICOR ledger" in WORK_JS
+    assert "historical/archived, not in current totals" in WORK_JS
     rules = labeling_rules()
     assert rules["authoritative_source"] == AUTHORITATIVE_SOURCE
     assert rules["double_count_opportunity_into_amicor"] is False
@@ -219,3 +220,174 @@ def test_negative_values_and_tenant_isolation(client: TestClient) -> None:
     assert guards["LIVE_DISCOVERY_ENABLED"] is False
     assert guards["EXTERNAL_SUBMISSION_ENABLED"] is False
     assert guards["AUTONOMOUS_CLIENT_CONTACT_ENABLED"] is False
+
+
+def _to_payment_pending(http: TestClient, headers: dict[str, str], entry_id: str) -> None:
+    for stage in ("QUOTED", "CONTRACTED", "PAYMENT_PENDING"):
+        moved = http.post(f"/api/nova/work/revenue-entries/{entry_id}/stage", headers=headers, params={"stage": stage})
+        assert moved.status_code == 200, moved.text
+
+
+def test_paid_ledger_and_opportunity_received_are_not_double_counted(client: TestClient) -> None:
+    headers = _headers(client)
+    engagement = _eng(client, headers, client_name="Block3 Paid Ledger Client")
+    created = client.post(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        json={"engagement_id": engagement["engagement_id"], "stage": "ESTIMATED", "amount": 50, "currency": "USD"},
+    )
+    assert created.status_code == 200
+    entry_id = created.json()["entry_id"]
+    _to_payment_pending(client, headers, entry_id)
+    paid = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True},
+    )
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["stage"] == "PAID"
+    before = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    opp = client.post(
+        "/api/nova/work/opportunities",
+        headers=headers,
+        json={
+            "company_name": "Block3 Double Count Co",
+            "opportunity_title": "Client context received only",
+            "description": "Remote bookkeeping",
+        },
+    )
+    assert opp.status_code == 200, opp.text
+    patched = client.patch(
+        f"/api/nova/work/opportunities/{opp.json()['opportunity_id']}",
+        headers=headers,
+        json={"amount_received": 999, "owner_confirmed_payment_received": True},
+    )
+    assert patched.status_code == 200, patched.text
+    after = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    analytics = client.get("/api/nova/work/analytics", headers=headers, params={"period": "all"}).json()
+    assert after["owner_confirmed_received"] == before["owner_confirmed_received"]
+    assert analytics["received_revenue"] == after["owner_confirmed_received"]
+    assert after["client_context"]["opportunity_received_amount"]["amount"] >= 999
+    assert after["double_counted"] is False
+    assert analytics["double_counted"] is False
+
+
+def test_partial_payment_keeps_remaining_expected(client: TestClient) -> None:
+    headers = _headers(client)
+    engagement = _eng(client, headers, client_name="Block3 Partial Client")
+    created = client.post(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        json={"engagement_id": engagement["engagement_id"], "stage": "ESTIMATED", "amount": 100, "currency": "USD"},
+    )
+    assert created.status_code == 200
+    entry_id = created.json()["entry_id"]
+    _to_payment_pending(client, headers, entry_id)
+    before = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    partial = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True, "amount": 40},
+    )
+    assert partial.status_code == 200, partial.text
+    body = partial.json()
+    assert body["stage"] == "PARTIALLY_PAID"
+    assert body["display_stage"] == "PARTIALLY_PAID"
+    assert body["amount"] == 40
+    assert body["remaining_amount"] == 60
+    assert body["owner_confirmed"] is True
+    recon = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    analytics = client.get("/api/nova/work/analytics", headers=headers, params={"period": "all"}).json()
+    listed = [item for item in recon.get("entries") or [] if item.get("entry_id") == entry_id]
+    assert listed
+    assert listed[0]["amount"] == 40
+    assert listed[0]["remaining_amount"] == 60
+    assert listed[0]["stage"] == "PARTIALLY_PAID"
+    assert recon["owner_confirmed_received"] == before["owner_confirmed_received"] + 40
+    assert recon["owner_confirmed_received"] != before["owner_confirmed_received"] + 100
+    assert analytics["received_revenue"] == recon["owner_confirmed_received"]
+
+
+def test_platform_policy_false_login_captcha_cannot_bypass_guards(client: TestClient) -> None:
+    headers = _headers(client)
+    catalog = client.get("/api/nova/work/platform-policies/catalog", headers=headers)
+    assert catalog.status_code == 200
+    assert catalog.json()["live_submit_enabled"] is False
+    policy = client.post(
+        "/api/nova/work/platform-policies",
+        headers=headers,
+        json={
+            "source_label": "open public board",
+            "login_required": False,
+            "captcha_required": False,
+            "human_submission_only": False,
+            "terms_restrict_automation": False,
+            "manual_review_required": False,
+        },
+    )
+    assert policy.status_code == 200, policy.text
+    body = policy.json()
+    assert body["LOGIN_REQUIRED"] is False
+    assert body["CAPTCHA_REQUIRED"] is False
+    assert body["HUMAN_SUBMISSION_ONLY"] is True
+    assert body["TERMS_RESTRICT_AUTOMATION"] is True
+    assert body["MANUAL_REVIEW_REQUIRED"] is True
+    assert body["bypass_allowed"] is False
+    opp = client.post(
+        "/api/nova/work/opportunities",
+        headers=headers,
+        json={"company_name": "Policy Guard Co", "opportunity_title": "Remote policy check", "description": "Remote"},
+    )
+    assert opp.status_code == 200
+    client.post(f"/api/nova/work/opportunities/{opp.json()['opportunity_id']}/qualify", headers=headers)
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={"opportunity_id": opp.json()["opportunity_id"], "applicant_party": "AMICOR"},
+    )
+    assert app_resp.status_code == 200, app_resp.text
+    submit = client.post(f"/api/nova/work/applications/{app_resp.json()['application_id']}/submit", headers=headers)
+    assert submit.status_code == 409
+    guards = engine_guardrails()
+    assert guards["EXTERNAL_SUBMISSION_ENABLED"] is False
+    assert guards["LIVE_DISCOVERY_ENABLED"] is False
+
+
+def test_archived_engagement_revenue_is_historical_not_current(client: TestClient) -> None:
+    headers = _headers(client)
+    engagement = _eng(client, headers, client_name="Block3 Archive Client")
+    created = client.post(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        json={"engagement_id": engagement["engagement_id"], "stage": "ESTIMATED", "amount": 25, "currency": "USD"},
+    )
+    assert created.status_code == 200
+    entry_id = created.json()["entry_id"]
+    _to_payment_pending(client, headers, entry_id)
+    paid = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True},
+    )
+    assert paid.status_code == 200, paid.text
+    before = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    archived = client.patch(
+        f"/api/nova/work/engagements/{engagement['engagement_id']}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["status"] == "ARCHIVED"
+    after = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    analytics = client.get("/api/nova/work/analytics", headers=headers, params={"period": "all"}).json()
+    assert after["owner_confirmed_received"] == before["owner_confirmed_received"] - 25
+    assert after["historical_archived"]["owner_confirmed_received"] >= 25
+    assert after["historical_archived"]["included_in_current_totals"] is False
+    listed = [item for item in after.get("entries") or [] if item.get("entry_id") == entry_id]
+    assert listed
+    assert listed[0]["historical"] is True
+    assert listed[0]["included_in_current_totals"] is False
+    assert listed[0]["amount"] == 25
+    assert analytics["received_revenue"] == after["owner_confirmed_received"]
+    assert analytics["historical_archived_received"] >= 25
+

@@ -221,7 +221,8 @@
       "<div class=\"item\"><strong>AMICOR contracted</strong><div class=\"muted\">" + escapeHtml(body.contracted_amount) + " · AMICOR ledger, not received</div></div>" +
       "<div class=\"item\"><strong>Client billed draft</strong><div class=\"muted\">" + escapeHtml((client.billed_amount || {}).amount || body.invoice_support_amount) + " · not a real invoice sent</div></div>" +
       "<div class=\"item\"><strong>Client/opportunity contract</strong><div class=\"muted\">" + escapeHtml((client.contract_opportunity_amount || {}).amount) + " · context only</div></div>" +
-      "<div class=\"item\"><strong>AMICOR owner-confirmed received</strong><div class=\"muted\">" + escapeHtml(body.owner_confirmed_received_amount) + " · owner action only</div></div>" +
+      "<div class=\"item\"><strong>AMICOR owner-confirmed received</strong><div class=\"muted\">" + escapeHtml(body.owner_confirmed_received_amount) + " · current/active AMICOR ledger</div></div>" +
+      "<div class=\"item\"><strong>Historical archived AMICOR received</strong><div class=\"muted\">" + escapeHtml(((body.historical_archived || {}).owner_confirmed_received) || 0) + " · historical only, not in current totals, not deleted</div></div>" +
       "<div class=\"item\"><strong>Reconciliation state</strong><div class=\"muted\">" + escapeHtml(body.reconciliation_state) +
       (mismatch.has_mismatch ? " · mismatch flagged between AMICOR ledger and client/opportunity context" : " · no AMICOR vs client amount mismatch") + "</div></div>" +
       "</div>" +
@@ -233,7 +234,9 @@
         (row.engagement_id ? "engagement " + escapeHtml(row.engagement_id) + " · " : "") +
         (row.opportunity_id ? "opportunity " + escapeHtml(row.opportunity_id) + " · " : "") +
         (row.owner_confirmed ? "owner confirmed" : "not owner-confirmed") +
-        " · AMICOR ledger · processor confirmed: no</div></div>";
+        (row.remaining_amount ? " · remaining expected " + escapeHtml(row.remaining_amount) : "") +
+        (row.historical ? " · historical/archived, not in current totals" : " · current AMICOR ledger") +
+        " · processor confirmed: no</div></div>";
     });
   }
   function oppItem(row) {
