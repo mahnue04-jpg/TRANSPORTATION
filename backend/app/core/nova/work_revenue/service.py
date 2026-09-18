@@ -1395,10 +1395,11 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         .filter(NovaWorkDeliverable.owner_confirmed_delivered.is_(False))
         .count()
     )
-    from app.core.nova.work_revenue.managed import completion_counts, reconciliation
+    from app.core.nova.work_revenue.managed import completion_counts, owner_fact_catalog, reconciliation
 
     extra = completion_counts(db, organization_id=organization_id, user=user)
     recon = reconciliation(db, organization_id=organization_id, user=user)
+    fact_ready = (owner_fact_catalog(db, organization_id=organization_id, user=user) or {}).get("readiness") or {}
     return DashboardOut(
         counts={
             "work_opportunities": len(opportunities),
@@ -1433,6 +1434,12 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "reports_awaiting_review": extra["reports_awaiting_review"],
             "invoice_support_drafts": extra["invoice_support_drafts"],
             "blocked_work": extra["blocked_work"],
+            "facts_required": int(fact_ready.get("total_required_facts") or 0),
+            "facts_provided": int(fact_ready.get("provided_facts") or 0),
+            "facts_verified": int(fact_ready.get("verified_facts") or 0),
+            "facts_missing": int(fact_ready.get("missing_facts") or 0),
+            "facts_expired": int(fact_ready.get("expired_facts") or 0),
+            "facts_readiness_percent": int(fact_ready.get("percentage_complete") or 0),
         },
         opportunity_inbox=inbox,
         qualified_work=qualified,

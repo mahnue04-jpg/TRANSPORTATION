@@ -806,12 +806,13 @@ class InvoiceSupportDecision(BaseModel):
 
 class BusinessFactUpdate(BaseModel):
     organization_id: str | None = None
-    value_status: str = "OWNER_PROVIDED"
+    value_status: str = "PROVIDED"
     value_display: str | None = Field(default=None, max_length=400)
     verification_date: datetime | None = None
     expiration_date: datetime | None = None
     source_description: str | None = Field(default=None, max_length=400)
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    confirm_overwrite: bool = False
 
 
 class DisclosurePolicyCreate(BaseModel):

@@ -4,6 +4,8 @@
   var activeFilter = "";
   var selectedOpportunityId = "";
   var activeTab = "overview";
+  var factFilter = "all";
+  var factCatalog = null;
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
@@ -90,6 +92,63 @@
     if (!bits.length) return "";
     return "<div class=\"action-row\">" + bits.join("") + "</div>";
   }
+  function factMatchesFilter(row) {
+    var status = String(row.value_status || "MISSING").toUpperCase();
+    if (factFilter === "missing") return status === "MISSING";
+    if (factFilter === "provided") return status === "PROVIDED" || status === "OWNER_PROVIDED";
+    if (factFilter === "verified") return status === "VERIFIED";
+    if (factFilter === "expired") return status === "EXPIRED" || Boolean(row.expires_at);
+    if (factFilter === "required") return Boolean(row.required_before_live) && (status === "MISSING" || status === "EXPIRED");
+    return true;
+  }
+  function factHint(row) {
+    if (row.value_kind === "flag") return "Readiness flag only: OWNER_SAYS_READY, OWNER_SAYS_NOT_READY, w9_ready, tax_information_ready, banking_ready, or NOT_APPLICABLE.";
+    if (row.value_kind === "decision" && row.fact_id === "ai_use_disclosure_decision") return "Use AI_ASSISTANCE_USED_DISCLOSE, AI_ASSISTANCE_USED_OWNER_WILL_DECIDE_PER_PLATFORM, NO_AI_ASSISTANCE_CLAIMED, or NOT_APPLICABLE.";
+    if (row.value_kind === "decision") return "Use SUBCONTRACTOR_ASSISTANCE_ALLOWED, SUBCONTRACTOR_ASSISTANCE_NOT_ALLOWED, OWNER_WILL_DECIDE_PER_ENGAGEMENT, or NOT_APPLICABLE.";
+    if (row.value_kind === "status") return "Use OWNER_SAYS_READY, insurance_verified / license_verified, or a short status. No policy or license numbers.";
+    if (row.value_kind === "email") return "Business email only. No secrets.";
+    if (row.value_kind === "phone") return "Business phone only. No secrets.";
+    return "Non-sensitive owner text only. No EIN, SSN, bank numbers, or keys.";
+  }
+  function renderFacts(catalog) {
+    factCatalog = catalog || factCatalog;
+    if (!factCatalog || !$("fact-list")) return;
+    var ready = factCatalog.readiness || {};
+    if ($("fact-readiness")) {
+      $("fact-readiness").textContent =
+        "Required " + (ready.total_required_facts || 0) +
+        " · provided " + (ready.provided_facts || 0) +
+        " · verified " + (ready.verified_facts || 0) +
+        " · missing " + (ready.missing_facts || 0) +
+        " · expired " + (ready.expired_facts || 0) +
+        " · " + (ready.percentage_complete || 0) + "% complete. Internal readiness only. Nothing was submitted or charged.";
+    }
+    var rows = (factCatalog.facts || []).filter(factMatchesFilter);
+    $("fact-list").innerHTML = listHtml(rows, "No facts match this filter.", function (row) {
+      var current = row.value_status === "MISSING" ? "" : (row.value_display || "");
+      return "<div class=\"item\" data-fact-id=\"" + escapeHtml(row.fact_id) + "\">" +
+        "<strong>" + escapeHtml(row.label) + "</strong>" +
+        "<div class=\"muted\">" + escapeHtml(row.category) +
+        " · <span class=\"fact-status " + escapeHtml(String(row.value_status || "").toLowerCase()) + "\">" +
+        escapeHtml(row.value_status) + "</span>" +
+        (row.required_before_live ? " · required before live V1" : " · optional") +
+        " · source " + escapeHtml(row.source || "OWNER") + "</div>" +
+        "<div class=\"muted\">" + escapeHtml(factHint(row)) + "</div>" +
+        "<form class=\"fact-form\" data-fact-form=\"" + escapeHtml(row.fact_id) + "\">" +
+        "<label>Status" +
+        "<select name=\"value_status\">" +
+        ["MISSING", "PROVIDED", "VERIFIED", "EXPIRED", "NOT_APPLICABLE"].map(function (status) {
+          return "<option value=\"" + status + "\"" + (row.value_status === status ? " selected" : "") + ">" + status + "</option>";
+        }).join("") +
+        "</select></label>" +
+        "<label>Value<input name=\"value_display\" maxlength=\"400\" value=\"" + escapeHtml(current) + "\" /></label>" +
+        "<label>Notes<textarea name=\"notes\" rows=\"2\" maxlength=\"2000\">" + escapeHtml(row.notes || "") + "</textarea></label>" +
+        (row.value_status === "VERIFIED" ? "<label><input type=\"checkbox\" name=\"confirm_overwrite\" /> Confirm overwrite of verified fact</label>" : "") +
+        "<div class=\"action-row\"><button type=\"submit\">Save fact</button></div>" +
+        "<div class=\"fact-error\" data-fact-error=\"" + escapeHtml(row.fact_id) + "\"></div>" +
+        "</form></div>";
+    });
+  }
   function oppItem(row) {
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
       "<strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
@@ -137,6 +196,8 @@
     if ($("count-reports")) $("count-reports").textContent = counts.reports_awaiting_review || 0;
     if ($("count-invoices")) $("count-invoices").textContent = counts.invoice_support_drafts || 0;
     if ($("count-blocked")) $("count-blocked").textContent = counts.blocked_work || 0;
+    if ($("count-facts-missing")) $("count-facts-missing").textContent = counts.facts_missing || 0;
+    if ($("count-facts-ready")) $("count-facts-ready").textContent = (counts.facts_readiness_percent || 0) + "%";
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
     $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
@@ -343,6 +404,11 @@
         }
       } catch (_) {}
     }
+    if (activeTab === "owner-facts" || $("fact-list")) {
+      try {
+        renderFacts(await api("/api/nova/work/owner-facts"));
+      } catch (_) {}
+    }
     if (activeTab === "invoice-support") {
       try {
         var invoices = await api("/api/nova/work/invoice-support");
@@ -452,8 +518,49 @@
       if (!target || !target.getAttribute || !target.hasAttribute("data-tab")) return;
       activeTab = target.getAttribute("data-tab") || "overview";
       applyTab();
+      if (activeTab === "owner-facts") {
+        refresh().catch(function (err) { showBanner(err.message); });
+      }
     });
   }
+  if ($("fact-filter-row")) {
+    $("fact-filter-row").addEventListener("click", function (event) {
+      var target = event.target;
+      if (!target || !target.getAttribute || !target.hasAttribute("data-fact-filter")) return;
+      factFilter = target.getAttribute("data-fact-filter") || "all";
+      var buttons = document.querySelectorAll("#fact-filter-row [data-fact-filter]");
+      buttons.forEach(function (button) {
+        button.classList.toggle("filter-on", (button.getAttribute("data-fact-filter") || "") === factFilter);
+      });
+      renderFacts(factCatalog);
+    });
+  }
+  document.querySelector(".work-main").addEventListener("submit", async function (event) {
+    var form = event.target && event.target.closest ? event.target.closest("[data-fact-form]") : null;
+    if (!form) return;
+    event.preventDefault();
+    var factId = form.getAttribute("data-fact-form");
+    var errorEl = document.querySelector("[data-fact-error=\"" + factId + "\"]");
+    if (errorEl) errorEl.textContent = "";
+    var confirmBox = form.querySelector("[name=\"confirm_overwrite\"]");
+    try {
+      var catalog = await api("/api/nova/work/owner-facts/" + encodeURIComponent(factId), {
+        method: "PUT",
+        body: JSON.stringify({
+          value_status: form.querySelector("[name=\"value_status\"]").value,
+          value_display: form.querySelector("[name=\"value_display\"]").value,
+          notes: form.querySelector("[name=\"notes\"]").value,
+          confirm_overwrite: !!(confirmBox && confirmBox.checked)
+        })
+      });
+      renderFacts(catalog);
+      showBanner("Owner fact saved. Nothing was submitted, sent, or charged.", true);
+      await refresh();
+    } catch (err) {
+      if (errorEl) errorEl.textContent = err.message;
+      showBanner(err.message);
+    }
+  });
   $("opp-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try {
