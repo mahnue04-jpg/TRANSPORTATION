@@ -205,6 +205,24 @@ Blocked by live integration / deferred:
 
 Do not run Stripe object-creation tests from this workstream.
 
+## V2 core (supervised operating system foundation)
+
+V2 adds configuration, safety policy, adapter contracts, an owner approval queue, a prepare-only scheduler, and processor-event recording. Live execution remains off.
+
+- Capabilities: `LIVE_DISCOVERY`, `EXTERNAL_SUBMISSION`, `CLIENT_CONTACT`, `REPORT_SEND`, `INVOICE_SEND`, `FINANCIAL_EXECUTION`, `CALENDAR_ACTIONS`, `NOTIFICATIONS`
+- Missing env vars are OFF. Master switch `NOVA_WR_ALLOW_LIVE_ACTIONS` is required in addition to each capability env var.
+- Production also requires `NOVA_WR_PRODUCTION_LIVE_OVERRIDE=OWNER_AUTHORIZED_PRODUCTION_LIVE`. Live adapters are still unimplemented, so execution stays blocked.
+- `GET /api/nova/work/v2/capabilities` is the status surface. Secrets are never returned.
+- Safety policy requires all of: capability enabled, correct environment, tenant authorized, owner approved, adapter implemented, required facts, terms/policy, not duplicated.
+- Adapter kinds exist as disabled/dry-run/mock contracts only.
+- Supervised actions: `DRAFT` → `READY_FOR_REVIEW` → `OWNER_APPROVED` → `QUEUED` → `FAILED`/`CANCELED`. `EXECUTED` is reserved and is not reached in V2 core.
+- Scheduler `POST /api/nova/work/v2/scheduler/prepare` generates idempotent prepare jobs. No worker, cron, send, contact, or payment.
+- Processor-shaped payment events are stored without changing AMICOR received cash. Owner confirmation remains authoritative.
+
+See `backend/docs/NOVA_WORK_REVENUE_V2_MIGRATION.md` for production migration notes. Do not run production migrations without owner authorization.
+
+`backend/tests/test_nova_work_revenue_v2.py` covers V2 config, safety, adapters, owner queue, scheduler, payment-event, tenant, and production-guard behavior.
+
 ## Schema / migration notes
 
 Changes are additive `CREATE TABLE` / `ALTER TABLE ADD COLUMN` via `ensure_work_revenue_schema`. New tables include recurring series/occurrences, weekly reports, invoice-support, business facts, disclosure policies, and platform policies. No Stripe, Health, Delivery, Freight, or Lifesaver tables.

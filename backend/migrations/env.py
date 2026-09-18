@@ -17,6 +17,7 @@ import app.db.models  # noqa: F401, E402 — registers all ORM models with Base
 import app.modules.health_isf.models  # noqa: F401, E402 — include Health ISF metadata
 import app.modules.payments.models  # noqa: F401, E402 — Ride + Deliver payment ledger
 import app.core.nova.freight.models  # noqa: F401, E402 — Nova freight shipments
+import app.core.nova.work_revenue.models  # noqa: F401, E402 — Work & Revenue V1/V2
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
@@ -41,6 +42,7 @@ def include_object(object_, name, type_, reflected, compare_to):
             or name.startswith("health_isf_")
             or name.startswith("amicor_")
             or name.startswith("nova_freight_")
+            or name.startswith("nova_work_")
         )
     return True
 
