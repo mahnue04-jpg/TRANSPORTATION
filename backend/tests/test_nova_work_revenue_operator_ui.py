@@ -201,6 +201,48 @@ def test_reconciliation_display_and_received_boundary(client: TestClient) -> Non
     still = client.get("/api/nova/work/reconciliation", headers=headers).json()
     assert still["owner_confirmed_received_amount"] == before_body["owner_confirmed_received_amount"]
     assert still["processor_confirmed_payment"] is False
+    omitted = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={},
+    )
+    assert omitted.status_code == 400
+    client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/stage",
+        headers=headers,
+        params={"stage": "QUOTED"},
+    )
+    client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/stage",
+        headers=headers,
+        params={"stage": "CONTRACTED"},
+    )
+    contracted_paid = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True},
+    )
+    assert contracted_paid.status_code == 400
+    client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/stage",
+        headers=headers,
+        params={"stage": "PAYMENT_PENDING"},
+    )
+    first_confirm = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True},
+    )
+    assert first_confirm.status_code == 200, first_confirm.text
+    repeat = client.post(
+        f"/api/nova/work/revenue-entries/{entry_id}/confirm",
+        headers=headers,
+        json={"owner_confirmed": True},
+    )
+    assert repeat.status_code == 409
+    after_confirm = client.get("/api/nova/work/reconciliation", headers=headers).json()
+    assert after_confirm["processor_confirmed_payment"] is False
+    assert after_confirm["stripe_confirmed_payment"] is False
 
 
 def test_queue_get_does_not_duplicate_records(client: TestClient) -> None:

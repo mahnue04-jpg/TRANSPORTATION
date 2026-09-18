@@ -719,7 +719,7 @@ class RevenueEntryOut(BaseModel):
 
 class RevenueConfirm(BaseModel):
     organization_id: str | None = None
-    owner_confirmed: bool = True
+    owner_confirmed: bool = False
     received_date: datetime | None = None
     reconciliation_notes: str | None = None
     amount: float | None = Field(default=None, ge=0, le=1_000_000_000)

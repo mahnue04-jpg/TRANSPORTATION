@@ -1289,12 +1289,16 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
     current = now()
     if getattr(current, "tzinfo", None) is None:
         current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
         status = row.value_status
         expires = row.expiration_date
         if expires is not None and getattr(expires, "tzinfo", None) is None:
             expires = expires.replace(tzinfo=timezone.utc)
+        elif expires is not None:
+            expires = expires.astimezone(timezone.utc)
         if expires is not None and current is not None and expires < current:
             status = "EXPIRED"
         out[row.fact_key] = {

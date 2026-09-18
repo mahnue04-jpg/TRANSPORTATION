@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -127,8 +127,18 @@ def _validate_amount(value: float | None, *, label: str) -> float | None:
     return value
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _validate_date_range(start: datetime | None, end: datetime | None) -> None:
-    if start and end and end < start:
+    left = _as_utc(start)
+    right = _as_utc(end)
+    if left and right and right < left:
         raise NovaWorkError("expected_end_date cannot be before expected_start_date")
 
 
@@ -1671,15 +1681,18 @@ def list_engagements(db: Session, *, organization_id: str, user: UserContext) ->
     _ensure()
     query = db.query(NovaWorkEngagement).filter(NovaWorkEngagement.organization_id == organization_id)
     query = _owner_filter(query, NovaWorkEngagement, user)
-    rows = query.order_by(NovaWorkEngagement.updated_at.desc()).limit(200).all()
-    task_rows = (
-        _owner_filter(
-            db.query(NovaWorkTask).filter(NovaWorkTask.organization_id == organization_id),
-            NovaWorkTask,
-            user,
-        )
-        .all()
+    rows = query.order_by(NovaWorkEngagement.updated_at.desc()).limit(LIST_MAX_LIMIT).all()
+    engagement_ids = [row.engagement_id for row in rows]
+    task_query = _owner_filter(
+        db.query(NovaWorkTask).filter(NovaWorkTask.organization_id == organization_id),
+        NovaWorkTask,
+        user,
     )
+    if engagement_ids:
+        task_query = task_query.filter(NovaWorkTask.engagement_id.in_(engagement_ids))
+        task_rows = task_query.limit(LIST_MAX_LIMIT).all()
+    else:
+        task_rows = []
     by_eng: dict[str, list[NovaWorkTask]] = {}
     for task in task_rows:
         by_eng.setdefault(task.engagement_id, []).append(task)
