@@ -320,9 +320,9 @@
         "<h3>Revenue</h3>" +
         "<p class=\"count-metric\">Separated owner-entered amounts</p>" +
         "<ul class=\"work-state-list\">" +
-          "<li><span class=\"state-label\">ESTIMATED</span> " + escapeHtml(moneyText(revenue.estimated_pipeline)) + " — not money earned</li>" +
-          "<li><span class=\"state-label\">CONTRACTED</span> " + escapeHtml(moneyText(revenue.contracted_value)) + " — not money earned</li>" +
-          "<li><span class=\"state-label\">RECEIVED</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — owner-confirmed only</li>" +
+          "<li><span class=\"state-label\">ESTIMATED</span> " + escapeHtml(moneyText(revenue.estimated_pipeline)) + " — AMICOR ledger, not money earned</li>" +
+          "<li><span class=\"state-label\">CONTRACTED</span> " + escapeHtml(moneyText(revenue.contracted_value)) + " — AMICOR ledger, not money earned</li>" +
+          "<li><span class=\"state-label\">RECEIVED</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — AMICOR owner-confirmed only</li>" +
         "</ul>" +
         receivedEmpty +
         "<p class=\"hint\">" + escapeHtml(summary.revenue_disclaimer || "Estimated pipeline is not received revenue. Nova does not collect payment.") + "</p>" +
@@ -357,9 +357,9 @@
         "<h3>Revenue Pipeline</h3>" +
         "<p class=\"count-metric\">Quoted vs contracted vs received</p>" +
         "<ul class=\"work-state-list\">" +
-          "<li><span class=\"state-label\">QUOTED</span> " + escapeHtml(moneyText(summary.quoted_pipeline)) + " — not money earned</li>" +
-          "<li><span class=\"state-label\">CONTRACTED REVENUE</span> " + escapeHtml(moneyText(summary.contracted_revenue || revenue.contracted_value)) + " — not cash received</li>" +
-          "<li><span class=\"state-label\">RECEIVED REVENUE</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — owner-confirmed only</li>" +
+          "<li><span class=\"state-label\">QUOTED</span> " + escapeHtml(moneyText(summary.quoted_pipeline)) + " — AMICOR ledger, not money earned</li>" +
+          "<li><span class=\"state-label\">CONTRACTED REVENUE</span> " + escapeHtml(moneyText(summary.contracted_revenue || revenue.contracted_value)) + " — AMICOR ledger, not cash received</li>" +
+          "<li><span class=\"state-label\">RECEIVED REVENUE</span> " + escapeHtml(moneyText(revenue.owner_confirmed_received)) + " — AMICOR owner-confirmed only</li>" +
         "</ul>" +
         "<p class=\"hint\">Quoted is not contracted. Contracted is not invoiced. Invoiced is not received.</p>" +
         workOpenLink() +

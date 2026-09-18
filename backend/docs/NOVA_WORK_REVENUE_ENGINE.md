@@ -91,6 +91,18 @@ Nova never infers payment from contract existence, task completion, draft invoic
 
 `GET /api/nova/work/reconciliation` treats `nova_work_revenue_entries` as the authoritative source for estimated / quoted / contracted / invoiced / received totals. Opportunity revenue fields and invoice-support drafts are returned as separate context only and are not added into those totals. This avoids double-counting.
 
+## AMICOR vs client revenue labeling
+
+One interpretation: AMICOR money is only what lives on `nova_work_revenue_entries`.
+
+- **Client billed amount** — invoice-support draft subtotal. Not a sent invoice.
+- **Contract / opportunity amount** — owner-entered opportunity fields. Context only.
+- **AMICOR expected revenue** — the current AMICOR ledger stage: contracted if present, else quoted, else estimated. Stages are not summed.
+- **AMICOR owner-confirmed received** — ledger rows in `PAID` / `PARTIALLY_PAID` after explicit owner confirmation. Not processor-confirmed.
+- **Contextual / non-authoritative** — opportunity and invoice-support amounts shown for comparison, never added into AMICOR totals.
+
+Mismatch flags appear when AMICOR ledger amounts disagree with opportunity or billed-draft context. Owner confirmation is still required before money is marked received.
+
 List endpoints cap results at 200 rows. Use `limit` where exposed. Source URLs reject `javascript:`, `data:`, `file:`, credentials, loopback, link-local, and RFC1918/private addresses. URLs are never fetched.
 
 ## Owner-action model
@@ -152,8 +164,7 @@ Blocked by owner input:
 
 Blocked by remaining internal V1 blocks:
 
-- Distinct AMICOR-vs-client revenue labeling (Block 3)
-- Tests for AMICOR-vs-client revenue labeling
+- Tests for remaining live-integration blocks
 
 Blocked by live integration / deferred:
 
@@ -170,7 +181,7 @@ Blocked by live integration / deferred:
 - Application dashboard still loads materials per application; keep list caps and do not add a background worker.
 - Opportunity revenue fields remain owner-entered pipeline context. Do not silently copy them into revenue entries.
 - Missing owner facts stay MISSING until the owner supplies them. Approval never marks an application externally ready.
-- After Block 2, the next safe implementation is Block 3 AMICOR-vs-client revenue labeling. Queue, reconciliation, and owner-fact status now have first-class Work UI. Live adapters stay off.
+- After Block 3, remaining V1 work is live-integration only. AMICOR ledger amounts are now labeled separately from client billed drafts and opportunity context. Live adapters stay off.
 
 ## Testing strategy
 
@@ -181,6 +192,8 @@ Blocked by live integration / deferred:
 `backend/tests/test_nova_work_revenue_owner_facts.py` covers Block 1 owner-fact intake, secret rejection, tenant isolation, readiness percentage, and the rule that fact entry does not enable external action.
 
 `backend/tests/test_nova_work_revenue_operator_ui.py` covers Block 2 operator queue/reconciliation UI, filter/sort/pagination validation, overdue/blocked/owner-action states, received-amount confirmation boundary, tenant isolation, and disabled external controls.
+
+`backend/tests/test_nova_work_revenue_labeling.py` covers Block 3 AMICOR vs client labeling, authoritative source selection, mismatch handling, owner-confirmed received boundaries, tenant isolation, and double-count protection.
 
 Do not run Stripe object-creation tests from this workstream.
 

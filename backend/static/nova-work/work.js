@@ -212,23 +212,28 @@
     var facts = (body && body.owner_fact_status) || {};
     renderFactStatus(facts);
     var mismatch = (body && body.mismatch) || {};
+    var amicor = (body && body.amicor) || {};
+    var client = (body && body.client_context) || {};
     $("recon-summary").innerHTML =
       "<div class=\"recon-grid\">" +
-      "<div class=\"item\"><strong>Estimated amount</strong><div class=\"muted\">" + escapeHtml(body.estimated_amount) + " · internal pipeline</div></div>" +
-      "<div class=\"item\"><strong>Contracted amount</strong><div class=\"muted\">" + escapeHtml(body.contracted_amount) + " · not received</div></div>" +
-      "<div class=\"item\"><strong>Invoice-support amount</strong><div class=\"muted\">" + escapeHtml(body.invoice_support_amount) + " · not a real invoice sent</div></div>" +
-      "<div class=\"item\"><strong>Owner-confirmed received</strong><div class=\"muted\">" + escapeHtml(body.owner_confirmed_received_amount) + " · owner action only</div></div>" +
+      "<div class=\"item\"><strong>AMICOR expected</strong><div class=\"muted\">" + escapeHtml((amicor.expected_revenue || {}).amount || body.contracted_amount) + " · AMICOR ledger</div></div>" +
+      "<div class=\"item\"><strong>AMICOR estimated</strong><div class=\"muted\">" + escapeHtml(body.estimated_amount) + " · AMICOR ledger, not received</div></div>" +
+      "<div class=\"item\"><strong>AMICOR contracted</strong><div class=\"muted\">" + escapeHtml(body.contracted_amount) + " · AMICOR ledger, not received</div></div>" +
+      "<div class=\"item\"><strong>Client billed draft</strong><div class=\"muted\">" + escapeHtml((client.billed_amount || {}).amount || body.invoice_support_amount) + " · not a real invoice sent</div></div>" +
+      "<div class=\"item\"><strong>Client/opportunity contract</strong><div class=\"muted\">" + escapeHtml((client.contract_opportunity_amount || {}).amount) + " · context only</div></div>" +
+      "<div class=\"item\"><strong>AMICOR owner-confirmed received</strong><div class=\"muted\">" + escapeHtml(body.owner_confirmed_received_amount) + " · owner action only</div></div>" +
       "<div class=\"item\"><strong>Reconciliation state</strong><div class=\"muted\">" + escapeHtml(body.reconciliation_state) +
-      (mismatch.has_mismatch ? " · mismatch flagged" : "") + "</div></div>" +
+      (mismatch.has_mismatch ? " · mismatch flagged between AMICOR ledger and client/opportunity context" : " · no AMICOR vs client amount mismatch") + "</div></div>" +
       "</div>" +
-      "<p class=\"hint\">" + escapeHtml(body.disclaimer) + " Processor confirmed payment: no. Stripe confirmed payment: no.</p>";
+      (mismatch.has_mismatch ? "<p class=\"hint\">Mismatch: " + escapeHtml(Object.keys(mismatch).filter(function (key) { return mismatch[key] === true && key !== "invoice_support_is_not_received" && key !== "invoice_support_is_not_a_sent_invoice" && key !== "has_mismatch"; }).join(", ") || "sources disagree") + ". Context amounts are not added into AMICOR totals.</p>" : "") +
+      "<p class=\"hint\">" + escapeHtml(body.disclaimer) + " Processor confirmed payment: no. Stripe confirmed payment: no. Double counted: no.</p>";
     $("recon-entries").innerHTML = listHtml(body.entries, "No internal revenue entries.", function (row) {
       return "<div class=\"item\"><strong>" + escapeHtml(row.stage) + " · " + escapeHtml(row.amount) + "</strong>" +
         "<div class=\"muted\">" +
         (row.engagement_id ? "engagement " + escapeHtml(row.engagement_id) + " · " : "") +
         (row.opportunity_id ? "opportunity " + escapeHtml(row.opportunity_id) + " · " : "") +
         (row.owner_confirmed ? "owner confirmed" : "not owner-confirmed") +
-        " · processor confirmed: no</div></div>";
+        " · AMICOR ledger · processor confirmed: no</div></div>";
     });
   }
   function oppItem(row) {
@@ -272,6 +277,8 @@
     if ($("count-quoted")) $("count-quoted").textContent = summary.quoted_pipeline || 0;
     if ($("count-contracted")) $("count-contracted").textContent = summary.contracted_value || 0;
     if ($("count-received")) $("count-received").textContent = summary.owner_confirmed_received || 0;
+    if ($("count-client-billed")) $("count-client-billed").textContent = summary.client_billed_amount || 0;
+    if ($("count-opp-contract")) $("count-opp-contract").textContent = summary.contract_opportunity_amount || 0;
     if ($("count-tasks")) $("count-tasks").textContent = counts.tasks_due || 0;
     if ($("count-deliverables")) $("count-deliverables").textContent = counts.deliverables_pending || 0;
     if ($("count-recurring")) $("count-recurring").textContent = counts.recurring_overdue || 0;
@@ -293,10 +300,13 @@
         "<div class=\"muted\">" + escapeHtml(row.explanation) + "</div></div>";
     });
     $("revenue-box").textContent = (summary.disclaimer || data.revenue_placeholder || "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.") +
-      " Pipeline " + (summary.estimated_pipeline || 0) +
-      " · contracted " + (summary.contracted_value || 0) +
-      " · owner-confirmed received " + (summary.owner_confirmed_received || 0) +
-      ". These are not Stripe charges.";
+      " AMICOR expected " + (summary.amicor_expected_revenue || 0) +
+      " · AMICOR estimated " + (summary.estimated_pipeline || 0) +
+      " · AMICOR contracted " + (summary.contracted_value || 0) +
+      " · AMICOR owner-confirmed received " + (summary.owner_confirmed_received || 0) +
+      " · client billed draft " + (summary.client_billed_amount || 0) +
+      " · client/opportunity contract context " + (summary.contract_opportunity_amount || 0) +
+      ". These are not Stripe charges. Sources are not added together.";
     if ($("engagement-list")) {
       $("engagement-list").innerHTML = listHtml(data.engagements, "No internal engagements.", function (row) {
         return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
@@ -509,7 +519,7 @@
             return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
               "<div class=\"muted\">" + escapeHtml(row.status) +
               " · subtotal " + escapeHtml(row.draft_subtotal) +
-              " · not a Stripe invoice</div></div>";
+              " · client billed draft · not AMICOR received · not a Stripe invoice</div></div>";
           });
         }
       } catch (_) {}

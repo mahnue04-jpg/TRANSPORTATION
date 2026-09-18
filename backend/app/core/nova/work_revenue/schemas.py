@@ -715,6 +715,10 @@ class RevenueEntryOut(BaseModel):
     owner_confirmed: bool
     reconciliation_notes: str | None = None
     display_stage: str | None = None
+    party: str = "AMICOR"
+    authoritative: bool = True
+    amount_role: str = "amicor_ledger"
+    processor_confirmed: bool = False
 
 
 class RevenueConfirm(BaseModel):

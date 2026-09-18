@@ -23,6 +23,7 @@ from app.core.nova.work_revenue.lifecycle import (
     normalize_task_status,
 )
 from app.core.nova.work_revenue.materials import sanitize_untrusted
+from app.core.nova.work_revenue.revenue_labels import labeled_revenue_view
 from app.core.nova.work_revenue.models import (
     NovaWorkDeliverable,
     NovaWorkMaterial,
@@ -180,6 +181,10 @@ def revenue_out(row: NovaWorkRevenueEntry) -> RevenueEntryOut:
         owner_confirmed=bool(row.owner_confirmed),
         reconciliation_notes=row.reconciliation_notes,
         display_stage=display,
+        party="AMICOR",
+        authoritative=True,
+        amount_role="amicor_ledger",
+        processor_confirmed=False,
     )
 
 
@@ -744,7 +749,17 @@ def analytics(
     contracted = sum((item.contract_amount or 0) for item in opps)
     invoiced = sum(item.amount for item in revenue if item.stage in {"INVOICE_DRAFT", "INVOICED_EXTERNALLY", "PAYMENT_PENDING", "OVERDUE"})
     received = sum(item.amount for item in revenue if item.owner_confirmed and item.stage in PAID_STAGES)
-    received += sum((item.amount_received or 0) for item in opps if item.owner_confirmed_payment_received)
+    labeled = labeled_revenue_view(
+        amicor_estimated=sum(item.amount for item in revenue if item.stage == "ESTIMATED"),
+        amicor_quoted=sum(item.amount for item in revenue if item.stage == "QUOTED"),
+        amicor_contracted=sum(item.amount for item in revenue if item.stage == "CONTRACTED"),
+        amicor_received=received,
+        client_billed=0,
+        opportunity_estimated=estimated,
+        opportunity_quoted=quoted,
+        opportunity_contracted=contracted,
+        opportunity_received=sum((item.amount_received or 0) for item in opps if item.owner_confirmed_payment_received),
+    )
     return {
         "period": period or "all",
         "new_opportunities": len([item for item in opps if item.status == "DISCOVERED"]),
@@ -756,14 +771,18 @@ def analytics(
         "blocked_engagements": len([item for item in engagements if item["status"] == "BLOCKED" or item.get("blockers")]),
         "tasks_due": tasks_due,
         "completed_work": len([item for item in deliverables if item.owner_confirmed_delivered]) + len([item for item in tasks if item.get("status") == "COMPLETE"]),
-        "estimated_pipeline": estimated,
-        "quoted_pipeline": quoted,
-        "contracted_revenue": contracted,
+        "estimated_pipeline": labeled["amicor"]["estimated"]["amount"],
+        "quoted_pipeline": labeled["amicor"]["quoted"]["amount"],
+        "contracted_revenue": labeled["amicor"]["contracted"]["amount"],
         "invoiced_revenue": invoiced,
         "received_revenue": received,
+        "amicor": labeled["amicor"],
+        "client_context": labeled["client_context"],
+        "authoritative_source": labeled["authoritative_source"],
+        "double_counted": False,
         "disclaimer": (
-            "ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. "
-            "Nova does not collect payment."
+            "AMICOR ledger != client billed draft. ESTIMATED != CONTRACTED. CONTRACTED != INVOICED. INVOICED != RECEIVED. "
+            "Opportunity amounts are context only and are not added into AMICOR received totals. Nova does not collect payment."
         ),
         "guardrails": engine_guardrails(),
         "due_cutoff": due_cutoff.isoformat(),
