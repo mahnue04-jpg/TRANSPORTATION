@@ -5,6 +5,12 @@ __pycache__/
 *.pyc
 backend/data/
 
+# Local Lifesaver verification databases (also covered by backend/data/)
+backend/data/lifesaver_*.db
+backend/data/lifesaver_*.db-journal
+backend/data/lifesaver_*.db-wal
+backend/data/lifesaver_*.db-shm
+
 # Python and virtual environments
 .venv/
 venv/
