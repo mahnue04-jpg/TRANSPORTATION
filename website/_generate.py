@@ -97,6 +97,14 @@ def icon_card(name: str, title: str, body: str) -> str:
     return f'<article class="card icon-card">{icon_mark(name)}<h3>{title}</h3><p>{body}</p></article>'
 
 
+def card_visual(prefix: str, filename: str, alt: str) -> str:
+    return (
+        f'<div class="card-visual">'
+        f'<img src="{prefix}assets/img/{filename}" alt="{alt}" width="640" height="280" loading="lazy" decoding="async">'
+        f"</div>"
+    )
+
+
 def icon_step(number: str, name: str, title: str, body: str) -> str:
     return (
         f'<div class="step">{icon_mark(name)}<div><p class="step-index">{number}</p>'
@@ -215,31 +223,35 @@ def page(
   </main>
   <footer class="site-footer">
     <div class="wrap footer-grid">
-      <div>
+      <div class="footer-col">
         <strong>AMICOR</strong>
         <p>AMICOR HEALTH ISF LLC is a Minnesota technology company. Product availability varies. Unlaunched offerings are labeled Coming Soon, In Development, or Early Access.</p>
         <p><a href="mailto:info@getamicor.com">info@getamicor.com</a></p>
         <p>&copy; <span data-year></span> AMICOR HEALTH ISF LLC</p>
       </div>
-      <div>
+      <div class="footer-col">
         <strong>Products</strong>
-        <a href="/work-revenue/">Nova Work &amp; Revenue</a>
-        <a href="/nova-today/">Nova Today</a>
-        <a href="/nova-create/">Nova Create</a>
-        <a href="/deliver/">AMICOR Delivery</a>
-        <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
-        <a href="/home-hub/">Home Hub</a>
-        <a href="/car-hub/">Car Hub</a>
+        <nav class="footer-links" aria-label="Footer product links">
+          <a href="/work-revenue/">Nova Work &amp; Revenue</a>
+          <a href="/nova-today/">Nova Today</a>
+          <a href="/nova-create/">Nova Create</a>
+          <a href="/deliver/">AMICOR Delivery</a>
+          <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
+          <a href="/home-hub/">Home Hub</a>
+          <a href="/car-hub/">Car Hub</a>
+        </nav>
       </div>
-      <div>
+      <div class="footer-col">
         <strong>Company</strong>
-        <a href="/about/">About</a>
-        <a href="/early-access/">Early Access</a>
-        <a href="/contact/">Contact</a>
-        <a href="/privacy/">Privacy Policy</a>
-        <a href="/terms/">Terms of Service</a>
-        <a href="/software-terms/">Software Terms</a>
-        <a href="/accessibility/">Accessibility</a>
+        <nav class="footer-links" aria-label="Footer company links">
+          <a href="/about/">About</a>
+          <a href="/early-access/">Early Access</a>
+          <a href="/contact/">Contact</a>
+          <a href="/privacy/">Privacy Policy</a>
+          <a href="/terms/">Terms of Service</a>
+          <a href="/software-terms/">Software Terms</a>
+          <a href="/accessibility/">Accessibility</a>
+        </nav>
       </div>
     </div>
   </footer>
@@ -329,13 +341,13 @@ add(
           </div>
         </article>
         <div class="grid grid-3">
-          <article class="card"><div class="card-visual today" aria-hidden="true"></div><span class="chip chip-early">Early Access</span><h3>AMICOR Nova Today</h3><p>Intelligent daily command center for signed-in operators.</p><a class="card-link" href="/nova-today/">Learn more</a></article>
-          <article class="card"><div class="card-visual create" aria-hidden="true"></div><span class="chip chip-dev">In Development</span><h3>AMICOR Nova Create</h3><p>AI-assisted drafts and work materials. Owner review required. Not a live public creation marketplace.</p><a class="card-link" href="/nova-create/">Learn more</a></article>
-          <article class="card featured-work"><div class="card-visual work" aria-hidden="true"></div><span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Learn more</a></article>
-          <article class="card"><div class="card-visual deliver" aria-hidden="true"></div><span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations. Not commercially available.</p><a class="card-link" href="/deliver/">Learn more</a></article>
-          <article class="card"><div class="card-visual life" aria-hidden="true"></div><span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care and health-technology initiative. Not a medical device or emergency service.</p><a class="card-link" href="/lifesaver/">Learn more</a></article>
-          <article class="card"><div class="card-visual home" aria-hidden="true"></div><span class="chip chip-future">Future Hardware</span><h3>AMICOR Home Hub</h3><p>Rotating tabletop smart hub for a connected home. Not for sale.</p><a class="card-link" href="/home-hub/">Learn more</a></article>
-          <article class="card"><div class="card-visual car" aria-hidden="true"></div><span class="chip chip-future">Future Hardware</span><h3>AMICOR Car Hub</h3><p>Dashboard-mounted in-vehicle AMICOR interface. Not for sale.</p><a class="card-link" href="/car-hub/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-nova-today.svg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>AMICOR Nova Today</h3><p>Intelligent daily command center for signed-in operators.</p><a class="card-link" href="/nova-today/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-nova-create.svg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>AMICOR Nova Create</h3><p>AI-assisted drafts and work materials. Owner review required. Not a live public creation marketplace.</p><a class="card-link" href="/nova-create/">Learn more</a></article>
+          <article class="card featured-work">{card_visual("", "card-work-revenue.svg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-delivery.svg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations. Not commercially available.</p><a class="card-link" href="/deliver/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-lifesaver.svg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care and health-technology initiative. Not a medical device or emergency service.</p><a class="card-link" href="/lifesaver/">Learn more</a></article>
+          <article class="card">{card_visual("", "home-hub.svg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>AMICOR Home Hub</h3><p>Rotating tabletop smart hub for a connected home. Not for sale.</p><a class="card-link" href="/home-hub/">Learn more</a></article>
+          <article class="card">{card_visual("", "car-hub.svg", "AMICOR Car Hub dashboard-mounted vehicle interface concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>AMICOR Car Hub</h3><p>Dashboard-mounted in-vehicle AMICOR interface. Not for sale.</p><a class="card-link" href="/car-hub/">Learn more</a></article>
         </div>
       </div>
     </section>
@@ -953,13 +965,13 @@ add(
     </section>
     <section class="section">
       <div class="wrap grid grid-2">
-        <article class="card featured-work"><span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Open product page</a></article>
-        <article class="card"><span class="chip chip-early">Early Access</span><h3>Nova Today</h3><p>Intelligent daily command center.</p><a class="card-link" href="/nova-today/">Open product page</a></article>
-        <article class="card"><span class="chip chip-dev">In Development</span><h3>Nova Create</h3><p>AI-assisted creation tools with owner review.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
-        <article class="card"><span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
-        <article class="card"><span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care initiative. Not a medical device.</p><a class="card-link" href="/lifesaver/">Open product page</a></article>
-        <article class="card"><span class="chip chip-future">Future Hardware</span><h3>Home Hub</h3><p>See More. Care More. Be There.</p><a class="card-link" href="/home-hub/">Open product page</a></article>
-        <article class="card"><span class="chip chip-future">Future Hardware</span><h3>Car Hub</h3><p>On the Road. On Your Team.</p><a class="card-link" href="/car-hub/">Open product page</a></article>
+        <article class="card featured-work">{card_visual("../", "card-work-revenue.svg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-nova-today.svg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>Nova Today</h3><p>Intelligent daily command center.</p><a class="card-link" href="/nova-today/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-nova-create.svg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>Nova Create</h3><p>AI-assisted creation tools with owner review.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-delivery.svg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-lifesaver.svg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care initiative. Not a medical device.</p><a class="card-link" href="/lifesaver/">Open product page</a></article>
+        <article class="card">{card_visual("../", "home-hub.svg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Home Hub</h3><p>See More. Care More. Be There.</p><a class="card-link" href="/home-hub/">Open product page</a></article>
+        <article class="card">{card_visual("../", "car-hub.svg", "AMICOR Car Hub dashboard-mounted vehicle interface concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Car Hub</h3><p>On the Road. On Your Team.</p><a class="card-link" href="/car-hub/">Open product page</a></article>
         <article class="card"><span class="chip chip-early">Early Access</span><h3>Operations Agent</h3><p>Supervised observe-recommend-approve software.</p><a class="card-link" href="/technologies/autonomous-operations-agent/">Open product page</a></article>
       </div>
     </section>

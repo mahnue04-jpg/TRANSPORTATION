@@ -222,21 +222,16 @@ h3 { font-size: 1.12rem; }
 }
 .card-visual {
   border-radius: 16px;
-  min-height: 128px;
   overflow: hidden;
-  background:
-    radial-gradient(120px 80px at 20% 30%, rgba(43, 151, 230, 0.35), transparent 60%),
-    linear-gradient(160deg, rgba(43, 151, 230, 0.18), rgba(94, 224, 196, 0.08));
+  background: #07141f;
   border: 1px solid var(--line);
 }
-.card-visual.today { background: radial-gradient(140px 90px at 80% 20%, rgba(94, 224, 196, 0.28), transparent 55%), linear-gradient(160deg, #12344c, #0b1c2a); }
-.card-visual.create { background: radial-gradient(140px 90px at 15% 80%, rgba(43, 151, 230, 0.35), transparent 55%), linear-gradient(160deg, #163044, #0b1c2a); }
-.card-visual.work { background: linear-gradient(135deg, rgba(122, 214, 154, 0.22), rgba(43, 151, 230, 0.18)); }
-.card-visual.deliver { background: linear-gradient(135deg, rgba(61, 186, 139, 0.28), rgba(16, 34, 51, 0.9)); }
-.card-visual.life { background: linear-gradient(135deg, rgba(154, 215, 234, 0.22), rgba(16, 34, 51, 0.9)); }
-.card-visual.home { background: radial-gradient(circle at 50% 60%, rgba(94, 224, 196, 0.3), #0b1c2a 62%); }
-.card-visual.car { background: linear-gradient(180deg, #163044, #0a1624 70%); }
-.card-visual img { width: 100%; height: 148px; object-fit: cover; }
+.card-visual img {
+  width: 100%;
+  height: 148px;
+  object-fit: cover;
+  object-position: center 42%;
+}
 .featured {
   border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
   background:
@@ -467,15 +462,33 @@ textarea { min-height: 120px; }
   color: var(--muted);
 }
 .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 32px; }
+.footer-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
 .footer-grid strong { color: var(--text); display: block; margin-bottom: 8px; }
-.footer-grid a {
+.footer-links {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 2px;
+}
+.footer-links a,
+.footer-col > a {
   color: var(--muted);
   text-decoration: none;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: 100%;
   min-height: 44px;
+  padding: 0 8px 0 0;
+  border-radius: 8px;
 }
-.footer-grid a:hover { color: var(--text); }
+.footer-links a:hover,
+.footer-col > a:hover { color: var(--text); }
 
 @media (max-width: 1100px) {
   .price-grid, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

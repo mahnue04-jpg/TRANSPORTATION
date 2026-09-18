@@ -72,8 +72,27 @@ def test_nav_and_ctas_use_real_routes() -> None:
 def test_hardware_assets_exist() -> None:
     assert (ROOT / "assets" / "img" / "home-hub.svg").is_file()
     assert (ROOT / "assets" / "img" / "car-hub.svg").is_file()
+    for name in ("card-work-revenue.svg", "card-nova-today.svg", "card-nova-create.svg", "card-delivery.svg", "card-lifesaver.svg"):
+        assert (ROOT / "assets" / "img" / name).is_file(), name
     assert "See More. Care More. Be There." in _html(PAGES["/home-hub/"])
     assert "On the Road. On Your Team." in _html(PAGES["/car-hub/"])
+
+
+def test_home_product_cards_have_meaningful_visuals() -> None:
+    home = _html(PAGES["/"])
+    for token in (
+        "card-work-revenue.svg",
+        "card-nova-today.svg",
+        "card-nova-create.svg",
+        "card-delivery.svg",
+        "card-lifesaver.svg",
+        "assets/img/home-hub.svg",
+        "assets/img/car-hub.svg",
+    ):
+        assert token in home, token
+    assert "card-visual today" not in home
+    assert 'aria-label="Footer product links"' in home
+    assert "class=\"footer-links\"" in home
 
 
 def test_public_claim_safety() -> None:
@@ -97,6 +116,7 @@ def main() -> None:
         test_no_placeholder_or_admin_links,
         test_nav_and_ctas_use_real_routes,
         test_hardware_assets_exist,
+        test_home_product_cards_have_meaningful_visuals,
         test_public_claim_safety,
         test_sitemap_includes_new_routes,
     ]
