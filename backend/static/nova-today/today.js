@@ -430,8 +430,13 @@
 
   async function refresh() {
     if (!token()) {
-      $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
+      $("brain-output").textContent = "You are signed out. Sign in to ask Mrs. Nova Brain.";
       setSignedIn(false);
+      ["attention-box","communications-box","government-box","business-box","workspace-box","queue-box","activity-box","recommendations-box","links-box"].forEach(function (id) {
+        if ($(id)) $(id).innerHTML = "";
+      });
+      if ($("products-box")) $("products-box").innerHTML = "";
+      if ($("connector-health")) $("connector-health").textContent = "";
       return;
     }
     var dash = await api("/api/nova/today/dashboard");
@@ -489,8 +494,10 @@
   async function runBrain(event) {
     event.preventDefault();
     if (!token()) {
-      showBanner("Sign in to ask Mrs. Nova Brain.");
+      $("brain-output").textContent = "I can answer after you sign in. Your question has not been sent.";
+      showBanner("You are signed out. Sign in below, then press Ask Nova again.");
       $("login-form").classList.remove("hidden");
+      if ($("login-email")) $("login-email").focus();
       return;
     }
     var result = await api("/api/nova/today/ask", {
