@@ -21,6 +21,60 @@
     el.classList.remove("hidden");
     el.classList.toggle("ok", !!ok);
   }
+  function setVoiceStatus(message) {
+    if ($("voice-status")) $("voice-status").textContent = message;
+  }
+  function speakNova(text) {
+    if (!window.speechSynthesis || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      var utterance = new SpeechSynthesisUtterance(String(text));
+      utterance.lang = "en-US";
+      utterance.rate = 1;
+      window.speechSynthesis.speak(utterance);
+    } catch (_) {}
+  }
+  function startVoiceInput() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setVoiceStatus("Voice input is not supported in this browser. You can still type to Nova.");
+      return;
+    }
+    if (!token()) {
+      showBanner("Sign in before using voice input.");
+      $("login-form").classList.remove("hidden");
+      return;
+    }
+    var recognition = new SR();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+    setVoiceStatus("Listening… speak now.");
+    if ($("ask-mic")) $("ask-mic").textContent = "Listening…";
+    recognition.onresult = function (event) {
+      var transcript = event.results && event.results[0] && event.results[0][0]
+        ? event.results[0][0].transcript
+        : "";
+      $("ask-input").value = transcript || "";
+      setVoiceStatus(transcript ? "Heard: " + transcript : "I did not catch that. Try again.");
+      if (transcript) {
+        $("ask-form").requestSubmit();
+      }
+    };
+    recognition.onerror = function (event) {
+      setVoiceStatus("Microphone error: " + ((event && event.error) || "unavailable") + ".");
+    };
+    recognition.onend = function () {
+      if ($("ask-mic")) $("ask-mic").textContent = "🎤 Talk";
+    };
+    try {
+      recognition.start();
+    } catch (_) {
+      setVoiceStatus("Microphone could not start. Check browser microphone permission.");
+      if ($("ask-mic")) $("ask-mic").textContent = "🎤 Talk";
+    }
+  }
   function errorText(payload, fallback) {
     if (!payload) return fallback;
     if (typeof payload.detail === "string") return payload.detail;
@@ -493,16 +547,25 @@
       $("login-form").classList.remove("hidden");
       return;
     }
+    var question = $("ask-input").value.trim();
+    if (!question) {
+      showBanner("Type a question or use the microphone.");
+      return;
+    }
     var result = await api("/api/nova/today/ask", {
       method: "POST",
       body: JSON.stringify({
-        question: $("ask-input").value.trim(),
+        question: question,
         action_id: selectedActionId || null,
         source_ref_id: selectedSourceRefId || null
       })
     });
-    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
-    showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or filed.", true);
+    var answer = result.answer || "No response from Mrs. Nova Brain.";
+    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + answer;
+    $("ask-input").value = "";
+    $("ask-input").focus();
+    speakNova(answer);
+    showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
   }
   async function decide(actionId, kind) {
     var path = "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/" + kind;
@@ -558,6 +621,11 @@
   $("ask-form").addEventListener("submit", function (event) {
     runBrain(event).catch(function (err) { showBanner(err.message || String(err)); });
   });
+  if ($("ask-mic")) {
+    $("ask-mic").addEventListener("click", function () {
+      startVoiceInput();
+    });
+  }
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });

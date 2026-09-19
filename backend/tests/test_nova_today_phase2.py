@@ -282,3 +282,13 @@ def test_phase1_freeze_and_soak_are_hidden_workflow_fixtures() -> None:
     assert is_workflow_fixture("Phase 1 soak acknowledge unapproved", "p1-soak-acknowledge")
     assert is_workflow_fixture("Draft Phase 1 freeze draft", "p1-freeze-draft")
     assert is_workflow_fixture("precheck", "precheck-001")
+
+
+def test_nova_today_voice_controls_and_input_reset() -> None:
+    assert 'id="ask-mic"' in TODAY_HTML
+    assert 'id="voice-status"' in TODAY_HTML
+    assert "SpeechRecognition" in TODAY_JS
+    assert "webkitSpeechRecognition" in TODAY_JS
+    assert "speechSynthesis" in TODAY_JS
+    assert '$("ask-input").value = "";' in TODAY_JS
+    assert "requestSubmit()" in TODAY_JS
