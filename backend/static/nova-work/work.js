@@ -61,6 +61,33 @@
     if (!response.ok) throw new Error(errorText(body, "Request failed."));
     return body;
   }
+  function liveJobItem(row) {
+    var opp = row.opportunity || row;
+    var title = opp.title || opp.opportunity_title || "Opportunity";
+    var company = opp.company_name || "Unknown company";
+    var url = opp.source_url || "";
+    var score = opp.relevance_score;
+    var meta = [];
+    if (opp.geography) meta.push(opp.geography);
+    if (opp.compensation_text) meta.push(opp.compensation_text);
+    if (score != null) meta.push("match score " + score);
+    return "<div class=\"item\"><strong>" + escapeHtml(title) + "</strong>" +
+      "<div class=\"muted\">" + escapeHtml(company) + (meta.length ? " · " + escapeHtml(meta.join(" · ")) : "") + "</div>" +
+      (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Open job source</a></div>" : "") +
+      "</div>";
+  }
+  async function refreshLiveDiscoveryStatus() {
+    if (!$("live-job-status") || !token()) return;
+    try {
+      var guards = await api("/api/nova/v3/guardrails");
+      var enabled = guards.LIVE_DISCOVERY_ENABLED === true;
+      $("live-job-status").textContent = enabled
+        ? "LIVE DISCOVERY READY · External submission remains approval-controlled/off until the submission adapter is verified."
+        : "LIVE DISCOVERY OFF · Set NOVA_V3_LIVE_DISCOVERY_ENABLED=true in the production environment, then redeploy. External submission remains off.";
+    } catch (err) {
+      $("live-job-status").textContent = "Live-discovery status unavailable: " + err.message;
+    }
+  }
   function setSignedIn(on) {
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
@@ -487,6 +514,7 @@
     var audit = [];
     try { audit = await api("/api/nova/work/audit"); } catch (_) { audit = []; }
     renderDashboard(data, audit);
+    await refreshLiveDiscoveryStatus();
     if (activeFilter) {
       var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter) + "&limit=100");
       $("filtered-list").innerHTML = listHtml(filtered, "No matching opportunities.", oppItem);
@@ -780,6 +808,38 @@
       showBanner(err.message);
     }
   });
+  if ($("live-job-form")) {
+    $("live-job-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var query = $("live-job-query").value.trim();
+      if (!query) return;
+      $("live-job-status").textContent = "Nova is searching live jobs, ranking matches, and preparing the strongest candidates for owner approval...";
+      $("live-job-results").innerHTML = "";
+      try {
+        var body = await api("/api/nova/v3/live/jobs/prepare", {
+          method: "POST",
+          body: JSON.stringify({
+            query: query,
+            limit: Number($("live-job-limit").value || 10),
+            save_limit: 5,
+            prepare_limit: Number($("live-job-prepare-limit").value || 3),
+            min_relevance_score: 1
+          })
+        });
+        var prepared = body.prepared || [];
+        $("live-job-status").textContent =
+          "Found/ranked " + (body.ranked_count || 0) + " · selected " + (body.selected_count || 0) +
+          " · prepared " + (body.prepared_count || 0) +
+          " for your approval. External action taken: " + String(body.external_action_taken === true) + ".";
+        $("live-job-results").innerHTML = listHtml(prepared, "No sufficiently relevant jobs were prepared. Try a broader search.", liveJobItem);
+        showBanner("Live job discovery finished. Review prepared opportunities before any external submission.", true);
+        await refresh();
+      } catch (err) {
+        $("live-job-status").textContent = err.message;
+        showBanner(err.message);
+      }
+    });
+  }
   $("opp-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try {
