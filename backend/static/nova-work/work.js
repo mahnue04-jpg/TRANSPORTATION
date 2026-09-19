@@ -123,7 +123,7 @@
         " · verified " + (ready.verified_facts || 0) +
         " · missing " + (ready.missing_facts || 0) +
         " · expired " + (ready.expired_facts || 0) +
-        " · " + (ready.percentage_complete || 0) + "% complete. Internal readiness only. Nothing was submitted or charged.";
+        " · " + (ready.percentage_complete || 0) + "% complete. Nova reuses PROVIDED/VERIFIED profile facts to tailor each application package. Nothing was submitted or charged.";
     }
     renderFactStatus(ready);
     var rows = (factCatalog.facts || []).filter(factMatchesFilter);
@@ -153,7 +153,7 @@
     });
   }
   function renderFactStatus(ready) {
-    var text = "Owner facts: verified " + (ready.verified || ready.verified_facts || 0) +
+    var text = "Master work profile: verified " + (ready.verified || ready.verified_facts || 0) +
       " · missing " + (ready.missing || ready.missing_facts || 0) +
       " · expired " + (ready.expired || ready.expired_facts || 0) +
       " · " + (ready.percentage_complete || 0) + "% ready. Sensitive values are not shown.";
