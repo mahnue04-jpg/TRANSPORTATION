@@ -31,7 +31,7 @@
   </header>
 
   <main class="work-main">
-    <p class="disclaimer">Nova is an AI system/tool under AMICOR/owner authorization. Nova is not a human employee. Phase 2 does not send external applications, accept contracts, or collect payment. APPROVED is not SUBMITTED. Estimated, contracted, invoiced, and received revenue stay separate. Missing credentials are marked [OWNER INPUT REQUIRED].</p>
+    <p class="disclaimer">Nova is an AI system/tool under AMICOR/owner authorization. Nova is not a human employee. Owner-controlled live job discovery may be enabled; external application submission, contract acceptance, and payment execution remain disabled until their adapters are separately verified and enabled. APPROVED is not SUBMITTED. Estimated, contracted, invoiced, and received revenue stay separate. Missing credentials are marked [OWNER INPUT REQUIRED].</p>
     <div id="banner" class="banner hidden"></div>
 
     <section class="command-card" aria-label="Sign in">
@@ -45,6 +45,32 @@
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
         <button type="submit">Sign in</button>
       </form>
+    </section>
+
+    <section class="command-card" aria-label="Live paid job discovery">
+      <h2>Find Paid Jobs for Nova</h2>
+      <p class="hint">Owner-only live discovery. Nova searches the approved live job source, ranks matches, saves selected opportunities, prepares proposal/application packages, and places them into owner approval. Nothing is submitted externally from this control.</p>
+      <form id="live-job-form" class="compose-grid">
+        <label class="wide">What should Nova look for?
+          <input id="live-job-query" maxlength="220" placeholder="Example: remote AI data analysis, research, reporting, customer support, content operations" required />
+        </label>
+        <label>Search limit
+          <select id="live-job-limit">
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="25">25</option>
+          </select>
+        </label>
+        <label>Prepare top
+          <select id="live-job-prepare-limit">
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <button type="submit">Find &amp; Prepare for My Approval</button>
+      </form>
+      <p id="live-job-status" class="hint">Sign in to check live-discovery readiness.</p>
+      <div id="live-job-results">No live discovery run yet.</div>
     </section>
 
     <section class="counts" aria-label="Work counts">
@@ -135,7 +161,7 @@
 
     <section class="command-card" aria-label="Dashboard sections">
       <h2>Work &amp; Revenue sections</h2>
-      <p class="hint">Informational local tracking. External submit, pay, and live discovery remain disabled.</p>
+      <p class="hint">Owner-only work tracking. Live job discovery status is shown above. External submission and financial execution remain separately controlled.</p>
       <div class="command-actions" id="tab-row" role="tablist" aria-label="Work sections">
         <button type="button" class="secondary filter-on" data-tab="overview" role="tab" aria-selected="true">Overview</button>
         <button type="button" class="secondary" data-tab="opportunities" role="tab" aria-selected="false">Opportunities</button>
