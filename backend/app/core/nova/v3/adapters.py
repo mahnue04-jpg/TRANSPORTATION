@@ -31,6 +31,7 @@ class RawOpportunity:
     human_verification_required: bool = False
     rate_limited: bool = False
     evidence: str = "synthetic fixture"
+    live: bool = False
 
 
 class SourceAdapter(Protocol):

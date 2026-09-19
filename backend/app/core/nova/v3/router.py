@@ -15,7 +15,7 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
-from app.core.nova.v3.live_discovery import search_remote_jobs
+from app.core.nova.v3.live_discovery import rank_live_jobs, search_remote_jobs
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 
 def _nova_v3_owner_emails() -> set[str]:
@@ -62,6 +62,11 @@ class IngestIn(OrgIn):
 class LiveJobSearchIn(OrgIn):
     query: str
     limit: int = Field(default=10, ge=1, le=25)
+
+
+class LiveJobDiscoverIn(LiveJobSearchIn):
+    save_limit: int = Field(default=5, ge=1, le=10)
+    min_relevance_score: int = Field(default=1, ge=0, le=100)
 
 
 class ManualOpportunityIn(OrgIn):
@@ -220,6 +225,38 @@ def v3_live_job_search(
             "source": "Remotive",
             "read_only": True,
             "jobs": jobs,
+        }
+    except V3Error as exc:
+        _raise(exc)
+
+
+@router.post("/live/jobs/discover")
+def v3_live_job_discover(
+    payload: LiveJobDiscoverIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    org_id = _org(user, payload.organization_id)
+    try:
+        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
+        ranked = rank_live_jobs(payload.query, raw_jobs)
+        selected = [
+            job for job in ranked
+            if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
+        ][: payload.save_limit]
+        saved = get_kernel().ingest_live_jobs(
+            selected,
+            organization_id=org_id,
+            owner_user_id=user.user_id,
+        )
+        return {
+            "query": payload.query,
+            "source": "Remotive",
+            "read_only_discovery": True,
+            "external_action_taken": False,
+            "ranked_count": len(ranked),
+            "selected_count": len(selected),
+            "ranked_jobs": ranked,
+            "saved": saved,
         }
     except V3Error as exc:
         _raise(exc)
