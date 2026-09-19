@@ -63,3 +63,28 @@ def test_live_job_search_normalizes_remotive_results(monkeypatch):
     assert jobs[0]["description"] == "Prepare reports & coordinate tasks."
     assert jobs[0]["source_attribution"] == "Remotive"
     assert jobs[0]["source_url"].startswith("https://remotive.com/")
+
+
+def test_rank_live_jobs_prioritizes_title_match():
+    jobs = [
+        {
+            "title": "Senior Data Scientist",
+            "company_name": "A",
+            "description": "Remote analytics role",
+            "geography": "Worldwide",
+            "publication_date": "2026-09-19",
+        },
+        {
+            "title": "Remote Operations Assistant",
+            "company_name": "B",
+            "description": "Coordinate operations and reports",
+            "geography": "USA",
+            "publication_date": "2026-09-18",
+        },
+    ]
+
+    ranked = live_discovery.rank_live_jobs("remote operations assistant", jobs)
+
+    assert ranked[0]["title"] == "Remote Operations Assistant"
+    assert ranked[0]["relevance_score"] > ranked[1]["relevance_score"]
+    assert ranked[0]["relevance_explanation"]["title_hits"] >= 2
