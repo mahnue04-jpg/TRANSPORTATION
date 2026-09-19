@@ -44,6 +44,8 @@ def test_v3_lab_page_and_guardrails(client: TestClient) -> None:
     assert "ALERTS" in LAB_HTML
     assert "AUDIT" in LAB_HTML
     assert "/api/nova/v3/lab" in LAB_JS
+    assert "/api/nova/v3/owner-access" in LAB_JS
+    assert "owner-gate-pending" in LAB_HTML
     headers = _headers(client)
     guards = client.get("/api/nova/v3/guardrails", headers=headers)
     assert guards.status_code == 200, guards.text
@@ -61,3 +63,16 @@ def test_v3_lab_page_and_guardrails(client: TestClient) -> None:
     hidden = client.get("/api/nova/v3/opportunities", headers=other)
     assert hidden.status_code == 200
     assert hidden.json() == []
+
+
+def test_v3_owner_gate_rejects_unapproved_account(client: TestClient) -> None:
+    owner = _headers(client, "admin@amicor.local")
+    allowed = client.get("/api/nova/v3/owner-access", headers=owner)
+    assert allowed.status_code == 200
+    assert allowed.json()["owner_access"] is True
+
+    non_owner = _headers(client, "rider@amicor.local")
+    denied = client.get("/api/nova/v3/owner-access", headers=non_owner)
+    assert denied.status_code == 403
+    denied_lab = client.get("/api/nova/v3/lab", headers=non_owner)
+    assert denied_lab.status_code == 403
