@@ -74,6 +74,7 @@ from app.core.nova.today.schemas import (
 )
 from app.core.nova.workspace.service import dashboard as workspace_dashboard
 from app.helpers import now, uuid4
+from app.db.models import User as PlatformUser
 from sqlalchemy.orm import Session
 
 
