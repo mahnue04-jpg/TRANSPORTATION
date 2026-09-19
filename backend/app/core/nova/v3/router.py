@@ -1,6 +1,7 @@
 """Nova V3 HTTP lab. Synthetic only. No live connectors or money movement."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-from app.auth import UserContext, get_current_user_context
+from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
@@ -16,10 +17,36 @@ from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 
+def _nova_v3_owner_emails() -> set[str]:
+    configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
+    if configured:
+        return {item.strip().lower() for item in configured.split(",") if item.strip()}
+    owners = {
+        str(grant.get("email") or "").strip().lower()
+        for grant in OPERATOR_ACCOUNT_GRANTS
+        if str(grant.get("email") or "").strip()
+    }
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        owners.update({
+            "admin@amicor.local",
+            "dispatcher@amicor.local",
+            "staff@amicor.local",
+        })
+    return owners
+
+
+def require_nova_v3_owner_access(
+    user: UserContext = Depends(get_current_user_context),
+) -> UserContext:
+    if str(user.email or "").strip().lower() not in _nova_v3_owner_emails():
+        raise HTTPException(status_code=403, detail="Nova owner access required")
+    return user
+
+
 router = APIRouter(
     prefix="/api/nova/v3",
-    tags=["nova-v3-lab"],
-    dependencies=[Depends(require_nova_access)],
+    tags=["nova-v3-owner"],
+    dependencies=[Depends(require_nova_access), Depends(require_nova_v3_owner_access)],
 )
 
 
@@ -158,8 +185,8 @@ def _raise(exc: V3Error) -> None:
     raise HTTPException(status_code=exc.http_status, detail={"code": exc.code, "reason": str(exc)}) from exc
 
 
-@router.get("/guardrails")
-def v3_guardrails(user: UserContext = Depends(get_current_user_context)):
+@router.get("/owner-access")
+def v3_owner_access(user: UserContext = Depends(get_current_user_context)):\n    return {"owner_access": True, "email": user.email}\n\n\n@router.get("/guardrails")\ndef v3_guardrails(user: UserContext = Depends(get_current_user_context)):
     return live_flags()
 
 

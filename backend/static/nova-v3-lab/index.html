@@ -8,7 +8,10 @@
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-v3-lab/lab.css" />
 </head>
-<body>
+<body class="owner-gate-pending">
+  <style>
+    body.owner-gate-pending main > section:not(:first-child) { display: none; }
+  </style>
   <header>
     <p class="kicker">AMICOR NOVA V3 — SYNTHETIC LAB</p>
     <h1>Live Work, Revenue, Growth &amp; Shield (Phase 3)</h1>
@@ -26,7 +29,7 @@
         <label>Password<input id="password" type="password" required /></label>
         <button type="submit">Sign in</button>
       </form>
-      <p id="session" class="hint">Sign in to load the lab snapshot.</p>
+      <p id="session" class="hint">Owner authorization required. Sign in with an approved Nova owner account.</p>
       <p id="action-status" class="hint"></p>
     </section>
     <section id="counts" class="grid"></section>
