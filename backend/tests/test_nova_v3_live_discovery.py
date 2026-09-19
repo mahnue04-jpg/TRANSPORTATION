@@ -201,3 +201,88 @@ def test_prepare_threshold_prefers_strong_matches():
 
     assert len(selected) == 1
     assert selected[0]["title"] == "Remote Operations Assistant"
+
+
+def test_live_submission_requires_flag_and_approval(monkeypatch):
+    from app.core.nova.v3.kernel import NovaV3Kernel
+    from app.core.nova.v3.errors import V3Error
+
+    kernel = NovaV3Kernel()
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.kernel.live_flags",
+        lambda: {
+            "LIVE_DISCOVERY_ENABLED": True,
+            "EXTERNAL_SUBMISSION_ENABLED": False,
+        },
+    )
+
+    saved = kernel.ingest_live_jobs(
+        [
+            {
+                "provider_id": "remotive",
+                "provider_identifier": "live-1",
+                "title": "Remote Operations Assistant",
+                "company_name": "Example Co",
+                "description": "Prepare reports and coordinate tasks.",
+                "source_url": "https://remotive.com/remote-jobs/example-1",
+                "geography": "USA",
+                "remote_status": "remote",
+                "source_attribution": "Remotive",
+            }
+        ],
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+    )
+    opp = saved["created"][0]
+    proposal = kernel.prepare_proposal(
+        opp["opportunity_id"],
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+    )
+
+    with pytest.raises(V3Error) as exc:
+        kernel.live_submit(
+            proposal.proposal_id,
+            organization_id="org-owner",
+            owner_user_id="owner-1",
+            approval_id="missing",
+        )
+    assert exc.value.code == "LIVE_DISABLED"
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.kernel.live_flags",
+        lambda: {
+            "LIVE_DISCOVERY_ENABLED": True,
+            "EXTERNAL_SUBMISSION_ENABLED": True,
+        },
+    )
+
+    approval = kernel.request_approval(
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+        action="LIVE_SUBMISSION",
+        target_id=proposal.proposal_id,
+        payload={
+            "proposal_id": proposal.proposal_id,
+            "source_url": opp["source_url"],
+        },
+    )
+    kernel.decide_approval(
+        approval.approval_id,
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+        decision="APPROVED",
+    )
+
+    result = kernel.live_submit(
+        proposal.proposal_id,
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+        approval_id=approval.approval_id,
+    )
+
+    assert result["status"] == "HUMAN_ACTION_REQUIRED"
+    assert result["submission_mode"] == "external_url_handoff"
+    assert result["externally_submitted"] is False
+    assert result["application_url"].startswith("https://remotive.com/")
