@@ -21,6 +21,13 @@
     el.classList.remove("hidden");
     el.classList.toggle("ok", !!ok);
   }
+  function hideBanner() {
+    var el = $("banner");
+    if (!el) return;
+    el.textContent = "";
+    el.classList.add("hidden");
+    el.classList.remove("ok");
+  }
   function setVoiceStatus(message) {
     if ($("voice-status")) $("voice-status").textContent = message;
   }
@@ -162,13 +169,18 @@
   }
   function cardActions(card) {
     var open = sourceLink(card);
+    if (card.source_module === "link") {
+      return "<div class=\"card-actions\">" + open + "</div>";
+    }
     var review = card.action_id
       ? "<button type=\"button\" class=\"secondary\" data-review=\"" + escapeHtml(card.action_id) + "\">Review</button>"
       : "";
     if (card.action_id && card.status === "proposed") {
       var draft = card.recommended_action === "create_draft"
         ? "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Prepare draft</button>"
-        : "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>";
+        : (card.recommended_action === "acknowledge"
+          ? "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Acknowledge</button>"
+          : "<button type=\"button\" data-approve=\"" + escapeHtml(card.action_id) + "\">Approve</button>");
       return "<div class=\"card-actions\">" +
         draft +
         "<button type=\"button\" class=\"secondary\" data-snooze=\"" + escapeHtml(card.action_id) + "\">Snooze 24h</button>" +
@@ -489,9 +501,12 @@
     }
     try {
       var summary = await api("/api/nova/work/today-summary");
+      var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
+      if (workRevenuePanel) workRevenuePanel.classList.remove("hidden");
       renderWorkRevenue(summary);
     } catch (_) {
-      renderWorkRevenueError();
+      var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
+      if (workRevenuePanel) workRevenuePanel.classList.add("hidden");
     }
   }
   async function applyProductAccess() {
@@ -499,6 +514,7 @@
     try {
       var access = await api("/api/nova/signup/me/access");
       var isCustomer = !!(access && access.nova_saas_customer);
+      var currentIdentity = identity();
       document.querySelectorAll(".today-nav a").forEach(function (el) {
         var href = el.getAttribute("href") || "";
         if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
@@ -509,6 +525,8 @@
       if (linkedPanel) linkedPanel.classList.toggle("hidden", isCustomer);
       var productLinksPanel = document.querySelector('[aria-label="Product links"]');
       if (productLinksPanel) productLinksPanel.classList.toggle("hidden", isCustomer);
+      var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
+      if (workRevenuePanel && isCustomer) workRevenuePanel.classList.add("hidden");
     } catch (_) {}
   }
 
@@ -532,7 +550,7 @@
       renderProductCounts([]);
     }
     renderList("links-box", dash.product_links, "Product links unavailable.");
-    renderList("recommendations-box", dash.recommendations, "No recommendations from real records.");
+    renderList("recommendations-box", dash.recommendations, "No current recommendation because no saved record requires attention.");
     var queue = dedupeLogical(dash.approval_queue);
     $("queue-box").innerHTML = queue.length
       ? queue.map(queueHtml).join("")
@@ -560,6 +578,7 @@
     } catch (_) {
       renderWorkRevenueError();
     }
+    hideBanner();
     if (selectedActionId) {
       try {
         var selected = await api("/api/nova/today/actions/" + encodeURIComponent(selectedActionId));

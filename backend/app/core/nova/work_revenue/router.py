@@ -1,14 +1,16 @@
 """Nova Work & Revenue Engine APIs. Local-only Phase 1. No Stripe and no external apply."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import UserContext, get_current_user_context
+from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
+from app.core.nova.signup.service import customer_access
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.config import capabilities_surface
@@ -59,10 +61,45 @@ from app.core.nova.work_revenue.schemas import (
 )
 from app.db.session import get_db
 
+def _work_revenue_owner_emails() -> set[str]:
+    configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
+    if configured:
+        return {item.strip().lower() for item in configured.split(",") if item.strip()}
+    owners = {
+        str(grant.get("email") or "").strip().lower()
+        for grant in OPERATOR_ACCOUNT_GRANTS
+        if str(grant.get("email") or "").strip()
+    }
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        owners.update({
+            "admin@amicor.local",
+            "dispatcher@amicor.local",
+            "staff@amicor.local",
+            "driver@amicor.local",
+        })
+    return owners
+
+
+def require_work_revenue_owner(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> UserContext:
+    access = customer_access(
+        db,
+        organization_id=user.organization_id,
+        user_id=user.user_id,
+    )
+    if access.get("nova_saas_customer"):
+        raise HTTPException(status_code=403, detail="Work & Revenue is owner-only.")
+    if str(user.email or "").strip().lower() not in _work_revenue_owner_emails():
+        raise HTTPException(status_code=403, detail="Work & Revenue is restricted to the AMICOR owner.")
+    return user
+
+
 router = APIRouter(
     prefix="/api/nova/work",
     tags=["nova-work-revenue"],
-    dependencies=[Depends(require_nova_access)],
+    dependencies=[Depends(require_nova_access), Depends(require_work_revenue_owner)],
 )
 
 
