@@ -30,12 +30,18 @@ from app.core.nova.today.live_tools import (
     extract_name_statement,
     extract_news_query,
     extract_weather_location,
+    extract_known_site,
+    extract_web_query,
     fetch_news,
+    fetch_web_search,
     fetch_weather,
     format_news,
     format_weather,
+    format_web_search,
     is_news_request,
     is_weather_request,
+    is_web_search_capability_question,
+    is_web_search_request,
     read_user_profile,
     update_user_profile,
 )
@@ -1711,6 +1717,63 @@ def _today_live_or_memory_answer(
             next_actions=[],
             generated_at=now().isoformat(),
         )
+
+    if is_web_search_capability_question(question):
+        return NovaTodayBrainOut(
+            answer=(
+                "Yes. I can search the live web, look up current information, and return clickable source links. "
+                "You can ask me to look up movies playing today, websites, products, businesses, YouTube, social media, "
+                "or other current information."
+            ),
+            fact_label="VERIFIED DATA",
+            next_actions=[],
+            generated_at=now().isoformat(),
+        )
+
+    known_site = extract_known_site(question)
+    if known_site:
+        title, url = known_site
+        return NovaTodayBrainOut(
+            answer=f"Here is {title}. You can open it from the source link below.",
+            fact_label="VERIFIED DATA",
+            next_actions=[],
+            generated_at=now().isoformat(),
+            source_href=url,
+            sources=[{"title": title, "url": url, "label": title}],
+        )
+
+    if is_web_search_request(question):
+        preferred_location = str(profile.get("preferred_location") or "").strip()
+        query = extract_web_query(question, preferred_location)
+        try:
+            result = fetch_web_search(query, max_results=5)
+            sources = result.get("sources") or []
+            source_rows = [
+                {
+                    "title": str(item.get("title") or item.get("label") or item.get("url") or "Source"),
+                    "url": str(item.get("url") or ""),
+                    "label": str(item.get("label") or ""),
+                }
+                for item in sources
+                if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
+            ]
+            return NovaTodayBrainOut(
+                answer=format_web_search(result, query),
+                fact_label="VERIFIED DATA" if source_rows else "AI SUGGESTION",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                source_href=source_rows[0]["url"] if source_rows else None,
+                sources=source_rows,
+                verification_status="verified" if source_rows else "unavailable",
+            )
+        except Exception:
+            return NovaTodayBrainOut(
+                answer="I couldn’t complete the live web search right now. Please try again in a moment.",
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                verification_status="unavailable",
+            )
 
     if is_weather_request(question):
         location = extract_weather_location(question) or str(profile.get("preferred_location") or "").strip()

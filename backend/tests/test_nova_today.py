@@ -510,3 +510,11 @@ def test_nova_today_owner_work_is_hidden_until_authorized() -> None:
     assert ">Acknowledge</button>" in TODAY_JS
     assert "No current recommendation because no saved record requires attention." in TODAY_JS
     assert "hideBanner()" in TODAY_JS
+
+
+def test_nova_today_renders_clickable_web_sources() -> None:
+    assert 'id="brain-sources"' in TODAY_HTML
+    assert "function renderBrainSources" in TODAY_JS
+    assert 'target="_blank"' in TODAY_JS
+    assert 'rel="noopener noreferrer"' in TODAY_JS
+    assert "result.sources || []" in TODAY_JS
