@@ -205,9 +205,24 @@ button.secondary {
 
 pre {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+  overflow-x: hidden;
   background: #082033;
   border-radius: 10px;
   padding: 12px;
+}
+
+.brain-copy {
+  min-width: 0;
+  width: 100%;
+}
+
+#brain-output {
+  width: 100%;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .card-list {
