@@ -151,6 +151,11 @@ def test_web_search_capability_and_known_sites():
     assert live_tools.is_web_search_capability_question("Can you search the web?") is True
     assert live_tools.is_web_search_request("Look up the latest movie playing today") is True
     assert live_tools.extract_known_site("Open YouTube") == ("YouTube", "https://www.youtube.com/")
+    assert live_tools.extract_known_site("Can you pull up YouTube for me?") == ("YouTube", "https://www.youtube.com/")
+    assert live_tools.extract_known_site("Take me directly to Facebook") == ("Facebook", "https://www.facebook.com/")
+    assert live_tools.extract_known_site("Please bring up Instagram") == ("Instagram", "https://www.instagram.com/")
+    assert live_tools.extract_known_site("Visit LinkedIn") == ("LinkedIn", "https://www.linkedin.com/")
+    assert live_tools.extract_known_site("Tell me about YouTube") is None
     assert "Minneapolis" in live_tools.extract_web_query("look up movies playing today", "Minneapolis, Minnesota")
 
 
