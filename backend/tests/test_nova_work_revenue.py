@@ -1408,3 +1408,10 @@ def test_phase2_dashboard_and_today_surface_new_sections() -> None:
     assert "Submit Application" not in WORK_JS
     assert "window.open" not in WORK_JS
 
+
+
+def test_work_revenue_owner_email_guard(monkeypatch) -> None:
+    from app.core.nova.work_revenue import router as work_router
+
+    monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "owner@example.com")
+    assert work_router._work_revenue_owner_emails() == {"owner@example.com"}
