@@ -115,3 +115,55 @@ def search_remote_jobs(query: str, *, limit: int = 10) -> list[dict[str, Any]]:
 
     _cache[cache_key] = (time.monotonic(), jobs)
     return jobs
+
+
+def _tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+        if len(token) > 2
+    }
+
+
+def rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return deterministic relevance ranking for discovered jobs.
+
+    Title matches are weighted highest, then company/geography, then description.
+    No external action is taken here.
+    """
+    query_tokens = _tokens(query)
+    ranked: list[dict[str, Any]] = []
+    for job in jobs:
+        title_tokens = _tokens(job.get("title", ""))
+        company_tokens = _tokens(job.get("company_name", ""))
+        geography_tokens = _tokens(job.get("geography", ""))
+        description_tokens = _tokens(job.get("description", ""))
+
+        title_hits = len(query_tokens & title_tokens)
+        company_hits = len(query_tokens & company_tokens)
+        geography_hits = len(query_tokens & geography_tokens)
+        description_hits = len(query_tokens & description_tokens)
+
+        score = (title_hits * 6) + (company_hits * 3) + geography_hits + min(description_hits, 5)
+        if query_tokens and query_tokens.issubset(title_tokens | description_tokens | company_tokens | geography_tokens):
+            score += 4
+
+        row = dict(job)
+        row["relevance_score"] = score
+        row["relevance_explanation"] = {
+            "query_tokens": sorted(query_tokens),
+            "title_hits": title_hits,
+            "company_hits": company_hits,
+            "geography_hits": geography_hits,
+            "description_hits": description_hits,
+        }
+        ranked.append(row)
+
+    return sorted(
+        ranked,
+        key=lambda item: (
+            int(item.get("relevance_score") or 0),
+            str(item.get("publication_date") or ""),
+        ),
+        reverse=True,
+    )
