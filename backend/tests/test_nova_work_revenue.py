@@ -872,6 +872,7 @@ def test_today_work_cards_are_informational_and_action_safe() -> None:
     assert "/api/nova/work/today-summary" in TODAY_JS
     assert "MANUAL" in TODAY_JS
     assert "SIMULATED / TEST" in TODAY_JS
+    assert "LIVE DISCOVERED" in TODAY_JS
     assert "APPROVED is not SUBMITTED" in TODAY_JS
     assert "future submission only" in TODAY_JS
     assert "ESTIMATED" in TODAY_JS
@@ -900,7 +901,7 @@ def test_today_summary_empty_states_and_disabled_gates(client: TestClient) -> No
     assert summary.status_code == 200, summary.text
     body = summary.json()
     assert body["work_opportunities"] == 0
-    assert body["source_counts"] == {"manual": 0, "simulated": 0, "other": 0}
+    assert body["source_counts"] == {"manual": 0, "simulated": 0, "live": 0, "other": 0}
     assert body["approval_states"] == {"draft": 0, "ready_for_review": 0, "approved": 0, "submitted": 0}
     assert body["active_engagements"] == 0
     assert body["active_tasks"] == 0

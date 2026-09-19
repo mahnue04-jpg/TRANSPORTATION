@@ -211,7 +211,23 @@ def v3_owner_access(user: UserContext = Depends(get_current_user_context)):
 
 @router.get("/guardrails")
 def v3_guardrails(user: UserContext = Depends(get_current_user_context)):
-    return live_flags()
+    from app.core.nova.work_revenue.flags import discovery_diagnostics
+
+    flags = live_flags()
+    diag = discovery_diagnostics()
+    return {
+        **flags,
+        "discovery_diagnostics": {
+            "live_discovery_enabled": bool(diag.get("live_discovery_enabled")),
+            "discovery_provider_configured": bool(diag.get("discovery_provider_configured")),
+            "discovery_provider": diag.get("discovery_provider"),
+            "authenticated": True,
+            "discovery_execution_status": "ready" if diag.get("live_discovery_enabled") else "disabled",
+            "result_count": None,
+            "error_category": None if diag.get("live_discovery_enabled") else "flag_off",
+            "auto_submit": False,
+        },
+    }
 
 
 @router.get("/connectors")

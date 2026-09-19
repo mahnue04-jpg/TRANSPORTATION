@@ -565,6 +565,7 @@ class TodaySummaryOut(BaseModel):
     live_discovery_enabled: bool = False
     external_submission_enabled: bool = False
     financial_actions_enabled: bool = False
+    discovery_diagnostics: dict[str, Any] = Field(default_factory=dict)
     revenue_disclaimer: str = "Estimated pipeline is not received revenue. Nova does not collect payment."
     tasks_due: int = 0
     deliverables_pending: int = 0
