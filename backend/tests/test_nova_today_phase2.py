@@ -273,3 +273,12 @@ def test_nova_today_phase2_priority_and_ask_with_selected_item(client: TestClien
     assert asked.status_code == 200, asked.text
     assert asked.json()["answer"]
     assert "AI SUGGESTION" in asked.json()["fact_label"]
+
+
+def test_phase1_freeze_and_soak_are_hidden_workflow_fixtures() -> None:
+    from app.core.nova.today.links import is_workflow_fixture
+
+    assert is_workflow_fixture("Phase 1 freeze create_draft unapproved", "p1-freeze-create-draft")
+    assert is_workflow_fixture("Phase 1 soak acknowledge unapproved", "p1-soak-acknowledge")
+    assert is_workflow_fixture("Draft Phase 1 freeze draft", "p1-freeze-draft")
+    assert is_workflow_fixture("precheck", "precheck-001")

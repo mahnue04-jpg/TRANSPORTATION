@@ -45,6 +45,10 @@ _WORKFLOW_FIXTURE_TITLE = (
     "deploy probe",
     "disposable probe",
     "disposable snooze",
+    "phase 1 freeze",
+    "phase 1 soak",
+    "draft phase 1 freeze",
+    "precheck",
 )
 _WORKFLOW_FIXTURE_REF_PREFIXES = (
     "v2live-",
@@ -52,6 +56,11 @@ _WORKFLOW_FIXTURE_REF_PREFIXES = (
     "smoke-",
     "smoke-iso-",
     "v2-p2-deploy-probe",
+    "p1-freeze-",
+    "p1-soak-",
+    "phase1-freeze-",
+    "phase1-soak-",
+    "precheck-",
 )
 
 
