@@ -24,6 +24,21 @@ from app.core.nova.communications.service import create_draft as create_communic
 from app.core.nova.communications.service import dashboard as communications_dashboard
 from app.core.nova.government.service import dashboard as government_dashboard
 from app.core.nova.service import NovaCoreService
+from app.core.nova.today.live_tools import (
+    asks_for_name,
+    extract_location_statement,
+    extract_name_statement,
+    extract_news_query,
+    extract_weather_location,
+    fetch_news,
+    fetch_weather,
+    format_news,
+    format_weather,
+    is_news_request,
+    is_weather_request,
+    read_user_profile,
+    update_user_profile,
+)
 from app.core.nova.today.links import (
     is_standing_synthetic,
     is_workflow_fixture,
@@ -1633,6 +1648,103 @@ def _build_today_ask_prompt(
     return primary + "\n\n" + supporting
 
 
+def _today_live_or_memory_answer(
+    payload: NovaTodayBrainRequest,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaTodayBrainOut | None:
+    question = str(payload.question or "").strip()
+    if not question:
+        return None
+
+    profile = read_user_profile(organization_id, user.user_id)
+
+    stated_name = extract_name_statement(question)
+    if stated_name:
+        update_user_profile(organization_id, user.user_id, {"preferred_name": stated_name})
+        return NovaTodayBrainOut(
+            answer=f"Got it. I’ll remember your name as {stated_name}.",
+            fact_label="USER-SAVED INFORMATION",
+            next_actions=[],
+            generated_at=now(),
+        )
+
+    stated_location = extract_location_statement(question)
+    if stated_location:
+        update_user_profile(organization_id, user.user_id, {"preferred_location": stated_location})
+        return NovaTodayBrainOut(
+            answer=f"Got it. I’ll remember your location as {stated_location}.",
+            fact_label="USER-SAVED INFORMATION",
+            next_actions=[],
+            generated_at=now(),
+        )
+
+    if asks_for_name(question):
+        remembered = str(profile.get("preferred_name") or "").strip()
+        if remembered:
+            return NovaTodayBrainOut(
+                answer=f"Your name is {remembered}.",
+                fact_label="USER-SAVED INFORMATION",
+                next_actions=[],
+                generated_at=now(),
+            )
+        return NovaTodayBrainOut(
+            answer="You haven’t told me a name to remember yet.",
+            fact_label="USER-SAVED INFORMATION",
+            next_actions=[],
+            generated_at=now(),
+        )
+
+    if is_weather_request(question):
+        location = extract_weather_location(question) or str(profile.get("preferred_location") or "").strip()
+        if not location:
+            return NovaTodayBrainOut(
+                answer="Tell me the city or place you want the weather for, for example: “What’s the weather in Minneapolis?”",
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now(),
+            )
+        try:
+            result = fetch_weather(location)
+            update_user_profile(organization_id, user.user_id, {"preferred_location": result.get("location") or location})
+            return NovaTodayBrainOut(
+                answer=format_weather(result),
+                fact_label="VERIFIED DATA",
+                next_actions=[],
+                generated_at=now(),
+                source_href="https://open-meteo.com/",
+            )
+        except Exception:
+            return NovaTodayBrainOut(
+                answer=f"I couldn’t retrieve live weather for {location} right now. Please try again in a moment.",
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now(),
+            )
+
+    if is_news_request(question):
+        query = extract_news_query(question)
+        try:
+            items = fetch_news(query, limit=5)
+            return NovaTodayBrainOut(
+                answer=format_news(items, query),
+                fact_label="VERIFIED DATA",
+                next_actions=[],
+                generated_at=now(),
+                source_href=items[0]["link"] if items else None,
+            )
+        except Exception:
+            return NovaTodayBrainOut(
+                answer="I couldn’t retrieve live news right now. Please try again in a moment.",
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now(),
+            )
+
+    return None
+
+
 def ask_today(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -1640,6 +1752,14 @@ def ask_today(
     organization_id: str,
     user: UserContext,
 ) -> NovaTodayBrainOut:
+    direct = _today_live_or_memory_answer(
+        payload,
+        organization_id=organization_id,
+        user=user,
+    )
+    if direct is not None:
+        return direct
+
     include_supporting = today_supporting_context_relevant(
         payload.question,
         selected_item=bool(payload.action_id or payload.source_ref_id),
