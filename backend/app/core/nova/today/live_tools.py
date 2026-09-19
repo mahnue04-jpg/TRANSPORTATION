@@ -326,8 +326,24 @@ def is_web_search_request(text: str) -> bool:
 
 def extract_known_site(text: str) -> tuple[str, str] | None:
     lowered = _clean(text).lower()
+    action_phrases = (
+        "open",
+        "look up",
+        "lookup",
+        "go to",
+        "show me",
+        "take me to",
+        "pull up",
+        "bring up",
+        "launch",
+        "visit",
+        "access",
+        "navigate to",
+    )
+    if not any(phrase in lowered for phrase in action_phrases):
+        return None
     for key, value in _KNOWN_SITES.items():
-        if key in lowered and any(token in lowered for token in ("open", "look up", "lookup", "go to", "show me")):
+        if re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", lowered):
             return value
     return None
 
