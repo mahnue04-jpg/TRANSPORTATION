@@ -88,3 +88,91 @@ def test_rank_live_jobs_prioritizes_title_match():
     assert ranked[0]["title"] == "Remote Operations Assistant"
     assert ranked[0]["relevance_score"] > ranked[1]["relevance_score"]
     assert ranked[0]["relevance_explanation"]["title_hits"] >= 2
+
+
+def test_rank_live_jobs_prefers_title_match():
+    jobs = [
+        {
+            "title": "Senior Data Scientist",
+            "company_name": "Data Co",
+            "description": "Remote operations analytics and reporting.",
+            "geography": "Worldwide",
+            "publication_date": "2026-09-19T00:00:00",
+        },
+        {
+            "title": "Remote Operations Assistant",
+            "company_name": "Office Co",
+            "description": "Coordinate schedules and prepare reports.",
+            "geography": "Worldwide",
+            "publication_date": "2026-09-18T00:00:00",
+        },
+    ]
+
+    ranked = live_discovery.rank_live_jobs("remote operations assistant", jobs)
+
+    assert ranked[0]["title"] == "Remote Operations Assistant"
+    assert ranked[0]["relevance_score"] > ranked[1]["relevance_score"]
+
+
+def test_live_job_ingest_marks_opportunity_live(monkeypatch):
+    from app.core.nova.v3.kernel import NovaV3Kernel
+
+    kernel = NovaV3Kernel()
+    monkeypatch.setattr(
+        "app.core.nova.v3.kernel.live_flags",
+        lambda: {"LIVE_DISCOVERY_ENABLED": True},
+    )
+
+    saved = kernel.ingest_live_jobs(
+        [
+            {
+                "provider_id": "remotive",
+                "provider_identifier": "123",
+                "title": "Remote Operations Assistant",
+                "company_name": "Example Co",
+                "description": "Prepare reports and coordinate tasks.",
+                "source_url": "https://remotive.com/remote-jobs/example-123",
+                "geography": "USA",
+                "remote_status": "remote",
+                "source_attribution": "Remotive",
+            }
+        ],
+        organization_id="org-owner",
+        owner_user_id="owner-1",
+    )
+
+    assert len(saved["created"]) == 1
+    row = saved["created"][0]
+    assert row["provider_id"] == "remotive"
+    assert row["live_discovery"] is True
+    assert row["provenance"]["live"] is True
+    assert row["provenance"]["synthetic"] is False
+    assert row["status"] == "LEAD"
+
+
+def test_live_job_ingest_deduplicates(monkeypatch):
+    from app.core.nova.v3.kernel import NovaV3Kernel
+
+    kernel = NovaV3Kernel()
+    monkeypatch.setattr(
+        "app.core.nova.v3.kernel.live_flags",
+        lambda: {"LIVE_DISCOVERY_ENABLED": True},
+    )
+    job = {
+        "provider_id": "remotive",
+        "provider_identifier": "same-123",
+        "title": "Remote Operations Assistant",
+        "company_name": "Example Co",
+        "description": "Prepare reports and coordinate tasks.",
+        "source_url": "https://remotive.com/remote-jobs/example-123",
+        "geography": "USA",
+        "remote_status": "remote",
+        "source_attribution": "Remotive",
+    }
+
+    first = kernel.ingest_live_jobs([job], organization_id="org-owner", owner_user_id="owner-1")
+    second = kernel.ingest_live_jobs([job], organization_id="org-owner", owner_user_id="owner-1")
+
+    assert len(first["created"]) == 1
+    assert second["created"] == []
+    assert len(second["duplicates"]) == 1
