@@ -66,7 +66,11 @@ class LiveJobSearchIn(OrgIn):
 
 class LiveJobDiscoverIn(LiveJobSearchIn):
     save_limit: int = Field(default=5, ge=1, le=10)
-    min_relevance_score: int = Field(default=1, ge=0, le=100)
+    min_relevance_score: int = Field(default=6, ge=0, le=100)
+
+
+class LiveJobPrepareIn(LiveJobDiscoverIn):
+    prepare_limit: int = Field(default=3, ge=1, le=5)
 
 
 class ManualOpportunityIn(OrgIn):
@@ -257,6 +261,62 @@ def v3_live_job_discover(
             "selected_count": len(selected),
             "ranked_jobs": ranked,
             "saved": saved,
+        }
+    except V3Error as exc:
+        _raise(exc)
+
+
+@router.post("/live/jobs/prepare")
+def v3_live_job_prepare(
+    payload: LiveJobPrepareIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    org_id = _org(user, payload.organization_id)
+    try:
+        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
+        ranked = rank_live_jobs(payload.query, raw_jobs)
+        selected = [
+            job for job in ranked
+            if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
+        ][: payload.save_limit]
+        saved = get_kernel().ingest_live_jobs(
+            selected,
+            organization_id=org_id,
+            owner_user_id=user.user_id,
+        )
+
+        prepared = []
+        for opportunity in saved["created"][: payload.prepare_limit]:
+            proposal = get_kernel().prepare_proposal(
+                opportunity["opportunity_id"],
+                organization_id=org_id,
+                owner_user_id=user.user_id,
+            )
+            approval = get_kernel().request_approval(
+                organization_id=org_id,
+                owner_user_id=user.user_id,
+                action="OPPORTUNITY_APPROVE",
+                target_id=proposal.proposal_id,
+                payload={"proposal_id": proposal.proposal_id},
+                idempotency_key=f"live-job-proposal:{proposal.proposal_id}",
+            )
+            prepared.append(
+                {
+                    "opportunity": opportunity,
+                    "proposal": jsonable_encoder(proposal),
+                    "approval": jsonable_encoder(approval),
+                }
+            )
+
+        return {
+            "query": payload.query,
+            "source": "Remotive",
+            "external_action_taken": False,
+            "ranked_count": len(ranked),
+            "selected_count": len(selected),
+            "prepared_count": len(prepared),
+            "prepared": prepared,
+            "duplicates": saved["duplicates"],
         }
     except V3Error as exc:
         _raise(exc)
