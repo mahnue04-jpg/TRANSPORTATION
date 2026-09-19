@@ -52,9 +52,9 @@ def test_format_news():
         ],
         "AI",
     )
-    assert "Current news for AI" in answer
-    assert "Example headline" in answer
-    assert "https://example.com/story" in answer
+    assert "Here is a quick news briefing for AI:" in answer
+    assert "Example headline (Example News)" in answer
+    assert "https://" not in answer
 
 
 def test_direct_answer_uses_serializable_timestamp(monkeypatch):
@@ -70,7 +70,24 @@ def test_direct_answer_uses_serializable_timestamp(monkeypatch):
         lambda organization_id, user_id, patch: dict(patch),
     )
 
+    account = SimpleNamespace(display_name=None)
+    class _Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def first(self):
+            return account
+    class _DB:
+        def query(self, *args, **kwargs):
+            return _Query()
+        def add(self, value):
+            pass
+        def commit(self):
+            pass
+        def refresh(self, value):
+            pass
+
     result = service._today_live_or_memory_answer(
+        _DB(),
         NovaTodayBrainRequest(question="My name is Saye"),
         organization_id="org-1",
         user=SimpleNamespace(user_id="user-1"),
@@ -96,3 +113,35 @@ def test_news_format_is_concise_and_has_no_raw_url():
     assert "Here is a quick news briefing:" in answer
     assert "Example headline (Example News)" in answer
     assert "https://" not in answer
+
+
+def test_direct_answer_recalls_account_display_name(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.core.nova.today import service
+    from app.core.nova.today.schemas import NovaTodayBrainRequest
+
+    monkeypatch.setattr(service, "read_user_profile", lambda organization_id, user_id: {})
+
+    account = SimpleNamespace(display_name="Saye")
+
+    class _Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def first(self):
+            return account
+
+    class _DB:
+        def query(self, *args, **kwargs):
+            return _Query()
+
+    result = service._today_live_or_memory_answer(
+        _DB(),
+        NovaTodayBrainRequest(question="What is my name?"),
+        organization_id="org-1",
+        user=SimpleNamespace(user_id="user-1"),
+    )
+
+    assert result is not None
+    assert result.answer == "Your name is Saye."
+    assert result.fact_label == "USER-SAVED INFORMATION"
