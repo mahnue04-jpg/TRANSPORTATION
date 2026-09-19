@@ -50,6 +50,7 @@ from app.core.nova.v3.worker import (
 
 APPROVAL_TYPES = {
     "OPPORTUNITY_APPROVE": "opportunity_approval",
+    "LIVE_SUBMISSION": "live_submission_approval",
     "MOCK_SUBMISSION": "submission_approval",
     "MOCK_MESSAGE": "communication_approval",
     "DELIVERABLE_APPROVE": "deliverable_approval",
@@ -530,6 +531,74 @@ class NovaV3Kernel:
             self.idempotency[(organization_id, owner_user_id, "consume", idempotency_key)] = row.approval_id
         self._audit("APPROVAL_CONSUMED", organization_id, approval_id=approval_id, executed=False)
         return row
+
+    def live_submit(
+        self,
+        proposal_id: str,
+        *,
+        organization_id: str,
+        owner_user_id: str,
+        approval_id: str,
+    ) -> dict[str, Any]:
+        if not live_flags()["EXTERNAL_SUBMISSION_ENABLED"]:
+            raise V3Error("LIVE_DISABLED", "Controlled external submission is not enabled", http_status=409)
+
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            raise V3Error("NOT_FOUND", "proposal not found", http_status=404)
+        self.assert_tenant(proposal.organization_id, organization_id)
+        self.assert_owner(proposal.owner_user_id, owner_user_id)
+
+        opp = self.get_opportunity(
+            proposal.opportunity_id,
+            organization_id=organization_id,
+            owner_user_id=owner_user_id,
+        )
+        if not bool(opp.provenance.get("live")):
+            raise V3Error("NOT_LIVE_OPPORTUNITY", "live submission requires a live opportunity", http_status=400)
+        if not opp.source_url:
+            raise V3Error("MISSING_APPLICATION_URL", "live opportunity has no application URL", http_status=400)
+
+        approval = self.get_approval(
+            approval_id,
+            organization_id=organization_id,
+            owner_user_id=owner_user_id,
+        )
+        expected_payload = {"proposal_id": proposal_id, "source_url": opp.source_url}
+        if approval.status != "APPROVED":
+            raise V3Error("MISSING_APPROVAL", "live submission approval is not approved")
+        if approval.action != "LIVE_SUBMISSION" or approval.target_id != proposal_id:
+            raise V3Error("STALE_APPROVAL", "live submission approval target mismatch")
+        if approval.payload_fingerprint != fingerprint(expected_payload):
+            raise V3Error("PAYLOAD_CHANGED", "application target changed; new approval required")
+
+        # Remotive is a discovery source. Listings lead to employer-controlled application
+        # pages and Nova has no authorized direct-submit transport for those sites.
+        # Preserve the approval and return a truthful handoff instead of pretending to submit.
+        result = {
+            "status": "HUMAN_ACTION_REQUIRED",
+            "submission_mode": "external_url_handoff",
+            "provider_id": opp.provider_id,
+            "proposal_id": proposal_id,
+            "opportunity_id": opp.opportunity_id,
+            "application_url": opp.source_url,
+            "approval_id": approval_id,
+            "approval_status": approval.status,
+            "externally_submitted": False,
+            "reason": (
+                "No authorized direct-submit API is configured for this listing. "
+                "Open the employer application page and complete any login, CAPTCHA, "
+                "identity verification, or terms acceptance manually."
+            ),
+        }
+        self._audit(
+            "LIVE_SUBMISSION_HANDOFF",
+            organization_id,
+            proposal_id=proposal_id,
+            provider_id=opp.provider_id,
+            executed=False,
+        )
+        return result
 
     def mock_submit(self, proposal_id: str, *, organization_id: str, owner_user_id: str, approval_id: str) -> Proposal:
         if live_flags()["EXTERNAL_SUBMISSION_ENABLED"]:
