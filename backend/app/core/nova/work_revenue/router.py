@@ -6,9 +6,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import UserContext, get_current_user_context
+from app.auth import ROLE_ADMIN, UserContext, get_current_user_context, normalize_role
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
+from app.core.nova.signup.service import customer_access
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.config import capabilities_surface
@@ -59,10 +60,26 @@ from app.core.nova.work_revenue.schemas import (
 )
 from app.db.session import get_db
 
+def require_work_revenue_owner(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> UserContext:
+    access = customer_access(
+        db,
+        organization_id=user.organization_id,
+        user_id=user.user_id,
+    )
+    if access.get("nova_saas_customer"):
+        raise HTTPException(status_code=403, detail="Work & Revenue is owner-only.")
+    if normalize_role(user.role) != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="Work & Revenue is restricted to the administrative owner.")
+    return user
+
+
 router = APIRouter(
     prefix="/api/nova/work",
     tags=["nova-work-revenue"],
-    dependencies=[Depends(require_nova_access)],
+    dependencies=[Depends(require_nova_access), Depends(require_work_revenue_owner)],
 )
 
 
