@@ -176,3 +176,28 @@ def test_live_job_ingest_deduplicates(monkeypatch):
     assert len(first["created"]) == 1
     assert second["created"] == []
     assert len(second["duplicates"]) == 1
+
+
+def test_prepare_threshold_prefers_strong_matches():
+    jobs = [
+        {
+            "title": "Remote Operations Assistant",
+            "company_name": "Office Co",
+            "description": "Coordinate schedules and prepare reports.",
+            "geography": "Worldwide",
+            "publication_date": "2026-09-18T00:00:00",
+        },
+        {
+            "title": "Senior Data Scientist",
+            "company_name": "Data Co",
+            "description": "Remote analytics and reporting.",
+            "geography": "Worldwide",
+            "publication_date": "2026-09-19T00:00:00",
+        },
+    ]
+
+    ranked = live_discovery.rank_live_jobs("remote operations assistant", jobs)
+    selected = [row for row in ranked if int(row.get("relevance_score") or 0) >= 6]
+
+    assert len(selected) == 1
+    assert selected[0]["title"] == "Remote Operations Assistant"
