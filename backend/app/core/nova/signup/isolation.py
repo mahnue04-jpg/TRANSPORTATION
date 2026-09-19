@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 BLOCKED_PREFIXES = (
     "/api/admin",
     "/api/health-isf",
+    "/api/ops",
     "/api/payments",
     "/api/platform-ops",
     "/api/nova/freight",

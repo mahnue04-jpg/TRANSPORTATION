@@ -37,6 +37,28 @@
             <script src="/static/ux/humanVoiceEngine.js?v=20260517.4"></script>
             <script src="/static/ux/embeddedBrowser.js?v=20260513.1"></script>
             <script src="/static/ux/sessionManager.js?v=20260711.2"></script>
+            <script>
+              (async function novaSaasHealthGate() {
+                if (window.location.pathname !== "/workspace") return;
+                try {
+                  if (window.AmiCorSession && window.AmiCorSession.ensureReady) {
+                    await window.AmiCorSession.ensureReady();
+                  }
+                  const token = window.AmiCorSession && window.AmiCorSession.getAccessToken
+                    ? window.AmiCorSession.getAccessToken()
+                    : "";
+                  if (!token) return;
+                  const response = await fetch("/api/nova/signup/me/access", {
+                    headers: { Authorization: "Bearer " + token }
+                  });
+                  if (!response.ok) return;
+                  const access = await response.json();
+                  if (access && access.nova_saas_customer) {
+                    window.location.replace("/nova/today?blocked=health");
+                  }
+                } catch (_) {}
+              })();
+            </script>
             <script src="/static/branding/brand.js?v=20260803.1"></script>
             <script src="/static/ux/authUI.js?v=20260803.1"></script>
             <script src="/static/ux/reconnectHandler.js?v=20260512.1"></script>

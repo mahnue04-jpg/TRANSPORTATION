@@ -410,6 +410,24 @@
       renderWorkRevenueError();
     }
   }
+  async function applyProductAccess() {
+    if (!token()) return;
+    try {
+      var access = await api("/api/nova/signup/me/access");
+      var isCustomer = !!(access && access.nova_saas_customer);
+      document.querySelectorAll(".today-nav a").forEach(function (el) {
+        var href = el.getAttribute("href") || "";
+        if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
+          el.classList.toggle("hidden", isCustomer);
+        }
+      });
+      var linkedPanel = document.querySelector('[aria-label="Health, Delivery, and Freight"]');
+      if (linkedPanel) linkedPanel.classList.toggle("hidden", isCustomer);
+      var productLinksPanel = document.querySelector('[aria-label="Product links"]');
+      if (productLinksPanel) productLinksPanel.classList.toggle("hidden", isCustomer);
+    } catch (_) {}
+  }
+
   async function refresh() {
     if (!token()) {
       $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
@@ -418,6 +436,7 @@
     }
     var dash = await api("/api/nova/today/dashboard");
     setSignedIn(true);
+    await applyProductAccess();
     renderList("attention-box", dash.attention_now, "Nothing needs attention now. No real items were invented.");
     renderList("communications-box", dash.communications, "No real unread or important communications.");
     renderList("government-box", dash.government, "No saved government or compliance items.");
@@ -584,13 +603,5 @@
     showBanner(err.message || String(err));
     loadWorkRevenue().catch(function () { renderWorkRevenueError(); });
   });
-  api("/api/nova/signup/me/access").then(function (access) {
-    if (!access || !access.nova_saas_customer) return;
-    document.querySelectorAll(".today-nav a").forEach(function (el) {
-      var href = el.getAttribute("href") || "";
-      if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
-        el.classList.add("hidden");
-      }
-    });
-  }).catch(function () {});
+  applyProductAccess().catch(function () {});
 })();

@@ -8,7 +8,10 @@
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-freight/freight.css" />
 </head>
-<body>
+<body class="product-gate-pending">
+  <style>
+    body.product-gate-pending .page { visibility: hidden; }
+  </style>
   <main class="page">
     <header class="brand-lockup amicor-brand-lockup">
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
@@ -198,6 +201,34 @@
     </section>
   </main>
   <script src="/static/ux/sessionManager.js"></script>
+  <script>
+    (async function novaSaasFreightGate() {
+      function reveal() { document.body.classList.remove("product-gate-pending"); }
+      try {
+        if (window.AmiCorSession && window.AmiCorSession.ensureReady) {
+          await window.AmiCorSession.ensureReady();
+        }
+        const token = window.AmiCorSession && window.AmiCorSession.getAccessToken
+          ? window.AmiCorSession.getAccessToken()
+          : "";
+        if (!token) {
+          reveal();
+          return;
+        }
+        const response = await fetch("/api/nova/signup/me/access", {
+          headers: { Authorization: "Bearer " + token }
+        });
+        if (response.ok) {
+          const access = await response.json();
+          if (access && access.nova_saas_customer) {
+            window.location.replace("/nova/today?blocked=freight");
+            return;
+          }
+        }
+      } catch (_) {}
+      reveal();
+    })();
+  </script>
   <script src="/static/nova-freight/freight.js"></script>
 </body>
 </html>
