@@ -145,3 +145,27 @@ def test_direct_answer_recalls_account_display_name(monkeypatch):
     assert result is not None
     assert result.answer == "Your name is Saye."
     assert result.fact_label == "USER-SAVED INFORMATION"
+
+
+def test_web_search_capability_and_known_sites():
+    assert live_tools.is_web_search_capability_question("Can you search the web?") is True
+    assert live_tools.is_web_search_request("Look up the latest movie playing today") is True
+    assert live_tools.extract_known_site("Open YouTube") == ("YouTube", "https://www.youtube.com/")
+    assert "Minneapolis" in live_tools.extract_web_query("look up movies playing today", "Minneapolis, Minnesota")
+
+
+def test_fetch_web_search_passthrough(monkeypatch):
+    monkeypatch.setattr(
+        live_tools,
+        "search_web",
+        lambda query, max_results=5, news_mode=False: {
+            "response": "Search results for movies.",
+            "sources": [
+                {"title": "Example", "url": "https://example.com", "label": "example.com"},
+            ],
+            "status": "success",
+        },
+    )
+    result = live_tools.fetch_web_search("movies playing today")
+    assert result["status"] == "success"
+    assert result["sources"][0]["url"] == "https://example.com"
