@@ -348,7 +348,16 @@
     var submitOff = summary.external_submission_enabled !== true;
     var financeOff = summary.financial_actions_enabled !== true;
     var modeParts = [];
-    if (liveOff) modeParts.push("Opportunities are manual or simulated. Live discovery is disabled. Nova did not search the live internet.");
+    var diag = summary.discovery_diagnostics || {};
+    if (liveOff) {
+      modeParts.push("Opportunities are manual or simulated. Live discovery is disabled. Nova did not search the live internet.");
+    } else {
+      modeParts.push(
+        "Live discovery is enabled (" +
+        (diag.discovery_provider_label || diag.discovery_provider || "Remotive") +
+        "). Recorded Today counts still separate manual/simulated from live results. Open Work & Revenue to run a search. External submission remains off."
+      );
+    }
     if (submitOff) modeParts.push("External submission is disabled. Approved is not submitted.");
     if (financeOff) modeParts.push("Financial execution is disabled. Nova cannot charge, invoice, or transfer money.");
     if (mode) mode.textContent = modeParts.join(" ");
@@ -378,9 +387,10 @@
         "<ul class=\"work-state-list\">" +
           "<li><span class=\"state-label\">MANUAL</span> " + escapeHtml(String(sources.manual || 0)) + "</li>" +
           "<li><span class=\"state-label\">SIMULATED / TEST</span> " + escapeHtml(String(sources.simulated || 0)) + "</li>" +
+          "<li><span class=\"state-label\">LIVE DISCOVERED</span> " + escapeHtml(String(sources.live || 0)) + "</li>" +
         "</ul>" +
         opportunityEmpty +
-        "<p class=\"hint\">These counts are from recorded manual or simulated entries. They are not live job-board search results.</p>" +
+        "<p class=\"hint\">Manual and simulated counts are never treated as live job-board results. Live discovered rows appear only after an owner runs discovery in Work &amp; Revenue.</p>" +
         workOpenLink() +
       "</article>" +
       "<article class=\"product-count-card\" data-work-card=\"approvals\">" +
@@ -538,6 +548,9 @@
     }
     var dash = await api("/api/nova/today/dashboard");
     setSignedIn(true);
+    if ($("brain-output") && String($("brain-output").textContent || "").indexOf("when you are signed in") !== -1) {
+      $("brain-output").textContent = "Mrs. Nova Brain is ready. Ask a question below.";
+    }
     await applyProductAccess();
     renderList("attention-box", dash.attention_now, "Nothing needs attention now. No real items were invented.");
     renderList("communications-box", dash.communications, "No real unread or important communications.");

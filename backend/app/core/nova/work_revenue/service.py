@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
-from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.flags import discovery_diagnostics, engine_guardrails, live_discovery_enabled
 from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.runtime_contract import _resolve_runtime_environment
 from app.core.nova.work_revenue.lifecycle import (
@@ -1578,11 +1578,13 @@ def today_cards(counts: dict[str, int]) -> list[dict[str, Any]]:
 
 
 def _today_source_counts(opportunities: list[OpportunityOut]) -> dict[str, int]:
-    counts = {"manual": 0, "simulated": 0, "other": 0}
+    counts = {"manual": 0, "simulated": 0, "live": 0, "other": 0}
     for item in opportunities:
         kind = str(item.source_type or item.source or "manual").strip().lower()
         if kind == "simulated":
             counts["simulated"] += 1
+        elif kind in {"live", "live_job_source", "remotive", "job_board"}:
+            counts["live"] += 1
         elif kind == "manual":
             counts["manual"] += 1
         else:
@@ -1618,6 +1620,7 @@ def _today_active_tasks(engagements: list[dict[str, Any]]) -> int:
 def today_summary(db: Session, *, organization_id: str, user: UserContext) -> TodaySummaryOut:
     dash = dashboard(db, organization_id=organization_id, user=user)
     guards = dash.guardrails or engine_guardrails()
+    discovery_on = live_discovery_enabled()
     revenue = dict(dash.revenue_summary or {})
     pending_deliverables = (
         _owner_filter(
@@ -1648,10 +1651,11 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         active_tasks=_today_active_tasks(dash.engagements),
         revenue_summary=revenue,
         guardrails=guards,
-        opportunity_mode="manual_simulated_only",
-        live_discovery_enabled=bool(guards.get("LIVE_DISCOVERY_ENABLED")),
+        opportunity_mode="live_discovery_ready" if discovery_on else "manual_simulated_only",
+        live_discovery_enabled=discovery_on,
         external_submission_enabled=bool(guards.get("EXTERNAL_SUBMISSION_ENABLED")),
         financial_actions_enabled=bool(guards.get("FINANCIAL_ACTIONS_ENABLED")),
+        discovery_diagnostics=discovery_diagnostics(),
         revenue_disclaimer=str(revenue.get("disclaimer") or dash.revenue_placeholder or REVENUE_PLACEHOLDER),
         tasks_due=int(dash.counts.get("tasks_due") or 0),
         deliverables_pending=int(pending_deliverables or 0),
