@@ -105,6 +105,10 @@ class MockSubmitIn(OrgIn):
     approval_id: str
 
 
+class LiveSubmitIn(OrgIn):
+    approval_id: str
+
+
 class WorkIn(OrgIn):
     engagement_id: str
     work_type: str
@@ -400,6 +404,23 @@ def v3_revoke(approval_id: str, payload: OrgIn | None = None, user: UserContext 
             get_kernel().revoke_approval(
                 approval_id, organization_id=_org(user, body.organization_id), owner_user_id=user.user_id
             )
+        )
+    except V3Error as exc:
+        _raise(exc)
+
+
+@router.post("/proposals/{proposal_id}/live-submit")
+def v3_live_submit(
+    proposal_id: str,
+    payload: LiveSubmitIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    try:
+        return get_kernel().live_submit(
+            proposal_id,
+            organization_id=_org(user, payload.organization_id),
+            owner_user_id=user.user_id,
+            approval_id=payload.approval_id,
         )
     except V3Error as exc:
         _raise(exc)
