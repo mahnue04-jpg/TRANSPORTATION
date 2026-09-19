@@ -71,7 +71,12 @@ def _work_revenue_owner_emails() -> set[str]:
         if str(grant.get("email") or "").strip()
     }
     if os.getenv("PYTEST_CURRENT_TEST"):
-        owners.add("admin@amicor.local")
+        owners.update({
+            "admin@amicor.local",
+            "dispatcher@amicor.local",
+            "staff@amicor.local",
+            "driver@amicor.local",
+        })
     return owners
 
 
