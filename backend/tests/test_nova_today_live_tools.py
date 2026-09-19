@@ -55,3 +55,28 @@ def test_format_news():
     assert "Current news for AI" in answer
     assert "Example headline" in answer
     assert "https://example.com/story" in answer
+
+
+def test_direct_answer_uses_serializable_timestamp(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.core.nova.today import service
+    from app.core.nova.today.schemas import NovaTodayBrainRequest
+
+    monkeypatch.setattr(service, "read_user_profile", lambda organization_id, user_id: {})
+    monkeypatch.setattr(
+        service,
+        "update_user_profile",
+        lambda organization_id, user_id, patch: dict(patch),
+    )
+
+    result = service._today_live_or_memory_answer(
+        NovaTodayBrainRequest(question="My name is Saye"),
+        organization_id="org-1",
+        user=SimpleNamespace(user_id="user-1"),
+    )
+
+    assert result is not None
+    assert result.answer == "Got it. I’ll remember your name as Saye."
+    assert isinstance(result.generated_at, str)
+    assert "T" in result.generated_at
