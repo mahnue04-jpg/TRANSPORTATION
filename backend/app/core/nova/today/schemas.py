@@ -152,12 +152,19 @@ class NovaTodayBrainRequest(BaseModel):
     source_ref_id: str | None = Field(default=None, max_length=80)
 
 
+class NovaTodaySourceLink(BaseModel):
+    title: str
+    url: str
+    label: str | None = None
+
+
 class NovaTodayBrainOut(BaseModel):
     answer: str
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str
     source_href: str | None = None
+    sources: list[NovaTodaySourceLink] = Field(default_factory=list)
     referenced_action_id: str | None = None
     referenced_source_ref_id: str | None = None
     verification_status: Literal["verified", "missing", "unavailable", "unknown"] | None = None
