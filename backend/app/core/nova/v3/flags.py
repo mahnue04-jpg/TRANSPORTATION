@@ -1,6 +1,13 @@
-"""Nova V3 live flags. All remain OFF. Synthetic lab only."""
+"""Nova V3 live flags. Production defaults remain OFF unless explicitly enabled."""
 
-LIVE_DISCOVERY_ENABLED = False
+import os
+
+
+def _env_enabled(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+LIVE_DISCOVERY_ENABLED = _env_enabled("NOVA_V3_LIVE_DISCOVERY_ENABLED")
 EXTERNAL_SUBMISSION_ENABLED = False
 CLIENT_CONTACT_ENABLED = False
 REPORT_SEND_ENABLED = False
@@ -30,7 +37,7 @@ def live_flags() -> dict[str, bool]:
         "HEADER_CAN_ENABLE_LIVE": False,
         "TEXT_CAN_ENABLE_LIVE": False,
         "MOCK_TRANSPORT_ONLY": True,
-        "LIVE_DISCOVERY": False,
+        "LIVE_DISCOVERY": LIVE_DISCOVERY_ENABLED,
         "REAL_EXTERNAL_SUBMISSION": False,
         "REAL_CLIENT_CONTACT": False,
         "REAL_EMAIL_SEND": False,
