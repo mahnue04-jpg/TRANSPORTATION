@@ -144,9 +144,6 @@ def build_stripe_schedule_phases(
         duration = stripe_phase_duration(phase)
         if duration is not None:
             item["duration"] = duration
-        if not trial_end and index == 0 and phase.get("trial_period_days"):
-            if trial_end:
-                item["trial_end"] = trial_end
         phases.append(item)
     return phases
 
