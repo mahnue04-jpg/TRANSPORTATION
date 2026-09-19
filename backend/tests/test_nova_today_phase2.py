@@ -292,3 +292,10 @@ def test_nova_today_voice_controls_and_input_reset() -> None:
     assert "speechSynthesis" in TODAY_JS
     assert '$("ask-input").value = "";' in TODAY_JS
     assert "requestSubmit()" in TODAY_JS
+
+
+def test_nova_today_stop_button_and_wrapped_answer() -> None:
+    assert 'id="stop-speaking"' in TODAY_HTML
+    assert "stopNovaSpeaking" in TODAY_JS
+    assert "preferredNovaVoice" in TODAY_JS
+    assert "Nova stopped speaking." in TODAY_JS

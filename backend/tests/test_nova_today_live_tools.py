@@ -80,3 +80,19 @@ def test_direct_answer_uses_serializable_timestamp(monkeypatch):
     assert result.answer == "Got it. I’ll remember your name as Saye."
     assert isinstance(result.generated_at, str)
     assert "T" in result.generated_at
+
+
+def test_news_format_is_concise_and_has_no_raw_url():
+    answer = live_tools.format_news(
+        [
+            {
+                "title": "Example headline - Example News",
+                "source": "Example News",
+                "link": "https://news.google.com/rss/articles/example",
+                "published": "today",
+            }
+        ]
+    )
+    assert "Here is a quick news briefing:" in answer
+    assert "Example headline (Example News)" in answer
+    assert "https://" not in answer

@@ -24,13 +24,38 @@
   function setVoiceStatus(message) {
     if ($("voice-status")) $("voice-status").textContent = message;
   }
+  function preferredNovaVoice() {
+    if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
+    var voices = window.speechSynthesis.getVoices() || [];
+    var english = voices.filter(function (voice) {
+      return String(voice.lang || "").toLowerCase().indexOf("en") === 0;
+    });
+    var preferred = english.find(function (voice) {
+      return /natural|neural|google us english|microsoft.*(aria|jenny|sonia|zira)/i.test(String(voice.name || ""));
+    });
+    return preferred || english[0] || voices[0] || null;
+  }
+  function stopNovaSpeaking() {
+    if (!window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+      setVoiceStatus("Nova stopped speaking.");
+    } catch (_) {}
+  }
   function speakNova(text) {
     if (!window.speechSynthesis || !text) return;
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(String(text));
-      utterance.lang = "en-US";
-      utterance.rate = 1;
+      var voice = preferredNovaVoice();
+      if (voice) utterance.voice = voice;
+      utterance.lang = (voice && voice.lang) || "en-US";
+      utterance.rate = 0.94;
+      utterance.pitch = 1.02;
+      utterance.volume = 1;
+      utterance.onstart = function () { setVoiceStatus("Nova is speaking…"); };
+      utterance.onend = function () { setVoiceStatus("Ready."); };
+      utterance.onerror = function () { setVoiceStatus("Voice playback stopped."); };
       window.speechSynthesis.speak(utterance);
     } catch (_) {}
   }
@@ -63,7 +88,12 @@
       }
     };
     recognition.onerror = function (event) {
-      setVoiceStatus("Microphone error: " + ((event && event.error) || "unavailable") + ".");
+      var code = (event && event.error) || "unavailable";
+      if (code === "aborted") {
+        setVoiceStatus("Listening stopped.");
+        return;
+      }
+      setVoiceStatus("Microphone error: " + code + ".");
     };
     recognition.onend = function () {
       if ($("ask-mic")) $("ask-mic").textContent = "🎤 Talk";
@@ -624,6 +654,11 @@
   if ($("ask-mic")) {
     $("ask-mic").addEventListener("click", function () {
       startVoiceInput();
+    });
+  }
+  if ($("stop-speaking")) {
+    $("stop-speaking").addEventListener("click", function () {
+      stopNovaSpeaking();
     });
   }
   $("sign-in-toggle").addEventListener("click", function () {
