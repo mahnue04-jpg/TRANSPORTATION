@@ -26,6 +26,7 @@ from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
+    NovaWorkBusinessFact,
     NovaWorkDeliverable,
     NovaWorkEngagement,
     NovaWorkMaterial,
@@ -66,6 +67,7 @@ from app.core.nova.work_revenue.schemas import (
     TodaySummaryOut,
     TrackerOut,
 )
+from app.core.nova.work_revenue.owner_facts import FACT_SOURCE_OWNER, fact_catalog
 from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED, profile_snapshot
 from app.helpers import now, uuid4
 
@@ -997,6 +999,37 @@ def refuse_external_submission() -> None:
     )
 
 
+def _application_owner_fact_catalog(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    applicant_party: str,
+) -> dict[str, Any]:
+    rows = _owner_filter(
+        db.query(NovaWorkBusinessFact).filter(NovaWorkBusinessFact.organization_id == organization_id),
+        NovaWorkBusinessFact,
+        user,
+    ).all()
+    current = _as_utc(now())
+    stored: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        status = str(row.value_status or "MISSING").upper()
+        expires = _as_utc(row.expiration_date)
+        if expires is not None and current is not None and expires < current:
+            status = "EXPIRED"
+        stored[row.fact_key] = {
+            "value_status": status,
+            "value_display": row.value_display,
+            "verification_date": row.verification_date.isoformat() if row.verification_date else None,
+            "expiration_date": row.expiration_date.isoformat() if row.expiration_date else None,
+            "source_description": row.source_description,
+            "notes": row.notes,
+            "source": FACT_SOURCE_OWNER,
+        }
+    return fact_catalog(applicant_party=applicant_party, stored=stored)
+
+
 def create_application(
     db: Session,
     payload: ApplicationCreate,
@@ -1025,7 +1058,17 @@ def create_application(
     )
     db.add(application)
     db.flush()
-    drafts = generate_drafts(_opportunity_payload(row), applicant_party=payload.applicant_party)
+    owner_facts = _application_owner_fact_catalog(
+        db,
+        organization_id=organization_id,
+        user=user,
+        applicant_party=payload.applicant_party,
+    )
+    drafts = generate_drafts(
+        _opportunity_payload(row),
+        applicant_party=payload.applicant_party,
+        owner_facts=owner_facts,
+    )
     for draft in drafts:
         if draft["kind"] not in MATERIAL_KINDS:
             continue
