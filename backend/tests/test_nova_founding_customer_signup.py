@@ -610,3 +610,69 @@ def test_duplicate_checkout_completed_webhook_is_idempotent() -> None:
     finally:
         set_nova_saas_stripe_override(None)
 
+
+
+def test_invoice_paid_routes_by_subscription_when_invoice_metadata_is_empty() -> None:
+    fake = FakeNovaSaasStripeClient()
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload()
+        activated = _activate(client, fake, payload=payload)
+        signup_id = activated["signup"]["signup_id"]
+
+        with SessionLocal() as db:
+            row = db.get(NovaSignupAccount, signup_id)
+            assert row is not None
+            subscription_id = row.stripe_subscription_id
+            assert subscription_id
+
+        paid = client.post(
+            "/api/nova/signup/stripe/webhook",
+            json={
+                "id": f"evt_paid_subscription_route_{uuid4()[:8]}",
+                "type": "invoice.paid",
+                "data": {
+                    "object": {
+                        "id": "in_subscription_route_test",
+                        "billing_reason": "subscription_cycle",
+                        "amount_paid": 5900,
+                        "metadata": {},
+                        "subscription": subscription_id,
+                    }
+                },
+            },
+        )
+        assert paid.status_code == 200, paid.text
+        body = paid.json()
+        assert body["result"] == "paid"
+        assert body["paid_activated"] is True
+        assert body["paid_month_index"] == 1
+        assert body["expected_unit_amount"] == 5900
+
+        with SessionLocal() as db:
+            row = db.get(NovaSignupAccount, signup_id)
+            assert row is not None
+            assert row.status == "active"
+            assert row.paid_month_index == 1
+            assert row.current_unit_amount == 5900
+    finally:
+        set_nova_saas_stripe_override(None)
+
+
+def test_invoice_parent_subscription_metadata_can_resolve_signup() -> None:
+    from app.core.nova.signup.service import _signup_id_from_event
+
+    signup_id = f"signup_{uuid4()[:8]}"
+    obj = {
+        "metadata": {},
+        "parent": {
+            "subscription_details": {
+                "metadata": {
+                    "nova_signup_id": signup_id,
+                    "nova_product": "nova_saas",
+                }
+            }
+        },
+    }
+    assert _signup_id_from_event(obj) == signup_id

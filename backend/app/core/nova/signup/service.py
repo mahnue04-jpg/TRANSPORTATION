@@ -329,7 +329,61 @@ def _event_object(event: dict[str, Any]) -> dict[str, Any]:
 def _signup_id_from_event(obj: dict[str, Any]) -> str | None:
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     value = metadata.get("nova_signup_id") or obj.get("client_reference_id")
-    return str(value).strip() if value else None
+    if value:
+        return str(value).strip()
+
+    subscription_details = obj.get("subscription_details")
+    if isinstance(subscription_details, dict):
+        details_meta = subscription_details.get("metadata")
+        if isinstance(details_meta, dict) and details_meta.get("nova_signup_id"):
+            return str(details_meta.get("nova_signup_id")).strip()
+
+    parent = obj.get("parent")
+    if isinstance(parent, dict):
+        parent_details = parent.get("subscription_details")
+        if isinstance(parent_details, dict):
+            parent_meta = parent_details.get("metadata")
+            if isinstance(parent_meta, dict) and parent_meta.get("nova_signup_id"):
+                return str(parent_meta.get("nova_signup_id")).strip()
+    return None
+
+
+def _subscription_id_from_event(obj: dict[str, Any]) -> str | None:
+    raw = obj.get("subscription")
+    if isinstance(raw, dict):
+        raw = raw.get("id")
+    if raw:
+        return str(raw).strip()
+
+    subscription_details = obj.get("subscription_details")
+    if isinstance(subscription_details, dict):
+        raw = subscription_details.get("subscription")
+        if isinstance(raw, dict):
+            raw = raw.get("id")
+        if raw:
+            return str(raw).strip()
+
+    parent = obj.get("parent")
+    if isinstance(parent, dict):
+        parent_details = parent.get("subscription_details")
+        if isinstance(parent_details, dict):
+            raw = parent_details.get("subscription")
+            if isinstance(raw, dict):
+                raw = raw.get("id")
+            if raw:
+                return str(raw).strip()
+    return None
+
+
+def _signup_id_from_subscription(db: Session, subscription_id: str | None) -> str | None:
+    if not subscription_id:
+        return None
+    row = (
+        db.query(NovaSignupAccount)
+        .filter(NovaSignupAccount.stripe_subscription_id == str(subscription_id))
+        .first()
+    )
+    return row.id if row is not None else None
 
 
 def _event_seen(db: Session, event: dict[str, Any]) -> bool:
@@ -360,6 +414,8 @@ def process_webhook(db: Session, event: dict[str, Any]) -> dict[str, Any]:
     obj = _event_object(event)
     signup_id = _signup_id_from_event(obj)
     event_type = str(event.get("type") or "")
+    if signup_id is None and event_type.startswith("invoice."):
+        signup_id = _signup_id_from_subscription(db, _subscription_id_from_event(obj))
     if _event_seen(db, event):
         return {"duplicate": True, "result": "ignored"}
 
