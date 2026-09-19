@@ -1415,3 +1415,46 @@ def test_work_revenue_owner_email_guard(monkeypatch) -> None:
 
     monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "owner@example.com")
     assert work_router._work_revenue_owner_emails() == {"owner@example.com"}
+
+
+def test_master_work_profile_tailors_resume_materials(client: TestClient) -> None:
+    headers = _headers(client)
+    saved = client.put(
+        "/api/nova/work/owner-facts/relevant_experience",
+        headers=headers,
+        json={
+            "value_status": "VERIFIED",
+            "value_display": "Owner-approved experience preparing business documents and organizing operational workflows.",
+            "source_description": "Owner verified",
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    saved_email = client.put(
+        "/api/nova/work/owner-facts/business_email",
+        headers=headers,
+        json={
+            "value_status": "VERIFIED",
+            "value_display": "work@example.com",
+            "source_description": "Owner verified",
+        },
+    )
+    assert saved_email.status_code == 200, saved_email.text
+    created = _create_opp(
+        client,
+        headers,
+        opportunity_title="Remote operations assistant",
+        description="Prepare documents and organize workflows for a remote operations team.",
+        skills_required=["documents", "operations"],
+        physical_presence_required="false",
+    )
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={"opportunity_id": created["opportunity_id"], "applicant_party": "AMICOR"},
+    )
+    assert app_resp.status_code == 200, app_resp.text
+    resume = next(item for item in app_resp.json()["materials"] if item["kind"] == "resume")
+    assert "MASTER VERIFIED/OWNER-PROVIDED PROFILE" in resume["body"]
+    assert "work@example.com" in resume["body"]
+    assert "Owner-approved experience preparing business documents" in resume["body"]
+    assert "Remote operations assistant" in resume["body"]
