@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from app.core.nova.memory import memory_store
+from app.web_search import search_web
 
 
 _WEATHER_CODES = {
@@ -263,3 +264,100 @@ def format_news(items: list[dict[str, str]], query: str | None = None) -> str:
         lines.append(f"{index}. {title} ({source})")
     lines.append("I can open the first source link if you want to read more.")
     return "\n".join(lines)
+
+
+_KNOWN_SITES = {
+    "youtube": ("YouTube", "https://www.youtube.com/"),
+    "facebook": ("Facebook", "https://www.facebook.com/"),
+    "instagram": ("Instagram", "https://www.instagram.com/"),
+    "tiktok": ("TikTok", "https://www.tiktok.com/"),
+    "linkedin": ("LinkedIn", "https://www.linkedin.com/"),
+    "reddit": ("Reddit", "https://www.reddit.com/"),
+    "x": ("X", "https://x.com/"),
+    "twitter": ("X", "https://x.com/"),
+}
+
+
+def is_web_search_capability_question(text: str) -> bool:
+    lowered = _clean(text).lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "can you search the web",
+            "can you search web",
+            "can you browse the web",
+            "can you browse internet",
+            "can you search the internet",
+            "do you search the web",
+        )
+    )
+
+
+def is_web_search_request(text: str) -> bool:
+    lowered = _clean(text).lower()
+    if is_weather_request(text) or is_news_request(text):
+        return False
+    if is_web_search_capability_question(text):
+        return False
+    return any(
+        phrase in lowered
+        for phrase in (
+            "search the web",
+            "search web",
+            "search the internet",
+            "look up",
+            "lookup",
+            "find online",
+            "find on the web",
+            "latest movie",
+            "movies playing",
+            "movie playing",
+            "open youtube",
+            "open facebook",
+            "open instagram",
+            "open tiktok",
+            "open linkedin",
+            "open reddit",
+            "open twitter",
+            "open x",
+        )
+    )
+
+
+def extract_known_site(text: str) -> tuple[str, str] | None:
+    lowered = _clean(text).lower()
+    for key, value in _KNOWN_SITES.items():
+        if key in lowered and any(token in lowered for token in ("open", "look up", "lookup", "go to", "show me")):
+            return value
+    return None
+
+
+def extract_web_query(text: str, preferred_location: str | None = None) -> str:
+    value = _clean(text)
+    query = re.sub(
+        r"(?i)\b(can you|please|nova|search the web for|search web for|search the internet for|"
+        r"search the web|search web|search the internet|look up|lookup|find online|find on the web)\b",
+        " ",
+        value,
+    )
+    query = _clean(query).strip(" ?!.,")
+    lowered = query.lower()
+    if preferred_location and ("movie" in lowered or "movies" in lowered) and not any(
+        token in lowered for token in (" near ", " in ", " around ", " minneapolis", " saint paul", " st paul")
+    ):
+        query = f"{query} near {preferred_location}".strip()
+    return query or value
+
+
+def fetch_web_search(query: str, *, max_results: int = 5) -> dict[str, Any]:
+    result = search_web(query, max_results=max_results, news_mode=False)
+    if not isinstance(result, dict):
+        return {"response": "I couldn't fetch live web results right now.", "sources": [], "status": "degraded"}
+    return result
+
+
+def format_web_search(result: dict[str, Any], query: str) -> str:
+    response = _clean(str(result.get("response") or ""))
+    if response:
+        return response
+    return f"I searched the web for {query}, but I couldn't summarize the results right now."
