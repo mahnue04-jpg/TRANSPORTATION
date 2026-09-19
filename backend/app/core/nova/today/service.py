@@ -1649,6 +1649,7 @@ def _build_today_ask_prompt(
 
 
 def _today_live_or_memory_answer(
+    db: Session,
     payload: NovaTodayBrainRequest,
     *,
     organization_id: str,
@@ -1659,10 +1660,17 @@ def _today_live_or_memory_answer(
         return None
 
     profile = read_user_profile(organization_id, user.user_id)
+    account = db.query(PlatformUser).filter(PlatformUser.id == user.user_id).first()
+    account_name = str(getattr(account, "display_name", "") or "").strip()
 
     stated_name = extract_name_statement(question)
     if stated_name:
         update_user_profile(organization_id, user.user_id, {"preferred_name": stated_name})
+        if account is not None and account.display_name != stated_name:
+            account.display_name = stated_name
+            db.add(account)
+            db.commit()
+            db.refresh(account)
         return NovaTodayBrainOut(
             answer=f"Got it. I’ll remember your name as {stated_name}.",
             fact_label="USER-SAVED INFORMATION",
@@ -1681,7 +1689,7 @@ def _today_live_or_memory_answer(
         )
 
     if asks_for_name(question):
-        remembered = str(profile.get("preferred_name") or "").strip()
+        remembered = str(profile.get("preferred_name") or account_name or "").strip()
         if remembered:
             return NovaTodayBrainOut(
                 answer=f"Your name is {remembered}.",
@@ -1753,6 +1761,7 @@ def ask_today(
     user: UserContext,
 ) -> NovaTodayBrainOut:
     direct = _today_live_or_memory_answer(
+        db,
         payload,
         organization_id=organization_id,
         user=user,
