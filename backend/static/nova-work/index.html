@@ -47,6 +47,32 @@
       </form>
     </section>
 
+    <section class="command-card" aria-label="Live paid job discovery">
+      <h2>Find Paid Jobs for Nova</h2>
+      <p class="hint">Owner-only live discovery. Nova searches the approved live job source, ranks matches, saves selected opportunities, prepares proposal/application packages, and places them into owner approval. Nothing is submitted externally from this control.</p>
+      <form id="live-job-form" class="compose-grid">
+        <label class="wide">What should Nova look for?
+          <input id="live-job-query" maxlength="220" placeholder="Example: remote AI data analysis, research, reporting, customer support, content operations" required />
+        </label>
+        <label>Search limit
+          <select id="live-job-limit">
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="25">25</option>
+          </select>
+        </label>
+        <label>Prepare top
+          <select id="live-job-prepare-limit">
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <button type="submit">Find &amp; Prepare for My Approval</button>
+      </form>
+      <p id="live-job-status" class="hint">Sign in to check live-discovery readiness.</p>
+      <div id="live-job-results">No live discovery run yet.</div>
+    </section>
+
     <section class="counts" aria-label="Work counts">
       <article class="card compact"><h3>WORK OPPORTUNITIES</h3><p id="count-opps">0</p></article>
       <article class="card compact"><h3>QUALIFIED</h3><p id="count-qualified">0</p></article>
