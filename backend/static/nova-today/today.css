@@ -316,3 +316,24 @@ pre {
 @media (min-width: 1600px) {
   .today-header, .today-main { width: min(1080px, calc(100% - 64px)); }
 }
+
+
+.brain-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+.brain-source-link {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  border: 1px solid var(--nova-line);
+  border-radius: 10px;
+  background: #082033;
+  color: var(--nova-accent);
+  text-decoration: underline;
+}
