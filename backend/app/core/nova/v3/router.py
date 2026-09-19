@@ -192,7 +192,12 @@ def _raise(exc: V3Error) -> None:
 
 
 @router.get("/owner-access")
-def v3_owner_access(user: UserContext = Depends(get_current_user_context)):\n    return {"owner_access": True, "email": user.email}\n\n\n@router.get("/guardrails")\ndef v3_guardrails(user: UserContext = Depends(get_current_user_context)):
+def v3_owner_access(user: UserContext = Depends(get_current_user_context)):
+    return {"owner_access": True, "email": user.email}
+
+
+@router.get("/guardrails")
+def v3_guardrails(user: UserContext = Depends(get_current_user_context)):
     return live_flags()
 
 
