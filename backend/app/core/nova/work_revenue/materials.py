@@ -27,14 +27,44 @@ def _quote_untrusted(label: str, value: str | None) -> str:
     return f"{label}: [UNTRUSTED SOURCE TEXT]\n{body}"
 
 
-def _unknown_lines() -> str:
+def _fact_value(owner_facts: dict[str, Any] | None, fact_id: str) -> str:
+    for row in (owner_facts or {}).get("facts", []):
+        if row.get("fact_id") != fact_id:
+            continue
+        status = str(row.get("value_status") or "MISSING").upper()
+        value = sanitize_untrusted(row.get("value_display"))
+        if status in {"PROVIDED", "VERIFIED"} and value and value != OWNER_INPUT_REQUIRED:
+            return value
+        if status == "NOT_APPLICABLE":
+            return "NOT_APPLICABLE"
+    return OWNER_INPUT_REQUIRED
+
+
+def _profile_lines(owner_facts: dict[str, Any] | None) -> str:
+    fields = (
+        ("Legal business name", "legal_business_name"),
+        ("Business email", "business_email"),
+        ("Business phone", "business_phone"),
+        ("Service areas", "service_areas"),
+        ("Relevant experience", "relevant_experience"),
+        ("Certifications", "certifications"),
+        ("References", "references"),
+        ("Availability", "availability"),
+        ("Pricing", "pricing"),
+        ("Rates", "rates"),
+        ("Technology capability", "technology_capability"),
+    )
+    return "\n".join(f"{label}: {_fact_value(owner_facts, fact_id)}" for label, fact_id in fields)
+
+
+def _unknown_lines(owner_facts: dict[str, Any] | None = None) -> str:
     return "\n".join(
         [
             f"Degrees: {OWNER_INPUT_REQUIRED}",
-            f"Licenses: {OWNER_INPUT_REQUIRED}",
-            f"Certifications: {OWNER_INPUT_REQUIRED}",
-            f"Employment history: {OWNER_INPUT_REQUIRED}",
-            f"References: {OWNER_INPUT_REQUIRED}",
+            f"Licenses: {_fact_value(owner_facts, 'licenses')}",
+            f"Certifications: {_fact_value(owner_facts, 'certifications')}",
+            f"Employment / relevant experience: {_fact_value(owner_facts, 'relevant_experience')}",
+            f"References: {_fact_value(owner_facts, 'references')}",
             f"Years of experience: {OWNER_INPUT_REQUIRED}",
             f"Client history: {OWNER_INPUT_REQUIRED}",
             f"Revenue: {OWNER_INPUT_REQUIRED}",
@@ -69,13 +99,19 @@ def _forbidden_claims() -> str:
     )
 
 
-def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMICOR") -> list[dict[str, str]]:
+def generate_drafts(
+    opportunity: dict[str, Any],
+    *,
+    applicant_party: str = "AMICOR",
+    owner_facts: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
     title = sanitize_untrusted(opportunity.get("opportunity_title")) or UNKNOWN
     company = sanitize_untrusted(opportunity.get("company_name")) or UNKNOWN
     untrusted_desc = _quote_untrusted("Opportunity description", opportunity.get("description"))
     party = _party_block(applicant_party)
     caps = _capability_lines()
-    unknown = _unknown_lines()
+    unknown = _unknown_lines(owner_facts)
+    master_profile = _profile_lines(owner_facts)
     forbidden = _forbidden_claims()
     identity = profile_snapshot(applicant_party=applicant_party)["verified"]["nova_identity"]
 
@@ -95,10 +131,10 @@ def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMIC
             "title": f"Resume draft for {title}",
             "body": (
                 f"DRAFT resume. {identity}\n\n"
-                f"Applicant party: {applicant_party}\n"
-                f"{OWNER_INPUT_REQUIRED} for legal name, contact details, and any human work history.\n\n"
-                f"Objective: Support authorized digital work related to {title} at {company}, "
-                f"with owner review of all external communications.\n\n"
+                f"Applicant party: {applicant_party}\n\n"
+                f"MASTER VERIFIED/OWNER-PROVIDED PROFILE\n{master_profile}\n\n"
+                f"Targeted objective: Support authorized digital work related to {title} at {company}, "
+                f"using only verified or owner-provided facts and matching capabilities.\n\n"
                 f"{unknown}\n\n"
                 f"Do not list fabricated employers, degrees, or dates.\n\n{untrusted_desc}"
             ),
@@ -109,6 +145,7 @@ def generate_drafts(opportunity: dict[str, Any], *, applicant_party: str = "AMIC
             "body": (
                 f"DRAFT cover letter — owner must approve before any future submission.\n\n"
                 f"{party}\n\n"
+                f"Master work profile:\n{master_profile}\n\n"
                 f"Regarding: {title} at {company}.\n\n"
                 f"Nova can prepare drafts for authorized digital tasks (email, documents, "
                 f"summaries, CRM organization) under owner authorization. Nova is not a human "
