@@ -21,6 +21,20 @@
     return rows[0][key] || "";
   }
 
+  async function verifyOwnerAccess() {
+    var response = await fetch("/api/nova/v3/owner-access", { headers: headers() });
+    if (!response.ok) {
+      $("session").textContent = response.status === 403
+        ? "Owner access required. This workspace is private."
+        : "Owner authorization check failed: " + response.status;
+      token = "";
+      document.body.classList.add("owner-gate-pending");
+      return false;
+    }
+    document.body.classList.remove("owner-gate-pending");
+    return true;
+  }
+
   async function loadLab() {
     var response = await fetch("/api/nova/v3/lab", { headers: headers() });
     if (!response.ok) {
@@ -210,6 +224,8 @@
       return;
     }
     token = (await response.json()).access_token;
-    await loadLab();
+    if (await verifyOwnerAccess()) {
+      await loadLab();
+    }
   });
 })();
