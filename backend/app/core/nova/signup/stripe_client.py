@@ -110,20 +110,43 @@ def build_stripe_schedule_phases(
     start_date: Any = None,
     trial_end: Any = None,
 ) -> list[dict[str, Any]]:
-    """Stripe schedule update payload. Never sends phases.iterations."""
+    """Build Stripe schedule phases without counting the trial as a paid month.
+
+    Stripe includes trial time inside a phase's duration. For an offer such as
+    "7 days free, then 3 paid months at the founding price", putting both
+    trial_end and a three-month duration on the same phase shortens the paid
+    founding period. When Stripe gives us explicit trial boundaries, split the
+    trial into its own phase and begin the paid schedule at trial_end.
+    """
+    plan_phases = list(plan.get("phases") or [])
     phases: list[dict[str, Any]] = []
-    for index, phase in enumerate(plan.get("phases") or []):
+
+    if trial_end and plan_phases:
+        first = plan_phases[0] if isinstance(plan_phases[0], dict) else {}
+        lookup = str(first.get("price_lookup") or "")
+        trial_phase: dict[str, Any] = {
+            "items": [{"price": catalog[lookup], "quantity": 1}],
+            "end_date": trial_end,
+            "trial_end": trial_end,
+        }
+        if start_date is not None:
+            trial_phase["start_date"] = start_date
+        phases.append(trial_phase)
+
+    for index, phase in enumerate(plan_phases):
+        phase = phase if isinstance(phase, dict) else {}
         lookup = str(phase.get("price_lookup") or "")
         item: dict[str, Any] = {
             "items": [{"price": catalog[lookup], "quantity": 1}],
         }
-        if index == 0 and start_date is not None:
+        if not trial_end and index == 0 and start_date is not None:
             item["start_date"] = start_date
-        duration = stripe_phase_duration(phase if isinstance(phase, dict) else {})
+        duration = stripe_phase_duration(phase)
         if duration is not None:
             item["duration"] = duration
-        if index == 0 and trial_end:
-            item["trial_end"] = trial_end
+        if not trial_end and index == 0 and phase.get("trial_period_days"):
+            if trial_end:
+                item["trial_end"] = trial_end
         phases.append(item)
     return phases
 
