@@ -20,6 +20,7 @@ HOME_HTML = (STATIC / "nova-home" / "index.html").read_text(encoding="utf-8")
 OPS_HTML = (STATIC / "ops-shell.html").read_text(encoding="utf-8")
 OPS_JS = (STATIC / "ops-shell.js").read_text(encoding="utf-8")
 HEALTH_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
+FREIGHT_HTML = (STATIC / "nova-freight" / "index.html").read_text(encoding="utf-8")
 FROZEN_V1 = [
     STATIC / "nova-home" / "index.html",
     STATIC / "nova-home" / "home.js",
@@ -251,8 +252,15 @@ def test_nova_today_does_not_mutate_frozen_products(client: TestClient) -> None:
     assert "Driver 001" not in TODAY_HTML + TODAY_JS
     assert "DRV-001" not in TODAY_HTML + TODAY_JS
     assert "Health ISF Workspace" in HEALTH_HTML
-    assert "/nova/today" not in HEALTH_HTML
-    assert "nova-today" not in OPS_HTML
+    assert "novaSaasHealthGate" in HEALTH_HTML
+    assert "/api/nova/signup/me/access" in HEALTH_HTML
+    assert "/nova/today?blocked=health" in HEALTH_HTML
+    assert "novaSaasProductGate" in OPS_HTML
+    assert "/api/nova/signup/me/access" in OPS_HTML
+    assert "/nova/today?blocked=health" in OPS_HTML
+    assert "novaSaasFreightGate" in FREIGHT_HTML
+    assert "/api/nova/signup/me/access" in FREIGHT_HTML
+    assert "/nova/today?blocked=freight" in FREIGHT_HTML
     assert "nova-today" not in OPS_JS
     assert "Coming later" not in HOME_HTML or HOME_HTML.count("Coming later") == 0
     health = client.get("/workspace")
@@ -473,3 +481,22 @@ def test_nova_today_product_counts_do_not_change_v1_destinations() -> None:
     assert 'href="/nova/workspace"' in HOME_HTML
     assert 'href="/app" data-destination="delivery"' in HOME_HTML
     assert 'href="/nova/freight" data-destination="freight"' in HOME_HTML
+
+
+def test_nova_saas_product_guard_blocks_ops_prefix() -> None:
+    from app.core.nova.signup.isolation import path_blocked_for_nova_customer
+
+    assert path_blocked_for_nova_customer("/api/ops") is True
+    assert path_blocked_for_nova_customer("/api/ops/dispatch") is True
+    assert path_blocked_for_nova_customer("/api/health-isf/rides") is True
+    assert path_blocked_for_nova_customer("/api/nova/freight/shipments") is True
+    assert path_blocked_for_nova_customer("/nova/workspace") is False
+
+
+def test_nova_today_customer_navigation_gate_is_refreshed_after_login() -> None:
+    assert "async function applyProductAccess()" in TODAY_JS
+    assert 'api("/api/nova/signup/me/access")' in TODAY_JS
+    assert 'href === "/workspace"' in TODAY_JS
+    assert 'href === "/app"' in TODAY_JS
+    assert 'href === "/nova/freight"' in TODAY_JS
+    assert "await applyProductAccess();" in TODAY_JS
