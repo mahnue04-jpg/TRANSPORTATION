@@ -500,3 +500,13 @@ def test_nova_today_customer_navigation_gate_is_refreshed_after_login() -> None:
     assert 'href === "/app"' in TODAY_JS
     assert 'href === "/nova/freight"' in TODAY_JS
     assert "await applyProductAccess();" in TODAY_JS
+
+
+def test_nova_today_owner_work_is_hidden_until_authorized() -> None:
+    assert '<section class="panel hidden" aria-label="Work and Revenue">' in TODAY_HTML
+    assert 'workRevenuePanel.classList.remove("hidden")' in TODAY_JS
+    assert 'workRevenuePanel.classList.add("hidden")' in TODAY_JS
+    assert 'card.source_module === "link"' in TODAY_JS
+    assert ">Acknowledge</button>" in TODAY_JS
+    assert "No current recommendation because no saved record requires attention." in TODAY_JS
+    assert "hideBanner()" in TODAY_JS
