@@ -21,6 +21,13 @@
     el.classList.remove("hidden");
     el.classList.toggle("ok", !!ok);
   }
+  function hideBanner() {
+    var el = $("banner");
+    if (!el) return;
+    el.textContent = "";
+    el.classList.add("hidden");
+    el.classList.remove("ok");
+  }
   function setVoiceStatus(message) {
     if ($("voice-status")) $("voice-status").textContent = message;
   }
@@ -494,9 +501,12 @@
     }
     try {
       var summary = await api("/api/nova/work/today-summary");
+      var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
+      if (workRevenuePanel) workRevenuePanel.classList.remove("hidden");
       renderWorkRevenue(summary);
     } catch (_) {
-      renderWorkRevenueError();
+      var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
+      if (workRevenuePanel) workRevenuePanel.classList.add("hidden");
     }
   }
   async function applyProductAccess() {
@@ -505,8 +515,6 @@
       var access = await api("/api/nova/signup/me/access");
       var isCustomer = !!(access && access.nova_saas_customer);
       var currentIdentity = identity();
-      var role = currentIdentity ? String(currentIdentity.role || "").toLowerCase() : "";
-      var canSeeOwnerWork = !isCustomer && role === "admin";
       document.querySelectorAll(".today-nav a").forEach(function (el) {
         var href = el.getAttribute("href") || "";
         if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
@@ -518,7 +526,7 @@
       var productLinksPanel = document.querySelector('[aria-label="Product links"]');
       if (productLinksPanel) productLinksPanel.classList.toggle("hidden", isCustomer);
       var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
-      if (workRevenuePanel) workRevenuePanel.classList.toggle("hidden", !canSeeOwnerWork);
+      if (workRevenuePanel && isCustomer) workRevenuePanel.classList.add("hidden");
     } catch (_) {}
   }
 
@@ -570,6 +578,7 @@
     } catch (_) {
       renderWorkRevenueError();
     }
+    hideBanner();
     if (selectedActionId) {
       try {
         var selected = await api("/api/nova/today/actions/" + encodeURIComponent(selectedActionId));
