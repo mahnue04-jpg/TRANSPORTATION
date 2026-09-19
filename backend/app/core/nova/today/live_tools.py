@@ -243,12 +243,23 @@ def fetch_news(query: str | None = None, *, limit: int = 5) -> list[dict[str, st
     return items
 
 
+def _clean_news_title(title: str, source: str) -> str:
+    value = _clean(title)
+    source_value = _clean(source)
+    suffix = f" - {source_value}"
+    if source_value and value.lower().endswith(suffix.lower()):
+        value = value[: -len(suffix)].rstrip(" -")
+    return value
+
+
 def format_news(items: list[dict[str, str]], query: str | None = None) -> str:
     if not items:
         return "I could not find current news results right now."
-    heading = f"Current news for {query}:" if query else "Current top headlines:"
+    heading = f"Here is a quick news briefing for {query}:" if query else "Here is a quick news briefing:"
     lines = [heading]
     for index, item in enumerate(items, 1):
-        source = item.get("source") or "source"
-        lines.append(f"{index}. {item.get('title')} — {source} — {item.get('link')}")
+        source = _clean(item.get("source") or "Source")
+        title = _clean_news_title(str(item.get("title") or ""), source)
+        lines.append(f"{index}. {title} ({source})")
+    lines.append("I can open the first source link if you want to read more.")
     return "\n".join(lines)
