@@ -1214,6 +1214,11 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
             reverse=True,
         )
     )[:16]
+    active_recommendation_refs = {
+        card.source_ref_id
+        for card in groups["recommendations"]
+        if str(card.source_ref_id or "").startswith("rec-")
+    }
     approval_queue = []
     for row in rows:
         if row.status != "proposed":
@@ -1221,6 +1226,8 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> NovaTo
         if _is_workflow_fixture_item(row):
             continue
         if is_standing_synthetic(row.source_module, row.source_ref_id) and row.source_module == "link":
+            continue
+        if str(row.source_ref_id or "").startswith("rec-") and row.source_ref_id not in active_recommendation_refs:
             continue
         if is_standing_synthetic(row.source_module, row.source_ref_id):
             canonical = keyed.get((row.source_module, row.source_ref_id, row.recommended_action))
