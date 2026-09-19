@@ -170,9 +170,12 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert status["plan"]["phases"][1]["unit_amount"] == 9900
         assert fake.schedules
         assert fake.schedules[0]["phases"][0]["unit_amount"] == 5900
-        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        assert len(fake.last_stripe_phases) == 3
+        assert "duration" not in fake.last_stripe_phases[0]
+        assert fake.last_stripe_phases[1]["duration"] == {"interval": "month", "interval_count": 3}
         assert "iterations" not in fake.last_stripe_phases[0]
         assert "iterations" not in fake.last_stripe_phases[1]
+        assert "iterations" not in fake.last_stripe_phases[2]
 
         login = client.post(
             "/api/auth/login",
@@ -469,11 +472,18 @@ def test_founding_schedule_uses_current_stripe_duration_api() -> None:
         STANDARD_PRICE_LOOKUP: "price_nova_standard_test",
     }
     phases = build_stripe_schedule_phases(founding, catalog=catalog, start_date=1_700_000_000, trial_end=1_700_604_800)
-    assert phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+    assert len(phases) == 3
+    assert phases[0]["start_date"] == 1_700_000_000
+    assert phases[0]["end_date"] == 1_700_604_800
+    assert phases[0]["trial_end"] == 1_700_604_800
+    assert "duration" not in phases[0]
+    assert phases[1]["duration"] == {"interval": "month", "interval_count": 3}
     assert "iterations" not in phases[0]
     assert "iterations" not in phases[1]
+    assert "iterations" not in phases[2]
     assert phases[0]["items"][0]["price"] == "price_nova_founding_test"
-    assert phases[1]["items"][0]["price"] == "price_nova_standard_test"
+    assert phases[1]["items"][0]["price"] == "price_nova_founding_test"
+    assert phases[2]["items"][0]["price"] == "price_nova_standard_test"
     assert expected_unit_amount(founding=True, paid_month_index=3) == 5900
     assert expected_unit_amount(founding=True, paid_month_index=4) == 9900
 
@@ -496,8 +506,12 @@ def test_existing_schedule_is_updated_instead_of_recreated() -> None:
         assert fake.schedule_update_calls == 1
         assert len(fake.schedules) == 1
         assert fake.schedules[0]["id"] == attached["id"]
-        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        assert len(fake.last_stripe_phases) == 3
+        assert "duration" not in fake.last_stripe_phases[0]
+        assert fake.last_stripe_phases[1]["duration"] == {"interval": "month", "interval_count": 3}
         assert "iterations" not in fake.last_stripe_phases[0]
+        assert "iterations" not in fake.last_stripe_phases[1]
+        assert "iterations" not in fake.last_stripe_phases[2]
         status = client.get(f"/api/nova/signup/{created.json()['signup_id']}").json()
         assert status["status"] == "trialing"
         assert status["founding_slot"] == created.json()["founding_slot"]
