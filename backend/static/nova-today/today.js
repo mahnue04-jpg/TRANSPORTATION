@@ -589,6 +589,30 @@
       }
     }
   }
+  function renderBrainSources(sources, fallbackHref) {
+    var box = $("brain-sources");
+    if (!box) return;
+    var rows = Array.isArray(sources) ? sources.slice(0, 8) : [];
+    if (!rows.length && fallbackHref) {
+      rows = [{ title: "Open source", url: fallbackHref, label: "Source" }];
+    }
+    if (!rows.length) {
+      box.innerHTML = "";
+      box.classList.add("hidden");
+      return;
+    }
+    box.innerHTML = rows.map(function (row, index) {
+      var url = String(row.url || "");
+      if (!/^https?:\/\//i.test(url)) return "";
+      var title = escapeHtml(row.title || row.label || ("Source " + (index + 1)));
+      var label = escapeHtml(row.label || "");
+      return "<a class=\"brain-source-link\" href=\"" + escapeHtml(url) +
+        "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+        title + (label && label !== title ? " · " + label : "") + "</a>";
+    }).join("");
+    box.classList.toggle("hidden", !box.innerHTML);
+  }
+
   async function runBrain(event) {
     event.preventDefault();
     if (!token()) {
@@ -611,6 +635,7 @@
     });
     var answer = result.answer || "No response from Mrs. Nova Brain.";
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + answer;
+    renderBrainSources(result.sources || [], result.source_href || "");
     $("ask-input").value = "";
     $("ask-input").focus();
     speakNova(answer);
