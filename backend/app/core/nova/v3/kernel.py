@@ -209,8 +209,8 @@ class NovaV3Kernel:
             provenance={
                 "adapter": raw.provider_id,
                 "fetched_at": self.now.isoformat(),
-                "synthetic": True,
-                "live": False,
+                "synthetic": not bool(raw.live),
+                "live": bool(raw.live),
             },
             classification=classification,
             score=score,
@@ -257,6 +257,69 @@ class NovaV3Kernel:
                 "duplicates": duplicates,
                 "human_gates": [self.human_gate(item) for item in created if self.human_gate(item)],
             }
+
+    def ingest_live_jobs(
+        self,
+        jobs: list[dict[str, Any]],
+        *,
+        organization_id: str,
+        owner_user_id: str,
+    ) -> dict[str, Any]:
+        if not live_flags()["LIVE_DISCOVERY_ENABLED"]:
+            raise V3Error("LIVE_DISABLED", "Live discovery is not enabled", http_status=409)
+        created: list[Opportunity] = []
+        duplicates: list[str] = []
+        with self._lock:
+            for job in jobs:
+                raw = RawOpportunity(
+                    provider_id=str(job.get("provider_id") or "live_job_source"),
+                    source_kind="job_board",
+                    provider_identifier=str(job.get("provider_identifier") or job.get("source_url") or ""),
+                    title=str(job.get("title") or ""),
+                    company_name=str(job.get("company_name") or ""),
+                    description=str(job.get("description") or ""),
+                    source_url=job.get("source_url"),
+                    compensation_amount=None,
+                    compensation_type="unknown",
+                    currency="USD",
+                    required_qualifications=[],
+                    geography=str(job.get("geography") or "Remote"),
+                    remote_status=str(job.get("remote_status") or "remote"),
+                    terms_restrictions="Live source listing. Owner review required before any external action.",
+                    login_required=False,
+                    captcha_required=False,
+                    human_verification_required=False,
+                    evidence=f"live discovery via {job.get('source_attribution') or job.get('provider_id') or 'source'}",
+                    live=True,
+                )
+                row = self._opportunity_from_raw(
+                    raw,
+                    organization_id=organization_id,
+                    owner_user_id=owner_user_id,
+                )
+                existing = next(
+                    (
+                        item
+                        for item in self.opportunities.values()
+                        if item.organization_id == organization_id and item.fingerprint == row.fingerprint
+                    ),
+                    None,
+                )
+                if existing:
+                    duplicates.append(existing.opportunity_id)
+                    continue
+                self.opportunities[row.opportunity_id] = row
+                created.append(row)
+                self._audit(
+                    "LIVE_OPPORTUNITY_INGESTED",
+                    organization_id,
+                    opportunity_id=row.opportunity_id,
+                    provider_id=row.provider_id,
+                )
+        return {
+            "created": [self.opportunity_out(item) for item in created],
+            "duplicates": duplicates,
+        }
 
     def enter_manual(self, payload: dict[str, Any], *, organization_id: str, owner_user_id: str) -> Opportunity:
         raw = RawOpportunity(
@@ -332,7 +395,7 @@ class NovaV3Kernel:
             "status": row.status,
             "duplicate_of": row.duplicate_of,
             "human_action": gate,
-            "live_discovery": False,
+            "live_discovery": bool(row.provenance.get("live")),
         }
 
     def prepare_proposal(self, opportunity_id: str, *, organization_id: str, owner_user_id: str) -> Proposal:
