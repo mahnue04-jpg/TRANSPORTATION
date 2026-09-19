@@ -1667,7 +1667,7 @@ def _today_live_or_memory_answer(
             answer=f"Got it. I’ll remember your name as {stated_name}.",
             fact_label="USER-SAVED INFORMATION",
             next_actions=[],
-            generated_at=now(),
+            generated_at=now().isoformat(),
         )
 
     stated_location = extract_location_statement(question)
@@ -1677,7 +1677,7 @@ def _today_live_or_memory_answer(
             answer=f"Got it. I’ll remember your location as {stated_location}.",
             fact_label="USER-SAVED INFORMATION",
             next_actions=[],
-            generated_at=now(),
+            generated_at=now().isoformat(),
         )
 
     if asks_for_name(question):
@@ -1687,13 +1687,13 @@ def _today_live_or_memory_answer(
                 answer=f"Your name is {remembered}.",
                 fact_label="USER-SAVED INFORMATION",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
             )
         return NovaTodayBrainOut(
             answer="You haven’t told me a name to remember yet.",
             fact_label="USER-SAVED INFORMATION",
             next_actions=[],
-            generated_at=now(),
+            generated_at=now().isoformat(),
         )
 
     if is_weather_request(question):
@@ -1703,7 +1703,7 @@ def _today_live_or_memory_answer(
                 answer="Tell me the city or place you want the weather for, for example: “What’s the weather in Minneapolis?”",
                 fact_label="AI SUGGESTION",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
             )
         try:
             result = fetch_weather(location)
@@ -1712,7 +1712,7 @@ def _today_live_or_memory_answer(
                 answer=format_weather(result),
                 fact_label="VERIFIED DATA",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
                 source_href="https://open-meteo.com/",
             )
         except Exception:
@@ -1720,7 +1720,7 @@ def _today_live_or_memory_answer(
                 answer=f"I couldn’t retrieve live weather for {location} right now. Please try again in a moment.",
                 fact_label="AI SUGGESTION",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
             )
 
     if is_news_request(question):
@@ -1731,7 +1731,7 @@ def _today_live_or_memory_answer(
                 answer=format_news(items, query),
                 fact_label="VERIFIED DATA",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
                 source_href=items[0]["link"] if items else None,
             )
         except Exception:
@@ -1739,7 +1739,7 @@ def _today_live_or_memory_answer(
                 answer="I couldn’t retrieve live news right now. Please try again in a moment.",
                 fact_label="AI SUGGESTION",
                 next_actions=[],
-                generated_at=now(),
+                generated_at=now().isoformat(),
             )
 
     return None
