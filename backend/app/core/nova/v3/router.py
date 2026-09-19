@@ -15,6 +15,7 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
+from app.core.nova.v3.live_discovery import search_remote_jobs
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 
 def _nova_v3_owner_emails() -> set[str]:
@@ -56,6 +57,11 @@ class OrgIn(BaseModel):
 
 class IngestIn(OrgIn):
     provider_id: str
+
+
+class LiveJobSearchIn(OrgIn):
+    query: str
+    limit: int = Field(default=10, ge=1, le=25)
 
 
 class ManualOpportunityIn(OrgIn):
@@ -193,6 +199,25 @@ def v3_owner_access(user: UserContext = Depends(get_current_user_context)):\n   
 @router.get("/connectors")
 def v3_connectors(user: UserContext = Depends(get_current_user_context)):
     return get_kernel().diagnostics(organization_id="unused", owner_user_id=user.user_id)["adapter_registry"]
+
+
+@router.post("/live/jobs/search")
+def v3_live_job_search(
+    payload: LiveJobSearchIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    _org(user, payload.organization_id)
+    try:
+        jobs = search_remote_jobs(payload.query, limit=payload.limit)
+        return {
+            "query": payload.query,
+            "count": len(jobs),
+            "source": "Remotive",
+            "read_only": True,
+            "jobs": jobs,
+        }
+    except V3Error as exc:
+        _raise(exc)
 
 
 @router.post("/ingest")
