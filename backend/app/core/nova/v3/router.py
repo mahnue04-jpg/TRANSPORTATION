@@ -14,6 +14,7 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
+from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.live_discovery import search_remote_jobs
@@ -247,6 +248,24 @@ def v3_capabilities(user: UserContext = Depends(get_current_user_context)):
         "external_submission": False,
         "financial_execution": False,
     }
+
+
+@router.get("/execution-playbooks")
+def v3_execution_playbooks(user: UserContext = Depends(get_current_user_context)):
+    """Read-only execution instructions for Nova sellable capabilities."""
+    return {
+        "playbooks": execution_playbooks(),
+        "external_submission": False,
+        "financial_execution": False,
+    }
+
+
+@router.get("/execution-playbooks/{capability_id}")
+def v3_execution_playbook(capability_id: str, user: UserContext = Depends(get_current_user_context)):
+    row = execution_playbook(capability_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown Nova capability")
+    return row
 
 
 @router.get("/connectors")
