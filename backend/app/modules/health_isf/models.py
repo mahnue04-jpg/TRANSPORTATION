@@ -1557,24 +1557,29 @@ def _ensure_health_isf_schema_impl() -> None:
         if not table_names:
             return
 
+        datetime_sql = _schema_datetime_sql(conn.dialect.name)
+        bool_default = "BOOLEAN NOT NULL DEFAULT FALSE" if conn.dialect.name == "postgresql" else "BOOLEAN NOT NULL DEFAULT 0"
+
         if "health_isf_rides" in table_names:
             ride_columns = {column["name"] for column in inspector.get_columns("health_isf_rides")}
             if "version" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN version INTEGER NOT NULL DEFAULT 0"))
+            if "estimated_duration_minutes" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN estimated_duration_minutes INTEGER"))
             if "priority_score" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN priority_score FLOAT"))
             if "priority_tag" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN priority_tag VARCHAR(32)"))
             if "is_emergency" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN is_emergency BOOLEAN NOT NULL DEFAULT 0"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN is_emergency {bool_default}"))
             if "appointment_time" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN appointment_time DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN appointment_time {datetime_sql}"))
             if "recurring_trip_pattern" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN recurring_trip_pattern TEXT"))
             if "recurring_schedule_id" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN recurring_schedule_id VARCHAR(36)"))
             if "recurring_instance_date" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN recurring_instance_date DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN recurring_instance_date {datetime_sql}"))
             if "ai_dispatch_context" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN ai_dispatch_context TEXT"))
             if "intake_fingerprint" not in ride_columns:
@@ -1582,29 +1587,29 @@ def _ensure_health_isf_schema_impl() -> None:
             if "lifecycle_state" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN lifecycle_state VARCHAR(32) DEFAULT 'requested'"))
             if "assigned_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN assigned_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN assigned_at {datetime_sql}"))
             if "enroute_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN enroute_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN enroute_at {datetime_sql}"))
             if "arrived_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN arrived_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN arrived_at {datetime_sql}"))
             if "picked_up_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN picked_up_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN picked_up_at {datetime_sql}"))
             if "transporting_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN transporting_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN transporting_at {datetime_sql}"))
             if "round_trip_group_id" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN round_trip_group_id VARCHAR(36)"))
             if "trip_leg" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN trip_leg VARCHAR(16)"))
             if "pickup_time" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN pickup_time DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN pickup_time {datetime_sql}"))
             if "return_pickup_type" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN return_pickup_type VARCHAR(32)"))
             if "same_driver_preference" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN same_driver_preference BOOLEAN NOT NULL DEFAULT 0"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN same_driver_preference {bool_default}"))
             if "dispatch_eligible_at" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN dispatch_eligible_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN dispatch_eligible_at {datetime_sql}"))
             if "call_when_ready" not in ride_columns:
-                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN call_when_ready BOOLEAN NOT NULL DEFAULT 0"))
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN call_when_ready {bool_default}"))
             if "scheduling_series_id" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN scheduling_series_id VARCHAR(36)"))
             conn.execute(text("UPDATE health_isf_rides SET lifecycle_state='queued' WHERE lifecycle_state IS NULL OR lifecycle_state=''"))
@@ -1639,9 +1644,9 @@ def _ensure_health_isf_schema_impl() -> None:
             if "availability_state" not in driver_columns:
                 conn.execute(text("ALTER TABLE health_isf_drivers ADD COLUMN availability_state VARCHAR(32) NOT NULL DEFAULT 'offline'"))
             if "is_online" not in driver_columns:
-                conn.execute(text("ALTER TABLE health_isf_drivers ADD COLUMN is_online BOOLEAN NOT NULL DEFAULT 0"))
+                conn.execute(text(f"ALTER TABLE health_isf_drivers ADD COLUMN is_online {bool_default}"))
             if "last_seen_at" not in driver_columns:
-                conn.execute(text("ALTER TABLE health_isf_drivers ADD COLUMN last_seen_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_drivers ADD COLUMN last_seen_at {datetime_sql}"))
             conn.execute(
                 text(
                     "UPDATE health_isf_drivers "
