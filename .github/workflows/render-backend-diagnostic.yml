@@ -71,3 +71,5 @@ jobs:
           cat /tmp/amicor.log
           kill $pid || true
           exit 1
+
+# diagnostic revision: alembic-id-fix
