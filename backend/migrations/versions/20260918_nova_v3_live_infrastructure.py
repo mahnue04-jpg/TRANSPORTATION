@@ -1,7 +1,7 @@
 """Additive Nova V3 tables on the canonical V2 Alembic head. Not applied to production.
 
-Revision ID: 20260918_nova_v3_live_infrastructure
-Revises: 20260918_nova_work_revenue_v2_owner_scheduler
+Revision ID: 20260918_nova_v3_live_infra
+Revises: 20260918_work_rev_owner_sched
 """
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260918_nova_v3_live_infrastructure"
-down_revision = "20260918_nova_work_revenue_v2_owner_scheduler"
+revision = "20260918_nova_v3_live_infra"
+down_revision = "20260918_work_rev_owner_sched"
 branch_labels = None
 depends_on = None
 
