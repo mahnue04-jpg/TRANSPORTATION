@@ -87,3 +87,5 @@ jobs:
 # diagnostic revision: accepted-at-fix
 
 # diagnostic revision: legacy-datetime-fix
+
+# diagnostic revision: core-ride-columns-fix
