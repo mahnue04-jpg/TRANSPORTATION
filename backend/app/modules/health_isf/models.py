@@ -1566,6 +1566,10 @@ def _ensure_health_isf_schema_impl() -> None:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN version INTEGER NOT NULL DEFAULT 0"))
             if "estimated_duration_minutes" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN estimated_duration_minutes INTEGER"))
+            if "notes" not in ride_columns:
+                conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN notes TEXT"))
+            if "completed_at" not in ride_columns:
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN completed_at {datetime_sql}"))
             if "priority_score" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN priority_score FLOAT"))
             if "priority_tag" not in ride_columns:
