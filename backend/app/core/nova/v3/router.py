@@ -16,6 +16,7 @@ from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.work_packets import build_work_packet
+from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.live_discovery import search_remote_jobs
@@ -285,6 +286,16 @@ def v3_work_packet_preview(
     """Build an internal-only execution packet without taking external action."""
     _org(user, payload.organization_id)
     return build_work_packet(payload.model_dump())
+
+
+@router.post("/capability-proof/preview")
+def v3_capability_proof_preview(
+    payload: WorkPacketIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Build a truthful internal demonstration plan; never publishes it."""
+    _org(user, payload.organization_id)
+    return build_capability_proof(payload.model_dump())
 
 
 @router.get("/connectors")
