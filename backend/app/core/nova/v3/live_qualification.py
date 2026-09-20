@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from app.core.nova.v3.capability_catalog import capability_fit
+from app.core.nova.v3.execution_playbooks import execution_plan_for_matches
 
 OUTCOME_QUALIFIED = "QUALIFIED"
 OUTCOME_NEEDS_OWNER_REVIEW = "NEEDS_OWNER_REVIEW"
@@ -649,6 +650,7 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         "capability_score": capability_result["score"],
         "matched_capabilities": capability_result["capabilities"],
         "capability_reason": capability_result["reason"],
+        "execution_plan": execution_plan_for_matches(capability_result["capabilities"]),
         "compensation_present": compensation_ok,
         "blockers": blockers,
         "review_flags": review_reasons,
