@@ -76,7 +76,7 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "Work &amp; Revenue Engine" in response.text or "Work & Revenue Engine" in response.text
     assert "WORK OPPORTUNITIES" in response.text
     assert "OWNER ACTION REQUIRED" in response.text
-    assert "COMING IN LATER PHASE" in response.text
+    assert "INTERNAL REVENUE TRACKING ACTIVE" in response.text
     assert "src=\"/static/nova-work/work.js\"" in response.text
     assert "Opportunity Inbox" in WORK_HTML
     assert "APPROVED FOR FUTURE SUBMISSION" in WORK_HTML
@@ -107,7 +107,7 @@ def test_opportunity_creation_and_dashboard(client: TestClient) -> None:
     dash = client.get("/api/nova/work/dashboard", headers=headers)
     assert dash.status_code == 200
     body = dash.json()
-    assert body["revenue_placeholder"].startswith("COMING IN LATER PHASE")
+    assert body["revenue_placeholder"].startswith("INTERNAL REVENUE TRACKING ACTIVE")
     assert "not a human employee" in body["identity_disclaimer"].lower()
     assert body["counts"]["work_opportunities"] >= 1
 
