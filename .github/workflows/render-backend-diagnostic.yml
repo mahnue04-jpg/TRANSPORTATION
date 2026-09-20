@@ -81,3 +81,5 @@ jobs:
 # diagnostic revision: migration-chain-fix
 
 # diagnostic revision: september-chain-fix
+
+# diagnostic revision: postgres-startup-fix
