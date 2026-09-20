@@ -1461,26 +1461,21 @@ def test_master_work_profile_tailors_resume_materials(client: TestClient) -> Non
     assert "Remote operations assistant" in resume["body"]
 
 
-def test_application_package_review_is_read_only_and_blocks_bad_package(client) -> None:
-    headers = _headers()
-    opp = client.post(
-        "/api/nova/work/opportunities",
-        headers=headers,
-        json={
-            "organization_id": "ORG-DEMO",
-            "source": "manual",
-            "company_name": "Example Client",
-            "opportunity_title": "AI workflow automation project",
-            "description": "B2B AI workflow automation using Zapier and API integration.",
-            "requirements": "Deliver workflow map, tested automation, and documentation.",
-            "engagement_type": "contract",
-        },
-    ).json()
+def test_application_package_review_is_read_only_and_blocks_bad_package(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Example Client",
+        opportunity_title="AI workflow automation project",
+        description="B2B AI workflow automation using Zapier and API integration.",
+        requirements="Deliver workflow map, tested automation, and documentation.",
+        engagement_type="contract",
+    )
     app_resp = client.post(
         "/api/nova/work/applications",
         headers=headers,
         json={
-            "organization_id": "ORG-DEMO",
             "opportunity_id": opp["opportunity_id"],
             "applicant_party": "AMICOR",
         },
