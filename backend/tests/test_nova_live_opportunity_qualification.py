@@ -57,6 +57,101 @@ def _iapwe_freelance_writer() -> dict:
     }
 
 
+def _iapwe_production_payment_access() -> dict:
+    """Production-shaped IAPWE listing that previously auto-qualified incorrectly."""
+    return {
+        "provider_id": "remotive",
+        "provider_identifier": "1185979",
+        "title": "Freelance Writer",
+        "company_name": "IAPWE",
+        "description": (
+            "Our organization is seeking content writers to create articles and blog posts on a "
+            "variety of topics. The rate of pay is $20 per 100 words (this comes out to approximately "
+            "$100 per article or $50 per hour). Requirements: Microsoft Word or Open Office, reliable "
+            "internet, meet deadlines. Note: Applicants to this job signaled that accessing some "
+            "writing tasks may require payment."
+        ),
+        "source_url": "https://remotive.com/remote-jobs/writing/freelance-writer-1185979",
+        "geography": "Worldwide",
+        "remote_status": "remote",
+        "compensation_text": "$50-$75 /hour",
+        "job_type": "freelance",
+        "source_attribution": "Remotive",
+        "publication_date": "2026-09-04T16:53:29",
+    }
+
+
+def _ateam_individual_specialist() -> dict:
+    return {
+        "provider_id": "remotive",
+        "provider_identifier": "1919266",
+        "title": "Senior Independent AI Engineer / Architect",
+        "company_name": "A.Team",
+        "description": (
+            "A.Team is an invite-only network of senior AI engineers, ML engineers, and AI architects "
+            "building production AI systems. People who have already shipped. Tell us what you've built. "
+            "Typical rates: $120-$170/hr. You keep 100% of your rate. Apply at build.a.team/apply-ai. "
+            "No membership fee."
+        ),
+        "source_url": (
+            "https://remotive.com/remote-jobs/software-development/"
+            "senior-independent-ai-engineer-architect-1919266"
+        ),
+        "geography": "Americas, Europe, Israel",
+        "remote_status": "remote",
+        "compensation_text": "$120 - $170 /hour",
+        "job_type": "contract",
+        "source_attribution": "Remotive",
+        "publication_date": "2026-09-16T10:10:53",
+    }
+
+
+def _imerit_human_evaluator() -> dict:
+    return {
+        "provider_id": "remotive",
+        "provider_identifier": "2091126",
+        "title": "AI Response Evaluator",
+        "company_name": "iMerit Technology",
+        "description": (
+            "iMerit is looking for detail oriented analysts to evaluate and rank AI generated responses "
+            "to image based prompts. You will judge answers on accuracy, relevance, clarity, and safety, "
+            "then explain your reasoning in writing. Rate and rank responses against defined quality "
+            "criteria. Compare multiple answers and explain why one wins. Independent contractor "
+            "engagement. No membership fee."
+        ),
+        "source_url": (
+            "https://remotive.com/remote-jobs/artificial-intelligence/ai-response-evaluator-2091126"
+        ),
+        "geography": "France, Japan, Turkey, Vietnam, Mexico, Norway",
+        "remote_status": "remote",
+        "compensation_text": "$10K-$20K",
+        "job_type": "freelance",
+        "source_attribution": "Remotive",
+        "publication_date": "2026-09-11T06:49:00",
+    }
+
+
+def _ambiguous_fee_or_vendor_policy() -> dict:
+    return {
+        "provider_id": "remotive",
+        "provider_identifier": "ambiguous-fee-1",
+        "title": "Remote Research Documentation Project",
+        "company_name": "Harbor Ops LLC",
+        "description": (
+            "Freelance research and documentation support. Possible membership options may apply "
+            "depending on platform access. Compensation $40/hr. ChatGPT and AI-assisted drafting "
+            "may be discussed with the editor."
+        ),
+        "source_url": "https://remotive.com/remote-jobs/harbor-ops-research",
+        "geography": "Worldwide",
+        "remote_status": "remote",
+        "compensation_text": "$40/hr",
+        "job_type": "freelance",
+        "source_attribution": "Remotive",
+        "publication_date": "2026-09-18T00:00:00",
+    }
+
+
 def _clean_b2b_project() -> dict:
     return {
         "provider_id": "remotive",
@@ -154,6 +249,35 @@ def test_iapwe_style_paid_membership_not_qualified():
     assert qual["fee_required"] == "yes"
     assert "upfront_fee_or_paid_membership" in qual["blockers"]
     assert qual["auto_prepare_allowed"] is False
+
+
+def test_iapwe_production_payment_access_not_qualified():
+    qual = qualify_live_job(_iapwe_production_payment_access())
+    assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert qual["fee_required"] == "yes"
+    assert "upfront_fee_or_paid_membership" in qual["blockers"]
+    assert qual["auto_prepare_allowed"] is False
+
+
+def test_ateam_individual_specialist_not_qualified():
+    qual = qualify_live_job(_ateam_individual_specialist())
+    assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert "individual_specialist_or_talent_network" in qual["blockers"]
+    assert qual["auto_prepare_allowed"] is False
+
+
+def test_imerit_human_evaluator_not_qualified():
+    qual = qualify_live_job(_imerit_human_evaluator())
+    assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert "human_evaluator_or_annotation_role" in qual["blockers"]
+    assert qual["auto_prepare_allowed"] is False
+
+
+def test_ambiguous_fee_or_vendor_policy_needs_owner_review():
+    qual = qualify_live_job(_ambiguous_fee_or_vendor_policy())
+    assert qual["qualification_status"] == OUTCOME_NEEDS_OWNER_REVIEW
+    assert qual["auto_prepare_allowed"] is False
+    assert qual["fee_required"] in {"unclear", "yes"} or "unclear" in (qual.get("owner_review_reason") or "").lower() or "vendor" in (qual.get("owner_review_reason") or "").lower() or "ai" in (qual.get("owner_review_reason") or "").lower()
 
 
 def test_freelance_unclear_ai_needs_owner_review():

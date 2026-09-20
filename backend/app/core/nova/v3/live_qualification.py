@@ -102,6 +102,68 @@ _FEE_TOKENS = (
     "registration fee",
     "pay before",
     "payment required to",
+    "may require payment",
+    "require payment",
+    "requires payment",
+    "accessing some writing tasks may require payment",
+    "accessing some writing tasks may require",
+    "access tasks may require payment",
+    "payment to access",
+    "pay to unlock",
+    "training fee",
+    "training required fee",
+    "deposit required",
+    "purchase required",
+    "buy access",
+    "paid access",
+)
+
+_FEE_UNCLEAR_TOKENS = (
+    "possible membership",
+    "membership options may",
+    "fees may apply",
+    "payment may be required",
+    "access requirements unclear",
+)
+
+_HUMAN_EVALUATOR_TOKENS = (
+    "ai response evaluator",
+    "evaluate and rank",
+    "rank ai generated",
+    "rate and rank responses",
+    "judge answers",
+    "human evaluator",
+    "human rater",
+    "human judgment",
+    "annotation task",
+    "data labeling",
+    "data labeler",
+    "labeling task",
+    "rlhf",
+    "compare multiple answers",
+    "rank responses against",
+    "evaluate ai generated",
+    "evaluate and score",
+)
+
+_INDIVIDUAL_SPECIALIST_TOKENS = (
+    "invite-only network",
+    "invite only network",
+    "talent network",
+    "forward deployed engineer",
+    "what you've built",
+    "what you have built",
+    "people who have already shipped",
+    "senior ai engineer",
+    "senior independent ai",
+    "ml engineer",
+    "must personally",
+    "personal portfolio required",
+    "apply as yourself",
+    "individual contributor only",
+    "builders in the network",
+    "not a fit early-career",
+    "you keep 100% of your rate",
 )
 
 _AI_PROHIBITED_TOKENS = (
@@ -219,30 +281,113 @@ def _detect_fee(text: str) -> str:
         "no fee required",
         "no fees",
         "free to join",
+        "never have to pay",
+        "no payment required",
+    )
+    affirmative = (
+        "paid membership required",
+        "membership required",
+        "pay to apply",
+        "pay to access",
+        "application fee required",
+        "subscription required",
+        "annual dues",
+        "registration fee required",
+        "may require payment",
+        "require payment",
+        "requires payment",
+        "accessing some writing tasks may require payment",
+        "training fee",
+        "deposit required",
+        "purchase required",
     )
     if any(token in text for token in negated):
-        # Still flag if an affirmative fee phrase appears outside negation context.
-        affirmative = (
-            "paid membership required",
-            "membership required",
-            "pay to apply",
-            "pay to access",
-            "application fee required",
-            "subscription required",
-            "annual dues",
-            "registration fee required",
-        )
-        if any(token in text for token in affirmative):
-            return FEE_YES
+        if any(token in text for token in affirmative) or _has_any(text, _FEE_TOKENS):
+            # Negation present but an affirmative payment-to-access signal also exists.
+            if any(token in text for token in affirmative):
+                return FEE_YES
+            # Remotive boilerplate "NEVER have to pay" plus applicant payment signal → YES.
+            if "may require payment" in text or "require payment" in text:
+                return FEE_YES
         return FEE_NO
-    if _has_any(text, _FEE_TOKENS):
+    if _has_any(text, _FEE_TOKENS) or any(token in text for token in affirmative):
         return FEE_YES
     if "membership" in text and ("pay" in text or "fee" in text or "dues" in text):
-        # Avoid "no fee" / "without fee" already handled above.
         if "no fee" in text or "without fee" in text:
             return FEE_NO
         return FEE_YES
+    if _has_any(text, _FEE_UNCLEAR_TOKENS):
+        return FEE_UNCLEAR
     return FEE_NO
+
+
+def _is_human_evaluator_role(text: str, title: str | None = None) -> bool:
+    blob = f"{title or ''} {text}".lower()
+    return _has_any(blob, _HUMAN_EVALUATOR_TOKENS)
+
+
+def _is_individual_specialist_role(text: str, title: str | None = None) -> bool:
+    blob = f"{title or ''} {text}".lower()
+    if _has_any(blob, _INDIVIDUAL_SPECIALIST_TOKENS):
+        return True
+    # High-skill IC engineering titles that Nova cannot perform as a vendor service.
+    title_l = str(title or "").lower()
+    if any(
+        token in title_l
+        for token in (
+            "ai engineer",
+            "ml engineer",
+            "machine learning engineer",
+            "software architect",
+            "ai architect",
+            "full-stack",
+            "full stack",
+            "devops",
+            "sre ",
+        )
+    ):
+        return True
+    return False
+
+
+def _vendor_compatibility(text: str, *, work_type: str, ai_policy: str) -> tuple[bool, bool]:
+    """Return (compatible_for_auto_qualify, needs_review).
+
+    Compatible means AMICOR/Nova can deliver as AI-assisted business/vendor/service.
+    """
+    vendor_welcome = any(
+        token in text
+        for token in (
+            "business vendor",
+            "vendor welcome",
+            "vendors welcome",
+            "b2b",
+            "business-to-business",
+            "agency welcome",
+            "agencies welcome",
+            "companies welcome",
+            "statement of work",
+        )
+    )
+    vendor_blocked = any(
+        token in text
+        for token in (
+            "no agencies",
+            "no companies",
+            "no vendors",
+            "individuals only",
+            "individual applicants only",
+            "must apply as an individual",
+        )
+    )
+    if vendor_blocked:
+        return False, False
+    if vendor_welcome or work_type == WORK_B2B or ai_policy == AI_ALLOWED:
+        return True, False
+    # Freelance/contractor without clear vendor/AI allowance → owner review, never auto QUALIFIED.
+    if work_type in {WORK_FREELANCE, WORK_CONTRACTOR, WORK_UNKNOWN}:
+        return False, True
+    return False, True
 
 
 def _ai_mentioned(text: str) -> bool:
@@ -325,6 +470,9 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     regulated = _has_any(text, _REGULATED_TOKENS)
     scam = _has_any(text, _SCAM_TOKENS)
     geo_hard = _has_any(text, _GEO_HARD_TOKENS)
+    human_evaluator = _is_human_evaluator_role(text, job.get("title"))
+    individual_specialist = _is_individual_specialist_role(text, job.get("title"))
+    vendor_ok, vendor_needs_review = _vendor_compatibility(text, work_type=work_type, ai_policy=ai_policy)
     individual_identity = any(
         token in text
         for token in (
@@ -354,6 +502,18 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     if fee_required == FEE_YES:
         blockers.append("upfront_fee_or_paid_membership")
         reasons.append("Upfront fee, paid membership, or payment-to-access is required.")
+    if human_evaluator:
+        blockers.append("human_evaluator_or_annotation_role")
+        reasons.append("Role requires a human evaluator/rater/annotator to personally judge work.")
+    if individual_specialist:
+        blockers.append("individual_specialist_or_talent_network")
+        reasons.append(
+            "Opportunity requires a specific individual human specialist or talent-network member; "
+            "AMICOR/Nova cannot perform it as an AI-assisted business vendor."
+        )
+    if individual_identity and not vendor_ok:
+        blockers.append("individual_applicant_required")
+        reasons.append("Listing requires an individual applicant rather than AMICOR as a business vendor.")
     if ai_policy == AI_PROHIBITED:
         blockers.append("ai_assisted_work_prohibited")
         reasons.append("AI-assisted/AI-generated work is explicitly prohibited.")
@@ -376,13 +536,17 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         blockers.append("missing_compensation_high_risk")
         reasons.append("Compensation is missing and the listing otherwise looks low-confidence/high-risk.")
 
+    if fee_required == FEE_UNCLEAR:
+        review_reasons.append("Fee/access/payment-to-access status is unclear and needs owner review.")
     if ai_ambiguous:
         review_reasons.append("AI-assisted work policy is unclear and needs owner review.")
+    if vendor_needs_review and not blockers:
+        review_reasons.append("AI/agency/vendor compatibility is unclear and needs owner review.")
     if work_type == WORK_UNKNOWN:
         review_reasons.append("Contractor/vendor/employee status is ambiguous.")
     if not compensation_ok and not blockers:
         review_reasons.append("Compensation needs manual confirmation.")
-    if individual_identity:
+    if individual_identity and vendor_ok and not blockers:
         review_reasons.append("Listing may prefer individual applicants over AMICOR as a business vendor.")
     if geo_hard:
         review_reasons.append("Geographic restriction needs owner verification.")
@@ -403,8 +567,18 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         owner_review_reason = "; ".join(review_reasons[:4])
         reasons.extend(review_reasons)
     else:
-        # QUALIFIED path: no fees, legitimate, contract/freelance/B2B, clear scope/comp, no AI conflict
-        if work_type not in {WORK_B2B, WORK_FREELANCE, WORK_CONTRACTOR}:
+        # QUALIFIED only when fee, vendor compatibility, and capability are safely established.
+        if fee_required != FEE_NO:
+            outcome = OUTCOME_NEEDS_OWNER_REVIEW
+            risk = RISK_MEDIUM
+            owner_review_reason = "Fee/access status is not safely established for automatic qualification."
+            reasons.append(owner_review_reason)
+        elif not vendor_ok:
+            outcome = OUTCOME_NEEDS_OWNER_REVIEW
+            risk = RISK_MEDIUM
+            owner_review_reason = "AI/agency/vendor compatibility is not safely established."
+            reasons.append(owner_review_reason)
+        elif work_type not in {WORK_B2B, WORK_FREELANCE, WORK_CONTRACTOR}:
             outcome = OUTCOME_NEEDS_OWNER_REVIEW
             risk = RISK_MEDIUM
             owner_review_reason = "Work type is not clearly B2B/freelance/contractor."
@@ -424,7 +598,8 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
             risk = RISK_LOW
             owner_review_reason = "No automatic disqualifiers; ready for owner approval gate."
             reasons.append(
-                "No upfront fee/membership; legitimate source; paid contract-style work; no known AI-use conflict."
+                "No upfront fee/membership; legitimate source; paid contract-style work; "
+                "vendor/AI compatibility established; no known AI-use conflict."
             )
 
     fit_score = 50
