@@ -1,6 +1,6 @@
 """Additive Work & Revenue V2 hardening. V2 tables only. Not applied to production.
 
-Revision ID: 20260918_nova_work_revenue_v2_hardening
+Revision ID: 20260918_work_rev_v2_hardening
 Revises: 20260918_nova_work_revenue_v2
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260918_nova_work_revenue_v2_hardening"
+revision = "20260918_work_rev_v2_hardening"
 down_revision = "20260918_nova_work_revenue_v2"
 branch_labels = None
 depends_on = None
