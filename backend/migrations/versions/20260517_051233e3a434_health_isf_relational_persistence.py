@@ -45,7 +45,7 @@ def _insert_default_org(bind) -> None:
             INSERT INTO health_isf_organizations (
               id, name, code, address, phone, is_active, created_at, updated_at
             ) VALUES (
-              :id, :name, :code, :address, :phone, 1, :created_at, :updated_at
+              :id, :name, :code, :address, :phone, TRUE, :created_at, :updated_at
             )
             """
         ),
@@ -95,7 +95,7 @@ def upgrade() -> None:
             sa.Column("address", sa.String(length=512), nullable=False),
             sa.Column("phone", sa.String(length=20), nullable=False),
             sa.Column("service_type", sa.String(length=128), nullable=False),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
             sa.PrimaryKeyConstraint("id"),
@@ -112,7 +112,7 @@ def upgrade() -> None:
             sa.Column("vehicle_type", sa.String(length=128), nullable=False),
             sa.Column("vehicle_plate", sa.String(length=50), nullable=False),
             sa.Column("status", sa.String(length=32), nullable=False, server_default="offline"),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("total_trips", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("rating", sa.Float(), nullable=False, server_default="5.0"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -229,7 +229,7 @@ def upgrade() -> None:
                         INSERT INTO health_isf_vehicles (
                           id, organization_id, vehicle_type, vehicle_plate, capacity, is_active, created_at, updated_at
                         ) VALUES (
-                          :id, :organization_id, :vehicle_type, :vehicle_plate, 4, 1, :created_at, :updated_at
+                          :id, :organization_id, :vehicle_type, :vehicle_plate, 4, TRUE, :created_at, :updated_at
                         )
                         """
                     ),
