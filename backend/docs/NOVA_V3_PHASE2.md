@@ -4,7 +4,7 @@ Canonical Cursor integration on merged V2. Synthetic / pre-production lab only.
 
 - Branch: `feature/nova-v3-canonical-integration`
 - Does not enable live discovery, submission, contact, invoices, payments, workers, connectors, or public webhooks
-- Additive Alembic revision `20260918_nova_v3_live_infrastructure` revises `20260918_nova_work_revenue_v2_owner_scheduler`
+- Additive Alembic revision `20260918_nova_v3_live_infra` revises `20260918_work_rev_owner_sched`
 - That revision is **not applied to production** in this session
 
 ## Storage model
