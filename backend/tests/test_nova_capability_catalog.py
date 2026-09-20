@@ -71,3 +71,38 @@ def test_capability_search_queries_are_targeted_and_deduplicated():
     assert any("AI workflow automation" in q for q in queries)
     assert any("spreadsheet" in q.lower() for q in queries)
     assert any("RFP" in q for q in queries)
+
+
+def test_job_specific_materials_use_matched_capabilities_not_generic_only():
+    from app.core.nova.work_revenue.materials import generate_drafts
+
+    drafts = generate_drafts(
+        {
+            "opportunity_title": "AI workflow automation project",
+            "company_name": "Example Client",
+            "description": "B2B project for AI workflow automation using Zapier and API integration.",
+            "requirements": "Deliver workflow map, tested automation, and implementation documentation.",
+        }
+    )
+    by_kind = {item["kind"]: item["body"] for item in drafts}
+    assert "AI workflow automation" in by_kind["resume"]
+    assert "ai_workflow_automation" in by_kind["proposal"]
+    assert "Quality controls:" in by_kind["proposal"]
+    assert "Do not invent prior client deliverables" in by_kind["work_sample_outline"]
+    assert "Matched capabilities:" in by_kind["scope_of_work"]
+    assert "Nova is not a human" in by_kind["cover_letter"]
+
+
+def test_generated_work_sample_is_not_claimed_as_prior_client_history():
+    from app.core.nova.work_revenue.materials import generate_drafts
+
+    drafts = generate_drafts(
+        {
+            "opportunity_title": "Spreadsheet reporting contract",
+            "company_name": "Example Client",
+            "description": "Clean CSV data and build an Excel spreadsheet reporting dashboard.",
+        }
+    )
+    sample = next(item for item in drafts if item["kind"] == "work_sample_outline")
+    assert "newly created" in sample["body"]
+    assert "Do not present a generated sample as prior paid client work" in sample["body"]
