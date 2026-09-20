@@ -76,7 +76,7 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "Work &amp; Revenue Engine" in response.text or "Work & Revenue Engine" in response.text
     assert "WORK OPPORTUNITIES" in response.text
     assert "OWNER ACTION REQUIRED" in response.text
-    assert "COMING IN LATER PHASE" in response.text
+    assert "INTERNAL REVENUE TRACKING ACTIVE" in response.text
     assert "src=\"/static/nova-work/work.js\"" in response.text
     assert "Opportunity Inbox" in WORK_HTML
     assert "APPROVED FOR FUTURE SUBMISSION" in WORK_HTML
@@ -107,7 +107,7 @@ def test_opportunity_creation_and_dashboard(client: TestClient) -> None:
     dash = client.get("/api/nova/work/dashboard", headers=headers)
     assert dash.status_code == 200
     body = dash.json()
-    assert body["revenue_placeholder"].startswith("COMING IN LATER PHASE")
+    assert body["revenue_placeholder"].startswith("INTERNAL REVENUE TRACKING ACTIVE")
     assert "not a human employee" in body["identity_disclaimer"].lower()
     assert body["counts"]["work_opportunities"] >= 1
 
@@ -1412,8 +1412,9 @@ def test_phase2_dashboard_and_today_surface_new_sections() -> None:
 
 
 def test_work_revenue_owner_email_guard(monkeypatch) -> None:
-    from app.core.nova.work_revenue import router as work_router
+    import importlib
 
+    work_router = importlib.import_module("app.core.nova.work_revenue.router")
     monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "owner@example.com")
     assert work_router._work_revenue_owner_emails() == {"owner@example.com"}
 
@@ -1459,3 +1460,45 @@ def test_master_work_profile_tailors_resume_materials(client: TestClient) -> Non
     assert "work@example.com" in resume["body"]
     assert "Owner-approved experience preparing business documents" in resume["body"]
     assert "Remote operations assistant" in resume["body"]
+
+
+def test_application_package_review_is_read_only_and_blocks_bad_package(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Example Client",
+        opportunity_title="AI workflow automation project",
+        description="B2B AI workflow automation using Zapier and API integration.",
+        requirements="Deliver workflow map, tested automation, and documentation.",
+        engagement_type="contract",
+    )
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={
+            "opportunity_id": opp["opportunity_id"],
+            "applicant_party": "AMICOR",
+        },
+    )
+    assert app_resp.status_code == 200
+    application_id = app_resp.json()["application_id"]
+
+    review = client.get(
+        f"/api/nova/work/applications/{application_id}/package-review",
+        headers=headers,
+    )
+    assert review.status_code == 200
+    payload = review.json()
+    assert payload["external_submission"] is False
+    assert payload["financial_execution"] is False
+    assert payload["approval_state"] == "DRAFT"
+    assert payload["readiness_score"] <= 100
+
+    after = client.get(
+        f"/api/nova/work/applications/{application_id}",
+        headers=headers,
+    )
+    assert after.status_code == 200
+    assert after.json()["approval_state"] == "DRAFT"
+    assert after.json()["externally_submitted"] is False

@@ -57,7 +57,7 @@ def test_completion_ui_has_internal_sections_only() -> None:
     assert 'data-tab="reconciliation"' in WORK_HTML
     assert "Do not enter EIN" in WORK_HTML
     assert "Generating a report is not sending it" in WORK_HTML
-    assert "COMING IN LATER PHASE" in WORK_HTML
+    assert "INTERNAL REVENUE TRACKING ACTIVE" in WORK_HTML
     assert "live apply" not in WORK_JS.lower()
     assert "payout" not in WORK_JS.lower()
     assert "Submit Application" not in WORK_JS

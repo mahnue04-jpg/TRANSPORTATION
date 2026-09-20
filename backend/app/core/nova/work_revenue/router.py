@@ -345,6 +345,26 @@ def get_application(
         _raise(exc)
 
 
+@router.get("/applications/{application_id}/package-review")
+def application_package_review(
+    application_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Read-only pre-owner-review quality report. Takes no external action."""
+    org_id = _resolve_org(user, organization_id)
+    try:
+        return service.get_application_package_review(
+            db,
+            application_id,
+            organization_id=org_id,
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
 @router.post("/applications/{application_id}/ready-for-review", response_model=ApplicationOut)
 def ready_for_review(
     application_id: str,

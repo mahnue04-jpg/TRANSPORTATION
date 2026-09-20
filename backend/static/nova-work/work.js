@@ -374,7 +374,7 @@
         "</span> · " + escapeHtml(row.action_type) +
         "<div class=\"muted\">" + escapeHtml(row.explanation) + "</div></div>";
     });
-    $("revenue-box").textContent = (summary.disclaimer || data.revenue_placeholder || "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue.") +
+    $("revenue-box").textContent = (summary.disclaimer || data.revenue_placeholder || "INTERNAL REVENUE TRACKING ACTIVE — processor-side financial execution remains disabled.") +
       " AMICOR expected " + (summary.amicor_expected_revenue || 0) +
       " · AMICOR estimated " + (summary.estimated_pipeline || 0) +
       " · AMICOR contracted " + (summary.contracted_value || 0) +
