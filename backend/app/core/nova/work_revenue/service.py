@@ -1183,10 +1183,10 @@ def mark_ready_for_review(
         organization_id=organization_id,
         user=user,
     )
-    if package_review["status"] != "READY_FOR_OWNER_REVIEW":
-        blockers = ", ".join(package_review.get("blockers") or []) or "package_not_ready"
+    if package_review["status"] == "BLOCKED":
+        blockers = ", ".join(package_review.get("blockers") or []) or "package_blocked"
         raise NovaWorkError(
-            "Package is not ready for owner review; resolve required facts/materials first: " + blockers,
+            "Package review is BLOCKED; resolve capability, execution, or truthfulness blockers before owner review: " + blockers,
             status_code=409,
         )
     previous = application.approval_state
