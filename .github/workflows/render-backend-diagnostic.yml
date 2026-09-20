@@ -34,6 +34,12 @@ jobs:
       DB_MAX_OVERFLOW: "5"
       HEALTH_ISF_STRIPE_ENABLED: "false"
       NOVA_STRIPE_LIVE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+      ALLOWED_ORIGINS: https://example.invalid
+      AMICOR_PUBLIC_URL: https://example.invalid
+      APP_VERSION: diagnostic
+      LOG_LEVEL: INFO
 
     defaults:
       run:
