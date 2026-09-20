@@ -204,7 +204,7 @@ def upgrade() -> None:
     bind.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_health_isf_ride_status_history_ride_id ON health_isf_ride_status_history (ride_id)"))
 
     if _table_exists(bind, "health_isf_drivers"):
-        with op.batch_alter_table("health_isf_drivers", recreate="always") as batch_op:
+        with op.batch_alter_table("health_isf_drivers", recreate="auto") as batch_op:
             if not _column_exists(bind, "health_isf_drivers", "organization_id"):
                 batch_op.add_column(sa.Column("organization_id", sa.String(length=36), nullable=True))
             if not _column_exists(bind, "health_isf_drivers", "vehicle_id"):
@@ -248,7 +248,7 @@ def upgrade() -> None:
             )
 
     if _table_exists(bind, "health_isf_providers"):
-        with op.batch_alter_table("health_isf_providers", recreate="always") as batch_op:
+        with op.batch_alter_table("health_isf_providers", recreate="auto") as batch_op:
             if not _column_exists(bind, "health_isf_providers", "organization_id"):
                 batch_op.add_column(sa.Column("organization_id", sa.String(length=36), nullable=True))
             batch_op.create_index(op.f("ix_health_isf_providers_organization_id"), ["organization_id"], unique=False)
@@ -256,7 +256,7 @@ def upgrade() -> None:
         bind.execute(sa.text("UPDATE health_isf_providers SET organization_id = :org_id WHERE organization_id IS NULL"), {"org_id": DEFAULT_ORG_ID})
 
     if _table_exists(bind, "health_isf_rides"):
-        with op.batch_alter_table("health_isf_rides", recreate="always") as batch_op:
+        with op.batch_alter_table("health_isf_rides", recreate="auto") as batch_op:
             if not _column_exists(bind, "health_isf_rides", "organization_id"):
                 batch_op.add_column(sa.Column("organization_id", sa.String(length=36), nullable=True))
             if not _column_exists(bind, "health_isf_rides", "created_by_user_id"):
@@ -322,13 +322,13 @@ def upgrade() -> None:
             )
 
     if _table_exists(bind, "health_isf_trips"):
-        with op.batch_alter_table("health_isf_trips", recreate="always") as batch_op:
+        with op.batch_alter_table("health_isf_trips", recreate="auto") as batch_op:
             if not _column_exists(bind, "health_isf_trips", "updated_at"):
                 batch_op.add_column(sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
         bind.execute(sa.text("UPDATE health_isf_trips SET updated_at = COALESCE(updated_at, created_at, :ts)"), {"ts": _now()})
 
     if _table_exists(bind, "health_isf_payouts"):
-        with op.batch_alter_table("health_isf_payouts", recreate="always") as batch_op:
+        with op.batch_alter_table("health_isf_payouts", recreate="auto") as batch_op:
             if not _column_exists(bind, "health_isf_payouts", "updated_at"):
                 batch_op.add_column(sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
         bind.execute(sa.text("UPDATE health_isf_payouts SET updated_at = COALESCE(updated_at, created_at, :ts)"), {"ts": _now()})
