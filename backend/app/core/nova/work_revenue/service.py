@@ -104,8 +104,9 @@ OUTCOME_TO_STATUS = {
 }
 
 REVENUE_PLACEHOLDER = (
-    "COMING IN LATER PHASE — owner-entered estimates only. Not earned revenue. "
-    "Nova does not create invoices, charges, or payouts."
+    "INTERNAL REVENUE TRACKING ACTIVE — estimated, quoted, contracted, invoice-support, "
+    "owner-confirmed received, partial-payment, and reconciliation states are available. "
+    "Nova does not create processor invoices, charges, transfers, or payouts."
 )
 IDENTITY_DISCLAIMER = (
     "Nova is an AI system/tool under AMICOR/owner authorization. "
