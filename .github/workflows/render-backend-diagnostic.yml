@@ -73,7 +73,8 @@ jobs:
           DATABASE_URL: sqlite:///./test_nova_work_revenue_ci.db
           AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
         run: |
-          pytest \
+          set -e
+          for test_file in \
             tests/test_nova_work_revenue.py \
             tests/test_nova_work_revenue_completion.py \
             tests/test_nova_work_revenue_v2.py \
@@ -89,8 +90,12 @@ jobs:
             tests/test_nova_work_revenue_owner_facts.py \
             tests/test_nova_work_revenue_simulated_ingest_guard.py \
             tests/test_nova_work_revenue_v2_hardening.py \
-            tests/test_nova_work_revenue_v2_migration.py \
-            -q
+            tests/test_nova_work_revenue_v2_migration.py
+          do
+            rm -f test_nova_work_revenue_ci.db
+            echo "=== Running $test_file with a fresh isolated test database ==="
+            pytest "$test_file" -q
+          done
 
       - name: Start app and probe readiness
         run: |
