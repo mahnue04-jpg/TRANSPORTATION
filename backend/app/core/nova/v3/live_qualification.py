@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.nova.v3.capability_catalog import capability_fit
+
 OUTCOME_QUALIFIED = "QUALIFIED"
 OUTCOME_NEEDS_OWNER_REVIEW = "NEEDS_OWNER_REVIEW"
 OUTCOME_NOT_QUALIFIED = "NOT_QUALIFIED"
@@ -449,7 +451,7 @@ def _source_legitimate(job: dict[str, Any]) -> bool:
 
 
 def _capability_fit(text: str) -> bool:
-    return _has_any(text, _CAPABILITY_TOKENS)
+    return bool(capability_fit(text)["fit"])
 
 
 def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -464,7 +466,8 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     ai_policy, ai_ambiguous = _detect_ai_policy(text)
     compensation_ok = _compensation_present(job, text)
     source_ok = _source_legitimate(job)
-    capability_ok = _capability_fit(text)
+    capability_result = capability_fit(text)
+    capability_ok = bool(capability_result["fit"])
     credentials_hard = _has_any(text, _CREDENTIAL_TOKENS)
     degree_hard = _has_any(text, _DEGREE_TOKENS)
     regulated = _has_any(text, _REGULATED_TOKENS)
@@ -643,6 +646,9 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         "source_url": job.get("source_url"),
         "source_legitimate": source_ok,
         "capability_fit": capability_ok,
+        "capability_score": capability_result["score"],
+        "matched_capabilities": capability_result["capabilities"],
+        "capability_reason": capability_result["reason"],
         "compensation_present": compensation_ok,
         "blockers": blockers,
         "review_flags": review_reasons,
