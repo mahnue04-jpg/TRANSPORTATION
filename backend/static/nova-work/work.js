@@ -63,17 +63,37 @@
   }
   function liveJobItem(row) {
     var opp = row.opportunity || row;
+    var qual = opp.live_qualification || {};
     var title = opp.title || opp.opportunity_title || "Opportunity";
     var company = opp.company_name || "Unknown company";
-    var url = opp.source_url || "";
+    var url = opp.source_url || qual.source_url || "";
+    var status = opp.qualification_status || qual.qualification_status || "unknown";
+    var risk = opp.risk_level || qual.risk_level || "unknown";
+    var workType = opp.work_type || qual.work_type || "unknown";
+    var aiPolicy = opp.ai_policy || qual.ai_policy || "unclear";
+    var feeRequired = opp.fee_required || qual.fee_required || "unclear";
+    var fitScore = opp.fit_score != null ? opp.fit_score : qual.fit_score;
+    var fitSummary = opp.fit_summary || qual.fit_summary || "";
+    var compensation = opp.compensation_summary || qual.compensation_summary || opp.compensation_text || "Compensation not stated";
+    var reviewReason = opp.owner_review_reason || qual.owner_review_reason || "";
     var score = opp.relevance_score;
     var meta = [];
+    meta.push("Qualification: " + status);
+    meta.push("Risk: " + risk);
+    if (fitScore != null) meta.push("Fit score " + fitScore);
+    meta.push("Work type: " + workType);
+    meta.push("AI policy: " + aiPolicy);
+    meta.push("Fee required: " + feeRequired);
     if (opp.geography) meta.push(opp.geography);
-    if (opp.compensation_text) meta.push(opp.compensation_text);
-    if (score != null) meta.push("match score " + score);
+    meta.push(compensation);
+    if (score != null) meta.push("rank score " + score);
+    if (opp._prepare_marker) meta.push(String(opp._prepare_marker).replace(/^ · /, ""));
     return "<div class=\"item\"><strong>" + escapeHtml(title) + "</strong>" +
-      "<div class=\"muted\">" + escapeHtml(company) + (meta.length ? " · " + escapeHtml(meta.join(" · ")) : "") + "</div>" +
-      (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Open job source</a></div>" : "") +
+      "<div class=\"muted\">" + escapeHtml(company) + "</div>" +
+      "<div class=\"muted\">" + escapeHtml(meta.join(" · ")) + "</div>" +
+      (fitSummary ? "<div class=\"muted\">Fit: " + escapeHtml(fitSummary) + "</div>" : "") +
+      (reviewReason ? "<div class=\"muted\">Owner review: " + escapeHtml(reviewReason) + "</div>" : "") +
+      (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Source URL</a></div>" : "") +
       "</div>";
   }
   async function refreshLiveDiscoveryStatus() {
@@ -83,7 +103,7 @@
       var enabled = guards.LIVE_DISCOVERY_ENABLED === true;
       $("live-job-status").textContent = enabled
         ? "LIVE DISCOVERY READY · External submission remains approval-controlled/off until the submission adapter is verified."
-        : "LIVE DISCOVERY OFF · Set NOVA_V3_LIVE_DISCOVERY_ENABLED=true in the production environment, then redeploy. External submission remains off.";
+        : "LIVE DISCOVERY OFF · Set NOVA_V3_LIVE_DISCOVERY_ENABLED=true in the production environment, then restart the service. External submission remains off.";
     } catch (err) {
       $("live-job-status").textContent = "Live-discovery status unavailable: " + err.message;
     }
@@ -813,7 +833,7 @@
       event.preventDefault();
       var query = $("live-job-query").value.trim();
       if (!query) return;
-      $("live-job-status").textContent = "Nova is searching live jobs, ranking matches, and preparing the strongest candidates for owner approval...";
+      $("live-job-status").textContent = "Nova is searching live jobs, applying risk/fit qualification, ranking matches, and auto-preparing only QUALIFIED candidates...";
       $("live-job-results").innerHTML = "";
       try {
         var body = await api("/api/nova/v3/live/jobs/prepare", {
@@ -827,12 +847,37 @@
           })
         });
         var prepared = body.prepared || [];
+        var ranked = body.ranked_jobs || [];
+        var counts = body.qualification_counts || {};
         $("live-job-status").textContent =
-          "Found/ranked " + (body.ranked_count || 0) + " · selected " + (body.selected_count || 0) +
-          " · prepared " + (body.prepared_count || 0) +
-          " for your approval. External action taken: " + String(body.external_action_taken === true) + ".";
-        $("live-job-results").innerHTML = listHtml(prepared, "No sufficiently relevant jobs were prepared. Try a broader search.", liveJobItem);
-        showBanner("Live job discovery finished. Review prepared opportunities before any external submission.", true);
+          "Found/ranked " + (body.ranked_count || 0) +
+          " · selected " + (body.selected_count || 0) +
+          " · QUALIFIED " + (counts.QUALIFIED || 0) +
+          " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
+          " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
+          " · auto-prepared " + (body.prepared_count || 0) +
+          " · external action: " + String(body.external_action_taken === true) +
+          " · financial execution: " + String(body.financial_execution === true) + ".";
+        var preparedIds = {};
+        prepared.forEach(function (item) {
+          var opp = item.opportunity || {};
+          if (opp.opportunity_id) preparedIds[opp.opportunity_id] = true;
+          if (opp.provider_identifier) preparedIds[opp.provider_identifier] = true;
+          if (opp.source_url) preparedIds[opp.source_url] = true;
+        });
+        var displayRows = (ranked.length ? ranked : prepared).map(function (job) {
+          var opp = job.opportunity || job;
+          var marker = preparedIds[opp.opportunity_id] || preparedIds[opp.provider_identifier] || preparedIds[opp.source_url]
+            ? " · auto-prepared"
+            : "";
+          return { opportunity: Object.assign({}, opp, { _prepare_marker: marker }) };
+        });
+        $("live-job-results").innerHTML = listHtml(
+          displayRows,
+          "No live opportunities matched. Try a broader search.",
+          liveJobItem
+        );
+        showBanner("Live discovery finished with qualification screening. Only QUALIFIED items were auto-prepared. External submission remains off.", true);
         await refresh();
       } catch (err) {
         $("live-job-status").textContent = err.message;

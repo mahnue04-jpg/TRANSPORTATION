@@ -15,7 +15,14 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
-from app.core.nova.v3.live_discovery import rank_live_jobs, search_remote_jobs
+from app.core.nova.v3.live_discovery import search_remote_jobs
+from app.core.nova.v3.live_qualification import (
+    OUTCOME_NEEDS_OWNER_REVIEW,
+    OUTCOME_NOT_QUALIFIED,
+    OUTCOME_QUALIFIED,
+    partition_by_qualification,
+    qualify_and_rank_live_jobs,
+)
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 
 def _nova_v3_owner_emails() -> set[str]:
@@ -242,13 +249,15 @@ def v3_live_job_search(
 ):
     _org(user, payload.organization_id)
     try:
-        jobs = search_remote_jobs(payload.query, limit=payload.limit)
+        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
+        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
         return {
             "query": payload.query,
-            "count": len(jobs),
+            "count": len(ranked),
             "source": "Remotive",
             "read_only": True,
-            "jobs": jobs,
+            "external_action_taken": False,
+            "jobs": ranked,
         }
     except V3Error as exc:
         _raise(exc)
@@ -262,7 +271,7 @@ def v3_live_job_discover(
     org_id = _org(user, payload.organization_id)
     try:
         raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
-        ranked = rank_live_jobs(payload.query, raw_jobs)
+        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
@@ -272,6 +281,7 @@ def v3_live_job_discover(
             organization_id=org_id,
             owner_user_id=user.user_id,
         )
+        buckets = partition_by_qualification(selected)
         return {
             "query": payload.query,
             "source": "Remotive",
@@ -279,6 +289,11 @@ def v3_live_job_discover(
             "external_action_taken": False,
             "ranked_count": len(ranked),
             "selected_count": len(selected),
+            "qualification_counts": {
+                OUTCOME_QUALIFIED: len(buckets[OUTCOME_QUALIFIED]),
+                OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
+                OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
+            },
             "ranked_jobs": ranked,
             "saved": saved,
         }
@@ -294,11 +309,12 @@ def v3_live_job_prepare(
     org_id = _org(user, payload.organization_id)
     try:
         raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
-        ranked = rank_live_jobs(payload.query, raw_jobs)
+        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
         ][: payload.save_limit]
+        # Retain QUALIFIED, NEEDS_OWNER_REVIEW, and NOT_QUALIFIED for audit/history.
         saved = get_kernel().ingest_live_jobs(
             selected,
             organization_id=org_id,
@@ -306,7 +322,25 @@ def v3_live_job_prepare(
         )
 
         prepared = []
-        for opportunity in saved["created"][: payload.prepare_limit]:
+        skipped_not_qualified = []
+        held_for_owner_review = []
+        for opportunity in saved["created"]:
+            status = str(
+                (opportunity.get("live_qualification") or {}).get("qualification_status")
+                or opportunity.get("qualification_status")
+                or ""
+            )
+            if status == OUTCOME_NOT_QUALIFIED:
+                skipped_not_qualified.append(opportunity["opportunity_id"])
+                continue
+            if status == OUTCOME_NEEDS_OWNER_REVIEW:
+                held_for_owner_review.append(opportunity["opportunity_id"])
+                continue
+            if status != OUTCOME_QUALIFIED:
+                held_for_owner_review.append(opportunity["opportunity_id"])
+                continue
+            if len(prepared) >= payload.prepare_limit:
+                continue
             proposal = get_kernel().prepare_proposal(
                 opportunity["opportunity_id"],
                 organization_id=org_id,
@@ -328,15 +362,27 @@ def v3_live_job_prepare(
                 }
             )
 
+        buckets = partition_by_qualification(selected)
         return {
             "query": payload.query,
             "source": "Remotive",
             "external_action_taken": False,
+            "financial_execution": False,
             "ranked_count": len(ranked),
             "selected_count": len(selected),
             "prepared_count": len(prepared),
             "prepared": prepared,
             "duplicates": saved["duplicates"],
+            "saved": saved,
+            "qualification_counts": {
+                OUTCOME_QUALIFIED: len(buckets[OUTCOME_QUALIFIED]),
+                OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
+                OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
+            },
+            "auto_prepared_only_qualified": True,
+            "held_for_owner_review": held_for_owner_review,
+            "skipped_not_qualified": skipped_not_qualified,
+            "ranked_jobs": ranked,
         }
     except V3Error as exc:
         _raise(exc)

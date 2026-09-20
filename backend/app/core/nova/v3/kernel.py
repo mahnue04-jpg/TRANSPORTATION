@@ -298,6 +298,33 @@ class NovaV3Kernel:
                     organization_id=organization_id,
                     owner_user_id=owner_user_id,
                 )
+                qual = job.get("live_qualification") or {}
+                if not qual and job.get("qualification_status"):
+                    qual = {
+                        "qualification_status": job.get("qualification_status"),
+                        "qualification_outcome": job.get("qualification_outcome") or job.get("qualification_status"),
+                        "risk_level": job.get("risk_level"),
+                        "fit_score": job.get("fit_score"),
+                        "fit_summary": job.get("fit_summary"),
+                        "compensation_summary": job.get("compensation_summary"),
+                        "work_type": job.get("work_type"),
+                        "ai_policy": job.get("ai_policy"),
+                        "fee_required": job.get("fee_required"),
+                        "owner_review_reason": job.get("owner_review_reason"),
+                        "source_url": job.get("source_url"),
+                        "auto_prepare_allowed": job.get("qualification_status") == "QUALIFIED",
+                        "external_submission": False,
+                        "financial_execution": False,
+                    }
+                if qual:
+                    row.provenance = {
+                        **dict(row.provenance or {}),
+                        "live_qualification": qual,
+                        "relevance_score": job.get("relevance_score"),
+                        "compensation_text": job.get("compensation_text"),
+                        "job_type": job.get("job_type"),
+                        "source_attribution": job.get("source_attribution"),
+                    }
                 existing = next(
                     (
                         item
@@ -316,6 +343,7 @@ class NovaV3Kernel:
                     organization_id,
                     opportunity_id=row.opportunity_id,
                     provider_id=row.provider_id,
+                    qualification_status=(qual or {}).get("qualification_status"),
                 )
         return {
             "created": [self.opportunity_out(item) for item in created],
@@ -365,6 +393,7 @@ class NovaV3Kernel:
 
     def opportunity_out(self, row: Opportunity) -> dict[str, Any]:
         gate = self.human_gate(row)
+        qual = dict((row.provenance or {}).get("live_qualification") or {})
         return {
             "opportunity_id": row.opportunity_id,
             "title": row.title,
@@ -397,6 +426,18 @@ class NovaV3Kernel:
             "duplicate_of": row.duplicate_of,
             "human_action": gate,
             "live_discovery": bool(row.provenance.get("live")),
+            "live_qualification": qual or None,
+            "qualification_status": qual.get("qualification_status"),
+            "qualification_outcome": qual.get("qualification_outcome") or qual.get("qualification_status"),
+            "risk_level": qual.get("risk_level"),
+            "fit_score": qual.get("fit_score"),
+            "fit_summary": qual.get("fit_summary"),
+            "compensation_summary": qual.get("compensation_summary") or (row.provenance or {}).get("compensation_text"),
+            "work_type": qual.get("work_type"),
+            "ai_policy": qual.get("ai_policy"),
+            "fee_required": qual.get("fee_required"),
+            "owner_review_reason": qual.get("owner_review_reason"),
+            "relevance_score": (row.provenance or {}).get("relevance_score"),
         }
 
     def prepare_proposal(self, opportunity_id: str, *, organization_id: str, owner_user_id: str) -> Proposal:
@@ -405,6 +446,13 @@ class NovaV3Kernel:
             raise V3Error("INVALID_STATE", "rejected or closed opportunity cannot receive a proposal")
         if opp.classification in {"PROHIBITED", "HUMAN_ONLY"}:
             raise V3Error("NOT_APPROPRIATE", "Nova will not prepare a proposal for this classification")
+        qual = dict((opp.provenance or {}).get("live_qualification") or {})
+        if qual.get("qualification_status") == "NOT_QUALIFIED":
+            raise V3Error(
+                "NOT_QUALIFIED",
+                "Live opportunity failed risk/fit qualification and cannot be prepared",
+                http_status=409,
+            )
         body = (
             f"INTERNAL DRAFT ONLY. Company: {opp.company_name}. Work: {opp.title}. "
             "Nova did not submit this. Missing facts remain [OWNER INPUT REQUIRED]."
