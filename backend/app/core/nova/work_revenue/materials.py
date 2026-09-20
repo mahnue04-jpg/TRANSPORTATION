@@ -197,8 +197,10 @@ def generate_drafts(
                 f"DRAFT resume. {identity}\n\n"
                 f"Applicant party: {applicant_party}\n\n"
                 f"MASTER VERIFIED/OWNER-PROVIDED PROFILE\n{master_profile}\n\n"
-                f"Targeted objective: Support authorized digital work related to {title} at {company}, "
-                f"using only verified or owner-provided facts and matching capabilities.\n\n"
+                f"Targeted objective: Deliver the specific digital work requested for {title} at {company} "
+                f"through AMICOR/Nova capabilities actually matched to the opportunity.\n\n"
+                f"CAPABILITY MATCH\n{matched_caps}\n\n"
+                f"EXECUTION POSITIONING\n{packet_summary}\n\n"
                 f"{unknown}\n\n"
                 f"Do not list fabricated employers, degrees, or dates.\n\n{untrusted_desc}"
             ),
@@ -211,9 +213,10 @@ def generate_drafts(
                 f"{party}\n\n"
                 f"Master work profile:\n{master_profile}\n\n"
                 f"Regarding: {title} at {company}.\n\n"
-                f"Nova can prepare drafts for authorized digital tasks (email, documents, "
-                f"summaries, CRM organization) under owner authorization. Nova is not a human "
-                f"applicant and will not pretend to be one.\n\n"
+                f"AMICOR/Nova is positioned only for capabilities actually matched to this opportunity:\n"
+                f"{matched_caps}\n\n"
+                f"{packet_summary}\n"
+                f"Nova is not a human applicant and will not pretend to be one.\n\n"
                 f"{OWNER_INPUT_REQUIRED}: owner-specific motivation, availability, and rate.\n\n"
                 f"{forbidden}\n\n{untrusted_desc}"
             ),
@@ -224,8 +227,9 @@ def generate_drafts(
             "body": (
                 f"DRAFT proposal outline.\n\n{party}\n\n"
                 f"Scope (from untrusted posting; owner must confirm):\n{untrusted_desc}\n\n"
-                f"Proposed Nova-assisted work: drafting, organization, and summarization with "
-                f"human review. Pricing: {OWNER_INPUT_REQUIRED}. Timeline: {OWNER_INPUT_REQUIRED}.\n\n"
+                f"Capability-specific approach:\n{matched_caps}\n\n"
+                f"Internal execution plan:\n{execution}\n\n"
+                f"Pricing: {OWNER_INPUT_REQUIRED}. Timeline: {OWNER_INPUT_REQUIRED}.\n\n"
                 f"{forbidden}"
             ),
         },
@@ -248,9 +252,11 @@ def generate_drafts(
             "body": (
                 f"DRAFT work-sample outline for {title}.\n\n"
                 f"1. Restate the requested work using only the untrusted posting, labeled as such.\n"
-                f"2. Map tasks to authorized Nova capabilities (drafting, organization, summarization).\n"
-                f"3. Mark human-required steps {OWNER_INPUT_REQUIRED}.\n"
-                f"4. Do not invent prior client deliverables.\n\n{untrusted_desc}"
+                f"2. Map tasks to the matched capabilities:\n{matched_caps}\n"
+                f"3. Build a new demonstration around the requested deliverable type.\n"
+                f"4. {portfolio_positioning}\n"
+                f"5. Mark human-required steps {OWNER_INPUT_REQUIRED}.\n"
+                f"6. Do not invent prior client deliverables.\n\n{untrusted_desc}"
             ),
         },
         {
@@ -270,7 +276,7 @@ def generate_drafts(
             "body": (
                 f"DRAFT statement of work. Not a signed contract.\n\n{party}\n\n"
                 f"Period of performance: {OWNER_INPUT_REQUIRED}\n"
-                f"Deliverables: {OWNER_INPUT_REQUIRED}\n"
+                f"Deliverables suggested by capability match: {', '.join(packet.get('deliverables') or []) or OWNER_INPUT_REQUIRED}\n"
                 f"Pricing: {OWNER_INPUT_REQUIRED}\n"
                 f"Nova will not accept this SOW. Owner signature is required later.\n\n"
                 f"{forbidden}\n\n{untrusted_desc}"
@@ -368,8 +374,8 @@ def generate_drafts(
             "title": f"Internal work plan for {title}",
             "body": (
                 f"DRAFT — OWNER REVIEW REQUIRED. Internal tracking only. Not a contract.\n\n{party}\n\n"
-                f"Nova tasks: draft, organize, and summarize with owner review.\n"
-                f"Owner tasks: approve, confirm facts, sign, and any live human steps.\n"
+                f"Capability-specific internal plan:\n{execution}\n"
+                f"Owner tasks: approve scope, confirm facts, approve gates, sign, and handle any live human steps.\n"
                 f"Unsupported: physical presence, licensed practice, payments, external send.\n"
                 f"Status of this plan: NOT STARTED until the owner creates an internal engagement.\n\n"
                 f"{forbidden}"
@@ -466,6 +472,8 @@ def generate_drafts(
             "title": f"Scope of work draft for {title}",
             "body": (
                 f"DRAFT scope of work. Not a contract.\n\n{untrusted_desc}\n\n"
+                f"Matched capabilities:\n{matched_caps}\n\n"
+                f"Proposed internal execution:\n{execution}\n\n"
                 f"Nova-assisted tasks require owner review. Owner signature: {OWNER_INPUT_REQUIRED}.\n"
                 f"{forbidden}"
             ),
