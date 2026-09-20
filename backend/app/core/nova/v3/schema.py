@@ -11,8 +11,8 @@ from app.core.nova.v3.errors import V3Error
 from app.db.session import Base
 
 _FORBIDDEN = ("DROP TABLE", "DROP COLUMN", "TRUNCATE", "STRIPE")
-REVISION = "20260918_nova_v3_live_infrastructure"
-DOWN_REVISION = "20260918_nova_work_revenue_v2_owner_scheduler"
+REVISION = "20260918_nova_v3_live_infra"
+DOWN_REVISION = "20260918_work_rev_owner_sched"
 
 
 def live_flags_hard_off_names() -> tuple[str, ...]:
@@ -74,7 +74,7 @@ def ensure_v3_schema(engine: Engine) -> None:
     if not lazy_v3_schema_allowed():
         raise V3Error(
             "SCHEMA_MIGRATION_REQUIRED",
-            "V3 tables are missing. Apply Alembic revision 20260918_nova_v3_live_infrastructure.",
+            "V3 tables are missing. Apply Alembic revision 20260918_nova_v3_live_infra.",
             http_status=503,
         )
     Base.metadata.create_all(bind=engine, tables=list(V3_ORM_TABLES))

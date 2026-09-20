@@ -1,7 +1,7 @@
 """Shared Ride + Deliver customer payment webhook ledger.
 
-Revision ID: 20260823_customer_payment_webhook
-Revises: 20260818_stripe_connect_onboarding
+Revision ID: 20260823_customer_payment_hook
+Revises: 20260818_stripe_connect_onboard
 
 Additive only. Does not alter Connect onboarding or Health ISF ride payment tables.
 Does not run automatically — apply when operators choose to migrate.
@@ -11,8 +11,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260823_customer_payment_webhook"
-down_revision = "20260818_stripe_connect_onboarding"
+revision = "20260823_customer_payment_hook"
+down_revision = "20260818_stripe_connect_onboard"
 branch_labels = None
 depends_on = None
 

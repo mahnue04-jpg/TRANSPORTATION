@@ -73,7 +73,7 @@ def upgrade() -> None:
     op.create_index("ix_platform_driver_onboarding_applications_email", "platform_driver_onboarding_applications", ["email"])
     op.create_index("ix_platform_driver_onboarding_applications_mobile_phone", "platform_driver_onboarding_applications", ["mobile_phone"])
     op.create_index("ix_platform_driver_onboarding_applications_assigned_reviewer_id", "platform_driver_onboarding_applications", ["assigned_reviewer_id"])
-    op.create_index("ix_platform_driver_onboarding_applications_applicant_access_token_hash", "platform_driver_onboarding_applications", ["applicant_access_token_hash"])
+    op.create_index("ix_driver_onboarding_app_access_token_hash", "platform_driver_onboarding_applications", ["applicant_access_token_hash"])
     op.create_index("ix_platform_driver_onboarding_applications_activated_driver_id", "platform_driver_onboarding_applications", ["activated_driver_id"])
 
     op.create_table(

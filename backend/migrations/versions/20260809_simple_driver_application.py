@@ -1,15 +1,15 @@
 """Simple driver application vehicle fields
 
-Revision ID: 20260809_simple_driver_application
-Revises: 20260809_approval_external_adapters
+Revision ID: 20260809_simple_driver_app
+Revises: 20260809_approval_ext_adapters
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260809_simple_driver_application"
-down_revision = "20260809_approval_external_adapters"
+revision = "20260809_simple_driver_app"
+down_revision = "20260809_approval_ext_adapters"
 branch_labels = None
 depends_on = None
 

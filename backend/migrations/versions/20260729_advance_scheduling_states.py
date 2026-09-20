@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 revision = "20260729_advance_scheduling"
-down_revision = "20260728_driver_mobile_read_indexes"
+down_revision = "20260728_driver_mobile_idx"
 branch_labels = None
 depends_on = None
 

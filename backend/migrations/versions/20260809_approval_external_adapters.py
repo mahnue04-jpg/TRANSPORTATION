@@ -1,6 +1,6 @@
 """Approval Engine external verification adapter columns
 
-Revision ID: 20260809_approval_external_adapters
+Revision ID: 20260809_approval_ext_adapters
 Revises: 20260808_approval_engine
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260809_approval_external_adapters"
+revision = "20260809_approval_ext_adapters"
 down_revision = "20260808_approval_engine"
 branch_labels = None
 depends_on = None

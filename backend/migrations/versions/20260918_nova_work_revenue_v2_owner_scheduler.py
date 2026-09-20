@@ -1,7 +1,7 @@
 """Owner-scope scheduler unique period. V2 tables only. Not applied to production.
 
-Revision ID: 20260918_nova_work_revenue_v2_owner_scheduler
-Revises: 20260918_nova_work_revenue_v2_hardening
+Revision ID: 20260918_work_rev_owner_sched
+Revises: 20260918_work_rev_v2_hardening
 """
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260918_nova_work_revenue_v2_owner_scheduler"
-down_revision = "20260918_nova_work_revenue_v2_hardening"
+revision = "20260918_work_rev_owner_sched"
+down_revision = "20260918_work_rev_v2_hardening"
 branch_labels = None
 depends_on = None
 
