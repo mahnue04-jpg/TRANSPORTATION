@@ -1459,3 +1459,50 @@ def test_master_work_profile_tailors_resume_materials(client: TestClient) -> Non
     assert "work@example.com" in resume["body"]
     assert "Owner-approved experience preparing business documents" in resume["body"]
     assert "Remote operations assistant" in resume["body"]
+
+
+def test_application_package_review_is_read_only_and_blocks_bad_package(client) -> None:
+    headers = _headers()
+    opp = client.post(
+        "/api/nova/work/opportunities",
+        headers=headers,
+        json={
+            "organization_id": "ORG-DEMO",
+            "source": "manual",
+            "company_name": "Example Client",
+            "opportunity_title": "AI workflow automation project",
+            "description": "B2B AI workflow automation using Zapier and API integration.",
+            "requirements": "Deliver workflow map, tested automation, and documentation.",
+            "engagement_type": "contract",
+        },
+    ).json()
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={
+            "organization_id": "ORG-DEMO",
+            "opportunity_id": opp["opportunity_id"],
+            "applicant_party": "AMICOR",
+        },
+    )
+    assert app_resp.status_code == 200
+    application_id = app_resp.json()["application_id"]
+
+    review = client.get(
+        f"/api/nova/work/applications/{application_id}/package-review",
+        headers=headers,
+    )
+    assert review.status_code == 200
+    payload = review.json()
+    assert payload["external_submission"] is False
+    assert payload["financial_execution"] is False
+    assert payload["approval_state"] == "DRAFT"
+    assert payload["readiness_score"] <= 100
+
+    after = client.get(
+        f"/api/nova/work/applications/{application_id}",
+        headers=headers,
+    )
+    assert after.status_code == 200
+    assert after.json()["approval_state"] == "DRAFT"
+    assert after.json()["externally_submitted"] is False
