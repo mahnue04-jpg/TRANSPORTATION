@@ -1,15 +1,15 @@
 """Stripe Connect hosted onboarding status fields
 
-Revision ID: 20260818_stripe_connect_onboarding
-Revises: 20260809_simple_driver_application
+Revision ID: 20260818_stripe_connect_onboard
+Revises: 20260809_simple_driver_app
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260818_stripe_connect_onboarding"
-down_revision = "20260809_simple_driver_application"
+revision = "20260818_stripe_connect_onboard"
+down_revision = "20260809_simple_driver_app"
 branch_labels = None
 depends_on = None
 
