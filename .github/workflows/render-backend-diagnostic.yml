@@ -71,6 +71,7 @@ jobs:
       - name: Run Nova Work & Revenue regression
         env:
           DATABASE_URL: sqlite:///./test_nova_work_revenue_ci.db
+          AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
         run: |
           pytest \
             tests/test_nova_work_revenue.py \
