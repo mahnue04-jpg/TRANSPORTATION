@@ -1596,6 +1596,8 @@ def _ensure_health_isf_schema_impl() -> None:
                 conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN picked_up_at {datetime_sql}"))
             if "transporting_at" not in ride_columns:
                 conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN transporting_at {datetime_sql}"))
+            if "accepted_at" not in ride_columns:
+                conn.execute(text(f"ALTER TABLE health_isf_rides ADD COLUMN accepted_at {datetime_sql}"))
             if "round_trip_group_id" not in ride_columns:
                 conn.execute(text("ALTER TABLE health_isf_rides ADD COLUMN round_trip_group_id VARCHAR(36)"))
             if "trip_leg" not in ride_columns:
