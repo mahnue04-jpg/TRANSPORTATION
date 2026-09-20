@@ -73,3 +73,5 @@ jobs:
           exit 1
 
 # diagnostic revision: alembic-id-fix
+
+# diagnostic revision: index-name-fix
