@@ -85,3 +85,5 @@ jobs:
 # diagnostic revision: postgres-startup-fix
 
 # diagnostic revision: accepted-at-fix
+
+# diagnostic revision: legacy-datetime-fix
