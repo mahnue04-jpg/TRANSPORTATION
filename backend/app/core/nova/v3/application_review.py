@@ -47,7 +47,12 @@ def review_application_package(
     missing_materials = sorted(_REQUIRED_KINDS - set(by_kind))
 
     all_text = "\n".join(str(item.get("body") or "") for item in materials)
-    owner_input_count = all_text.count(OWNER_INPUT_REQUIRED)
+    owner_input_by_material = {
+        kind: str(item.get("body") or "").count(OWNER_INPUT_REQUIRED)
+        for kind, item in by_kind.items()
+        if str(item.get("body") or "").count(OWNER_INPUT_REQUIRED)
+    }
+    owner_input_count = sum(owner_input_by_material.values())
     risky_claims = [
         pattern
         for pattern in _RISKY_CLAIM_PATTERNS
@@ -97,7 +102,11 @@ def review_application_package(
 
     actions: list[str] = []
     if owner_input_count:
-        actions.append("Resolve OWNER INPUT REQUIRED fields using verified or owner-provided facts.")
+        kinds = ", ".join(sorted(owner_input_by_material))
+        actions.append(
+            "Resolve OWNER INPUT REQUIRED fields using verified or owner-provided facts"
+            + (f" in: {kinds}." if kinds else ".")
+        )
     if missing_materials:
         actions.append("Generate missing required application materials.")
     if risky_claims:
@@ -114,6 +123,7 @@ def review_application_package(
         "coverage_checks": coverage_checks,
         "missing_materials": missing_materials,
         "owner_input_markers": owner_input_count,
+        "owner_input_by_material": owner_input_by_material,
         "potential_unverified_claim_patterns": risky_claims,
         "blockers": blockers,
         "recommended_actions": actions,
