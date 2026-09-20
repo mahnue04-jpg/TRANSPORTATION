@@ -1731,11 +1731,11 @@ def _ensure_health_isf_schema_impl() -> None:
             if "transition_reason" not in dispatch_log_columns:
                 conn.execute(text("ALTER TABLE health_isf_dispatch_logs ADD COLUMN transition_reason VARCHAR(256)"))
             if "transition_timestamp" not in dispatch_log_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_logs ADD COLUMN transition_timestamp DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_dispatch_logs ADD COLUMN transition_timestamp {datetime_sql}"))
             if "emitted_event_name" not in dispatch_log_columns:
                 conn.execute(text("ALTER TABLE health_isf_dispatch_logs ADD COLUMN emitted_event_name VARCHAR(128)"))
             if "emitted_timestamp" not in dispatch_log_columns:
-                conn.execute(text("ALTER TABLE health_isf_dispatch_logs ADD COLUMN emitted_timestamp DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_dispatch_logs ADD COLUMN emitted_timestamp {datetime_sql}"))
             if "websocket_delivery_target" not in dispatch_log_columns:
                 conn.execute(text("ALTER TABLE health_isf_dispatch_logs ADD COLUMN websocket_delivery_target VARCHAR(256)"))
             if "assignment_transition_source" not in dispatch_log_columns:
@@ -1758,13 +1758,13 @@ def _ensure_health_isf_schema_impl() -> None:
             if "occurrence_count" not in alert_columns:
                 conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 1"))
             if "last_seen_at" not in alert_columns:
-                conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN last_seen_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_operational_alerts ADD COLUMN last_seen_at {datetime_sql}"))
             if "acknowledged_by_user_id" not in alert_columns:
                 conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN acknowledged_by_user_id VARCHAR(36)"))
             if "acknowledged_at" not in alert_columns:
-                conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN acknowledged_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_operational_alerts ADD COLUMN acknowledged_at {datetime_sql}"))
             if "escalated_at" not in alert_columns:
-                conn.execute(text("ALTER TABLE health_isf_operational_alerts ADD COLUMN escalated_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE health_isf_operational_alerts ADD COLUMN escalated_at {datetime_sql}"))
 
         # Idempotency: one document type per completed ride.
         if "health_isf_trip_documents" in table_names:
