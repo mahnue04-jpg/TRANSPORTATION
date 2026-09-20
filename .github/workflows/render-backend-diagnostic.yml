@@ -62,12 +62,18 @@ jobs:
           uvicorn app.main:app --host 127.0.0.1 --port 8011 > /tmp/amicor.log 2>&1 &
           pid=$!
           for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:8011/api/health/readiness; then
+            status=$(curl -sS -o /tmp/readiness.json -w "%{http_code}" http://127.0.0.1:8011/api/health/readiness || true)
+            if [ "$status" = "200" ]; then
+              cat /tmp/readiness.json
               kill $pid || true
               exit 0
             fi
             sleep 1
           done
+          echo "Final readiness response:"
+          cat /tmp/readiness.json || true
+          echo
+          echo "Application log:"
           cat /tmp/amicor.log
           kill $pid || true
           exit 1
