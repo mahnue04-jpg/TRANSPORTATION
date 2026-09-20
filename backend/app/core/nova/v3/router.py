@@ -15,6 +15,7 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
+from app.core.nova.v3.work_packets import build_work_packet
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.live_discovery import search_remote_jobs
@@ -80,6 +81,14 @@ class LiveJobDiscoverIn(LiveJobSearchIn):
 
 class LiveJobPrepareIn(LiveJobDiscoverIn):
     prepare_limit: int = Field(default=3, ge=1, le=5)
+
+
+class WorkPacketIn(OrgIn):
+    opportunity_title: str
+    company_name: str = ""
+    description: str = ""
+    requirements: str = ""
+    skills_required: list[str] = Field(default_factory=list)
 
 
 class ManualOpportunityIn(OrgIn):
@@ -266,6 +275,16 @@ def v3_execution_playbook(capability_id: str, user: UserContext = Depends(get_cu
     if row is None:
         raise HTTPException(status_code=404, detail="Unknown Nova capability")
     return row
+
+
+@router.post("/work-packets/preview")
+def v3_work_packet_preview(
+    payload: WorkPacketIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Build an internal-only execution packet without taking external action."""
+    _org(user, payload.organization_id)
+    return build_work_packet(payload.model_dump())
 
 
 @router.get("/connectors")
