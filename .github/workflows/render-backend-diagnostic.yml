@@ -108,3 +108,5 @@ jobs:
 # diagnostic revision: core-ride-columns-fix
 
 # diagnostic revision: nova-v3-id-sync
+
+# diagnostic revision: stripe-regression
