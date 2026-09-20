@@ -170,12 +170,14 @@ def ensure_payments_test_schema() -> None:
 
 
 def ensure_customer_payment_tables() -> None:
-    """Idempotent production-safe create for customer payment ledger tables.
+    """Compatibility hook for older Render release commands.
 
-    Used by Render releaseCommand when Alembic history was stamped past the
-    payment revision without applying the table DDL.
+    Production schema is Alembic-owned. The customer-payment migration exists,
+    so Render releases must not perform a second table-creation pass here.
+    Keep this function as a no-op so older configured release commands can
+    import and call it safely until the Render service command is simplified.
     """
-    _create_payment_tables_if_missing(reason="release")
+    logger.info("payments schema managed by Alembic; release compatibility hook is a no-op")
 
 
 def _create_payment_tables_if_missing(*, reason: str) -> None:
