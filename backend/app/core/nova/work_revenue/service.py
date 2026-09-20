@@ -23,6 +23,7 @@ from app.core.nova.work_revenue.lifecycle import (
     queue_status_for,
 )
 from app.core.nova.work_revenue.materials import generate_drafts, missing_owner_facts, owner_input_checklist, sanitize_untrusted
+from app.core.nova.v3.application_review import review_application_package
 from app.core.nova.work_revenue.models import (
     NovaWorkApplication,
     NovaWorkAuditEvent,
@@ -1113,6 +1114,58 @@ def create_application(
     return application
 
 
+
+def get_application_package_review(
+    db: Session,
+    application_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    """Review one application package without changing approval or external state."""
+    application = get_application(
+        db,
+        application_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    opportunity = get_opportunity(
+        db,
+        application.opportunity_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    materials = (
+        db.query(NovaWorkMaterial)
+        .filter(
+            NovaWorkMaterial.application_id == application.application_id,
+            NovaWorkMaterial.organization_id == organization_id,
+        )
+        .order_by(NovaWorkMaterial.created_at.asc())
+        .all()
+    )
+    material_payload = [
+        {
+            "kind": row.kind,
+            "title": row.title,
+            "body": row.body,
+            "status": row.status,
+            "owner_input_required": bool(row.owner_input_required),
+            "externally_submitted": False,
+        }
+        for row in materials
+    ]
+    review = review_application_package(_opportunity_payload(opportunity), material_payload)
+    return {
+        **review,
+        "application_id": application.application_id,
+        "opportunity_id": opportunity.opportunity_id,
+        "approval_state": application.approval_state,
+        "approved_for_future_submission": bool(application.approved_for_future_submission),
+        "externally_submitted": False,
+    }
+
+
 def mark_ready_for_review(
     db: Session,
     application_id: str,
@@ -1123,6 +1176,17 @@ def mark_ready_for_review(
     application = get_application(db, application_id, organization_id=organization_id, user=user)
     if application.approval_state not in {"DRAFT", "NEEDS_CHANGES"}:
         raise NovaWorkError("Only DRAFT or NEEDS_CHANGES applications can be sent for owner review")
+    package_review = get_application_package_review(
+        db,
+        application_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    if package_review["status"] == "BLOCKED":
+        raise NovaWorkError(
+            "Package review is BLOCKED; resolve capability, execution, or truthfulness blockers before owner review",
+            status_code=409,
+        )
     previous = application.approval_state
     application.approval_state = "READY_FOR_OWNER_REVIEW"
     application.updated_at = now()
