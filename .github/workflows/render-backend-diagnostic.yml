@@ -1,0 +1,73 @@
+name: Render backend diagnostic
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "render.yaml"
+      - ".github/workflows/render-backend-diagnostic.yml"
+  workflow_dispatch:
+
+jobs:
+  backend-diagnostic:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amicor
+          POSTGRES_PASSWORD: amicor
+          POSTGRES_DB: amicor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amicor -d amicor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://amicor:amicor@127.0.0.1:5432/amicor
+      APP_ENV: production
+      AMICOR_ENVIRONMENT: production
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      HEALTH_ISF_STRIPE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade -r requirements.txt
+
+      - name: Run Alembic upgrade
+        run: alembic upgrade heads
+
+      - name: Import app
+        run: python -c "import app.main; print('app import ok')"
+
+      - name: Start app and probe readiness
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8011 > /tmp/amicor.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8011/api/health/readiness; then
+              kill $pid || true
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/amicor.log
+          kill $pid || true
+          exit 1
