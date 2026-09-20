@@ -13,6 +13,7 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
+from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.live_discovery import search_remote_jobs
@@ -234,6 +235,17 @@ def v3_guardrails(user: UserContext = Depends(get_current_user_context)):
             "error_category": None if diag.get("live_discovery_enabled") else "flag_off",
             "auto_submit": False,
         },
+    }
+
+
+@router.get("/capabilities")
+def v3_capabilities(user: UserContext = Depends(get_current_user_context)):
+    """Read-only catalog of work Nova can perform and target in discovery."""
+    return {
+        "capabilities": capability_catalog(),
+        "search_queries": capability_search_queries(),
+        "external_submission": False,
+        "financial_execution": False,
     }
 
 
