@@ -281,7 +281,10 @@ def test_tenant_isolation_for_queue_recon_and_facts(client: TestClient) -> None:
     assert hidden_eng.status_code == 404
     other_facts = client.get("/api/nova/work/owner-facts", headers=other).json()
     other_row = next(item for item in other_facts["facts"] if item["fact_id"] == "service_areas")
-    assert other_row["value_display"] != "Owner-only Block2 area"
+    # Master Work Profile is org-scoped: same-org operators share the business profile.
+    # Queue/engagement/revenue isolation above remains per-owner.
+    assert other_row["value_display"] == "Owner-only Block2 area"
+    assert other_row["value_status"] == "PROVIDED"
     foreign = client.get("/api/nova/work/queue", headers=owner, params={"organization_id": "org-not-the-caller"})
     assert foreign.status_code == 403
 
