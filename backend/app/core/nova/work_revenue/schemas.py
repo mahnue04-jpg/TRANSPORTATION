@@ -703,6 +703,21 @@ class DeliverableConfirm(BaseModel):
     notes: str | None = None
 
 
+class OwnerCompletionRequest(BaseModel):
+    organization_id: str | None = None
+    owner_notes: str | None = Field(default=None, max_length=2000)
+
+
+class OwnerInvoicePrepRequest(BaseModel):
+    organization_id: str | None = None
+    quantity: float = Field(gt=0, le=1_000_000_000)
+    rate: float = Field(gt=0, le=1_000_000_000)
+    currency: str = Field(default="USD", max_length=12)
+    invoice_required: bool = True
+    record_estimated_revenue: bool = True
+    owner_notes: str | None = Field(default=None, max_length=2000)
+
+
 class RevenueEntryOut(BaseModel):
     entry_id: str
     engagement_id: str | None = None
