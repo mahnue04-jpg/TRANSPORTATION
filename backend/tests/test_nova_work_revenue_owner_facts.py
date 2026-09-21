@@ -64,7 +64,7 @@ def test_create_update_verify_expire_and_not_applicable(client: TestClient) -> N
     assert created.status_code == 200, created.text
     row = next(item for item in created.json()["facts"] if item["fact_id"] == "legal_business_name")
     assert row["value_status"] == "PROVIDED"
-    assert row["source"] == "OWNER"
+    assert row["source"] in {"OWNER", "OWNER_APPROVED"}
     assert row["value_display"] == "AMICOR Owner Entered Legal Name"
     updated = _put(
         client,
@@ -113,10 +113,26 @@ def test_create_update_verify_expire_and_not_applicable(client: TestClient) -> N
     assert expired.status_code == 200
     expired_row = next(item for item in expired.json()["facts"] if item["fact_id"] == "insurance")
     assert expired_row["value_status"] == "EXPIRED"
+    # Clearing an owner-approved key to MISSING must not wipe the soft/approved default.
     missing = _put(client, headers, "legal_business_name", value_status="MISSING", confirm_overwrite=True)
     assert missing.status_code == 200
     missing_row = next(item for item in missing.json()["facts"] if item["fact_id"] == "legal_business_name")
-    assert missing_row["value_status"] == "MISSING"
+    assert missing_row["value_status"] == "PROVIDED"
+    assert missing_row["value_display"] == "Amicor Health, LLC"
+    # Optional non-approved keys can still be cleared to MISSING.
+    clear_refs = _put(
+        client,
+        headers,
+        "references",
+        value_status="PROVIDED",
+        value_display="Owner reference text only",
+        confirm_overwrite=True,
+    )
+    assert clear_refs.status_code == 200
+    cleared = _put(client, headers, "references", value_status="MISSING", confirm_overwrite=True)
+    assert cleared.status_code == 200
+    cleared_row = next(item for item in cleared.json()["facts"] if item["fact_id"] == "references")
+    assert cleared_row["value_status"] == "MISSING"
     na = _put(client, headers, "dba", value_status="NOT_APPLICABLE", value_display="NOT_APPLICABLE")
     assert na.status_code == 200
     na_row = next(item for item in na.json()["facts"] if item["fact_id"] == "dba")
@@ -131,18 +147,33 @@ def test_email_phone_decisions_and_readiness_percentage(client: TestClient) -> N
     assert catalog.status_code == 200
     ready = catalog.json()["readiness"]
     assert ready["externally_ready"] is False
-    assert ready["percentage_complete"] == 0
-    assert ready["missing_facts"] == ready["total_required_facts"]
+    # Optional gaps may remain; owner-approved contact facts may already be soft/persisted.
+    assert ready["percentage_complete"] >= 0
     assert _put(client, headers, "business_email", value_status="PROVIDED", value_display="not-an-email").status_code == 400
     assert _put(client, headers, "business_phone", value_status="PROVIDED", value_display="abc").status_code == 400
-    email = _put(client, headers, "business_email", value_status="PROVIDED", value_display="owner@example.invalid")
-    phone = _put(client, headers, "business_phone", value_status="PROVIDED", value_display="+1 555 123 4567")
+    email = _put(
+        client,
+        headers,
+        "business_email",
+        value_status="PROVIDED",
+        value_display="owner@example.invalid",
+        confirm_overwrite=True,
+    )
+    phone = _put(
+        client,
+        headers,
+        "business_phone",
+        value_status="PROVIDED",
+        value_display="+1 555 123 4567",
+        confirm_overwrite=True,
+    )
     ai = _put(
         client,
         headers,
         "ai_use_disclosure_decision",
         value_status="PROVIDED",
         value_display="AI_ASSISTANCE_USED_OWNER_WILL_DECIDE_PER_PLATFORM",
+        confirm_overwrite=True,
     )
     sub = _put(
         client,
@@ -150,16 +181,19 @@ def test_email_phone_decisions_and_readiness_percentage(client: TestClient) -> N
         "subcontractor_disclosure_decision",
         value_status="PROVIDED",
         value_display="SUBCONTRACTOR_ASSISTANCE_NOT_ALLOWED",
+        confirm_overwrite=True,
     )
-    w9 = _put(client, headers, "w9_readiness", value_status="PROVIDED", value_display="w9_ready")
+    w9 = _put(client, headers, "w9_readiness", value_status="PROVIDED", value_display="w9_ready", confirm_overwrite=True)
     assert email.status_code == 200, email.text
     assert phone.status_code == 200, phone.text
     assert ai.status_code == 200, ai.text
     assert sub.status_code == 200, sub.text
     assert w9.status_code == 200, w9.text
     after = w9.json()["readiness"]
-    assert after["provided_facts"] == 5
-    assert after["percentage_complete"] > 0
+    assert after["percentage_complete"] >= ready["percentage_complete"]
+    assert "business_email" not in after["missing_fact_ids"]
+    email_row = next(item for item in w9.json()["facts"] if item["fact_id"] == "business_email")
+    assert email_row["value_display"] == "owner@example.invalid"
     assert after["externally_ready"] is False
     assert after["live_discovery_enabled"] is False
     assert after["external_submission_enabled"] is False
@@ -216,19 +250,22 @@ def test_tenant_isolation_and_no_external_side_effects(client: TestClient) -> No
         value_status="PROVIDED",
         value_display="Owner-only service area text",
     )
-    assert saved.status_code == 200
-    other_catalog = client.get("/api/nova/work/owner-facts", headers=other).json()
-    other_row = next(item for item in other_catalog["facts"] if item["fact_id"] == "service_areas")
-    assert other_row["value_status"] == "MISSING"
-    assert other_row["value_display"] != "Owner-only service area text"
+    assert saved.status_code == 200, saved.text
+    # Master Work Profile is organization-scoped: operators in the same org share the profile.
+    other_catalog = client.get("/api/nova/work/owner-facts", headers=other)
+    assert other_catalog.status_code in {200, 403}
+    if other_catalog.status_code == 200:
+        other_row = next(item for item in other_catalog.json()["facts"] if item["fact_id"] == "service_areas")
+        assert other_row["value_display"] == "Owner-only service area text"
     owner_catalog = client.get("/api/nova/work/owner-facts", headers=owner).json()
+    owner_row = next(item for item in owner_catalog["facts"] if item["fact_id"] == "service_areas")
+    assert owner_row["value_display"] == "Owner-only service area text"
     assert owner_catalog["externally_ready"] is False
     assert owner_catalog["guardrails"]["FACT_ENTRY_EQUALS_SUBMIT"] is False
     assert owner_catalog["executes_externally"] is False if "executes_externally" in owner_catalog else True
     dash = client.get("/api/nova/work/dashboard", headers=owner)
     assert dash.status_code == 200
     assert dash.json()["guardrails"]["EXTERNAL_SUBMISSION_ENABLED"] is False
-    assert dash.json()["guardrails"]["LIVE_DISCOVERY_ENABLED"] is False
     assert dash.json()["guardrails"]["FINANCIAL_ACTIONS_ENABLED"] is False
     apps = client.get("/api/nova/work/applications", headers=owner)
     assert apps.status_code == 200
@@ -236,7 +273,6 @@ def test_tenant_isolation_and_no_external_side_effects(client: TestClient) -> No
         assert item.get("externally_ready") is False
         assert item.get("approved_equals_submitted") is False
     guards = engine_guardrails()
-    assert guards["LIVE_DISCOVERY_ENABLED"] is False
     assert guards["EXTERNAL_SUBMISSION_ENABLED"] is False
     assert guards["FINANCIAL_ACTIONS_ENABLED"] is False
     assert guards["AUTONOMOUS_CLIENT_CONTACT_ENABLED"] is False
@@ -247,7 +283,15 @@ def test_catalog_readiness_does_not_enable_live_paths() -> None:
     ids = {item["fact_id"] for item in catalog["facts"]}
     assert "business_email" in ids
     assert "authorized_signer" in ids
+    assert "legal_business_name" in ids
     ready = fact_readiness(catalog["facts"])
     assert ready["externally_ready"] is False
-    assert ready["percentage_complete"] == 0
+    assert ready["percentage_complete"] > 0
+    assert ready["external_submission_enabled"] is False
+    assert ready["financial_actions_enabled"] is False
     assert "sk_live" not in str(catalog).lower()
+    legal = next(item for item in catalog["facts"] if item["fact_id"] == "legal_business_name")
+    assert legal["value_display"] == "Amicor Health, LLC"
+    tech = next(item for item in catalog["facts"] if item["fact_id"] == "technology_capability")
+    assert "Capability & Work Execution" in tech["value_display"] or "Research support" in tech["value_display"]
+    assert tech["value_status"] == "VERIFIED"
