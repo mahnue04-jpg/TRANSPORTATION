@@ -1967,6 +1967,90 @@ def create_engagement(
     return _engagement_out(row, created_tasks)
 
 
+def start_autonomous_internal_work(
+    db: Session,
+    opportunity_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    """Create an internal engagement and SAFE_INTERNAL Nova tasks for one opportunity."""
+    from app.core.nova.v3.autonomous_execution import build_autonomous_execution_session
+
+    opportunity = get_opportunity(db, opportunity_id, organization_id=organization_id, user=user)
+    session = build_autonomous_execution_session(_opportunity_payload(opportunity))
+    if not session.get("autonomous_execution_ready"):
+        reason = str(session.get("reason") or "capability or input requirements are unresolved")
+        raise NovaWorkError(f"Autonomous internal work is blocked: {reason}", status_code=409)
+
+    engagement = create_engagement(
+        db,
+        EngagementCreate(
+            opportunity_id=opportunity.opportunity_id,
+            client_name=opportunity.company_name,
+            service=opportunity.opportunity_title,
+            frequency="one_time",
+            title=f"Autonomous internal work: {opportunity.opportunity_title}"[:220],
+            service_type=str(session.get("primary_capability_id") or "nova_internal_work")[:80],
+            notes=(
+                "Owner-triggered Nova autonomous internal work session. "
+                "No external submission, client contact, contract acceptance, deployment, invoice sending, or financial execution."
+            ),
+            priority=opportunity.priority or "normal",
+            source="nova_autonomous",
+        ),
+        organization_id=organization_id,
+        user=user,
+    )
+
+    execution_stage = next(
+        (row for row in session.get("stages") or [] if row.get("stage") == "AUTONOMOUS_INTERNAL_EXECUTION"),
+        {},
+    )
+    created_safe_tasks = 0
+    for row in execution_stage.get("tasks") or []:
+        if not row.get("nova_may_advance") or row.get("execution_class") != "SAFE_INTERNAL":
+            continue
+        create_task(
+            db,
+            engagement["engagement_id"],
+            TaskCreate(
+                title=str(row.get("task") or "Nova internal task")[:220],
+                responsible_party="NOVA",
+                classification="NOVA",
+                status="READY",
+                priority=opportunity.priority or "normal",
+                review_required=True,
+                description=(
+                    "Generated from an owner-triggered autonomous execution session. "
+                    "Internal work only; external action remains blocked."
+                ),
+            ),
+            organization_id=organization_id,
+            user=user,
+        )
+        created_safe_tasks += 1
+
+    final_engagement = get_engagement(
+        db,
+        engagement["engagement_id"],
+        organization_id=organization_id,
+        user=user,
+    )
+    return {
+        "status": "AUTONOMOUS_INTERNAL_WORK_STARTED",
+        "opportunity_id": opportunity.opportunity_id,
+        "engagement": final_engagement,
+        "autonomous_execution": session,
+        "safe_tasks_created": created_safe_tasks,
+        "external_submission": False,
+        "client_contact": False,
+        "contract_acceptance": False,
+        "production_deploy": False,
+        "financial_execution": False,
+    }
+
+
 def get_engagement(db: Session, engagement_id: str, *, organization_id: str, user: UserContext) -> dict[str, Any]:
     _ensure()
     query = db.query(NovaWorkEngagement).filter(

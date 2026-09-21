@@ -322,7 +322,7 @@
       (cap.vendor_contract_compatibility ? "<div>Vendor/contract compatibility: " + escapeHtml(cap.vendor_contract_compatibility) + "</div>" : "") +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
       "<div>Owner review needed: " + review + "</div>" +
-      "<div class=\"command-actions\">" + actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + "</div></div>";
+      "<div class=\"command-actions\">" + actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + " " + actionButton("autonomous-start", row.opportunity_id, "Start Autonomous Internal Work") + "</div></div>";
   }
   function applicationItem(row) {
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
@@ -754,6 +754,10 @@
         var safeCount = tasks.filter(function (row) { return row.nova_may_advance; }).length;
         showBanner("Autonomous preview ready: " + vertical + " · " + safeCount + " internal task(s) Nova may advance · owner handoff remains required before external action.", true);
       }
+    } else if (action === "autonomous-start") {
+      var started = await api("/api/nova/work/opportunities/" + id + "/autonomous-start", { method: "POST" });
+      var safeTasks = started.safe_tasks_created || 0;
+      showBanner("Autonomous internal work started · " + safeTasks + " safe Nova task(s) created · external contact, contracts, production release, invoicing, and money movement remain blocked.", true);
     } else if (action === "engage") {
       var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
       var opp = ((detail.tracker || {}).opportunity) || {};

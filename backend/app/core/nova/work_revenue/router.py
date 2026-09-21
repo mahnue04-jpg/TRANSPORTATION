@@ -471,6 +471,25 @@ def list_audit(
     ]
 
 
+@router.post("/opportunities/{opportunity_id}/autonomous-start")
+def start_autonomous_internal_work(
+    opportunity_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner-triggered creation of internal-only Nova autonomous work."""
+    try:
+        return service.start_autonomous_internal_work(
+            db,
+            opportunity_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
 @router.get("/engagements")
 def list_engagements(
     organization_id: str | None = None,
