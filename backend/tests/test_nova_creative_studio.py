@@ -271,6 +271,123 @@ def test_export_contains_no_secrets_and_no_publishing():
     assert exported["export"]["url"] is None
 
 
+def test_generation_quality_amicor_tiktok_contract():
+    """AMICOR example: natural copy, no topic paste, useful hashtags, brand casing."""
+    from app.core.nova.creative_studio.generation import assemble_short_video, generate_content_pack
+
+    topic = "How AMICOR Nova helps small business owners save time and get work done with AI"
+    audience = "small business owners"
+    tone = "professional and friendly"
+    cta = "Learn more about AMICOR Nova"
+    pack = generate_content_pack(
+        topic=topic,
+        audience=audience,
+        objective="awareness",
+        tone=tone,
+        platform="TikTok",
+        cta=cta,
+        duration_target=30,
+        brand_name="AMICOR",
+    )
+    hook = pack["hook"]
+    assert "What if How" not in hook
+    assert topic not in hook
+    assert topic not in pack["short_script"]
+    assert topic not in pack["long_caption"]
+    assert topic not in pack["voiceover_script"]
+    assert "Point:" not in pack["short_script"]
+    assert "Proof angle:" not in pack["short_script"]
+    assert "Hook:" not in pack["short_script"]
+    assert "AMICOR" in pack["title"]
+    assert "AI" in pack["title"]
+    assert "Amicor Nova Helps" not in pack["title"]
+    assert " With Ai" not in pack["title"]
+    weak = {"#how", "#helps", "#small", "#get", "#done", "#with", "#and"}
+    tags_l = {t.lower() for t in pack["hashtags"]}
+    assert not (tags_l & weak)
+    assert any("amicor" in t.lower() for t in pack["hashtags"])
+    assert any("ai" in t.lower() or "business" in t.lower() for t in pack["hashtags"])
+    assert pack["subtitle_caption_text"] == pack["voiceover_script"]
+    words = len(pack["voiceover_script"].split())
+    assert 12 <= words <= 90
+    assert pack["media_generated"] is False
+
+    board = assemble_short_video(
+        topic=topic,
+        audience=audience,
+        platform="TikTok",
+        duration_target=30,
+        style="Modern, professional, energetic",
+        tone=tone,
+        cta=cta,
+        brand_name="AMICOR",
+    )
+    assert len(board["scenes"]) >= 3
+    topic_hits = sum(1 for s in board["scenes"] if topic in s["description"] or topic in s["voiceover_text"])
+    assert topic_hits == 0
+    assert all(s["subtitle_text"] == s["voiceover_text"] for s in board["scenes"])
+    assert board["media_generated"] is False
+    assert board["video_provider_status"] == CONFIG_REQUIRED
+
+    # Service path still wires through.
+    svc = _svc()
+    project = svc.create_project(
+        "owner-a",
+        {
+            "title": "AMICOR Creative Test",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+            "audience": audience,
+            "tone": tone,
+        },
+    )
+    svc.create_brief(
+        "owner-a",
+        {
+            "project_id": project["id"],
+            "topic": topic,
+            "cta": cta,
+            "style": "Modern, professional, energetic",
+            "audience": audience,
+            "tone": tone,
+        },
+    )
+    script = svc.generate_script("owner-a", project["id"])
+    assert "What if How" not in script["pack"]["hook"]
+    caption = svc.generate_caption("owner-a", project["id"])
+    assert topic not in caption["pack"]["long_caption"]
+    story = svc.generate_storyboard("owner-a", project["id"])
+    assert all(topic not in s["voiceover_text"] for s in story["scenes"])
+
+
+def test_linkedin_copy_is_more_professional_than_tiktok():
+    from app.core.nova.creative_studio.generation import generate_content_pack
+
+    topic = "How AMICOR Nova helps small business owners save time and get work done with AI"
+    tiktok = generate_content_pack(
+        topic=topic,
+        audience="small business owners",
+        objective="awareness",
+        tone="professional and friendly",
+        platform="TikTok",
+        cta="Learn more about AMICOR Nova",
+        duration_target=30,
+    )
+    linkedin = generate_content_pack(
+        topic=topic,
+        audience="small business owners",
+        objective="awareness",
+        tone="professional and friendly",
+        platform="LinkedIn",
+        cta="Learn more about AMICOR Nova",
+        duration_target=30,
+    )
+    assert tiktok["hook"].startswith("What if")
+    assert not linkedin["hook"].startswith("What if")
+    assert "AMICOR" in linkedin["hook"] or "AMICOR" in linkedin["title"]
+
+
 def test_create_project_empty_title_rejected_by_backend():
     svc = _svc()
     with pytest.raises(CreativeStudioError) as exc:
