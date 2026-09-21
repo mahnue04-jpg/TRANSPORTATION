@@ -404,6 +404,7 @@
       var items = await api("/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs");
       target.innerHTML = listHtml(items, "No source data attached.", function (row) {
         return "<div class=\"muted\"><strong>" + escapeHtml(row.original_filename) + "</strong>" +
+          " · " + escapeHtml(row.input_kind || "SOURCE_DATA") +
           " · " + escapeHtml(row.status) + " · " + escapeHtml(row.file_size) + " bytes " +
           "<button type=\"button\" class=\"secondary\" data-work-input-download=\"" +
           escapeHtml(engagementId) + "\" data-input-id=\"" + escapeHtml(row.input_id) +
