@@ -44,26 +44,11 @@ def approve_internal_work(
     if not deliverables:
         raise NovaWorkError("No deliverables exist for owner review", status_code=409)
 
-    approved_deliverables: list[str] = []
-    pending_deliverables: list[str] = []
-    for item in deliverables:
-        if item.delivery_status == "READY_FOR_REVIEW":
-            updated = ops.update_deliverable(
-                db,
-                item.deliverable_id,
-                DeliverableUpdate(
-                    owner_approved=True,
-                    notes=payload.owner_notes,
-                ),
-                organization_id=organization_id,
-                user=user,
-            )
-            approved_deliverables.append(updated.deliverable_id)
-        elif item.delivery_status in {"OWNER_APPROVED", "CONFIRMED_DELIVERED"}:
-            approved_deliverables.append(item.deliverable_id)
-        else:
-            pending_deliverables.append(item.deliverable_id)
-
+    pending_deliverables = [
+        item.deliverable_id
+        for item in deliverables
+        if item.delivery_status not in {"READY_FOR_REVIEW", "OWNER_APPROVED", "CONFIRMED_DELIVERED"}
+    ]
     if pending_deliverables:
         raise NovaWorkError(
             "All deliverables must be READY_FOR_REVIEW before owner completion",
@@ -77,6 +62,41 @@ def approve_internal_work(
         engagement_id=engagement_id,
         limit=200,
     )
+    invalid_tasks = [
+        task for task in tasks
+        if task["status"] not in {"COMPLETE", "CANCELLED", "OWNER_REVIEW", "NOT_STARTED"}
+        or (
+            task["status"] == "NOT_STARTED"
+            and not (
+                task.get("classification") != "NOVA"
+                and "owner review" in str(task.get("title") or "").strip().lower()
+            )
+        )
+    ]
+    if invalid_tasks:
+        raise NovaWorkError(
+            "Internal work is not ready for owner completion: "
+            + ", ".join(str(task.get("title") or task["task_id"]) for task in invalid_tasks[:8]),
+            status_code=409,
+        )
+
+    approved_deliverables: list[str] = []
+    for item in deliverables:
+        if item.delivery_status == "READY_FOR_REVIEW":
+            updated = ops.update_deliverable(
+                db,
+                item.deliverable_id,
+                DeliverableUpdate(
+                    owner_approved=True,
+                    notes=payload.owner_notes,
+                ),
+                organization_id=organization_id,
+                user=user,
+            )
+            approved_deliverables.append(updated.deliverable_id)
+        else:
+            approved_deliverables.append(item.deliverable_id)
+
     completed_tasks: list[str] = []
 
     # Complete Nova review tasks first so owner-review dependencies can resolve.
@@ -221,6 +241,8 @@ def prepare_invoice_support(
         raise NovaWorkError("No owner-approved deliverables are available for invoice support", status_code=409)
 
     subtotal = round(float(payload.quantity) * float(payload.rate), 2)
+    if subtotal > 1_000_000_000:
+        raise NovaWorkError("Invoice-support subtotal exceeds the allowed maximum", status_code=422)
     existing_invoices = [
         item for item in managed.list_invoice_supports(
             db, organization_id=organization_id, user=user, limit=200
