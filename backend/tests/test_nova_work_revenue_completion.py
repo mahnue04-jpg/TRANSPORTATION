@@ -317,8 +317,9 @@ def test_owner_actions_facts_disclosure_and_platform_policy(client: TestClient) 
     assert action.json()["executes_externally"] is False
     facts = client.get("/api/nova/work/owner-facts", headers=headers)
     assert facts.status_code == 200
-    missing = [item for item in facts.json()["facts"] if item["fact_id"] == "legal_business_name"][0]
-    assert missing["value_status"] == "MISSING"
+    baseline = [item for item in facts.json()["facts"] if item["fact_id"] == "legal_business_name"][0]
+    assert baseline["value_status"] == "PROVIDED"
+    assert baseline["value_display"] == "Amicor Health, LLC"
     updated = client.put(
         "/api/nova/work/owner-facts/legal_business_name",
         headers=headers,
