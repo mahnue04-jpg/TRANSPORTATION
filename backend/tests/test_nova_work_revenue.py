@@ -2263,6 +2263,12 @@ def test_void_invoice_support_removes_only_matching_test_draft_from_active_total
     )
     assert complete.status_code == 200, complete.text
 
+    baseline = client.get("/api/nova/work/reconciliation", headers=headers)
+    assert baseline.status_code == 200, baseline.text
+    baseline_estimated = float(baseline.json()["estimated_amount"])
+    baseline_billed = float(baseline.json()["invoice_support_amount"])
+    baseline_received = float(baseline.json()["owner_confirmed_received"])
+
     one = client.post(
         f"/api/nova/work/engagements/{engagement_id}/prepare-invoice-support",
         headers=headers,
@@ -2281,9 +2287,9 @@ def test_void_invoice_support_removes_only_matching_test_draft_from_active_total
 
     before = client.get("/api/nova/work/reconciliation", headers=headers)
     assert before.status_code == 200, before.text
-    assert before.json()["estimated_amount"] == 101
-    assert before.json()["invoice_support_amount"] == 101
-    assert before.json()["owner_confirmed_received"] == 0
+    assert before.json()["estimated_amount"] == baseline_estimated + 101
+    assert before.json()["invoice_support_amount"] == baseline_billed + 101
+    assert before.json()["owner_confirmed_received"] == baseline_received
 
     voided = client.post(
         f"/api/nova/work/invoice-support/{one_id}/void",
@@ -2301,9 +2307,9 @@ def test_void_invoice_support_removes_only_matching_test_draft_from_active_total
 
     after = client.get("/api/nova/work/reconciliation", headers=headers)
     assert after.status_code == 200, after.text
-    assert after.json()["estimated_amount"] == 100
-    assert after.json()["invoice_support_amount"] == 100
-    assert after.json()["owner_confirmed_received"] == 0
+    assert after.json()["estimated_amount"] == baseline_estimated + 100
+    assert after.json()["invoice_support_amount"] == baseline_billed + 100
+    assert after.json()["owner_confirmed_received"] == baseline_received
 
     invoices = client.get("/api/nova/work/invoice-support", headers=headers)
     assert invoices.status_code == 200, invoices.text
@@ -2332,8 +2338,8 @@ def test_void_invoice_support_removes_only_matching_test_draft_from_active_total
 
     final_recon = client.get("/api/nova/work/reconciliation", headers=headers)
     assert final_recon.status_code == 200, final_recon.text
-    assert final_recon.json()["estimated_amount"] == 100
-    assert final_recon.json()["invoice_support_amount"] == 100
+    assert final_recon.json()["estimated_amount"] == baseline_estimated + 100
+    assert final_recon.json()["invoice_support_amount"] == baseline_billed + 100
 
 
 def test_void_invoice_support_ui_is_auditable_and_non_destructive() -> None:
