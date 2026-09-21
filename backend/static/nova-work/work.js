@@ -767,7 +767,11 @@
               (canVoid
                 ? "<div class=\"action-row\"><button type=\"button\" class=\"secondary\" data-void-invoice=\"" +
                   escapeHtml(row.invoice_support_id) + "\">Void Draft</button></div>"
-                : "<div class=\"muted\">Historical/archived. Excluded from active billed-draft totals.</div>") +
+                : row.status === "ARCHIVED"
+                  ? "<div class=\"action-row\"><button type=\"button\" class=\"secondary\" data-restore-invoice=\"" +
+                    escapeHtml(row.invoice_support_id) + "\">Restore Draft</button></div>" +
+                    "<div class=\"muted\">Historical/archived. Excluded from active billed-draft totals.</div>"
+                  : "<div class=\"muted\">Historical/archived. Excluded from active billed-draft totals.</div>") +
               "</div>";
           });
         }
@@ -950,6 +954,32 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var restoreButton = event.target && event.target.closest ? event.target.closest("[data-restore-invoice]") : null;
+    if (restoreButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var restoreId = restoreButton.getAttribute("data-restore-invoice") || "";
+      if (!restoreId) return;
+      try {
+        var restored = await api("/api/nova/work/invoice-support/" + encodeURIComponent(restoreId) + "/restore", {
+          method: "POST",
+          body: JSON.stringify({
+            confirm_restore: true,
+            owner_notes: "Owner restored accidentally voided invoice-support draft. Internal only; not sent or charged."
+          })
+        });
+        showBanner(
+          "DRAFT RESTORED · subtotal $" + Number(restored.subtotal || 0).toFixed(2) +
+          " · READY FOR OWNER REVIEW · estimated revenue restored · nothing sent · nothing charged · nothing received.",
+          true
+        );
+        await refresh();
+      } catch (err) {
+        showBanner(err.message);
+      }
+      return;
+    }
+
     var voidButton = event.target && event.target.closest ? event.target.closest("[data-void-invoice]") : null;
     if (voidButton) {
       event.preventDefault();

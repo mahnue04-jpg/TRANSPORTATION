@@ -17,8 +17,10 @@ from app.core.nova.work_revenue.schemas import (
     RevenueEntryCreate,
     TaskUpdate,
     VoidInvoiceSupportRequest,
+    RestoreInvoiceSupportRequest,
 )
-from app.core.nova.work_revenue.service import NovaWorkError
+from app.core.nova.work_revenue.service import NovaWorkError, _record_audit
+from app.helpers import now
 
 
 def approve_internal_work(
@@ -420,6 +422,134 @@ def void_invoice_support(
         "revenue_stage": cancelled.stage,
         "already_voided": False,
         "included_in_current_totals": False,
+        "money_received": False,
+        "stripe_action": False,
+        "external_send": False,
+    }
+
+
+
+def restore_invoice_support(
+    db: Session,
+    invoice_support_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    payload: RestoreInvoiceSupportRequest,
+) -> dict[str, Any]:
+    if payload.confirm_restore is not True:
+        raise NovaWorkError("Restore requires explicit owner confirmation", status_code=409)
+
+    invoice_row = managed._get_invoice(
+        db,
+        invoice_support_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    if invoice_row.status != "ARCHIVED":
+        raise NovaWorkError("Only an archived invoice-support draft can be restored", status_code=409)
+    invoice_view = managed._invoice_out(invoice_row)
+    if (
+        invoice_view.get("externally_sent")
+        or invoice_view.get("stripe_invoice_created")
+        or invoice_view.get("payment_intent_created")
+        or invoice_view.get("money_received")
+    ):
+        raise NovaWorkError(
+            "Externally sent, processor-created, or received records cannot be restored this way",
+            status_code=409,
+        )
+
+    entries = ops.list_revenue_entries(
+        db,
+        organization_id=organization_id,
+        user=user,
+        engagement_id=invoice_row.engagement_id,
+        limit=200,
+    )
+    exact = [
+        item for item in entries
+        if item.stage == "CANCELLED"
+        and not item.owner_confirmed
+        and item.invoice_reference == invoice_support_id
+    ]
+    if exact:
+        candidates = exact
+    else:
+        candidates = [
+            item for item in entries
+            if item.stage == "CANCELLED"
+            and not item.owner_confirmed
+            and not item.invoice_reference
+            and abs(float(item.amount or 0) - float(invoice_row.draft_subtotal or 0)) < 0.005
+        ]
+
+    if len(candidates) != 1:
+        raise NovaWorkError(
+            "RESTORE_REQUIRES_UNAMBIGUOUS_CANCELLED_REVENUE_MATCH",
+            status_code=409,
+        )
+
+    revenue = ops.get_revenue_entry(
+        db,
+        candidates[0].entry_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    if revenue.owner_confirmed:
+        raise NovaWorkError("Owner-confirmed received revenue cannot be restored to ESTIMATED", status_code=409)
+
+    invoice_row.status = "READY_FOR_OWNER_REVIEW"
+    invoice_row.owner_notes = (
+        payload.owner_notes
+        or "Restored by owner after accidental/test void. Internal draft only; not sent or charged."
+    )
+    invoice_row.updated_at = now()
+
+    previous_stage = revenue.stage
+    revenue.stage = "ESTIMATED"
+    revenue.invoice_reference = invoice_support_id
+    revenue.reconciliation_notes = (
+        "Restored by owner from CANCELLED to ESTIMATED after accidental/test void. "
+        "Not contracted, invoiced externally, received, or processor-confirmed."
+    )
+    revenue.updated_at = now()
+
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="INVOICE_SUPPORT_RESTORED",
+        summary="Archived invoice-support draft restored to READY_FOR_OWNER_REVIEW. Nothing sent or charged.",
+        ref_id=invoice_support_id,
+        entity_type="invoice_support",
+        actor_category="OWNER",
+        previous_state="ARCHIVED",
+        new_state="READY_FOR_OWNER_REVIEW",
+    )
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="REVENUE_ESTIMATE_RESTORED",
+        summary=f"Revenue stage {previous_stage} → ESTIMATED after owner restore. Not a payment event.",
+        ref_id=revenue.entry_id,
+        entity_type="revenue",
+        actor_category="OWNER",
+        previous_state=previous_stage,
+        new_state="ESTIMATED",
+    )
+    db.commit()
+    db.refresh(invoice_row)
+    db.refresh(revenue)
+
+    return {
+        "invoice_support_id": invoice_support_id,
+        "invoice_status": invoice_row.status,
+        "revenue_entry_id": revenue.entry_id,
+        "revenue_stage": revenue.stage,
+        "subtotal": float(invoice_row.draft_subtotal or 0),
+        "included_in_current_totals": True,
         "money_received": False,
         "stripe_action": False,
         "external_send": False,
