@@ -314,6 +314,8 @@ def run_autonomous_engagement(
             if existing_report is None:
                 result = work_inputs.process_tabular_source(tabular_source)
                 validation = dict(result["validation"])
+                if not validation.get("validated"):
+                    raise NovaWorkError("Generated tabular output failed reconciliation validation", status_code=409)
                 stem = tabular_source.original_filename.rsplit(".", 1)[0]
                 output_name = f"{stem}_nova_cleaned.csv"
                 generated = work_inputs.create_generated_output(
@@ -388,9 +390,6 @@ def run_autonomous_engagement(
                     user=user,
                 )
                 transformation_data_id = data_deliverable.deliverable_id
-
-                if not validation.get("validated"):
-                    raise NovaWorkError("Generated tabular output failed reconciliation validation", status_code=409)
 
                 for task in transform_tasks:
                     ops.update_task(
