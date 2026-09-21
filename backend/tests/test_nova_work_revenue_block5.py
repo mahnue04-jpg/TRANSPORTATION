@@ -134,12 +134,14 @@ def test_owner_fact_put_is_create_or_update(client: TestClient) -> None:
     row = next(item for item in updated.json()["facts"] if item["fact_id"] == "business_age")
     assert row["value_display"] == "Block5 age updated"
     other = _headers(client, "staff@amicor.local")
-    conflict = client.put(
+    shared_update = client.put(
         "/api/nova/work/owner-facts/business_age",
         headers=other,
-        json={"value_status": "PROVIDED", "value_display": "Staff should not clobber"},
+        json={"value_status": "PROVIDED", "value_display": "Staff org-wide update"},
     )
-    assert conflict.status_code == 409
+    assert shared_update.status_code == 200, shared_update.text
+    shared_row = next(item for item in shared_update.json()["facts"] if item["fact_id"] == "business_age")
+    assert shared_row["value_display"] == "Staff org-wide update"
     guards = engine_guardrails()
     assert guards["LIVE_DISCOVERY_ENABLED"] is False
     assert guards["EXTERNAL_SUBMISSION_ENABLED"] is False
