@@ -16,6 +16,7 @@ from app.core.nova.work_revenue.schemas import (
     OwnerInvoicePrepRequest,
     RevenueEntryCreate,
     TaskUpdate,
+    VoidInvoiceSupportRequest,
 )
 from app.core.nova.work_revenue.service import NovaWorkError
 
@@ -306,6 +307,7 @@ def prepare_invoice_support(
                     stage="ESTIMATED",
                     amount=subtotal,
                     currency=payload.currency,
+                    invoice_reference=invoice["invoice_support_id"],
                     reconciliation_notes=(
                         "Estimated from owner-supplied invoice-support quantity/rate. "
                         "Not contracted, invoiced externally, or received."
@@ -327,4 +329,98 @@ def prepare_invoice_support(
         "payment_intent_created": False,
         "payment_received": False,
         "estimated_equals_received": False,
+    }
+
+
+
+def void_invoice_support(
+    db: Session,
+    invoice_support_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    payload: VoidInvoiceSupportRequest,
+) -> dict[str, Any]:
+    if payload.confirm_void is not True:
+        raise NovaWorkError("Void requires explicit owner confirmation", status_code=409)
+
+    invoice_row = managed._get_invoice(
+        db,
+        invoice_support_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    if invoice_row.status == "ARCHIVED":
+        return {
+            "invoice_support_id": invoice_support_id,
+            "invoice_status": "ARCHIVED",
+            "revenue_entry_id": None,
+            "revenue_stage": None,
+            "already_voided": True,
+            "included_in_current_totals": False,
+            "money_received": False,
+        }
+    if invoice_row.status not in {"DRAFT", "READY_FOR_OWNER_REVIEW", "APPROVED"}:
+        raise NovaWorkError("Only an active invoice-support draft can be voided", status_code=409)
+
+    entries = ops.list_revenue_entries(
+        db,
+        organization_id=organization_id,
+        user=user,
+        engagement_id=invoice_row.engagement_id,
+        limit=200,
+    )
+    exact = [
+        item for item in entries
+        if item.stage == "ESTIMATED"
+        and not item.owner_confirmed
+        and item.invoice_reference == invoice_support_id
+    ]
+    if exact:
+        candidates = exact
+    else:
+        candidates = [
+            item for item in entries
+            if item.stage == "ESTIMATED"
+            and not item.owner_confirmed
+            and not item.invoice_reference
+            and abs(float(item.amount or 0) - float(invoice_row.draft_subtotal or 0)) < 0.005
+        ]
+
+    if len(candidates) != 1:
+        raise NovaWorkError(
+            "VOID_REQUIRES_UNAMBIGUOUS_ESTIMATED_REVENUE_MATCH",
+            status_code=409,
+        )
+
+    revenue = candidates[0]
+    cancelled = ops.update_revenue_stage(
+        db,
+        revenue.entry_id,
+        "CANCELLED",
+        organization_id=organization_id,
+        user=user,
+    )
+    archived = managed.transition_invoice_support(
+        db,
+        invoice_support_id,
+        "ARCHIVED",
+        InvoiceSupportDecision(
+            owner_notes=payload.owner_notes or (
+                "Voided by owner. Preserved for audit; excluded from active invoice-support totals."
+            )
+        ),
+        organization_id=organization_id,
+        user=user,
+    )
+    return {
+        "invoice_support_id": invoice_support_id,
+        "invoice_status": archived["status"],
+        "revenue_entry_id": cancelled.entry_id,
+        "revenue_stage": cancelled.stage,
+        "already_voided": False,
+        "included_in_current_totals": False,
+        "money_received": False,
+        "stripe_action": False,
+        "external_send": False,
     }

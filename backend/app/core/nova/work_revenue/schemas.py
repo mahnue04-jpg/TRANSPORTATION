@@ -718,6 +718,12 @@ class OwnerInvoicePrepRequest(BaseModel):
     owner_notes: str | None = Field(default=None, max_length=2000)
 
 
+class VoidInvoiceSupportRequest(BaseModel):
+    organization_id: str | None = None
+    confirm_void: Literal[True]
+    owner_notes: str | None = Field(default=None, max_length=2000)
+
+
 class RevenueEntryOut(BaseModel):
     entry_id: str
     engagement_id: str | None = None

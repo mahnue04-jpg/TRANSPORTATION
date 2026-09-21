@@ -50,6 +50,7 @@ from app.core.nova.work_revenue.schemas import (
     OwnerActionUpdate,
     OwnerCompletionRequest,
     OwnerInvoicePrepRequest,
+    VoidInvoiceSupportRequest,
     PlatformPolicyCreate,
     ProviderOut,
     QualificationOut,
@@ -1311,6 +1312,25 @@ def archive_invoice_support(
             payload,
             organization_id=_resolve_org(user, payload.organization_id),
             user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/invoice-support/{invoice_support_id}/void")
+def void_invoice_support_draft(
+    invoice_support_id: str,
+    payload: VoidInvoiceSupportRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return owner_completion.void_invoice_support(
+            db,
+            invoice_support_id,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+            payload=payload,
         )
     except service.NovaWorkError as exc:
         _raise(exc)
