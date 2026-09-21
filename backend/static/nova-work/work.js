@@ -42,6 +42,13 @@
       escapeHtml(action) + "\" data-id=\"" + escapeHtml(id) + "\">" +
       escapeHtml(label) + "</button>";
   }
+  function setWorkActionStatus(id, message, ok) {
+    var el = document.getElementById("work-action-status-" + id);
+    if (!el) return;
+    el.textContent = message || "";
+    el.classList.toggle("ok", !!ok);
+    el.classList.toggle("error", ok === false);
+  }
   async function api(path, options) {
     var headers = { "Content-Type": "application/json" };
     if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
@@ -322,7 +329,13 @@
       (cap.vendor_contract_compatibility ? "<div>Vendor/contract compatibility: " + escapeHtml(cap.vendor_contract_compatibility) + "</div>" : "") +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
       "<div>Owner review needed: " + review + "</div>" +
-      "<div class=\"command-actions\">" + actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + " " + actionButton("autonomous-start", row.opportunity_id, "Start Autonomous Internal Work") + "</div></div>";
+      "<div class=\"command-actions\">" +
+      actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + " " +
+      ((cap.capability_classification === "CAN_PERFORM" && row.status === "QUALIFIED")
+        ? actionButton("autonomous-start", row.opportunity_id, "Start Autonomous Internal Work")
+        : "<button type=\"button\" class=\"secondary\" disabled title=\"Start is available only for QUALIFIED CAN_PERFORM work\">Start Autonomous Internal Work</button>") +
+      "</div>" +
+      "<div class=\"work-action-status\" id=\"work-action-status-" + escapeHtml(row.opportunity_id) + "\" aria-live=\"polite\"></div></div>";
   }
   function applicationItem(row) {
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
@@ -733,6 +746,7 @@
       await api("/api/nova/work/applications/" + id + "/record-manual-submission", { method: "POST" });
       showBanner("Manual submission recorded. Nova did not contact the source.", true);
     } else if (action === "autonomous-preview") {
+      setWorkActionStatus(id, "Checking autonomous readiness...", true);
       var autoDetail = await api("/api/nova/work/opportunities/" + id + "/detail");
       var autoOpp = ((autoDetail.tracker || {}).opportunity) || {};
       var autoSession = await api("/api/nova/v3/autonomous-execution/preview", {
@@ -746,17 +760,25 @@
         })
       });
       if (!autoSession.autonomous_execution_ready) {
-        showBanner("Autonomous work blocked: " + (autoSession.reason || "capability or input requirements are unresolved."));
+        var blockedMessage = "Autonomous work blocked: " + (autoSession.reason || "capability or input requirements are unresolved.");
+        setWorkActionStatus(id, blockedMessage, false);
+        showBanner(blockedMessage);
       } else {
         var vertical = ((autoSession.vertical || {}).vertical_id || "general_business_operations").replace(/_/g, " ");
         var stage = (autoSession.stages || []).filter(function (row) { return row.stage === "AUTONOMOUS_INTERNAL_EXECUTION"; })[0] || {};
         var tasks = stage.tasks || [];
         var safeCount = tasks.filter(function (row) { return row.nova_may_advance; }).length;
+        var previewMessage = "READY · " + vertical + " · " + safeCount + " safe internal task(s) · owner handoff required before external action.";
+        setWorkActionStatus(id, previewMessage, true);
         showBanner("Autonomous preview ready: " + vertical + " · " + safeCount + " internal task(s) Nova may advance · owner handoff remains required before external action.", true);
       }
+      return;
     } else if (action === "autonomous-start") {
+      setWorkActionStatus(id, "Starting autonomous internal work...", true);
       var started = await api("/api/nova/work/opportunities/" + id + "/autonomous-start", { method: "POST" });
       var safeTasks = started.safe_tasks_created || 0;
+      var startedMessage = "STARTED · " + safeTasks + " safe Nova task(s) created. External contact, contracts, production release, invoicing, and money movement remain blocked.";
+      setWorkActionStatus(id, startedMessage, true);
       showBanner("Autonomous internal work started · " + safeTasks + " safe Nova task(s) created · external contact, contracts, production release, invoicing, and money movement remain blocked.", true);
     } else if (action === "engage") {
       var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
@@ -797,6 +819,8 @@
       try {
         await runWorkAction(button.getAttribute("data-work-action"), button.getAttribute("data-id"));
       } catch (err) {
+        var actionId = button.getAttribute("data-id") || "";
+        setWorkActionStatus(actionId, "ERROR · " + err.message, false);
         showBanner(err.message);
       }
       return;
