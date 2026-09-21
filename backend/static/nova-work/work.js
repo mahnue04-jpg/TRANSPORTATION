@@ -374,6 +374,29 @@
       button.classList.toggle("filter-on", (button.getAttribute("data-filter") || "") === activeFilter);
     });
   }
+  async function loadWorkInputsFor(engagementId) {
+    var target = document.querySelector("[data-work-input-list=\"" + engagementId + "\"]");
+    if (!target) return;
+    try {
+      var items = await api("/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs");
+      target.innerHTML = listHtml(items, "No source data attached.", function (row) {
+        var fileHref = "/api/nova/work/engagements/" + encodeURIComponent(engagementId) +
+          "/inputs/" + encodeURIComponent(row.input_id) + "/file";
+        return "<div class=\"muted\"><strong>" + escapeHtml(row.original_filename) + "</strong>" +
+          " · " + escapeHtml(row.status) + " · " + escapeHtml(row.file_size) + " bytes" +
+          " · <a href=\"" + escapeHtml(fileHref) + "\" target=\"_blank\" rel=\"noopener\">open/download</a></div>";
+      });
+    } catch (err) {
+      target.textContent = "Work Inputs could not be loaded: " + err.message;
+    }
+  }
+  function loadVisibleWorkInputs() {
+    document.querySelectorAll("[data-work-input-list]").forEach(function (el) {
+      var engagementId = el.getAttribute("data-work-input-list") || "";
+      if (engagementId) loadWorkInputsFor(engagementId);
+    });
+  }
+
   function renderDashboard(data, audit) {
     var counts = data.counts || {};
     $("count-opps").textContent = counts.real_opportunities != null ? counts.real_opportunities : (counts.opportunities_found || counts.work_opportunities || 0);
@@ -423,7 +446,8 @@
           "<label>Work Inputs <input type=\"file\" data-work-input-file=\"" + escapeHtml(row.engagement_id) +
           "\" accept=\".csv,.xlsx,.txt,.json,.pdf,.docx\" /></label>" +
           "<button type=\"button\" class=\"secondary\" data-work-input-upload=\"" + escapeHtml(row.engagement_id) + "\">Attach Source Data</button>" +
-          "<div class=\"muted\">Supported: CSV, XLSX, TXT, JSON, PDF, DOCX · max 20 MB · internal only.</div></div>" +
+          "<div class=\"muted\">Supported: CSV, XLSX, TXT, JSON, PDF, DOCX · max 20 MB · internal only.</div>" +
+          "<div data-work-input-list=\"" + escapeHtml(row.engagement_id) + "\">Loading Work Inputs...</div></div>" +
           "<div class=\"work-action-status\" id=\"work-action-status-" + escapeHtml(row.engagement_id) + "\" aria-live=\"polite\"></div>"
         : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
@@ -605,6 +629,7 @@
     var audit = [];
     try { audit = await api("/api/nova/work/audit"); } catch (_) { audit = []; }
     renderDashboard(data, audit);
+    loadVisibleWorkInputs();
     await refreshLiveDiscoveryStatus();
     if (activeFilter) {
       var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter) + "&limit=100");
@@ -843,7 +868,9 @@
       setWorkActionStatus(id, "Running safe internal Nova tasks...", true);
       var execution = await api("/api/nova/work/engagements/" + id + "/autonomous-run", { method: "POST" });
       var executionMessage = "EXECUTOR RAN · " + (execution.tasks_advanced || 0) + " task(s) advanced · " +
+        (execution.tasks_unblocked || 0) + " reactivated · " +
         (execution.tasks_blocked || 0) + " blocked" +
+        (execution.source_data_available ? " · SOURCE DATA AVAILABLE" : "") +
         (execution.source_data_required ? " · SOURCE DATA REQUIRED" : "") +
         " · owner review required.";
       await refresh();
@@ -898,6 +925,7 @@
           true
         );
         showBanner("Source data attached to internal engagement. Nothing was transmitted externally.", true);
+        await loadWorkInputsFor(engagementId);
       } catch (err) {
         setWorkActionStatus(engagementId, "ERROR · " + err.message, false);
         showBanner(err.message);
