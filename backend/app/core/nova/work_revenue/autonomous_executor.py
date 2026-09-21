@@ -9,6 +9,7 @@ from app.auth import UserContext
 from app.core.nova.work_revenue import managed, ops, work_inputs
 from app.core.nova.work_revenue.models import NovaWorkDeliverable, NovaWorkTask
 from app.core.nova.work_revenue.schemas import DeliverableCreate, DeliverableUpdate, EngagementUpdate, TaskUpdate
+from app.helpers import now
 from app.core.nova.work_revenue.service import (
     NovaWorkError,
     _record_audit,
@@ -80,6 +81,9 @@ def run_autonomous_engagement(
         user=user,
     )
     source_data_available = bool(source_inspection.get("source_data_available"))
+    source_records_exist = bool(source_inspection.get("source_records_exist"))
+    source_file_missing = bool(source_inspection.get("source_file_missing"))
+    source_parse_failed = bool(source_inspection.get("source_parse_failed"))
     source_inputs = list(source_inspection.get("inputs") or [])
 
     outline_task = (
@@ -256,6 +260,31 @@ def run_autonomous_engagement(
                 user=user,
             )
             advanced.append(profile_task.task_id)
+
+    if source_file_missing:
+        missing_reason = (
+            "SOURCE FILE MISSING / REUPLOAD REQUIRED: the source-data record exists, "
+            "but the stored file bytes are no longer present. Reattach the source file."
+        )
+        existing_blocked = (
+            db.query(NovaWorkTask)
+            .filter(
+                NovaWorkTask.organization_id == organization_id,
+                NovaWorkTask.engagement_id == engagement_id,
+                NovaWorkTask.classification == "NOVA",
+                NovaWorkTask.status == "BLOCKED",
+            )
+            .all()
+        )
+        for task in existing_blocked:
+            if not _is_source_data_task(task.title):
+                continue
+            task.blocked_reason = missing_reason
+            task.owner_notes = missing_reason
+            task.updated_at = now()
+            blocked.append(task.task_id)
+        if existing_blocked:
+            db.flush()
 
     transformation_report_id: str | None = None
     transformation_data_id: str | None = None
@@ -459,15 +488,21 @@ def run_autonomous_engagement(
             continue
         if source_data_available:
             continue
-        input_present = bool(source_inputs)
-        reason = (
-            "SOURCE DATA PARSE REQUIRED: a source file is attached but Nova could not parse usable content. "
-            "Replace the file with a supported readable source file."
-            if input_present
-            else
-            "SOURCE DATA REQUIRED: this task depends on the client/source dataset. "
-            "No engagement-level source dataset is available, so Nova did not invent or analyze data."
-        )
+        if source_file_missing:
+            reason = (
+                "SOURCE FILE MISSING / REUPLOAD REQUIRED: the source-data record exists, "
+                "but the stored file bytes are no longer present. Reattach the source file."
+            )
+        elif source_parse_failed or source_records_exist:
+            reason = (
+                "SOURCE DATA PARSE REQUIRED: a source file is attached but Nova could not parse usable content. "
+                "Replace the file with a supported readable source file."
+            )
+        else:
+            reason = (
+                "SOURCE DATA REQUIRED: this task depends on the client/source dataset. "
+                "No engagement-level source dataset is available, so Nova did not invent or analyze data."
+            )
         ops.update_task(
             db,
             task.task_id,
@@ -512,6 +547,9 @@ def run_autonomous_engagement(
         "owner_review_required": True,
         "source_data_available": source_data_available,
         "source_data_input_count": len(source_inputs),
+        "source_records_exist": source_records_exist,
+        "source_file_missing": source_file_missing,
+        "source_parse_failed": source_parse_failed,
         "source_data_required": not source_data_available,
         "external_submission": False,
         "client_contact": False,

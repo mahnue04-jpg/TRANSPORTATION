@@ -1892,3 +1892,79 @@ def test_work_inputs_controls_are_exposed_in_active_work() -> None:
 def test_tabular_executor_ui_labels_generated_outputs() -> None:
     assert "GENERATED_OUTPUT" in WORK_JS or "input_kind" in WORK_JS
     assert "SOURCE_DATA" in WORK_JS
+
+
+def test_work_input_root_prefers_existing_persistent_render_disk(monkeypatch, tmp_path) -> None:
+    from app.core.nova.work_revenue import work_inputs
+    monkeypatch.delenv("NOVA_WORK_INPUT_DIR", raising=False)
+    original_exists = work_inputs.Path.exists
+
+    def fake_exists(self):
+        if str(self) == "/data/onboarding_docs":
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(work_inputs.Path, "exists", fake_exists)
+    monkeypatch.setattr(work_inputs.Path, "mkdir", lambda self, parents=True, exist_ok=True: None)
+    root = work_inputs.work_input_root()
+    assert str(root) == "/data/onboarding_docs/nova_work_inputs"
+
+
+def test_executor_reports_missing_stored_source_file(client: TestClient, monkeypatch) -> None:
+    from app.core.nova.work_revenue import work_inputs
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Missing Stored File Test",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    client.post(f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify", headers=headers)
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    first = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+
+    upload = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("delivery_records.csv", b"a,b\n1,2\n", "text/csv")},
+    )
+    assert upload.status_code == 201, upload.text
+
+    monkeypatch.setattr(work_inputs, "input_file_path", lambda row: None)
+
+    rerun = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert rerun.status_code == 200, rerun.text
+    body = rerun.json()
+    assert body["source_data_available"] is False
+    assert body["source_records_exist"] is True
+    assert body["source_file_missing"] is True
+    assert body["tasks_blocked"] >= 1
+
+    engagement = client.get(
+        f"/api/nova/work/engagements/{engagement_id}",
+        headers=headers,
+    )
+    assert engagement.status_code == 200, engagement.text
+    blocked = [task for task in engagement.json()["tasks"] if task["status"] == "BLOCKED"]
+    assert blocked
+    assert any("SOURCE FILE MISSING / REUPLOAD REQUIRED" in (task["blocked_reason"] or "") for task in blocked)
