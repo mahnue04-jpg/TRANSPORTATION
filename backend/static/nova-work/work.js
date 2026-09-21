@@ -757,7 +757,7 @@
     } else if (action === "autonomous-start") {
       var started = await api("/api/nova/work/opportunities/" + id + "/autonomous-start", { method: "POST" });
       var safeTasks = started.safe_tasks_created || 0;
-      showBanner("Autonomous internal work started · " + safeTasks + " safe Nova task(s) created · external contact, contracts, deployment, invoicing, and money movement remain blocked.", true);
+      showBanner("Autonomous internal work started · " + safeTasks + " safe Nova task(s) created · external contact, contracts, production release, invoicing, and money movement remain blocked.", true);
     } else if (action === "engage") {
       var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
       var opp = ((detail.tracker || {}).opportunity) || {};
