@@ -393,8 +393,13 @@
       applicationItem
     );
     if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
+      var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
+        ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
+          "<div class=\"work-action-status\" id=\"work-action-status-" + escapeHtml(row.engagement_id) + "\" aria-live=\"polite\"></div>"
+        : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
-        "<div class=\"muted\">" + escapeHtml(row.status) + " · PAYMENT NOT CONFIRMED unless owner-confirmed received</div></div>";
+        "<div class=\"muted\">" + escapeHtml(row.status) + " · PAYMENT NOT CONFIRMED unless owner-confirmed received</div>" +
+        runControl + "</div>";
     });
     if ($("completed-list")) $("completed-list").innerHTML = listHtml(
       (data.engagements || []).filter(function (row) { return row.status === "COMPLETE" || row.queue_status === "COMPLETE"; }),
@@ -781,6 +786,17 @@
       showBanner("Autonomous internal work started · " + safeTasks + " safe Nova task(s) created · external contact, contracts, production release, invoicing, and money movement remain blocked.", true);
       await refresh();
       setWorkActionStatus(id, startedMessage, true);
+      return;
+    } else if (action === "autonomous-run") {
+      setWorkActionStatus(id, "Running safe internal Nova tasks...", true);
+      var execution = await api("/api/nova/work/engagements/" + id + "/autonomous-run", { method: "POST" });
+      var executionMessage = "EXECUTOR RAN · " + (execution.tasks_advanced || 0) + " task(s) advanced · " +
+        (execution.tasks_blocked || 0) + " blocked" +
+        (execution.source_data_required ? " · SOURCE DATA REQUIRED" : "") +
+        " · owner review required.";
+      await refresh();
+      setWorkActionStatus(id, executionMessage, execution.tasks_blocked === 0);
+      showBanner(executionMessage, true);
       return;
     } else if (action === "engage") {
       var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
