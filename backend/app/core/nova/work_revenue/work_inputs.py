@@ -75,8 +75,19 @@ def _extract_text(filename: str, content_type: str, content: bytes) -> tuple[str
         diagnostics["parser"] = "csv"
         text = content.decode("utf-8-sig", errors="replace")
         rows = list(csv.reader(io.StringIO(text)))
-        preview = "\n".join("\t".join(str(cell) for cell in row) for row in rows[:500])
-        diagnostics.update({"rows_detected": len(rows), "preview_rows": min(len(rows), 500)})
+        preview_rows = rows[:500]
+        preview = "\n".join("\t".join(str(cell) for cell in row) for row in preview_rows)
+        width = max((len(row) for row in preview_rows), default=0)
+        blank_cells = sum(1 for row in preview_rows for cell in row if str(cell).strip() == "")
+        normalized_rows = [tuple(str(cell) for cell in row) for row in preview_rows]
+        duplicate_rows = max(0, len(normalized_rows) - len(set(normalized_rows)))
+        diagnostics.update({
+            "rows_detected": len(rows),
+            "preview_rows": len(preview_rows),
+            "columns_detected": width,
+            "blank_cells_in_preview": blank_cells,
+            "duplicate_rows_in_preview": duplicate_rows,
+        })
         return preview, diagnostics
     if ext == ".json":
         diagnostics["parser"] = "json"
@@ -91,17 +102,31 @@ def _extract_text(filename: str, content_type: str, content: bytes) -> tuple[str
         lines: list[str] = []
         sheet_count = 0
         row_count = 0
+        max_columns = 0
+        blank_cells = 0
+        normalized_rows: list[tuple[str, ...]] = []
         for sheet in workbook.worksheets:
             sheet_count += 1
             lines.append(f"[SHEET] {sheet.title}")
             for row in sheet.iter_rows(values_only=True):
                 row_count += 1
-                lines.append("\t".join("" if cell is None else str(cell) for cell in row))
+                values = tuple("" if cell is None else str(cell) for cell in row)
+                max_columns = max(max_columns, len(values))
+                blank_cells += sum(1 for value in values if value.strip() == "")
+                normalized_rows.append(values)
+                lines.append("\t".join(values))
                 if row_count >= 500:
                     break
             if row_count >= 500:
                 break
-        diagnostics.update({"sheets_detected": sheet_count, "preview_rows": row_count})
+        duplicate_rows = max(0, len(normalized_rows) - len(set(normalized_rows)))
+        diagnostics.update({
+            "sheets_detected": sheet_count,
+            "preview_rows": row_count,
+            "columns_detected": max_columns,
+            "blank_cells_in_preview": blank_cells,
+            "duplicate_rows_in_preview": duplicate_rows,
+        })
         return "\n".join(lines), diagnostics
     if ext == ".docx":
         diagnostics["parser"] = "python-docx"
