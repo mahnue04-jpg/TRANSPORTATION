@@ -68,6 +68,53 @@
     if (!response.ok) throw new Error(errorText(body, "Request failed."));
     return body;
   }
+  async function uploadWorkInput(engagementId, file) {
+    if (!file) throw new Error("Choose a source file first.");
+    var form = new FormData();
+    form.append("file", file);
+    var headers = {};
+    if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
+    else if (token()) headers.Authorization = "Bearer " + token();
+    var response;
+    try {
+      response = await fetch(
+        "/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs/upload",
+        { method: "POST", headers: headers, body: form }
+      );
+    } catch (_) {
+      throw new Error("Network error. Source file was not uploaded.");
+    }
+    var payload = null;
+    try { payload = await response.json(); } catch (_) {}
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
+    if (response.status === 403) throw new Error("Access denied.");
+    if (!response.ok) throw new Error(errorText(payload, "Source file upload failed."));
+    return payload;
+  }
+
+  async function downloadWorkInput(engagementId, inputId, filename) {
+    var headers = {};
+    if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
+    else if (token()) headers.Authorization = "Bearer " + token();
+    var response = await fetch(
+      "/api/nova/work/engagements/" + encodeURIComponent(engagementId) +
+      "/inputs/" + encodeURIComponent(inputId) + "/file",
+      { headers: headers }
+    );
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
+    if (response.status === 403) throw new Error("Access denied.");
+    if (!response.ok) throw new Error("Work Input file could not be opened.");
+    var blob = await response.blob();
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = filename || "work-input";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
   function liveJobItem(row) {
     var opp = row.opportunity || row;
     var qual = opp.live_qualification || {};
@@ -350,6 +397,29 @@
       button.classList.toggle("filter-on", (button.getAttribute("data-filter") || "") === activeFilter);
     });
   }
+  async function loadWorkInputsFor(engagementId) {
+    var target = document.querySelector("[data-work-input-list=\"" + engagementId + "\"]");
+    if (!target) return;
+    try {
+      var items = await api("/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs");
+      target.innerHTML = listHtml(items, "No source data attached.", function (row) {
+        return "<div class=\"muted\"><strong>" + escapeHtml(row.original_filename) + "</strong>" +
+          " · " + escapeHtml(row.status) + " · " + escapeHtml(row.file_size) + " bytes " +
+          "<button type=\"button\" class=\"secondary\" data-work-input-download=\"" +
+          escapeHtml(engagementId) + "\" data-input-id=\"" + escapeHtml(row.input_id) +
+          "\" data-filename=\"" + escapeHtml(row.original_filename) + "\">Open / Save File</button></div>";
+      });
+    } catch (err) {
+      target.textContent = "Work Inputs could not be loaded: " + err.message;
+    }
+  }
+  function loadVisibleWorkInputs() {
+    document.querySelectorAll("[data-work-input-list]").forEach(function (el) {
+      var engagementId = el.getAttribute("data-work-input-list") || "";
+      if (engagementId) loadWorkInputsFor(engagementId);
+    });
+  }
+
   function renderDashboard(data, audit) {
     var counts = data.counts || {};
     $("count-opps").textContent = counts.real_opportunities != null ? counts.real_opportunities : (counts.opportunities_found || counts.work_opportunities || 0);
@@ -395,6 +465,12 @@
     if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
       var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
         ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
+          "<div class=\"work-input-box\">" +
+          "<label>Work Inputs <input type=\"file\" data-work-input-file=\"" + escapeHtml(row.engagement_id) +
+          "\" accept=\".csv,.xlsx,.txt,.json,.pdf,.docx\" /></label>" +
+          "<button type=\"button\" class=\"secondary\" data-work-input-upload=\"" + escapeHtml(row.engagement_id) + "\">Attach Source Data</button>" +
+          "<div class=\"muted\">Supported: CSV, XLSX, TXT, JSON, PDF, DOCX · max 20 MB · internal only.</div>" +
+          "<div data-work-input-list=\"" + escapeHtml(row.engagement_id) + "\">Loading Work Inputs...</div></div>" +
           "<div class=\"work-action-status\" id=\"work-action-status-" + escapeHtml(row.engagement_id) + "\" aria-live=\"polite\"></div>"
         : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
@@ -576,6 +652,7 @@
     var audit = [];
     try { audit = await api("/api/nova/work/audit"); } catch (_) { audit = []; }
     renderDashboard(data, audit);
+    loadVisibleWorkInputs();
     await refreshLiveDiscoveryStatus();
     if (activeFilter) {
       var filtered = await api("/api/nova/work/opportunities?view_filter=" + encodeURIComponent(activeFilter) + "&limit=100");
@@ -814,7 +891,9 @@
       setWorkActionStatus(id, "Running safe internal Nova tasks...", true);
       var execution = await api("/api/nova/work/engagements/" + id + "/autonomous-run", { method: "POST" });
       var executionMessage = "EXECUTOR RAN · " + (execution.tasks_advanced || 0) + " task(s) advanced · " +
+        (execution.tasks_unblocked || 0) + " reactivated · " +
         (execution.tasks_blocked || 0) + " blocked" +
+        (execution.source_data_available ? " · SOURCE DATA AVAILABLE" : "") +
         (execution.source_data_required ? " · SOURCE DATA REQUIRED" : "") +
         " · owner review required.";
       await refresh();
@@ -853,6 +932,44 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var downloadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-download]") : null;
+    if (downloadButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await downloadWorkInput(
+          downloadButton.getAttribute("data-work-input-download") || "",
+          downloadButton.getAttribute("data-input-id") || "",
+          downloadButton.getAttribute("data-filename") || "work-input"
+        );
+      } catch (err) {
+        showBanner(err.message);
+      }
+      return;
+    }
+    var uploadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-upload]") : null;
+    if (uploadButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var engagementId = uploadButton.getAttribute("data-work-input-upload") || "";
+      var fileInput = document.querySelector("[data-work-input-file=\"" + engagementId + "\"]");
+      var file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      try {
+        setWorkActionStatus(engagementId, "Uploading source data...", true);
+        var uploaded = await uploadWorkInput(engagementId, file);
+        setWorkActionStatus(
+          engagementId,
+          "SOURCE DATA ATTACHED · " + uploaded.original_filename + " · " + uploaded.file_size + " bytes · run autonomous work again.",
+          true
+        );
+        showBanner("Source data attached to internal engagement. Nothing was transmitted externally.", true);
+        await loadWorkInputsFor(engagementId);
+      } catch (err) {
+        setWorkActionStatus(engagementId, "ERROR · " + err.message, false);
+        showBanner(err.message);
+      }
+      return;
+    }
     var button = event.target && event.target.closest ? event.target.closest("[data-work-action]") : null;
     if (button) {
       event.preventDefault();
