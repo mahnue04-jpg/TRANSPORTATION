@@ -20,6 +20,7 @@ from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue import autonomous_executor
 from app.core.nova.work_revenue import work_inputs
+from app.core.nova.work_revenue import owner_completion
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -47,6 +48,8 @@ from app.core.nova.work_revenue.schemas import (
     OwnerActionCreate,
     OwnerActionOut,
     OwnerActionUpdate,
+    OwnerCompletionRequest,
+    OwnerInvoicePrepRequest,
     PlatformPolicyCreate,
     ProviderOut,
     QualificationOut,
@@ -578,6 +581,44 @@ def run_autonomous_engagement(
             engagement_id,
             organization_id=_resolve_org(user, organization_id),
             user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/engagements/{engagement_id}/owner-complete")
+def owner_complete_engagement(
+    engagement_id: str,
+    payload: OwnerCompletionRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return owner_completion.approve_internal_work(
+            db,
+            engagement_id,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+            payload=payload,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/engagements/{engagement_id}/prepare-invoice-support")
+def prepare_owner_invoice_support(
+    engagement_id: str,
+    payload: OwnerInvoicePrepRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return owner_completion.prepare_invoice_support(
+            db,
+            engagement_id,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+            payload=payload,
         )
     except service.NovaWorkError as exc:
         _raise(exc)
