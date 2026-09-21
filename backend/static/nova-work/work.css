@@ -181,3 +181,13 @@ button {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+.work-input-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.work-input-box input[type="file"] {
+  width: 100%;
+  max-width: 100%;
+}
