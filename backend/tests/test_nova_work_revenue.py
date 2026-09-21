@@ -2041,3 +2041,184 @@ def test_executor_skips_stale_source_record_and_uses_fresh_reupload(client: Test
     generated = [row for row in files.json() if row["input_kind"] == "GENERATED_OUTPUT"]
     assert len(generated) == 1
     assert generated[0]["original_filename"] == "fresh_nova_cleaned.csv"
+
+
+def test_owner_completion_and_invoice_prep_from_autonomous_work(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Owner Completion Test Co",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200, qualified.text
+
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    first_run = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert first_run.status_code == 200, first_run.text
+    assert first_run.json()["source_data_required"] is True
+
+    csv_bytes = (
+        b"delivery_id,route,miles,status\n"
+        b"1,A,12.5,complete\n"
+        b"2,A,,complete\n"
+        b"2,A,,complete\n"
+        b"3,B,9.0,pending\n"
+    )
+    upload = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("completion_test.csv", csv_bytes, "text/csv")},
+    )
+    assert upload.status_code == 201, upload.text
+
+    execute = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["source_data_available"] is True
+    assert execute.json()["tasks_blocked"] == 0
+
+    before = client.get(
+        f"/api/nova/work/engagements/{engagement_id}",
+        headers=headers,
+    )
+    assert before.status_code == 200, before.text
+    task_rows = before.json()["tasks"]
+    assert any(task["status"] == "OWNER_REVIEW" for task in task_rows)
+
+    completed = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/owner-complete",
+        headers=headers,
+        json={"owner_notes": "Approved after reviewing Nova's internal work."},
+    )
+    assert completed.status_code == 200, completed.text
+    complete_body = completed.json()
+    assert complete_body["status"] == "COMPLETE"
+    assert complete_body["deliverables_approved"] >= 4
+    assert complete_body["tasks_completed_this_action"] >= 1
+    assert complete_body["external_delivery"] is False
+    assert complete_body["invoice_sent"] is False
+    assert complete_body["payment_received"] is False
+    assert complete_body["complete_equals_paid"] is False
+
+    after = client.get(
+        f"/api/nova/work/engagements/{engagement_id}",
+        headers=headers,
+    )
+    assert after.status_code == 200, after.text
+    assert after.json()["status"] == "COMPLETE"
+    assert all(
+        task["status"] in {"COMPLETE", "CANCELLED"}
+        for task in after.json()["tasks"]
+    )
+
+    deliverables = client.get(
+        "/api/nova/work/deliverables",
+        headers=headers,
+        params={"engagement_id": engagement_id},
+    )
+    assert deliverables.status_code == 200, deliverables.text
+    assert deliverables.json()
+    assert all(row["owner_approved"] is True for row in deliverables.json())
+    assert all(row["owner_confirmed_delivered"] is False for row in deliverables.json())
+
+    repeat_complete = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/owner-complete",
+        headers=headers,
+        json={"owner_notes": "Repeat approval should be idempotent."},
+    )
+    assert repeat_complete.status_code == 200, repeat_complete.text
+    assert repeat_complete.json()["status"] == "COMPLETE"
+
+    prepared = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/prepare-invoice-support",
+        headers=headers,
+        json={
+            "quantity": 2,
+            "rate": 50,
+            "currency": "USD",
+            "invoice_required": True,
+            "record_estimated_revenue": True,
+            "owner_notes": "Owner-entered test pricing.",
+        },
+    )
+    assert prepared.status_code == 200, prepared.text
+    prep_body = prepared.json()
+    assert prep_body["subtotal"] == 100
+    assert prep_body["invoice_support"]["status"] == "READY_FOR_OWNER_REVIEW"
+    assert prep_body["invoice_support"]["draft_subtotal"] == 100
+    assert prep_body["invoice_support"]["externally_sent"] is False
+    assert prep_body["invoice_support"]["stripe_invoice_created"] is False
+    assert prep_body["invoice_support"]["payment_intent_created"] is False
+    assert prep_body["invoice_support"]["money_received"] is False
+    assert prep_body["estimated_revenue"]["stage"] == "ESTIMATED"
+    assert prep_body["estimated_revenue"]["amount"] == 100
+    assert prep_body["estimated_revenue"]["owner_confirmed"] is False
+    assert prep_body["invoice_sent"] is False
+    assert prep_body["payment_received"] is False
+    assert prep_body["estimated_equals_received"] is False
+
+    prepared_again = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/prepare-invoice-support",
+        headers=headers,
+        json={
+            "quantity": 2,
+            "rate": 50,
+            "currency": "USD",
+            "invoice_required": True,
+            "record_estimated_revenue": True,
+        },
+    )
+    assert prepared_again.status_code == 200, prepared_again.text
+    assert (
+        prepared_again.json()["invoice_support"]["invoice_support_id"]
+        == prep_body["invoice_support"]["invoice_support_id"]
+    )
+    assert (
+        prepared_again.json()["estimated_revenue"]["entry_id"]
+        == prep_body["estimated_revenue"]["entry_id"]
+    )
+
+    revenues = client.get(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        params={"engagement_id": engagement_id},
+    )
+    assert revenues.status_code == 200, revenues.text
+    matching = [row for row in revenues.json() if row["stage"] == "ESTIMATED" and row["amount"] == 100]
+    assert len(matching) == 1
+    assert matching[0]["owner_confirmed"] is False
+
+
+def test_owner_completion_ui_controls_are_safe() -> None:
+    assert "Approve Internal Work" in WORK_JS
+    assert "Prepare Invoice Support" in WORK_JS
+    assert "/owner-complete" in WORK_JS
+    assert "/prepare-invoice-support" in WORK_JS
+    assert "Nova will not guess pricing." in WORK_JS
+    assert "NOT SENT · NOT CHARGED · NOT PAID" in WORK_JS
+    assert "COMPLETE != PAID" in WORK_JS
+    assert ".owner-completion-box" in WORK_CSS
+    assert ".invoice-prep-grid" in WORK_CSS
