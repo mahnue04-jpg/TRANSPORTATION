@@ -91,6 +91,7 @@ from app.core.nova.payments.router import router as nova_payments_router  # type
 from app.core.nova.tenants.router import router as nova_tenants_router  # type: ignore
 from app.core.nova.signup.router import router as nova_signup_router  # type: ignore
 from app.core.nova.billing.router import router as nova_billing_router  # type: ignore
+from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -491,6 +492,7 @@ app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
 app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
+app.include_router(nova_creative_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -3969,6 +3971,14 @@ def serve_nova_work() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Work page not found"}, status_code=404)
+
+
+@app.get("/nova/creative")
+def serve_nova_creative() -> Response:
+    page = os.path.join(_static_dir, "nova-creative", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Creative Studio page not found"}, status_code=404)
 
 
 @app.get("/nova/v3-lab")

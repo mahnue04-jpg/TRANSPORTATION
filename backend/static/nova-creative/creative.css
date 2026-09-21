@@ -1,0 +1,80 @@
+:root {
+  --bg: #f3efe6;
+  --ink: #1c1914;
+  --muted: #5c564c;
+  --card: #fffdf8;
+  --line: #d9d0c1;
+  --accent: #0f5c4c;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(15, 92, 76, 0.08), transparent 40%),
+    linear-gradient(180deg, #efe8da, var(--bg));
+}
+.studio-header, .studio-main { max-width: 980px; margin: 0 auto; padding: 1rem 1.25rem; }
+.studio-nav { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
+.studio-nav a { color: var(--accent); text-decoration: none; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.hint, .disclaimer, .muted { color: var(--muted); }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+.grid .wide { grid-column: 1 / -1; }
+label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.92rem; }
+input, select, textarea, button {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+button.secondary { background: #2f2a24; }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.actions.wrap { margin-top: 0.5rem; }
+.list .item, .output {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  background: #fff;
+}
+.output {
+  white-space: pre-wrap;
+  min-height: 8rem;
+  max-height: 24rem;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.banner {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #e7f3ef;
+  border: 1px solid #b7d8cd;
+}
+.banner.error { background: #f8e8e4; border-color: #e2b7ad; }
+.hidden { display: none !important; }
+.badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #ece6da;
+}
