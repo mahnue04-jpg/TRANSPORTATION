@@ -582,18 +582,41 @@
       $("filtered-list").innerHTML = listHtml(filtered, "No matching opportunities.", oppItem);
     }
     if ($("filtered-list")) $("filtered-list").removeAttribute("aria-busy");
-    if (activeTab === "deliverables") {
+    if (activeTab === "deliverables" || activeTab === "needs-review") {
       try {
         var dels = await api("/api/nova/work/deliverables?limit=100");
+        function deliverableItem(row) {
+          return "<div class=\"item\"><strong>" + escapeHtml(row.deliverable_type) + "</strong>" +
+            "<div class=\"muted\">review " + escapeHtml(row.review_status || "DRAFT") +
+            " · draft " + escapeHtml(row.draft_status || "DRAFT") +
+            " · delivery " + escapeHtml(row.delivery_status || "NOT_DELIVERED") +
+            (row.owner_approved ? " · OWNER APPROVED" : " · owner approval pending") +
+            (row.owner_confirmed_delivered ? " · owner confirmed delivered" : " · not transmitted") +
+            "</div>" +
+            "<div>" + escapeHtml(row.description || "") + "</div></div>";
+        }
         if ($("deliverable-list")) {
-          $("deliverable-list").innerHTML = listHtml(dels, "No internal deliverables.", function (row) {
-            return "<div class=\"item\"><strong>" + escapeHtml(row.deliverable_type) + "</strong>" +
-              "<div class=\"muted\">" + escapeHtml(row.delivery_status) +
-              (row.owner_confirmed_delivered ? " · owner confirmed" : " · not transmitted") +
-              "</div></div>";
+          $("deliverable-list").innerHTML = listHtml(dels, "No internal deliverables.", deliverableItem);
+        }
+        if (activeTab === "needs-review" && $("needs-review-list")) {
+          var reviewDels = (dels || []).filter(function (row) {
+            return row.review_status === "READY_FOR_REVIEW" && !row.owner_approved;
+          });
+          var appReview = (data.owner_approvals || []).map(function (row) {
+            return { kind: "application", row: row };
+          });
+          var delReview = reviewDels.map(function (row) {
+            return { kind: "deliverable", row: row };
+          });
+          $("needs-review-list").innerHTML = listHtml(appReview.concat(delReview), "Nothing needs owner review.", function (item) {
+            if (item.kind === "application") return applicationItem(item.row);
+            return deliverableItem(item.row);
           });
         }
-      } catch (_) {}
+      } catch (err) {
+        if ($("deliverable-list") && activeTab === "deliverables") $("deliverable-list").textContent = "Deliverables could not be loaded: " + err.message;
+        if ($("needs-review-list") && activeTab === "needs-review") $("needs-review-list").textContent = "Review items could not be loaded: " + err.message;
+      }
     }
     if (activeTab === "recurring") {
       try {
@@ -861,7 +884,7 @@
       if (!target || !target.getAttribute || !target.hasAttribute("data-tab")) return;
       activeTab = target.getAttribute("data-tab") || "overview";
       applyTab();
-      if (activeTab === "owner-facts" || activeTab === "queue" || activeTab === "reconciliation" || activeTab === "v2-actions" || activeTab === "v2-capabilities") {
+      if (activeTab === "owner-facts" || activeTab === "queue" || activeTab === "reconciliation" || activeTab === "v2-actions" || activeTab === "v2-capabilities" || activeTab === "deliverables" || activeTab === "needs-review" || activeTab === "recurring" || activeTab === "reports" || activeTab === "invoice-support") {
         refresh().catch(function (err) { showBanner(err.message); });
       }
     });
