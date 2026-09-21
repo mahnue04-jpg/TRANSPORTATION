@@ -1559,3 +1559,17 @@ def test_autonomous_internal_start_blocks_human_only_work(client: TestClient) ->
 def test_work_ui_exposes_autonomous_internal_start_control() -> None:
     assert "Start Autonomous Internal Work" in WORK_JS
     assert "/autonomous-start" in WORK_JS
+
+
+def test_autonomous_controls_have_visible_inline_feedback() -> None:
+    assert "work-action-status-" in WORK_JS
+    assert "Checking autonomous readiness..." in WORK_JS
+    assert "Starting autonomous internal work..." in WORK_JS
+    assert "READY · " in WORK_JS
+    assert "STARTED · " in WORK_JS
+    assert "ERROR · " in WORK_JS
+    assert 'cap.capability_classification === "CAN_PERFORM"' in WORK_JS
+    assert 'row.status === "QUALIFIED"' in WORK_JS
+    assert "Start is available only for QUALIFIED CAN_PERFORM work" in WORK_JS
+    assert ".work-action-status" in WORK_CSS
+    assert "pointer-events: auto" in WORK_CSS
