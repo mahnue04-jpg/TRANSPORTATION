@@ -260,6 +260,31 @@ def run_autonomous_engagement(
             )
             advanced.append(profile_task.task_id)
 
+    if source_file_missing:
+        missing_reason = (
+            "SOURCE FILE MISSING / REUPLOAD REQUIRED: the source-data record exists, "
+            "but the stored file bytes are no longer present. Reattach the source file."
+        )
+        existing_blocked = (
+            db.query(NovaWorkTask)
+            .filter(
+                NovaWorkTask.organization_id == organization_id,
+                NovaWorkTask.engagement_id == engagement_id,
+                NovaWorkTask.classification == "NOVA",
+                NovaWorkTask.status == "BLOCKED",
+            )
+            .all()
+        )
+        for task in existing_blocked:
+            if not _is_source_data_task(task.title):
+                continue
+            task.blocked_reason = missing_reason
+            task.owner_notes = missing_reason
+            task.updated_at = now()
+            blocked.append(task.task_id)
+        if existing_blocked:
+            db.flush()
+
     transformation_report_id: str | None = None
     transformation_data_id: str | None = None
     generated_output_id: str | None = None
