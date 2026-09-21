@@ -14,6 +14,10 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
+from app.core.nova.work_revenue.capability_first_discovery import (
+    generate_capability_first_queries,
+    search_family_catalog,
+)
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.work_packets import build_work_packet
 from app.core.nova.v3.capability_proof import build_capability_proof
@@ -255,6 +259,9 @@ def v3_capabilities(user: UserContext = Depends(get_current_user_context)):
     return {
         "capabilities": capability_catalog(),
         "search_queries": capability_search_queries(),
+        "search_families": search_family_catalog(),
+        "capability_first_queries": generate_capability_first_queries(),
+        "discovery_mode": "capability_first_nationwide_remote",
         "external_submission": False,
         "financial_execution": False,
     }

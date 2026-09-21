@@ -285,7 +285,14 @@ def capability_fit(text: str) -> dict[str, Any]:
 
 
 def capability_search_queries() -> list[str]:
-    """Return deduplicated search phrases for capability-directed discovery."""
+    """Return deduplicated capability-first search phrases for discovery."""
+    from app.core.nova.work_revenue.capability_first_discovery import capability_first_search_queries
+
+    # Prefer capability-first nationwide remote/digital queries. Fall back to catalog
+    # phrases only if the planner returns nothing (should not happen in normal use).
+    planned = capability_first_search_queries()
+    if planned:
+        return planned
     seen: set[str] = set()
     queries: list[str] = []
     for spec in CAPABILITIES.values():
