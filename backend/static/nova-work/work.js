@@ -464,6 +464,17 @@
       applicationItem
     );
     if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
+      var completionControls = row.source === "nova_autonomous"
+        ? "<div class=\"owner-completion-box\">" +
+          (row.status !== "COMPLETE"
+            ? "<button type=\"button\" class=\"secondary\" data-owner-complete=\"" + escapeHtml(row.engagement_id) + "\">Approve Internal Work</button>"
+            : "<div class=\"muted\">Internal work COMPLETE. COMPLETE != PAID.</div>") +
+          "<div class=\"invoice-prep-grid\">" +
+          "<label>Quantity <input type=\"number\" min=\"0.01\" step=\"0.01\" data-invoice-qty=\"" + escapeHtml(row.engagement_id) + "\" value=\"1\" /></label>" +
+          "<label>Rate <input type=\"number\" min=\"0.01\" step=\"0.01\" data-invoice-rate=\"" + escapeHtml(row.engagement_id) + "\" placeholder=\"Owner enters rate\" /></label>" +
+          "<button type=\"button\" class=\"secondary\" data-invoice-prep=\"" + escapeHtml(row.engagement_id) + "\">Prepare Invoice Support</button>" +
+          "<div class=\"muted\">Creates an internal draft only. Nothing is sent or charged.</div></div></div>"
+        : "";
       var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
         ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
           "<div class=\"work-input-box\">" +
@@ -476,7 +487,7 @@
         : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
         "<div class=\"muted\">" + escapeHtml(row.status) + " · PAYMENT NOT CONFIRMED unless owner-confirmed received</div>" +
-        runControl + "</div>";
+        runControl + completionControls + "</div>";
     });
     if ($("completed-list")) $("completed-list").innerHTML = listHtml(
       (data.engagements || []).filter(function (row) { return row.status === "COMPLETE" || row.queue_status === "COMPLETE"; }),
@@ -933,6 +944,69 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var completeButton = event.target && event.target.closest ? event.target.closest("[data-owner-complete]") : null;
+    if (completeButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var completeEngagementId = completeButton.getAttribute("data-owner-complete") || "";
+      try {
+        setWorkActionStatus(completeEngagementId, "Approving reviewed internal work...", true);
+        var completed = await api("/api/nova/work/engagements/" + encodeURIComponent(completeEngagementId) + "/owner-complete", {
+          method: "POST",
+          body: JSON.stringify({ owner_notes: "Owner approved reviewed internal Nova work." })
+        });
+        var completedMessage = "INTERNAL WORK COMPLETE · " + completed.deliverables_approved +
+          " deliverable(s) approved · " + completed.tasks_completed_this_action +
+          " task(s) completed · NOTHING SENT · NOT PAID.";
+        await refresh();
+        setWorkActionStatus(completeEngagementId, completedMessage, true);
+        showBanner(completedMessage, true);
+      } catch (err) {
+        setWorkActionStatus(completeEngagementId, "ERROR · " + err.message, false);
+        showBanner(err.message);
+      }
+      return;
+    }
+
+    var invoiceButton = event.target && event.target.closest ? event.target.closest("[data-invoice-prep]") : null;
+    if (invoiceButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var invoiceEngagementId = invoiceButton.getAttribute("data-invoice-prep") || "";
+      var qtyEl = document.querySelector("[data-invoice-qty=\"" + invoiceEngagementId + "\"]");
+      var rateEl = document.querySelector("[data-invoice-rate=\"" + invoiceEngagementId + "\"]");
+      var quantity = Number(qtyEl && qtyEl.value);
+      var rate = Number(rateEl && rateEl.value);
+      if (!(quantity > 0) || !(rate > 0)) {
+        showBanner("Enter a positive quantity and rate. Nova will not guess pricing.");
+        return;
+      }
+      try {
+        setWorkActionStatus(invoiceEngagementId, "Preparing internal invoice support...", true);
+        var prepared = await api("/api/nova/work/engagements/" + encodeURIComponent(invoiceEngagementId) + "/prepare-invoice-support", {
+          method: "POST",
+          body: JSON.stringify({
+            quantity: quantity,
+            rate: rate,
+            currency: "USD",
+            invoice_required: true,
+            record_estimated_revenue: true,
+            owner_notes: "Owner supplied quantity/rate. Internal invoice support only."
+          })
+        });
+        var invoiceMessage = "INVOICE SUPPORT READY FOR OWNER REVIEW · subtotal $" +
+          Number(prepared.subtotal || 0).toFixed(2) +
+          " · NOT SENT · NOT CHARGED · NOT PAID.";
+        await refresh();
+        setWorkActionStatus(invoiceEngagementId, invoiceMessage, true);
+        showBanner(invoiceMessage, true);
+      } catch (err) {
+        setWorkActionStatus(invoiceEngagementId, "ERROR · " + err.message, false);
+        showBanner(err.message);
+      }
+      return;
+    }
+
     var downloadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-download]") : null;
     if (downloadButton) {
       event.preventDefault();
