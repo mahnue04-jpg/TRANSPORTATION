@@ -2222,3 +2222,122 @@ def test_owner_completion_ui_controls_are_safe() -> None:
     assert "COMPLETE != PAID" in WORK_JS
     assert ".owner-completion-box" in WORK_CSS
     assert ".invoice-prep-grid" in WORK_CSS
+
+
+def test_void_invoice_support_removes_only_matching_test_draft_from_active_totals(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Void Draft Test Co",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    client.post(f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify", headers=headers)
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    client.post(f"/api/nova/work/engagements/{engagement_id}/autonomous-run", headers=headers)
+    upload = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("void_test.csv", b"a,b\n1,2\n1,2\n", "text/csv")},
+    )
+    assert upload.status_code == 201, upload.text
+    run = client.post(f"/api/nova/work/engagements/{engagement_id}/autonomous-run", headers=headers)
+    assert run.status_code == 200, run.text
+    complete = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/owner-complete",
+        headers=headers,
+        json={"owner_notes": "Approved for void-draft regression."},
+    )
+    assert complete.status_code == 200, complete.text
+
+    one = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/prepare-invoice-support",
+        headers=headers,
+        json={"quantity": 1, "rate": 1, "currency": "USD", "record_estimated_revenue": True},
+    )
+    assert one.status_code == 200, one.text
+    hundred = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/prepare-invoice-support",
+        headers=headers,
+        json={"quantity": 1, "rate": 100, "currency": "USD", "record_estimated_revenue": True},
+    )
+    assert hundred.status_code == 200, hundred.text
+    one_id = one.json()["invoice_support"]["invoice_support_id"]
+    hundred_id = hundred.json()["invoice_support"]["invoice_support_id"]
+    assert one_id != hundred_id
+
+    before = client.get("/api/nova/work/reconciliation", headers=headers)
+    assert before.status_code == 200, before.text
+    assert before.json()["estimated_amount"] == 101
+    assert before.json()["invoice_support_amount"] == 101
+    assert before.json()["owner_confirmed_received"] == 0
+
+    voided = client.post(
+        f"/api/nova/work/invoice-support/{one_id}/void",
+        headers=headers,
+        json={"confirm_void": True, "owner_notes": "Duplicate/test $1 draft."},
+    )
+    assert voided.status_code == 200, voided.text
+    body = voided.json()
+    assert body["invoice_status"] == "ARCHIVED"
+    assert body["revenue_stage"] == "CANCELLED"
+    assert body["included_in_current_totals"] is False
+    assert body["money_received"] is False
+    assert body["stripe_action"] is False
+    assert body["external_send"] is False
+
+    after = client.get("/api/nova/work/reconciliation", headers=headers)
+    assert after.status_code == 200, after.text
+    assert after.json()["estimated_amount"] == 100
+    assert after.json()["invoice_support_amount"] == 100
+    assert after.json()["owner_confirmed_received"] == 0
+
+    invoices = client.get("/api/nova/work/invoice-support", headers=headers)
+    assert invoices.status_code == 200, invoices.text
+    inv_by_id = {row["invoice_support_id"]: row for row in invoices.json()}
+    assert inv_by_id[one_id]["status"] == "ARCHIVED"
+    assert inv_by_id[hundred_id]["status"] == "READY_FOR_OWNER_REVIEW"
+
+    entries = client.get(
+        "/api/nova/work/revenue-entries",
+        headers=headers,
+        params={"engagement_id": engagement_id},
+    )
+    assert entries.status_code == 200, entries.text
+    by_ref = {row["invoice_reference"]: row for row in entries.json() if row["invoice_reference"]}
+    assert by_ref[one_id]["stage"] == "CANCELLED"
+    assert by_ref[hundred_id]["stage"] == "ESTIMATED"
+    assert by_ref[hundred_id]["amount"] == 100
+
+    repeat = client.post(
+        f"/api/nova/work/invoice-support/{one_id}/void",
+        headers=headers,
+        json={"confirm_void": True},
+    )
+    assert repeat.status_code == 200, repeat.text
+    assert repeat.json()["already_voided"] is True
+
+    final_recon = client.get("/api/nova/work/reconciliation", headers=headers)
+    assert final_recon.status_code == 200, final_recon.text
+    assert final_recon.json()["estimated_amount"] == 100
+    assert final_recon.json()["invoice_support_amount"] == 100
+
+
+def test_void_invoice_support_ui_is_auditable_and_non_destructive() -> None:
+    assert "Void Draft" in WORK_JS
+    assert "/void" in WORK_JS
+    assert "nothing sent · nothing charged · nothing received" in WORK_JS
+    assert "Historical/archived. Excluded from active billed-draft totals." in WORK_JS
