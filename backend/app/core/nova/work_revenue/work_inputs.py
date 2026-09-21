@@ -194,6 +194,134 @@ def create_work_input(
     return work_input_out(row)
 
 
+def create_generated_output(
+    db: Session,
+    engagement_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    filename: str,
+    content_type: str,
+    content: bytes,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+    if not content:
+        raise NovaWorkError("Generated output is empty", status_code=400)
+    input_id = "NWO-" + uuid4().replace("-", "")[:12].upper()
+    digest = hashlib.sha256(content).hexdigest()
+    dest = _path_for(organization_id, engagement_id, input_id, filename)
+    dest.write_bytes(content)
+    row = NovaWorkInput(
+        input_id=input_id,
+        organization_id=organization_id,
+        owner_user_id=user.user_id,
+        engagement_id=engagement_id,
+        input_kind="GENERATED_OUTPUT",
+        original_filename=Path(filename).name[:255],
+        content_type=str(content_type or "application/octet-stream")[:120],
+        file_size=len(content),
+        sha256=digest,
+        storage_ref=str(dest),
+        status="AVAILABLE",
+        notes=(notes or None),
+        is_active=True,
+    )
+    db.add(row)
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="WORK_OUTPUT_GENERATED",
+        summary=f"Nova generated internal work output for engagement {engagement_id}: {row.original_filename}.",
+        ref_id=input_id,
+        entity_type="work_output",
+        actor_category="NOVA",
+        new_state="AVAILABLE",
+    )
+    db.commit()
+    db.refresh(row)
+    return work_input_out(row)
+
+
+def process_tabular_source(row: NovaWorkInput) -> dict[str, Any]:
+    path = input_file_path(row)
+    if path is None:
+        raise NovaWorkError("Source file is not stored", status_code=404)
+    ext = Path(row.original_filename).suffix.lower()
+    if ext not in {".csv", ".xlsx"}:
+        raise NovaWorkError("Tabular transformation currently supports CSV and XLSX", status_code=409)
+
+    raw_rows: list[list[str]] = []
+    if ext == ".csv":
+        text = path.read_bytes().decode("utf-8-sig", errors="replace")
+        raw_rows = [[str(cell) for cell in record] for record in csv.reader(io.StringIO(text))]
+    else:
+        openpyxl = importlib.import_module("openpyxl")
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        sheet = workbook.worksheets[0]
+        raw_rows = [
+            ["" if cell is None else str(cell) for cell in values]
+            for values in sheet.iter_rows(values_only=True)
+        ]
+
+    if not raw_rows:
+        raise NovaWorkError("Tabular source has no rows", status_code=409)
+
+    width = max(len(record) for record in raw_rows)
+    normalized: list[list[str]] = []
+    for record in raw_rows:
+        padded = list(record) + [""] * (width - len(record))
+        normalized.append([str(cell).strip() for cell in padded])
+
+    header = normalized[0]
+    for index, value in enumerate(header):
+        if not value:
+            header[index] = f"column_{index + 1}"
+
+    data_rows = normalized[1:]
+    seen: set[tuple[str, ...]] = set()
+    cleaned_rows: list[list[str]] = []
+    duplicate_rows_removed = 0
+    for record in data_rows:
+        key = tuple(record)
+        if key in seen:
+            duplicate_rows_removed += 1
+            continue
+        seen.add(key)
+        cleaned_rows.append(record)
+
+    blank_cells = sum(1 for record in cleaned_rows for cell in record if cell == "")
+    inconsistent_rows = sum(1 for record in raw_rows if len(record) != width)
+
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(header)
+    writer.writerows(cleaned_rows)
+    content = output.getvalue().encode("utf-8")
+
+    validation = {
+        "source_filename": row.original_filename,
+        "source_format": ext.lstrip("."),
+        "source_rows_including_header": len(raw_rows),
+        "source_data_rows": len(data_rows),
+        "columns": width,
+        "duplicate_rows_removed": duplicate_rows_removed,
+        "cleaned_data_rows": len(cleaned_rows),
+        "blank_cells_retained": blank_cells,
+        "inconsistent_width_rows": inconsistent_rows,
+        "header_columns": header,
+        "row_count_reconciles": len(cleaned_rows) == len(data_rows) - duplicate_rows_removed,
+        "column_count_reconciles": all(len(record) == width for record in cleaned_rows),
+        "missing_values_imputed": False,
+        "domain_specific_formulas_applied": False,
+    }
+    validation["validated"] = bool(
+        validation["row_count_reconciles"] and validation["column_count_reconciles"]
+    )
+    return {"content": content, "validation": validation}
+
+
 def work_input_out(row: NovaWorkInput) -> dict[str, Any]:
     return {
         "input_id": row.input_id,
@@ -273,6 +401,7 @@ def inspect_work_inputs(
         .filter(
             NovaWorkInput.organization_id == organization_id,
             NovaWorkInput.engagement_id == engagement_id,
+            NovaWorkInput.input_kind == "SOURCE_DATA",
             NovaWorkInput.is_active.is_(True),
             NovaWorkInput.status == "AVAILABLE",
         )

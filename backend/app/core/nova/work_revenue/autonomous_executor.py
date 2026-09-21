@@ -29,6 +29,8 @@ _SOURCE_DATA_TASK_TERMS = (
 _OUTLINE_TITLE = "Prepare internal work outline"
 _OUTLINE_MARKER = "AUTONOMOUS_EXECUTOR_OUTLINE_V1"
 _SOURCE_PROFILE_MARKER = "AUTONOMOUS_SOURCE_PROFILE_V1"
+_TRANSFORM_REPORT_MARKER = "AUTONOMOUS_TRANSFORM_REPORT_V1"
+_TRANSFORM_DATA_MARKER = "AUTONOMOUS_TRANSFORM_DATA_V1"
 
 
 def _is_source_data_task(title: str) -> bool:
@@ -255,6 +257,193 @@ def run_autonomous_engagement(
             )
             advanced.append(profile_task.task_id)
 
+    transformation_report_id: str | None = None
+    transformation_data_id: str | None = None
+    generated_output_id: str | None = None
+
+    transform_ready = (
+        db.query(NovaWorkTask)
+        .filter(
+            NovaWorkTask.organization_id == organization_id,
+            NovaWorkTask.engagement_id == engagement_id,
+            NovaWorkTask.classification == "NOVA",
+            NovaWorkTask.status == "READY",
+        )
+        .all()
+    )
+    transform_tasks = [
+        task for task in transform_ready
+        if any(
+            term in str(task.title or "").lower()
+            for term in (
+                "identify missing, duplicate",
+                "clean and normalize data",
+                "calculations and transformations",
+                "spreadsheet/report structure",
+                "validate totals and sample records",
+            )
+        )
+    ]
+    if source_data_available and transform_tasks:
+        source_rows = (
+            db.query(work_inputs.NovaWorkInput)
+            .filter(
+                work_inputs.NovaWorkInput.organization_id == organization_id,
+                work_inputs.NovaWorkInput.engagement_id == engagement_id,
+                work_inputs.NovaWorkInput.input_kind == "SOURCE_DATA",
+                work_inputs.NovaWorkInput.is_active.is_(True),
+                work_inputs.NovaWorkInput.status == "AVAILABLE",
+            )
+            .order_by(work_inputs.NovaWorkInput.created_at.asc())
+            .all()
+        )
+        tabular_source = next(
+            (row for row in source_rows if str(row.original_filename).lower().endswith((".csv", ".xlsx"))),
+            None,
+        )
+        if tabular_source is not None:
+            existing_report = (
+                db.query(NovaWorkDeliverable)
+                .filter(
+                    NovaWorkDeliverable.organization_id == organization_id,
+                    NovaWorkDeliverable.engagement_id == engagement_id,
+                    NovaWorkDeliverable.notes.like(f"{_TRANSFORM_REPORT_MARKER}%"),
+                )
+                .first()
+            )
+            if existing_report is None:
+                result = work_inputs.process_tabular_source(tabular_source)
+                validation = dict(result["validation"])
+                if not validation.get("validated"):
+                    raise NovaWorkError("Generated tabular output failed reconciliation validation", status_code=409)
+                stem = tabular_source.original_filename.rsplit(".", 1)[0]
+                output_name = f"{stem}_nova_cleaned.csv"
+                generated = work_inputs.create_generated_output(
+                    db,
+                    engagement_id,
+                    organization_id=organization_id,
+                    user=user,
+                    filename=output_name,
+                    content_type="text/csv",
+                    content=result["content"],
+                    notes=_TRANSFORM_DATA_MARKER,
+                )
+                generated_output_id = generated["input_id"]
+
+                report_description = (
+                    "Nova Tabular Transformation & QA Report. "
+                    f"Source: {validation['source_filename']}. "
+                    f"Rows before cleaning: {validation['source_data_rows']}. "
+                    f"Columns: {validation['columns']}. "
+                    f"Exact duplicate rows removed: {validation['duplicate_rows_removed']}. "
+                    f"Rows after cleaning: {validation['cleaned_data_rows']}. "
+                    f"Blank cells retained without imputation: {validation['blank_cells_retained']}. "
+                    f"Inconsistent-width rows normalized: {validation['inconsistent_width_rows']}. "
+                    f"Row reconciliation passed: {validation['row_count_reconciles']}. "
+                    f"Column reconciliation passed: {validation['column_count_reconciles']}. "
+                    "Missing values were not invented or imputed. "
+                    "No domain-specific formulas were applied because none were provided in the engagement scope. "
+                    f"Generated internal output: {output_name} ({generated_output_id}). "
+                    "Owner review is required before external use."
+                )
+                report = ops.create_deliverable(
+                    db,
+                    DeliverableCreate(
+                        engagement_id=engagement_id,
+                        deliverable_type="REPORT",
+                        description=report_description[:12000],
+                        notes=f"{_TRANSFORM_REPORT_MARKER}:{generated_output_id}",
+                    ),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                report = ops.update_deliverable(
+                    db,
+                    report.deliverable_id,
+                    DeliverableUpdate(review_status="READY_FOR_REVIEW"),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                transformation_report_id = report.deliverable_id
+
+                data_deliverable = ops.create_deliverable(
+                    db,
+                    DeliverableCreate(
+                        engagement_id=engagement_id,
+                        deliverable_type="DATA_FILE",
+                        description=(
+                            f"Cleaned internal data file {output_name}. "
+                            f"Generated output id {generated_output_id}. "
+                            "Exact duplicates removed; whitespace normalized; missing values preserved. "
+                            "Not transmitted externally."
+                        ),
+                        notes=f"{_TRANSFORM_DATA_MARKER}:{generated_output_id}",
+                    ),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                data_deliverable = ops.update_deliverable(
+                    db,
+                    data_deliverable.deliverable_id,
+                    DeliverableUpdate(review_status="READY_FOR_REVIEW"),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                transformation_data_id = data_deliverable.deliverable_id
+
+                for task in transform_tasks:
+                    ops.update_task(
+                        db,
+                        task.task_id,
+                        TaskUpdate(status="IN_PROGRESS"),
+                        organization_id=organization_id,
+                        user=user,
+                    )
+                    note = (
+                        f"Nova completed safe tabular processing using {tabular_source.original_filename}; "
+                        f"generated {output_name}; exact duplicates removed={validation['duplicate_rows_removed']}; "
+                        f"blank cells retained={validation['blank_cells_retained']}; "
+                        "owner review required before external use."
+                    )
+                    ops.update_task(
+                        db,
+                        task.task_id,
+                        TaskUpdate(status="OWNER_REVIEW", owner_notes=note),
+                        organization_id=organization_id,
+                        user=user,
+                    )
+                    advanced.append(task.task_id)
+            else:
+                transformation_report_id = existing_report.deliverable_id
+                notes = str(existing_report.notes or "")
+                if ":" in notes:
+                    generated_output_id = notes.split(":", 1)[1] or None
+                existing_data = (
+                    db.query(NovaWorkDeliverable)
+                    .filter(
+                        NovaWorkDeliverable.organization_id == organization_id,
+                        NovaWorkDeliverable.engagement_id == engagement_id,
+                        NovaWorkDeliverable.notes.like(f"{_TRANSFORM_DATA_MARKER}%"),
+                    )
+                    .first()
+                )
+                if existing_data is not None:
+                    transformation_data_id = existing_data.deliverable_id
+        else:
+            for task in transform_tasks:
+                reason = (
+                    "TABULAR SOURCE REQUIRED: this transformation phase currently supports CSV or XLSX source data. "
+                    "The attached source input is not a supported tabular file for this executor."
+                )
+                ops.update_task(
+                    db,
+                    task.task_id,
+                    TaskUpdate(status="BLOCKED", blocked_reason=reason, owner_notes=reason),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                blocked.append(task.task_id)
+
     ready_tasks = (
         db.query(NovaWorkTask)
         .filter(
@@ -317,6 +506,9 @@ def run_autonomous_engagement(
         "unblocked_task_ids": unblocked,
         "deliverable_id": deliverable_id,
         "source_profile_deliverable_id": source_profile_deliverable_id,
+        "transformation_report_deliverable_id": transformation_report_id,
+        "transformation_data_deliverable_id": transformation_data_id,
+        "generated_output_id": generated_output_id,
         "owner_review_required": True,
         "source_data_available": source_data_available,
         "source_data_input_count": len(source_inputs),
