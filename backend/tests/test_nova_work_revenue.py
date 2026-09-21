@@ -1573,3 +1573,11 @@ def test_autonomous_controls_have_visible_inline_feedback() -> None:
     assert "Start is available only for QUALIFIED CAN_PERFORM work" in WORK_JS
     assert ".work-action-status" in WORK_CSS
     assert "pointer-events: auto" in WORK_CSS
+
+
+def test_autonomous_start_status_survives_refresh() -> None:
+    start_block = WORK_JS.split('} else if (action === "autonomous-start") {', 1)[1].split('} else if (action === "engage") {', 1)[0]
+    assert "await refresh();" in start_block
+    assert "setWorkActionStatus(id, startedMessage, true);" in start_block
+    assert start_block.index("await refresh();") < start_block.index("setWorkActionStatus(id, startedMessage, true);")
+    assert "return;" in start_block
