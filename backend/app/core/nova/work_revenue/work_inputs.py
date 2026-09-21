@@ -37,7 +37,15 @@ def _safe_token(value: str, limit: int = 120) -> str:
 
 def work_input_root() -> Path:
     configured = (os.getenv("NOVA_WORK_INPUT_DIR") or "").strip()
-    root = Path(configured) if configured else Path("/tmp/amicor/nova-work-inputs")
+    if configured:
+        root = Path(configured)
+    else:
+        persistent_parent = Path("/data/onboarding_docs")
+        root = (
+            persistent_parent / "nova_work_inputs"
+            if persistent_parent.exists()
+            else Path("/tmp/amicor/nova-work-inputs")
+        )
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -431,8 +439,21 @@ def inspect_work_inputs(
                 "available": True,
                 "parse_error": str(exc)[:400],
             })
+    source_data_available = any(item.get("available") and item.get("text") for item in parsed)
+    source_records_exist = bool(rows)
+    missing_stored_files = [
+        item for item in parsed
+        if item.get("available") is False
+    ]
+    parse_failures = [
+        item for item in parsed
+        if item.get("parse_error")
+    ]
     return {
         "engagement_id": engagement_id,
-        "source_data_available": any(item.get("available") and item.get("text") for item in parsed),
+        "source_data_available": source_data_available,
+        "source_records_exist": source_records_exist,
+        "source_file_missing": bool(missing_stored_files),
+        "source_parse_failed": bool(parse_failures),
         "inputs": parsed,
     }
