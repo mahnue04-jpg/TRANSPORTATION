@@ -92,6 +92,29 @@
     return payload;
   }
 
+  async function downloadWorkInput(engagementId, inputId, filename) {
+    var headers = {};
+    if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
+    else if (token()) headers.Authorization = "Bearer " + token();
+    var response = await fetch(
+      "/api/nova/work/engagements/" + encodeURIComponent(engagementId) +
+      "/inputs/" + encodeURIComponent(inputId) + "/file",
+      { headers: headers }
+    );
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
+    if (response.status === 403) throw new Error("Access denied.");
+    if (!response.ok) throw new Error("Work Input file could not be opened.");
+    var blob = await response.blob();
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = filename || "work-input";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
   function liveJobItem(row) {
     var opp = row.opportunity || row;
     var qual = opp.live_qualification || {};
@@ -380,11 +403,11 @@
     try {
       var items = await api("/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs");
       target.innerHTML = listHtml(items, "No source data attached.", function (row) {
-        var fileHref = "/api/nova/work/engagements/" + encodeURIComponent(engagementId) +
-          "/inputs/" + encodeURIComponent(row.input_id) + "/file";
         return "<div class=\"muted\"><strong>" + escapeHtml(row.original_filename) + "</strong>" +
-          " · " + escapeHtml(row.status) + " · " + escapeHtml(row.file_size) + " bytes" +
-          " · <a href=\"" + escapeHtml(fileHref) + "\" target=\"_blank\" rel=\"noopener\">open/download</a></div>";
+          " · " + escapeHtml(row.status) + " · " + escapeHtml(row.file_size) + " bytes " +
+          "<button type=\"button\" class=\"secondary\" data-work-input-download=\"" +
+          escapeHtml(engagementId) + "\" data-input-id=\"" + escapeHtml(row.input_id) +
+          "\" data-filename=\"" + escapeHtml(row.original_filename) + "\">Open / Save File</button></div>";
       });
     } catch (err) {
       target.textContent = "Work Inputs could not be loaded: " + err.message;
@@ -909,6 +932,21 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var downloadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-download]") : null;
+    if (downloadButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await downloadWorkInput(
+          downloadButton.getAttribute("data-work-input-download") || "",
+          downloadButton.getAttribute("data-input-id") || "",
+          downloadButton.getAttribute("data-filename") || "work-input"
+        );
+      } catch (err) {
+        showBanner(err.message);
+      }
+      return;
+    }
     var uploadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-upload]") : null;
     if (uploadButton) {
       event.preventDefault();
