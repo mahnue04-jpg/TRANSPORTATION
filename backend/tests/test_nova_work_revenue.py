@@ -1659,3 +1659,12 @@ def test_work_ui_exposes_controlled_autonomous_executor() -> None:
     assert "/autonomous-run" in WORK_JS
     assert "SOURCE DATA REQUIRED" in WORK_JS
     assert "Running safe internal Nova tasks..." in WORK_JS
+
+
+def test_deliverables_and_needs_review_load_on_tab_open() -> None:
+    assert 'activeTab === "deliverables"' in WORK_JS
+    assert 'activeTab === "needs-review"' in WORK_JS
+    assert '"/api/nova/work/deliverables?limit=100"' in WORK_JS
+    assert "review_status === \"READY_FOR_REVIEW\"" in WORK_JS
+    assert "owner approval pending" in WORK_JS
+    assert "Deliverables could not be loaded:" in WORK_JS
