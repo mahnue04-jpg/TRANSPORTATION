@@ -759,10 +759,16 @@
         var invoices = await api("/api/nova/work/invoice-support");
         if ($("invoice-list")) {
           $("invoice-list").innerHTML = listHtml(invoices, "No invoice-support drafts.", function (row) {
+            var canVoid = ["DRAFT", "READY_FOR_OWNER_REVIEW", "APPROVED"].includes(row.status);
             return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
               "<div class=\"muted\">" + escapeHtml(row.status) +
               " · subtotal " + escapeHtml(row.draft_subtotal) +
-              " · client billed draft · not AMICOR received · not a Stripe invoice</div></div>";
+              " · client billed draft · not AMICOR received · not a Stripe invoice</div>" +
+              (canVoid
+                ? "<div class=\"action-row\"><button type=\"button\" class=\"secondary\" data-void-invoice=\"" +
+                  escapeHtml(row.invoice_support_id) + "\">Void Draft</button></div>"
+                : "<div class=\"muted\">Historical/archived. Excluded from active billed-draft totals.</div>") +
+              "</div>";
           });
         }
       } catch (_) {}
@@ -944,6 +950,33 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var voidButton = event.target && event.target.closest ? event.target.closest("[data-void-invoice]") : null;
+    if (voidButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var invoiceId = voidButton.getAttribute("data-void-invoice") || "";
+      if (!invoiceId) return;
+      try {
+        var result = await api("/api/nova/work/invoice-support/" + encodeURIComponent(invoiceId) + "/void", {
+          method: "POST",
+          body: JSON.stringify({
+            confirm_void: true,
+            owner_notes: "Owner voided duplicate/test invoice-support draft. Preserve audit history; exclude from active totals."
+          })
+        });
+        showBanner(
+          "DRAFT VOIDED · invoice archived · matching estimated revenue " +
+          escapeHtml(result.revenue_stage || "unchanged") +
+          " · nothing sent · nothing charged · nothing received.",
+          true
+        );
+        await refresh();
+      } catch (err) {
+        showBanner(err.message);
+      }
+      return;
+    }
+
     var completeButton = event.target && event.target.closest ? event.target.closest("[data-owner-complete]") : null;
     if (completeButton) {
       event.preventDefault();
