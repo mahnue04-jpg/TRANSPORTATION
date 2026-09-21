@@ -582,7 +582,13 @@
     if (activeTab === "owner-facts" || $("fact-list")) {
       try {
         renderFacts(await api("/api/nova/work/owner-facts"));
-      } catch (_) {}
+      } catch (err) {
+        if ($("fact-readiness")) {
+          $("fact-readiness").textContent =
+            "Master Work Profile could not be loaded: " + (err && err.message ? err.message : "request failed");
+        }
+        showBanner(err && err.message ? err.message : "Master Work Profile load failed.");
+      }
     }
     if (activeTab === "queue" || $("queue-list")) {
       try {

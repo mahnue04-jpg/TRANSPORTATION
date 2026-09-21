@@ -560,6 +560,26 @@ def owner_facts(
     )
 
 
+@router.post("/owner-facts/apply-owner-approved")
+def apply_owner_approved_facts(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Persist owner-approved safe Master Work Profile facts for MISSING keys only."""
+    catalog = managed.apply_owner_approved_profile(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        applicant_party="AMICOR",
+    )
+    catalog["executes_externally"] = False
+    catalog["approved_application"] = False
+    catalog["submitted_application"] = False
+    catalog["payment_recorded"] = False
+    return catalog
+
+
 @router.get("/lifecycle")
 def work_lifecycle(user: UserContext = Depends(get_current_user_context)):
     return {

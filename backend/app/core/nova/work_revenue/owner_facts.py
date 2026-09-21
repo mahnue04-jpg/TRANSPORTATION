@@ -4,6 +4,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.nova.work_revenue.capability_registry import (
+    AVAILABLE,
+    AVAILABLE_WITH_OWNER_REVIEW,
+    CAPABILITIES,
+)
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.lifecycle import FACT_STATUSES, FACT_VALUE_STATUSES
 from app.core.nova.work_revenue.materials import sanitize_untrusted
@@ -11,6 +16,8 @@ from app.core.nova.work_revenue.urls import UnsafeSourceUrl, validate_source_url
 from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED, profile_snapshot
 
 FACT_SOURCE_OWNER = "OWNER"
+FACT_SOURCE_OWNER_APPROVED = "OWNER_APPROVED"
+FACT_SOURCE_SYSTEM = "SYSTEM"
 
 PROVIDED_STATUSES = {"PROVIDED", "OWNER_PROVIDED"}
 COUNTED_PROVIDED_STATUSES = {"PROVIDED", "OWNER_PROVIDED", "VERIFIED"}
@@ -48,6 +55,63 @@ FACT_DEFINITIONS: tuple[dict[str, Any], ...] = (
 SENSITIVE_FACT_IDS = {item["fact_id"] for item in FACT_DEFINITIONS if item["sensitivity"] == "sensitive"}
 REQUIRED_BEFORE_LIVE_IDS = {item["fact_id"] for item in FACT_DEFINITIONS if item["required_before_live"]}
 FACT_DEFINITION_MAP = {item["fact_id"]: item for item in FACT_DEFINITIONS}
+
+# Owner-authorized non-secret Master Work Profile values.
+# Never includes EIN/SSN/tax ID numbers, bank/routing/account numbers, cards, passwords, or API/Stripe keys.
+# Soft-shown until an org-specific non-MISSING stored value exists; persisted non-MISSING values always win.
+OWNER_APPROVED_SAFE_FACTS: dict[str, str] = {
+    "legal_business_name": "Amicor Health, LLC",
+    "address": "2823 Aldrich Ave North\nMinneapolis, MN 55411",
+    "business_email": "info@getamicor.com",
+    "business_phone": "612-807-0683",
+    "authorized_signer": "Saye Monibah — Owner / Managing Member",
+    "ownership": (
+        "Amicor Health, LLC — jointly owned by Saye Monibah and Sherita J. Monibert, 50% each."
+    ),
+    "business_age": "Established May 2026.",
+    "service_areas": "United States; remote digital services available where permitted.",
+    "industries_served": (
+        "Small business; healthcare operations; transportation; delivery; "
+        "professional services; administrative operations; technology-enabled business services."
+    ),
+    "insurance": "OWNER_SAYS_NOT_READY",
+    "licenses": "NOT_APPLICABLE",
+    "relevant_experience": (
+        "AMICOR Nova supports AI-assisted business research, administrative operations, data analysis, "
+        "spreadsheet work, reporting, document preparation and analysis, workflow automation, "
+        "customer-support operations, content operations, proposal/RFP support, and web/software support. "
+        "Work remains subject to capability verification and owner approval."
+    ),
+    "pricing": (
+        "Pricing is determined by project scope, complexity, estimated effort, required deliverables, "
+        "and client requirements. Final commercial terms require owner approval."
+    ),
+    "rates": (
+        "Hourly, fixed-project, milestone, or recurring-service rates may be quoted according to the "
+        "specific opportunity. Final rate requires owner approval."
+    ),
+    "availability": (
+        "Remote digital services and project-based contract work; availability depends on project scope, "
+        "capacity, and owner approval."
+    ),
+    "workforce": (
+        "Owner-operated business using AMICOR Nova AI-assisted systems. Human owner approval remains "
+        "required for external commitments, submissions, contracts, and financial actions."
+    ),
+    "equipment": (
+        "Computer and internet-connected business systems; cloud software; AI-assisted workflow tools; "
+        "document, spreadsheet, research, reporting, and data-processing tools."
+    ),
+    "ai_use_disclosure_decision": "AI_ASSISTANCE_USED_OWNER_WILL_DECIDE_PER_PLATFORM",
+    "subcontractor_disclosure_decision": "OWNER_WILL_DECIDE_PER_ENGAGEMENT",
+    "w9_readiness": "w9_ready",
+    "banking_payment_readiness": "banking_ready",
+}
+
+# value_status for owner-approved soft/persist facts (default PROVIDED when omitted).
+OWNER_APPROVED_FACT_STATUSES: dict[str, str] = {
+    "licenses": "NOT_APPLICABLE",
+}
 
 SENSITIVE_READY_VALUES = {
     "MISSING",
@@ -138,6 +202,26 @@ def normalize_fact_status(value: str | None) -> str:
 
 def definition_for(fact_key: str) -> dict[str, Any] | None:
     return FACT_DEFINITION_MAP.get(str(fact_key or "").strip())
+
+
+def system_verified_technology_capability() -> str:
+    """Build technology capability text from the verified Capability & Work Execution registry."""
+    labels = [
+        item["label"]
+        for item in CAPABILITIES
+        if item["availability"] in {AVAILABLE, AVAILABLE_WITH_OWNER_REVIEW}
+    ]
+    joined = "; ".join(labels)
+    text = (
+        "Verified AMICOR Nova Capability & Work Execution Engine support (owner review required for "
+        f"external use): {joined}. Nova is an AI system/tool under AMICOR/owner authorization, not a "
+        "human employee."
+    )
+    return text[:MAX_FACT_VALUE]
+
+
+def owner_approved_safe_fact_ids() -> tuple[str, ...]:
+    return tuple(OWNER_APPROVED_SAFE_FACTS.keys())
 
 
 def _legacy_status(value_status: str) -> str:
@@ -270,6 +354,7 @@ def fact_catalog(*, applicant_party: str = "AMICOR", stored: dict[str, dict[str,
     snapshot = profile_snapshot(applicant_party=applicant_party)
     facts = []
     stored = stored or {}
+    tech_capability = system_verified_technology_capability()
     for item in FACT_DEFINITIONS:
         status = "MISSING_FACT"
         value = OWNER_INPUT_REQUIRED
@@ -281,22 +366,41 @@ def fact_catalog(*, applicant_party: str = "AMICOR", stored: dict[str, dict[str,
         source = FACT_SOURCE_OWNER
         if item["fact_id"] == "technology_capability":
             status = "KNOWN_VERIFIED_FACT"
-            value = "Authorized digital drafting, organization, and summarization with owner review."
+            value = tech_capability
             value_status = "VERIFIED"
-            source = "SYSTEM"
+            source = FACT_SOURCE_SYSTEM
+            source_description = "Capability & Work Execution Engine registry"
+        elif item["fact_id"] in OWNER_APPROVED_SAFE_FACTS:
+            # Soft default until an org-specific non-MISSING stored value exists.
+            soft_status = OWNER_APPROVED_FACT_STATUSES.get(item["fact_id"], "PROVIDED")
+            status = _legacy_status(soft_status)
+            value = OWNER_APPROVED_SAFE_FACTS[item["fact_id"]]
+            value_status = soft_status
+            source = FACT_SOURCE_OWNER_APPROVED
+            source_description = "Owner-approved Master Work Profile safe fact"
         overlay = stored.get(item["fact_id"])
         if overlay:
             try:
-                value_status = normalize_fact_status(overlay.get("value_status") or value_status)
+                overlay_status = normalize_fact_status(overlay.get("value_status") or "MISSING")
             except OwnerFactError:
-                value_status = "MISSING"
-            status = _legacy_status(value_status)
-            value = overlay.get("value_display") or value
-            verification_date = overlay.get("verification_date")
-            expiration_date = overlay.get("expiration_date")
-            source_description = overlay.get("source_description")
-            notes = overlay.get("notes")
-            source = overlay.get("source") or FACT_SOURCE_OWNER
+                overlay_status = "MISSING"
+            # Empty MISSING DB rows must not wipe soft defaults or system-verified capability.
+            # Persisted non-MISSING owner values always win over soft defaults.
+            if overlay_status != "MISSING":
+                value_status = overlay_status
+                status = _legacy_status(value_status)
+                value = overlay.get("value_display") or value
+                verification_date = overlay.get("verification_date")
+                expiration_date = overlay.get("expiration_date")
+                source_description = overlay.get("source_description")
+                notes = overlay.get("notes")
+                source = overlay.get("source") or FACT_SOURCE_OWNER
+            if item["fact_id"] == "technology_capability" and value_status in {"MISSING", "EXPIRED"}:
+                status = "KNOWN_VERIFIED_FACT"
+                value = tech_capability
+                value_status = "VERIFIED"
+                source = FACT_SOURCE_SYSTEM
+                source_description = "Capability & Work Execution Engine registry"
         facts.append(
             {
                 "fact_id": item["fact_id"],
@@ -329,6 +433,7 @@ def fact_catalog(*, applicant_party: str = "AMICOR", stored: dict[str, dict[str,
         "facts": facts,
         "readiness": readiness,
         "source": FACT_SOURCE_OWNER,
+        "owner_approved_safe_fact_ids": list(owner_approved_safe_fact_ids()),
         "prohibited": [
             "EIN",
             "SSN",

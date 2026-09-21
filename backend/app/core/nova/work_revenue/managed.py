@@ -48,10 +48,15 @@ from app.core.nova.work_revenue.models import (
 )
 from app.core.nova.work_revenue.owner_facts import (
     FACT_SOURCE_OWNER,
+    FACT_SOURCE_OWNER_APPROVED,
+    FACT_SOURCE_SYSTEM,
+    OWNER_APPROVED_FACT_STATUSES,
+    OWNER_APPROVED_SAFE_FACTS,
     OwnerFactError,
     definition_for,
     fact_catalog,
     normalize_fact_status,
+    system_verified_technology_capability,
     validate_fact_value,
 )
 from app.core.nova.work_revenue.recurring import next_due_date
@@ -1413,8 +1418,13 @@ def create_owner_action(
 
 
 def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dict[str, dict[str, Any]]:
+    """Load Master Work Profile facts for the organization (org-scoped, not per-user)."""
     _ensure()
-    rows = _query(db, NovaWorkBusinessFact, organization_id, user).all()
+    rows = (
+        db.query(NovaWorkBusinessFact)
+        .filter(NovaWorkBusinessFact.organization_id == organization_id)
+        .all()
+    )
     current = now()
     if getattr(current, "tzinfo", None) is None:
         current = current.replace(tzinfo=timezone.utc)
@@ -1430,6 +1440,9 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
             expires = expires.astimezone(timezone.utc)
         if expires is not None and current is not None and expires < current:
             status = "EXPIRED"
+        source = str(row.source_description or FACT_SOURCE_OWNER)
+        if source not in {FACT_SOURCE_OWNER, FACT_SOURCE_OWNER_APPROVED, FACT_SOURCE_SYSTEM}:
+            source = FACT_SOURCE_OWNER
         out[row.fact_key] = {
             "value_status": status,
             "value_display": row.value_display,
@@ -1437,7 +1450,7 @@ def stored_facts(db: Session, *, organization_id: str, user: UserContext) -> dic
             "expiration_date": _iso(row.expiration_date),
             "source_description": row.source_description,
             "notes": row.notes,
-            "source": FACT_SOURCE_OWNER,
+            "source": source,
         }
     return out
 
@@ -1448,7 +1461,106 @@ def owner_fact_catalog(db: Session, *, organization_id: str, user: UserContext, 
     catalog["approved_application"] = False
     catalog["submitted_application"] = False
     catalog["payment_recorded"] = False
+    catalog["owner_approved_facts_persisted"] = []
     return catalog
+
+
+def apply_owner_approved_profile(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    applicant_party: str = "AMICOR",
+) -> dict[str, Any]:
+    persisted = persist_owner_approved_safe_facts(db, organization_id=organization_id, user=user)
+    catalog = owner_fact_catalog(db, organization_id=organization_id, user=user, applicant_party=applicant_party)
+    catalog["owner_approved_facts_persisted"] = persisted
+    return catalog
+
+
+def persist_owner_approved_safe_facts(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> list[str]:
+    """Persist owner-approved safe facts for MISSING keys only. Never overwrites owner edits."""
+    _ensure()
+    existing = stored_facts(db, organization_id=organization_id, user=user)
+    saved: list[str] = []
+    payload_pairs: list[tuple[str, str, str]] = [
+        (fact_id, value, FACT_SOURCE_OWNER_APPROVED) for fact_id, value in OWNER_APPROVED_SAFE_FACTS.items()
+    ]
+    payload_pairs.append(
+        (
+            "technology_capability",
+            system_verified_technology_capability(),
+            FACT_SOURCE_SYSTEM,
+        )
+    )
+    for fact_id, value, source in payload_pairs:
+        current = existing.get(fact_id)
+        if current and normalize_fact_status(current.get("value_status")) not in {"MISSING"}:
+            continue
+        definition = definition_for(fact_id)
+        if definition is None:
+            continue
+        if fact_id == "technology_capability":
+            status = "VERIFIED"
+        else:
+            status = OWNER_APPROVED_FACT_STATUSES.get(fact_id, "PROVIDED")
+        try:
+            display = validate_fact_value(
+                fact_id,
+                value_status=status,
+                value_display=value,
+            )
+        except OwnerFactError:
+            continue
+        row = (
+            db.query(NovaWorkBusinessFact)
+            .filter(
+                NovaWorkBusinessFact.organization_id == organization_id,
+                NovaWorkBusinessFact.fact_key == fact_id,
+            )
+            .first()
+        )
+        if row is None:
+            row = NovaWorkBusinessFact(
+                fact_record_id=_new_id("NWBF-"),
+                organization_id=organization_id,
+                owner_user_id=user.user_id,
+                fact_key=fact_id,
+                display_label=definition["label"],
+            )
+            db.add(row)
+        row.value_status = status
+        row.value_display = display
+        if status == "VERIFIED" and row.verification_date is None:
+            row.verification_date = now()
+        row.source_description = source
+        row.notes = None
+        row.updated_at = now()
+        saved.append(fact_id)
+    if saved:
+        _record_audit(
+            db,
+            organization_id=organization_id,
+            user=user,
+            event_type="FACT_UPDATED",
+            summary=(
+                "Owner-approved Master Work Profile safe facts persisted for missing keys only: "
+                + ", ".join(saved)
+                + ". No application submitted, no client contacted, no payment recorded."
+            ),
+            ref_id="owner-approved-safe-facts",
+            entity_type="business_fact",
+            actor_category="OWNER",
+            previous_state="MISSING",
+            new_state="PROVIDED",
+        )
+        db.commit()
+    return saved
 
 
 def update_business_fact(
@@ -1476,26 +1588,13 @@ def update_business_fact(
         raise NovaWorkError(str(exc), status_code=exc.status_code)
     _validate_date_range(payload.verification_date, payload.expiration_date)
     row = (
-        _query(db, NovaWorkBusinessFact, organization_id, user)
-        .filter(NovaWorkBusinessFact.fact_key == key)
+        db.query(NovaWorkBusinessFact)
+        .filter(
+            NovaWorkBusinessFact.organization_id == organization_id,
+            NovaWorkBusinessFact.fact_key == key,
+        )
         .first()
     )
-    if row is None:
-        org_match = (
-            db.query(NovaWorkBusinessFact)
-            .filter(
-                NovaWorkBusinessFact.organization_id == organization_id,
-                NovaWorkBusinessFact.fact_key == key,
-            )
-            .first()
-        )
-        if org_match is not None:
-            if org_match.owner_user_id != user.user_id and not _can_see_org_wide(user):
-                raise NovaWorkError(
-                    "A matching owner fact already exists for this organization",
-                    status_code=409,
-                )
-            row = org_match
     if row is None:
         row = NovaWorkBusinessFact(
             fact_record_id=_new_id("NWBF-"),
@@ -1547,7 +1646,13 @@ def update_business_fact(
         )
         if existing is None:
             raise NovaWorkError("Owner fact could not be saved", status_code=409)
-        if existing.owner_user_id != user.user_id and not _can_see_org_wide(user):
+        source_desc = str(existing.source_description or "")
+        approved_seed = source_desc in {FACT_SOURCE_OWNER_APPROVED, FACT_SOURCE_SYSTEM}
+        if (
+            existing.owner_user_id != user.user_id
+            and not _can_see_org_wide(user)
+            and not approved_seed
+        ):
             raise NovaWorkError(
                 "A matching owner fact already exists for this organization",
                 status_code=409,
