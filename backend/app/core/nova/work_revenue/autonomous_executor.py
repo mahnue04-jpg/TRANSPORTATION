@@ -327,7 +327,12 @@ def run_autonomous_engagement(
             .all()
         )
         tabular_source = next(
-            (row for row in source_rows if str(row.original_filename).lower().endswith((".csv", ".xlsx"))),
+            (
+                row
+                for row in source_rows
+                if str(row.original_filename).lower().endswith((".csv", ".xlsx"))
+                and work_inputs.input_file_path(row) is not None
+            ),
             None,
         )
         if tabular_source is not None:
