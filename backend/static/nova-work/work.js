@@ -68,6 +68,30 @@
     if (!response.ok) throw new Error(errorText(body, "Request failed."));
     return body;
   }
+  async function uploadWorkInput(engagementId, file) {
+    if (!file) throw new Error("Choose a source file first.");
+    var form = new FormData();
+    form.append("file", file);
+    var headers = {};
+    if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
+    else if (token()) headers.Authorization = "Bearer " + token();
+    var response;
+    try {
+      response = await fetch(
+        "/api/nova/work/engagements/" + encodeURIComponent(engagementId) + "/inputs/upload",
+        { method: "POST", headers: headers, body: form }
+      );
+    } catch (_) {
+      throw new Error("Network error. Source file was not uploaded.");
+    }
+    var payload = null;
+    try { payload = await response.json(); } catch (_) {}
+    if (response.status === 401) throw new Error("Session expired. Sign in again.");
+    if (response.status === 403) throw new Error("Access denied.");
+    if (!response.ok) throw new Error(errorText(payload, "Source file upload failed."));
+    return payload;
+  }
+
   function liveJobItem(row) {
     var opp = row.opportunity || row;
     var qual = opp.live_qualification || {};
@@ -395,6 +419,11 @@
     if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
       var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
         ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
+          "<div class=\"work-input-box\">" +
+          "<label>Work Inputs <input type=\"file\" data-work-input-file=\"" + escapeHtml(row.engagement_id) +
+          "\" accept=\".csv,.xlsx,.txt,.json,.pdf,.docx\" /></label>" +
+          "<button type=\"button\" class=\"secondary\" data-work-input-upload=\"" + escapeHtml(row.engagement_id) + "\">Attach Source Data</button>" +
+          "<div class=\"muted\">Supported: CSV, XLSX, TXT, JSON, PDF, DOCX · max 20 MB · internal only.</div></div>" +
           "<div class=\"work-action-status\" id=\"work-action-status-" + escapeHtml(row.engagement_id) + "\" aria-live=\"polite\"></div>"
         : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.client_name) + "</strong>" +
@@ -853,6 +882,28 @@
     await refresh();
   }
   document.querySelector(".work-main").addEventListener("click", async function (event) {
+    var uploadButton = event.target && event.target.closest ? event.target.closest("[data-work-input-upload]") : null;
+    if (uploadButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      var engagementId = uploadButton.getAttribute("data-work-input-upload") || "";
+      var fileInput = document.querySelector("[data-work-input-file=\"" + engagementId + "\"]");
+      var file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      try {
+        setWorkActionStatus(engagementId, "Uploading source data...", true);
+        var uploaded = await uploadWorkInput(engagementId, file);
+        setWorkActionStatus(
+          engagementId,
+          "SOURCE DATA ATTACHED · " + uploaded.original_filename + " · " + uploaded.file_size + " bytes · run autonomous work again.",
+          true
+        );
+        showBanner("Source data attached to internal engagement. Nothing was transmitted externally.", true);
+      } catch (err) {
+        setWorkActionStatus(engagementId, "ERROR · " + err.message, false);
+        showBanner(err.message);
+      }
+      return;
+    }
     var button = event.target && event.target.closest ? event.target.closest("[data-work-action]") : null;
     if (button) {
       event.preventDefault();
