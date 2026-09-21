@@ -1753,6 +1753,9 @@ def test_work_inputs_csv_reactivates_autonomous_source_tasks(client: TestClient)
     assert second_body["source_data_input_count"] == 1
     assert second_body["tasks_unblocked"] >= 1
     assert second_body["source_profile_deliverable_id"]
+    assert second_body["transformation_report_deliverable_id"]
+    assert second_body["transformation_data_deliverable_id"]
+    assert second_body["generated_output_id"]
     assert second_body["tasks_blocked"] == 0
 
     engagement = client.get(
@@ -1763,13 +1766,19 @@ def test_work_inputs_csv_reactivates_autonomous_source_tasks(client: TestClient)
     task_rows = engagement.json()["tasks"]
     profile = next(task for task in task_rows if "profile the source data" in task["title"].lower())
     assert profile["status"] == "OWNER_REVIEW"
-    remaining_source_tasks = [
+    transformed_titles = (
+        "identify missing, duplicate",
+        "clean and normalize data",
+        "calculations and transformations",
+        "spreadsheet/report structure",
+        "validate totals and sample records",
+    )
+    transformed_tasks = [
         task for task in task_rows
-        if task["responsible_party"] == "NOVA"
-        and task["task_id"] != profile["task_id"]
-        and task["status"] == "READY"
+        if any(term in task["title"].lower() for term in transformed_titles)
     ]
-    assert remaining_source_tasks
+    assert len(transformed_tasks) == 5
+    assert all(task["status"] == "OWNER_REVIEW" for task in transformed_tasks)
 
     deliverables = client.get(
         "/api/nova/work/deliverables",
@@ -1777,8 +1786,9 @@ def test_work_inputs_csv_reactivates_autonomous_source_tasks(client: TestClient)
         params={"engagement_id": engagement_id},
     )
     assert deliverables.status_code == 200, deliverables.text
+    deliverable_rows = deliverables.json()
     analyses = [
-        row for row in deliverables.json()
+        row for row in deliverable_rows
         if row["deliverable_type"] == "ANALYSIS"
         and "Source Data Intake Analysis" in (row["description"] or "")
     ]
@@ -1787,6 +1797,58 @@ def test_work_inputs_csv_reactivates_autonomous_source_tasks(client: TestClient)
     assert "delivery_records.csv" in analyses[0]["description"]
     assert "blank_cells_preview=" in analyses[0]["description"]
     assert "duplicate_rows_preview=" in analyses[0]["description"]
+
+    reports = [
+        row for row in deliverable_rows
+        if row["deliverable_type"] == "REPORT"
+        and "Nova Tabular Transformation & QA Report" in (row["description"] or "")
+    ]
+    assert reports
+    assert reports[0]["review_status"] == "READY_FOR_REVIEW"
+    assert "Exact duplicate rows removed: 1" in reports[0]["description"]
+    assert "Rows after cleaning: 3" in reports[0]["description"]
+    assert "Blank cells retained without imputation: 1" in reports[0]["description"]
+    assert "No domain-specific formulas were applied" in reports[0]["description"]
+
+    data_files = [
+        row for row in deliverable_rows
+        if row["deliverable_type"] == "DATA_FILE"
+        and "delivery_records_nova_cleaned.csv" in (row["description"] or "")
+    ]
+    assert data_files
+    assert data_files[0]["review_status"] == "READY_FOR_REVIEW"
+
+    all_files = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs",
+        headers=headers,
+    )
+    assert all_files.status_code == 200, all_files.text
+    file_rows = all_files.json()
+    source_rows = [row for row in file_rows if row["input_kind"] == "SOURCE_DATA"]
+    generated_rows = [row for row in file_rows if row["input_kind"] == "GENERATED_OUTPUT"]
+    assert len(source_rows) == 1
+    assert len(generated_rows) == 1
+    assert generated_rows[0]["original_filename"] == "delivery_records_nova_cleaned.csv"
+
+    generated_download = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/{generated_rows[0]['input_id']}/file",
+        headers=headers,
+    )
+    assert generated_download.status_code == 200, generated_download.text
+    cleaned = generated_download.content.decode("utf-8")
+    assert cleaned.count("2,A,,complete") == 1
+    assert "3,B,9.0,pending" in cleaned
+
+    repeat = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert repeat.status_code == 200, repeat.text
+    files_after_repeat = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs",
+        headers=headers,
+    ).json()
+    assert len([row for row in files_after_repeat if row["input_kind"] == "GENERATED_OUTPUT"]) == 1
 
 
 def test_work_inputs_reject_unsupported_binary(client: TestClient) -> None:
@@ -1825,3 +1887,8 @@ def test_work_inputs_controls_are_exposed_in_active_work() -> None:
     assert "SOURCE DATA AVAILABLE" in WORK_JS
     assert ".csv,.xlsx,.txt,.json,.pdf,.docx" in WORK_JS
     assert ".work-input-box" in WORK_CSS
+
+
+def test_tabular_executor_ui_labels_generated_outputs() -> None:
+    assert "GENERATED_OUTPUT" in WORK_JS or "input_kind" in WORK_JS
+    assert "SOURCE_DATA" in WORK_JS
