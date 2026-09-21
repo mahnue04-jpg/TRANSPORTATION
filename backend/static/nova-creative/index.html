@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Creative Studio</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+</head>
+<body>
+  <header class="studio-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Creative Studio</h1>
+      </div>
+    </div>
+    <nav class="studio-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/work">Work</a>
+      <a href="/nova/creative" aria-current="page">Creative</a>
+      <a href="/nova/today">Today</a>
+    </nav>
+  </header>
+
+  <main class="studio-main">
+    <p class="disclaimer">Creative Studio V1 is planning / script / storyboard mode. Image, video, and voice providers stay CONFIG_REQUIRED until owner-approved credentials exist. No fake media URLs. External publishing, submission, and financial execution remain OFF.</p>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="card" aria-label="Sign in">
+      <p id="session-meta" class="hint">Sign in to use Creative Studio.</p>
+      <div class="actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <form id="login-form" class="grid hidden">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Provider status">
+      <h2>Provider status</h2>
+      <div id="provider-status" class="hint">Sign in to load provider status.</div>
+    </section>
+
+    <section class="card" aria-label="Brand profile">
+      <h2>Brand profile</h2>
+      <form id="brand-form" class="grid">
+        <label>Business name<input id="brand-name" required maxlength="200" /></label>
+        <label>Tagline<input id="brand-tagline" maxlength="200" /></label>
+        <label>Tone<input id="brand-tone" maxlength="120" /></label>
+        <label>Audience<input id="brand-audience" maxlength="200" /></label>
+        <label>Preferred CTA<input id="brand-cta" maxlength="200" /></label>
+        <label class="wide">Brand description<textarea id="brand-description" rows="3"></textarea></label>
+        <button type="submit">Save brand</button>
+      </form>
+      <div id="brand-list" class="list"></div>
+    </section>
+
+    <section class="card" aria-label="New project">
+      <h2>1. New Project</h2>
+      <form id="project-form" class="grid">
+        <label>Title<input id="project-title" required maxlength="200" /></label>
+        <label>Type
+          <select id="project-type">
+            <option value="social_post">social_post</option>
+            <option value="social_image">social_image</option>
+            <option value="short_video" selected>short_video</option>
+            <option value="ad_creative">ad_creative</option>
+            <option value="promo_video">promo_video</option>
+            <option value="explainer">explainer</option>
+            <option value="presentation_asset">presentation_asset</option>
+          </select>
+        </label>
+        <label>Platform
+          <select id="project-platform">
+            <option>TikTok</option>
+            <option>Instagram</option>
+            <option>Facebook</option>
+            <option>YouTube Shorts</option>
+            <option>YouTube</option>
+            <option>LinkedIn</option>
+            <option>X</option>
+            <option>generic</option>
+          </select>
+        </label>
+        <label>Duration
+          <select id="project-duration">
+            <option value="15">15</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
+          </select>
+        </label>
+        <label>Audience<input id="project-audience" maxlength="200" /></label>
+        <label>Tone<input id="project-tone" maxlength="120" /></label>
+        <label class="wide">Objective<input id="project-objective" maxlength="300" /></label>
+        <button type="submit">Create project</button>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Content brief">
+      <h2>2. Content Brief</h2>
+      <form id="brief-form" class="grid">
+        <label class="wide">Topic<input id="brief-topic" required maxlength="300" /></label>
+        <label>CTA<input id="brief-cta" maxlength="200" /></label>
+        <label>Style<input id="brief-style" maxlength="120" /></label>
+        <button type="submit">Save brief on active project</button>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Generate">
+      <h2>Generate</h2>
+      <div class="actions wrap">
+        <button type="button" data-action="script">3. Generate Script</button>
+        <button type="button" data-action="caption">4. Generate Caption</button>
+        <button type="button" data-action="storyboard">5. Generate Storyboard</button>
+        <button type="button" data-action="image-prompt">6. Generate Image Prompt</button>
+        <button type="button" data-action="image">7. Image Generation status</button>
+        <button type="button" data-action="video">8. Video Generation status</button>
+        <button type="button" data-action="voice">9. Voice Generation status</button>
+        <button type="button" data-action="export">12. Export project package</button>
+      </div>
+      <pre id="output" class="output" aria-live="polite"></pre>
+    </section>
+
+    <section class="card" aria-label="Project history">
+      <h2>10. Project history</h2>
+      <div id="project-list" class="list"></div>
+    </section>
+
+    <section class="card" aria-label="Assets">
+      <h2>11. Asset list</h2>
+      <div id="asset-list" class="list"></div>
+    </section>
+  </main>
+
+  <script src="/static/nova-creative/creative.js"></script>
+</body>
+</html>
