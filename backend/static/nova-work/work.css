@@ -163,3 +163,21 @@ button {
 @media (min-width: 1600px) {
   .work-header, .work-main { width: min(1440px, calc(100% - 64px)); }
 }
+
+.work-action-status {
+  min-height: 1.4rem;
+  margin-top: 8px;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.work-action-status.ok { font-weight: 700; }
+.work-action-status.error { font-weight: 700; }
+.item [data-work-action] {
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+}
+.item button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
