@@ -63,8 +63,8 @@
 
     <section class="card" aria-label="New project">
       <h2>1. New Project</h2>
-      <form id="project-form" class="grid">
-        <label>Title<input id="project-title" required maxlength="200" /></label>
+      <form id="project-form" class="grid" novalidate>
+        <label>Title<input id="project-title" name="title" maxlength="200" autocomplete="off" /></label>
         <label>Type
           <select id="project-type">
             <option value="social_post">social_post</option>
@@ -98,7 +98,7 @@
         <label>Audience<input id="project-audience" maxlength="200" /></label>
         <label>Tone<input id="project-tone" maxlength="120" /></label>
         <label class="wide">Objective<input id="project-objective" maxlength="300" /></label>
-        <button type="submit">Create project</button>
+        <button type="submit" id="project-create-btn">Create project</button>
       </form>
     </section>
 

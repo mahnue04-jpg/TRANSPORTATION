@@ -22,16 +22,42 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+  function detailText(body, fallback) {
+    if (!body) return fallback;
+    var detail = body.detail;
+    if (detail && typeof detail === "object") {
+      if (detail.message) return String(detail.message);
+      if (Array.isArray(detail) && detail.length) {
+        return detail.map(function (item) {
+          if (!item) return "";
+          if (typeof item === "string") return item;
+          return item.msg || item.message || JSON.stringify(item);
+        }).filter(Boolean).join("; ") || fallback;
+      }
+      try { return JSON.stringify(detail); } catch (err) { return fallback; }
+    }
+    if (typeof detail === "string" && detail) return detail;
+    if (body.message) return String(body.message);
+    return fallback;
+  }
   async function api(path, options) {
     options = options || {};
     var headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
     if (token()) headers.Authorization = "Bearer " + token();
-    var res = await fetch(path, Object.assign({}, options, { headers: headers }));
+    var res;
+    try {
+      res = await fetch(path, Object.assign({}, options, { headers: headers }));
+    } catch (err) {
+      throw new Error("Network error. Check your connection and try again.");
+    }
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
+    if (res.status === 401) throw new Error("Session expired. Sign in again. (401)");
+    if (res.status === 403) throw new Error("Access denied. (403)");
+    if (res.status === 422) throw new Error(detailText(body, "Validation failed. (422)"));
+    if (res.status >= 500) throw new Error("Temporary system error. (500)");
     if (!res.ok) {
-      var detail = body && (body.detail && body.detail.message || body.detail || body.message) || res.statusText;
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      throw new Error(detailText(body, "Request failed. (" + res.status + ")"));
     }
     return body;
   }
@@ -159,11 +185,20 @@
   });
   $("project-form").addEventListener("submit", async function (event) {
     event.preventDefault();
+    var titleInput = $("project-title");
+    var createBtn = $("project-create-btn");
+    var title = (titleInput.value || "").trim();
+    if (!title) {
+      showBanner("Project title is required.", false);
+      titleInput.focus();
+      return;
+    }
+    createBtn.disabled = true;
     try {
       var row = await api("/api/nova/creative/projects", {
         method: "POST",
         body: JSON.stringify({
-          title: $("project-title").value.trim(),
+          title: title,
           project_type: $("project-type").value,
           platform: $("project-platform").value,
           duration_target: Number($("project-duration").value),
@@ -174,11 +209,13 @@
         })
       });
       activeProjectId = row.id;
-      showBanner("Project created: " + row.id, true);
-      refreshProjects();
-      refreshAssets();
+      showBanner("Project created", true);
+      await refreshProjects();
+      await refreshAssets();
     } catch (err) {
-      showBanner(err.message, false);
+      showBanner(err.message || "Project create failed.", false);
+    } finally {
+      createBtn.disabled = false;
     }
   });
   $("brief-form").addEventListener("submit", async function (event) {

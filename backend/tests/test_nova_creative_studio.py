@@ -271,6 +271,41 @@ def test_export_contains_no_secrets_and_no_publishing():
     assert exported["export"]["url"] is None
 
 
+def test_create_project_empty_title_rejected_by_backend():
+    svc = _svc()
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.create_project("owner-a", {"title": "   ", "project_type": "social_post", "platform": "TikTok"})
+    assert exc.value.code == "INVALID_INPUT"
+
+
+def test_create_project_ux_static_contract(client: TestClient):
+    """Native HTML required must not block the JS submit handler before banners run."""
+    page = client.get("/nova/creative")
+    assert page.status_code == 200
+    html = page.content.decode("utf-8")
+    assert 'id="project-form"' in html
+    assert "novalidate" in html
+    assert 'id="project-title"' in html
+    assert 'id="project-create-btn"' in html
+    # Title must not use native required (that blocked the banner path).
+    assert 'id="project-title" required' not in html
+    assert 'id="project-title" name="title" required' not in html
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert "Project title is required." in js
+    assert 'showBanner("Project created"' in js
+    assert "createBtn.disabled = true" in js
+    assert "createBtn.disabled = false" in js
+    assert "await refreshProjects()" in js
+    assert "Session expired. Sign in again. (401)" in js
+    assert "Access denied. (403)" in js
+    assert "Validation failed. (422)" in js or "(422)" in js
+    assert "Temporary system error. (500)" in js
+    assert "Network error." in js
+    work = client.get("/nova/work")
+    assert work.status_code == 200
+    assert b"nova-work" in work.content or b"Work" in work.content
+
+
 def test_http_surface_and_page(client: TestClient):
     headers = _headers(client)
     page = client.get("/nova/creative")
