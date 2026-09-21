@@ -352,7 +352,6 @@ def list_work_inputs(
         .filter(
             NovaWorkInput.organization_id == organization_id,
             NovaWorkInput.engagement_id == engagement_id,
-            NovaWorkInput.input_kind == "SOURCE_DATA",
             NovaWorkInput.is_active.is_(True),
         )
         .order_by(NovaWorkInput.created_at.desc())
