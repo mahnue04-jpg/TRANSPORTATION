@@ -20,6 +20,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
 )
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.work_packets import build_work_packet
+from app.core.nova.v3.autonomous_execution import build_autonomous_execution_session
 from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
@@ -293,6 +294,16 @@ def v3_work_packet_preview(
     """Build an internal-only execution packet without taking external action."""
     _org(user, payload.organization_id)
     return build_work_packet(payload.model_dump())
+
+
+@router.post("/autonomous-execution/preview")
+def v3_autonomous_execution_preview(
+    payload: WorkPacketIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Build an owner-controlled autonomous internal work session without external action."""
+    _org(user, payload.organization_id)
+    return build_autonomous_execution_session(payload.model_dump())
 
 
 @router.post("/capability-proof/preview")
