@@ -1668,3 +1668,160 @@ def test_deliverables_and_needs_review_load_on_tab_open() -> None:
     assert "review_status === \"READY_FOR_REVIEW\"" in WORK_JS
     assert "owner approval pending" in WORK_JS
     assert "Deliverables could not be loaded:" in WORK_JS
+
+
+def test_work_inputs_csv_reactivates_autonomous_source_tasks(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Source Input Delivery Ops",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200, qualified.text
+
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    first_run = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert first_run.status_code == 200, first_run.text
+    first_body = first_run.json()
+    assert first_body["source_data_required"] is True
+    assert first_body["tasks_blocked"] >= 1
+
+    csv_bytes = (
+        b"delivery_id,route,miles,status\n"
+        b"1,A,12.5,complete\n"
+        b"2,A,,complete\n"
+        b"2,A,,complete\n"
+        b"3,B,9.0,pending\n"
+    )
+    upload = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("delivery_records.csv", csv_bytes, "text/csv")},
+    )
+    assert upload.status_code == 201, upload.text
+    uploaded = upload.json()
+    assert uploaded["engagement_id"] == engagement_id
+    assert uploaded["original_filename"] == "delivery_records.csv"
+    assert uploaded["status"] == "AVAILABLE"
+    assert uploaded["file_size"] == len(csv_bytes)
+
+    listed = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs",
+        headers=headers,
+    )
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    assert len(rows) == 1
+    assert rows[0]["input_id"] == uploaded["input_id"]
+
+    downloaded = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/{uploaded['input_id']}/file",
+        headers=headers,
+    )
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.content == csv_bytes
+
+    second_run = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert second_run.status_code == 200, second_run.text
+    second_body = second_run.json()
+    assert second_body["source_data_available"] is True
+    assert second_body["source_data_required"] is False
+    assert second_body["source_data_input_count"] == 1
+    assert second_body["tasks_unblocked"] >= 1
+    assert second_body["source_profile_deliverable_id"]
+    assert second_body["tasks_blocked"] == 0
+
+    engagement = client.get(
+        f"/api/nova/work/engagements/{engagement_id}",
+        headers=headers,
+    )
+    assert engagement.status_code == 200, engagement.text
+    task_rows = engagement.json()["tasks"]
+    profile = next(task for task in task_rows if "profile the source data" in task["title"].lower())
+    assert profile["status"] == "OWNER_REVIEW"
+    remaining_source_tasks = [
+        task for task in task_rows
+        if task["responsible_party"] == "NOVA"
+        and task["task_id"] != profile["task_id"]
+        and task["status"] == "READY"
+    ]
+    assert remaining_source_tasks
+
+    deliverables = client.get(
+        "/api/nova/work/deliverables",
+        headers=headers,
+        params={"engagement_id": engagement_id},
+    )
+    assert deliverables.status_code == 200, deliverables.text
+    analyses = [
+        row for row in deliverables.json()
+        if row["deliverable_type"] == "ANALYSIS"
+        and "Source Data Intake Analysis" in (row["description"] or "")
+    ]
+    assert analyses
+    assert analyses[0]["review_status"] == "READY_FOR_REVIEW"
+    assert "delivery_records.csv" in analyses[0]["description"]
+    assert "blank_cells_preview=" in analyses[0]["description"]
+    assert "duplicate_rows_preview=" in analyses[0]["description"]
+
+
+def test_work_inputs_reject_unsupported_binary(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Unsafe Input Test",
+        opportunity_title="Remote administrative support contractor",
+        description="Remote research, reporting, and document support.",
+        requirements="Remote digital work.",
+        physical_presence_required="false",
+    )
+    client.post(f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify", headers=headers)
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    rejected = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("payload.exe", b"MZ-not-safe", "application/octet-stream")},
+    )
+    assert rejected.status_code == 415
+
+
+def test_work_inputs_controls_are_exposed_in_active_work() -> None:
+    assert "Attach Source Data" in WORK_JS
+    assert 'data-work-input-file' in WORK_JS
+    assert 'data-work-input-upload' in WORK_JS
+    assert 'data-work-input-download' in WORK_JS
+    assert "/inputs/upload" in WORK_JS
+    assert "SOURCE DATA AVAILABLE" in WORK_JS
+    assert ".csv,.xlsx,.txt,.json,.pdf,.docx" in WORK_JS
+    assert ".work-input-box" in WORK_CSS
