@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
@@ -18,6 +19,7 @@ from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
 from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue import autonomous_executor
+from app.core.nova.work_revenue import work_inputs
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -486,6 +488,77 @@ def start_autonomous_internal_work(
             opportunity_id,
             organization_id=_resolve_org(user, organization_id),
             user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/engagements/{engagement_id}/inputs/upload", status_code=201)
+async def upload_work_input(
+    engagement_id: str,
+    file: UploadFile = File(...),
+    notes: str | None = Form(None),
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        content = await file.read()
+        return work_inputs.create_work_input(
+            db,
+            engagement_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+            filename=file.filename or "source-data",
+            content_type=file.content_type or "application/octet-stream",
+            content=content,
+            notes=notes,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/engagements/{engagement_id}/inputs")
+def list_work_inputs(
+    engagement_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        return work_inputs.list_work_inputs(
+            db,
+            engagement_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.get("/engagements/{engagement_id}/inputs/{input_id}/file")
+def get_work_input_file(
+    engagement_id: str,
+    input_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    try:
+        row = work_inputs.get_work_input(
+            db,
+            engagement_id,
+            input_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+        stored = work_inputs.input_file_path(row)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Work input file is not stored")
+        return FileResponse(
+            path=str(stored),
+            media_type=row.content_type or "application/octet-stream",
+            filename=row.original_filename,
         )
     except service.NovaWorkError as exc:
         _raise(exc)
