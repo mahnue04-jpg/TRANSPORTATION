@@ -729,6 +729,8 @@ def apply_qualification(job: dict[str, Any]) -> dict[str, Any]:
     row["ai_policy"] = qual["ai_policy"]
     row["fee_required"] = qual["fee_required"]
     row["owner_review_reason"] = qual["owner_review_reason"]
+    row["capability_classification"] = qual.get("capability_classification")
+    row["actual_duty_fit"] = qual.get("capability_classification")
     return row
 
 

@@ -77,6 +77,8 @@
     var compensation = opp.compensation_summary || qual.compensation_summary || opp.compensation_text || "Compensation not stated";
     var reviewReason = opp.owner_review_reason || qual.owner_review_reason || "";
     var score = opp.relevance_score;
+    var dutyClass = opp.actual_duty_fit || qual.actual_duty_fit || opp.capability_classification || qual.capability_classification || "";
+    var provenance = Array.isArray(opp.provenance_sources) ? opp.provenance_sources.join(", ") : "";
     var meta = [];
     meta.push("Qualification: " + status);
     meta.push("Risk: " + risk);
@@ -93,6 +95,9 @@
       "<div class=\"muted\">" + escapeHtml(meta.join(" · ")) + "</div>" +
       (opp.why_searched || (opp.live_qualification && opp.live_qualification.why_searched) ? "<div class=\"muted\">Why searched: " + escapeHtml(opp.why_searched || opp.live_qualification.why_searched) + "</div>" : "") +
       (opp.search_family_label || (opp.live_qualification && opp.live_qualification.search_family_label) ? "<div class=\"muted\">Search family: " + escapeHtml(opp.search_family_label || opp.live_qualification.search_family_label) + "</div>" : "") +
+      (opp.provider_type || opp.source_attribution || opp.provider_id ? "<div class=\"muted\">Source: " + escapeHtml(opp.source_attribution || opp.provider_id || "") + (opp.provider_type ? " · type " + escapeHtml(opp.provider_type) : "") + (opp.provider_id ? " · id " + escapeHtml(opp.provider_id) : "") + "</div>" : "") +
+      (provenance ? "<div class=\"muted\">Provenance: " + escapeHtml(provenance) + "</div>" : "") +
+      (dutyClass ? "<div class=\"muted\">Actual-duty classification: " + escapeHtml(dutyClass) + "</div>" : "") +
       (fitSummary ? "<div class=\"muted\">Fit: " + escapeHtml(fitSummary) + "</div>" : "") +
       (reviewReason ? "<div class=\"muted\">Owner review: " + escapeHtml(reviewReason) + "</div>" : "") +
       (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Source URL</a></div>" : "") +
@@ -102,9 +107,18 @@
     if (!$("live-job-status") || !token()) return;
     try {
       var guards = await api("/api/nova/v3/guardrails");
+      var caps = await api("/api/nova/v3/capabilities");
       var enabled = guards.LIVE_DISCOVERY_ENABLED === true;
+      var providers = (caps.discovery_providers || []).filter(function (row) { return row.enabled; });
+      var pending = (caps.discovery_providers || []).filter(function (row) { return !row.enabled; });
+      var healthBits = (caps.provider_health || []).slice(0, 4).map(function (row) {
+        return (row.provider_id || "") + ":" + (row.status || "idle");
+      }).join(", ");
       $("live-job-status").textContent = enabled
-        ? "LIVE DISCOVERY READY · External submission remains approval-controlled/off until the submission adapter is verified."
+        ? ("LIVE MULTI-SOURCE DISCOVERY READY · providers " + providers.map(function (row) { return row.provider_id; }).join(", ") +
+          (pending.length ? " · pending " + pending.length : "") +
+          (healthBits ? " · health " + healthBits : "") +
+          " · External submission remains off.")
         : "LIVE DISCOVERY OFF · Set NOVA_V3_LIVE_DISCOVERY_ENABLED=true in the production environment, then restart the service. External submission remains off.";
     } catch (err) {
       $("live-job-status").textContent = "Live-discovery status unavailable: " + err.message;
@@ -314,6 +328,8 @@
       "</div>" +
       (cap.why_searched ? "<div>Why Nova searched: " + escapeHtml(cap.why_searched) + "</div>" : "") +
       (cap.search_family_label || cap.search_family ? "<div>Search family: " + escapeHtml(cap.search_family_label || cap.search_family) + "</div>" : "") +
+      (row.source || row.source_type || row.provider_id || cap.provider_type ? "<div>Source: " + escapeHtml(row.source || row.source_type || row.provider_id || "") + (cap.provider_type || row.provider_type ? " · type " + escapeHtml(cap.provider_type || row.provider_type) : "") + "</div>" : "") +
+      (cap.capability_classification || cap.actual_duty_fit ? "<div>Actual-duty classification: " + escapeHtml(cap.capability_classification || cap.actual_duty_fit) + "</div>" : "") +
       (cap.capability_registry_matches && cap.capability_registry_matches.length ? "<div>Capability registry match: " + escapeHtml(cap.capability_registry_matches.join(", ")) + "</div>" : "") +
       (duties ? "<div>Actual duties: " + escapeHtml(String(duties).slice(0, 280)) + "</div>" : "") +
       "<div>Nova can do: " + escapeHtml(canDo) + "</div>" +
