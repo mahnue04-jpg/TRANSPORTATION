@@ -91,6 +91,8 @@
     return "<div class=\"item\"><strong>" + escapeHtml(title) + "</strong>" +
       "<div class=\"muted\">" + escapeHtml(company) + "</div>" +
       "<div class=\"muted\">" + escapeHtml(meta.join(" · ")) + "</div>" +
+      (opp.why_searched || (opp.live_qualification && opp.live_qualification.why_searched) ? "<div class=\"muted\">Why searched: " + escapeHtml(opp.why_searched || opp.live_qualification.why_searched) + "</div>" : "") +
+      (opp.search_family_label || (opp.live_qualification && opp.live_qualification.search_family_label) ? "<div class=\"muted\">Search family: " + escapeHtml(opp.search_family_label || opp.live_qualification.search_family_label) + "</div>" : "") +
       (fitSummary ? "<div class=\"muted\">Fit: " + escapeHtml(fitSummary) + "</div>" : "") +
       (reviewReason ? "<div class=\"muted\">Owner review: " + escapeHtml(reviewReason) + "</div>" : "") +
       (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Source URL</a></div>" : "") +
@@ -294,6 +296,7 @@
     var canDo = Array.isArray(cap.nova_can_do) ? cap.nova_can_do.join("; ") : (cap.nova_can_do || "None identified");
     var cannotDo = Array.isArray(cap.nova_cannot_do) ? cap.nova_cannot_do.join("; ") : (cap.nova_cannot_do || "None identified");
     var why = cap.blocking_reason || cap.owner_review_reason || (cap.capability_classification === "CAN_PERFORM" ? "Duties match Nova digital capabilities." : "");
+    var duties = row.description || cap.actual_duties || "";
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
       "<strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
       (simulated ? " <span class=\"muted\">simulated/test fixture</span>" : "") +
@@ -302,14 +305,21 @@
       " · " + escapeHtml(row.status) +
       (cap.capability_classification ? " · capability " + escapeHtml(cap.capability_classification) : "") +
       (cap.capability_fit_score !== undefined && cap.capability_fit_score !== null ? " · fit " + escapeHtml(cap.capability_fit_score) : "") +
+      (cap.discovery_score != null ? " · discovery " + escapeHtml(cap.discovery_score) : "") +
       (row.qualification_outcome ? " · " + escapeHtml(row.qualification_outcome) : "") +
       (row.lifecycle_outcome ? " · " + escapeHtml(row.lifecycle_outcome) : "") +
       (row.owner_action_required ? " · OWNER ACTION REQUIRED" : "") +
       (row.application_state ? " · application " + escapeHtml(row.application_state) : "") +
       (row.updated_at ? " · updated " + escapeHtml(row.updated_at) : "") +
       "</div>" +
+      (cap.why_searched ? "<div>Why Nova searched: " + escapeHtml(cap.why_searched) + "</div>" : "") +
+      (cap.search_family_label || cap.search_family ? "<div>Search family: " + escapeHtml(cap.search_family_label || cap.search_family) + "</div>" : "") +
+      (cap.capability_registry_matches && cap.capability_registry_matches.length ? "<div>Capability registry match: " + escapeHtml(cap.capability_registry_matches.join(", ")) + "</div>" : "") +
+      (duties ? "<div>Actual duties: " + escapeHtml(String(duties).slice(0, 280)) + "</div>" : "") +
       "<div>Nova can do: " + escapeHtml(canDo) + "</div>" +
       "<div>Nova cannot do: " + escapeHtml(cannotDo) + "</div>" +
+      (cap.remote_eligibility ? "<div>Remote eligibility: " + escapeHtml(cap.remote_eligibility) + "</div>" : "") +
+      (cap.vendor_contract_compatibility ? "<div>Vendor/contract compatibility: " + escapeHtml(cap.vendor_contract_compatibility) + "</div>" : "") +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
       "<div>Owner review needed: " + review + "</div></div>";
   }

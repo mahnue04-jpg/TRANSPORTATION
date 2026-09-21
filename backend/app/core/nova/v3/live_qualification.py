@@ -15,6 +15,7 @@ from app.core.nova.work_revenue.capability_classification import (
     INSUFFICIENT_INFORMATION,
     classify_opportunity_capability,
 )
+from app.core.nova.work_revenue.capability_first_discovery import score_discovery_candidate
 
 OUTCOME_QUALIFIED = "QUALIFIED"
 OUTCOME_NEEDS_OWNER_REVIEW = "NEEDS_OWNER_REVIEW"
@@ -767,12 +768,41 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
     enriched: list[dict[str, Any]] = []
     for job in ranked:
         row = apply_qualification(job)
-        base = int(row.get("relevance_score") or 0)
+        discovery = score_discovery_candidate(row, query=query)
         qual = row["live_qualification"]
-        row["relevance_score"] = base + qualification_rank_bonus(qual)
+        qual.update(
+            {
+                "discovery_score": discovery["discovery_score"],
+                "discovery_band": discovery["discovery_band"],
+                "search_family": discovery.get("search_family"),
+                "search_family_label": discovery.get("search_family_label"),
+                "why_searched": discovery.get("why_searched"),
+                "remote_eligibility": discovery.get("remote_eligibility"),
+                "vendor_contract_compatibility": discovery.get("vendor_contract_compatibility"),
+                "state_restriction_detected": discovery.get("state_restriction_detected"),
+                "nationwide_remote_allowed": True,
+            }
+        )
+        # Keep CANNOT / INSUFFICIENT from auto-prepare path already enforced.
+        if discovery["discovery_band"] == "REJECT" and qual.get("qualification_status") == OUTCOME_QUALIFIED:
+            if discovery["actual_duty_fit"] in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
+                qual["qualification_status"] = OUTCOME_NOT_QUALIFIED
+                qual["qualification_outcome"] = OUTCOME_NOT_QUALIFIED
+                qual["auto_prepare_allowed"] = False
+        base = int(row.get("relevance_score") or 0)
+        bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
+        row["relevance_score"] = base + bonus
+        row["discovery_score"] = discovery["discovery_score"]
+        row["discovery_band"] = discovery["discovery_band"]
+        row["search_family"] = discovery.get("search_family")
+        row["search_family_label"] = discovery.get("search_family_label")
+        row["why_searched"] = discovery.get("why_searched")
+        row["remote_eligibility"] = discovery.get("remote_eligibility")
+        row["vendor_contract_compatibility"] = discovery.get("vendor_contract_compatibility")
         row["ranking_components"] = {
             "base_relevance": base,
             "qualification_bonus": qualification_rank_bonus(qual),
+            "discovery_score": discovery["discovery_score"],
             "qualification_status": qual["qualification_status"],
         }
         enriched.append(row)
@@ -781,6 +811,7 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
         key=lambda item: (
             int(item.get("relevance_score") or 0),
             int((item.get("live_qualification") or {}).get("fit_score") or 0),
+            int(item.get("discovery_score") or 0),
             str(item.get("publication_date") or ""),
         ),
         reverse=True,
