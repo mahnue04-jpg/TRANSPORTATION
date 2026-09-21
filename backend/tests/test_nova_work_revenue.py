@@ -1581,3 +1581,81 @@ def test_autonomous_start_status_survives_refresh() -> None:
     assert "setWorkActionStatus(id, startedMessage, true);" in start_block
     assert start_block.index("await refresh();") < start_block.index("setWorkActionStatus(id, startedMessage, true);")
     assert "return;" in start_block
+
+
+def test_autonomous_executor_runs_outline_and_blocks_missing_source_data(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Executor Delivery Ops Test",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200, qualified.text
+
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+    assert started.json()["safe_tasks_created"] >= 1
+
+    executed = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert executed.status_code == 200, executed.text
+    body = executed.json()
+    assert body["status"] == "AUTONOMOUS_EXECUTOR_RAN"
+    assert body["engagement_status"] == "ACTIVE"
+    assert body["tasks_advanced"] == 1
+    assert body["tasks_blocked"] >= 1
+    assert body["source_data_required"] is True
+    assert body["owner_review_required"] is True
+    assert body["deliverable_id"]
+    assert body["external_submission"] is False
+    assert body["client_contact"] is False
+    assert body["contract_acceptance"] is False
+    assert body["financial_execution"] is False
+
+    engagement = client.get(
+        f"/api/nova/work/engagements/{engagement_id}",
+        headers=headers,
+    )
+    assert engagement.status_code == 200, engagement.text
+    engagement_body = engagement.json()
+    assert engagement_body["status"] == "ACTIVE"
+    outline = next(task for task in engagement_body["tasks"] if task["title"] == "Prepare internal work outline")
+    assert outline["status"] == "OWNER_REVIEW"
+    blocked = [task for task in engagement_body["tasks"] if task["status"] == "BLOCKED"]
+    assert blocked
+    assert all("SOURCE DATA REQUIRED" in (task["blocked_reason"] or "") for task in blocked)
+
+    deliverables = client.get(
+        "/api/nova/work/deliverables",
+        headers=headers,
+        params={"engagement_id": engagement_id},
+    )
+    assert deliverables.status_code == 200, deliverables.text
+    review_ready = [row for row in deliverables.json() if row["review_status"] == "READY_FOR_REVIEW"]
+    assert review_ready
+    assert all(row["owner_approved"] is False for row in review_ready)
+
+
+def test_work_ui_exposes_controlled_autonomous_executor() -> None:
+    assert "Run Autonomous Work" in WORK_JS
+    assert "/autonomous-run" in WORK_JS
+    assert "SOURCE DATA REQUIRED" in WORK_JS
+    assert "Running safe internal Nova tasks..." in WORK_JS
