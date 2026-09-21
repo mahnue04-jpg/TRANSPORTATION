@@ -288,17 +288,30 @@
     });
   }
   function oppItem(row) {
+    var cap = row.qualification || {};
+    var simulated = (row.source_type === "simulated" || row.source === "simulated");
+    var review = cap.owner_review_needed ? "YES" : "NO";
+    var canDo = Array.isArray(cap.nova_can_do) ? cap.nova_can_do.join("; ") : (cap.nova_can_do || "None identified");
+    var cannotDo = Array.isArray(cap.nova_cannot_do) ? cap.nova_cannot_do.join("; ") : (cap.nova_cannot_do || "None identified");
+    var why = cap.blocking_reason || cap.owner_review_reason || (cap.capability_classification === "CAN_PERFORM" ? "Duties match Nova digital capabilities." : "");
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
       "<strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
+      (simulated ? " <span class=\"muted\">simulated/test fixture</span>" : "") +
       "<div class=\"muted\">" + escapeHtml(row.company_name) +
       " · source " + escapeHtml(row.source || row.source_type) +
       " · " + escapeHtml(row.status) +
+      (cap.capability_classification ? " · capability " + escapeHtml(cap.capability_classification) : "") +
+      (cap.capability_fit_score !== undefined && cap.capability_fit_score !== null ? " · fit " + escapeHtml(cap.capability_fit_score) : "") +
       (row.qualification_outcome ? " · " + escapeHtml(row.qualification_outcome) : "") +
       (row.lifecycle_outcome ? " · " + escapeHtml(row.lifecycle_outcome) : "") +
       (row.owner_action_required ? " · OWNER ACTION REQUIRED" : "") +
       (row.application_state ? " · application " + escapeHtml(row.application_state) : "") +
       (row.updated_at ? " · updated " + escapeHtml(row.updated_at) : "") +
-      "</div></div>";
+      "</div>" +
+      "<div>Nova can do: " + escapeHtml(canDo) + "</div>" +
+      "<div>Nova cannot do: " + escapeHtml(cannotDo) + "</div>" +
+      "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
+      "<div>Owner review needed: " + review + "</div></div>";
   }
   function applicationItem(row) {
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
@@ -315,7 +328,7 @@
   }
   function renderDashboard(data, audit) {
     var counts = data.counts || {};
-    $("count-opps").textContent = counts.opportunities_found || counts.work_opportunities || 0;
+    $("count-opps").textContent = counts.real_opportunities != null ? counts.real_opportunities : (counts.opportunities_found || counts.work_opportunities || 0);
     $("count-qualified").textContent = counts.qualified || 0;
     $("count-owner-input").textContent = counts.needs_owner_input || 0;
     $("count-draft").textContent = counts.draft_ready || 0;

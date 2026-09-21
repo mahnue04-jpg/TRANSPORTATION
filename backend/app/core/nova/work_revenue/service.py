@@ -10,7 +10,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
-from app.core.nova.work_revenue.capability_registry import list_capabilities, registry_snapshot
+from app.core.nova.work_revenue.capability_classification import (
+    CANNOT_PERFORM,
+    INSUFFICIENT_INFORMATION,
+    NEEDS_OWNER_REVIEW,
+    classify_opportunity_capability,
+)
 from app.core.nova.work_revenue.flags import discovery_diagnostics, engine_guardrails, live_discovery_enabled
 from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.runtime_contract import _resolve_runtime_environment
@@ -309,13 +314,19 @@ def get_application(db: Session, application_id: str, *, organization_id: str, u
     return row
 
 
+def _with_capability(row: NovaWorkOpportunity, qual: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(qual or {})
+    merged.update(classify_opportunity_capability(_opportunity_payload(row)))
+    return merged
+
+
 def opportunity_out(
     row: NovaWorkOpportunity,
     *,
     application_state: str | None = None,
     owner_action_required: bool = False,
 ) -> OpportunityOut:
-    qual = _parse_qual(row.qualification_json) or {}
+    qual = _with_capability(row, _parse_qual(row.qualification_json) or {})
     return OpportunityOut(
         opportunity_id=row.opportunity_id,
         organization_id=row.organization_id,
@@ -467,6 +478,8 @@ def _opportunity_payload(row: NovaWorkOpportunity) -> dict[str, Any]:
         "compensation_amount": row.compensation_amount,
         "compensation_period": row.compensation_period,
         "company_name": row.company_name,
+        "engagement_type": row.engagement_type,
+        "remote_status": row.remote_status,
     }
 
 
@@ -647,6 +660,11 @@ def _matches_view(
     if view_filter == "needs_review":
         return row.status in {"REVIEWING", "OWNER_REVIEW"}
     if view_filter == "qualified":
+        duty_class = classify_opportunity_capability(_opportunity_payload(row))["capability_classification"]
+        if duty_class in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
+            return False
+        if duty_class == NEEDS_OWNER_REVIEW and row.status not in {"OWNER_REVIEW", "APPROVED_TO_APPLY"}:
+            return False
         return (
             row.qualification_outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}
             or row.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY", "APPLICATION_PREPARED"}
@@ -673,6 +691,8 @@ def _matches_view(
         return row.status == "REJECTED" or (app is not None and app.approval_state == "REJECTED")
     if view_filter == "archived":
         return archived or row.status in {"CLOSED", "REJECTED"}
+    if view_filter == "simulated":
+        return (row.source_type or "") == "simulated" or (row.source or "") == "simulated"
     if view_filter == "qualifying":
         return row.status in {"DISCOVERED", "REVIEWING"} or row.qualification_outcome == "INSUFFICIENT_INFORMATION"
     if view_filter == "blocked":
@@ -1514,7 +1534,16 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     action_ids = {item.opportunity_id for item in actions if item.opportunity_id}
     outs = [_enriched_out(row, apps_map, action_ids) for row in opportunities]
     inbox = [item for item in outs if item.status in {"DISCOVERED", "REVIEWING"}]
-    qualified = [item for item in outs if item.status in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY"}]
+    qualified = []
+    for item in outs:
+        duty_class = ((item.qualification or {}).get("capability_classification"))
+        if duty_class in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
+            continue
+        if item.status not in {"QUALIFIED", "OWNER_REVIEW", "APPROVED_TO_APPLY"}:
+            continue
+        if duty_class == NEEDS_OWNER_REVIEW and item.status not in {"OWNER_REVIEW", "APPROVED_TO_APPLY"}:
+            continue
+        qualified.append(item)
     follow_ups = [
         _enriched_out(row, apps_map, action_ids)
         for row in opportunities
@@ -1559,6 +1588,8 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         counts={
             "work_opportunities": len(opportunities),
             "opportunities_found": len(opportunities),
+            "simulated_fixtures": len([item for item in outs if (item.source_type or item.source) == "simulated"]),
+            "real_opportunities": len([item for item in outs if (item.source_type or item.source) != "simulated"]),
             "new": len([item for item in outs if item.status == "DISCOVERED"]),
             "needs_review": len([item for item in outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
             "qualified": len(qualified),

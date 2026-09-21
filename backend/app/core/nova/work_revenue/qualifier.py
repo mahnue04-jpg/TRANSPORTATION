@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.nova.work_revenue.capability_classification import classify_opportunity_capability
 from app.core.nova.work_revenue.capability_registry import nova_supported_ids
 from app.core.nova.work_revenue.verified_profile import has_verified_credential
 
@@ -92,12 +93,26 @@ def _blob(opportunity: dict[str, Any]) -> str:
     return "\n".join(str(part) for part in parts)
 
 
+def _duty_text(opportunity: dict[str, Any]) -> str:
+    """Blockers are read from duties, not the job title."""
+    parts = [
+        opportunity.get("description") or "",
+        opportunity.get("requirements") or "",
+        opportunity.get("engagement_type") or "",
+        opportunity.get("remote_status") or "",
+        " ".join(opportunity.get("skills_required") or []),
+        " ".join(opportunity.get("credentials_required") or []),
+    ]
+    return "\n".join(str(part) for part in parts)
+
+
 def _flag(pattern: re.Pattern[str], text: str) -> bool:
     return bool(pattern.search(text or ""))
 
 
 def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
     text = _blob(opportunity)
+    duties = _duty_text(opportunity)
     missing: list[str] = []
     reasons: list[str] = []
     nova_tasks: list[str] = []
@@ -123,7 +138,7 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         missing.append("compensation")
 
     physical_field = str(opportunity.get("physical_presence_required") or "unknown").lower()
-    physical_from_text = _flag(_PHYSICAL_RE, text)
+    physical_from_text = _flag(_PHYSICAL_RE, duties)
     if physical_field == "true" or physical_from_text:
         physical = "true"
     elif physical_field == "false" and not physical_from_text:
@@ -133,9 +148,9 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         if physical_field == "unknown":
             missing.append("physical_presence_required")
 
-    driving = _flag(_DRIVING_RE, text)
-    licenses = _flag(_LICENSE_RE, text) or bool(opportunity.get("credentials_required"))
-    regulated = _flag(_REGULATED_RE, text)
+    driving = _flag(_DRIVING_RE, duties)
+    licenses = _flag(_LICENSE_RE, duties) or bool(opportunity.get("credentials_required"))
+    regulated = _flag(_REGULATED_RE, duties)
     identity = _flag(_IDENTITY_RE, text)
     interview = _flag(_INTERVIEW_RE, text)
     captcha = _flag(_CAPTCHA_RE, text)
@@ -221,7 +236,7 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         owner_actions.append("PRICING_COMMITMENT")
         owner_participation.append("Pricing commitment")
         reasons.append("requires owner approval of pricing")
-    employee_status_required = _flag(_EMPLOYEE_RE, text)
+    employee_status_required = _flag(_EMPLOYEE_RE, duties)
     equipment_required = _flag(_EQUIPMENT_RE, text)
     sensitive_data_required = _flag(_SENSITIVE_RE, text)
     if employee_status_required:
@@ -286,6 +301,34 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
             outcome = "INSUFFICIENT_INFORMATION"
             nova_share = "unknown"
             reasons.append("Unable to confirm Nova can perform this work without guessing.")
+
+    capability = classify_opportunity_capability(opportunity)
+    capability_class = capability["capability_classification"]
+    if capability_class == "CANNOT_PERFORM" and outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}:
+        outcome = "NOT_SUITABLE"
+        reasons.append(capability["blocking_reason"] or "Duties are outside Nova capability.")
+    elif (
+        capability_class == "INSUFFICIENT_INFORMATION"
+        and outcome in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}
+        and not matched_caps
+    ):
+        outcome = "INSUFFICIENT_INFORMATION"
+        reasons.append(capability["blocking_reason"] or "insufficient duties/deliverables")
+    elif capability_class == "NEEDS_OWNER_REVIEW" and outcome == "NOVA_CAN_PERFORM":
+        outcome = "NOVA_WITH_OWNER_REVIEW"
+        reasons.append(capability["owner_review_reason"] or "Owner review is required.")
+    elif (
+        capability_class == "CAN_PERFORM"
+        and outcome in {"HUMAN_REQUIRED", "NOT_SUITABLE", "INSUFFICIENT_INFORMATION"}
+        and capability["required_physical_presence"] == "NO"
+        and not capability["required_license_or_credential"]
+        and not driving
+        and description
+        and str(opportunity.get("physical_presence_required") or "").lower() == "false"
+        and not opportunity.get("credentials_required")
+    ):
+        outcome = "NOVA_CAN_PERFORM"
+        reasons.append("Duties are digital and vendor-compatible. The job title did not control this decision.")
 
     unique_actions = list(dict.fromkeys(owner_actions))
     unique_reasons = list(dict.fromkeys(reasons)) or ["Qualification completed without a deceptive numeric score."]
@@ -373,4 +416,18 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "required_materials": ["owner approval"] + (["portfolio_or_work_sample"] if "portfolio_or_work_sample" in missing else []),
         "client_name": opportunity.get("company_name") or OWNER_INPUT_REQUIRED,
         "work_summary": opportunity.get("opportunity_title") or OWNER_INPUT_REQUIRED,
+        "capability_classification": capability["capability_classification"],
+        "capability_fit_score": capability["capability_fit_score"],
+        "nova_can_do": capability["nova_can_do"],
+        "nova_cannot_do": capability["nova_cannot_do"],
+        "required_human_actions": capability["required_human_actions"],
+        "required_physical_presence": capability["required_physical_presence"],
+        "required_license_or_credential": capability["required_license_or_credential"],
+        "deliverables_nova_can_produce": capability["deliverables_nova_can_produce"],
+        "blocking_reason": capability["blocking_reason"],
+        "owner_review_reason": capability["owner_review_reason"],
+        "capability_registry_matches": capability["capability_registry_matches"],
+        "owner_review_needed": capability["owner_review_needed"],
+        "auto_prepare_allowed": capability["auto_prepare_allowed"],
+        "title_used_for_decision": False,
     }

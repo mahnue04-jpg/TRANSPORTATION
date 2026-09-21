@@ -10,6 +10,11 @@ from typing import Any
 
 from app.core.nova.v3.capability_catalog import capability_fit
 from app.core.nova.v3.execution_playbooks import execution_plan_for_matches
+from app.core.nova.work_revenue.capability_classification import (
+    CANNOT_PERFORM,
+    INSUFFICIENT_INFORMATION,
+    classify_opportunity_capability,
+)
 
 OUTCOME_QUALIFIED = "QUALIFIED"
 OUTCOME_NEEDS_OWNER_REVIEW = "NEEDS_OWNER_REVIEW"
@@ -629,6 +634,42 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         fit_score += 8
     fit_score = max(0, min(100, fit_score))
 
+    duty = classify_opportunity_capability(
+        {
+            "title": job.get("title") or job.get("opportunity_title"),
+            "description": job.get("description"),
+            "requirements": job.get("requirements"),
+            "skills_required": job.get("skills_required") or job.get("skills"),
+            "credentials_required": job.get("credentials_required"),
+            "engagement_type": job.get("job_type") or job.get("engagement_type"),
+            "remote_status": job.get("remote_status"),
+            "physical_presence_required": job.get("physical_presence_required") or "unknown",
+            "ai_policy": job.get("ai_policy"),
+        }
+    )
+    duty_class = duty["capability_classification"]
+    if duty_class == CANNOT_PERFORM and outcome == OUTCOME_QUALIFIED:
+        outcome = OUTCOME_NOT_QUALIFIED
+        risk = RISK_HIGH
+        blockers.append("capability_cannot_perform")
+        reasons.append(duty["blocking_reason"] or "Duties are outside Nova capability.")
+        owner_review_reason = duty["blocking_reason"] or owner_review_reason
+    elif duty_class == INSUFFICIENT_INFORMATION and outcome == OUTCOME_QUALIFIED:
+        outcome = OUTCOME_NOT_QUALIFIED
+        risk = RISK_HIGH
+        blockers.append("insufficient_duties")
+        reasons.append(duty["blocking_reason"] or "insufficient duties/deliverables")
+        owner_review_reason = duty["blocking_reason"] or owner_review_reason
+    elif duty_class == "NEEDS_OWNER_REVIEW" and outcome == OUTCOME_QUALIFIED:
+        outcome = OUTCOME_NEEDS_OWNER_REVIEW
+        risk = RISK_MEDIUM
+        review_reasons.append(duty["owner_review_reason"] or "Duty review required before qualification.")
+        owner_review_reason = duty["owner_review_reason"] or owner_review_reason
+    auto_prepare_allowed = outcome == OUTCOME_QUALIFIED and duty_class not in {
+        CANNOT_PERFORM,
+        INSUFFICIENT_INFORMATION,
+    }
+
     compensation_summary = str(job.get("compensation_text") or "").strip() or (
         "Compensation not stated" if not compensation_ok else "Compensation inferred from listing text"
     )
@@ -655,9 +696,21 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "review_flags": review_reasons,
         "reasons": reasons,
-        "auto_prepare_allowed": outcome == OUTCOME_QUALIFIED,
+        "auto_prepare_allowed": auto_prepare_allowed,
         "external_submission": False,
         "financial_execution": False,
+        "capability_classification": duty_class,
+        "capability_fit_score": duty["capability_fit_score"],
+        "nova_can_do": duty["nova_can_do"],
+        "nova_cannot_do": duty["nova_cannot_do"],
+        "required_human_actions": duty["required_human_actions"],
+        "required_physical_presence": duty["required_physical_presence"],
+        "required_license_or_credential": duty["required_license_or_credential"],
+        "deliverables_nova_can_produce": duty["deliverables_nova_can_produce"],
+        "blocking_reason": duty["blocking_reason"],
+        "capability_owner_review_reason": duty["owner_review_reason"],
+        "capability_registry_matches": duty["capability_registry_matches"],
+        "owner_review_needed": duty["owner_review_needed"],
     }
 
 
