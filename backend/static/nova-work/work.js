@@ -321,7 +321,8 @@
       (cap.remote_eligibility ? "<div>Remote eligibility: " + escapeHtml(cap.remote_eligibility) + "</div>" : "") +
       (cap.vendor_contract_compatibility ? "<div>Vendor/contract compatibility: " + escapeHtml(cap.vendor_contract_compatibility) + "</div>" : "") +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
-      "<div>Owner review needed: " + review + "</div></div>";
+      "<div>Owner review needed: " + review + "</div>" +
+      "<div class=\"command-actions\">" + actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + "</div></div>";
   }
   function applicationItem(row) {
     return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
@@ -731,6 +732,28 @@
     } else if (action === "record-manual") {
       await api("/api/nova/work/applications/" + id + "/record-manual-submission", { method: "POST" });
       showBanner("Manual submission recorded. Nova did not contact the source.", true);
+    } else if (action === "autonomous-preview") {
+      var autoDetail = await api("/api/nova/work/opportunities/" + id + "/detail");
+      var autoOpp = ((autoDetail.tracker || {}).opportunity) || {};
+      var autoSession = await api("/api/nova/v3/autonomous-execution/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          opportunity_title: autoOpp.opportunity_title || autoOpp.title || "Opportunity",
+          company_name: autoOpp.company_name || "",
+          description: autoOpp.description || "",
+          requirements: autoOpp.requirements || "",
+          skills_required: autoOpp.skills_required || []
+        })
+      });
+      if (!autoSession.autonomous_execution_ready) {
+        showBanner("Autonomous work blocked: " + (autoSession.reason || "capability or input requirements are unresolved."));
+      } else {
+        var vertical = ((autoSession.vertical || {}).vertical_id || "general_business_operations").replace(/_/g, " ");
+        var stage = (autoSession.stages || []).filter(function (row) { return row.stage === "AUTONOMOUS_INTERNAL_EXECUTION"; })[0] || {};
+        var tasks = stage.tasks || [];
+        var safeCount = tasks.filter(function (row) { return row.nova_may_advance; }).length;
+        showBanner("Autonomous preview ready: " + vertical + " · " + safeCount + " internal task(s) Nova may advance · owner handoff remains required before external action.", true);
+      }
     } else if (action === "engage") {
       var detail = await api("/api/nova/work/opportunities/" + id + "/detail");
       var opp = ((detail.tracker || {}).opportunity) || {};
