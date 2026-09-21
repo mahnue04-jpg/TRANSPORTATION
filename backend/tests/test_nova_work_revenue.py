@@ -1968,3 +1968,76 @@ def test_executor_reports_missing_stored_source_file(client: TestClient, monkeyp
     blocked = [task for task in engagement.json()["tasks"] if task["status"] == "BLOCKED"]
     assert blocked
     assert any("SOURCE FILE MISSING / REUPLOAD REQUIRED" in (task["blocked_reason"] or "") for task in blocked)
+
+
+def test_executor_skips_stale_source_record_and_uses_fresh_reupload(client: TestClient, monkeypatch) -> None:
+    from app.core.nova.work_revenue import work_inputs
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Stale Source Reupload Test",
+        opportunity_title="Delivery operations analyst",
+        description=(
+            "Remotely analyze delivery records, prepare performance reports, organize route and operations data, "
+            "and produce management summaries. Fully remote vendor contract. No driving."
+        ),
+        requirements="Research, spreadsheet analysis, reporting, data organization.",
+        skills_required=["research", "spreadsheet_analysis", "reporting", "data_organization"],
+        physical_presence_required="false",
+    )
+    client.post(f"/api/nova/work/opportunities/{opp['opportunity_id']}/qualify", headers=headers)
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    engagement_id = started.json()["engagement"]["engagement_id"]
+
+    first = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+
+    stale = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("stale.csv", b"id,value\n1,old\n", "text/csv")},
+    )
+    assert stale.status_code == 201, stale.text
+
+    fresh = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/inputs/upload",
+        headers=headers,
+        files={"file": ("fresh.csv", b"id,value\n1,new\n2,newer\n", "text/csv")},
+    )
+    assert fresh.status_code == 201, fresh.text
+
+    original_path = work_inputs.input_file_path
+
+    def selective_path(row):
+        if row.original_filename == "stale.csv":
+            return None
+        return original_path(row)
+
+    monkeypatch.setattr(work_inputs, "input_file_path", selective_path)
+
+    rerun = client.post(
+        f"/api/nova/work/engagements/{engagement_id}/autonomous-run",
+        headers=headers,
+    )
+    assert rerun.status_code == 200, rerun.text
+    body = rerun.json()
+    assert body["source_data_available"] is True
+    assert body["generated_output_id"]
+    assert body["tasks_blocked"] == 0
+
+    files = client.get(
+        f"/api/nova/work/engagements/{engagement_id}/inputs",
+        headers=headers,
+    )
+    assert files.status_code == 200, files.text
+    generated = [row for row in files.json() if row["input_kind"] == "GENERATED_OUTPUT"]
+    assert len(generated) == 1
+    assert generated[0]["original_filename"] == "fresh_nova_cleaned.csv"
