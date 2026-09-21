@@ -77,3 +77,24 @@ def test_human_only_work_remains_blocked():
     )
     assert session["autonomous_execution_ready"] is False
     assert session["status"] == "BLOCKED"
+
+
+def test_owner_triggered_autonomous_start_creates_internal_engagement_and_safe_tasks(client=None):
+    # API coverage lives in Work & Revenue integration tests; this unit-level guard
+    # ensures the autonomous session exposes safe tasks and keeps external actions off.
+    session = build_autonomous_execution_session(
+        {
+            "opportunity_title": "Remote logistics reporting support",
+            "company_name": "Example Logistics",
+            "description": "Remote dispatch administration, shipment tracking, spreadsheet reporting and document preparation.",
+            "requirements": "B2B contractor. No driving or physical presence.",
+        }
+    )
+    stage = next(row for row in session["stages"] if row["stage"] == "AUTONOMOUS_INTERNAL_EXECUTION")
+    safe = [row for row in stage["tasks"] if row["nova_may_advance"]]
+    assert session["autonomous_execution_ready"] is True
+    assert safe
+    assert all(row["execution_class"] == SAFE_INTERNAL for row in safe)
+    assert session["external_submission"] is False
+    assert session["client_contact"] is False
+    assert session["financial_execution"] is False
