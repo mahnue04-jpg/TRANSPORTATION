@@ -448,8 +448,17 @@ def restore_invoice_support(
     )
     if invoice_row.status != "ARCHIVED":
         raise NovaWorkError("Only an archived invoice-support draft can be restored", status_code=409)
-    if invoice_row.externally_sent or invoice_row.stripe_invoice_created or invoice_row.money_received:
-        raise NovaWorkError("Externally sent, processor-created, or received records cannot be restored this way", status_code=409)
+    invoice_view = managed._invoice_out(invoice_row)
+    if (
+        invoice_view.get("externally_sent")
+        or invoice_view.get("stripe_invoice_created")
+        or invoice_view.get("payment_intent_created")
+        or invoice_view.get("money_received")
+    ):
+        raise NovaWorkError(
+            "Externally sent, processor-created, or received records cannot be restored this way",
+            status_code=409,
+        )
 
     entries = ops.list_revenue_entries(
         db,
