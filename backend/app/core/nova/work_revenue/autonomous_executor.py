@@ -9,6 +9,7 @@ from app.auth import UserContext
 from app.core.nova.work_revenue import managed, ops, work_inputs
 from app.core.nova.work_revenue.models import NovaWorkDeliverable, NovaWorkTask
 from app.core.nova.work_revenue.schemas import DeliverableCreate, DeliverableUpdate, EngagementUpdate, TaskUpdate
+from app.helpers import now
 from app.core.nova.work_revenue.service import (
     NovaWorkError,
     _record_audit,
