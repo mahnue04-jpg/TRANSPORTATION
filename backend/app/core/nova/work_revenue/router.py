@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.config import capabilities_surface
 from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
 from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue import managed
+from app.core.nova.work_revenue import autonomous_executor
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -483,6 +484,25 @@ def start_autonomous_internal_work(
         return service.start_autonomous_internal_work(
             db,
             opportunity_id,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/engagements/{engagement_id}/autonomous-run")
+def run_autonomous_engagement(
+    engagement_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Run only controlled internal Nova work for one autonomous engagement."""
+    try:
+        return autonomous_executor.run_autonomous_engagement(
+            db,
+            engagement_id,
             organization_id=_resolve_org(user, organization_id),
             user=user,
         )
