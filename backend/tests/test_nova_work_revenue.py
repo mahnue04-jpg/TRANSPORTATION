@@ -1502,3 +1502,60 @@ def test_application_package_review_is_read_only_and_blocks_bad_package(client: 
     assert after.status_code == 200
     assert after.json()["approval_state"] == "DRAFT"
     assert after.json()["externally_submitted"] is False
+
+
+def test_autonomous_internal_start_happy_path_and_duplicate_guard(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Autonomous Logistics Test",
+        opportunity_title="Remote logistics reporting contractor",
+        description="Remote dispatch administration, shipment tracking, spreadsheet reporting, document preparation.",
+        requirements="B2B contractor. No driving or physical presence.",
+        physical_presence_required="false",
+    )
+    started = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert body["status"] == "AUTONOMOUS_INTERNAL_WORK_STARTED"
+    assert body["safe_tasks_created"] > 0
+    assert body["external_submission"] is False
+    assert body["client_contact"] is False
+    assert body["contract_acceptance"] is False
+    assert body["production_deploy"] is False
+    assert body["financial_execution"] is False
+    assert body["engagement"]["opportunity_id"] == opp["opportunity_id"]
+    assert any(task["responsible_party"] == "NOVA" for task in body["engagement"]["tasks"])
+
+    duplicate = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+
+
+def test_autonomous_internal_start_blocks_human_only_work(client: TestClient) -> None:
+    headers = _headers(client)
+    opp = _create_opp(
+        client,
+        headers,
+        company_name="Human Only Delivery Test",
+        opportunity_title="On-site delivery driver",
+        description="Drive vehicle, lift packages, and deliver items in person.",
+        requirements="Valid driver's license and physical delivery required.",
+        physical_presence_required="true",
+    )
+    blocked = client.post(
+        f"/api/nova/work/opportunities/{opp['opportunity_id']}/autonomous-start",
+        headers=headers,
+    )
+    assert blocked.status_code == 409
+
+
+def test_work_ui_exposes_autonomous_internal_start_control() -> None:
+    assert "Start Autonomous Internal Work" in WORK_JS
+    assert "/autonomous-start" in WORK_JS
