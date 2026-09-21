@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
-from app.core.nova.work_revenue import managed, ops
+from app.core.nova.work_revenue import managed, ops, work_inputs
 from app.core.nova.work_revenue.models import NovaWorkDeliverable, NovaWorkTask
 from app.core.nova.work_revenue.schemas import DeliverableCreate, DeliverableUpdate, EngagementUpdate, TaskUpdate
 from app.core.nova.work_revenue.service import (
@@ -28,6 +28,7 @@ _SOURCE_DATA_TASK_TERMS = (
 )
 _OUTLINE_TITLE = "Prepare internal work outline"
 _OUTLINE_MARKER = "AUTONOMOUS_EXECUTOR_OUTLINE_V1"
+_SOURCE_PROFILE_MARKER = "AUTONOMOUS_SOURCE_PROFILE_V1"
 
 
 def _is_source_data_task(title: str) -> bool:
@@ -67,7 +68,17 @@ def run_autonomous_engagement(
 
     advanced: list[str] = []
     blocked: list[str] = []
+    unblocked: list[str] = []
     deliverable_id: str | None = None
+    source_profile_deliverable_id: str | None = None
+    source_inspection = work_inputs.inspect_work_inputs(
+        db,
+        engagement_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    source_data_available = bool(source_inspection.get("source_data_available"))
+    source_inputs = list(source_inspection.get("inputs") or [])
 
     outline_task = (
         db.query(NovaWorkTask)
@@ -137,6 +148,113 @@ def run_autonomous_engagement(
         )
         advanced.append(outline_task.task_id)
 
+    if source_data_available:
+        previously_blocked = (
+            db.query(NovaWorkTask)
+            .filter(
+                NovaWorkTask.organization_id == organization_id,
+                NovaWorkTask.engagement_id == engagement_id,
+                NovaWorkTask.classification == "NOVA",
+                NovaWorkTask.status == "BLOCKED",
+            )
+            .all()
+        )
+        for task in previously_blocked:
+            if not _is_source_data_task(task.title):
+                continue
+            ops.update_task(
+                db,
+                task.task_id,
+                TaskUpdate(
+                    status="READY",
+                    blocked_reason=None,
+                    owner_notes="Source data is attached and parseable. Task reactivated for controlled Nova work.",
+                ),
+                organization_id=organization_id,
+                user=user,
+            )
+            unblocked.append(task.task_id)
+
+        profile_task = (
+            db.query(NovaWorkTask)
+            .filter(
+                NovaWorkTask.organization_id == organization_id,
+                NovaWorkTask.engagement_id == engagement_id,
+                NovaWorkTask.classification == "NOVA",
+                NovaWorkTask.title.ilike("%profile the source data%"),
+                NovaWorkTask.status == "READY",
+            )
+            .first()
+        )
+        if profile_task is not None:
+            ops.update_task(
+                db,
+                profile_task.task_id,
+                TaskUpdate(status="IN_PROGRESS"),
+                organization_id=organization_id,
+                user=user,
+            )
+            profile_lines: list[str] = []
+            for item in source_inputs:
+                diagnostics = item.get("diagnostics") or {}
+                line = (
+                    f"{item.get('filename')}: parser={diagnostics.get('parser') or 'unknown'}"
+                    f", rows={diagnostics.get('rows_detected', diagnostics.get('preview_rows', 'n/a'))}"
+                    f", columns={diagnostics.get('columns_detected', 'n/a')}"
+                    f", blank_cells_preview={diagnostics.get('blank_cells_in_preview', 'n/a')}"
+                    f", duplicate_rows_preview={diagnostics.get('duplicate_rows_in_preview', 'n/a')}"
+                )
+                if item.get("parse_error"):
+                    line += f", parse_error={item.get('parse_error')}"
+                profile_lines.append(line)
+            existing_profile = (
+                db.query(NovaWorkDeliverable)
+                .filter(
+                    NovaWorkDeliverable.organization_id == organization_id,
+                    NovaWorkDeliverable.engagement_id == engagement_id,
+                    NovaWorkDeliverable.notes == _SOURCE_PROFILE_MARKER,
+                )
+                .first()
+            )
+            if existing_profile is None:
+                profile_deliverable = ops.create_deliverable(
+                    db,
+                    DeliverableCreate(
+                        engagement_id=engagement_id,
+                        deliverable_type="ANALYSIS",
+                        description=(
+                            "Source Data Intake Analysis. "
+                            + " ".join(profile_lines)
+                            + " This analysis reflects uploaded source files only. "
+                            "No external transmission occurred. Transformation and report-building tasks remain separately controlled."
+                        )[:12000],
+                        notes=_SOURCE_PROFILE_MARKER,
+                    ),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                profile_deliverable = ops.update_deliverable(
+                    db,
+                    profile_deliverable.deliverable_id,
+                    DeliverableUpdate(review_status="READY_FOR_REVIEW"),
+                    organization_id=organization_id,
+                    user=user,
+                )
+                source_profile_deliverable_id = profile_deliverable.deliverable_id
+            else:
+                source_profile_deliverable_id = existing_profile.deliverable_id
+            ops.update_task(
+                db,
+                profile_task.task_id,
+                TaskUpdate(
+                    status="OWNER_REVIEW",
+                    owner_notes="Source data profile created from the attached work input. Owner review required.",
+                ),
+                organization_id=organization_id,
+                user=user,
+            )
+            advanced.append(profile_task.task_id)
+
     ready_tasks = (
         db.query(NovaWorkTask)
         .filter(
@@ -150,7 +268,14 @@ def run_autonomous_engagement(
     for task in ready_tasks:
         if not _is_source_data_task(task.title):
             continue
+        if source_data_available:
+            continue
+        input_present = bool(source_inputs)
         reason = (
+            "SOURCE DATA PARSE REQUIRED: a source file is attached but Nova could not parse usable content. "
+            "Replace the file with a supported readable source file."
+            if input_present
+            else
             "SOURCE DATA REQUIRED: this task depends on the client/source dataset. "
             "No engagement-level source dataset is available, so Nova did not invent or analyze data."
         )
@@ -170,7 +295,8 @@ def run_autonomous_engagement(
         event_type="AUTONOMOUS_EXECUTOR_RUN",
         summary=(
             f"Nova internal executor ran: {len(advanced)} task(s) advanced; "
-            f"{len(blocked)} task(s) blocked for missing source data. No external action."
+            f"{len(unblocked)} task(s) reactivated; {len(blocked)} task(s) blocked. "
+            f"Source data available={source_data_available}. No external action."
         ),
         ref_id=engagement_id,
         entity_type="engagement",
@@ -185,11 +311,16 @@ def run_autonomous_engagement(
         "engagement_status": "ACTIVE",
         "tasks_advanced": len(advanced),
         "tasks_blocked": len(blocked),
+        "tasks_unblocked": len(unblocked),
         "advanced_task_ids": advanced,
         "blocked_task_ids": blocked,
+        "unblocked_task_ids": unblocked,
         "deliverable_id": deliverable_id,
+        "source_profile_deliverable_id": source_profile_deliverable_id,
         "owner_review_required": True,
-        "source_data_required": bool(blocked),
+        "source_data_available": source_data_available,
+        "source_data_input_count": len(source_inputs),
+        "source_data_required": not source_data_available,
         "external_submission": False,
         "client_contact": False,
         "contract_acceptance": False,
