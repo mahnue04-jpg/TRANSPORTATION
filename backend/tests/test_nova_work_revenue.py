@@ -1905,6 +1905,7 @@ def test_work_input_root_prefers_existing_persistent_render_disk(monkeypatch, tm
         return original_exists(self)
 
     monkeypatch.setattr(work_inputs.Path, "exists", fake_exists)
+    monkeypatch.setattr(work_inputs.Path, "mkdir", lambda self, parents=True, exist_ok=True: None)
     root = work_inputs.work_input_root()
     assert str(root) == "/data/onboarding_docs/nova_work_inputs"
 
