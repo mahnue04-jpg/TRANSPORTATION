@@ -595,6 +595,72 @@ def create_opportunity(
     return row
 
 
+def create_discovered_opportunity(
+    db: Session,
+    payload: OpportunityCreate,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaWorkOpportunity:
+    """Persist a live/discovered opportunity without forcing source=manual.
+
+    Preserves payload.source / source_type / source_url and uses the same
+    fingerprint duplicate protection as _create_opportunity_row().
+    """
+    _ensure()
+    data = payload.model_dump()
+    if not str(data.get("source") or "").strip():
+        data["source"] = "live_discovery"
+    if not str(data.get("source_type") or "").strip():
+        data["source_type"] = "approved_api"
+    row = _create_opportunity_row(db, data, organization_id=organization_id, user=user)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_opportunity_by_fingerprint(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+    company_name: str,
+    opportunity_title: str,
+    source_url: str | None,
+) -> NovaWorkOpportunity | None:
+    """Owner/tenant-scoped fingerprint lookup for idempotent live persistence."""
+    _ensure()
+    company = sanitize_untrusted(company_name)[:220]
+    title = sanitize_untrusted(opportunity_title)[:220]
+    safe_url = _safe_source_url(source_url) if source_url else None
+    fingerprint = opportunity_fingerprint(
+        organization_id=organization_id,
+        company_name=company,
+        opportunity_title=title,
+        source_url=safe_url,
+    )
+    return (
+        _opp_query(db, organization_id, user)
+        .filter(NovaWorkOpportunity.fingerprint == fingerprint)
+        .first()
+    )
+
+
+def get_application_for_opportunity(
+    db: Session,
+    opportunity_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaWorkApplication | None:
+    _ensure()
+    return (
+        _app_query(db, organization_id, user)
+        .filter(NovaWorkApplication.opportunity_id == opportunity_id)
+        .first()
+    )
+
+
 def list_opportunities(
     db: Session,
     *,
@@ -1680,7 +1746,14 @@ def _today_source_counts(opportunities: list[OpportunityOut]) -> dict[str, int]:
         kind = str(item.source_type or item.source or "manual").strip().lower()
         if kind == "simulated":
             counts["simulated"] += 1
-        elif kind in {"live", "live_job_source", "remotive", "job_board"}:
+        elif kind in {
+            "live",
+            "live_job_source",
+            "remotive",
+            "remoteok",
+            "job_board",
+            "approved_api",
+        }:
             counts["live"] += 1
         elif kind == "manual":
             counts["manual"] += 1
