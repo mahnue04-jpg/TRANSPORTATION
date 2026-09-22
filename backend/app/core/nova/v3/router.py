@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
@@ -37,6 +38,8 @@ from app.core.nova.v3.live_qualification import (
     qualify_and_rank_live_jobs,
 )
 from app.core.nova.v3.growth.kernel import get_growth_kernel
+from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
+from app.db.session import get_db
 
 def _nova_v3_owner_emails() -> set[str]:
     configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
