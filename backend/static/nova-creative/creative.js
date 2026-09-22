@@ -54,6 +54,7 @@
     try { body = await res.json(); } catch (err) { body = null; }
     if (res.status === 401) throw new Error("Session expired. Sign in again. (401)");
     if (res.status === 403) throw new Error("Access denied. (403)");
+    if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
     if (res.status === 422) throw new Error(detailText(body, "Validation failed. (422)"));
     if (res.status >= 500) throw new Error("Temporary system error. (500)");
     if (!res.ok) {
@@ -251,27 +252,56 @@
         return;
       }
       var action = button.getAttribute("data-action");
+      var labels = {
+        script: { working: "Working: Generate Script...", ok: "Script generated." },
+        caption: { working: "Working: Generate Caption...", ok: "Caption generated." },
+        storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
+        "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
+        image: { working: "Working: Image Generation status...", ok: "Image provider status updated." },
+        video: { working: "Working: Video Generation status...", ok: "Video provider status updated." },
+        voice: { working: "Working: Voice Generation status...", ok: "Voice provider status updated." },
+        export: { working: "Working: Export Project Package...", ok: "Project package exported." }
+      };
+      var meta = labels[action];
+      if (!meta) {
+        showBanner("Unknown generate action.", false);
+        return;
+      }
       var path = "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/";
+      var requestBody = null;
       if (action === "script") path += "generate/script";
       else if (action === "caption") path += "generate/caption";
       else if (action === "storyboard") path += "generate/storyboard";
-      else if (action === "image-prompt") path += "generate/image-prompt";
-      else if (action === "image") path += "generate/image";
-      else if (action === "video") path += "generate/video";
+      else if (action === "image-prompt") {
+        path += "generate/image-prompt";
+        requestBody = { aspect_ratio: "9:16" };
+      } else if (action === "image") {
+        path += "generate/image";
+        requestBody = { aspect_ratio: "9:16" };
+      } else if (action === "video") path += "generate/video";
       else if (action === "voice") path += "generate/voice";
-      else if (action === "export") path += "export";
-      else return;
+      else if (action === "export") {
+        path += "export";
+        requestBody = { format: "markdown" };
+      } else return;
+
+      var selectedProjectId = activeProjectId;
+      button.disabled = true;
+      showBanner(meta.working, true);
       try {
-        var body = await api(path, {
-          method: "POST",
-          body: JSON.stringify(action === "export" ? { format: "markdown" } : { aspect_ratio: "9:16" })
-        });
+        var options = { method: "POST" };
+        if (requestBody) options.body = JSON.stringify(requestBody);
+        var body = await api(path, options);
+        if (selectedProjectId) activeProjectId = selectedProjectId;
         renderOutput(body);
-        showBanner((body.job && body.job.status) || (body.export && body.export.status) || "Done", true);
-        refreshAssets();
-        refreshProjects();
+        showBanner(meta.ok, true);
+        await refreshAssets();
+        await refreshProjects();
+        if (selectedProjectId) activeProjectId = selectedProjectId;
       } catch (err) {
-        showBanner(err.message, false);
+        showBanner(err.message || ("Action failed: " + action), false);
+      } finally {
+        button.disabled = false;
       }
     });
   });

@@ -45,6 +45,10 @@ button {
   border: none;
   cursor: pointer;
 }
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 button.secondary { background: #2f2a24; }
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .actions.wrap { margin-top: 0.5rem; }
