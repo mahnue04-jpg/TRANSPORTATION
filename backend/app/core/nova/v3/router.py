@@ -24,7 +24,11 @@ from app.core.nova.v3.autonomous_execution import build_autonomous_execution_ses
 from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
-from app.core.nova.v3.live_discovery import search_remote_jobs
+from app.core.nova.v3.multi_source_discovery import (
+    provider_catalog,
+    provider_health_snapshot,
+    search_multi_source_jobs,
+)
 from app.core.nova.v3.live_qualification import (
     OUTCOME_NEEDS_OWNER_REVIEW,
     OUTCOME_NOT_QUALIFIED,
@@ -262,7 +266,9 @@ def v3_capabilities(user: UserContext = Depends(get_current_user_context)):
         "search_queries": capability_search_queries(),
         "search_families": search_family_catalog(),
         "capability_first_queries": generate_capability_first_queries(),
-        "discovery_mode": "capability_first_nationwide_remote",
+        "discovery_mode": "capability_first_nationwide_remote_multi_source",
+        "discovery_providers": provider_catalog(),
+        "provider_health": provider_health_snapshot(),
         "external_submission": False,
         "financial_execution": False,
     }
@@ -328,14 +334,20 @@ def v3_live_job_search(
 ):
     _org(user, payload.organization_id)
     try:
-        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
-        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
+        multi = search_multi_source_jobs(payload.query, limit=payload.limit)
+        ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
         return {
             "query": payload.query,
             "count": len(ranked),
-            "source": "Remotive",
+            "source": "multi_source",
+            "sources": multi.get("providers_queried") or [],
+            "provider_result_counts": multi.get("provider_result_counts") or {},
+            "provider_errors": multi.get("provider_errors") or [],
+            "provider_health": multi.get("provider_health") or [],
             "read_only": True,
             "external_action_taken": False,
+            "external_submission": False,
+            "financial_execution": False,
             "jobs": ranked,
         }
     except V3Error as exc:
@@ -349,8 +361,8 @@ def v3_live_job_discover(
 ):
     org_id = _org(user, payload.organization_id)
     try:
-        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
-        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
+        multi = search_multi_source_jobs(payload.query, limit=payload.limit)
+        ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
@@ -363,9 +375,15 @@ def v3_live_job_discover(
         buckets = partition_by_qualification(selected)
         return {
             "query": payload.query,
-            "source": "Remotive",
+            "source": "multi_source",
+            "sources": multi.get("providers_queried") or [],
+            "provider_result_counts": multi.get("provider_result_counts") or {},
+            "provider_errors": multi.get("provider_errors") or [],
+            "provider_health": multi.get("provider_health") or [],
             "read_only_discovery": True,
             "external_action_taken": False,
+            "external_submission": False,
+            "financial_execution": False,
             "ranked_count": len(ranked),
             "selected_count": len(selected),
             "qualification_counts": {
@@ -444,8 +462,13 @@ def v3_live_job_prepare(
         buckets = partition_by_qualification(selected)
         return {
             "query": payload.query,
-            "source": "Remotive",
+            "source": "multi_source",
+            "sources": multi.get("providers_queried") or [],
+            "provider_result_counts": multi.get("provider_result_counts") or {},
+            "provider_errors": multi.get("provider_errors") or [],
+            "provider_health": multi.get("provider_health") or [],
             "external_action_taken": False,
+            "external_submission": False,
             "financial_execution": False,
             "ranked_count": len(ranked),
             "selected_count": len(selected),
