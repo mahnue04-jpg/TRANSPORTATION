@@ -39,7 +39,8 @@ def build_capability_proof(opportunity: dict[str, Any]) -> dict[str, Any]:
                 opportunity.get("description"),
                 opportunity.get("requirements"),
             )
-        )
+        ),
+        title=str(opportunity.get("opportunity_title") or opportunity.get("title") or "") or None,
     )
 
     if not packet.get("execution_ready") or not matches:

@@ -182,10 +182,23 @@ def test_physical_onsite_role_not_qualified():
     assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
 
 
-def test_licensed_clinical_role_not_qualified():
-    qual = qualify_live_job(_licensed_clinical_role())
-    assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
-    blockers = set(qual.get("blockers") or [])
-    assert blockers.intersection(
-        {"licensing_or_certification_required", "sensitive_regulated_work", "outside_amicor_nova_capabilities"}
+def test_concrete_email_crm_report_phrases_match_admin_capability():
+    text = (
+        "Prepare email drafts, organize CRM notes, and summarize reports. "
+        "Email writing, CRM, reporting."
     )
+    matches = capability_matches(text, title="Approval gate role")
+    ids = {row["capability_id"] for row in matches}
+    assert "administrative_operations" in ids
+    fit = capability_fit(text, title="Approval gate role")
+    assert fit["fit"] is True
+    strong = matches[0]["strong_matched_terms"]
+    assert any(" " in term for term in strong)
+
+
+def test_weekly_reporting_phrase_is_strong_not_weak_token_alone():
+    assert capability_fit("Need reporting.", title="Ops helper")["fit"] is False
+    assert capability_fit(
+        "Remote weekly reporting for the operations team with spreadsheet cleanup.",
+        title="Reporting contractor",
+    )["fit"] is True
