@@ -29,7 +29,7 @@ from app.core.nova.creative_studio.providers import (
     voice_provider,
 )
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
-from app.core.nova.creative_studio.store import CreativeStudioStore, get_store
+from app.core.nova.creative_studio.store import CreativeStudioStore, DbCreativeStudioStore, get_db_store, get_store
 
 
 class CreativeStudioError(Exception):
@@ -45,7 +45,7 @@ def _now() -> str:
 
 
 class CreativeStudioService:
-    def __init__(self, store: CreativeStudioStore | None = None):
+    def __init__(self, store: CreativeStudioStore | DbCreativeStudioStore | None = None):
         self.store = store or get_store()
 
     def guardrails(self) -> dict[str, Any]:
@@ -314,9 +314,7 @@ class CreativeStudioService:
             brand_name=brand.business_name if brand else "AMICOR",
         )
         # Replace scenes
-        existing = self.store.list_scenes(project_id, owner_id)
-        for scene in existing:
-            self.store.scenes.pop(scene.id, None)
+        self.store.delete_scenes(project_id, owner_id)
         saved_scenes = []
         for raw in assembly["scenes"]:
             scene = CreativeScene(
@@ -488,5 +486,12 @@ class CreativeStudioService:
         return {"job": job.as_dict(), "export": exported, "asset": asset.as_dict()}
 
 
-def get_service() -> CreativeStudioService:
+def get_service(db=None) -> CreativeStudioService:
+    """Return Creative Studio service.
+
+    Production/router path should pass a SQLAlchemy Session so records persist.
+    Unit tests may inject an in-memory CreativeStudioStore directly.
+    """
+    if db is not None:
+        return CreativeStudioService(get_db_store(db))
     return CreativeStudioService()

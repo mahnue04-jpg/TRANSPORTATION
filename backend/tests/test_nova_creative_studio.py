@@ -12,10 +12,12 @@ from app.core.nova.creative_studio.flags import creative_guardrails
 from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, provider_statuses
 from app.core.nova.creative_studio.safety import BLOCK, OWNER_REVIEW, OK, screen_creative_text
 from app.core.nova.creative_studio.service import CreativeStudioError, CreativeStudioService
-from app.core.nova.creative_studio.store import CreativeStudioStore, reset_store_for_tests
+from app.core.nova.creative_studio.store import CreativeStudioStore, DbCreativeStudioStore, reset_store_for_tests
+from app.core.nova.creative_studio.schema_ensure import ensure_nova_creative_schema
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.work_revenue.flags import EXTERNAL_SUBMISSION_ENABLED, FINANCIAL_ACTIONS_ENABLED
 from app.core.nova.work_revenue.owner_facts import FACT_DEFINITIONS
+from app.db.session import SessionLocal, engine
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +35,7 @@ def _reset_store():
 def client() -> TestClient:
     ensure_auth_schema()
     seed_default_users()
+    ensure_nova_creative_schema(engine)
     return TestClient(app)
 
 
@@ -44,6 +47,11 @@ def _headers(client: TestClient) -> dict[str, str]:
 
 def _svc() -> CreativeStudioService:
     return CreativeStudioService(CreativeStudioStore())
+
+
+def _db_svc() -> tuple[CreativeStudioService, object]:
+    db = SessionLocal()
+    return CreativeStudioService(DbCreativeStudioStore(db)), db
 
 
 def test_project_creation_and_persistence():
@@ -578,3 +586,121 @@ def test_existing_nova_work_and_profile_regression(client: TestClient):
     assert cg["PLANNING_MODE_AVAILABLE"] is True
     assert cg["EXTERNAL_SUBMISSION_ENABLED"] is False
     assert cg["FINANCIAL_EXECUTION_ENABLED"] is False
+
+
+def test_db_project_brief_brand_asset_scene_job_persistence_and_restart():
+    """Create records, close session (restart simulation), reload and verify persistence."""
+    svc1, db1 = _db_svc()
+    try:
+        brand = svc1.create_brand(
+            "owner-persist",
+            {
+                "business_name": "AMICOR",
+                "tagline": "Owner-controlled AI",
+                "preferred_cta": "Learn more about AMICOR Nova",
+                "target_audience": "small business owners",
+            },
+        )
+        project = svc1.create_project(
+            "owner-persist",
+            {
+                "title": "Persistent Creative Test",
+                "project_type": "short_video",
+                "platform": "TikTok",
+                "duration_target": 30,
+                "audience": "small business owners",
+                "tone": "professional and friendly",
+                "brand_profile_id": brand["id"],
+            },
+        )
+        project_id = project["id"]
+        svc1.create_brief(
+            "owner-persist",
+            {
+                "project_id": project_id,
+                "topic": "How AMICOR Nova helps small business owners save time and get work done with AI",
+                "cta": "Learn more about AMICOR Nova",
+                "style": "Modern, professional, energetic",
+            },
+        )
+        script = svc1.generate_script("owner-persist", project_id)
+        caption = svc1.generate_caption("owner-persist", project_id)
+        story = svc1.generate_storyboard("owner-persist", project_id)
+        prompt = svc1.generate_image_prompt("owner-persist", project_id, aspect_ratio="9:16")
+        exported = svc1.export_project("owner-persist", project_id, fmt="markdown")
+        assert script["pack"]["media_generated"] is False
+        assert caption["pack"]["hashtags"]
+        assert len(story["scenes"]) >= 3
+        assert prompt["url"] is None
+        assert exported["export"]["package"]["external_publishing"] is False
+        assert exported["export"]["package"]["external_submission"] is False
+        assert exported["export"]["package"]["financial_execution"] is False
+    finally:
+        db1.close()
+
+    # Restart simulation: new session/store must still see records.
+    svc2, db2 = _db_svc()
+    try:
+        listed = svc2.list_projects("owner-persist")
+        assert any(p["id"] == project_id for p in listed)
+        detail = svc2.get_project("owner-persist", project_id)
+        assert detail["project"]["title"] == "Persistent Creative Test"
+        assert detail["brief"] is not None
+        assert detail["brand"] is not None
+        assert detail["brand"]["business_name"] == "AMICOR"
+        kinds = {a["kind"] for a in detail["assets"]}
+        assert "script" in kinds
+        assert "caption" in kinds or "hashtags" in kinds
+        assert "storyboard" in kinds
+        assert "image_prompt" in kinds
+        assert "export" in kinds
+        assert len(detail["scenes"]) >= 3
+        assert detail["scenes"][0]["voiceover_text"]
+        assert detail["scenes"][0]["subtitle_text"] == detail["scenes"][0]["voiceover_text"]
+        assert detail["jobs"]
+        rebuilt = svc2.export_project("owner-persist", project_id, fmt="json")
+        assert rebuilt["export"]["package"]["external_publishing"] is False
+        assert "AMICOR" in rebuilt["export"]["content"] or rebuilt["export"]["package"]["script"]
+        # Cross-owner inaccessible
+        with pytest.raises(CreativeStudioError) as exc:
+            svc2.get_project("other-owner", project_id)
+        assert exc.value.code == "NOT_FOUND"
+        assert svc2.list_projects("other-owner") == []
+        assert svc2.store.list_assets(project_id, "other-owner") == []
+        assert svc2.store.list_scenes(project_id, "other-owner") == []
+    finally:
+        db2.close()
+
+
+def test_http_persistence_survives_new_service_session(client: TestClient):
+    headers = _headers(client)
+    created = client.post(
+        "/api/nova/creative/projects",
+        headers=headers,
+        json={
+            "title": "HTTP persistent",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+        },
+    )
+    assert created.status_code == 200, created.text
+    project_id = created.json()["id"]
+    assert client.post(
+        "/api/nova/creative/briefs",
+        headers=headers,
+        json={"project_id": project_id, "topic": "workflow tip", "cta": "Learn more"},
+    ).status_code == 200
+    assert client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers).status_code == 200
+    # Fresh DB session read path
+    db = SessionLocal()
+    try:
+        svc = CreativeStudioService(DbCreativeStudioStore(db))
+        # Resolve owner_id from project list using HTTP then verify DB owner isolation by id presence
+        detail = client.get(f"/api/nova/creative/projects/{project_id}", headers=headers)
+        assert detail.status_code == 200
+        assert any(a["kind"] == "script" for a in detail.json()["assets"])
+        # Direct store ownership: unknown owner sees nothing
+        assert svc.store.get_project(project_id, "not-the-owner") is None
+    finally:
+        db.close()

@@ -7,10 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
+from app.db.session import get_db
 
 router = APIRouter(
     prefix="/api/nova/creative",
@@ -100,90 +102,127 @@ class ExportIn(BaseModel):
 
 
 @router.get("/guardrails")
-def creative_guardrails_endpoint(user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def creative_guardrails_endpoint(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
-    return get_service().guardrails()
+    return get_service(db).guardrails()
 
 
 @router.post("/projects")
-def create_project(payload: ProjectIn, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def create_project(
+    payload: ProjectIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().create_project(user.user_id, payload.model_dump())
+        return get_service(db).create_project(user.user_id, payload.model_dump())
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.get("/projects")
-def list_projects(user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def list_projects(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
-    rows = get_service().list_projects(user.user_id)
+    rows = get_service(db).list_projects(user.user_id)
     return {"count": len(rows), "projects": rows}
 
 
 @router.get("/projects/{project_id}")
-def get_project(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def get_project(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().get_project(user.user_id, project_id)
+        return get_service(db).get_project(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.post("/brands")
-def create_brand(payload: BrandIn, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def create_brand(
+    payload: BrandIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().create_brand(user.user_id, payload.model_dump())
+        return get_service(db).create_brand(user.user_id, payload.model_dump())
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.get("/brands")
-def list_brands(user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def list_brands(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
-    rows = get_service().list_brands(user.user_id)
+    rows = get_service(db).list_brands(user.user_id)
     return {"count": len(rows), "brands": rows}
 
 
 @router.post("/briefs")
-def create_brief(payload: BriefIn, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def create_brief(
+    payload: BriefIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().create_brief(user.user_id, payload.model_dump())
+        return get_service(db).create_brief(user.user_id, payload.model_dump())
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.post("/projects/{project_id}/generate/script")
-def generate_script(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def generate_script(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().generate_script(user.user_id, project_id)
+        return get_service(db).generate_script(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.post("/projects/{project_id}/generate/caption")
-def generate_caption(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def generate_caption(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().generate_caption(user.user_id, project_id)
+        return get_service(db).generate_caption(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.post("/projects/{project_id}/generate/storyboard")
-def generate_storyboard(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def generate_storyboard(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().generate_storyboard(user.user_id, project_id)
+        return get_service(db).generate_storyboard(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -194,11 +233,12 @@ def generate_image_prompt(
     project_id: str,
     payload: AspectIn | None = None,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     aspect = (payload.aspect_ratio if payload else "1:1")
     try:
-        return get_service().generate_image_prompt(user.user_id, project_id, aspect_ratio=aspect)
+        return get_service(db).generate_image_prompt(user.user_id, project_id, aspect_ratio=aspect)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -209,10 +249,11 @@ def generate_image(
     project_id: str,
     payload: AspectIn | None = None,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().request_image_generation(
+        return get_service(db).request_image_generation(
             user.user_id,
             project_id,
             aspect_ratio=(payload.aspect_ratio if payload else "1:1"),
@@ -224,20 +265,28 @@ def generate_image(
 
 
 @router.post("/projects/{project_id}/generate/video")
-def generate_video(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def generate_video(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().request_video_generation(user.user_id, project_id)
+        return get_service(db).request_video_generation(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
 
 
 @router.post("/projects/{project_id}/generate/voice")
-def generate_voice(project_id: str, user: UserContext = Depends(get_current_user_context)) -> dict[str, Any]:
+def generate_voice(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().request_voice_generation(user.user_id, project_id)
+        return get_service(db).request_voice_generation(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -248,10 +297,11 @@ def export_project(
     project_id: str,
     payload: ExportIn | None = None,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service().export_project(user.user_id, project_id, fmt=(payload.format if payload else "json"))
+        return get_service(db).export_project(user.user_id, project_id, fmt=(payload.format if payload else "json"))
     except CreativeStudioError as exc:
         _raise(exc)
         raise

@@ -19,6 +19,7 @@ import app.modules.payments.models  # noqa: F401, E402 — Ride + Deliver paymen
 import app.core.nova.freight.models  # noqa: F401, E402 — Nova freight shipments
 import app.core.nova.work_revenue.models  # noqa: F401, E402 — Work & Revenue V1/V2
 import app.core.nova.v3.db_models  # noqa: F401, E402 — Nova V3 live infrastructure
+import app.core.nova.creative_studio.db_models  # noqa: F401, E402 — Creative Studio persistence
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
@@ -45,6 +46,7 @@ def include_object(object_, name, type_, reflected, compare_to):
             or name.startswith("nova_freight_")
             or name.startswith("nova_work_")
             or name.startswith("nova_v3_")
+            or name.startswith("nova_creative_")
         )
     return True
 
