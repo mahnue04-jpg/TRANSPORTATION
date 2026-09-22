@@ -837,6 +837,82 @@ def _apply_status(db: Session, row: NovaWorkOpportunity, new_status: str, user: 
     )
 
 
+# Real live/manual source markers must never be bulk-archived by simulated cleanup.
+_PROTECTED_NON_SIMULATED_SOURCES = frozenset(
+    {
+        "remotive",
+        "remoteok",
+        "approved_api",
+        "live",
+        "live_job_source",
+        "manual",
+    }
+)
+_BULK_SIMULATED_ARCHIVE_REASON = "Bulk archive of simulated/test fixture by owner."
+
+
+def is_canonical_simulated_opportunity(row: NovaWorkOpportunity) -> bool:
+    """True only when the canonical source markers are explicitly simulated.
+
+    Title text alone never qualifies. Protected live/manual source types are never treated as simulated.
+    """
+    source_type = str(getattr(row, "source_type", None) or "").strip().lower()
+    source = str(getattr(row, "source", None) or "").strip().lower()
+    if source_type in _PROTECTED_NON_SIMULATED_SOURCES:
+        return False
+    if source in _PROTECTED_NON_SIMULATED_SOURCES and source_type != "simulated":
+        return False
+    return source_type == "simulated" or source == "simulated"
+
+
+def archive_simulated_opportunities(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    """Archive tenant-scoped opportunities that are explicitly simulated/test fixtures.
+
+    Uses the existing per-opportunity archive path (archived=True, history preserved).
+    Does not delete rows, create applications, contact clients, submit externally,
+    accept contracts, or perform Stripe/financial actions.
+    """
+    _ensure()
+    candidates = (
+        _opp_query(db, organization_id, user)
+        .filter(NovaWorkOpportunity.archived.is_(False))
+        .all()
+    )
+    archived_ids: list[str] = []
+    for row in candidates:
+        if not is_canonical_simulated_opportunity(row):
+            continue
+        update_opportunity(
+            db,
+            row.opportunity_id,
+            OpportunityUpdate(
+                archived=True,
+                archive_reason=_BULK_SIMULATED_ARCHIVE_REASON,
+            ),
+            organization_id=organization_id,
+            user=user,
+        )
+        archived_ids.append(row.opportunity_id)
+    count = len(archived_ids)
+    return {
+        "archived_count": count,
+        "archived_ids": archived_ids,
+        "message": (
+            f"Archived {count} simulated/test opportunities. Real opportunities were not changed."
+        ),
+        "external_submission": False,
+        "client_contact": False,
+        "contract_acceptance": False,
+        "financial_execution": False,
+        "stripe_action": False,
+    }
+
+
 def update_opportunity(
     db: Session,
     opportunity_id: str,

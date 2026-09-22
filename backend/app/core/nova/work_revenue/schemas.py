@@ -357,6 +357,17 @@ class OpportunityOut(BaseModel):
     qualification_reason: str | None = None
 
 
+class ArchiveSimulatedOut(BaseModel):
+    archived_count: int = 0
+    archived_ids: list[str] = Field(default_factory=list)
+    message: str = ""
+    external_submission: bool = False
+    client_contact: bool = False
+    contract_acceptance: bool = False
+    financial_execution: bool = False
+    stripe_action: bool = False
+
+
 class QualificationOut(BaseModel):
     opportunity_id: str
     outcome: str

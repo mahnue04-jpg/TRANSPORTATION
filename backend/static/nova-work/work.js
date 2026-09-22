@@ -396,6 +396,10 @@
     buttons.forEach(function (button) {
       button.classList.toggle("filter-on", (button.getAttribute("data-filter") || "") === activeFilter);
     });
+    var cleanupBar = $("simulated-cleanup-bar");
+    if (cleanupBar) {
+      cleanupBar.classList.toggle("hidden", activeFilter !== "simulated");
+    }
   }
   async function loadWorkInputsFor(engagementId) {
     var target = document.querySelector("[data-work-input-list=\"" + engagementId + "\"]");
@@ -1133,6 +1137,29 @@
     activeFilter = target.getAttribute("data-filter") || "";
     try { await refresh(); } catch (err) { showBanner(err.message); }
   });
+  if ($("archive-simulated-btn")) {
+    $("archive-simulated-btn").addEventListener("click", async function () {
+      if (activeFilter !== "simulated") {
+        showBanner("Switch to the Simulated/test filter before archiving fixtures.");
+        return;
+      }
+      var confirmed = window.confirm(
+        "Archive all simulated/test opportunities? Real live/manual opportunities will not be changed."
+      );
+      if (!confirmed) return;
+      try {
+        var result = await api("/api/nova/work/opportunities/archive-simulated", { method: "POST", body: "{}" });
+        var count = result && typeof result.archived_count === "number" ? result.archived_count : 0;
+        showBanner(
+          "Archived " + count + " simulated/test opportunities. Real opportunities were not changed.",
+          true
+        );
+        await refresh();
+      } catch (err) {
+        showBanner(err.message);
+      }
+    });
+  }
   if ($("tab-row")) {
     $("tab-row").addEventListener("click", function (event) {
       var target = event.target;

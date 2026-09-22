@@ -45,6 +45,7 @@ from app.core.nova.work_revenue.schemas import (
     OpportunityDetailOut,
     OpportunityOut,
     OpportunityUpdate,
+    ArchiveSimulatedOut,
     OwnerActionCreate,
     OwnerActionOut,
     OwnerActionUpdate,
@@ -219,6 +220,20 @@ def create_opportunity(
     org_id = _resolve_org(user, payload.organization_id)
     try:
         return service.opportunity_out(service.create_opportunity(db, payload, organization_id=org_id, user=user))
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/opportunities/archive-simulated", response_model=ArchiveSimulatedOut)
+def archive_simulated_opportunities(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner-only bulk archive of explicitly simulated/test opportunities. No deletes."""
+    org_id = _resolve_org(user, organization_id)
+    try:
+        return service.archive_simulated_opportunities(db, organization_id=org_id, user=user)
     except service.NovaWorkError as exc:
         _raise(exc)
 
