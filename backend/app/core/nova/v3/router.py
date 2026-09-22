@@ -405,8 +405,8 @@ def v3_live_job_prepare(
 ):
     org_id = _org(user, payload.organization_id)
     try:
-        raw_jobs = search_remote_jobs(payload.query, limit=payload.limit)
-        ranked = qualify_and_rank_live_jobs(payload.query, raw_jobs)
+        multi = search_multi_source_jobs(payload.query, limit=payload.limit)
+        ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
