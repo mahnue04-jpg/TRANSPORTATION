@@ -24,6 +24,7 @@ from app.core.nova.v3.multi_source_discovery import (
     ProviderMeta,
     RemotiveLiveProvider,
     RemoteOkLiveProvider,
+    SamGovLiveProvider,
     dedupe_opportunities,
     live_providers,
     normalize_opportunity,
@@ -497,7 +498,9 @@ def test_pending_providers_disabled_and_catalog_quality() -> None:
             p.meta.provider_id for p in PENDING_PROVIDERS
         }
     pending_ids = {p.meta.provider_id for p in PENDING_PROVIDERS}
-    assert {"upwork", "freelancer", "sam_gov", "public_rfp_rss", "vendor_project_board"} <= pending_ids
+    assert {"upwork", "freelancer", "public_rfp_rss", "vendor_project_board"} <= pending_ids
+    sam = next(row for row in catalog if row["provider_id"] == "sam_gov")
+    assert sam["supports_external_submission"] is False
     for item in PENDING_PROVIDERS:
         assert item.meta.enabled is False
         assert item.meta.pending_requirements
@@ -594,3 +597,91 @@ def test_remoteok_token_filter(monkeypatch) -> None:
     assert len(rows) == 1
     assert rows[0]["provider_id"] == "remoteok"
     assert rows[0]["title"] == "Spreadsheet Cleanup Contract"
+
+
+
+def test_sam_gov_disabled_without_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("SAM_GOV_API_KEY", raising=False)
+    provider = SamGovLiveProvider()
+    assert provider.meta.enabled is False
+    assert provider.meta.access_status == "pending_api_key"
+    assert provider.search("administrative reporting", limit=5) == []
+
+
+def test_sam_gov_official_api_normalization(monkeypatch) -> None:
+    monkeypatch.setenv("SAM_GOV_API_KEY", "test-key")
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "opportunitiesData": [
+                    {
+                        "noticeId": "abc123",
+                        "title": "Administrative Data and Reporting Support",
+                        "solicitationNumber": "SOL-123",
+                        "fullParentPathName": "Department / Program Office",
+                        "postedDate": "2026-09-20",
+                        "responseDeadLine": "2026-10-15T17:00:00-05:00",
+                        "naicsCode": "541611",
+                        "type": "Solicitation",
+                        "description": "Provide spreadsheet analysis, data reconciliation, document preparation, and reporting.",
+                        "placeOfPerformance": {
+                            "city": "Minneapolis",
+                            "state": "MN",
+                            "country": {"name": "United States"},
+                        },
+                    }
+                ]
+            }
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, **kwargs):
+            assert url == SamGovLiveProvider.API_URL
+            params = kwargs["params"]
+            assert params["api_key"] == "test-key"
+            assert params["postedFrom"]
+            assert params["postedTo"]
+            assert params["title"]
+            return _Resp()
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.multi_source_discovery.httpx.Client",
+        _Client,
+    )
+    provider = SamGovLiveProvider()
+    assert provider.meta.enabled is True
+    assert provider.meta.supports_external_submission is False
+    rows = provider.search(
+        "remote administrative support contractor CRM document preparation weekly reporting spreadsheet cleanup data reconciliation",
+        limit=5,
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["provider_id"] == "sam_gov"
+    assert row["provider_type"] == "government_contracting"
+    assert row["source_url"] == "https://sam.gov/opp/abc123/view"
+    assert row["fee_required"] == "no"
+    assert row["real_or_simulated"] == "REAL"
+    assert row["raw_source_metadata"]["solicitation_number"] == "SOL-123"
+    assert row["raw_source_metadata"]["response_deadline"] == "2026-10-15T17:00:00-05:00"
+
+
+def test_sam_gov_catalog_enables_only_when_key_present(monkeypatch) -> None:
+    monkeypatch.setenv("SAM_GOV_API_KEY", "configured")
+    catalog = provider_catalog()
+    sam = next(row for row in catalog if row["provider_id"] == "sam_gov")
+    assert sam["enabled"] is True
+    assert sam["access_mode"] == "api"
+    assert sam["supports_external_submission"] is False
