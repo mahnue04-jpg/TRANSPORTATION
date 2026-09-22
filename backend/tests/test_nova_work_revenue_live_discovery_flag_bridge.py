@@ -171,9 +171,11 @@ def test_source_counts_keep_simulated_separate_from_live() -> None:
             _Opp("simulated"),
             _Opp("remotive"),
             _Opp("live"),
+            _Opp("approved_api"),
+            _Opp("remoteok"),
         ]
     )
-    assert counts == {"manual": 1, "simulated": 2, "live": 2, "other": 0}
+    assert counts == {"manual": 1, "simulated": 2, "live": 4, "other": 0}
 
 
 def test_discovery_never_auto_submits_when_flag_on(monkeypatch: pytest.MonkeyPatch) -> None:

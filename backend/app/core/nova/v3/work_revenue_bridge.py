@@ -2,6 +2,7 @@
 
 No external submission, client contact, contract acceptance, invoicing, payment,
 Stripe, or financial execution is performed here.
+Approval remains separate from submission.
 """
 from __future__ import annotations
 
@@ -13,12 +14,17 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext
 from app.core.nova.work_revenue import service as work_service
 from app.core.nova.work_revenue.schemas import ApplicationCreate, OpportunityCreate
-from app.core.nova.v3.live_qualification import OUTCOME_QUALIFIED
+from app.core.nova.v3.live_qualification import (
+    OUTCOME_NEEDS_OWNER_REVIEW,
+    OUTCOME_NOT_QUALIFIED,
+    OUTCOME_QUALIFIED,
+)
 
 _MONEY_RE = re.compile(r"\$\s*([0-9][0-9,]*(?:\.\d+)?)")
 
 
 def _amount_from_job(job: dict[str, Any]) -> float | None:
+    """Extract a numeric amount when present. Never invent a compensation period."""
     raw = str(job.get("compensation_text") or "").strip()
     match = _MONEY_RE.search(raw)
     if not match:
@@ -29,30 +35,19 @@ def _amount_from_job(job: dict[str, Any]) -> float | None:
         return None
 
 
-def _find_existing(
-    db: Session,
-    *,
-    organization_id: str,
-    user: UserContext,
-    source_url: str | None,
-    company_name: str,
-    title: str,
-):
-    for row in work_service.list_opportunities(
-        db,
-        organization_id=organization_id,
-        user=user,
-        limit=500,
-        offset=0,
-    ):
-        if source_url and row.source_url and row.source_url == source_url:
-            return row
-        if (
-            str(row.company_name or "").strip().lower() == company_name.strip().lower()
-            and str(row.opportunity_title or "").strip().lower() == title.strip().lower()
-        ):
-            return row
-    return None
+def _live_status(job: dict[str, Any]) -> str:
+    return str(
+        (job.get("live_qualification") or {}).get("qualification_status")
+        or job.get("qualification_status")
+        or ""
+    )
+
+
+def _compensation_note(job: dict[str, Any]) -> str:
+    raw = str(job.get("compensation_text") or "").strip()
+    if not raw:
+        return "Compensation period unknown; raw listing text unavailable."
+    return f"Raw compensation text preserved (period not inferred): {raw}"
 
 
 def persist_live_job(
@@ -61,10 +56,12 @@ def persist_live_job(
     *,
     organization_id: str,
     user: UserContext,
+    prepare_application: bool = False,
 ) -> dict[str, Any]:
     title = str(job.get("title") or "").strip()
     company = str(job.get("company_name") or job.get("client") or "").strip()
     source_url = str(job.get("source_url") or "").strip() or None
+    provider_id = str(job.get("provider_id") or "live_discovery").strip()[:80] or "live_discovery"
     if not title or not company:
         return {
             "persisted": False,
@@ -72,15 +69,21 @@ def persist_live_job(
             "work_opportunity_id": None,
             "work_application_id": None,
             "ready_for_owner_review": False,
+            "package_review_status": None,
+            "package_review_blocker": None,
+            "externally_submitted": False,
+            "financial_execution": False,
+            "client_contacted": False,
+            "contract_accepted": False,
         }
 
-    existing = _find_existing(
+    existing = work_service.get_opportunity_by_fingerprint(
         db,
         organization_id=organization_id,
         user=user,
-        source_url=source_url,
         company_name=company,
-        title=title,
+        opportunity_title=title,
+        source_url=source_url,
     )
     created = existing is None
     if existing is None:
@@ -88,7 +91,7 @@ def persist_live_job(
         live_qual = dict(job.get("live_qualification") or {})
         payload = OpportunityCreate(
             organization_id=organization_id,
-            source=str(job.get("provider_id") or "live_discovery")[:80],
+            source=provider_id,
             source_url=source_url,
             source_type="approved_api",
             company_name=company,
@@ -104,28 +107,46 @@ def persist_live_job(
             requirements=None,
             skills_required=[],
             credentials_required=[],
-            physical_presence_required="false" if str(job.get("remote_status") or "").lower() == "remote" else "unknown",
+            physical_presence_required=(
+                "false" if str(job.get("remote_status") or "").lower() == "remote" else "unknown"
+            ),
             notes=(
                 "Live multi-source discovery. "
-                f"Provider={job.get('provider_id') or 'unknown'}; "
+                f"Provider={provider_id}; "
                 f"live_qualification={live_qual.get('qualification_status') or job.get('qualification_status') or 'unknown'}; "
-                "External submission remains OFF."
+                f"{_compensation_note(job)}; "
+                "External submission remains OFF. Approval does not equal submission."
             )[:4000],
             estimated_value=amount,
             category="external_paid_work",
-            priority="high" if str(job.get("qualification_status") or "") == OUTCOME_QUALIFIED else "normal",
+            priority="high" if _live_status(job) == OUTCOME_QUALIFIED else "normal",
             tags=[
                 "live_discovery",
-                str(job.get("provider_id") or "unknown")[:60],
+                provider_id[:60],
                 str(job.get("qualification_status") or "unclassified")[:60],
             ],
         )
-        existing = work_service.create_discovered_opportunity(
-            db,
-            payload,
-            organization_id=organization_id,
-            user=user,
-        )
+        try:
+            existing = work_service.create_discovered_opportunity(
+                db,
+                payload,
+                organization_id=organization_id,
+                user=user,
+            )
+        except work_service.NovaWorkError as exc:
+            if getattr(exc, "status_code", 400) != 409:
+                raise
+            existing = work_service.get_opportunity_by_fingerprint(
+                db,
+                organization_id=organization_id,
+                user=user,
+                company_name=company,
+                opportunity_title=title,
+                source_url=source_url,
+            )
+            if existing is None:
+                raise
+            created = False
 
     work_row, work_qualification = work_service.qualify(
         db,
@@ -134,39 +155,50 @@ def persist_live_job(
         user=user,
     )
 
-    application = next(
-        (
-            item
-            for item in work_service.list_applications(
-                db,
-                organization_id=organization_id,
-                user=user,
-                limit=500,
-            )
-            if item.opportunity_id == work_row.opportunity_id
-        ),
-        None,
+    application = work_service.get_application_for_opportunity(
+        db,
+        work_row.opportunity_id,
+        organization_id=organization_id,
+        user=user,
     )
 
-    live_status = str(
-        (job.get("live_qualification") or {}).get("qualification_status")
-        or job.get("qualification_status")
-        or ""
-    )
-    if live_status == OUTCOME_QUALIFIED and work_row.status not in {"NOT_QUALIFIED", "CLOSED", "REJECTED"}:
+    live_status = _live_status(job)
+    package_review_status = None
+    package_review_blocker = None
+
+    # Only QUALIFIED live outcomes may auto-create application workspaces.
+    if (
+        prepare_application
+        and live_status == OUTCOME_QUALIFIED
+        and work_row.status not in {"NOT_QUALIFIED", "CLOSED", "REJECTED"}
+    ):
         if application is None:
-            application = work_service.create_application(
-                db,
-                ApplicationCreate(
+            try:
+                application = work_service.create_application(
+                    db,
+                    ApplicationCreate(
+                        organization_id=organization_id,
+                        opportunity_id=work_row.opportunity_id,
+                        applicant_party="AMICOR",
+                        notes=(
+                            "Prepared automatically from a QUALIFIED live discovery result. "
+                            "Nothing submitted externally. Owner approval remains separate."
+                        ),
+                    ),
                     organization_id=organization_id,
-                    opportunity_id=work_row.opportunity_id,
-                    applicant_party="AMICOR",
-                    notes="Prepared automatically from a QUALIFIED live discovery result. Nothing submitted externally.",
-                ),
-                organization_id=organization_id,
-                user=user,
-            )
-        if application.approval_state in {"DRAFT", "NEEDS_CHANGES"}:
+                    user=user,
+                )
+            except work_service.NovaWorkError as exc:
+                if getattr(exc, "status_code", 400) != 409:
+                    raise
+                application = work_service.get_application_for_opportunity(
+                    db,
+                    work_row.opportunity_id,
+                    organization_id=organization_id,
+                    user=user,
+                )
+
+        if application is not None and application.approval_state in {"DRAFT", "NEEDS_CHANGES"}:
             try:
                 application = work_service.mark_ready_for_review(
                     db,
@@ -174,12 +206,30 @@ def persist_live_job(
                     organization_id=organization_id,
                     user=user,
                 )
-            except work_service.NovaWorkError:
-                pass
+                package_review_status = "READY"
+            except work_service.NovaWorkError as exc:
+                # Honest blocker: stay DRAFT / NEEDS_CHANGES; do not force READY.
+                package_review_status = "BLOCKED"
+                package_review_blocker = str(exc)
+                review = work_service.get_application_package_review(
+                    db,
+                    application.application_id,
+                    organization_id=organization_id,
+                    user=user,
+                )
+                package_review_status = review.get("status") or package_review_status
+                if review.get("blockers"):
+                    package_review_blocker = ", ".join(review.get("blockers") or [])
+    elif live_status == OUTCOME_NEEDS_OWNER_REVIEW:
+        package_review_status = "HELD_FOR_OWNER_REVIEW"
+    elif live_status == OUTCOME_NOT_QUALIFIED:
+        package_review_status = "SKIPPED_NOT_QUALIFIED"
 
     return {
         "persisted": True,
         "created": created,
+        "provider_id": provider_id,
+        "live_qualification_status": live_status or None,
         "work_opportunity_id": work_row.opportunity_id,
         "work_status": work_row.status,
         "work_qualification_outcome": work_qualification.get("outcome"),
@@ -188,8 +238,14 @@ def persist_live_job(
         "ready_for_owner_review": bool(
             application and application.approval_state == "READY_FOR_OWNER_REVIEW"
         ),
+        "package_review_status": package_review_status,
+        "package_review_blocker": package_review_blocker,
         "externally_submitted": False,
         "financial_execution": False,
+        "client_contacted": False,
+        "contract_accepted": False,
+        "invoice_created": False,
+        "stripe_action": False,
     }
 
 
@@ -199,13 +255,27 @@ def persist_ranked_jobs(
     *,
     organization_id: str,
     user: UserContext,
+    prepare_applications: bool = False,
+    prepare_limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    return [
-        persist_live_job(
+    results: list[dict[str, Any]] = []
+    prepared = 0
+    limit = prepare_limit if prepare_limit is not None else len(jobs)
+    for job in jobs:
+        live_status = _live_status(job)
+        should_prepare = (
+            prepare_applications
+            and live_status == OUTCOME_QUALIFIED
+            and prepared < max(0, int(limit))
+        )
+        result = persist_live_job(
             db,
             job,
             organization_id=organization_id,
             user=user,
+            prepare_application=should_prepare,
         )
-        for job in jobs
-    ]
+        if should_prepare and result.get("work_application_id"):
+            prepared += 1
+        results.append(result)
+    return results

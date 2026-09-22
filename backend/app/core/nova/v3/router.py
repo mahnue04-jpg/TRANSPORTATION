@@ -39,6 +39,7 @@ from app.core.nova.v3.live_qualification import (
 )
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
+from app.core.nova.work_revenue import service as work_service
 from app.db.session import get_db
 
 def _nova_v3_owner_emails() -> set[str]:
@@ -235,6 +236,13 @@ def _raise(exc: V3Error) -> None:
     raise HTTPException(status_code=exc.http_status, detail={"code": exc.code, "reason": str(exc)}) from exc
 
 
+def _raise_work(exc: work_service.NovaWorkError) -> None:
+    raise HTTPException(
+        status_code=int(getattr(exc, "status_code", 400) or 400),
+        detail={"code": "NOVA_WORK_ERROR", "reason": str(exc)},
+    ) from exc
+
+
 @router.get("/owner-access")
 def v3_owner_access(user: UserContext = Depends(get_current_user_context)):
     return {"owner_access": True, "email": user.email}
@@ -361,6 +369,7 @@ def v3_live_job_search(
 def v3_live_job_discover(
     payload: LiveJobDiscoverIn,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ):
     org_id = _org(user, payload.organization_id)
     try:
@@ -374,6 +383,13 @@ def v3_live_job_discover(
             selected,
             organization_id=org_id,
             owner_user_id=user.user_id,
+        )
+        persistent_results = persist_ranked_jobs(
+            db,
+            selected,
+            organization_id=org_id,
+            user=user,
+            prepare_applications=False,
         )
         buckets = partition_by_qualification(selected)
         return {
@@ -396,7 +412,10 @@ def v3_live_job_discover(
             },
             "ranked_jobs": ranked,
             "saved": saved,
+            "persistent_results": persistent_results,
         }
+    except work_service.NovaWorkError as exc:
+        _raise_work(exc)
     except V3Error as exc:
         _raise(exc)
 
@@ -405,6 +424,7 @@ def v3_live_job_discover(
 def v3_live_job_prepare(
     payload: LiveJobPrepareIn,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ):
     org_id = _org(user, payload.organization_id)
     try:
@@ -419,6 +439,14 @@ def v3_live_job_prepare(
             selected,
             organization_id=org_id,
             owner_user_id=user.user_id,
+        )
+        persistent_results = persist_ranked_jobs(
+            db,
+            selected,
+            organization_id=org_id,
+            user=user,
+            prepare_applications=True,
+            prepare_limit=payload.prepare_limit,
         )
 
         prepared = []
@@ -462,6 +490,16 @@ def v3_live_job_prepare(
                 }
             )
 
+        for item in persistent_results:
+            live_status = str(item.get("live_qualification_status") or "")
+            work_id = item.get("work_opportunity_id")
+            if not work_id:
+                continue
+            if live_status == OUTCOME_NOT_QUALIFIED and work_id not in skipped_not_qualified:
+                skipped_not_qualified.append(work_id)
+            elif live_status == OUTCOME_NEEDS_OWNER_REVIEW and work_id not in held_for_owner_review:
+                held_for_owner_review.append(work_id)
+
         buckets = partition_by_qualification(selected)
         return {
             "query": payload.query,
@@ -488,7 +526,10 @@ def v3_live_job_prepare(
             "held_for_owner_review": held_for_owner_review,
             "skipped_not_qualified": skipped_not_qualified,
             "ranked_jobs": ranked,
+            "persistent_results": persistent_results,
         }
+    except work_service.NovaWorkError as exc:
+        _raise_work(exc)
     except V3Error as exc:
         _raise(exc)
 
