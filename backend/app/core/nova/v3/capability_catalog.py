@@ -33,8 +33,11 @@ CAPABILITIES: dict[str, dict[str, Any]] = {
         "keywords": (
             "administrative support", "administrative operations", "virtual assistant",
             "calendar management", "inbox organization", "task tracking", "meeting notes",
-            "meeting summary", "follow-up tracking", "document organization", "sop",
-            "standard operating procedure", "operations support",
+            "meeting summary", "meeting summaries", "follow-up tracking", "document organization",
+            "document preparation", "sop", "standard operating procedure", "operations support",
+            "email drafts", "email drafting", "email writing", "prepare email",
+            "crm notes", "crm organization", "organize crm", "crm data organization",
+            "summarize reports", "report summaries", "weekly reporting",
         ),
         "deliverables": (
             "organized task tracker", "meeting summary", "follow-up plan",
@@ -49,9 +52,11 @@ CAPABILITIES: dict[str, dict[str, Any]] = {
     "data_spreadsheet": {
         "label": "Data & spreadsheet work",
         "keywords": (
-            "data cleaning", "spreadsheet", "excel", "google sheets", "csv", "data analysis",
-            "dashboard", "reporting", "data entry automation", "data transformation",
-            "data categorization", "reconciliation spreadsheet", "pivot table",
+            "data cleaning", "data cleanup", "spreadsheet cleanup", "spreadsheet", "excel",
+            "google sheets", "csv", "data analysis", "dashboard", "reporting",
+            "data entry automation", "data transformation", "data categorization",
+            "reconciliation spreadsheet", "data reconciliation", "pivot table",
+            "weekly reporting", "summarize reports", "report summaries",
         ),
         "deliverables": (
             "clean dataset", "spreadsheet model", "dashboard", "analysis report",
@@ -108,7 +113,8 @@ CAPABILITIES: dict[str, dict[str, Any]] = {
         "keywords": (
             "business writing", "technical writing", "documentation", "knowledge base",
             "faq", "website copy", "proposal writing", "report writing", "research brief",
-            "content operations", "content editing", "sop writing",
+            "content operations", "content editing", "sop writing", "document preparation",
+            "summarize reports", "report summaries", "weekly reporting",
         ),
         "deliverables": (
             "business document", "knowledge-base article", "FAQ", "website copy",

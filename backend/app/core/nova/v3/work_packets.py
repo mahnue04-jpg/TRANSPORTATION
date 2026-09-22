@@ -28,15 +28,16 @@ def _opportunity_text(opportunity: dict[str, Any]) -> str:
 def build_work_packet(opportunity: dict[str, Any]) -> dict[str, Any]:
     """Build a deterministic, internal-only execution packet."""
     text = _opportunity_text(opportunity)
-    fit = capability_fit(text)
-    plan = execution_plan_for_matches(fit["capabilities"])
-    playbook = plan.get("playbook") or {}
-
     title = str(
         opportunity.get("opportunity_title")
         or opportunity.get("title")
-        or "Untitled opportunity"
+        or ""
     ).strip()
+    fit = capability_fit(text, title=title or None)
+    plan = execution_plan_for_matches(fit["capabilities"])
+    playbook = plan.get("playbook") or {}
+
+    title = title or "Untitled opportunity"
     company = str(opportunity.get("company_name") or "Unknown client").strip()
 
     required_inputs = list(playbook.get("required_inputs") or [])
