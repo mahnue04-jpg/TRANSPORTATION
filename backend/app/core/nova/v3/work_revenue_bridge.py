@@ -90,7 +90,7 @@ def persist_live_job(
             organization_id=organization_id,
             source=str(job.get("provider_id") or "live_discovery")[:80],
             source_url=source_url,
-            source_type="live_discovery",
+            source_type="approved_api",
             company_name=company,
             opportunity_title=title,
             description=str(job.get("description") or "") or None,
@@ -120,7 +120,7 @@ def persist_live_job(
                 str(job.get("qualification_status") or "unclassified")[:60],
             ],
         )
-        existing = work_service.create_opportunity(
+        existing = work_service.create_discovered_opportunity(
             db,
             payload,
             organization_id=organization_id,
