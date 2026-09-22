@@ -339,7 +339,7 @@ def _is_individual_specialist_role(text: str, title: str | None = None) -> bool:
     blob = f"{title or ''} {text}".lower()
     if _has_any(blob, _INDIVIDUAL_SPECIALIST_TOKENS):
         return True
-    # High-skill IC engineering titles that Nova cannot perform as a vendor service.
+    # High-skill IC engineering/design titles that Nova cannot perform as a vendor service.
     title_l = str(title or "").lower()
     if any(
         token in title_l
@@ -353,6 +353,17 @@ def _is_individual_specialist_role(text: str, title: str | None = None) -> bool:
             "full stack",
             "devops",
             "sre ",
+            "product designer",
+            "ux designer",
+            "ui designer",
+            "graphic designer",
+            "visual designer",
+            "software engineer",
+            "software developer",
+            "shopify developer",
+            "data scientist",
+            "staff engineer",
+            "principal engineer",
         )
     ):
         return True
@@ -473,7 +484,7 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     ai_policy, ai_ambiguous = _detect_ai_policy(text)
     compensation_ok = _compensation_present(job, text)
     source_ok = _source_legitimate(job)
-    capability_result = capability_fit(text)
+    capability_result = capability_fit(text, title=str(job.get("title") or "") or None)
     capability_ok = bool(capability_result["fit"])
     credentials_hard = _has_any(text, _CREDENTIAL_TOKENS)
     degree_hard = _has_any(text, _DEGREE_TOKENS)

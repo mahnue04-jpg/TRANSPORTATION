@@ -47,7 +47,9 @@ _DOWNRANK_SIGNALS = re.compile(
     r"w-2|w2|full-time employee|employee role|onsite|on-site|must report in person|"
     r"driver|physical labor|lifting|manual labor|shift work onsite|"
     r"licensed professional|rn required|cpa required|security clearance|"
-    r"named[- ]person|talent network"
+    r"named[- ]person|talent network|"
+    r"product designer|ux designer|ui designer|graphic designer|"
+    r"software engineer|shopify developer|staff engineer|principal engineer|data scientist"
     r")\b",
     re.I,
 )

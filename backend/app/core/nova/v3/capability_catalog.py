@@ -215,26 +215,98 @@ _REGULATED_PATTERNS = (
     "security clearance",
 )
 
+# Single generic tokens that must never qualify a capability alone.
+_WEAK_KEYWORD_TOKENS = frozenset(
+    {
+        "sop",
+        "admin",
+        "support",
+        "operations",
+        "report",
+        "reporting",
+        "faq",
+        "csv",
+    }
+)
+
+# Titles/role families that are specialist ICs and must not ride weak admin/support matches.
+_SPECIALIST_TITLE_RE = re.compile(
+    r"\b("
+    r"product designer|ux designer|ui designer|graphic designer|visual designer|"
+    r"software engineer|software developer|full[-\s]?stack|frontend engineer|backend engineer|"
+    r"devops|site reliability|sre\b|shopify developer|mobile developer|ios developer|"
+    r"android developer|machine learning engineer|ml engineer|ai engineer|ai architect|"
+    r"data scientist|staff engineer|principal engineer|engineering manager"
+    r")\b",
+    re.I,
+)
+
+# Capabilities that are compatible with software/web implementation titles.
+_ENGINEERING_CAPABILITIES = frozenset({"web_software", "ai_workflow_automation"})
+
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").lower()).strip()
 
 
-def capability_matches(text: str) -> list[dict[str, Any]]:
-    """Return matched capability families with deterministic evidence and score."""
+def _is_strong_keyword(keyword: str) -> bool:
+    """Multi-word or concrete capability phrases count as strong evidence."""
+    token = str(keyword or "").strip().lower()
+    if not token or token in _WEAK_KEYWORD_TOKENS:
+        return False
+    if " " in token:
+        return True
+    # Longer single tokens are usually concrete tools/deliverables.
+    return len(token) >= 10
+
+
+def _title_conflicts_with_capability(title: str, capability_id: str) -> bool:
+    """Reject weak cross-family matches (e.g. Product Designer → administrative_operations)."""
+    title_l = _normalize(title)
+    if not title_l or not _SPECIALIST_TITLE_RE.search(title_l):
+        return False
+    if capability_id in _ENGINEERING_CAPABILITIES:
+        # Design titles still conflict with implementation capabilities.
+        if re.search(r"\b(product designer|ux designer|ui designer|graphic designer|visual designer)\b", title_l):
+            return True
+        return False
+    return True
+
+
+def capability_matches(text: str, *, title: str | None = None) -> list[dict[str, Any]]:
+    """Return matched capability families with multi-signal evidence and score.
+
+    A single weak token (sop/support/report/admin/operations) never qualifies a family.
+    Prefer multi-word duty phrases and multiple corroborating signals.
+    """
     blob = _normalize(text)
+    title_l = _normalize(title or "")
     matches: list[dict[str, Any]] = []
     for key, spec in CAPABILITIES.items():
         hits = sorted({kw for kw in spec["keywords"] if kw in blob})
         if not hits:
             continue
-        score = min(100, 55 + 10 * len(hits))
+        strong_hits = [h for h in hits if _is_strong_keyword(h)]
+        weak_hits = [h for h in hits if h not in strong_hits]
+        # Require at least one strong signal; weak-only matches are discarded.
+        if not strong_hits:
+            continue
+        # Prefer corroboration: strong multi-word OR strong + another signal.
+        multi_word_strong = [h for h in strong_hits if " " in h]
+        if not multi_word_strong and len(strong_hits) + len(weak_hits) < 2:
+            continue
+        if title_l and _title_conflicts_with_capability(title_l, key):
+            continue
+        score = min(100, 50 + 12 * len(strong_hits) + 4 * len(weak_hits))
+        if multi_word_strong:
+            score = min(100, score + 8)
         matches.append(
             {
                 "capability_id": key,
                 "label": spec["label"],
                 "score": score,
                 "matched_terms": hits,
+                "strong_matched_terms": strong_hits,
                 "deliverables": list(spec["deliverables"]),
             }
         )
@@ -242,12 +314,12 @@ def capability_matches(text: str) -> list[dict[str, Any]]:
     return matches
 
 
-def capability_fit(text: str) -> dict[str, Any]:
+def capability_fit(text: str, *, title: str | None = None) -> dict[str, Any]:
     """Classify whether Nova has a concrete service capability for the listing."""
     blob = _normalize(text)
     human_only = [p for p in _HUMAN_ONLY_PATTERNS if p in blob]
     regulated = [p for p in _REGULATED_PATTERNS if p in blob]
-    matches = capability_matches(blob)
+    matches = capability_matches(blob, title=title)
 
     if human_only:
         return {
@@ -264,6 +336,14 @@ def capability_fit(text: str) -> dict[str, Any]:
             "capabilities": matches,
             "blockers": ["regulated_or_credentialed_work"],
             "reason": "Work requires regulated or credentialed professional activity.",
+        }
+    if title and _SPECIALIST_TITLE_RE.search(_normalize(title)) and not matches:
+        return {
+            "fit": False,
+            "score": 0,
+            "capabilities": [],
+            "blockers": ["title_role_family_mismatch"],
+            "reason": "Title/role family is a specialist IC role outside matched Nova service capabilities.",
         }
     if not matches:
         return {
