@@ -423,6 +423,94 @@ def test_create_project_ux_static_contract(client: TestClient):
     assert b"nova-work" in work.content or b"Work" in work.content
 
 
+def test_generate_actions_http_contracts(client: TestClient):
+    """Caption / storyboard / image-prompt / export APIs succeed (UI should not appear dead)."""
+    headers = _headers(client)
+    created = client.post(
+        "/api/nova/creative/projects",
+        headers=headers,
+        json={
+            "title": "Action contract",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+            "audience": "small business owners",
+            "tone": "professional and friendly",
+        },
+    )
+    assert created.status_code == 200, created.text
+    project_id = created.json()["id"]
+    brief = client.post(
+        "/api/nova/creative/briefs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "topic": "How AMICOR Nova helps small business owners save time and get work done with AI",
+            "cta": "Learn more about AMICOR Nova",
+            "style": "Modern, professional, energetic",
+        },
+    )
+    assert brief.status_code == 200
+    script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
+    assert script.status_code == 200
+    assert "What if How" not in script.json()["pack"]["hook"]
+    caption = client.post(f"/api/nova/creative/projects/{project_id}/generate/caption", headers=headers)
+    assert caption.status_code == 200, caption.text
+    assert caption.json()["pack"]["long_caption"]
+    assert caption.json()["pack"]["hashtags"]
+    storyboard = client.post(f"/api/nova/creative/projects/{project_id}/generate/storyboard", headers=headers)
+    assert storyboard.status_code == 200, storyboard.text
+    assert len(storyboard.json()["scenes"]) >= 3
+    prompt = client.post(
+        f"/api/nova/creative/projects/{project_id}/generate/image-prompt",
+        headers=headers,
+        json={"aspect_ratio": "9:16"},
+    )
+    assert prompt.status_code == 200, prompt.text
+    assert prompt.json()["url"] is None
+    exported = client.post(
+        f"/api/nova/creative/projects/{project_id}/export",
+        headers=headers,
+        json={"format": "markdown"},
+    )
+    assert exported.status_code == 200, exported.text
+    assert exported.json()["export"]["url"] is None
+    assert exported.json()["export"]["package"]["external_publishing"] is False
+    detail = client.get(f"/api/nova/creative/projects/{project_id}", headers=headers)
+    assert detail.status_code == 200
+    kinds = {a["kind"] for a in detail.json()["assets"]}
+    assert "caption" in kinds or "hashtags" in kinds
+    assert "storyboard" in kinds or "scene" in kinds
+    assert "image_prompt" in kinds
+    assert "export" in kinds
+
+
+def test_generate_actions_ux_static_contract(client: TestClient):
+    """Generate controls must show working state and never look silently dead."""
+    page = client.get("/nova/creative")
+    assert page.status_code == 200
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert 'working: "Working: Generate Caption..."' in js
+    assert 'working: "Working: Generate Storyboard..."' in js
+    assert 'working: "Working: Generate Image Prompt..."' in js
+    assert 'working: "Working: Export Project Package..."' in js
+    assert 'ok: "Caption generated."' in js
+    assert 'ok: "Storyboard generated."' in js
+    assert 'ok: "Image prompt generated."' in js
+    assert 'ok: "Project package exported."' in js
+    assert "button.disabled = true" in js
+    assert "button.disabled = false" in js
+    assert "await refreshAssets()" in js
+    assert "await refreshProjects()" in js
+    assert "renderOutput(body)" in js
+    assert "Not found. Check the selected project. (404)" in js
+    assert "Session expired. Sign in again. (401)" in js
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+    assert "button:disabled" in css
+    work = client.get("/nova/work")
+    assert work.status_code == 200
+
+
 def test_http_surface_and_page(client: TestClient):
     headers = _headers(client)
     page = client.get("/nova/creative")
