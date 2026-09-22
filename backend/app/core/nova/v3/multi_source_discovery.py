@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
@@ -326,6 +327,140 @@ class RemoteOkLiveProvider:
         return [row for _, row in scored[:capped]]
 
 
+class SamGovLiveProvider:
+    """Official SAM.gov Contract Opportunities API. Discovery-only."""
+
+    API_URL = "https://api.sam.gov/opportunities/v2/search"
+
+    def __init__(self) -> None:
+        self.api_key = (os.getenv("SAM_GOV_API_KEY") or "").strip()
+        self.meta = ProviderMeta(
+            provider_id="sam_gov",
+            label="SAM.gov opportunities",
+            provider_type="government_contracting",
+            enabled=bool(self.api_key),
+            access_status="public_api" if self.api_key else "pending_api_key",
+            access_mode="api" if self.api_key else "pending",
+            requires_login=False,
+            requires_fee=False,
+            supports_detail_fetch=True,
+            supports_external_submission=False,
+            terms_safety_notes=(
+                "Official SAM.gov public Contract Opportunities API. Read-only discovery only; "
+                "no bid, proposal, contract acceptance, or external submission."
+            ),
+            pending_requirements=None if self.api_key else "Set SAM_GOV_API_KEY from the owner's SAM.gov public API key.",
+            priority=PROVIDER_TYPE_PRIORITY["government_contracting"],
+        )
+
+    @staticmethod
+    def _search_terms(query: str) -> list[str]:
+        generic = {
+            "remote", "contract", "contractor", "support", "work", "project",
+            "weekly", "cleanup", "preparation",
+        }
+        tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+", str(query or "").lower())
+            if len(token) >= 4 and token not in generic
+        ]
+        preferred = [
+            token for token in tokens
+            if token in {
+                "administrative", "spreadsheet", "reporting", "reconciliation",
+                "research", "document", "records", "data", "operations",
+                "analysis", "bookkeeping",
+            }
+        ]
+        ordered = list(dict.fromkeys(preferred + tokens))
+        return ordered[:4] or ["administrative"]
+
+    def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        if not self.api_key:
+            return []
+        capped = max(1, min(25, int(limit)))
+        today = datetime.now(timezone.utc).date()
+        posted_from = today - timedelta(days=45)
+        rows: list[dict[str, Any]] = []
+
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            for term in self._search_terms(query):
+                response = client.get(
+                    self.API_URL,
+                    params={
+                        "api_key": self.api_key,
+                        "postedFrom": posted_from.strftime("%m/%d/%Y"),
+                        "postedTo": today.strftime("%m/%d/%Y"),
+                        "limit": capped,
+                        "offset": 0,
+                        "title": term,
+                    },
+                    headers={"User-Agent": "AMICOR-Nova/1.0 multi-source-discovery"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                for raw in list(payload.get("opportunitiesData") or []):
+                    notice_id = str(raw.get("noticeId") or "").strip()
+                    title = str(raw.get("title") or "").strip()
+                    if not notice_id or not title:
+                        continue
+                    office_path = str(raw.get("fullParentPathName") or raw.get("office") or "").strip()
+                    solicitation = str(raw.get("solicitationNumber") or "").strip()
+                    description = _clean_html(raw.get("description"))
+                    place = raw.get("placeOfPerformance") or {}
+                    if not isinstance(place, dict):
+                        place = {}
+                    country = place.get("country") or {}
+                    if not isinstance(country, dict):
+                        country = {}
+                    geography = " ".join(
+                        part for part in [
+                            str(place.get("city") or "").strip(),
+                            str(place.get("state") or "").strip(),
+                            str(country.get("name") or country.get("code") or "").strip(),
+                        ] if part
+                    ).strip() or "United States / federal"
+                    source_url = f"https://sam.gov/opp/{notice_id}/view"
+                    rows.append(
+                        normalize_opportunity(
+                            provider_id="sam_gov",
+                            provider_type="government_contracting",
+                            provider_identifier=notice_id,
+                            source_name="SAM.gov",
+                            source_attribution="SAM.gov Contract Opportunities",
+                            source_url=source_url,
+                            title=title,
+                            company_name=office_path or "U.S. Federal Government",
+                            description=description or (
+                                f"Federal contract opportunity {solicitation or notice_id}. "
+                                "Review the official SAM.gov notice for scope, eligibility, and response requirements."
+                            ),
+                            compensation_text=None,
+                            contract_type="government_contract",
+                            job_type="government_contract",
+                            remote_status="unknown",
+                            geography=geography,
+                            fee_required="no",
+                            publication_date=(str(raw.get("postedDate")).strip() or None)
+                            if raw.get("postedDate") is not None
+                            else None,
+                            raw_source_metadata={
+                                "origin": "sam_gov",
+                                "solicitation_number": solicitation or None,
+                                "notice_type": raw.get("type") or raw.get("baseType"),
+                                "naics_code": raw.get("naicsCode"),
+                                "response_deadline": raw.get("responseDeadLine"),
+                                "set_aside": raw.get("typeOfSetAsideDescription") or raw.get("typeOfSetAside"),
+                            },
+                            simulated=False,
+                        )
+                    )
+                if len(dedupe_opportunities(rows)) >= capped:
+                    break
+
+        return dedupe_opportunities(rows)[:capped]
+
+
 @dataclass
 class PendingProvider:
     meta: ProviderMeta
@@ -371,23 +506,6 @@ PENDING_PROVIDERS: list[PendingProvider] = [
     ),
     PendingProvider(
         ProviderMeta(
-            provider_id="sam_gov",
-            label="SAM.gov opportunities",
-            provider_type="government_contracting",
-            enabled=False,
-            access_status="pending_api_key",
-            access_mode="pending",
-            requires_login=False,
-            requires_fee=False,
-            supports_detail_fetch=True,
-            supports_external_submission=False,
-            terms_safety_notes="Public procurement data via SAM.gov API. Key required.",
-            pending_requirements="SAM.gov API key (api.data.gov) and entity registration confirmation for proposal paths.",
-            priority=PROVIDER_TYPE_PRIORITY["government_contracting"],
-        )
-    ),
-    PendingProvider(
-        ProviderMeta(
             provider_id="public_rfp_rss",
             label="Public RFP RSS feeds",
             provider_type="public_rfp_feed",
@@ -424,11 +542,17 @@ PENDING_PROVIDERS: list[PendingProvider] = [
 
 
 def live_providers() -> list[LiveDiscoveryProvider]:
-    return [RemotiveLiveProvider(), RemoteOkLiveProvider()]
+    providers: list[LiveDiscoveryProvider] = [RemotiveLiveProvider(), RemoteOkLiveProvider()]
+    sam = SamGovLiveProvider()
+    if sam.meta.enabled:
+        providers.append(sam)
+    return providers
 
 
 def all_provider_metas() -> list[ProviderMeta]:
     rows = [provider.meta for provider in live_providers()]
+    if not any(meta.provider_id == "sam_gov" for meta in rows):
+        rows.append(SamGovLiveProvider().meta)
     rows.extend(item.meta for item in PENDING_PROVIDERS)
     return sorted(rows, key=lambda item: (item.priority, item.provider_id))
 
