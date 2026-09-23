@@ -83,6 +83,7 @@ class WebSearchProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["status"], "partial")
         self.assertEqual(payload["meta"]["provider"], "duckduckgo")
         self.assertGreaterEqual(len(payload["sources"]), 1)
+        self.assertEqual(payload["sources"][0]["snippet"], "ok")
 
     @patch("app.web_search.logging_utils.log_request_lifecycle")
     @patch("app.web_search.get_breaker")

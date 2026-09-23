@@ -721,3 +721,47 @@ def test_nova_anonymous_reports_zero_result_search_diagnostics(monkeypatch, clie
     assert "fallback ran 5 bounded searches" in answer
     assert "received 0 source results" in answer
     assert "search status: success" in answer
+
+
+
+def test_nova_anonymous_uses_source_snippet_for_buyer_intent(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "fetch_web_search",
+        lambda *args, **kwargs: {
+            "status": "success",
+            "sources": [{
+                "title": "Professional Services Opportunity",
+                "url": "https://procurement.example.gov/opportunity/123",
+                "label": "procurement.example.gov",
+                "snippet": "The agency is accepting proposals from qualified vendors for workflow automation and administrative support services. Proposal deadline October 15.",
+            }],
+        },
+    )
+    captured = {}
+
+    def fake_persist(db, jobs, **kwargs):
+        captured["jobs"] = list(jobs)
+        return [{
+            "persisted": True,
+            "package_review_status": "HELD_FOR_OWNER_REVIEW",
+            "ready_for_owner_review": False,
+        }]
+
+    monkeypatch.setattr(today_service, "persist_ranked_jobs", fake_persist)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    assert len(captured["jobs"]) == 1
+    assert captured["jobs"][0]["provider_id"] == "web_buyer_discovery"
+    assert "workflow automation" in captured["jobs"][0]["description"].lower()
