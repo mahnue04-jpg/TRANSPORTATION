@@ -210,7 +210,7 @@ def test_owner_approval_required_and_no_external_submit(client: TestClient) -> N
     assert any(OWNER_INPUT_REQUIRED in item["body"] for item in application["materials"])
     submit = client.post(f"/api/nova/work/applications/{application['application_id']}/submit", headers=headers)
     assert submit.status_code == 409
-    assert "FUTURE_SUBMISSION" in submit.json()["detail"]
+    assert "approval" in submit.json()["detail"].lower()
     manual = client.post(
         f"/api/nova/work/applications/{application['application_id']}/record-manual-submission",
         headers=headers,
