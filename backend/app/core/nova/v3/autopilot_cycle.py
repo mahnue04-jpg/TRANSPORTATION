@@ -7,6 +7,7 @@ accepts contracts, or performs financial actions.
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from sqlalchemy.orm import Session
 
@@ -43,18 +44,18 @@ def _fallback_query(query: str) -> str:
     """Broaden an over-specific provider query without changing work family intent."""
     text = " ".join(str(query or "").split())
     lowered = text.lower()
-    removable = (
-        " remote",
-        " contractor",
-        " independent contractor",
-        " freelance project",
-        " freelance",
-        " project",
-        " no cpa",
-        " vendor allowed",
+    phrases = (
+        "independent contractor",
+        "freelance project",
+        "vendor allowed",
+        "no cpa",
+        "contractor",
+        "freelance",
+        "project",
+        "remote",
     )
-    for token in removable:
-        lowered = lowered.replace(token, "")
+    for phrase in phrases:
+        lowered = re.sub(rf"\\b{re.escape(phrase)}\\b", " ", lowered)
     fallback = " ".join(lowered.split()).strip()
     return fallback or text
 
