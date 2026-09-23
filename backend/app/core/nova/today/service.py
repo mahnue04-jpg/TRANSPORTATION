@@ -1808,10 +1808,15 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
         '"request for proposal" CRM automation support',
         '"seeking vendor" document processing automation',
         '"RFP" administrative workflow automation',
+        '"request for quote" operations automation',
+        '"solicitation" data processing automation',
+        '"bid opportunity" administrative support automation',
+        '"accepting proposals" workflow automation',
+        '"seeking vendor" spreadsheet automation',
     )
     leads: list[dict] = []
     seen_urls: set[str] = set()
-    diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": []}
+    diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": [], "rejected": {}, "accepted": 0}
     buyer_signals = (
         "request for proposal",
         "rfp",
@@ -1872,6 +1877,10 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
         "due date",
     )
 
+    def _reject(reason: str) -> None:
+        bucket = diagnostics["rejected"]
+        bucket[reason] = int(bucket.get(reason, 0)) + 1
+
     for query in queries:
         result = fetch_web_search(query, max_results=5)
         diagnostics["queries_run"] += 1
@@ -1884,16 +1893,25 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
             label = str(source.get("label") or "").strip()
             blob = f"{title} {label}".lower()
             if not title or not url.startswith(("http://", "https://")):
+                _reject("invalid_source")
                 continue
-            if url in seen_urls or any(domain in url.lower() for domain in blocked_domains):
+            if url in seen_urls:
+                _reject("duplicate")
+                continue
+            if any(domain in url.lower() for domain in blocked_domains):
+                _reject("blocked_domain")
                 continue
             if any(signal in blob for signal in reject_signals):
+                _reject("informational_or_educational")
                 continue
             if not any(signal in blob for signal in buyer_signals):
+                _reject("no_service_need_signal")
                 continue
             if not any(signal in blob for signal in action_signals):
+                _reject("no_actionable_procurement_signal")
                 continue
             seen_urls.add(url)
+            diagnostics["accepted"] += 1
             leads.append(
                 {
                     "provider_id": "web_buyer_discovery",
@@ -2029,12 +2047,17 @@ def _find_nova_anonymous_clients(
     if not candidates:
         statuses = sorted(set(web_diagnostics.get("provider_statuses") or []))
         provider_note = ", ".join(statuses) if statuses else "not-run"
+        rejected = dict(web_diagnostics.get("rejected") or {})
+        rejected_summary = ", ".join(
+            f"{reason}={count}" for reason, count in sorted(rejected.items())
+        ) or "none"
         answer = (
             f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
             "unprotected live-search opportunities. The strict discovery path produced no usable buyer, "
             f"so public buyer-intent fallback ran {web_diagnostics.get('queries_run', 0)} bounded searches "
             f"and received {web_diagnostics.get('sources_seen', 0)} source results "
-            f"(search status: {provider_note}), but 0 passed the buyer-intent filters. "
+            f"(search status: {provider_note}). Accepted {web_diagnostics.get('accepted', 0)} buyer leads; "
+            f"rejections: {rejected_summary}. "
             "I did not save random or unsuitable work. No client was contacted and nothing was submitted."
         )
 
