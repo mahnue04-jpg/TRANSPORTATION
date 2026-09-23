@@ -1813,6 +1813,11 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
         '"bid opportunity" administrative support automation',
         '"accepting proposals" workflow automation',
         '"seeking vendor" spreadsheet automation',
+        'site:sam.gov "request for proposal" automation services',
+        'site:gov "solicitation" administrative support services',
+        'site:gov "request for quote" data processing services',
+        'site:gov "bid opportunity" workflow automation',
+        'site:gov "professional services" process automation rfp',
     )
     leads: list[dict] = []
     seen_urls: set[str] = set()
@@ -1891,7 +1896,8 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
             title = str(source.get("title") or "").strip()
             url = str(source.get("url") or "").strip()
             label = str(source.get("label") or "").strip()
-            blob = f"{title} {label}".lower()
+            snippet = str(source.get("snippet") or "").strip()
+            blob = f"{title} {label} {snippet}".lower()
             if not title or not url.startswith(("http://", "https://")):
                 _reject("invalid_source")
                 continue
@@ -1925,8 +1931,8 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
                     "client": label or title[:160],
                     "description": (
                         "Potential Nova Anonymous buyer-intent source discovered on the public web. "
-                        f"Discovery query: {query}. Owner must verify the buyer, scope, compensation, "
-                        "vendor terms, and contact path before any outreach."
+                        f"Discovery query: {query}. Source context: {snippet[:500] if snippet else 'No provider snippet.'} "
+                        "Owner must verify the buyer, scope, compensation, vendor terms, and contact path before any outreach."
                     ),
                     "job_type": "unknown",
                     "contract_type": "unknown",
