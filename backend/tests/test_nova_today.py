@@ -518,3 +518,45 @@ def test_nova_today_renders_clickable_web_sources() -> None:
     assert 'target="_blank"' in TODAY_JS
     assert 'rel="noopener noreferrer"' in TODAY_JS
     assert "result.sources || []" in TODAY_JS
+
+
+
+def test_nova_today_anonymous_client_intent_routes_to_discovery(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    captured = {}
+
+    def fake_find(db, *, question, organization_id, user):
+        captured["question"] = question
+        return today_service.NovaTodayBrainOut(
+            answer="Nova Anonymous client search completed.",
+            fact_label="VERIFIED DATA",
+            next_actions=["Review Nova Work & Revenue client files"],
+            generated_at="2026-09-23T00:00:00Z",
+            source_href="/nova/work",
+            verification_status="verified",
+        )
+
+    monkeypatch.setattr(today_service, "_find_nova_anonymous_clients", fake_find)
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Nova Today, find a client for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert captured["question"]
+    assert body["source_href"] == "/nova/work"
+    assert "client search completed" in body["answer"].lower()
+
+
+def test_nova_today_anonymous_intent_requires_buyer_discovery_language() -> None:
+    from app.core.nova.today.service import _is_nova_anonymous_client_request
+
+    assert _is_nova_anonymous_client_request(
+        "Nova Today, find clients for Nova Anonymous operations agent"
+    )
+    assert not _is_nova_anonymous_client_request(
+        "Explain what Nova Anonymous operations agent does"
+    )
