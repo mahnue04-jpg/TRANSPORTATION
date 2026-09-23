@@ -649,3 +649,49 @@ def test_nova_anonymous_preserves_safe_owner_review_candidates(monkeypatch, clie
     assert "1 legitimate opportunity" in body["answer"]
     assert "held for owner review" in body["answer"]
     assert body["next_actions"] == ["Review Nova Work & Revenue client files"]
+
+
+
+def test_nova_anonymous_uses_public_buyer_intent_fallback(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "fetch_web_search",
+        lambda *args, **kwargs: {
+            "status": "success",
+            "sources": [{
+                "title": "Request for Proposal: Workflow Automation Services",
+                "url": "https://buyer.example/rfp/workflow-automation",
+                "label": "Buyer Example",
+            }],
+        },
+    )
+    captured = {}
+
+    def fake_persist(db, jobs, **kwargs):
+        captured["jobs"] = list(jobs)
+        return [{
+            "persisted": True,
+            "package_review_status": "HELD_FOR_OWNER_REVIEW",
+            "ready_for_owner_review": False,
+        }]
+
+    monkeypatch.setattr(today_service, "persist_ranked_jobs", fake_persist)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(captured["jobs"]) == 1
+    assert captured["jobs"][0]["provider_id"] == "web_buyer_discovery"
+    assert captured["jobs"][0]["qualification_status"] == "NEEDS_OWNER_REVIEW"
+    assert "1 from public buyer-intent web discovery" in body["answer"]
+    assert "held for owner review" in body["answer"]

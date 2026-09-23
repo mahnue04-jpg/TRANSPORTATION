@@ -1796,6 +1796,109 @@ def _is_nova_anonymous_client_request(question: str) -> bool:
     )
 
 
+def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 6) -> list[dict]:
+    """Find public buyer-intent web sources for Nova Anonymous owner review.
+
+    These are leads, not automatically qualified customers. They are held for
+    owner verification before any outreach or proposal activity.
+    """
+    queries = (
+        '"request for proposal" workflow automation',
+        '"seeking contractor" business operations automation',
+        '"request for proposal" CRM automation support',
+        '"seeking vendor" document processing automation',
+        '"RFP" administrative workflow automation',
+    )
+    leads: list[dict] = []
+    seen_urls: set[str] = set()
+    buyer_signals = (
+        "request for proposal",
+        "rfp",
+        "seeking",
+        "vendor",
+        "contractor",
+        "proposal",
+        "automation",
+        "workflow",
+        "operations",
+        "crm",
+        "document",
+        "support",
+    )
+    reject_signals = (
+        "how to",
+        "guide",
+        "template",
+        "course",
+        "training",
+        "job board",
+        "jobs",
+        "wikipedia",
+    )
+    blocked_domains = ("youtube.com", "reddit.com", "wikipedia.org", "facebook.com", "instagram.com")
+
+    for query in queries:
+        result = fetch_web_search(query, max_results=5)
+        for source in list(result.get("sources") or []):
+            title = str(source.get("title") or "").strip()
+            url = str(source.get("url") or "").strip()
+            label = str(source.get("label") or "").strip()
+            blob = f"{title} {label}".lower()
+            if not title or not url.startswith(("http://", "https://")):
+                continue
+            if url in seen_urls or any(domain in url.lower() for domain in blocked_domains):
+                continue
+            if any(signal in blob for signal in reject_signals):
+                continue
+            if not any(signal in blob for signal in buyer_signals):
+                continue
+            seen_urls.add(url)
+            leads.append(
+                {
+                    "provider_id": "web_buyer_discovery",
+                    "provider_type": "public_buyer_intent_web",
+                    "source_name": label or "Public web",
+                    "source_attribution": label or "Public web",
+                    "source_url": url,
+                    "application_url": url,
+                    "title": title,
+                    "company_name": label or title[:160],
+                    "client": label or title[:160],
+                    "description": (
+                        "Potential Nova Anonymous buyer-intent source discovered on the public web. "
+                        f"Discovery query: {query}. Owner must verify the buyer, scope, compensation, "
+                        "vendor terms, and contact path before any outreach."
+                    ),
+                    "job_type": "unknown",
+                    "contract_type": "unknown",
+                    "remote_status": "unknown",
+                    "compensation_text": None,
+                    "simulated": False,
+                    "search_family": "nova_anonymous_clients",
+                    "search_family_label": "Nova Anonymous client acquisition",
+                    "why_searched": question,
+                    "qualification_status": "NEEDS_OWNER_REVIEW",
+                    "live_qualification": {
+                        "qualification_status": "NEEDS_OWNER_REVIEW",
+                        "qualification_outcome": "NEEDS_OWNER_REVIEW",
+                        "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+                        "revenue_ready": False,
+                        "blockers": [],
+                        "review_flags": [
+                            "Buyer identity, service need, compensation, and vendor terms require owner verification."
+                        ],
+                        "owner_review_reason": (
+                            "Public buyer-intent lead found; verify the buyer, scope, compensation, "
+                            "vendor compatibility, and contact path before preparing outreach."
+                        ),
+                    },
+                }
+            )
+            if len(leads) >= max_candidates:
+                return leads
+    return leads
+
+
 def _find_nova_anonymous_clients(
     db: Session,
     *,
@@ -1836,6 +1939,11 @@ def _find_nova_anonymous_clients(
             reviewable.append(row)
 
     candidates = (qualified + reviewable)[:10]
+    web_reviewable: list[dict] = []
+    if not candidates:
+        web_reviewable = _discover_nova_anonymous_web_buyers(question, max_candidates=6)
+        reviewable.extend(web_reviewable)
+        candidates = web_reviewable[:10]
 
     reset = reset_live_discovery_opportunities(
         db,
@@ -1870,7 +1978,8 @@ def _find_nova_anonymous_clients(
         f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and found {len(qualified)} revenue-ready client "
         f"opportunit{'y' if len(qualified) == 1 else 'ies'} plus {len(reviewable)} legitimate "
-        f"opportunit{'y' if len(reviewable) == 1 else 'ies'} that need owner review. "
+        f"opportunit{'y' if len(reviewable) == 1 else 'ies'} that need owner review "
+        f"({len(web_reviewable)} from public buyer-intent web discovery). "
         f"{len(ready)} client package{' is' if len(ready) == 1 else 's are'} ready for owner review, "
         f"and {len(held)} opportunit{'y is' if len(held) == 1 else 'ies are'} held for owner review. "
         "No client was contacted, no proposal was submitted, no contract was accepted, and no money moved."
