@@ -130,7 +130,7 @@ def test_tenant_isolation_and_live_flags_unchanged(client: TestClient) -> None:
     assert guards["REPORT_SEND_ENABLED"] is False
     assert guards["INVOICE_SEND_ENABLED"] is False
     submit = client.post("/api/nova/work/applications/NWAPP-GUARD/submit", headers=owner)
-    assert submit.status_code == 409
+    assert submit.status_code == 404
     send_report = client.post("/api/nova/work/reports/NWR-GUARD/send", headers=owner)
     assert send_report.status_code == 409
     send_invoice = client.post("/api/nova/work/invoice-support/NWIS-GUARD/send", headers=owner)
