@@ -749,3 +749,71 @@ def test_admin_search_targets_us_contract_and_rejects_employee_fee_and_foreign_o
     assert result["count"] == 1
     assert result["jobs"][0]["title"] == "Remote Administrative Support Contractor"
     assert result["external_action_taken"] is False
+
+
+def test_admin_search_expands_queries_and_requires_positive_title_fit(monkeypatch):
+    monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "true")
+
+    class Provider:
+        meta = multi_source_discovery.ProviderMeta(
+            provider_id="positive_fit_fixture",
+            label="Positive Fit Fixture",
+            provider_type="remote_contract_feed",
+            enabled=True,
+            access_status="test",
+            access_mode="api",
+            requires_login=False,
+            requires_fee=False,
+            supports_detail_fetch=False,
+            supports_external_submission=False,
+            terms_safety_notes="test only",
+            priority=1,
+        )
+
+        def __init__(self):
+            self.queries = []
+
+        def search(self, query, *, limit=10):
+            self.queries.append(query)
+            if "virtual assistant" in query.lower():
+                return [
+                    multi_source_discovery.normalize_opportunity(
+                        provider_id=self.meta.provider_id,
+                        provider_type=self.meta.provider_type,
+                        provider_identifier="va-1",
+                        title="Virtual Assistant Contractor",
+                        company_name="Example Client",
+                        description="Remote calendar, email, document and administrative support.",
+                        source_url="https://example.test/va-1",
+                        job_type="contractor",
+                        geography="United States remote",
+                        fee_required="no",
+                    )
+                ]
+            return [
+                multi_source_discovery.normalize_opportunity(
+                    provider_id=self.meta.provider_id,
+                    provider_type=self.meta.provider_type,
+                    provider_identifier="sales-1",
+                    title="Regional Sales Manager",
+                    company_name="Example Client",
+                    description="Contract role supporting business operations and scheduling.",
+                    source_url="https://example.test/sales-1",
+                    job_type="contractor",
+                    geography="United States remote",
+                    fee_required="no",
+                )
+            ]
+
+    provider = Provider()
+    result = multi_source_discovery.search_multi_source_jobs(
+        "remote administrative support contractor",
+        limit=10,
+        providers_override=[provider],
+    )
+
+    assert len(provider.queries) > 1
+    assert result["count"] == 1
+    assert result["jobs"][0]["title"] == "Virtual Assistant Contractor"
+    assert result["provider_screened_counts"]["positive_fit_fixture"] >= 2
+    assert "remote administrative support contractor" in result["query_variants"]
