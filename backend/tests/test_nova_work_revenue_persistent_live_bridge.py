@@ -18,7 +18,7 @@ from app.core.nova.v3.live_qualification import (
     OUTCOME_NOT_QUALIFIED,
     OUTCOME_QUALIFIED,
 )
-from app.core.nova.v3.work_revenue_bridge import persist_live_job, persist_ranked_jobs
+from app.core.nova.v3.work_revenue_bridge import persist_live_job, persist_ranked_jobs, reset_live_discovery_opportunities
 from app.core.nova.work_revenue import flags as wr_flags
 from app.core.nova.work_revenue import service as work_service
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
@@ -407,3 +407,45 @@ def test_http_discover_and_prepare_persist(client: TestClient, monkeypatch: pyte
     guards = wr_flags.engine_guardrails()
     assert guards["EXTERNAL_SUBMISSION_ENABLED"] is False
     assert guards["FINANCIAL_ACTIONS_ENABLED"] is False
+
+
+
+def test_new_search_reset_archives_unprotected_live_but_preserves_manual(db_session) -> None:
+    user = UserContext(user_id="owner-reset-test", email="admin@amicor.local", role="admin")
+    org = "org-reset-test"
+    live = work_service.create_discovered_opportunity(
+        db_session,
+        OpportunityCreate(
+            organization_id=org,
+            source="remotive",
+            source_type="approved_api",
+            company_name="Old Live Buyer",
+            opportunity_title="Old remote admin contract",
+            source_url="https://example.com/old-live",
+        ),
+        organization_id=org,
+        user=user,
+    )
+    manual = work_service.create_discovered_opportunity(
+        db_session,
+        OpportunityCreate(
+            organization_id=org,
+            source="manual",
+            source_type="manual",
+            company_name="Manual Buyer",
+            opportunity_title="Owner-entered opportunity",
+            source_url="https://example.com/manual",
+        ),
+        organization_id=org,
+        user=user,
+    )
+    result = reset_live_discovery_opportunities(
+        db_session,
+        organization_id=org,
+        user=user,
+    )
+    db_session.refresh(live)
+    db_session.refresh(manual)
+    assert result["archived_count"] == 1
+    assert live.archived is True
+    assert manual.archived is False
