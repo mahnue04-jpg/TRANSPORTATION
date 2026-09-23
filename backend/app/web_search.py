@@ -172,6 +172,27 @@ def _duckduckgo_search(query: str, max_results: int) -> dict: # pyright: ignore[
     } # pyright: ignore[reportUnknownVariableType]
 
 
+def _bing_rss_search(query: str, max_results: int) -> dict:
+    """Keyless Bing RSS web-search fallback for discovery-only queries."""
+    response = requests.get(
+        "https://www.bing.com/search",
+        params={"q": query, "format": "rss", "setlang": "en-US"},
+        timeout=PROVIDER_TIMEOUT_SECONDS,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; Amicor/1.0)"},
+    )
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.text)
+    items: list[dict] = []
+    for item in root.findall(".//item")[:max_results]:
+        title = _clean_text(item.findtext("title", default="Search result"))
+        url = _clean_text(item.findtext("link", default=""))
+        snippet = _clean_text(item.findtext("description", default=""))
+        if not title or not url.startswith(("http://", "https://")):
+            continue
+        items.append({"title": title, "url": url, "snippet": snippet})
+    return {"provider": "bing-rss", "answer": "", "results": items}
+
+
 def _google_news_search(query: str, max_results: int) -> dict: # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     response = requests.get(
         "https://news.google.com/rss/search",
@@ -311,6 +332,15 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
                     recovery_timeout=20,
                 ),
                 lambda q, n: _duckduckgo_search(q, n), # type: ignore
+            ),
+            (
+                "bing_rss",
+                get_breaker(
+                    "bing_rss",
+                    failure_threshold=4,
+                    recovery_timeout=30,
+                ),
+                lambda q, n: _bing_rss_search(q, n), # type: ignore
             ),
             (
                 "wikipedia",
