@@ -140,3 +140,46 @@ def test_autopilot_cycle_prepare_limit_can_be_zero(monkeypatch):
     assert captured["prepare_limit"] == 0
     assert result["prepared_application_count"] == 0
     assert result["external_submission"] is False
+
+
+
+def test_empty_specific_search_retries_with_broader_query(monkeypatch):
+    calls = []
+
+    def fake_search(query, limit):
+        calls.append(query)
+        if query == "remote administrative support contractor":
+            return {
+                "jobs": [],
+                "providers_queried": ["remotive", "remoteok"],
+                "provider_errors": [],
+                "provider_result_counts": {"remotive": 0, "remoteok": 0},
+            }
+        return {
+            "jobs": [{"provider_id": "remotive", "source_url": "https://example.test/job", "title": "Administrative Support", "company_name": "Buyer"}],
+            "providers_queried": ["remotive", "remoteok"],
+            "provider_errors": [],
+            "provider_result_counts": {"remotive": 1, "remoteok": 0},
+        }
+
+    def fake_rank(query, jobs):
+        assert query == "administrative support"
+        return [dict(jobs[0], relevance_score=75, qualification_status="NEEDS_OWNER_REVIEW", live_qualification={"qualification_status": "NEEDS_OWNER_REVIEW"})]
+
+    monkeypatch.setattr(autopilot_cycle, "search_multi_source_jobs", fake_search)
+    monkeypatch.setattr(autopilot_cycle, "qualify_and_rank_live_jobs", fake_rank)
+    monkeypatch.setattr(autopilot_cycle, "persist_ranked_jobs", lambda *args, **kwargs: [])
+
+    result = autopilot_cycle.run_autopilot_cycle(
+        object(),
+        organization_id="org-1",
+        user=object(),
+        queries=["remote administrative support contractor"],
+        query_limit=1,
+        per_query_limit=5,
+        min_relevance_score=60,
+    )
+
+    assert calls == ["remote administrative support contractor", "administrative support"]
+    assert result["selected_count"] == 1
+    assert result["per_query"][0]["used_query"] == "administrative support"
