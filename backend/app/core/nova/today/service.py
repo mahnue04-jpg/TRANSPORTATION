@@ -233,6 +233,7 @@ _SOURCE_LABELS = {
     "government": "Nova Government / Compliance",
     "business": "Nova Business / Operations",
     "workspace": "Nova Workspace",
+    "work_revenue": "Nova Work & Revenue",
     "link": "Product shortcut",
 }
 
@@ -2040,6 +2041,48 @@ def _find_nova_anonymous_clients(
 
     ready = [row for row in persisted if row.get("ready_for_owner_review")]
     held = [row for row in persisted if row.get("package_review_status") == "HELD_FOR_OWNER_REVIEW"]
+
+    # Surface held Work & Revenue opportunities in Nova Today's Approval Queue.
+    # Approval only opens the stored opportunity for owner review; it does not
+    # contact the buyer, submit a proposal, accept a contract, or move money.
+    candidate_by_id = {}
+    for candidate, stored in zip(candidates, persisted):
+        opp_id = str(stored.get("work_opportunity_id") or "").strip()
+        if opp_id:
+            candidate_by_id[opp_id] = candidate
+    for stored in held:
+        opp_id = str(stored.get("work_opportunity_id") or "").strip()
+        if not opp_id:
+            continue
+        candidate = candidate_by_id.get(opp_id) or {}
+        title = str(candidate.get("title") or "Work & Revenue opportunity").strip()
+        company = str(candidate.get("company_name") or candidate.get("client") or "").strip()
+        source_url = str(candidate.get("source_url") or candidate.get("application_url") or "").strip()
+        detail_parts = [part for part in (
+            f"Buyer: {company}" if company else "",
+            f"Opportunity: {title}" if title else "",
+            f"Source: {source_url}" if source_url else "",
+            str(candidate.get("description") or "").strip(),
+            "Owner review required before any proposal, contact, contract acceptance, or financial action.",
+        ) if part]
+        _upsert_proposed(
+            db,
+            _card(
+                source_module="work_revenue",
+                source_ref_id=opp_id,
+                title=f"Review Work & Revenue opportunity: {title}",
+                detail="\n".join(detail_parts)[:4000],
+                href="/nova/work",
+                trust_label="ACTION REQUIRES APPROVAL",
+                priority=70,
+                recommended_action="open_link",
+                explanation="A live buyer opportunity was saved and is waiting for owner review.",
+            ),
+            organization_id=organization_id,
+            user=user,
+        )
+    if held:
+        db.commit()
     answer = (
         f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and found {len(qualified)} revenue-ready client "
