@@ -695,3 +695,29 @@ def test_nova_anonymous_uses_public_buyer_intent_fallback(monkeypatch, client: T
     assert captured["jobs"][0]["qualification_status"] == "NEEDS_OWNER_REVIEW"
     assert "1 from public buyer-intent web discovery" in body["answer"]
     assert "held for owner review" in body["answer"]
+
+
+
+def test_nova_anonymous_reports_zero_result_search_diagnostics(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "fetch_web_search",
+        lambda *args, **kwargs: {"status": "success", "sources": []},
+    )
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "fallback ran 5 bounded searches" in answer
+    assert "received 0 source results" in answer
+    assert "search status: success" in answer
