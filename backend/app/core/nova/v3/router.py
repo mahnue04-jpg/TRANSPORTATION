@@ -22,6 +22,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.work_packets import build_work_packet
 from app.core.nova.v3.autonomous_execution import build_autonomous_execution_session
+from app.core.nova.v3.autopilot_cycle import run_autopilot_cycle
 from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
@@ -95,6 +96,15 @@ class LiveJobDiscoverIn(LiveJobSearchIn):
 
 class LiveJobPrepareIn(LiveJobDiscoverIn):
     prepare_limit: int = Field(default=3, ge=1, le=5)
+
+
+class WorkAutopilotIn(OrgIn):
+    queries: list[str] = Field(default_factory=list, max_length=5)
+    query_limit: int = Field(default=3, ge=1, le=5)
+    per_query_limit: int = Field(default=5, ge=1, le=10)
+    save_limit: int = Field(default=8, ge=1, le=10)
+    prepare_limit: int = Field(default=3, ge=0, le=5)
+    min_relevance_score: int = Field(default=60, ge=0, le=100)
 
 
 class WorkPacketIn(OrgIn):
@@ -336,6 +346,32 @@ def v3_capability_proof_preview(
 @router.get("/connectors")
 def v3_connectors(user: UserContext = Depends(get_current_user_context)):
     return get_kernel().diagnostics(organization_id="unused", owner_user_id=user.user_id)["adapter_registry"]
+
+
+@router.post("/live/jobs/autopilot-cycle")
+def v3_live_job_autopilot_cycle(
+    payload: WorkAutopilotIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Run one bounded search/qualify/prepare cycle. Never submits externally."""
+    org_id = _org(user, payload.organization_id)
+    try:
+        return run_autopilot_cycle(
+            db,
+            organization_id=org_id,
+            user=user,
+            queries=payload.queries,
+            query_limit=payload.query_limit,
+            per_query_limit=payload.per_query_limit,
+            save_limit=payload.save_limit,
+            prepare_limit=payload.prepare_limit,
+            min_relevance_score=payload.min_relevance_score,
+        )
+    except work_service.NovaWorkError as exc:
+        _raise_work(exc)
+    except V3Error as exc:
+        _raise(exc)
 
 
 @router.post("/live/jobs/search")
