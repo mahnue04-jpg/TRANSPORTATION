@@ -18,6 +18,7 @@ from app.core.nova.v3.capability_catalog import capability_catalog, capability_s
 from app.core.nova.work_revenue.capability_first_discovery import (
     generate_capability_first_queries,
     search_family_catalog,
+    targeted_queries_for_request,
 )
 from app.core.nova.v3.execution_playbooks import execution_playbook, execution_playbooks
 from app.core.nova.v3.work_packets import build_work_packet
@@ -39,7 +40,7 @@ from app.core.nova.v3.live_qualification import (
     qualify_and_rank_live_jobs,
 )
 from app.core.nova.v3.growth.kernel import get_growth_kernel
-from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
+from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
 from app.core.nova.work_revenue import service as work_service
 from app.db.session import get_db
 
@@ -464,13 +465,42 @@ def v3_live_job_prepare(
 ):
     org_id = _org(user, payload.organization_id)
     try:
-        multi = search_multi_source_jobs(payload.query, limit=payload.limit)
-        ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
+        search_plan = targeted_queries_for_request(payload.query, max_queries=5)
+        collected: list[dict[str, Any]] = []
+        sources: list[str] = []
+        provider_counts: dict[str, int] = {}
+        provider_errors: list[dict[str, Any]] = []
+        provider_health: list[dict[str, Any]] = []
+        for planned in search_plan:
+            multi_part = search_multi_source_jobs(planned["query"], limit=payload.limit)
+            for job in multi_part["jobs"]:
+                item = dict(job)
+                item["search_family"] = planned.get("search_family")
+                item["search_family_label"] = planned.get("search_family_label")
+                item["why_searched"] = planned.get("why_searched")
+                collected.append(item)
+            for source in multi_part.get("providers_queried") or []:
+                if source not in sources:
+                    sources.append(source)
+            for provider_id, count in (multi_part.get("provider_result_counts") or {}).items():
+                provider_counts[provider_id] = provider_counts.get(provider_id, 0) + int(count or 0)
+            provider_errors.extend(multi_part.get("provider_errors") or [])
+            provider_health = multi_part.get("provider_health") or provider_health
+
+        ranked = qualify_and_rank_live_jobs(payload.query, collected)
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
+            and str((job.get("live_qualification") or {}).get("qualification_status") or job.get("qualification_status") or "") == OUTCOME_QUALIFIED
+            and bool((job.get("live_qualification") or {}).get("revenue_ready", job.get("revenue_ready")))
         ][: payload.save_limit]
-        # Retain QUALIFIED, NEEDS_OWNER_REVIEW, and NOT_QUALIFIED for audit/history.
+
+        reset_result = reset_live_discovery_opportunities(
+            db,
+            organization_id=org_id,
+            user=user,
+        )
+        # Persist only revenue-ready QUALIFIED matches for this search session.
         saved = get_kernel().ingest_live_jobs(
             selected,
             organization_id=org_id,
@@ -540,10 +570,12 @@ def v3_live_job_prepare(
         return {
             "query": payload.query,
             "source": "multi_source",
-            "sources": multi.get("providers_queried") or [],
-            "provider_result_counts": multi.get("provider_result_counts") or {},
-            "provider_errors": multi.get("provider_errors") or [],
-            "provider_health": multi.get("provider_health") or [],
+            "sources": sources,
+            "provider_result_counts": provider_counts,
+            "provider_errors": provider_errors,
+            "provider_health": provider_health,
+            "search_plan": search_plan,
+            "reset_result": reset_result,
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
