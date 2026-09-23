@@ -7,7 +7,6 @@ accepts contracts, or performs financial actions.
 from __future__ import annotations
 
 from typing import Any
-import re
 
 from sqlalchemy.orm import Session
 
@@ -55,7 +54,7 @@ def _fallback_query(query: str) -> str:
         "remote",
     )
     for phrase in phrases:
-        lowered = re.sub(rf"\\b{re.escape(phrase)}\\b", " ", lowered)
+        lowered = lowered.replace(phrase, " ")
     fallback = " ".join(lowered.split()).strip()
     return fallback or text
 
