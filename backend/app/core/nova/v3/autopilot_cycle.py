@@ -79,7 +79,7 @@ def run_autopilot_cycle(
     q_limit = max(1, min(int(query_limit or 3), MAX_QUERIES))
     result_limit = max(1, min(int(per_query_limit or 5), MAX_RESULTS_PER_QUERY))
     save_cap = max(1, min(int(save_limit or 8), MAX_SAVED))
-    prep_cap = max(0, min(int(prepare_limit or 3), MAX_PREPARED))
+    prep_cap = max(0, min(int(prepare_limit if prepare_limit is not None else 3), MAX_PREPARED))
     threshold = max(0, min(int(min_relevance_score or 0), 100))
 
     supplied = [str(item).strip() for item in (queries or []) if str(item).strip()]
