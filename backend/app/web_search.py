@@ -452,7 +452,12 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
 
     results = payload.get("results", []) # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     sources = [ # type: ignore
-        {"title": item["title"], "url": item["url"], "label": urlparse(item["url"]).netloc or item["url"]} # type: ignore
+        {
+            "title": item["title"],
+            "url": item["url"],
+            "label": urlparse(item["url"]).netloc or item["url"],
+            "snippet": _clean_text(item.get("snippet", "")),
+        } # type: ignore
         for item in results[:4] # type: ignore
     ]
     response = _summarize_results(normalized_query, results, payload.get("answer", "")) # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
