@@ -333,7 +333,10 @@ def test_simulated_ingest_and_today_summary(client: TestClient) -> None:
     assert summary.status_code == 200
     body = summary.json()
     assert body["href"] == "/nova/work"
-    assert body["work_opportunities"] >= 5
+    assert body["work_opportunities"] == 0
+    dashboard = client.get("/api/nova/work/dashboard", headers=headers).json()
+    assert dashboard["counts"]["simulated_fixtures"] >= 5
+    assert dashboard["counts"]["real_opportunities"] == 0
     providers = client.get("/api/nova/work/providers", headers=headers)
     ids = {row["provider_id"] for row in providers.json()}
     assert "manual" in ids
