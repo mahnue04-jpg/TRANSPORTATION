@@ -826,6 +826,48 @@ _ADMIN_US_GEO = re.compile(
 )
 
 
+_ADMIN_STRONG_TITLE = re.compile(
+    r"\b("
+    r"administrative (?:assistant|support|coordinator|specialist)|"
+    r"admin(?:istrative)? assistant|virtual assistant|office assistant|office administrator|"
+    r"operations (?:assistant|support|coordinator|administrator)|"
+    r"business operations (?:assistant|support|coordinator)|"
+    r"data entry (?:assistant|clerk|specialist|contractor)|"
+    r"records (?:assistant|clerk|specialist|coordinator)|"
+    r"document (?:assistant|specialist|coordinator|processor)|"
+    r"crm (?:assistant|administrator|specialist|coordinator)|"
+    r"scheduling (?:assistant|coordinator|specialist)|"
+    r"back office (?:assistant|support|specialist)|"
+    r"bookkeeping (?:assistant|support|specialist)"
+    r")\b",
+    re.I,
+)
+
+_ADMIN_QUERY_VARIANTS = (
+    "remote administrative assistant contractor",
+    "virtual assistant contractor remote",
+    "operations assistant contractor remote",
+    "data entry contractor remote",
+    "back office support contractor remote",
+)
+
+
+def _discovery_query_variants(query: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", str(query or "").strip())
+    if not _ADMIN_QUERY_HINTS.search(normalized):
+        return [normalized]
+    variants = [normalized, *_ADMIN_QUERY_VARIANTS]
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in variants:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out[:5]
+
+
 
 def _query_relevant(row: dict[str, Any], query: str) -> bool:
     """Reject obvious provider false positives before qualification.
@@ -866,6 +908,13 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # Prefer U.S.-remote/nationwide work. Worldwide is allowed, but explicit
     # non-U.S.-only regions are removed from this U.S. contractor search.
     if _ADMIN_NON_US_GEO.search(geography) and not _ADMIN_US_GEO.search(geography):
+        return False
+
+    # Positive-fit gate: for an admin search, do not keep generic managers,
+    # schedulers, sales roles, or other jobs merely because their body contains
+    # words such as "operations" or "support". The title itself must map to an
+    # administrative work archetype Nova is actually allowed to pursue.
+    if not _ADMIN_STRONG_TITLE.search(title):
         return False
 
     return title_has_admin or body_has_admin
@@ -925,19 +974,35 @@ def search_multi_source_jobs(
     collected: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     per_provider: dict[str, int] = {}
+    provider_screened_counts: dict[str, int] = {}
+    provider_query_variants: dict[str, list[str]] = {}
+    query_variants = _discovery_query_variants(normalized)
 
     for provider in providers:
         meta = provider.meta
         if not meta.enabled:
             continue
+        provider_rows: list[dict[str, Any]] = []
+        screened = 0
+        used_variants: list[str] = []
         try:
-            rows = provider.search(normalized, limit=capped)
-            rows = [row for row in rows if _query_relevant(row, normalized)]
-            if not include_simulated:
-                rows = [row for row in rows if not row.get("simulated")]
-            per_provider[meta.provider_id] = len(rows)
-            _record_success(meta.provider_id, source_type=meta.provider_type, count=len(rows))
-            collected.extend(rows)
+            for variant in query_variants:
+                used_variants.append(variant)
+                rows = provider.search(variant, limit=capped)
+                screened += len(rows)
+                rows = [row for row in rows if _query_relevant(row, normalized)]
+                if not include_simulated:
+                    rows = [row for row in rows if not row.get("simulated")]
+                provider_rows.extend(rows)
+                provider_rows = dedupe_opportunities(provider_rows)
+                if len(provider_rows) >= capped:
+                    break
+            provider_rows = provider_rows[:capped]
+            per_provider[meta.provider_id] = len(provider_rows)
+            provider_screened_counts[meta.provider_id] = screened
+            provider_query_variants[meta.provider_id] = used_variants
+            _record_success(meta.provider_id, source_type=meta.provider_type, count=len(provider_rows))
+            collected.extend(provider_rows)
         except Exception as exc:  # noqa: BLE001 - isolate provider outages
             message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
             _record_failure(meta.provider_id, source_type=meta.provider_type, error=message)
@@ -965,6 +1030,9 @@ def search_multi_source_jobs(
         "jobs": deduped,
         "providers_queried": [p.meta.provider_id for p in providers if p.meta.enabled],
         "provider_result_counts": per_provider,
+        "provider_screened_counts": provider_screened_counts,
+        "provider_query_variants": provider_query_variants,
+        "query_variants": query_variants,
         "provider_errors": errors,
         "deduplicated": True,
         "read_only": True,
