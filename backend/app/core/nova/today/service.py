@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from app.auth import (
     ROLE_ADMIN,
@@ -1883,6 +1884,36 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
         "due date",
     )
 
+    directory_signals = (
+        "search government bids",
+        "search for government bids",
+        "find bid opportunities",
+        "government bids, rfps, rfqs",
+        "government contracts & bids",
+        "bid search",
+        "bids and contracts",
+        "vendor profiles",
+        "bid opportunities from state and local agencies",
+        "thousands of active",
+        "daily email report",
+    )
+    generic_path_markers = (
+        "",
+        "/",
+        "/search",
+        "/search/",
+        "/bids",
+        "/bids/",
+        "/rfp",
+        "/rfp/",
+        "/rfps",
+        "/rfps/",
+        "/contracts",
+        "/contracts/",
+        "/government-bids",
+        "/government-bids/",
+    )
+
     def _reject(reason: str) -> None:
         bucket = diagnostics["rejected"]
         bucket[reason] = int(bucket.get(reason, 0)) + 1
@@ -1911,6 +1942,11 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
             if any(signal in blob for signal in reject_signals):
                 _reject("informational_or_educational")
                 continue
+            parsed = urlparse(url)
+            path = (parsed.path or "/").rstrip("/") or "/"
+            if any(signal in blob for signal in directory_signals) or path in generic_path_markers:
+                _reject("directory_or_portal_page")
+                continue
             if not any(signal in blob for signal in buyer_signals):
                 _reject("no_service_need_signal")
                 continue
@@ -1931,9 +1967,9 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
                     "company_name": label or title[:160],
                     "client": label or title[:160],
                     "description": (
-                        "Potential Nova Anonymous buyer-intent source discovered on the public web. "
+                        "Specific public buyer opportunity discovered for owner review. "
                         f"Discovery query: {query}. Source context: {snippet[:500] if snippet else 'No provider snippet.'} "
-                        "Owner must verify the buyer, scope, compensation, vendor terms, and contact path before any outreach."
+                        "Owner must still verify scope, compensation, vendor terms, and contact path before any outreach."
                     ),
                     "job_type": "unknown",
                     "contract_type": "unknown",
