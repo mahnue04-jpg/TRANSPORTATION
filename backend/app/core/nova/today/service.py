@@ -1744,12 +1744,17 @@ def _run_work_revenue_job_search(
     selected = int(result.get("selected_count") or 0)
     prepared = int(result.get("prepared_application_count") or 0)
     ready = int(result.get("ready_for_owner_review_count") or 0)
+    held = len([
+        row for row in persistent
+        if row.get("package_review_status") == "HELD_FOR_OWNER_REVIEW"
+    ])
     answer = (
         f"Work & Revenue search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and selected {selected} suitable revenue "
         f"opportunit{'y' if selected == 1 else 'ies'} from the live search. "
         f"I prepared {prepared} application package{'s' if prepared != 1 else ''}; "
-        f"{ready} {'is' if ready == 1 else 'are'} ready for owner review. "
+        f"{ready} {'is' if ready == 1 else 'are'} ready for owner review, and "
+        f"{held} opportunit{'y is' if held == 1 else 'ies are'} held for owner review before preparation. "
         "No application was externally submitted, no client or employer was contacted, "
         "no contract was accepted, and no money moved."
     )
@@ -1815,12 +1820,22 @@ def _find_nova_anonymous_clients(
             collected.append(item)
 
     ranked = qualify_and_rank_live_jobs(question, collected)
-    qualified = [
-        row for row in ranked
-        if str((row.get("live_qualification") or {}).get("qualification_status") or row.get("qualification_status") or "") == OUTCOME_QUALIFIED
-        and bool((row.get("live_qualification") or {}).get("revenue_ready", row.get("revenue_ready")))
-        and str((row.get("live_qualification") or {}).get("customer_type") or row.get("customer_type") or "") == "NOVA_ANONYMOUS_CUSTOMER"
-    ][:10]
+    qualified = []
+    reviewable = []
+    for row in ranked:
+        qual = dict(row.get("live_qualification") or {})
+        status = str(qual.get("qualification_status") or row.get("qualification_status") or "")
+        customer_type = str(qual.get("customer_type") or row.get("customer_type") or "")
+        revenue_ready = bool(qual.get("revenue_ready", row.get("revenue_ready")))
+        blockers = list(qual.get("blockers") or [])
+        if customer_type != "NOVA_ANONYMOUS_CUSTOMER":
+            continue
+        if status == OUTCOME_QUALIFIED and revenue_ready:
+            qualified.append(row)
+        elif status == "NEEDS_OWNER_REVIEW" and not blockers:
+            reviewable.append(row)
+
+    candidates = (qualified + reviewable)[:10]
 
     reset = reset_live_discovery_opportunities(
         db,
@@ -1829,7 +1844,7 @@ def _find_nova_anonymous_clients(
     )
     persisted = persist_ranked_jobs(
         db,
-        qualified,
+        candidates,
         organization_id=organization_id,
         user=user,
         prepare_applications=True,
@@ -1838,7 +1853,7 @@ def _find_nova_anonymous_clients(
 
     sources: list[dict[str, str]] = []
     seen_urls: set[str] = set()
-    for row in qualified:
+    for row in candidates:
         url = str(row.get("source_url") or row.get("application_url") or "").strip()
         if not url.startswith(("http://", "https://")) or url in seen_urls:
             continue
@@ -1850,25 +1865,28 @@ def _find_nova_anonymous_clients(
         })
 
     ready = [row for row in persisted if row.get("ready_for_owner_review")]
+    held = [row for row in persisted if row.get("package_review_status") == "HELD_FOR_OWNER_REVIEW"]
     answer = (
         f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and found {len(qualified)} revenue-ready client "
-        f"opportunit{'y' if len(qualified) == 1 else 'ies'} matching Nova Anonymous capabilities. "
-        f"{len(ready)} client package{' is' if len(ready) == 1 else 's are'} ready for owner review. "
+        f"opportunit{'y' if len(qualified) == 1 else 'ies'} plus {len(reviewable)} legitimate "
+        f"opportunit{'y' if len(reviewable) == 1 else 'ies'} that need owner review. "
+        f"{len(ready)} client package{' is' if len(ready) == 1 else 's are'} ready for owner review, "
+        f"and {len(held)} opportunit{'y is' if len(held) == 1 else 'ies are'} held for owner review. "
         "No client was contacted, no proposal was submitted, no contract was accepted, and no money moved."
     )
-    if not qualified:
+    if not candidates:
         answer = (
             f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
-            "unprotected live-search opportunities, but no revenue-ready buyer passed all capability and "
-            "qualification gates in this search. I did not save random or unsuitable work. "
+            "unprotected live-search opportunities, but no revenue-ready or safely reviewable buyer passed "
+            "the current gates in this search. I did not save random or unsuitable work. "
             "No client was contacted and nothing was submitted."
         )
 
     return NovaTodayBrainOut(
         answer=answer,
         fact_label="VERIFIED DATA",
-        next_actions=["Review Nova Work & Revenue client files"] if qualified else [],
+        next_actions=["Review Nova Work & Revenue client files"] if candidates else [],
         generated_at=now().isoformat(),
         source_href="/nova/work",
         sources=sources[:10],
