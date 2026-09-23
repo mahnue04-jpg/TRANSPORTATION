@@ -1675,9 +1675,30 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     actions = list_owner_actions(db, organization_id=organization_id, user=user)
     action_ids = {item.opportunity_id for item in actions if item.opportunity_id}
     outs = [_enriched_out(row, apps_map, action_ids) for row in opportunities]
-    inbox = [item for item in outs if item.status in {"DISCOVERED", "REVIEWING"}]
+
+    def _is_test_fixture(item: OpportunityOut) -> bool:
+        source = str(item.source_type or item.source or "").strip().lower()
+        blob = " ".join(
+            str(value or "")
+            for value in (item.company_name, item.opportunity_title, item.notes)
+        ).lower()
+        return source == "simulated" or any(
+            token in blob
+            for token in (
+                "simulated/test fixture",
+                "simulated fixture",
+                "controlled test co",
+                "duty-class-prod-test",
+                "example logistics",
+                "example operations co",
+            )
+        )
+
+    real_outs = [item for item in outs if not _is_test_fixture(item)]
+    test_outs = [item for item in outs if _is_test_fixture(item)]
+    inbox = [item for item in real_outs if item.status in {"DISCOVERED", "REVIEWING"}]
     qualified = []
-    for item in outs:
+    for item in real_outs:
         duty_class = ((item.qualification or {}).get("capability_classification"))
         if duty_class in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
             continue
@@ -1702,10 +1723,10 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     draft_ready = [item for item in applications if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
     approved = [item for item in applications if item.approved_for_future_submission]
     submitted = [item for item in outs if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"]
-    needs_owner = [item for item in outs if item.owner_action_required or item.missing_owner_facts]
+    needs_owner = [item for item in real_outs if item.owner_action_required or item.missing_owner_facts]
     lost = [item for item in outs if item.status in {"REJECTED", "CLOSED"}]
     active = [item for item in outs if item.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}]
-    missing_info = [item for item in outs if item.qualification_outcome == "INSUFFICIENT_INFORMATION"]
+    missing_info = [item for item in real_outs if item.qualification_outcome == "INSUFFICIENT_INFORMATION"]
     engagement_rows = list_engagements(db, organization_id=organization_id, user=user)
     pending_deliverables = (
         _owner_filter(
@@ -1728,14 +1749,14 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     revenue_summary["awaiting_owner_payment_confirmation"] = recon.get("awaiting_owner_payment_confirmation") or 0
     return DashboardOut(
         counts={
-            "work_opportunities": len(opportunities),
-            "opportunities_found": len(opportunities),
-            "simulated_fixtures": len([item for item in outs if (item.source_type or item.source) == "simulated"]),
-            "real_opportunities": len([item for item in outs if (item.source_type or item.source) != "simulated"]),
-            "new": len([item for item in outs if item.status == "DISCOVERED"]),
-            "needs_review": len([item for item in outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
+            "work_opportunities": len(real_outs),
+            "opportunities_found": len(real_outs),
+            "simulated_fixtures": len(test_outs),
+            "real_opportunities": len(real_outs),
+            "new": len([item for item in real_outs if item.status == "DISCOVERED"]),
+            "needs_review": len([item for item in real_outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
             "qualified": len(qualified),
-            "not_qualified": len([item for item in outs if item.status == "NOT_QUALIFIED"]),
+            "not_qualified": len([item for item in real_outs if item.status == "NOT_QUALIFIED"]),
             "needs_owner_input": len(needs_owner),
             "missing_information": len(missing_info),
             "draft_ready": len(draft_ready),
