@@ -1835,8 +1835,42 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
         "job board",
         "jobs",
         "wikipedia",
+        "what is an rfp",
+        "what is a request for proposal",
+        "understanding the differences",
+        "sample rfp",
+        "rfp example",
+        "rfp process",
+        "definition",
+        "glossary",
+        "explained",
+        "best practices",
     )
-    blocked_domains = ("youtube.com", "reddit.com", "wikipedia.org", "facebook.com", "instagram.com")
+    blocked_domains = (
+        "youtube.com",
+        "reddit.com",
+        "wikipedia.org",
+        "facebook.com",
+        "instagram.com",
+        "investopedia.com",
+        "project-management.com",
+    )
+    action_signals = (
+        "request for proposal",
+        "rfp",
+        "request for quote",
+        "rfq",
+        "invitation to bid",
+        "bid opportunity",
+        "procurement",
+        "solicitation",
+        "seeking vendor",
+        "seeking contractor",
+        "accepting proposals",
+        "submit proposal",
+        "proposal deadline",
+        "due date",
+    )
 
     for query in queries:
         result = fetch_web_search(query, max_results=5)
@@ -1856,6 +1890,8 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
             if any(signal in blob for signal in reject_signals):
                 continue
             if not any(signal in blob for signal in buyer_signals):
+                continue
+            if not any(signal in blob for signal in action_signals):
                 continue
             seen_urls.add(url)
             leads.append(
