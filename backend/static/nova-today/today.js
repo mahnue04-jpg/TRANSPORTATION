@@ -653,6 +653,7 @@
     $("ask-input").focus();
     speakNova(answer);
     showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
+    await refresh();
   }
   async function decide(actionId, kind) {
     var path = "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/" + kind;
