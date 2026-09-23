@@ -1796,7 +1796,7 @@ def _is_nova_anonymous_client_request(question: str) -> bool:
     )
 
 
-def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 6) -> list[dict]:
+def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 6) -> tuple[list[dict], dict]:
     """Find public buyer-intent web sources for Nova Anonymous owner review.
 
     These are leads, not automatically qualified customers. They are held for
@@ -1811,6 +1811,7 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
     )
     leads: list[dict] = []
     seen_urls: set[str] = set()
+    diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": []}
     buyer_signals = (
         "request for proposal",
         "rfp",
@@ -1839,7 +1840,11 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
 
     for query in queries:
         result = fetch_web_search(query, max_results=5)
-        for source in list(result.get("sources") or []):
+        diagnostics["queries_run"] += 1
+        diagnostics["provider_statuses"].append(str(result.get("status") or "unknown"))
+        sources_found = list(result.get("sources") or [])
+        diagnostics["sources_seen"] += len(sources_found)
+        for source in sources_found:
             title = str(source.get("title") or "").strip()
             url = str(source.get("url") or "").strip()
             label = str(source.get("label") or "").strip()
@@ -1895,8 +1900,8 @@ def _discover_nova_anonymous_web_buyers(question: str, *, max_candidates: int = 
                 }
             )
             if len(leads) >= max_candidates:
-                return leads
-    return leads
+                return leads, diagnostics
+    return leads, diagnostics
 
 
 def _find_nova_anonymous_clients(
@@ -1940,8 +1945,9 @@ def _find_nova_anonymous_clients(
 
     candidates = (qualified + reviewable)[:10]
     web_reviewable: list[dict] = []
+    web_diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": []}
     if not candidates:
-        web_reviewable = _discover_nova_anonymous_web_buyers(question, max_candidates=6)
+        web_reviewable, web_diagnostics = _discover_nova_anonymous_web_buyers(question, max_candidates=6)
         reviewable.extend(web_reviewable)
         candidates = web_reviewable[:10]
 
@@ -1985,11 +1991,15 @@ def _find_nova_anonymous_clients(
         "No client was contacted, no proposal was submitted, no contract was accepted, and no money moved."
     )
     if not candidates:
+        statuses = sorted(set(web_diagnostics.get("provider_statuses") or []))
+        provider_note = ", ".join(statuses) if statuses else "not-run"
         answer = (
             f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
-            "unprotected live-search opportunities, but no revenue-ready or safely reviewable buyer passed "
-            "the current gates in this search. I did not save random or unsuitable work. "
-            "No client was contacted and nothing was submitted."
+            "unprotected live-search opportunities. The strict discovery path produced no usable buyer, "
+            f"so public buyer-intent fallback ran {web_diagnostics.get('queries_run', 0)} bounded searches "
+            f"and received {web_diagnostics.get('sources_seen', 0)} source results "
+            f"(search status: {provider_note}), but 0 passed the buyer-intent filters. "
+            "I did not save random or unsuitable work. No client was contacted and nothing was submitted."
         )
 
     return NovaTodayBrainOut(
