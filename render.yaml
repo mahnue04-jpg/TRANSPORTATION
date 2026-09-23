@@ -54,9 +54,13 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: DB_POOL_SIZE
-        value: "5"
+        value: "2"
       - key: DB_MAX_OVERFLOW
-        value: "5"
+        value: "1"
+      - key: RUNTIME_GOVERNOR_CLEANUP_INTERVAL_SECONDS
+        value: "180"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: HEALTH_ISF_WS_MAX_ORG_CONNECTIONS
         value: "500"
       - key: HEALTH_ISF_WS_MAX_USER_CONNECTIONS
