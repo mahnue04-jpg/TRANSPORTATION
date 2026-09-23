@@ -608,3 +608,44 @@ def test_nova_today_work_revenue_intent_does_not_steal_client_searches() -> None
     assert not _is_work_revenue_job_request(
         "Explain what Work & Revenue does"
     )
+
+
+
+def test_nova_anonymous_preserves_safe_owner_review_candidates(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    reviewable = {
+        "title": "Operations automation project",
+        "company_name": "Real Buyer",
+        "source_url": "https://example.test/rfp",
+        "live_qualification": {
+            "qualification_status": "NEEDS_OWNER_REVIEW",
+            "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+            "revenue_ready": False,
+            "blockers": [],
+        },
+    }
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(today_service, "search_multi_source_jobs", lambda *args, **kwargs: {"jobs": [reviewable]})
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [reviewable])
+    monkeypatch.setattr(
+        today_service,
+        "persist_ranked_jobs",
+        lambda *args, **kwargs: [{
+            "persisted": True,
+            "package_review_status": "HELD_FOR_OWNER_REVIEW",
+            "ready_for_owner_review": False,
+        }],
+    )
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "1 legitimate opportunity" in body["answer"]
+    assert "held for owner review" in body["answer"]
+    assert body["next_actions"] == ["Review Nova Work & Revenue client files"]
