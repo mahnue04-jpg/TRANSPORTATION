@@ -39,6 +39,26 @@ def _dedupe_key(job: dict[str, Any]) -> str:
     return f"{provider}|{notice}|{company}|{title}"
 
 
+def _fallback_query(query: str) -> str:
+    """Broaden an over-specific provider query without changing work family intent."""
+    text = " ".join(str(query or "").split())
+    lowered = text.lower()
+    phrases = (
+        "independent contractor",
+        "freelance project",
+        "vendor allowed",
+        "no cpa",
+        "contractor",
+        "freelance",
+        "project",
+        "remote",
+    )
+    for phrase in phrases:
+        lowered = lowered.replace(phrase, " ")
+    fallback = " ".join(lowered.split()).strip()
+    return fallback or text
+
+
 def _default_queries(limit: int) -> list[str]:
     rows = generate_capability_first_queries()
     # Spread the default run across different capability families instead of
@@ -92,12 +112,25 @@ def run_autopilot_cycle(
 
     for query in selected_queries:
         multi = search_multi_source_jobs(query, limit=result_limit)
-        ranked = qualify_and_rank_live_jobs(query, multi.get("jobs") or [])
+        used_query = query
+        fallback_query = None
+        if not (multi.get("jobs") or []):
+            fallback_query = _fallback_query(query)
+            if fallback_query and fallback_query.lower() != query.lower():
+                retry = search_multi_source_jobs(fallback_query, limit=result_limit)
+                providers_queried.update(str(item) for item in (retry.get("providers_queried") or []))
+                provider_errors.extend(list(retry.get("provider_errors") or []))
+                if retry.get("jobs"):
+                    multi = retry
+                    used_query = fallback_query
+        ranked = qualify_and_rank_live_jobs(used_query, multi.get("jobs") or [])
         providers_queried.update(str(item) for item in (multi.get("providers_queried") or []))
         provider_errors.extend(list(multi.get("provider_errors") or []))
         per_query.append(
             {
                 "query": query,
+                "used_query": used_query,
+                "fallback_query": fallback_query,
                 "ranked_count": len(ranked),
                 "provider_result_counts": multi.get("provider_result_counts") or {},
             }
