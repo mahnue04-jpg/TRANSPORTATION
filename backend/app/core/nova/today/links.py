@@ -15,6 +15,7 @@ MODULE_PAGES = {
     "government": "/nova/government",
     "business": "/nova/business",
     "workspace": "/nova/workspace",
+    "work_revenue": "/nova/work",
 }
 PRODUCT_PAGES = {
     "health": "/workspace",
@@ -119,6 +120,14 @@ def source_record_visible(
             return _business_visible(db, ref, organization_id=organization_id, user=user)
         if source_module == "workspace":
             return _workspace_visible(db, ref, organization_id=organization_id, user=user)
+        if source_module == "work_revenue":
+            from app.core.nova.work_revenue import service as work_service
+            try:
+                row = work_service.get_opportunity(db, ref, organization_id=organization_id, user=user)
+                return bool(row and not bool(getattr(row, "archived", False)))
+            except Exception:
+                recover_today_session(db)
+                return False
     except Exception:
         recover_today_session(db)
         return False
@@ -201,6 +210,17 @@ def source_details(
             return _business_details(db, ref, organization_id=organization_id, user=user)
         if source_module == "workspace":
             return _workspace_details(db, ref, organization_id=organization_id, user=user)
+        if source_module == "work_revenue":
+            from app.core.nova.work_revenue import service as work_service
+            row = work_service.get_opportunity(db, ref, organization_id=organization_id, user=user)
+            return {
+                "kind": "work_revenue_opportunity",
+                "title": str(getattr(row, "opportunity_title", "") or ""),
+                "company": str(getattr(row, "company_name", "") or ""),
+                "status": str(getattr(row, "status", "") or ""),
+                "source_url": str(getattr(row, "source_url", "") or ""),
+                "description": str(getattr(row, "description", "") or "")[:2000],
+            }
         if source_module == "link":
             return {"kind": "product_link", "title": source_ref_id, "page": module_page("link", source_ref_id) or ""}
     except Exception:
