@@ -253,6 +253,76 @@ SEARCH_FAMILIES: dict[str, dict[str, Any]] = {
 }
 
 
+_FAMILY_REQUEST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bookkeeping_support", re.compile(r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|invoice prep|expense categorization|financial spreadsheet)\b", re.I)),
+    ("document_writing", re.compile(r"\b(writing|writer|document|proposal|rfp|sop|content|report writing|business correspondence)\b", re.I)),
+    ("research_analysis", re.compile(r"\b(research|market research|competitor research|lead research|supplier research|analysis research)\b", re.I)),
+    ("data_spreadsheet", re.compile(r"\b(spreadsheet|excel|csv|data cleanup|data entry|data analysis|reporting|inventory data)\b", re.I)),
+    ("ai_automation", re.compile(r"\b(ai|artificial intelligence|automation|prompt|workflow automation|ai analysis|ai operations)\b", re.I)),
+    ("customer_support_operations", re.compile(r"\b(customer support|chat support|email support|ticket|faq|customer service|back office)\b", re.I)),
+    ("web_software", re.compile(r"\b(web|website|html|css|api|software|technical documentation|qa testing)\b", re.I)),
+    ("administrative_operations", re.compile(r"\b(admin(?:istrative)?|virtual assistant|office support|operations support|scheduling|crm|clerical)\b", re.I)),
+    ("logistics_digital", re.compile(r"\b(logistics|warehouse reporting|inventory reconciliation|shipment tracking|dispatch admin)\b", re.I)),
+    ("transportation_digital", re.compile(r"\b(transportation|delivery data|fleet reporting|route planning|dispatch support)\b", re.I)),
+    ("healthcare_non_clinical", re.compile(r"\b(healthcare admin|medical document|non-clinical|records organization|healthcare reporting)\b", re.I)),
+)
+
+
+def resolve_requested_family(query: str) -> str | None:
+    """Resolve a user request to one narrow capability family when possible."""
+    text = re.sub(r"\s+", " ", str(query or "").strip())
+    if not text:
+        return None
+    for family_id, pattern in _FAMILY_REQUEST_PATTERNS:
+        if pattern.search(text):
+            return family_id
+    return None
+
+
+def targeted_queries_for_request(query: str, *, max_queries: int = 5) -> list[dict[str, Any]]:
+    """Return capability-backed query variants for the user's requested work type.
+
+    If no known family is detected, preserve the exact user query only. This
+    prevents a bookkeeping request from drifting into unrelated job families.
+    """
+    normalized = re.sub(r"\s+", " ", str(query or "").strip())
+    if not normalized:
+        return []
+    family_id = resolve_requested_family(normalized)
+    if not family_id:
+        return [{
+            "query": normalized,
+            "search_family": None,
+            "search_family_label": "User-specified work",
+            "capability_registry_matches": [],
+            "why_searched": "Exact user-specified search; no capability family inferred.",
+            "geography": "United States remote nationwide",
+            "preferred_signals": list(_REMOTE_VENDOR_TERMS),
+        }]
+    generated = generate_capability_first_queries(families=[family_id])
+    rows = [{
+        "query": normalized,
+        "search_family": family_id,
+        "search_family_label": SEARCH_FAMILIES[family_id]["label"],
+        "capability_registry_matches": [
+            cid for cid in SEARCH_FAMILIES[family_id]["capability_ids"] if cid in _supported_capability_keys()
+        ],
+        "why_searched": f"Owner requested {SEARCH_FAMILIES[family_id]['label']}; Nova restricted discovery to this capability family.",
+        "geography": "United States remote nationwide",
+        "preferred_signals": list(_REMOTE_VENDOR_TERMS),
+    }]
+    seen = {normalized.lower()}
+    for item in generated:
+        if len(rows) >= max(1, int(max_queries)):
+            break
+        key = str(item["query"]).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(item)
+    return rows
+
+
 def _supported_capability_keys() -> set[str]:
     keys = set(nova_supported_ids())
     keys.update(V3_CAPABILITIES.keys())
