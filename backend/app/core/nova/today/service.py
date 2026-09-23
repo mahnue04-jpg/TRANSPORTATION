@@ -80,6 +80,7 @@ from app.core.nova.today.schemas import (
 )
 from app.core.nova.workspace.service import dashboard as workspace_dashboard
 from app.core.nova.work_revenue.capability_first_discovery import targeted_queries_for_request
+from app.core.nova.v3.autopilot_cycle import run_autopilot_cycle
 from app.core.nova.v3.multi_source_discovery import search_multi_source_jobs
 from app.core.nova.v3.live_qualification import OUTCOME_QUALIFIED, qualify_and_rank_live_jobs
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
@@ -1666,6 +1667,111 @@ def _build_today_ask_prompt(
     return primary + "\n\n" + supporting
 
 
+def _is_work_revenue_job_request(question: str) -> bool:
+    """Recognize owner requests to actively discover suitable revenue work."""
+    text = " ".join(str(question or "").lower().split())
+    discovery_words = ("find", "search", "look for", "locate", "discover", "get me")
+    work_words = (
+        "job",
+        "jobs",
+        "job opportunity",
+        "job opportunities",
+        "work opportunity",
+        "work opportunities",
+        "application",
+        "applications",
+        "employment",
+        "revenue-ready work",
+        "revenue ready work",
+        "work & revenue",
+        "work and revenue",
+    )
+    client_words = (
+        "client",
+        "clients",
+        "customer",
+        "customers",
+        "buyer",
+        "buyers",
+        "nova anonymous",
+        "anonymous operations agent",
+        "anonymous operation agent",
+    )
+    return (
+        any(word in text for word in discovery_words)
+        and any(word in text for word in work_words)
+        and not any(word in text for word in client_words)
+    )
+
+
+def _run_work_revenue_job_search(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaTodayBrainOut:
+    """Run one bounded capability-first Work & Revenue discovery cycle."""
+    reset = reset_live_discovery_opportunities(
+        db,
+        organization_id=organization_id,
+        user=user,
+    )
+    result = run_autopilot_cycle(
+        db,
+        organization_id=organization_id,
+        user=user,
+        query_limit=5,
+        per_query_limit=10,
+        save_limit=10,
+        prepare_limit=5,
+        min_relevance_score=60,
+    )
+
+    persistent = list(result.get("persistent_results") or [])
+    sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in persistent:
+        url = str(row.get("source_url") or row.get("application_url") or "").strip()
+        if not url.startswith(("http://", "https://")) or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        sources.append({
+            "title": str(row.get("company_name") or row.get("client") or row.get("title") or "Work opportunity"),
+            "url": url,
+            "label": str(row.get("title") or "Work & Revenue opportunity"),
+        })
+
+    selected = int(result.get("selected_count") or 0)
+    prepared = int(result.get("prepared_application_count") or 0)
+    ready = int(result.get("ready_for_owner_review_count") or 0)
+    answer = (
+        f"Work & Revenue search completed. I replaced {reset.get('archived_count', 0)} prior "
+        f"unprotected live-search opportunities and selected {selected} suitable revenue "
+        f"opportunit{'y' if selected == 1 else 'ies'} from the live search. "
+        f"I prepared {prepared} application package{'s' if prepared != 1 else ''}; "
+        f"{ready} {'is' if ready == 1 else 'are'} ready for owner review. "
+        "No application was externally submitted, no client or employer was contacted, "
+        "no contract was accepted, and no money moved."
+    )
+    if not selected:
+        answer = (
+            f"Work & Revenue search completed. I replaced {reset.get('archived_count', 0)} prior "
+            "unprotected live-search opportunities, but no suitable revenue opportunity passed "
+            "the current qualification threshold. I did not save random or unsuitable work, "
+            "and nothing was submitted externally."
+        )
+
+    return NovaTodayBrainOut(
+        answer=answer,
+        fact_label="VERIFIED DATA",
+        next_actions=["Review Nova Work & Revenue applications"] if selected else [],
+        generated_at=now().isoformat(),
+        source_href="/nova/work",
+        sources=sources[:10],
+        verification_status="verified",
+    )
+
+
 def _is_nova_anonymous_client_request(question: str) -> bool:
     text = " ".join(str(question or "").lower().split())
     names = (
@@ -1794,6 +1900,26 @@ def _today_live_or_memory_answer(
                 answer=(
                     "I couldn't complete the Nova Anonymous client search right now. "
                     "I did not contact any client or submit anything. Please try the search again."
+                ),
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                source_href="/nova/work",
+                verification_status="unavailable",
+            )
+
+    if _is_work_revenue_job_request(question):
+        try:
+            return _run_work_revenue_job_search(
+                db,
+                organization_id=organization_id,
+                user=user,
+            )
+        except Exception:
+            return NovaTodayBrainOut(
+                answer=(
+                    "I couldn't complete the Work & Revenue job search right now. "
+                    "I did not submit an application or contact an employer. Please try the search again."
                 ),
                 fact_label="AI SUGGESTION",
                 next_actions=[],
