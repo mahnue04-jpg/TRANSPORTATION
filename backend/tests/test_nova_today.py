@@ -560,3 +560,51 @@ def test_nova_today_anonymous_intent_requires_buyer_discovery_language() -> None
     assert not _is_nova_anonymous_client_request(
         "Explain what Nova Anonymous operations agent does"
     )
+
+
+
+def test_nova_today_work_revenue_job_intent_routes_to_autopilot(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    captured = {}
+
+    def fake_run(db, *, organization_id, user):
+        captured["organization_id"] = organization_id
+        return today_service.NovaTodayBrainOut(
+            answer="Work & Revenue search completed.",
+            fact_label="VERIFIED DATA",
+            next_actions=["Review Nova Work & Revenue applications"],
+            generated_at="2026-09-23T00:00:00Z",
+            source_href="/nova/work",
+            verification_status="verified",
+        )
+
+    monkeypatch.setattr(today_service, "_run_work_revenue_job_search", fake_run)
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Nova Today, find suitable revenue-ready jobs for me and prepare the best applications"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert captured["organization_id"]
+    assert body["source_href"] == "/nova/work"
+    assert "work & revenue search completed" in body["answer"].lower()
+
+
+def test_nova_today_work_revenue_intent_does_not_steal_client_searches() -> None:
+    from app.core.nova.today.service import _is_work_revenue_job_request
+
+    assert _is_work_revenue_job_request(
+        "Search for new revenue-ready jobs that match my verified Work & Revenue capabilities"
+    )
+    assert _is_work_revenue_job_request(
+        "Find suitable job opportunities and prepare applications for my review"
+    )
+    assert not _is_work_revenue_job_request(
+        "Find clients for AMICOR Nova Anonymous Operations Agent"
+    )
+    assert not _is_work_revenue_job_request(
+        "Explain what Work & Revenue does"
+    )
