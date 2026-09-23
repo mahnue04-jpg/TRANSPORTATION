@@ -70,14 +70,17 @@ def test_render_yaml_keeps_one_uvicorn_worker_and_reduced_pool() -> None:
     assert "--workers" not in text
     assert "gunicorn" not in text.lower()
     assert 'key: DB_POOL_SIZE' in text
-    assert 'value: "5"' in text
+    assert 'value: "2"' in text
     assert 'key: DB_MAX_OVERFLOW' in text
     pool_idx = text.index("DB_POOL_SIZE")
     overflow_idx = text.index("DB_MAX_OVERFLOW")
     pool_slice = text[pool_idx : pool_idx + 80]
     overflow_slice = text[overflow_idx : overflow_idx + 80]
-    assert 'value: "5"' in pool_slice
-    assert 'value: "5"' in overflow_slice
+    assert 'value: "2"' in pool_slice
+    assert 'value: "1"' in overflow_slice
+    assert 'key: RUNTIME_GOVERNOR_CLEANUP_INTERVAL_SECONDS' in text
+    assert 'value: "180"' in text
+    assert 'key: MALLOC_ARENA_MAX' in text
 
 
 def test_expected_ops_monitoring_403_audit_skip_helper() -> None:
