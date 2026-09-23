@@ -1689,8 +1689,6 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
                 "simulated fixture",
                 "controlled test co",
                 "duty-class-prod-test",
-                "example logistics",
-                "example operations co",
             )
         )
 
