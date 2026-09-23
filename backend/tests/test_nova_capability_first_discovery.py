@@ -253,3 +253,21 @@ def test_targeted_queries_do_not_drift_across_families() -> None:
         term in row["query"].lower()
         for term in ("transaction", "expense", "invoice", "accounts", "reconciliation", "financial")
     ) for row in rows)
+
+
+def test_nova_anonymous_request_routes_to_client_acquisition_family() -> None:
+    assert resolve_requested_family("Nova Today, find a client for AMICOR Nova Anonymous Operations Agent") == "nova_anonymous_clients"
+    assert resolve_requested_family("find clients for Nova Anonymous") == "nova_anonymous_clients"
+
+
+def test_nova_anonymous_client_queries_are_buyer_intent_and_capability_backed() -> None:
+    rows = targeted_queries_for_request(
+        "find clients for Nova Anonymous operations agent",
+        max_queries=5,
+    )
+    assert rows
+    assert all(row["search_family"] == "nova_anonymous_clients" for row in rows)
+    generated = [row["query"].lower() for row in rows[1:]]
+    assert generated
+    assert any("automation" in query or "operations support" in query for query in generated)
+    assert all(not is_banned_query(query) for query in generated)
