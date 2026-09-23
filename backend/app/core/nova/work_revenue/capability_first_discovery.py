@@ -75,6 +75,31 @@ _STATE_RESTRICT = re.compile(
 )
 
 SEARCH_FAMILIES: dict[str, dict[str, Any]] = {
+    "nova_anonymous_clients": {
+        "label": "Nova Anonymous client acquisition",
+        "capability_ids": (
+            "administrative_operations",
+            "business_research",
+            "data_spreadsheet",
+            "content_documentation",
+            "customer_support_operations",
+            "ai_workflow_automation",
+            "document_intelligence",
+        ),
+        "queries": (
+            "business operations support contractor remote",
+            "back office automation contractor remote",
+            "AI workflow automation project contractor",
+            "CRM cleanup automation freelance project",
+            "document processing automation contract",
+            "customer support workflow automation contractor",
+            "spreadsheet reporting automation freelance project",
+            "business research and reporting contractor remote",
+            "virtual operations support contract remote",
+            "administrative workflow automation contractor remote",
+        ),
+    },
+
     "administrative_operations": {
         "label": "Administrative operations",
         "capability_ids": ("administrative_operations", "ADMINISTRATIVE_SUPPORT", "SCHEDULING_SUPPORT", "CRM_DATA_ORGANIZATION"),
@@ -254,6 +279,7 @@ SEARCH_FAMILIES: dict[str, dict[str, Any]] = {
 
 
 _FAMILY_REQUEST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("nova_anonymous_clients", re.compile(r"\b(nova anonymous|amicor anonymous|anonymous operations agent|anonymous operation agent|autonomous operations agent|autonomous operation agent)\b", re.I)),
     ("bookkeeping_support", re.compile(r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|invoice prep|expense categorization|financial spreadsheet)\b", re.I)),
     ("document_writing", re.compile(r"\b(writing|writer|document|proposal|rfp|sop|content|report writing|business correspondence)\b", re.I)),
     ("research_analysis", re.compile(r"\b(research|market research|competitor research|lead research|supplier research|analysis research)\b", re.I)),
