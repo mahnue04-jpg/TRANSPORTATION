@@ -206,10 +206,11 @@ def test_provider_type_classes_supported() -> None:
 
 def test_more_than_one_live_provider_registered() -> None:
     providers = live_providers()
-    assert len(providers) >= 2
+    assert len(providers) >= 3
     ids = {p.meta.provider_id for p in providers}
     assert "remotive" in ids
     assert "remoteok" in ids
+    assert "sam_gov" in ids
     assert all(p.meta.enabled for p in providers)
 
 
@@ -485,9 +486,9 @@ def test_pending_providers_disabled_and_catalog_quality() -> None:
     catalog = provider_catalog()
     enabled = [row for row in catalog if row["enabled"]]
     pending = [row for row in catalog if not row["enabled"]]
-    assert len(enabled) >= 2
-    assert {row["provider_id"] for row in enabled} >= {"remotive", "remoteok"}
-    assert len(pending) >= 4
+    assert len(enabled) >= 3
+    assert {row["provider_id"] for row in enabled} >= {"remotive", "remoteok", "sam_gov"}
+    assert len(pending) >= 3
     for row in catalog:
         assert row["supports_external_submission"] is False
         assert "requires_login" in row
@@ -497,10 +498,15 @@ def test_pending_providers_disabled_and_catalog_quality() -> None:
             p.meta.provider_id for p in PENDING_PROVIDERS
         }
     pending_ids = {p.meta.provider_id for p in PENDING_PROVIDERS}
-    assert {"upwork", "freelancer", "sam_gov", "public_rfp_rss", "vendor_project_board"} <= pending_ids
+    assert {"upwork", "freelancer", "public_rfp_rss", "vendor_project_board"} <= pending_ids
+    assert "sam_gov" not in pending_ids
     for item in PENDING_PROVIDERS:
         assert item.meta.enabled is False
         assert item.meta.pending_requirements
+    sam_row = next(row for row in catalog if row["provider_id"] == "sam_gov")
+    assert sam_row["enabled"] is True
+    assert sam_row["supports_external_submission"] is False
+    assert sam_row["access_status"] in {"api_key_configured", "api_key_missing", "public_api_key_required"}
 
 
 def test_capability_first_families_not_remotive_only() -> None:

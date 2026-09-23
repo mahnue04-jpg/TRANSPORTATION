@@ -236,7 +236,7 @@ _SCAM_TOKENS = (
     "guaranteed income with no work",
 )
 
-_LEGIT_SOURCES = ("remotive", "remotive.com")
+_LEGIT_SOURCES = ("remotive", "remotive.com", "remoteok", "sam_gov", "sam.gov")
 
 _GEO_HARD_TOKENS = (
     "must be located in",
@@ -257,6 +257,11 @@ def _blob(job: dict[str, Any]) -> str:
         job.get("geography"),
         job.get("source_attribution"),
         job.get("source_url"),
+        job.get("agency"),
+        job.get("solicitation_number"),
+        job.get("place_of_performance"),
+        job.get("set_aside"),
+        job.get("response_deadline"),
     ]
     return " ".join(str(part or "") for part in parts).lower()
 
@@ -459,9 +464,9 @@ def _source_legitimate(job: dict[str, Any]) -> bool:
     provider = str(job.get("provider_id") or "").lower()
     attribution = str(job.get("source_attribution") or "").lower()
     url = str(job.get("source_url") or "").lower()
-    if provider in _LEGIT_SOURCES or attribution in {"remotive"}:
+    if provider in _LEGIT_SOURCES or attribution in {"remotive", "remoteok", "sam.gov"}:
         return True
-    if "remotive.com" in url:
+    if "remotive.com" in url or "remoteok.com" in url or "sam.gov" in url:
         return True
     if url.startswith("https://") and job.get("company_name") and job.get("title"):
         return True
