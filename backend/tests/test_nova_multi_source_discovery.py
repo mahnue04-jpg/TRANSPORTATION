@@ -600,3 +600,74 @@ def test_remoteok_token_filter(monkeypatch) -> None:
     assert len(rows) == 1
     assert rows[0]["provider_id"] == "remoteok"
     assert rows[0]["title"] == "Spreadsheet Cleanup Contract"
+
+
+
+def test_admin_search_filters_unrelated_technical_titles(monkeypatch) -> None:
+    monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "1")
+
+    class AdminProvider:
+        meta = ProviderMeta(
+            provider_id="admin-test",
+            label="Admin test",
+            provider_type="remote_contract_feed",
+            enabled=True,
+            access_status="test",
+            access_mode="api",
+            requires_login=False,
+            requires_fee=False,
+            supports_detail_fetch=False,
+            supports_external_submission=False,
+            terms_safety_notes="test",
+            priority=1,
+        )
+
+        def search(self, query: str, *, limit: int = 10):
+            return [
+                normalize_opportunity(
+                    provider_id="admin-test",
+                    provider_type="remote_contract_feed",
+                    provider_identifier="admin-1",
+                    source_url="https://example.test/admin-1",
+                    title="Remote Administrative Support Contractor",
+                    company_name="Example",
+                    description="Scheduling, document preparation, CRM cleanup and reporting support.",
+                    job_type="contract",
+                    remote_status="remote",
+                    simulated=False,
+                ),
+                normalize_opportunity(
+                    provider_id="admin-test",
+                    provider_type="remote_contract_feed",
+                    provider_identifier="dev-1",
+                    source_url="https://example.test/dev-1",
+                    title="Senior Shopify Developer",
+                    company_name="Example",
+                    description="Build storefront software and support development operations.",
+                    job_type="contract",
+                    remote_status="remote",
+                    simulated=False,
+                ),
+                normalize_opportunity(
+                    provider_id="admin-test",
+                    provider_type="remote_contract_feed",
+                    provider_identifier="ai-1",
+                    source_url="https://example.test/ai-1",
+                    title="Senior AI Engineer",
+                    company_name="Example",
+                    description="Machine learning engineering and platform operations.",
+                    job_type="contract",
+                    remote_status="remote",
+                    simulated=False,
+                ),
+            ]
+
+    result = search_multi_source_jobs(
+        "remote administrative support contractor",
+        limit=10,
+        providers_override=[AdminProvider()],
+    )
+
+    assert result["count"] == 1
+    assert result["jobs"][0]["title"] == "Remote Administrative Support Contractor"
+    assert result["external_action_taken"] is False
