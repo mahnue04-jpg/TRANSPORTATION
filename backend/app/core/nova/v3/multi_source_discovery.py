@@ -10,16 +10,43 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
 
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
+
+# Env-only. Never log, print, commit, or embed in user-facing URLs.
+_SAM_GOV_API_KEY_ENV = "SAM_GOV_API_KEY"
+
+
+class SamGovUnavailable(RuntimeError):
+    """SAM.gov provider unavailable (missing/expired key or upstream auth failure)."""
+
+
+def _sam_gov_api_key() -> str | None:
+    key = str(os.environ.get(_SAM_GOV_API_KEY_ENV) or "").strip()
+    return key or None
+
+
+def _redact_secret(text: str, secret: str | None) -> str:
+    """Strip a secret from any diagnostic string. Never return the raw key."""
+    msg = str(text or "")
+    if secret:
+        msg = msg.replace(secret, "[REDACTED]")
+    # Belt-and-suspenders for query-string leakage.
+    msg = re.sub(r"(?i)(api_key=)[^&\s\"']+", r"\1[REDACTED]", msg)
+    return msg
+
+
+def sam_gov_key_configured() -> bool:
+    return _sam_gov_api_key() is not None
 
 PROVIDER_TYPES = (
     "freelance_marketplace",
@@ -61,6 +88,24 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
     provider_id = str(kwargs.get("provider_id") or "").strip()
     provider_identifier = str(kwargs.get("provider_identifier") or source_url or title).strip()
     simulated = bool(kwargs.get("simulated") or kwargs.get("real_or_simulated") == "SIMULATED")
+    notice_id = (str(kwargs.get("notice_id")).strip() or None) if kwargs.get("notice_id") is not None else None
+    solicitation_number = (
+        (str(kwargs.get("solicitation_number")).strip() or None)
+        if kwargs.get("solicitation_number") is not None
+        else None
+    )
+    agency = (str(kwargs.get("agency")).strip() or None) if kwargs.get("agency") is not None else None
+    response_deadline = (
+        (str(kwargs.get("response_deadline")).strip() or None)
+        if kwargs.get("response_deadline") is not None
+        else None
+    )
+    place_of_performance = (
+        (str(kwargs.get("place_of_performance")).strip() or None)
+        if kwargs.get("place_of_performance") is not None
+        else None
+    )
+    set_aside = (str(kwargs.get("set_aside")).strip() or None) if kwargs.get("set_aside") is not None else None
     return {
         "provider_id": provider_id,
         "provider_type": str(kwargs.get("provider_type") or "job_board"),
@@ -82,6 +127,12 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
         "fee_required": str(kwargs.get("fee_required") or "unknown"),
         "application_url": source_url,
         "publication_date": kwargs.get("publication_date"),
+        "notice_id": notice_id,
+        "solicitation_number": solicitation_number,
+        "agency": agency,
+        "response_deadline": response_deadline,
+        "place_of_performance": place_of_performance,
+        "set_aside": set_aside,
         "raw_source_metadata": dict(kwargs.get("raw_source_metadata") or {}),
         "simulated": simulated,
         "real_or_simulated": "SIMULATED" if simulated else "REAL",
@@ -90,6 +141,11 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
 
 
 def opportunity_dedupe_key(row: dict[str, Any]) -> str:
+    # SAM.gov: stable government notice/opportunity id wins over URL churn.
+    if str(row.get("provider_id") or "").strip().lower() == "sam_gov":
+        notice = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
+        if notice:
+            return "sam_notice:" + notice
     url = str(row.get("source_url") or "").strip().lower()
     if url:
         return "url:" + url
@@ -326,6 +382,278 @@ class RemoteOkLiveProvider:
         return [row for _, row in scored[:capped]]
 
 
+# Capability-aligned digital/remote contracting signals for SAM.gov pre-filter.
+_SAM_DIGITAL_RELEVANCE = re.compile(
+    r"\b("
+    r"administrative|admin(?:istrative)? support|document preparation|document support|"
+    r"report(?:ing)?|spreadsheet|data cleanup|data reconciliation|data entry|"
+    r"research|operational analysis|operations support|virtual assistant|"
+    r"clerical|records management|information management|program support|"
+    r"management support|business operations|technical writing|editorial|"
+    r"transcription|analyst|analytical|workflow|crm|office support|"
+    r"knowledge management|policy analysis|market research"
+    r")\b",
+    re.I,
+)
+
+_SAM_HARD_REJECT = re.compile(
+    r"\b("
+    r"construction|renovation|demolition|janitorial|custodial|groundskeeping|"
+    r"security guard|armed guard|physician|registered nurse|nursing|"
+    r"electrician|plumbing|hvac|pest control|lawn care|"
+    r"food service|catering|truck driving|vehicle maintenance|"
+    r"weapons|ammunition|aircraft maintenance|ship repair|"
+    r"facility maintenance|roofing|paving|asphalt"
+    r")\b",
+    re.I,
+)
+
+
+def _pop_name(node: Any) -> str:
+    if isinstance(node, dict):
+        return str(node.get("name") or node.get("code") or "").strip()
+    return str(node or "").strip()
+
+
+def _format_place_of_performance(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    city = _pop_name(raw.get("city"))
+    state = _pop_name(raw.get("state"))
+    country = _pop_name(raw.get("country"))
+    zip_code = str(raw.get("zip") or "").strip()
+    parts = [p for p in (city, state, zip_code, country) if p]
+    return ", ".join(parts)
+
+
+def _award_compensation(award: Any) -> str | None:
+    if not isinstance(award, dict):
+        return None
+    amount = award.get("amount")
+    if amount is None or amount == "":
+        return None
+    try:
+        return f"${float(amount):,.2f} award"
+    except (TypeError, ValueError):
+        text = str(amount).strip()
+        return text or None
+
+
+class SamGovLiveProvider:
+    """Read-only SAM.gov Get Opportunities Public API. Discovery-only.
+
+    Never submits proposals, contacts agencies, accepts contracts, or registers.
+    API key is read only from SAM_GOV_API_KEY and never embedded in source URLs
+    returned to callers or persisted diagnostics.
+    """
+
+    API_URL = "https://api.sam.gov/opportunities/v2/search"
+    PUBLIC_OPP_URL = "https://sam.gov/opp/{notice_id}/view"
+
+    meta = ProviderMeta(
+        provider_id="sam_gov",
+        label="SAM.gov opportunities",
+        provider_type="government_contracting",
+        enabled=True,
+        access_status="public_api_key_required",
+        access_mode="api",
+        requires_login=False,
+        requires_fee=False,
+        supports_detail_fetch=False,
+        supports_external_submission=False,
+        terms_safety_notes=(
+            "Read-only SAM.gov Get Opportunities Public API. Discovery only. "
+            "No proposal submission, agency contact, registration, or contract acceptance."
+        ),
+        pending_requirements=None,
+        priority=PROVIDER_TYPE_PRIORITY["government_contracting"],
+    )
+
+    def _require_key(self) -> str:
+        key = _sam_gov_api_key()
+        if not key:
+            raise SamGovUnavailable(
+                "provider unavailable: SAM_GOV_API_KEY missing from environment"
+            )
+        return key
+
+    def _posted_window(self) -> tuple[str, str]:
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=30)
+        return start.strftime("%m/%d/%Y"), today.strftime("%m/%d/%Y")
+
+    def _title_search_term(self, query: str) -> str:
+        cleaned = re.sub(r"\s+", " ", str(query or "").strip())
+        # Prefer multi-word digital phrases; fall back to first meaningful tokens.
+        if _SAM_DIGITAL_RELEVANCE.search(cleaned):
+            return cleaned[:120]
+        tokens = [t for t in re.findall(r"[A-Za-z]{3,}", cleaned) if t.lower() not in {"the", "and", "for"}]
+        if not tokens:
+            return "administrative support"
+        return " ".join(tokens[:6])[:120]
+
+    def _source_text_blob(self, raw: dict[str, Any], title: str) -> str:
+        """Title + original SAM text only (never synthetic boilerplate)."""
+        desc = str(raw.get("description") or "").strip()
+        if desc.lower().startswith("http"):
+            desc = ""
+        return f"{title} {_clean_html(desc)}"
+
+    def _is_digitally_relevant(self, title: str, source_blob: str) -> bool:
+        # Title-level hard rejects always win (construction, nursing, etc.).
+        if _SAM_HARD_REJECT.search(title):
+            return False
+        if _SAM_HARD_REJECT.search(source_blob) and not _SAM_DIGITAL_RELEVANCE.search(title):
+            return False
+        return bool(_SAM_DIGITAL_RELEVANCE.search(source_blob))
+
+    def _build_description(self, raw: dict[str, Any], *, place: str, set_aside: str | None) -> str:
+        parts = [
+            str(raw.get("title") or "").strip(),
+            f"Notice type: {str(raw.get('type') or '').strip()}" if raw.get("type") else "",
+            f"NAICS: {str(raw.get('naicsCode') or '').strip()}" if raw.get("naicsCode") else "",
+            f"Set-aside: {set_aside}" if set_aside else "",
+            f"Place of performance: {place}" if place else "",
+            "Public government contract opportunity. Discovery only.",
+        ]
+        # Prefer any inline textual description if SAM ever returns plain text.
+        desc = str(raw.get("description") or "").strip()
+        if desc and not desc.lower().startswith("http"):
+            parts.insert(1, _clean_html(desc)[:3500])
+        return _clean_html(" ".join(p for p in parts if p))[:5000]
+
+    def _parse_row(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        notice_id = str(raw.get("noticeId") or "").strip()
+        title = str(raw.get("title") or "").strip()
+        if not notice_id or not title:
+            return None
+        if not self._is_digitally_relevant(title, self._source_text_blob(raw, title)):
+            return None
+        agency = (
+            str(raw.get("fullParentPathName") or "").strip()
+            or str(raw.get("department") or "").strip()
+            or str(raw.get("subTier") or "").strip()
+            or "U.S. Government"
+        )
+        solicitation = str(raw.get("solicitationNumber") or "").strip() or None
+        response_deadline = str(raw.get("responseDeadLine") or raw.get("reponseDeadLine") or "").strip() or None
+        set_aside = (
+            str(raw.get("typeOfSetAsideDescription") or raw.get("setAside") or "").strip()
+            or str(raw.get("typeOfSetAside") or raw.get("setAsideCode") or "").strip()
+            or None
+        )
+        place = _format_place_of_performance(raw.get("placeOfPerformance"))
+        description = self._build_description(raw, place=place, set_aside=set_aside)
+        place_lower = place.lower()
+        if any(token in place_lower for token in ("remote", "virtual", "telework", "nationwide", "continental us")):
+            remote_status = "remote"
+        elif place:
+            remote_status = "unknown"
+        else:
+            remote_status = "unknown"
+        compensation = _award_compensation(raw.get("award"))
+        # Public UI link — never append api_key.
+        source_url = self.PUBLIC_OPP_URL.format(notice_id=notice_id)
+        return normalize_opportunity(
+            provider_id="sam_gov",
+            provider_type="government_contracting",
+            provider_identifier=notice_id,
+            notice_id=notice_id,
+            solicitation_number=solicitation,
+            agency=agency,
+            response_deadline=response_deadline,
+            place_of_performance=place or None,
+            set_aside=set_aside,
+            source_name="SAM.gov",
+            source_attribution="SAM.gov",
+            source_url=source_url,
+            title=title,
+            company_name=agency,
+            description=description,
+            compensation_text=compensation,
+            contract_type="government_contract",
+            job_type="contract",
+            remote_status=remote_status,
+            geography=place or "United States",
+            fee_required="no",
+            publication_date=(str(raw.get("postedDate") or "").strip() or None),
+            raw_source_metadata={
+                "origin": "sam_gov",
+                "notice_id": notice_id,
+                "solicitation_number": solicitation,
+                "agency": agency,
+                "response_deadline": response_deadline,
+                "place_of_performance": place or None,
+                "set_aside": set_aside,
+                "naics_code": str(raw.get("naicsCode") or "").strip() or None,
+                "notice_type": str(raw.get("type") or "").strip() or None,
+                "active": str(raw.get("active") or "").strip() or None,
+                # Store description endpoint without key if present.
+                "description_ref": (
+                    str(raw.get("description") or "").strip()
+                    if str(raw.get("description") or "").lower().startswith("http")
+                    else None
+                ),
+            },
+            simulated=False,
+        )
+
+    def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        key = self._require_key()
+        capped = max(1, min(25, int(limit)))
+        posted_from, posted_to = self._posted_window()
+        title_term = self._title_search_term(query)
+        params = {
+            "api_key": key,
+            "postedFrom": posted_from,
+            "postedTo": posted_to,
+            "limit": min(100, max(capped * 4, 25)),
+            "offset": 0,
+            "ptype": "o,k,r",
+            "title": title_term,
+        }
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                response = client.get(
+                    self.API_URL,
+                    params=params,
+                    headers={
+                        "User-Agent": "AMICOR-Nova/1.0 multi-source-discovery",
+                        "Accept": "application/json",
+                    },
+                )
+                if response.status_code in {401, 403}:
+                    raise SamGovUnavailable(
+                        "provider unavailable: SAM.gov API key rejected or expired"
+                    )
+                response.raise_for_status()
+                payload = response.json()
+        except SamGovUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001 - redact secrets before re-raise
+            raise RuntimeError(_redact_secret(f"{type(exc).__name__}: {exc}", key)) from None
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in list(payload.get("opportunitiesData") or []):
+            if not isinstance(raw, dict):
+                continue
+            row = self._parse_row(raw)
+            if not row:
+                continue
+            notice = str(row.get("notice_id") or "")
+            if notice in seen:
+                continue
+            seen.add(notice)
+            # Never leak the key into normalized records.
+            assert key not in str(row.get("source_url") or "")
+            assert key not in str(row.get("description") or "")
+            out.append(row)
+            if len(out) >= capped:
+                break
+        return out
+
+
 @dataclass
 class PendingProvider:
     meta: ProviderMeta
@@ -371,23 +699,6 @@ PENDING_PROVIDERS: list[PendingProvider] = [
     ),
     PendingProvider(
         ProviderMeta(
-            provider_id="sam_gov",
-            label="SAM.gov opportunities",
-            provider_type="government_contracting",
-            enabled=False,
-            access_status="pending_api_key",
-            access_mode="pending",
-            requires_login=False,
-            requires_fee=False,
-            supports_detail_fetch=True,
-            supports_external_submission=False,
-            terms_safety_notes="Public procurement data via SAM.gov API. Key required.",
-            pending_requirements="SAM.gov API key (api.data.gov) and entity registration confirmation for proposal paths.",
-            priority=PROVIDER_TYPE_PRIORITY["government_contracting"],
-        )
-    ),
-    PendingProvider(
-        ProviderMeta(
             provider_id="public_rfp_rss",
             label="Public RFP RSS feeds",
             provider_type="public_rfp_feed",
@@ -424,7 +735,7 @@ PENDING_PROVIDERS: list[PendingProvider] = [
 
 
 def live_providers() -> list[LiveDiscoveryProvider]:
-    return [RemotiveLiveProvider(), RemoteOkLiveProvider()]
+    return [RemotiveLiveProvider(), RemoteOkLiveProvider(), SamGovLiveProvider()]
 
 
 def all_provider_metas() -> list[ProviderMeta]:
@@ -437,13 +748,16 @@ def provider_catalog() -> list[dict[str, Any]]:
     out = []
     for meta in all_provider_metas():
         health = _health.get(meta.provider_id)
+        access_status = meta.access_status
+        if meta.provider_id == "sam_gov":
+            access_status = "api_key_configured" if sam_gov_key_configured() else "api_key_missing"
         out.append(
             {
                 "provider_id": meta.provider_id,
                 "label": meta.label,
                 "provider_type": meta.provider_type,
                 "enabled": meta.enabled,
-                "access_status": meta.access_status,
+                "access_status": access_status,
                 "access_mode": meta.access_mode,
                 "requires_login": meta.requires_login,
                 "requires_fee": meta.requires_fee,
@@ -539,7 +853,7 @@ def search_multi_source_jobs(
             _record_success(meta.provider_id, source_type=meta.provider_type, count=len(rows))
             collected.extend(rows)
         except Exception as exc:  # noqa: BLE001 - isolate provider outages
-            message = f"{type(exc).__name__}: {exc}"
+            message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
             _record_failure(meta.provider_id, source_type=meta.provider_type, error=message)
             errors.append({"provider_id": meta.provider_id, "error": message[:300]})
 
