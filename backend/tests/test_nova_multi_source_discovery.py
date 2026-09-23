@@ -671,3 +671,81 @@ def test_admin_search_filters_unrelated_technical_titles(monkeypatch) -> None:
     assert result["count"] == 1
     assert result["jobs"][0]["title"] == "Remote Administrative Support Contractor"
     assert result["external_action_taken"] is False
+
+
+
+def test_admin_search_targets_us_contract_and_rejects_employee_fee_and_foreign_only(monkeypatch) -> None:
+    monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "1")
+
+    class TargetProvider:
+        meta = ProviderMeta(
+            provider_id="admin-target-test",
+            label="Admin target test",
+            provider_type="remote_contract_feed",
+            enabled=True,
+            access_status="test",
+            access_mode="api",
+            requires_login=False,
+            requires_fee=False,
+            supports_detail_fetch=False,
+            supports_external_submission=False,
+            terms_safety_notes="test",
+            priority=1,
+        )
+
+        def search(self, query: str, *, limit: int = 10):
+            common = dict(
+                provider_id="admin-target-test",
+                provider_type="remote_contract_feed",
+                company_name="Example",
+                remote_status="remote",
+                simulated=False,
+            )
+            return [
+                normalize_opportunity(
+                    **common,
+                    provider_identifier="contract-us",
+                    source_url="https://example.test/contract-us",
+                    title="Remote Administrative Support Contractor",
+                    description="1099 contractor for scheduling, CRM cleanup and document support.",
+                    job_type="contract",
+                    geography="United States remote nationwide",
+                ),
+                normalize_opportunity(
+                    **common,
+                    provider_identifier="employee-us",
+                    source_url="https://example.test/employee-us",
+                    title="Remote Office Assistant",
+                    description="Full-time employee role with salary, benefits and 401(k).",
+                    job_type="employee",
+                    geography="United States",
+                ),
+                normalize_opportunity(
+                    **common,
+                    provider_identifier="fee",
+                    source_url="https://example.test/fee",
+                    title="Administrative Assistant Contractor",
+                    description="Contract work. Paid membership required to access applications.",
+                    job_type="contract",
+                    geography="United States",
+                ),
+                normalize_opportunity(
+                    **common,
+                    provider_identifier="foreign",
+                    source_url="https://example.test/foreign",
+                    title="Administrative Support Freelancer",
+                    description="Freelance administrative support.",
+                    job_type="freelance",
+                    geography="Europe",
+                ),
+            ]
+
+    result = search_multi_source_jobs(
+        "remote administrative support contractor",
+        limit=10,
+        providers_override=[TargetProvider()],
+    )
+
+    assert result["count"] == 1
+    assert result["jobs"][0]["title"] == "Remote Administrative Support Contractor"
+    assert result["external_action_taken"] is False
