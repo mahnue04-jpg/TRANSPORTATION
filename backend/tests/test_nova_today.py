@@ -815,3 +815,78 @@ def test_nova_anonymous_held_opportunity_surfaces_in_today_approval_queue(monkey
     assert match["source_module"] == "work_revenue"
     assert match["recommended_action"] == "open_link"
     assert "Workflow Automation RFP" in match["title"]
+
+
+
+def test_nova_anonymous_rejects_generic_bid_portal_homepage(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "fetch_web_search",
+        lambda *args, **kwargs: {
+            "status": "success",
+            "sources": [{
+                "title": "Search Government Bids, RFPs, RFQs & Contracts | Govcb",
+                "url": "https://www.govcb.com/",
+                "label": "www.govcb.com",
+                "snippet": "Find bid opportunities from state and local agencies. Search government bids, RFPs, RFQs, IFBs, contract opportunities and procurement notices.",
+            }],
+        },
+    )
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "Accepted 0 buyer leads" in body["answer"]
+    assert "directory_or_portal_page=15" in body["answer"]
+
+
+def test_nova_anonymous_accepts_specific_procurement_record(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "fetch_web_search",
+        lambda *args, **kwargs: {
+            "status": "success",
+            "sources": [{
+                "title": "RFP 2026-41 Workflow Automation Services",
+                "url": "https://procurement.example.gov/solicitations/2026-41",
+                "label": "procurement.example.gov",
+                "snippet": "Example County is accepting proposals from qualified vendors for workflow automation and administrative support services. Proposal deadline October 15.",
+            }],
+        },
+    )
+    captured = {}
+
+    def fake_persist(db, jobs, **kwargs):
+        captured["jobs"] = list(jobs)
+        return [{
+            "persisted": True,
+            "package_review_status": "HELD_FOR_OWNER_REVIEW",
+            "ready_for_owner_review": False,
+        }]
+
+    monkeypatch.setattr(today_service, "persist_ranked_jobs", fake_persist)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    assert len(captured["jobs"]) == 1
+    assert captured["jobs"][0]["title"] == "RFP 2026-41 Workflow Automation Services"
