@@ -805,6 +805,26 @@ _ADMIN_TECH_TITLE_REJECT = re.compile(
     r"software developer|software engineer|tech lead)\b",
     re.I,
 )
+_ADMIN_EMPLOYEE_SIGNALS = re.compile(
+    r"\b(full[- ]?time|part[- ]?time|employee|w-?2|salary|benefits|401\(k\)|401k|"
+    r"join our team|permanent position|staff position)\b",
+    re.I,
+)
+_ADMIN_PAID_ACCESS_SIGNALS = re.compile(
+    r"\b(upfront fee|membership fee|paid membership|subscription required|"
+    r"pay to apply|application fee|pay to access|payment required)\b",
+    re.I,
+)
+_ADMIN_NON_US_GEO = re.compile(
+    r"\b(europe|european union|germany|deutschland|uk only|united kingdom only|"
+    r"canada only|australia only|india only|emea|apac only)\b",
+    re.I,
+)
+_ADMIN_US_GEO = re.compile(
+    r"\b(united states|usa|u\.s\.|us only|nationwide|worldwide|anywhere|remote)\b",
+    re.I,
+)
+
 
 
 def _query_relevant(row: dict[str, Any], query: str) -> bool:
@@ -819,12 +839,33 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
 
     title = str(row.get("title") or "")
     description = str(row.get("description") or "")
+    geography = str(row.get("geography") or "")
+    job_type = str(row.get("job_type") or row.get("contract_type") or "")
+    combined = " ".join([title, description, geography, job_type])
+
     title_has_admin = bool(_ADMIN_JOB_SIGNALS.search(title))
     body_has_admin = bool(_ADMIN_JOB_SIGNALS.search(description))
 
     # Technical IC titles should not survive an admin search merely because
     # their descriptions contain generic words like support/operations.
     if _ADMIN_TECH_TITLE_REJECT.search(title) and not title_has_admin:
+        return False
+
+    # This query family is explicitly for contract/vendor work, not employee jobs.
+    if _ADMIN_EMPLOYEE_SIGNALS.search(combined) and not re.search(
+        r"\b(contract|contractor|freelance|1099|vendor|b2b|project[- ]based)\b",
+        combined,
+        re.I,
+    ):
+        return False
+
+    # Never surface pay-to-apply / paid-access admin opportunities.
+    if _ADMIN_PAID_ACCESS_SIGNALS.search(combined):
+        return False
+
+    # Prefer U.S.-remote/nationwide work. Worldwide is allowed, but explicit
+    # non-U.S.-only regions are removed from this U.S. contractor search.
+    if _ADMIN_NON_US_GEO.search(geography) and not _ADMIN_US_GEO.search(geography):
         return False
 
     return title_has_admin or body_has_admin
