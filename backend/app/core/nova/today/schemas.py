@@ -20,6 +20,7 @@ SOURCE_MODULES = (
     "communications",
     "government",
     "business",
+    "work_revenue",
     "link",
 )
 
