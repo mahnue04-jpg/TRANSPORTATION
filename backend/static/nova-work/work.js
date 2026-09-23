@@ -1236,7 +1236,7 @@
       event.preventDefault();
       var query = $("live-job-query").value.trim();
       if (!query) return;
-      $("live-job-status").textContent = "Nova is searching live jobs, applying risk/fit qualification, ranking matches, and auto-preparing only QUALIFIED candidates...";
+      $("live-job-status").textContent = "Nova is resetting the prior live-search list, searching only the requested capability family, and keeping only revenue-ready QUALIFIED matches...";
       $("live-job-results").innerHTML = "";
       try {
         var body = await api("/api/nova/v3/live/jobs/prepare", {
@@ -1253,7 +1253,9 @@
         var ranked = body.ranked_jobs || [];
         var counts = body.qualification_counts || {};
         $("live-job-status").textContent =
-          "Found/ranked " + (body.ranked_count || 0) +
+          "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
+          " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
+          " · found/ranked " + (body.ranked_count || 0) +
           " · selected " + (body.selected_count || 0) +
           " · QUALIFIED " + (counts.QUALIFIED || 0) +
           " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
@@ -1280,7 +1282,7 @@
           "No live opportunities matched. Try a broader search.",
           liveJobItem
         );
-        showBanner("Live discovery finished with qualification screening. Only QUALIFIED items were auto-prepared. External submission remains off.", true);
+        showBanner("New search session loaded. Prior unprotected live-search results were archived; only revenue-ready QUALIFIED matches were saved. External submission remains off.", true);
         await refresh();
       } catch (err) {
         $("live-job-status").textContent = err.message;
