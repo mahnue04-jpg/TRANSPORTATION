@@ -786,6 +786,50 @@ def provider_health_snapshot() -> list[dict[str, Any]]:
     return [row["health"] | {"label": row["label"], "provider_type": row["provider_type"]} for row in provider_catalog()]
 
 
+_ADMIN_QUERY_HINTS = re.compile(
+    r"\b(administrative|admin|virtual assistant|office assistant|operations support|"
+    r"project administration|scheduling support|data entry|crm cleanup|"
+    r"workflow documentation|business operations support)\b",
+    re.I,
+)
+_ADMIN_JOB_SIGNALS = re.compile(
+    r"\b(administrative|admin|assistant|office|clerical|scheduling|calendar|"
+    r"data entry|crm|document preparation|document support|records|"
+    r"operations support|business operations|project coordinator|project administration|"
+    r"customer operations|back office|reporting support)\b",
+    re.I,
+)
+_ADMIN_TECH_TITLE_REJECT = re.compile(
+    r"\b(engineer|developer|architect|data scientist|devops|full[- ]?stack|"
+    r"front[- ]?end|back[- ]?end|shopify|rails|machine learning|ml engineer|"
+    r"software developer|software engineer|tech lead)\b",
+    re.I,
+)
+
+
+def _query_relevant(row: dict[str, Any], query: str) -> bool:
+    """Reject obvious provider false positives before qualification.
+
+    This is intentionally narrow: it only applies an extra guard to
+    administrative/operations searches, where broad remote-job APIs commonly
+    return unrelated software roles. General searches keep provider behavior.
+    """
+    if not _ADMIN_QUERY_HINTS.search(str(query or "")):
+        return True
+
+    title = str(row.get("title") or "")
+    description = str(row.get("description") or "")
+    title_has_admin = bool(_ADMIN_JOB_SIGNALS.search(title))
+    body_has_admin = bool(_ADMIN_JOB_SIGNALS.search(description))
+
+    # Technical IC titles should not survive an admin search merely because
+    # their descriptions contain generic words like support/operations.
+    if _ADMIN_TECH_TITLE_REJECT.search(title) and not title_has_admin:
+        return False
+
+    return title_has_admin or body_has_admin
+
+
 def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -847,6 +891,7 @@ def search_multi_source_jobs(
             continue
         try:
             rows = provider.search(normalized, limit=capped)
+            rows = [row for row in rows if _query_relevant(row, normalized)]
             if not include_simulated:
                 rows = [row for row in rows if not row.get("simulated")]
             per_provider[meta.provider_id] = len(rows)
