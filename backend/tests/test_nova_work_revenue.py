@@ -210,7 +210,7 @@ def test_owner_approval_required_and_no_external_submit(client: TestClient) -> N
     assert any(OWNER_INPUT_REQUIRED in item["body"] for item in application["materials"])
     submit = client.post(f"/api/nova/work/applications/{application['application_id']}/submit", headers=headers)
     assert submit.status_code == 409
-    assert "FUTURE_SUBMISSION" in submit.json()["detail"]
+    assert "approval" in submit.json()["detail"].lower()
     manual = client.post(
         f"/api/nova/work/applications/{application['application_id']}/record-manual-submission",
         headers=headers,
@@ -230,12 +230,15 @@ def test_owner_approval_required_and_no_external_submit(client: TestClient) -> N
     assert approved.status_code == 200
     assert approved.json()["approval_state"] == "APPROVED"
     assert approved.json()["approved_for_future_submission"] is True
-    still_blocked = client.post(
+    handoff = client.post(
         f"/api/nova/work/applications/{application['application_id']}/submit",
         headers=headers,
     )
-    assert still_blocked.status_code == 409
-    assert "FUTURE_SUBMISSION" in still_blocked.json()["detail"]
+    assert handoff.status_code == 200, handoff.text
+    assert handoff.json()["status"] == "HUMAN_ACTION_REQUIRED"
+    assert handoff.json()["externally_submitted"] is False
+    assert handoff.json()["approval_consumed"] is False
+    assert handoff.json()["external_action_taken"] is False
     recorded = client.post(
         f"/api/nova/work/applications/{application['application_id']}/record-manual-submission",
         headers=headers,
@@ -682,7 +685,7 @@ def test_invalid_transition_and_unsafe_submission_refusal(client: TestClient) ->
     application_id = app_resp.json()["application_id"]
     submit = client.post(f"/api/nova/work/applications/{application_id}/submit", headers=headers)
     assert submit.status_code == 409
-    assert "FUTURE_SUBMISSION" in submit.json()["detail"]
+    assert "approval" in submit.json()["detail"].lower()
     assert app_resp.json()["externally_submitted"] is False
 
 
@@ -965,7 +968,10 @@ def test_today_summary_labels_sources_approvals_work_and_revenue(client: TestCli
     assert approved_summary["approved_for_future_submission"] >= 1
     assert approved_summary["approval_states"]["submitted"] == baseline_submitted
     submit = client.post(f"/api/nova/work/applications/{application_id}/submit", headers=headers)
-    assert submit.status_code == 409
+    assert submit.status_code == 200, submit.text
+    assert submit.json()["status"] == "HUMAN_ACTION_REQUIRED"
+    assert submit.json()["externally_submitted"] is False
+    assert submit.json()["approval_consumed"] is False
     still_approved = client.get("/api/nova/work/today-summary", headers=headers).json()
     assert still_approved["approval_states"]["approved"] == baseline_approved + 1
     assert still_approved["approval_states"]["submitted"] == baseline_submitted
@@ -1205,7 +1211,10 @@ def test_phase2_drafts_approval_engagement_task_deliverable_revenue(client: Test
         f"/api/nova/work/applications/{app_resp.json()['application_id']}/submit",
         headers=headers,
     )
-    assert submit.status_code == 409
+    assert submit.status_code == 200, submit.text
+    assert submit.json()["status"] == "HUMAN_ACTION_REQUIRED"
+    assert submit.json()["externally_submitted"] is False
+    assert submit.json()["approval_consumed"] is False
     facts = client.get("/api/nova/work/owner-facts", headers=headers)
     assert facts.status_code == 200
     assert facts.json()["facts"]

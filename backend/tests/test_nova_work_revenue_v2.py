@@ -443,7 +443,7 @@ def test_payment_event_cross_tenant_and_archived(client: TestClient) -> None:
 def test_v1_live_routes_still_blocked(client: TestClient) -> None:
     headers = _headers(client)
     submit = client.post("/api/nova/work/applications/NO-SUCH/submit", headers=headers)
-    assert submit.status_code == 409
+    assert submit.status_code == 404
     report = client.post("/api/nova/work/reports/NO-SUCH/send", headers=headers)
     assert report.status_code == 409
     invoice = client.post("/api/nova/work/invoice-support/NO-SUCH/send", headers=headers)

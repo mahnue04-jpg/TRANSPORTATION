@@ -13,6 +13,7 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.signup.service import customer_access
 from app.core.nova.work_revenue import service
+from app.core.nova.work_revenue import submission
 from app.core.nova.work_revenue.flags import engine_guardrails
 from app.core.nova.work_revenue.config import capabilities_surface
 from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
@@ -419,12 +420,24 @@ def decide_application(
 
 
 @router.post("/applications/{application_id}/submit")
-def refuse_submit(
+def submit_application(
     application_id: str,
+    organization_id: str | None = None,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ):
+    """Submit through a verified provider adapter, or return a truthful narrow handoff.
+
+    Approval is preserved when no external send occurs.
+    """
+    org_id = _resolve_org(user, organization_id)
     try:
-        service.refuse_external_submission()
+        return submission.submit_or_handoff(
+            db,
+            application_id,
+            organization_id=org_id,
+            user=user,
+        )
     except service.NovaWorkError as exc:
         _raise(exc)
 
