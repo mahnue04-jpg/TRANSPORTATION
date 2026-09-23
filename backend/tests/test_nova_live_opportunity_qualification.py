@@ -490,3 +490,43 @@ def test_simulated_records_remain_separate_from_live(monkeypatch):
     assert live["created"][0]["live_discovery"] is True
     assert live["created"][0]["provenance"]["synthetic"] is False
     assert live["created"][0]["qualification_status"] == OUTCOME_QUALIFIED
+
+
+
+def test_revenue_gate_rejects_simulated_fixture_even_when_capability_matches() -> None:
+    from app.core.nova.v3.live_qualification import OUTCOME_NOT_QUALIFIED, qualify_live_job
+
+    job = {
+        "title": "Remote administrative support contractor simulated/test fixture",
+        "company_name": "Example Operations Co",
+        "description": "Vendor welcome. Remote administrative research reporting and document preparation.",
+        "provider_id": "remotive",
+        "source_url": "https://example.com/test-opportunity",
+        "job_type": "contractor",
+        "remote_status": "remote",
+        "compensation_text": "$35/hr",
+    }
+    result = qualify_live_job(job)
+    assert result["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert result["real_opportunity"] is False
+    assert result["revenue_ready"] is False
+    assert "test_or_simulated_opportunity" in result["blockers"]
+
+
+def test_revenue_gate_requires_actionable_source_and_real_buyer() -> None:
+    from app.core.nova.v3.live_qualification import OUTCOME_NOT_QUALIFIED, qualify_live_job
+
+    job = {
+        "title": "Remote Administrative Assistant Contractor",
+        "company_name": "Unknown Company",
+        "description": "Vendor welcome. Remote administrative research reporting and document preparation.",
+        "provider_id": "remotive",
+        "job_type": "contractor",
+        "remote_status": "remote",
+        "compensation_text": "$35/hr",
+    }
+    result = qualify_live_job(job)
+    assert result["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert result["buyer_verified"] is False
+    assert result["source_actionable"] is False
+    assert result["revenue_ready"] is False

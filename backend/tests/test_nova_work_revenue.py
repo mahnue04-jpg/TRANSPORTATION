@@ -324,16 +324,24 @@ def test_status_transitions_and_tracker(client: TestClient) -> None:
 
 def test_simulated_ingest_and_today_summary(client: TestClient) -> None:
     headers = _headers(client)
+    before = client.get("/api/nova/work/dashboard", headers=headers).json()
+    real_before = before["counts"]["real_opportunities"]
+
     ingested = client.post("/api/nova/work/ingest/simulated", headers=headers)
     assert ingested.status_code == 200, ingested.text
     listed = client.get("/api/nova/work/opportunities", headers=headers).json()
     simulated = [row for row in listed if (row.get("source_type") or row.get("source")) == "simulated"]
     assert len(ingested.json()) >= 5 or len(simulated) >= 5
+
     summary = client.get("/api/nova/work/today-summary", headers=headers)
     assert summary.status_code == 200
     body = summary.json()
     assert body["href"] == "/nova/work"
-    assert body["work_opportunities"] >= 5
+
+    dashboard = client.get("/api/nova/work/dashboard", headers=headers).json()
+    assert dashboard["counts"]["simulated_fixtures"] >= 5
+    assert dashboard["counts"]["real_opportunities"] == real_before
+    assert body["work_opportunities"] == real_before
     providers = client.get("/api/nova/work/providers", headers=headers)
     ids = {row["provider_id"] for row in providers.json()}
     assert "manual" in ids

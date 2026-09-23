@@ -6,6 +6,7 @@ Never submits applications, contacts employers, pays fees, or creates accounts.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.nova.v3.capability_catalog import capability_fit
@@ -245,6 +246,72 @@ _GEO_HARD_TOKENS = (
     "on-site only",
     "in-office only",
 )
+
+
+_ANONYMOUS_CAPABILITY_HINTS = (
+    "administrative",
+    "admin",
+    "research",
+    "spreadsheet",
+    "data",
+    "reporting",
+    "document",
+    "crm",
+    "scheduling",
+    "customer support",
+    "back office",
+    "workflow",
+)
+
+
+def _is_simulated_or_test(job: dict[str, Any]) -> bool:
+    if bool(job.get("simulated")):
+        return True
+    blob = " ".join(
+        str(job.get(key) or "")
+        for key in ("title", "company_name", "provider_id", "source_attribution", "source_type")
+    ).lower()
+    return any(
+        token in blob
+        for token in (
+            "simulated/test fixture",
+            "simulated fixture",
+            "controlled test co",
+            "duty-class-prod-test",
+            "example logistics",
+            "example operations co",
+        )
+    )
+
+
+def _deadline_expired(job: dict[str, Any]) -> bool:
+    raw = str(job.get("response_deadline") or job.get("application_deadline") or "").strip()
+    if not raw:
+        return False
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc) < datetime.now(timezone.utc)
+
+
+def _buyer_present(job: dict[str, Any]) -> bool:
+    buyer = str(job.get("company_name") or job.get("agency") or job.get("client") or "").strip()
+    return bool(buyer and buyer.lower() not in {"unknown", "unknown company", "n/a", "none"})
+
+
+def _source_accessible(job: dict[str, Any]) -> bool:
+    url = str(job.get("source_url") or job.get("application_url") or "").strip().lower()
+    return url.startswith("https://")
+
+
+def _customer_type(capabilities: list[str]) -> str:
+    joined = " ".join(str(item or "").lower() for item in capabilities)
+    if any(token in joined for token in _ANONYMOUS_CAPABILITY_HINTS):
+        return "NOVA_ANONYMOUS_CUSTOMER"
+    return "NOVA_WORK_CUSTOMER"
 
 
 def _blob(job: dict[str, Any]) -> str:
@@ -489,6 +556,10 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     ai_policy, ai_ambiguous = _detect_ai_policy(text)
     compensation_ok = _compensation_present(job, text)
     source_ok = _source_legitimate(job)
+    simulated_or_test = _is_simulated_or_test(job)
+    active_ok = not _deadline_expired(job)
+    buyer_ok = _buyer_present(job)
+    source_accessible = _source_accessible(job)
     capability_result = capability_fit(text, title=str(job.get("title") or "") or None)
     capability_ok = bool(capability_result["fit"])
     credentials_hard = _has_any(text, _CREDENTIAL_TOKENS)
@@ -522,6 +593,18 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         )
     )
 
+    if simulated_or_test:
+        blockers.append("test_or_simulated_opportunity")
+        reasons.append("Test/simulated opportunities cannot qualify as revenue opportunities.")
+    if not active_ok:
+        blockers.append("opportunity_expired")
+        reasons.append("Opportunity deadline has passed.")
+    if not buyer_ok:
+        blockers.append("buyer_not_verified")
+        reasons.append("A real purchasing organization/client is not identified.")
+    if not source_accessible:
+        blockers.append("source_not_actionable")
+        reasons.append("A usable HTTPS source/application path is not available.")
     if work_type == WORK_EMPLOYEE:
         blockers.append("employee_w2_staff_role")
         reasons.append("Listing appears to be W-2/employee/staff employment, not AMICOR vendor/contract work.")
@@ -682,10 +765,41 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         risk = RISK_MEDIUM
         review_reasons.append(duty["owner_review_reason"] or "Duty review required before qualification.")
         owner_review_reason = duty["owner_review_reason"] or owner_review_reason
-    auto_prepare_allowed = outcome == OUTCOME_QUALIFIED and duty_class not in {
-        CANNOT_PERFORM,
-        INSUFFICIENT_INFORMATION,
-    }
+    # Revenue qualification is stricter than capability matching. A listing
+    # must be real, active, attributable to a buyer, actionable from a verified
+    # source, contract/vendor compatible, compensated, and a primary-duty match.
+    revenue_ready = all(
+        (
+            not simulated_or_test,
+            active_ok,
+            buyer_ok,
+            source_accessible,
+            source_ok,
+            fee_required == FEE_NO,
+            work_type in {WORK_B2B, WORK_FREELANCE, WORK_CONTRACTOR},
+            compensation_ok,
+            capability_ok,
+            duty_class not in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION, "NEEDS_OWNER_REVIEW"},
+            not human_evaluator,
+            not individual_specialist,
+            not credentials_hard,
+            not regulated,
+            not scam,
+        )
+    )
+    if outcome == OUTCOME_QUALIFIED and not revenue_ready:
+        outcome = OUTCOME_NEEDS_OWNER_REVIEW
+        risk = RISK_MEDIUM
+        review_reasons.append("Revenue qualification gates are incomplete; capability match alone is not enough.")
+        owner_review_reason = review_reasons[-1]
+
+    auto_prepare_allowed = (
+        outcome == OUTCOME_QUALIFIED
+        and revenue_ready
+        and duty_class not in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}
+    )
+
+    customer_type = _customer_type(list(capability_result.get("capabilities") or []))
 
     compensation_summary = str(job.get("compensation_text") or "").strip() or (
         "Compensation not stated" if not compensation_ok else "Compensation inferred from listing text"
@@ -728,6 +842,12 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
         "capability_owner_review_reason": duty["owner_review_reason"],
         "capability_registry_matches": duty["capability_registry_matches"],
         "owner_review_needed": duty["owner_review_needed"],
+        "revenue_ready": revenue_ready,
+        "real_opportunity": not simulated_or_test,
+        "active_opportunity": active_ok,
+        "buyer_verified": buyer_ok,
+        "source_actionable": source_accessible,
+        "customer_type": customer_type,
     }
 
 
