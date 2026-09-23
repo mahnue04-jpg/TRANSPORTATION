@@ -230,12 +230,15 @@ def test_owner_approval_required_and_no_external_submit(client: TestClient) -> N
     assert approved.status_code == 200
     assert approved.json()["approval_state"] == "APPROVED"
     assert approved.json()["approved_for_future_submission"] is True
-    still_blocked = client.post(
+    handoff = client.post(
         f"/api/nova/work/applications/{application['application_id']}/submit",
         headers=headers,
     )
-    assert still_blocked.status_code == 409
-    assert "FUTURE_SUBMISSION" in still_blocked.json()["detail"]
+    assert handoff.status_code == 200, handoff.text
+    assert handoff.json()["status"] == "HUMAN_ACTION_REQUIRED"
+    assert handoff.json()["externally_submitted"] is False
+    assert handoff.json()["approval_consumed"] is False
+    assert handoff.json()["external_action_taken"] is False
     recorded = client.post(
         f"/api/nova/work/applications/{application['application_id']}/record-manual-submission",
         headers=headers,
