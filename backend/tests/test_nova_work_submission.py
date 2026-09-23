@@ -78,3 +78,27 @@ def test_no_material_change_after_approval():
         organization_id="org-1",
         decided_at=decided_at,
     ) is False
+
+
+def test_naive_and_aware_timestamps_compare_safely():
+    from datetime import datetime, timezone
+
+    decided_at = datetime(2026, 9, 23, 4, 0, 0)  # SQLite-style naive UTC
+    newer = SimpleNamespace(updated_at=datetime(2026, 9, 23, 4, 0, 1, tzinfo=timezone.utc))
+
+    class Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def all(self):
+            return [newer]
+
+    class DB:
+        def query(self, *args, **kwargs):
+            return Query()
+
+    assert submission._materials_changed_after_approval(
+        DB(),
+        application_id="NWA-1",
+        organization_id="org-1",
+        decided_at=decided_at,
+    ) is True
