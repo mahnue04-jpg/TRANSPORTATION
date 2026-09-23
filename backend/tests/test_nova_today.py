@@ -765,3 +765,53 @@ def test_nova_anonymous_uses_source_snippet_for_buyer_intent(monkeypatch, client
     assert len(captured["jobs"]) == 1
     assert captured["jobs"][0]["provider_id"] == "web_buyer_discovery"
     assert "workflow automation" in captured["jobs"][0]["description"].lower()
+
+
+
+def test_nova_anonymous_held_opportunity_surfaces_in_today_approval_queue(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    candidate = {
+        "provider_id": "web_buyer_discovery",
+        "title": "Workflow Automation RFP",
+        "company_name": "Example Agency",
+        "source_url": "https://example.gov/rfp/123",
+        "description": "Agency seeks workflow automation support.",
+        "qualification_status": "NEEDS_OWNER_REVIEW",
+        "live_qualification": {
+            "qualification_status": "NEEDS_OWNER_REVIEW",
+            "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+            "revenue_ready": False,
+            "blockers": [],
+        },
+    }
+    monkeypatch.setattr(today_service, "targeted_queries_for_request", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [candidate])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "persist_ranked_jobs",
+        lambda *args, **kwargs: [{
+            "persisted": True,
+            "work_opportunity_id": "opp-review-123",
+            "package_review_status": "HELD_FOR_OWNER_REVIEW",
+            "ready_for_owner_review": False,
+        }],
+    )
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+
+    dash = client.get("/api/nova/today/dashboard", headers=headers)
+    assert dash.status_code == 200, dash.text
+    queue = dash.json()["approval_queue"]
+    match = next((row for row in queue if row["source_ref_id"] == "opp-review-123"), None)
+    assert match is not None
+    assert match["source_module"] == "work_revenue"
+    assert match["recommended_action"] == "open_link"
+    assert "Workflow Automation RFP" in match["title"]
