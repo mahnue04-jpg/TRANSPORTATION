@@ -79,6 +79,10 @@ from app.core.nova.today.schemas import (
     NovaTodaySourceHealth,
 )
 from app.core.nova.workspace.service import dashboard as workspace_dashboard
+from app.core.nova.work_revenue.capability_first_discovery import targeted_queries_for_request
+from app.core.nova.v3.multi_source_discovery import search_multi_source_jobs
+from app.core.nova.v3.live_qualification import OUTCOME_QUALIFIED, qualify_and_rank_live_jobs
+from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
 from app.helpers import now, uuid4
 from app.db.models import User as PlatformUser
 from sqlalchemy.orm import Session
@@ -1662,6 +1666,110 @@ def _build_today_ask_prompt(
     return primary + "\n\n" + supporting
 
 
+def _is_nova_anonymous_client_request(question: str) -> bool:
+    text = " ".join(str(question or "").lower().split())
+    names = (
+        "nova anonymous",
+        "amicor anonymous",
+        "anonymous operations agent",
+        "anonymous operation agent",
+        "autonomous operations agent",
+        "autonomous operation agent",
+    )
+    buyer_words = ("client", "customer", "buyer", "project", "contract", "work")
+    discovery_words = ("find", "search", "look for", "get", "locate", "discover")
+    return (
+        any(name in text for name in names)
+        and any(word in text for word in buyer_words)
+        and any(word in text for word in discovery_words)
+    )
+
+
+def _find_nova_anonymous_clients(
+    db: Session,
+    *,
+    question: str,
+    organization_id: str,
+    user: UserContext,
+) -> NovaTodayBrainOut:
+    """Run one owner-requested Nova Anonymous buyer-intent discovery cycle.
+
+    This is discovery/preparation only. It never contacts a buyer, submits a
+    proposal, accepts a contract, or executes a financial action.
+    """
+    search_plan = targeted_queries_for_request(question, max_queries=5)
+    collected: list[dict] = []
+    for planned in search_plan:
+        multi = search_multi_source_jobs(planned["query"], limit=10)
+        for raw in multi.get("jobs") or []:
+            item = dict(raw)
+            item["search_family"] = planned.get("search_family")
+            item["search_family_label"] = planned.get("search_family_label")
+            item["why_searched"] = planned.get("why_searched")
+            collected.append(item)
+
+    ranked = qualify_and_rank_live_jobs(question, collected)
+    qualified = [
+        row for row in ranked
+        if str((row.get("live_qualification") or {}).get("qualification_status") or row.get("qualification_status") or "") == OUTCOME_QUALIFIED
+        and bool((row.get("live_qualification") or {}).get("revenue_ready", row.get("revenue_ready")))
+        and str((row.get("live_qualification") or {}).get("customer_type") or row.get("customer_type") or "") == "NOVA_ANONYMOUS_CUSTOMER"
+    ][:10]
+
+    reset = reset_live_discovery_opportunities(
+        db,
+        organization_id=organization_id,
+        user=user,
+    )
+    persisted = persist_ranked_jobs(
+        db,
+        qualified,
+        organization_id=organization_id,
+        user=user,
+        prepare_applications=True,
+        prepare_limit=3,
+    )
+
+    sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in qualified:
+        url = str(row.get("source_url") or row.get("application_url") or "").strip()
+        if not url.startswith(("http://", "https://")) or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        sources.append({
+            "title": str(row.get("company_name") or row.get("client") or row.get("title") or "Buyer"),
+            "url": url,
+            "label": str(row.get("title") or "Nova Anonymous client opportunity"),
+        })
+
+    ready = [row for row in persisted if row.get("ready_for_owner_review")]
+    answer = (
+        f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
+        f"unprotected live-search opportunities and found {len(qualified)} revenue-ready client "
+        f"opportunit{'y' if len(qualified) == 1 else 'ies'} matching Nova Anonymous capabilities. "
+        f"{len(ready)} client package{' is' if len(ready) == 1 else 's are'} ready for owner review. "
+        "No client was contacted, no proposal was submitted, no contract was accepted, and no money moved."
+    )
+    if not qualified:
+        answer = (
+            f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
+            "unprotected live-search opportunities, but no revenue-ready buyer passed all capability and "
+            "qualification gates in this search. I did not save random or unsuitable work. "
+            "No client was contacted and nothing was submitted."
+        )
+
+    return NovaTodayBrainOut(
+        answer=answer,
+        fact_label="VERIFIED DATA",
+        next_actions=["Review Nova Work & Revenue client files"] if qualified else [],
+        generated_at=now().isoformat(),
+        source_href="/nova/work",
+        sources=sources[:10],
+        verification_status="verified",
+    )
+
+
 def _today_live_or_memory_answer(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -1672,6 +1780,27 @@ def _today_live_or_memory_answer(
     question = str(payload.question or "").strip()
     if not question:
         return None
+
+    if _is_nova_anonymous_client_request(question):
+        try:
+            return _find_nova_anonymous_clients(
+                db,
+                question=question,
+                organization_id=organization_id,
+                user=user,
+            )
+        except Exception:
+            return NovaTodayBrainOut(
+                answer=(
+                    "I couldn't complete the Nova Anonymous client search right now. "
+                    "I did not contact any client or submit anything. Please try the search again."
+                ),
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                source_href="/nova/work",
+                verification_status="unavailable",
+            )
 
     profile = read_user_profile(organization_id, user.user_id)
     account = db.query(PlatformUser).filter(PlatformUser.id == user.user_id).first()
