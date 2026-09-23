@@ -249,6 +249,69 @@ def persist_live_job(
     }
 
 
+def reset_live_discovery_opportunities(
+    db: Session,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    """Archive the previous live-discovery search set before a new owner search.
+
+    Manual records and simulated fixtures are untouched. Opportunities with
+    submitted/won/active downstream work are preserved so a new search cannot
+    erase business history or owner-approved work.
+    """
+    rows = work_service.list_opportunities(
+        db,
+        organization_id=organization_id,
+        user=user,
+        limit=None,
+    )
+    archived_ids: list[str] = []
+    preserved_ids: list[str] = []
+    protected_statuses = {
+        "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER", "WON",
+        "APPLICATION_PREPARED", "APPROVED_TO_APPLY",
+    }
+    for row in rows:
+        if str(row.source_type or "").lower() != "approved_api":
+            continue
+        if row.archived:
+            continue
+        app = work_service.get_application_for_opportunity(
+            db,
+            row.opportunity_id,
+            organization_id=organization_id,
+            user=user,
+        )
+        protected = (
+            row.status in protected_statuses
+            or bool(app and (
+                app.approved_for_future_submission
+                or app.externally_submitted
+                or app.manual_submission_recorded
+            ))
+        )
+        if protected:
+            preserved_ids.append(row.opportunity_id)
+            continue
+        row.archived = True
+        row.archive_reason = "Replaced by a newer owner-initiated live discovery search."
+        row.updated_at = work_service.now()
+        archived_ids.append(row.opportunity_id)
+    if archived_ids:
+        db.commit()
+    return {
+        "archived_count": len(archived_ids),
+        "archived_ids": archived_ids,
+        "preserved_count": len(preserved_ids),
+        "preserved_ids": preserved_ids,
+        "external_submission": False,
+        "client_contacted": False,
+        "financial_execution": False,
+    }
+
+
 def persist_ranked_jobs(
     db: Session,
     jobs: list[dict[str, Any]],
