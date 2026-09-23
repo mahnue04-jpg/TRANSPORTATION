@@ -16,6 +16,8 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     is_banned_query,
     score_discovery_candidate,
     search_family_catalog,
+    resolve_requested_family,
+    targeted_queries_for_request,
 )
 from app.core.nova.work_revenue.flags import EXTERNAL_SUBMISSION_ENABLED, FINANCIAL_ACTIONS_ENABLED
 
@@ -233,3 +235,21 @@ def test_search_family_never_generate_lists() -> None:
 def test_external_and_financial_remain_off() -> None:
     assert EXTERNAL_SUBMISSION_ENABLED is False
     assert FINANCIAL_ACTIONS_ENABLED is False
+
+
+
+def test_owner_request_resolves_to_specific_capability_family() -> None:
+    assert resolve_requested_family("find a bookkeeping job") == "bookkeeping_support"
+    assert resolve_requested_family("find writing work") == "document_writing"
+    assert resolve_requested_family("find AI operations work") == "ai_automation"
+    assert resolve_requested_family("find spreadsheet cleanup work") == "data_spreadsheet"
+
+
+def test_targeted_queries_do_not_drift_across_families() -> None:
+    rows = targeted_queries_for_request("find a bookkeeping job", max_queries=5)
+    assert rows
+    assert all(row["search_family"] == "bookkeeping_support" for row in rows)
+    assert all("bookkeep" in row["query"].lower() or row["query"] == "find a bookkeeping job" or any(
+        term in row["query"].lower()
+        for term in ("transaction", "expense", "invoice", "accounts", "reconciliation", "financial")
+    ) for row in rows)
