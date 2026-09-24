@@ -549,12 +549,17 @@ class SamGovLiveProvider:
             parts.insert(1, _clean_html(desc)[:3500])
         return _clean_html(" ".join(p for p in parts if p))[:5000]
 
-    def _parse_row(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+    def _parse_row(
+        self,
+        raw: dict[str, Any],
+        *,
+        enforce_relevance: bool = True,
+    ) -> dict[str, Any] | None:
         notice_id = str(raw.get("noticeId") or "").strip()
         title = str(raw.get("title") or "").strip()
         if not notice_id or not title:
             return None
-        if not self._is_digitally_relevant(title, self._source_text_blob(raw, title)):
+        if enforce_relevance and not self._is_digitally_relevant(title, self._source_text_blob(raw, title)):
             return None
         agency = (
             str(raw.get("fullParentPathName") or "").strip()
@@ -624,6 +629,62 @@ class SamGovLiveProvider:
             },
             simulated=False,
         )
+
+
+    def find_exact(self, identifier: str) -> dict[str, Any] | None:
+        """Read-only exact lookup by solicitation number or SAM notice ID."""
+        key = self._require_key()
+        value = str(identifier or "").strip()
+        if not value:
+            return None
+        today = datetime.now(timezone.utc).date()
+        posted_from = (today - timedelta(days=365)).strftime("%m/%d/%Y")
+        posted_to = today.strftime("%m/%d/%Y")
+
+        def _request(param_name: str) -> list[dict[str, Any]]:
+            params = {
+                "api_key": key,
+                "postedFrom": posted_from,
+                "postedTo": posted_to,
+                "limit": 25,
+                "offset": 0,
+                param_name: value,
+            }
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                response = client.get(
+                    self.API_URL,
+                    params=params,
+                    headers={
+                        "User-Agent": "AMICOR-Nova/1.0 exact-opportunity-review",
+                        "Accept": "application/json",
+                    },
+                )
+                if response.status_code in {401, 403}:
+                    raise SamGovUnavailable(
+                        "provider unavailable: SAM.gov API key rejected or expired"
+                    )
+                response.raise_for_status()
+                payload = response.json()
+            return [row for row in list(payload.get("opportunitiesData") or []) if isinstance(row, dict)]
+
+        try:
+            raw_rows = _request("solnum")
+            if not raw_rows:
+                raw_rows = _request("noticeid")
+        except SamGovUnavailable:
+            raise
+        except Exception as exc:
+            raise RuntimeError(_redact_secret(f"{type(exc).__name__}: {exc}", key)) from None
+
+        wanted = value.upper()
+        for raw in raw_rows:
+            ids = {
+                str(raw.get("solicitationNumber") or "").strip().upper(),
+                str(raw.get("noticeId") or "").strip().upper(),
+            }
+            if wanted in ids:
+                return self._parse_row(raw, enforce_relevance=False)
+        return None
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
         key = self._require_key()
