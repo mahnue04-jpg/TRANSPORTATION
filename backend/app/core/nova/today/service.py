@@ -656,6 +656,29 @@ def _upsert_proposed(
     organization_id: str,
     user: UserContext,
 ) -> NovaV2CommandAction:
+    # SessionLocal runs with autoflush=False. During a single Nova search, the
+    # same logical approval card can be encountered more than once before the
+    # final commit. A database query cannot see those pending db.new rows, so
+    # without this in-memory check we can stage duplicate rows and only discover
+    # the collision at commit time on ix_nova_v2_action_source.
+    for pending in tuple(db.new):
+        if not isinstance(pending, NovaV2CommandAction):
+            continue
+        if (
+            pending.organization_id == organization_id
+            and pending.owner_user_id == user.user_id
+            and pending.source_module == card.source_module
+            and pending.source_ref_id == card.source_ref_id
+            and pending.recommended_action == card.recommended_action
+        ):
+            if pending.status == "proposed":
+                pending.title = card.title
+                pending.detail = card.detail
+                pending.href = card.href
+                pending.trust_label = "ACTION REQUIRES APPROVAL"
+                pending.priority = card.priority
+            return pending
+
     standing = is_standing_synthetic(card.source_module, card.source_ref_id)
     if standing:
         existing = find_in_org_today_action(

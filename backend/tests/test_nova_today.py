@@ -1171,3 +1171,69 @@ def test_nova_anonymous_surfaces_today_approval_commit_integrity_stage(monkeypat
     assert "integrity_stage=today_approval_commit" in answer
     assert "constraint=uq_today_owner_source" in answer
     assert "insert hidden" not in answer
+
+
+
+def test_upsert_proposed_reuses_pending_row_when_autoflush_disabled(client: TestClient) -> None:
+    from app.core.nova.today import service as today_service
+
+    user = _user_from_login(client)
+    db = SessionLocal()
+    try:
+        org = user.organization_id or "org-test"
+        card = today_service._card(
+            source_module="work_revenue",
+            source_ref_id="NWO-PENDING-IDEMPOTENT",
+            title="Review Work & Revenue opportunity: first",
+            detail="first detail",
+            href="/nova/work",
+            trust_label="ACTION REQUIRES APPROVAL",
+            priority=70,
+            recommended_action="open_link",
+            explanation="first",
+        )
+        first = today_service._upsert_proposed(
+            db,
+            card,
+            organization_id=org,
+            user=user,
+        )
+        assert first in db.new
+
+        updated = today_service._card(
+            source_module="work_revenue",
+            source_ref_id="NWO-PENDING-IDEMPOTENT",
+            title="Review Work & Revenue opportunity: updated",
+            detail="updated detail",
+            href="/nova/work",
+            trust_label="ACTION REQUIRES APPROVAL",
+            priority=80,
+            recommended_action="open_link",
+            explanation="updated",
+        )
+        second = today_service._upsert_proposed(
+            db,
+            updated,
+            organization_id=org,
+            user=user,
+        )
+
+        assert second is first
+        matches = [
+            row for row in db.new
+            if isinstance(row, today_service.NovaV2CommandAction)
+            and row.organization_id == org
+            and row.owner_user_id == user.user_id
+            and row.source_module == "work_revenue"
+            and row.source_ref_id == "NWO-PENDING-IDEMPOTENT"
+            and row.recommended_action == "open_link"
+        ]
+        assert len(matches) == 1
+        assert first.title.endswith("updated")
+        assert first.detail == "updated detail"
+        assert first.priority == 80
+
+        db.commit()
+    finally:
+        db.rollback()
+        db.close()
