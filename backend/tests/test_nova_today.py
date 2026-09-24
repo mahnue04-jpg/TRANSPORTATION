@@ -1017,3 +1017,56 @@ def test_nova_anonymous_search_uses_capability_first_queries(monkeypatch, client
     assert "rfp" in blob or "proposal" in blob
     assert all("delivery driver" not in query.lower() for query in seen_queries)
     assert all("registered nurse" not in query.lower() for query in seen_queries)
+
+
+
+def test_nova_anonymous_query_failure_isolated_and_reported(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    calls = {"n": 0}
+    def fake_multi(query, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("provider aggregator boom")
+        return {
+            "jobs": [],
+            "providers_queried": ["sam_gov", "remotive", "remoteok"],
+            "provider_result_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_screened_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_errors": [],
+        }
+
+    monkeypatch.setattr(today_service, "search_multi_source_jobs", fake_multi)
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "query_pipeline: RuntimeError: dedicated query failed" in answer
+    assert "No client was contacted and nothing was submitted." in answer
+
+
+def test_nova_anonymous_outer_failure_returns_safe_error_class(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    monkeypatch.setattr(
+        today_service,
+        "_find_nova_anonymous_clients",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("secret details must not leak")),
+    )
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "pipeline_error=ValueError" in answer
+    assert "secret details must not leak" not in answer
