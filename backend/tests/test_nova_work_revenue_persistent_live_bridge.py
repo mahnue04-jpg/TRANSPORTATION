@@ -477,6 +477,10 @@ def test_live_bridge_recovers_integrity_error_on_duplicate_insert(monkeypatch, c
         }
         first = bridge.persist_live_job(db, job, organization_id=org, user=user)
         assert first["persisted"] is True
+        assert first["opportunity_title"] == "Workflow Automation Contractor"
+        assert first["company_name"] == "Example Buyer"
+        assert first["source_url"] == "https://example.com/opportunity/123"
+        assert "application_url" in first
         original_create = bridge.work_service.create_discovered_opportunity
 
         def race_create(*args, **kwargs):
