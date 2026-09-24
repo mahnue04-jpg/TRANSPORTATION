@@ -484,13 +484,40 @@ class SamGovLiveProvider:
 
     def _title_search_term(self, query: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(query or "").strip())
-        # Prefer multi-word digital phrases; fall back to first meaningful tokens.
-        if _SAM_DIGITAL_RELEVANCE.search(cleaned):
-            return cleaned[:120]
-        tokens = [t for t in re.findall(r"[A-Za-z]{3,}", cleaned) if t.lower() not in {"the", "and", "for"}]
+        low = cleaned.lower()
+        # SAM title search is much narrower than general job-board search.
+        # Convert Nova capability phrases to short procurement-friendly terms
+        # instead of sending long freelance/remote wording that often yields 0.
+        canonical = (
+            ("rfp", "proposal support"),
+            ("proposal", "proposal support"),
+            ("sop", "technical writing"),
+            ("technical writing", "technical writing"),
+            ("document", "document support"),
+            ("records", "records management"),
+            ("spreadsheet", "data support"),
+            ("data cleaning", "data support"),
+            ("data cleanup", "data support"),
+            ("research", "research support"),
+            ("competitor", "market research"),
+            ("customer support", "customer support"),
+            ("crm", "administrative support"),
+            ("bookkeeping", "financial support"),
+            ("invoice", "financial support"),
+            ("workflow automation", "workflow"),
+            ("automation", "workflow"),
+            ("api integration", "information technology"),
+            ("web development", "information technology"),
+            ("operations", "operations support"),
+            ("administrative", "administrative support"),
+        )
+        for signal, term in canonical:
+            if signal in low:
+                return term
+        tokens = [t for t in re.findall(r"[A-Za-z]{3,}", cleaned) if t.lower() not in {"the", "and", "for", "remote", "contractor", "freelance", "project"}]
         if not tokens:
             return "administrative support"
-        return " ".join(tokens[:6])[:120]
+        return " ".join(tokens[:3])[:80]
 
     def _source_text_blob(self, raw: dict[str, Any], title: str) -> str:
         """Title + original SAM text only (never synthetic boilerplate)."""
@@ -826,6 +853,20 @@ _ADMIN_US_GEO = re.compile(
 )
 
 
+_VENDOR_INTENT_QUERY = re.compile(
+    r"\b(contract|contractor|freelance|vendor|b2b|project)\b",
+    re.I,
+)
+_VENDOR_COMPATIBLE_SIGNALS = re.compile(
+    r"\b(contract|contractor|freelance|1099|vendor|b2b|consultant|project[- ]based|statement of work|sow)\b",
+    re.I,
+)
+_EMPLOYEE_ONLY_SIGNALS = re.compile(
+    r"\b(w-?2|full[- ]?time employee|part[- ]?time employee|employee role|salary|benefits|401\(k\)|401k|join our team|staff position|talent network)\b",
+    re.I,
+)
+
+
 _ADMIN_STRONG_TITLE = re.compile(
     r"\b("
     r"administrative (?:assistant|support|coordinator|specialist)|"
@@ -876,14 +917,21 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     administrative/operations searches, where broad remote-job APIs commonly
     return unrelated software roles. General searches keep provider behavior.
     """
-    if not _ADMIN_QUERY_HINTS.search(str(query or "")):
-        return True
-
     title = str(row.get("title") or "")
     description = str(row.get("description") or "")
     geography = str(row.get("geography") or "")
     job_type = str(row.get("job_type") or row.get("contract_type") or "")
     combined = " ".join([title, description, geography, job_type])
+
+    # For any explicit vendor/contract/project search, remove obvious employee-
+    # only feed results before expensive qualification. This preserves true
+    # contractor/freelance/B2B listings while reducing W-2/talent-network noise.
+    if _VENDOR_INTENT_QUERY.search(str(query or "")):
+        if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
+            return False
+
+    if not _ADMIN_QUERY_HINTS.search(str(query or "")):
+        return True
 
     title_has_admin = bool(_ADMIN_JOB_SIGNALS.search(title))
     body_has_admin = bool(_ADMIN_JOB_SIGNALS.search(description))
