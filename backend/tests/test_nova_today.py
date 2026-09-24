@@ -928,3 +928,55 @@ def test_nova_anonymous_uses_dedicated_sources_without_web_fallback(monkeypatch,
     answer = response.json()["answer"]
     assert "dedicated-source search completed" in answer
     assert "Public-web fallback was intentionally not used" in answer
+
+
+
+def test_nova_anonymous_reports_qualification_rejection_diagnostics(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    raw = {
+        "provider_id": "remotive",
+        "title": "Administrative Assistant",
+        "company_name": "Example Co",
+        "source_url": "https://example.com/job/1",
+    }
+    ranked = [{
+        **raw,
+        "live_qualification": {
+            "qualification_status": "NOT_QUALIFIED",
+            "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+            "revenue_ready": False,
+            "blockers": ["employee_w2_staff_role"],
+            "work_type": "employee",
+            "discovery_band": "REJECT",
+            "capability_classification": "CAN_PERFORM",
+        },
+    }]
+
+    monkeypatch.setattr(
+        today_service,
+        "search_multi_source_jobs",
+        lambda *args, **kwargs: {
+            "jobs": [raw],
+            "providers_queried": ["remotive"],
+            "provider_result_counts": {"remotive": 1},
+            "provider_screened_counts": {"remotive": 1},
+            "provider_errors": [],
+        },
+    )
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: ranked)
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "Qualification statuses:" in answer
+    assert "NOT_QUALIFIED=6" in answer
+    assert "employee_w2_staff_role=6" in answer
+    assert "Work types: employee=6" in answer
+    assert "Provider qualification outcomes: remotive:NOT_QUALIFIED=6" in answer
