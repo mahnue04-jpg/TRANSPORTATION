@@ -449,3 +449,44 @@ def test_new_search_reset_archives_unprotected_live_but_preserves_manual(db_sess
     assert result["archived_count"] == 1
     assert live.archived is True
     assert manual.archived is False
+
+
+
+def test_live_bridge_recovers_integrity_error_on_duplicate_insert(monkeypatch, client: TestClient) -> None:
+    from sqlalchemy.exc import IntegrityError
+    from app.core.nova.v3 import work_revenue_bridge as bridge
+
+    user = _user_from_login(client)
+    db = SessionLocal()
+    try:
+        org = user.organization_id or "org-test"
+        job = {
+            "provider_id": "remotive",
+            "title": "Workflow Automation Contractor",
+            "company_name": "Example Buyer",
+            "source_url": "https://example.com/opportunity/123",
+            "description": "Project-based workflow automation support.",
+            "remote_status": "remote",
+            "job_type": "contract",
+            "qualification_status": "QUALIFIED",
+            "live_qualification": {
+                "qualification_status": "QUALIFIED",
+                "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+                "revenue_ready": True,
+            },
+        }
+        first = bridge.persist_live_job(db, job, organization_id=org, user=user)
+        assert first["persisted"] is True
+        original_create = bridge.work_service.create_discovered_opportunity
+
+        def race_create(*args, **kwargs):
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+        monkeypatch.setattr(bridge.work_service, "create_discovered_opportunity", race_create)
+        second = bridge.persist_live_job(db, job, organization_id=org, user=user)
+        assert second["persisted"] is True
+        assert second["work_opportunity_id"] == first["work_opportunity_id"]
+        monkeypatch.setattr(bridge.work_service, "create_discovered_opportunity", original_create)
+    finally:
+        db.rollback()
+        db.close()
