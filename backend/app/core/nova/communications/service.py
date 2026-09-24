@@ -316,6 +316,7 @@ def record_send_request(
 
 
 def send_blocked(payload: NovaCommsSendRequest) -> None:
+    """Backward-compatible guard used by older callers/tests."""
     if not payload.confirm_send:
         raise NovaCommunicationsError(
             "Sending requires an explicit confirm_send action by the signed-in user.",
@@ -326,10 +327,86 @@ def send_blocked(payload: NovaCommsSendRequest) -> None:
             "External email send is disabled. Save a draft instead. Stripe LIVE and autonomous send remain off.",
             status_code=403,
         )
-    raise NovaCommunicationsError(
-        "External send is not enabled in this Nova Communications phase. Use drafts.",
-        status_code=403,
+
+
+def _preferred_email_provider(db: Session, user: UserContext) -> str:
+    rows = (
+        db.query(IntegrationAccount)
+        .filter(IntegrationAccount.user_id == user.user_id, IntegrationAccount.service == "email")
+        .all()
     )
+    by_provider = {str(row.provider or "").lower(): row for row in rows}
+    for provider in ("gmail", "outlook", "smtp"):
+        row = by_provider.get(provider)
+        if row is not None and (row.account_email or row.access_token or row.meta_json):
+            return provider
+    if os.getenv("SMTP_HOST"):
+        return "smtp"
+    raise NovaCommunicationsError(
+        "No approved email provider is connected for this Nova account.",
+        status_code=409,
+    )
+
+
+def send_confirmed(
+    db: Session,
+    payload: NovaCommsSendRequest,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, object]:
+    """Owner-confirmed email send through the existing ecosystem provider layer.
+
+    This is never autonomous: confirm_send and NOVA_COMMUNICATIONS_ALLOW_SEND=1
+    are both required for every send.
+    """
+    send_blocked(payload)
+
+    to = [str(item).strip() for item in (payload.to or []) if str(item).strip()]
+    subject = str(payload.subject or "").strip()
+    body = str(payload.body or "")
+    if not to:
+        raise NovaCommunicationsError("At least one recipient is required.", status_code=422)
+    if not subject:
+        raise NovaCommunicationsError("Subject is required.", status_code=422)
+
+    provider = _preferred_email_provider(db, user)
+    try:
+        from app.ecosystem import EmailSendRequest, send_email as ecosystem_send_email
+        result = ecosystem_send_email(
+            EmailSendRequest(
+                user_id=user.user_id,
+                provider=provider,
+                to=to,
+                subject=subject,
+                body=body,
+                save_as_draft=False,
+            )
+        )
+    except Exception as exc:
+        detail = getattr(exc, "detail", None)
+        raise NovaCommunicationsError(
+            str(detail or "Email provider send failed."),
+            status_code=int(getattr(exc, "status_code", 502) or 502),
+        ) from exc
+
+    _notify(
+        db,
+        organization_id=organization_id,
+        owner_user_id=user.user_id,
+        kind="email_sent",
+        title=f"Email sent: {subject}",
+        detail=f"Owner-confirmed send to {', '.join(to[:3])}.",
+    )
+    db.commit()
+    return {
+        "status": "sent",
+        "provider": str((result or {}).get("provider") or provider),
+        "to": to,
+        "subject": subject,
+        "owner_confirmed": True,
+        "autonomous": False,
+    }
 
 
 def list_events(db: Session, *, user: UserContext) -> list[CalendarEventRecord]:
