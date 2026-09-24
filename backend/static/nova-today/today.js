@@ -31,18 +31,26 @@
   function setVoiceStatus(message) {
     if ($("voice-status")) $("voice-status").textContent = message;
   }
-  function preferredNovaVoice() {
-    if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
-    var voices = window.speechSynthesis.getVoices() || [];
-    var english = voices.filter(function (voice) {
-      return String(voice.lang || "").toLowerCase().indexOf("en") === 0;
-    });
-    var preferred = english.find(function (voice) {
-      return /natural|neural|google us english|microsoft.*(aria|jenny|sonia|zira)/i.test(String(voice.name || ""));
-    });
-    return preferred || english[0] || voices[0] || null;
+  var novaHumanVoice = null;
+  function getNovaHumanVoice() {
+    if (!novaHumanVoice && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
+      novaHumanVoice = window.AmiCorHumanVoice.createEngine({
+        browserFallbackEnabled: true,
+        onState: function (state) {
+          if (state && state.speaking) setVoiceStatus("Nova is speaking naturally…");
+          else if (state && state.reason) setVoiceStatus("Ready.");
+        }
+      });
+    }
+    return novaHumanVoice;
   }
   function stopNovaSpeaking() {
+    var engine = getNovaHumanVoice();
+    if (engine) {
+      engine.stop("owner-stop");
+      setVoiceStatus("Nova stopped speaking.");
+      return;
+    }
     if (!window.speechSynthesis) return;
     try {
       window.speechSynthesis.cancel();
@@ -50,19 +58,23 @@
     } catch (_) {}
   }
   function speakNova(text) {
-    if (!window.speechSynthesis || !text) return;
+    if (!text) return;
+    var engine = getNovaHumanVoice();
+    if (engine) {
+      engine.speak(String(text), { persona: "Warm Conversational" }).catch(function () {
+        setVoiceStatus("Natural voice is temporarily unavailable.");
+      });
+      return;
+    }
+    if (!window.speechSynthesis) return;
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(String(text));
-      var voice = preferredNovaVoice();
-      if (voice) utterance.voice = voice;
-      utterance.lang = (voice && voice.lang) || "en-US";
-      utterance.rate = 0.94;
-      utterance.pitch = 1.02;
-      utterance.volume = 1;
+      utterance.lang = "en-US";
+      utterance.rate = 0.98;
+      utterance.pitch = 1.01;
       utterance.onstart = function () { setVoiceStatus("Nova is speaking…"); };
       utterance.onend = function () { setVoiceStatus("Ready."); };
-      utterance.onerror = function () { setVoiceStatus("Voice playback stopped."); };
       window.speechSynthesis.speak(utterance);
     } catch (_) {}
   }
