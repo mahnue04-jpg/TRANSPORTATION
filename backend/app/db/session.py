@@ -26,6 +26,8 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", _default_url)
 # host, database name, or any other connection-string component.
 if DATABASE_URL.startswith("postgresql+psycopg://"):
     DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql+psycopg://"):]
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://"):]
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
