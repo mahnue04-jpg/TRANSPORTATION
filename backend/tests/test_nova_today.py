@@ -890,3 +890,41 @@ def test_nova_anonymous_accepts_specific_procurement_record(monkeypatch, client:
     assert response.status_code == 200, response.text
     assert len(captured["jobs"]) == 1
     assert captured["jobs"][0]["title"] == "RFP 2026-41 Workflow Automation Services"
+
+
+
+def test_nova_anonymous_uses_dedicated_sources_without_web_fallback(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    calls = []
+    def fake_multi(query, **kwargs):
+        calls.append((query, kwargs))
+        return {
+            "jobs": [],
+            "providers_queried": ["sam_gov", "remotive", "remoteok"],
+            "provider_result_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_screened_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_errors": [],
+        }
+
+    monkeypatch.setattr(today_service, "search_multi_source_jobs", fake_multi)
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(
+        today_service,
+        "_discover_nova_anonymous_web_buyers",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("public web fallback must not run")),
+    )
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    assert calls
+    assert all(call[1].get("provider_ids") == ["sam_gov", "remotive", "remoteok"] for call in calls)
+    answer = response.json()["answer"]
+    assert "dedicated-source search completed" in answer
+    assert "Public-web fallback was intentionally not used" in answer

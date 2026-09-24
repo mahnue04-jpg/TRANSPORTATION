@@ -2013,15 +2013,49 @@ def _find_nova_anonymous_clients(
     This is discovery/preparation only. It never contacts a buyer, submits a
     proposal, accepts a contract, or executes a financial action.
     """
-    search_plan = targeted_queries_for_request(question, max_queries=5)
+    # Dedicated opportunity sources are the primary discovery path for Nova
+    # Anonymous client acquisition. Public-web buyer discovery is intentionally
+    # not used here unless a future owner-approved mode explicitly enables it.
+    dedicated_queries = (
+        "administrative support contractor",
+        "business operations support contractor",
+        "workflow automation services",
+        "data entry spreadsheet support contractor",
+        "document processing records management support",
+        "project administration operations support",
+    )
     collected: list[dict] = []
-    for planned in search_plan:
-        multi = search_multi_source_jobs(planned["query"], limit=10)
+    dedicated_diagnostics = {
+        "providers_queried": [],
+        "provider_result_counts": {},
+        "provider_screened_counts": {},
+        "provider_errors": [],
+        "queries_run": 0,
+    }
+    for query in dedicated_queries:
+        multi = search_multi_source_jobs(
+            query,
+            limit=10,
+            provider_ids=["sam_gov", "remotive", "remoteok"],
+        )
+        dedicated_diagnostics["queries_run"] += 1
+        dedicated_diagnostics["providers_queried"] = list(dict.fromkeys(
+            dedicated_diagnostics["providers_queried"] + list(multi.get("providers_queried") or [])
+        ))
+        for provider_id, count in dict(multi.get("provider_result_counts") or {}).items():
+            dedicated_diagnostics["provider_result_counts"][provider_id] = (
+                int(dedicated_diagnostics["provider_result_counts"].get(provider_id, 0)) + int(count)
+            )
+        for provider_id, count in dict(multi.get("provider_screened_counts") or {}).items():
+            dedicated_diagnostics["provider_screened_counts"][provider_id] = (
+                int(dedicated_diagnostics["provider_screened_counts"].get(provider_id, 0)) + int(count)
+            )
+        dedicated_diagnostics["provider_errors"].extend(list(multi.get("provider_errors") or []))
         for raw in multi.get("jobs") or []:
             item = dict(raw)
-            item["search_family"] = planned.get("search_family")
-            item["search_family_label"] = planned.get("search_family_label")
-            item["why_searched"] = planned.get("why_searched")
+            item["search_family"] = "nova_anonymous_dedicated_sources"
+            item["search_family_label"] = "Dedicated opportunity sources"
+            item["why_searched"] = question
             collected.append(item)
 
     ranked = qualify_and_rank_live_jobs(question, collected)
@@ -2041,12 +2075,11 @@ def _find_nova_anonymous_clients(
             reviewable.append(row)
 
     candidates = (qualified + reviewable)[:10]
+    # Do not fall back to broad public-web discovery for this workflow.
+    # Dedicated providers may return zero; that is safer and more actionable
+    # than promoting search portals or general pages as buyer opportunities.
     web_reviewable: list[dict] = []
-    web_diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": []}
-    if not candidates:
-        web_reviewable, web_diagnostics = _discover_nova_anonymous_web_buyers(question, max_candidates=6)
-        reviewable.extend(web_reviewable)
-        candidates = web_reviewable[:10]
+    web_diagnostics = {"queries_run": 0, "sources_seen": 0, "provider_statuses": [], "skipped": True}
 
     reset = reset_live_discovery_opportunities(
         db,
@@ -2130,20 +2163,24 @@ def _find_nova_anonymous_clients(
         "No client was contacted, no proposal was submitted, no contract was accepted, and no money moved."
     )
     if not candidates:
-        statuses = sorted(set(web_diagnostics.get("provider_statuses") or []))
-        provider_note = ", ".join(statuses) if statuses else "not-run"
-        rejected = dict(web_diagnostics.get("rejected") or {})
-        rejected_summary = ", ".join(
-            f"{reason}={count}" for reason, count in sorted(rejected.items())
-        ) or "none"
+        counts = dict(dedicated_diagnostics.get("provider_result_counts") or {})
+        screened = dict(dedicated_diagnostics.get("provider_screened_counts") or {})
+        errors = list(dedicated_diagnostics.get("provider_errors") or [])
+        providers = ", ".join(dedicated_diagnostics.get("providers_queried") or []) or "none"
+        count_text = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none"
+        screened_text = ", ".join(f"{k}={v}" for k, v in sorted(screened.items())) or "none"
+        error_text = "; ".join(
+            f"{item.get('provider_id')}: {item.get('error')}" for item in errors
+        )[:800] or "none"
         answer = (
-            f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
-            "unprotected live-search opportunities. The strict discovery path produced no usable buyer, "
-            f"so public buyer-intent fallback ran {web_diagnostics.get('queries_run', 0)} bounded searches "
-            f"and received {web_diagnostics.get('sources_seen', 0)} source results "
-            f"(search status: {provider_note}). Accepted {web_diagnostics.get('accepted', 0)} buyer leads; "
-            f"rejections: {rejected_summary}. "
-            "I did not save random or unsuitable work. No client was contacted and nothing was submitted."
+            f"Nova Anonymous dedicated-source search completed. I replaced {reset.get('archived_count', 0)} prior "
+            "unprotected live-search opportunities. "
+            f"Dedicated providers queried: {providers}. "
+            f"Provider accepted-result counts: {count_text}. Provider screened counts: {screened_text}. "
+            f"Provider errors: {error_text}. "
+            "No qualified buyer opportunity passed Nova's capability and safety gates. "
+            "Public-web fallback was intentionally not used. "
+            "No client was contacted and nothing was submitted."
         )
 
     return NovaTodayBrainOut(
