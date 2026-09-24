@@ -633,7 +633,12 @@ class SamGovLiveProvider:
                 "resource_links": [
                     str(item).strip()
                     for item in list(raw.get("resourceLinks") or [])
-                    if str(item or "").strip()
+                    if isinstance(item, str) and str(item or "").strip()
+                ][:12],
+                "resource_link_objects": [
+                    dict(item)
+                    for item in list(raw.get("resourceLinks") or [])
+                    if isinstance(item, dict)
                 ][:12],
                 "additional_info_link": str(raw.get("additionalInfoLink") or "").strip() or None,
             },
@@ -702,6 +707,24 @@ class SamGovLiveProvider:
             for item in list(metadata.get("resource_links") or [])
             if self._allowed_sam_resource_url(str(item or ""))
         ]
+        # SAM resourceLinks may be strings or structured objects depending on
+        # notice/version.  Do not stringify objects: extract URL-like values.
+        for item in list(metadata.get("resource_link_objects") or []):
+            if not isinstance(item, dict):
+                continue
+            for key_name in (
+                "url", "href", "link", "resourceUrl", "resourceURL",
+                "downloadUrl", "downloadURL", "uri",
+            ):
+                candidate = str(item.get(key_name) or "").strip()
+                if self._allowed_sam_resource_url(candidate):
+                    links.append(candidate)
+                    break
+        additional = str(metadata.get("additional_info_link") or "").strip()
+        if self._allowed_sam_resource_url(additional):
+            links.append(additional)
+        # Keep stable order while removing duplicates.
+        links = list(dict.fromkeys(links))
         if not links:
             return None
 
