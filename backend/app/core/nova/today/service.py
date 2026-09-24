@@ -2572,6 +2572,26 @@ def _answer_saved_work_opportunity(
                     None,
                 )
             if match:
+                # Re-qualify the enriched live SAM record.  The saved Work & Revenue
+                # row may predate notice-description enrichment, so keeping its
+                # persisted qualification here would discard the duties that the
+                # exact SAM refresh just retrieved.
+                qualification = qualify_live_job(match)
+                outcome = str(
+                    qualification.get("qualification_outcome")
+                    or qualification.get("qualification_status")
+                    or "NEEDS_OWNER_REVIEW"
+                )
+                display_outcome = {
+                    "NOVA_CAN_PERFORM": "CAN PERFORM",
+                    "NOVA_WITH_OWNER_REVIEW": "NEEDS OWNER REVIEW",
+                    "HUMAN_REQUIRED": "NEEDS OWNER REVIEW",
+                    "INSUFFICIENT_INFORMATION": "NEEDS OWNER REVIEW",
+                    "NOT_SUITABLE": "CANNOT PERFORM",
+                    "QUALIFIED": "CAN PERFORM",
+                    "NEEDS_OWNER_REVIEW": "NEEDS OWNER REVIEW",
+                    "NOT_QUALIFIED": "CANNOT PERFORM",
+                }.get(outcome, "NEEDS OWNER REVIEW")
                 for key in source_details:
                     source_details[key] = match.get(key)
                 set_aside = str(match.get("set_aside") or "").strip()

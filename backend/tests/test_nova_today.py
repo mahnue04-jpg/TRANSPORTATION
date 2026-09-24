@@ -1237,3 +1237,91 @@ def test_upsert_proposed_reuses_pending_row_when_autoflush_disabled(client: Test
     finally:
         db.rollback()
         db.close()
+
+
+
+def test_saved_sam_refresh_requalifies_enriched_notice_and_preserves_set_aside_gate(
+    monkeypatch, client: TestClient,
+) -> None:
+    """A saved SAM row must use the freshly enriched notice for qualification."""
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+    from app.core.nova.v3 import live_qualification
+
+    title = "HOMC Financial Administrative Support 260924"
+    source_url = "https://sam.gov/opp/test-saved-sam-requalify/view"
+    created = client.post(
+        "/api/nova/work/opportunities",
+        headers=headers,
+        json={
+            "source": "sam_gov",
+            "source_type": "live",
+            "source_url": source_url,
+            "company_name": "Example Federal Agency",
+            "opportunity_title": title,
+            "description": "",
+            "requirements": "",
+            "skills_required": [],
+            "physical_presence_required": "unknown",
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    enriched = {
+        "provider_id": "sam_gov",
+        "provider_identifier": "TEST-SAM-260924",
+        "title": title,
+        "company_name": "Example Federal Agency",
+        "agency": "Example Federal Agency",
+        "source_url": source_url,
+        "description": (
+            "Contractor shall provide administrative operations support, document "
+            "control, recurring reports, scheduling support, data reconciliation, "
+            "and workflow documentation."
+        ),
+        "requirements": "Administrative operations, reporting, scheduling, and data reconciliation.",
+        "skills_required": ["administrative operations", "reporting", "scheduling", "data reconciliation"],
+        "job_type": "contractor",
+        "remote_status": "remote",
+        "set_aside": "SDVOSB",
+        "solicitation_number": "TEST-SAM-260924",
+        "response_deadline": "2026-10-15T17:00:00Z",
+        "place_of_performance": "Minnesota",
+    }
+
+    class _Provider:
+        def find_exact(self, identifier):
+            return enriched
+
+        def search(self, query, *, limit=10):
+            return [enriched]
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.multi_source_discovery.SamGovLiveProvider",
+        _Provider,
+    )
+
+    calls = []
+    real_qualify = live_qualification.qualify_live_job
+
+    def tracked_qualify(job):
+        calls.append(job)
+        return real_qualify(job)
+
+    monkeypatch.setattr(live_qualification, "qualify_live_job", tracked_qualify)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": f"Review qualification for {title}"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+
+    assert calls and calls[-1] is enriched
+    assert "Provide the actual duties and deliverables before qualification" not in answer
+    assert "requirements_or_skills" not in answer
+    assert "Set-aside: SDVOSB" in answer
+    assert "NEEDS OWNER REVIEW" in answer
+    assert "Set-aside eligibility must be verified" in answer
+    assert "No application was submitted" in answer
