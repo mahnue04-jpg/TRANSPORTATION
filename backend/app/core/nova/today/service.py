@@ -2321,6 +2321,85 @@ def _find_nova_anonymous_clients(
 
 
 
+
+def _find_approval_queue_work_opportunity(
+    db: Session,
+    *,
+    question: str,
+    organization_id: str,
+    user: UserContext,
+):
+    """Resolve a Work & Revenue opportunity through Nova Today's approval queue."""
+    from app.core.nova.work_revenue import service as work_service
+
+    text = " ".join(str(question or "").split())
+    lowered = text.lower()
+    question_tokens = set(re.findall(r"[a-z0-9]+", lowered))
+    identifiers = {
+        token.upper()
+        for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", text)
+        if any(ch.isdigit() for ch in token)
+    }
+    query = db.query(NovaV2CommandAction).filter(
+        NovaV2CommandAction.organization_id == organization_id,
+        NovaV2CommandAction.source_module == "work_revenue",
+        NovaV2CommandAction.status.in_(("proposed", "snoozed")),
+    )
+    if not _can_see_org_wide(user):
+        query = query.filter(NovaV2CommandAction.owner_user_id == user.user_id)
+
+    stop = {
+        "review", "work", "revenue", "opportunity", "support", "services",
+        "business", "operations", "client", "job", "nova", "amicor",
+        "action", "requires", "approval",
+    }
+    best_action = None
+    best_score = 0
+    for action in query.order_by(NovaV2CommandAction.created_at.desc()).limit(250).all():
+        blob = " ".join(str(value or "") for value in (
+            action.source_ref_id, action.title, action.detail, action.href,
+        ))
+        score = 0
+        if str(action.source_ref_id or "").lower() in lowered:
+            score = max(score, 140)
+        if identifiers and any(token in blob.upper() for token in identifiers):
+            score = max(score, 130)
+        title = re.sub(
+            r"^review\s+work\s*&\s*revenue\s+opportunity:\s*", "",
+            str(action.title or ""), flags=re.I,
+        ).strip().lower()
+        if title and title in lowered:
+            score = max(score, 120)
+        title_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", title)
+            if len(token) >= 4 and token not in stop
+        }
+        detail_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", blob.lower())
+            if len(token) >= 4 and token not in stop
+        }
+        title_hits = len(title_tokens & question_tokens)
+        detail_hits = len(detail_tokens & question_tokens)
+        if title_tokens and title_hits >= 2:
+            ratio = title_hits / max(len(title_tokens), 1)
+            if ratio >= 0.35:
+                score = max(score, 80 + title_hits)
+        if detail_hits >= 4:
+            score = max(score, 70 + min(detail_hits, 20))
+        if score > best_score:
+            best_action, best_score = action, score
+
+    if best_action is None or best_score < 70:
+        return None
+    try:
+        return work_service.get_opportunity(
+            db, str(best_action.source_ref_id),
+            organization_id=organization_id, user=user,
+        )
+    except Exception:
+        return None
+
+
 def _find_referenced_work_opportunity(
     db: Session,
     *,
@@ -2409,12 +2488,19 @@ def _answer_saved_work_opportunity(
     if not any(word in intent for word in review_words):
         return None
 
-    row = _find_referenced_work_opportunity(
+    row = _find_approval_queue_work_opportunity(
         db,
         question=question,
         organization_id=organization_id,
         user=user,
     )
+    if row is None:
+        row = _find_referenced_work_opportunity(
+            db,
+            question=question,
+            organization_id=organization_id,
+            user=user,
+        )
     exact_sam = None
     identifiers = [
         token for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", question)
