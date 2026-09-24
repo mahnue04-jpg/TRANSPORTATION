@@ -1325,3 +1325,29 @@ def test_saved_sam_refresh_requalifies_enriched_notice_and_preserves_set_aside_g
     assert "NEEDS OWNER REVIEW" in answer
     assert "Set-aside eligibility must be verified" in answer
     assert "No application was submitted" in answer
+
+
+
+def test_find_referenced_work_opportunity_skips_null_listing_row(monkeypatch, db_session, owner_user):
+    """A malformed/null historical listing row must not crash Nova Today."""
+    from app.core.nova.today import service as today_service
+    from app.core.nova.work_revenue import service as work_service
+
+    class _Row:
+        opportunity_id = "NWO-VALID123"
+        opportunity_title = "Remote workflow automation contractor"
+        company_name = "Example Buyer"
+        source_url = "https://example.com/work/valid"
+        description = "Remote workflow and reporting support."
+        requirements = "Administrative operations and reporting."
+        notes = None
+
+    monkeypatch.setattr(work_service, "list_opportunities", lambda *args, **kwargs: [None, _Row()])
+    row = today_service._find_referenced_work_opportunity(
+        db_session,
+        question="review remote workflow automation contractor",
+        organization_id=owner_user.organization_id,
+        user=owner_user,
+    )
+    assert row is not None
+    assert row.opportunity_title == "Remote workflow automation contractor"
