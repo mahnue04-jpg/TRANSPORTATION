@@ -980,3 +980,40 @@ def test_nova_anonymous_reports_qualification_rejection_diagnostics(monkeypatch,
     assert "employee_w2_staff_role=6" in answer
     assert "Work types: employee=6" in answer
     assert "Provider qualification outcomes: remotive:NOT_QUALIFIED=6" in answer
+
+
+
+def test_nova_anonymous_search_uses_capability_first_queries(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+
+    seen_queries = []
+
+    def fake_multi(query, **kwargs):
+        seen_queries.append(query)
+        return {
+            "jobs": [],
+            "providers_queried": ["sam_gov", "remotive", "remoteok"],
+            "provider_result_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_screened_counts": {"sam_gov": 0, "remotive": 0, "remoteok": 0},
+            "provider_errors": [],
+        }
+
+    monkeypatch.setattr(today_service, "search_multi_source_jobs", fake_multi)
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    blob = "\n".join(seen_queries).lower()
+    assert "workflow automation" in blob
+    assert "spreadsheet" in blob or "data cleaning" in blob
+    assert "business research" in blob or "competitor research" in blob
+    assert "document processing" in blob or "sop writing" in blob
+    assert "rfp" in blob or "proposal" in blob
+    assert all("delivery driver" not in query.lower() for query in seen_queries)
+    assert all("registered nurse" not in query.lower() for query in seen_queries)
