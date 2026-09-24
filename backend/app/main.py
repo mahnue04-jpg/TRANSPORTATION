@@ -3036,6 +3036,21 @@ def marketing_services(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/nova-product")
+def marketing_nova(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "nova.html",
+        page_title="AMICOR Nova — AI Business Operations",
+        meta_description=(
+            "Explore AMICOR Nova and the Nova Anonymous Operations Agent for supported "
+            "business research, administrative operations, documentation, workflows, and digital work."
+        ),
+        active="services",
+        canonical_path="/nova-product",
+        request=request,
+    )
+
+
 @app.get("/for-providers")
 def marketing_providers(request: Request) -> HTMLResponse:
     """Public providers page. `/providers` remains a legacy redirect to `/app/providers`."""
