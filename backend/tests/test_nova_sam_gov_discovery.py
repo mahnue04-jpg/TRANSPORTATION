@@ -485,3 +485,90 @@ def test_sam_title_search_uses_procurement_friendly_terms() -> None:
     assert provider._title_search_term("spreadsheet cleanup freelance project") == "data support"
     assert provider._title_search_term("RFP proposal support contractor remote") == "proposal support"
     assert provider._title_search_term("business research freelance project") == "research support"
+
+
+def test_find_exact_fetches_notice_description(monkeypatch) -> None:
+    monkeypatch.setenv("SAM_GOV_API_KEY", FAKE_KEY)
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = ""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    calls = []
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            calls.append((url, dict(params or {})))
+            if "noticedesc" in url:
+                return _Resp({"description": "<p>Contractor shall provide administrative operations support, document control, recurring reports, scheduling support, data reconciliation, and workflow documentation.</p>"})
+            return _Resp({"totalRecords": 1, "opportunitiesData": [_sam_admin_notice()]})
+
+    monkeypatch.setattr("app.core.nova.v3.multi_source_discovery.httpx.Client", _Client)
+    row = SamGovLiveProvider().find_exact("fort-admin-26-001")
+    assert row is not None
+    assert "document control" in row["description"].lower()
+    assert "data reconciliation" in row["description"].lower()
+    assert row["raw_source_metadata"]["description_fetched"] is True
+    assert FAKE_KEY not in row["description"]
+    assert any("noticedesc" in url for url, _ in calls)
+    assert all(params.get("api_key") == FAKE_KEY for url, params in calls if "noticedesc" in url)
+
+
+def test_find_exact_description_failure_keeps_notice(monkeypatch) -> None:
+    monkeypatch.setenv("SAM_GOV_API_KEY", FAKE_KEY)
+
+    class _Resp:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, payload=None, status_code=200, fail=False):
+            self._payload = payload or {}
+            self.status_code = status_code
+            self._fail = fail
+            self.text = ""
+
+        def raise_for_status(self):
+            if self._fail:
+                raise RuntimeError("upstream description unavailable")
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            if "noticedesc" in url:
+                return _Resp(fail=True)
+            return _Resp({"totalRecords": 1, "opportunitiesData": [_sam_admin_notice()]})
+
+    monkeypatch.setattr("app.core.nova.v3.multi_source_discovery.httpx.Client", _Client)
+    row = SamGovLiveProvider().find_exact("fort-admin-26-001")
+    assert row is not None
+    assert row["title"]
+    assert row["source_url"].startswith("https://sam.gov/opp/")
