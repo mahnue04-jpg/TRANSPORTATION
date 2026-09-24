@@ -7,6 +7,7 @@ Approval remains separate from submission.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -34,6 +35,33 @@ def _amount_from_job(job: dict[str, Any]) -> float | None:
         return float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+
+
+def _response_deadline(job: dict[str, Any]):
+    raw = str(job.get("response_deadline") or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _source_requirements(job: dict[str, Any]) -> str | None:
+    details = []
+    labels = (
+        ("Set-aside", "set_aside"),
+        ("Solicitation", "solicitation_number"),
+        ("Notice ID", "notice_id"),
+        ("Agency", "agency"),
+        ("Place of performance", "place_of_performance"),
+        ("Response deadline", "response_deadline"),
+    )
+    for label, key in labels:
+        value = str(job.get(key) or "").strip()
+        if value:
+            details.append(f"{label}: {value}")
+    return "; ".join(details) or None
 
 
 def _live_status(job: dict[str, Any]) -> str:
@@ -105,7 +133,7 @@ def persist_live_job(
             compensation_amount=amount,
             compensation_period=None,
             currency="USD",
-            requirements=None,
+            requirements=_source_requirements(job),
             skills_required=[],
             credentials_required=[],
             physical_presence_required=(
@@ -115,6 +143,7 @@ def persist_live_job(
                 "Live multi-source discovery. "
                 f"Provider={provider_id}; "
                 f"live_qualification={live_qual.get('qualification_status') or job.get('qualification_status') or 'unknown'}; "
+                f"{_source_requirements(job) or 'No structured source requirements supplied.'}; "
                 f"{_compensation_note(job)}; "
                 "External submission remains OFF. Approval does not equal submission."
             )[:4000],
