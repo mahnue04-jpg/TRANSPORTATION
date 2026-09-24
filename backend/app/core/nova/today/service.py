@@ -2433,25 +2433,30 @@ def _find_referenced_work_opportunity(
         "business", "operations", "client", "job", "nova", "amicor",
     }
     for row in rows:
+        # A defensive guard is required here because historical/partially
+        # reconciled Work & Revenue listings can contain a null entry.  One
+        # malformed row must not crash the entire Nova Today search request.
+        if row is None:
+            continue
         blob = " ".join(
             str(value or "")
             for value in (
-                row.opportunity_id,
-                row.opportunity_title,
-                row.company_name,
-                row.source_url,
-                row.description,
-                row.requirements,
-                row.notes,
+                getattr(row, "opportunity_id", None),
+                getattr(row, "opportunity_title", None),
+                getattr(row, "company_name", None),
+                getattr(row, "source_url", None),
+                getattr(row, "description", None),
+                getattr(row, "requirements", None),
+                getattr(row, "notes", None),
             )
         )
         blob_lower = blob.lower()
         score = 0
-        if str(row.opportunity_id or "").lower() in lowered:
+        if str(getattr(row, "opportunity_id", None) or "").lower() in lowered:
             score = max(score, 120)
         if identifiers and any(token in blob.upper() for token in identifiers):
             score = max(score, 110)
-        title = " ".join(str(row.opportunity_title or "").lower().split())
+        title = " ".join(str(getattr(row, "opportunity_title", None) or "").lower().split())
         if title and title in lowered:
             score = max(score, 100)
         title_tokens = {
