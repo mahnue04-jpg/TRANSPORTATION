@@ -288,6 +288,13 @@ def persist_live_job(
         "persisted": True,
         "created": created,
         "provider_id": provider_id,
+        # Preserve source/display metadata in the plain result dict consumed by
+        # Nova Today. Do not make the UI re-query ORM rows just to build links.
+        "title": title,
+        "opportunity_title": title,
+        "company_name": company,
+        "source_url": source_url,
+        "application_url": str(job.get("application_url") or "").strip() or None,
         "live_qualification_status": live_status or None,
         "work_opportunity_id": work_row.opportunity_id,
         "work_status": work_row.status,
