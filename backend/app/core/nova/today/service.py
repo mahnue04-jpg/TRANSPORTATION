@@ -2016,13 +2016,13 @@ def _find_nova_anonymous_clients(
     # Dedicated opportunity sources are the primary discovery path for Nova
     # Anonymous client acquisition. Public-web buyer discovery is intentionally
     # not used here unless a future owner-approved mode explicitly enables it.
-    dedicated_queries = (
-        "administrative support contractor",
-        "business operations support contractor",
-        "workflow automation services",
-        "data entry spreadsheet support contractor",
-        "document processing records management support",
-        "project administration operations support",
+    capability_plan = targeted_queries_for_request(question, max_queries=12)
+    dedicated_queries = tuple(
+        str(row.get("query") or "").strip()
+        for row in capability_plan
+        if str(row.get("search_family") or "") == "nova_anonymous_clients"
+        and str(row.get("query") or "").strip()
+        and str(row.get("query") or "").strip().lower() != str(question or "").strip().lower()
     )
     collected: list[dict] = []
     dedicated_diagnostics = {
@@ -2051,11 +2051,13 @@ def _find_nova_anonymous_clients(
                 int(dedicated_diagnostics["provider_screened_counts"].get(provider_id, 0)) + int(count)
             )
         dedicated_diagnostics["provider_errors"].extend(list(multi.get("provider_errors") or []))
+        planned = next((row for row in capability_plan if str(row.get("query") or "") == query), {})
         for raw in multi.get("jobs") or []:
             item = dict(raw)
-            item["search_family"] = "nova_anonymous_dedicated_sources"
-            item["search_family_label"] = "Dedicated opportunity sources"
-            item["why_searched"] = question
+            item["search_family"] = str(planned.get("search_family") or "nova_anonymous_clients")
+            item["search_family_label"] = str(planned.get("search_family_label") or "Nova Anonymous client acquisition")
+            item["why_searched"] = str(planned.get("why_searched") or question)
+            item["capability_registry_matches"] = list(planned.get("capability_registry_matches") or [])
             collected.append(item)
 
     ranked = qualify_and_rank_live_jobs(question, collected)
