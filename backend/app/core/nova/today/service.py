@@ -2415,35 +2415,58 @@ def _answer_saved_work_opportunity(
         organization_id=organization_id,
         user=user,
     )
-    if row is None:
-        return None
+    exact_sam = None
+    identifiers = [
+        token for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", question)
+        if any(ch.isdigit() for ch in token)
+    ]
+    if row is None and identifiers:
+        try:
+            from app.core.nova.v3.multi_source_discovery import SamGovLiveProvider
+            provider = SamGovLiveProvider()
+            for identifier in identifiers:
+                exact_sam = provider.find_exact(identifier)
+                if exact_sam is not None:
+                    break
+        except Exception:
+            exact_sam = None
+        if exact_sam is None:
+            return None
 
     from app.core.nova.work_revenue import service as work_service
     from app.core.nova.work_revenue.qualifier import qualify_opportunity
+    from app.core.nova.v3.live_qualification import qualify_live_job
 
-    payload = work_service._opportunity_payload(row)
-    qualification = qualify_opportunity(payload)
-    outcome = str(qualification.get("qualification_outcome") or "INSUFFICIENT_INFORMATION")
+    if exact_sam is not None:
+        qualification = qualify_live_job(exact_sam)
+        outcome = str(qualification.get("qualification_outcome") or "NEEDS_OWNER_REVIEW")
+    else:
+        payload = work_service._opportunity_payload(row)
+        qualification = qualify_opportunity(payload)
+        outcome = str(qualification.get("qualification_outcome") or "INSUFFICIENT_INFORMATION")
     display_outcome = {
         "NOVA_CAN_PERFORM": "CAN PERFORM",
         "NOVA_WITH_OWNER_REVIEW": "NEEDS OWNER REVIEW",
         "HUMAN_REQUIRED": "NEEDS OWNER REVIEW",
         "INSUFFICIENT_INFORMATION": "NEEDS OWNER REVIEW",
         "NOT_SUITABLE": "CANNOT PERFORM",
+        "QUALIFIED": "CAN PERFORM",
+        "NEEDS_OWNER_REVIEW": "NEEDS OWNER REVIEW",
+        "NOT_QUALIFIED": "CANNOT PERFORM",
     }.get(outcome, "NEEDS OWNER REVIEW")
 
     source_details = {
-        "set_aside": None,
-        "response_deadline": None,
-        "solicitation_number": None,
-        "notice_id": None,
-        "agency": None,
-        "place_of_performance": None,
+        "set_aside": exact_sam.get("set_aside") if exact_sam else None,
+        "response_deadline": exact_sam.get("response_deadline") if exact_sam else None,
+        "solicitation_number": exact_sam.get("solicitation_number") if exact_sam else None,
+        "notice_id": exact_sam.get("notice_id") if exact_sam else None,
+        "agency": exact_sam.get("agency") if exact_sam else None,
+        "place_of_performance": exact_sam.get("place_of_performance") if exact_sam else None,
     }
     # For saved SAM.gov records, refresh the exact notice read-only when possible
     # so Today can reason over set-aside/deadline fields that are not first-class
     # columns in the V1 Work & Revenue schema.
-    if str(row.source or "").lower() == "sam_gov" or "sam.gov" in str(row.source_url or "").lower():
+    if row is not None and (str(row.source or "").lower() == "sam_gov" or "sam.gov" in str(row.source_url or "").lower()):
         try:
             from app.core.nova.v3.multi_source_discovery import SamGovLiveProvider
             identifiers = [
@@ -2451,18 +2474,17 @@ def _answer_saved_work_opportunity(
                 if any(ch.isdigit() for ch in token)
             ]
             search_term = identifiers[0] if identifiers else str(row.opportunity_title or "")
-            live_rows = SamGovLiveProvider().search(search_term, limit=10)
-            match = next(
-                (
-                    item for item in live_rows
-                    if str(item.get("source_url") or "") == str(row.source_url or "")
-                    or (search_term and search_term.lower() in " ".join(
-                        str(item.get(key) or "")
-                        for key in ("title", "solicitation_number", "notice_id", "source_url")
-                    ).lower())
-                ),
-                None,
-            )
+            provider = SamGovLiveProvider()
+            match = provider.find_exact(search_term) if identifiers else None
+            if match is None and not identifiers:
+                live_rows = provider.search(search_term, limit=10)
+                match = next(
+                    (
+                        item for item in live_rows
+                        if str(item.get("source_url") or "") == str(row.source_url or "")
+                    ),
+                    None,
+                )
             if match:
                 for key in source_details:
                     source_details[key] = match.get(key)
@@ -2477,14 +2499,40 @@ def _answer_saved_work_opportunity(
             # Saved-record evaluation must still work if the upstream source is unavailable.
             pass
 
-    can_do = list(qualification.get("nova_tasks") or qualification.get("nova_can_do") or [])
+    set_aside = str(source_details.get("set_aside") or "").strip()
+    if set_aside:
+        display_outcome = "NEEDS OWNER REVIEW"
+        qualification.setdefault("reasons", [])
+        set_aside_reason = (
+            "Set-aside eligibility must be verified against AMICOR business certifications: "
+            f"{set_aside}"
+        )
+        if set_aside_reason not in list(qualification.get("reasons") or []):
+            qualification["reasons"] = list(qualification.get("reasons") or []) + [set_aside_reason]
+
+    can_do = list(
+        qualification.get("nova_tasks")
+        or qualification.get("nova_can_do")
+        or qualification.get("matched_capabilities")
+        or []
+    )
     human = list(qualification.get("human_tasks") or qualification.get("required_human_actions") or [])
     reasons = list(qualification.get("reasons") or [])
     missing = list(qualification.get("missing_information") or qualification.get("missing") or [])
-    parts = [
-        f"{display_outcome}: {row.opportunity_title} ({row.company_name}).",
-        f"Stored Work & Revenue record: {row.opportunity_id}.",
-    ]
+    if row is not None:
+        title = str(row.opportunity_title or "Saved opportunity")
+        company = str(row.company_name or "Work & Revenue")
+        parts = [
+            f"{display_outcome}: {title} ({company}).",
+            f"Stored Work & Revenue record: {row.opportunity_id}.",
+        ]
+    else:
+        title = str(exact_sam.get("title") or "SAM.gov opportunity")
+        company = str(exact_sam.get("company_name") or exact_sam.get("agency") or "U.S. Government")
+        parts = [
+            f"{display_outcome}: {title} ({company}).",
+            "Exact SAM.gov opportunity retrieved read-only by identifier.",
+        ]
     if can_do:
         parts.append("Nova can perform: " + "; ".join(str(item) for item in can_do[:8]) + ".")
     if human:
@@ -2499,7 +2547,7 @@ def _answer_saved_work_opportunity(
         parts.append(f"Solicitation: {source_details['solicitation_number']}.")
     if source_details["response_deadline"]:
         parts.append(f"Response deadline: {source_details['response_deadline']}.")
-    elif row.application_deadline is not None:
+    elif row is not None and row.application_deadline is not None:
         parts.append(f"Application deadline: {row.application_deadline.isoformat()}.")
     if source_details["agency"]:
         parts.append(f"Agency: {source_details['agency']}.")
@@ -2513,13 +2561,13 @@ def _answer_saved_work_opportunity(
         fact_label="VERIFIED DATA",
         next_actions=["Review the saved Work & Revenue opportunity"],
         generated_at=now().isoformat(),
-        source_href=row.source_url or "/nova/work",
+        source_href=(row.source_url if row is not None else exact_sam.get("source_url")) or "/nova/work",
         sources=[{
-            "title": str(row.company_name or "Work & Revenue"),
-            "url": str(row.source_url or "/nova/work"),
-            "label": str(row.opportunity_title or "Saved opportunity"),
-        }] if row.source_url else [],
-        referenced_source_ref_id=row.opportunity_id,
+            "title": company,
+            "url": str((row.source_url if row is not None else exact_sam.get("source_url")) or "/nova/work"),
+            "label": title,
+        }] if ((row.source_url if row is not None else exact_sam.get("source_url"))) else [],
+        referenced_source_ref_id=(row.opportunity_id if row is not None else None),
         verification_status="verified",
     )
 
