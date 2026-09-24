@@ -1,8 +1,11 @@
 """Nova V2 Today aggregator. Reads V1 dashboards. Writes only nova_v2_command_actions."""
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 from app.auth import (
     ROLE_ADMIN,
@@ -2033,12 +2036,21 @@ def _find_nova_anonymous_clients(
         "queries_run": 0,
     }
     for query in dedicated_queries:
-        multi = search_multi_source_jobs(
-            query,
-            limit=10,
-            provider_ids=["sam_gov", "remotive", "remoteok"],
-        )
         dedicated_diagnostics["queries_run"] += 1
+        try:
+            multi = search_multi_source_jobs(
+                query,
+                limit=10,
+                provider_ids=["sam_gov", "remotive", "remoteok"],
+            )
+        except Exception as exc:
+            logger.exception("Nova Anonymous dedicated query failed")
+            dedicated_diagnostics["provider_errors"].append({
+                "provider_id": "query_pipeline",
+                "error": f"{type(exc).__name__}: dedicated query failed",
+                "query": query[:120],
+            })
+            continue
         dedicated_diagnostics["providers_queried"] = list(dict.fromkeys(
             dedicated_diagnostics["providers_queried"] + list(multi.get("providers_queried") or [])
         ))
@@ -2261,11 +2273,15 @@ def _today_live_or_memory_answer(
                 organization_id=organization_id,
                 user=user,
             )
-        except Exception:
+        except Exception as exc:
+            logger.exception("Nova Anonymous client search failed")
+            safe_error = type(exc).__name__
             return NovaTodayBrainOut(
                 answer=(
                     "I couldn't complete the Nova Anonymous client search right now. "
-                    "I did not contact any client or submit anything. Please try the search again."
+                    f"Safe diagnostic: pipeline_error={safe_error}. "
+                    "I did not contact any client or submit anything. "
+                    "The failure was recorded in server logs for diagnosis."
                 ),
                 fact_label="AI SUGGESTION",
                 next_actions=[],
