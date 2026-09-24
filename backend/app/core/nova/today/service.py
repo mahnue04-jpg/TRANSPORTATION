@@ -2492,6 +2492,8 @@ def _answer_saved_work_opportunity(
     if not any(word in intent for word in review_words):
         return None
 
+    from app.core.nova.work_revenue import service as work_service
+
     row = _find_approval_queue_work_opportunity(
         db,
         question=question,
@@ -2505,6 +2507,22 @@ def _answer_saved_work_opportunity(
             organization_id=organization_id,
             user=user,
         )
+    # Queue/reconciliation helpers may return a stale proxy or null-like value.
+    # Normalize it before any qualification code dereferences opportunity fields.
+    if row is not None and getattr(row, "opportunity_title", None) is None:
+        opportunity_id = getattr(row, "opportunity_id", None)
+        if opportunity_id:
+            try:
+                row = work_service.get_opportunity(
+                    db,
+                    str(opportunity_id),
+                    organization_id=organization_id,
+                    user=user,
+                )
+            except Exception:
+                row = None
+        else:
+            row = None
     exact_sam = None
     identifiers = [
         token for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", question)
@@ -2523,7 +2541,6 @@ def _answer_saved_work_opportunity(
         if exact_sam is None:
             return None
 
-    from app.core.nova.work_revenue import service as work_service
     from app.core.nova.work_revenue.qualifier import qualify_opportunity
     from app.core.nova.v3.live_qualification import qualify_live_job
 
