@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
@@ -147,6 +148,23 @@ def persist_live_job(
             if existing is None:
                 raise
             created = False
+        except IntegrityError:
+            # A concurrent/repeated discovery can race the fingerprint pre-check
+            # or collide with an already-persisted related row. Recover the
+            # session and reuse the canonical opportunity instead of aborting
+            # the entire owner search.
+            db.rollback()
+            existing = work_service.get_opportunity_by_fingerprint(
+                db,
+                organization_id=organization_id,
+                user=user,
+                company_name=company,
+                opportunity_title=title,
+                source_url=source_url,
+            )
+            if existing is None:
+                raise
+            created = False
 
     work_row, work_qualification = work_service.qualify(
         db,
@@ -197,6 +215,18 @@ def persist_live_job(
                     organization_id=organization_id,
                     user=user,
                 )
+            except IntegrityError:
+                # Application creation is idempotent per opportunity. If an
+                # overlapping request wins the insert race, recover and reuse it.
+                db.rollback()
+                application = work_service.get_application_for_opportunity(
+                    db,
+                    work_row.opportunity_id,
+                    organization_id=organization_id,
+                    user=user,
+                )
+                if application is None:
+                    raise
 
         if application is not None and application.approval_state in {"DRAFT", "NEEDS_CHANGES"}:
             try:
