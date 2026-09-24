@@ -665,3 +665,83 @@ def test_exact_lookup_enriches_from_sam_supporting_pws_when_notice_desc_is_thin(
     qualification = qualify_live_job(row)
     assert qualification["capability_classification"] != "INSUFFICIENT_INFORMATION"
     assert "requirements_or_skills" not in list(qualification.get("missing_requirements") or [])
+
+
+
+def test_exact_lookup_reads_structured_sam_resource_link_object(monkeypatch) -> None:
+    """SAM may return attachment references as objects, not bare URL strings."""
+    monkeypatch.setenv("SAM_GOV_API_KEY", FAKE_KEY)
+    notice = _sam_admin_notice(
+        noticeId="structured-resource-link-001",
+        solicitationNumber="W911SF26RA009",
+        title="Amendment 4 - Business Operations Support Services",
+        description="https://api.sam.gov/opportunities/v1/noticedesc?noticeid=structured-resource-link-001",
+        resourceLinks=[
+            {
+                "url": "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/pws-structured.pdf",
+                "name": "Performance Work Statement.pdf",
+            }
+        ],
+    )
+
+    class _Resp:
+        def __init__(self, *, payload=None, content=b"", content_type="application/json", disposition=""):
+            self.status_code = 200
+            self._payload = payload
+            self.content = content
+            self.text = ""
+            self.headers = {
+                "content-type": content_type,
+                "content-disposition": disposition,
+            }
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Page:
+        def extract_text(self):
+            return (
+                "Performance Work Statement. Contractor shall provide business operations "
+                "support, administrative workflow management, recurring reports, document "
+                "control, meeting summaries, and data reconciliation."
+            )
+
+    class _Reader:
+        def __init__(self, stream):
+            self.pages = [_Page()]
+
+    monkeypatch.setattr("app.core.nova.v3.multi_source_discovery.PdfReader", _Reader)
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def get(self, url, params=None, headers=None):
+            if "opportunities/v2/search" in url:
+                return _Resp(payload={"opportunitiesData": [notice]})
+            if "noticedesc" in url:
+                return _Resp(payload={"description": "Amendment 4. See attached PWS for requirements."})
+            if "pws-structured.pdf" in url:
+                return _Resp(
+                    content=b"%PDF-structured-stub",
+                    content_type="application/pdf",
+                    disposition='attachment; filename="Performance Work Statement.pdf"',
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("app.core.nova.v3.multi_source_discovery.httpx.Client", _Client)
+
+    row = SamGovLiveProvider().find_exact("W911SF26RA009")
+    assert row is not None
+    assert row["raw_source_metadata"]["resource_link_objects"][0]["name"] == "Performance Work Statement.pdf"
+    assert row["raw_source_metadata"]["supporting_resource_fetched"] is True
+    assert "business operations support" in row["description"].lower()
+    qualification = qualify_live_job(row)
+    assert qualification["capability_classification"] != "INSUFFICIENT_INFORMATION"
+    assert "requirements_or_skills" not in list(qualification.get("missing_requirements") or [])
