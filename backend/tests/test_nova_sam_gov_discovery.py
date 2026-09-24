@@ -572,3 +572,96 @@ def test_find_exact_description_failure_keeps_notice(monkeypatch) -> None:
     assert row is not None
     assert row["title"]
     assert row["source_url"].startswith("https://sam.gov/opp/")
+
+
+
+def test_exact_lookup_enriches_from_sam_supporting_pws_when_notice_desc_is_thin(monkeypatch) -> None:
+    monkeypatch.setenv("SAM_GOV_API_KEY", FAKE_KEY)
+    notice = _sam_admin_notice(
+        noticeId="amendment-with-pws-001",
+        solicitationNumber="W911SF26RA009",
+        title="Amendment 4 - Business Operations Support Services",
+        description="https://api.sam.gov/opportunities/v1/noticedesc?noticeid=amendment-with-pws-001",
+        resourceLinks=[
+            "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/pws-business-operations.pdf"
+        ],
+    )
+
+    class _Headers(dict):
+        pass
+
+    class _Resp:
+        def __init__(self, *, payload=None, text="", content=b"", content_type="application/json", disposition=""):
+            self.status_code = 200
+            self._payload = payload
+            self.text = text
+            self.content = content
+            self.headers = _Headers({
+                "content-type": content_type,
+                "content-disposition": disposition,
+            })
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Page:
+        def extract_text(self):
+            return (
+                "Performance Work Statement. Contractor shall provide administrative "
+                "operations support, meeting summaries, document control, recurring "
+                "reports, workflow documentation, and data reconciliation deliverables."
+            )
+
+    class _Reader:
+        def __init__(self, stream):
+            self.pages = [_Page()]
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.multi_source_discovery.PdfReader",
+        _Reader,
+    )
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            if "opportunities/v2/search" in url:
+                return _Resp(payload={"opportunitiesData": [notice]})
+            if "noticedesc" in url:
+                return _Resp(
+                    payload={"description": "Amendment 4 updates proposal dates. See attached PWS."},
+                )
+            if "pws-business-operations.pdf" in url:
+                return _Resp(
+                    content=b"%PDF-stub",
+                    content_type="application/pdf",
+                    disposition='attachment; filename="PWS Business Operations.pdf"',
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(
+        "app.core.nova.v3.multi_source_discovery.httpx.Client",
+        _Client,
+    )
+
+    row = SamGovLiveProvider().find_exact("W911SF26RA009")
+    assert row is not None
+    description = row["description"].lower()
+    assert "contractor shall provide administrative operations support" in description
+    assert "document control" in description
+    assert "data reconciliation" in description
+    assert row["raw_source_metadata"]["description_fetched"] is True
+    assert row["raw_source_metadata"]["supporting_resource_fetched"] is True
+    qualification = qualify_live_job(row)
+    assert qualification["capability_classification"] != "INSUFFICIENT_INFORMATION"
+    assert "requirements_or_skills" not in list(qualification.get("missing_requirements") or [])
