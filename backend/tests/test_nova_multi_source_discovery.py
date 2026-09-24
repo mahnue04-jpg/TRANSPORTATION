@@ -817,3 +817,23 @@ def test_admin_search_expands_queries_and_requires_positive_title_fit(monkeypatc
     assert result["jobs"][0]["title"] == "Virtual Assistant Contractor"
     assert result["provider_screened_counts"]["positive_fit_fixture"] >= 2
     assert "remote administrative support contractor" in result["query_variants"]
+
+
+
+def test_vendor_intent_search_filters_employee_only_feed_results() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    employee = {
+        "title": "Operations Analyst",
+        "description": "Join our team as a full-time employee with salary, benefits, and 401(k).",
+        "geography": "Remote USA",
+        "job_type": "full_time",
+    }
+    contractor = {
+        "title": "Operations Analyst Contractor",
+        "description": "Project-based independent contractor engagement for workflow documentation.",
+        "geography": "Remote USA",
+        "job_type": "contract",
+    }
+    assert _query_relevant(employee, "business operations support contractor remote") is False
+    assert _query_relevant(contractor, "business operations support contractor remote") is True
