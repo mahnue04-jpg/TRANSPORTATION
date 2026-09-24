@@ -169,6 +169,12 @@ def run_autopilot_cycle(
     blocked_packages = [
         row for row in persistent if row.get("package_review_status") == "BLOCKED"
     ]
+    held_for_owner_review = [
+        row for row in persistent if row.get("package_review_status") == "HELD_FOR_OWNER_REVIEW"
+    ]
+    application_workspaces = [
+        row for row in persistent if row.get("work_application_id")
+    ]
 
     return {
         "mode": "bounded_autopilot_cycle",
@@ -184,12 +190,15 @@ def run_autopilot_cycle(
             OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
             OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
         },
-        "prepared_application_count": len(
-            [row for row in persistent if row.get("work_application_id")]
-        ),
+        # Keep lifecycle counts semantically distinct. An application workspace
+        # can exist without the package having passed preparation/review checks.
+        "application_workspace_count": len(application_workspaces),
+        "prepared_application_count": len(ready_for_owner_review),
         "ready_for_owner_review_count": len(ready_for_owner_review),
+        "held_for_owner_review_count": len(held_for_owner_review),
         "blocked_package_count": len(blocked_packages),
         "ready_for_owner_review": ready_for_owner_review,
+        "held_for_owner_review": held_for_owner_review,
         "blocked_packages": blocked_packages,
         "persistent_results": persistent,
         "external_action_taken": False,

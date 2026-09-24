@@ -1781,19 +1781,18 @@ def _run_work_revenue_job_search(
         })
 
     selected = int(result.get("selected_count") or 0)
-    prepared = int(result.get("prepared_application_count") or 0)
+    workspaces = int(result.get("application_workspace_count") or 0)
     ready = int(result.get("ready_for_owner_review_count") or 0)
-    held = len([
-        row for row in persistent
-        if row.get("package_review_status") == "HELD_FOR_OWNER_REVIEW"
-    ])
+    held = int(result.get("held_for_owner_review_count") or 0)
+    blocked = int(result.get("blocked_package_count") or 0)
     answer = (
         f"Work & Revenue search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and selected {selected} suitable revenue "
         f"opportunit{'y' if selected == 1 else 'ies'} from the live search. "
-        f"I prepared {prepared} application package{'s' if prepared != 1 else ''}; "
-        f"{ready} {'is' if ready == 1 else 'are'} ready for owner review, and "
-        f"{held} opportunit{'y is' if held == 1 else 'ies are'} held for owner review before preparation. "
+        f"I created or retained {workspaces} application workspace{'s' if workspaces != 1 else ''}; "
+        f"{ready} {'package is' if ready == 1 else 'packages are'} prepared and ready for owner review, "
+        f"{held} opportunit{'y is' if held == 1 else 'ies are'} held for owner qualification review before preparation, "
+        f"and {blocked} package{' is' if blocked == 1 else 's are'} blocked by missing package requirements. "
         "No application was externally submitted, no client or employer was contacted, "
         "no contract was accepted, and no money moved."
     )
