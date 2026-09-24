@@ -2061,12 +2061,43 @@ def _find_nova_anonymous_clients(
     ranked = qualify_and_rank_live_jobs(question, collected)
     qualified = []
     reviewable = []
+    qualification_diagnostics = {
+        "status_counts": {},
+        "customer_type_counts": {},
+        "blocker_counts": {},
+        "work_type_counts": {},
+        "discovery_band_counts": {},
+        "capability_classification_counts": {},
+        "provider_status_counts": {},
+    }
     for row in ranked:
         qual = dict(row.get("live_qualification") or {})
-        status = str(qual.get("qualification_status") or row.get("qualification_status") or "")
-        customer_type = str(qual.get("customer_type") or row.get("customer_type") or "")
+        status = str(qual.get("qualification_status") or row.get("qualification_status") or "UNKNOWN")
+        customer_type = str(qual.get("customer_type") or row.get("customer_type") or "UNKNOWN")
         revenue_ready = bool(qual.get("revenue_ready", row.get("revenue_ready")))
         blockers = list(qual.get("blockers") or [])
+        work_type = str(qual.get("work_type") or row.get("work_type") or "unknown")
+        discovery_band = str(qual.get("discovery_band") or row.get("discovery_band") or "UNKNOWN")
+        classification = str(qual.get("capability_classification") or "UNKNOWN")
+        provider_id = str(row.get("provider_id") or "unknown")
+
+        for bucket, key in (
+            ("status_counts", status),
+            ("customer_type_counts", customer_type),
+            ("work_type_counts", work_type),
+            ("discovery_band_counts", discovery_band),
+            ("capability_classification_counts", classification),
+            ("provider_status_counts", f"{provider_id}:{status}"),
+        ):
+            qualification_diagnostics[bucket][key] = int(
+                qualification_diagnostics[bucket].get(key, 0)
+            ) + 1
+        for blocker in blockers:
+            key = str(blocker or "unknown")
+            qualification_diagnostics["blocker_counts"][key] = int(
+                qualification_diagnostics["blocker_counts"].get(key, 0)
+            ) + 1
+
         if customer_type != "NOVA_ANONYMOUS_CUSTOMER":
             continue
         if status == OUTCOME_QUALIFIED and revenue_ready:
@@ -2172,12 +2203,27 @@ def _find_nova_anonymous_clients(
         error_text = "; ".join(
             f"{item.get('provider_id')}: {item.get('error')}" for item in errors
         )[:800] or "none"
+        def _fmt_counts(values):
+            return ", ".join(
+                f"{k}={v}" for k, v in sorted(
+                    dict(values or {}).items(),
+                    key=lambda item: (-int(item[1]), str(item[0])),
+                )
+            ) or "none"
+
         answer = (
             f"Nova Anonymous dedicated-source search completed. I replaced {reset.get('archived_count', 0)} prior "
             "unprotected live-search opportunities. "
             f"Dedicated providers queried: {providers}. "
             f"Provider accepted-result counts: {count_text}. Provider screened counts: {screened_text}. "
             f"Provider errors: {error_text}. "
+            f"Qualification statuses: {_fmt_counts(qualification_diagnostics['status_counts'])}. "
+            f"Customer types: {_fmt_counts(qualification_diagnostics['customer_type_counts'])}. "
+            f"Top blockers: {_fmt_counts(qualification_diagnostics['blocker_counts'])}. "
+            f"Work types: {_fmt_counts(qualification_diagnostics['work_type_counts'])}. "
+            f"Discovery bands: {_fmt_counts(qualification_diagnostics['discovery_band_counts'])}. "
+            f"Capability classifications: {_fmt_counts(qualification_diagnostics['capability_classification_counts'])}. "
+            f"Provider qualification outcomes: {_fmt_counts(qualification_diagnostics['provider_status_counts'])}. "
             "No qualified buyer opportunity passed Nova's capability and safety gates. "
             "Public-web fallback was intentionally not used. "
             "No client was contacted and nothing was submitted."
