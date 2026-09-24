@@ -3997,6 +3997,15 @@ def serve_nova_today() -> Response:
     return JSONResponse({"error": "Nova Today page not found"}, status_code=404)
 
 
+@app.get("/nova/anonymous-agent")
+@app.get("/nova/anonymous-operations")
+def serve_nova_anonymous_agent() -> Response:
+    page = os.path.join(_static_dir, "nova-anonymous-agent", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Anonymous Operations Agent page not found"}, status_code=404)
+
+
 @app.get("/nova/signup")
 @app.get("/nova/early-access")
 def serve_nova_signup() -> Response:
