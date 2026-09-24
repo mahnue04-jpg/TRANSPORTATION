@@ -1070,3 +1070,31 @@ def test_nova_anonymous_outer_failure_returns_safe_error_class(monkeypatch, clie
     answer = response.json()["answer"]
     assert "pipeline_error=ValueError" in answer
     assert "secret details must not leak" not in answer
+
+
+
+def test_nova_anonymous_surfaces_integrity_stage_without_values(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+    from sqlalchemy.exc import IntegrityError
+
+    class Orig:
+        class Diag:
+            constraint_name = "uq_safe_constraint_name"
+        diag = Diag()
+
+    def fail_reset(*args, **kwargs):
+        raise IntegrityError("insert secret-value", {}, Orig())
+
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", fail_reset)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "integrity_stage=reset_live_discovery" in answer
+    assert "constraint=uq_safe_constraint_name" in answer
+    assert "secret-value" not in answer
