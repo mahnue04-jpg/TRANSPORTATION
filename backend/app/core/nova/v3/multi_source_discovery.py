@@ -631,6 +631,61 @@ class SamGovLiveProvider:
         )
 
 
+    def _fetch_notice_description(self, row: dict[str, Any]) -> str | None:
+        """Fetch the public SAM notice description read-only using the configured API key.
+
+        The search API frequently returns description as an API URL rather than
+        inline text. This helper follows only SAM.gov API URLs and never exposes
+        the API key in returned data, logs, or source URLs.
+        """
+        key = self._require_key()
+        metadata = dict(row.get("raw_source_metadata") or {})
+        ref = str(metadata.get("description_ref") or "").strip()
+        if not ref:
+            return None
+        if not ref.startswith(("https://api.sam.gov/", "https://api-alpha.sam.gov/")):
+            return None
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                response = client.get(
+                    ref,
+                    params={"api_key": key},
+                    headers={
+                        "User-Agent": "AMICOR-Nova/1.0 opportunity-description-review",
+                        "Accept": "application/json,text/plain,text/html",
+                    },
+                )
+                if response.status_code in {401, 403}:
+                    raise SamGovUnavailable(
+                        "provider unavailable: SAM.gov API key rejected or expired"
+                    )
+                response.raise_for_status()
+                content_type = str(response.headers.get("content-type") or "").lower()
+                if "json" in content_type:
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        raw = (
+                            payload.get("description")
+                            or payload.get("body")
+                            or payload.get("content")
+                            or payload.get("descriptionText")
+                            or ""
+                        )
+                        if isinstance(raw, dict):
+                            raw = raw.get("body") or raw.get("content") or ""
+                    else:
+                        raw = ""
+                else:
+                    raw = response.text
+                cleaned = _clean_html(str(raw or ""))
+                if not cleaned:
+                    return None
+                return cleaned[:12000]
+        except SamGovUnavailable:
+            raise
+        except Exception:
+            return None
+
     def find_exact(self, identifier: str) -> dict[str, Any] | None:
         """Read-only exact lookup by solicitation number or SAM notice ID."""
         key = self._require_key()
@@ -683,7 +738,16 @@ class SamGovLiveProvider:
                 str(raw.get("noticeId") or "").strip().upper(),
             }
             if wanted in ids:
-                return self._parse_row(raw, enforce_relevance=False)
+                parsed = self._parse_row(raw, enforce_relevance=False)
+                if parsed is None:
+                    return None
+                detailed = self._fetch_notice_description(parsed)
+                if detailed:
+                    parsed["description"] = detailed
+                    metadata = dict(parsed.get("raw_source_metadata") or {})
+                    metadata["description_fetched"] = True
+                    parsed["raw_source_metadata"] = metadata
+                return parsed
         return None
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
