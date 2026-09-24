@@ -18,6 +18,17 @@ _db_filename = os.getenv("DB_FILENAME", os.path.abspath(
 _default_url = f"sqlite:///{_db_filename}"
 DATABASE_URL: str = os.getenv("DATABASE_URL", _default_url)
 
+# The production image installs psycopg2-binary. Some managed PostgreSQL
+# connection strings explicitly request SQLAlchemy's psycopg v3 dialect
+# (postgresql+psycopg://), which would require a different DBAPI package and
+# causes startup to fail with ModuleNotFoundError: psycopg. Normalize that
+# driver hint to the installed psycopg2 driver without changing credentials,
+# host, database name, or any other connection-string component.
+if DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql+psycopg://"):]
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://"):]
+
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
