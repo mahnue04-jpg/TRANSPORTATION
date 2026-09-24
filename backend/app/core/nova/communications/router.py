@@ -145,10 +145,16 @@ def create_draft(
 def send_email(
     payload: NovaCommsSendRequest,
     user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
 ):
-    _resolve_org(user, payload.organization_id)
+    org_id = _resolve_org(user, payload.organization_id)
     try:
-        service.send_blocked(payload)
+        return service.send_confirmed(
+            db,
+            payload,
+            organization_id=org_id,
+            user=user,
+        )
     except service.NovaCommunicationsError as exc:
         _raise(exc)
 
