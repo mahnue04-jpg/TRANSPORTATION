@@ -90,6 +90,7 @@ from app.core.nova.v3.live_qualification import OUTCOME_QUALIFIED, qualify_and_r
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
 from app.helpers import now, uuid4
 from app.db.models import User as PlatformUser
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -1716,11 +1717,20 @@ def _run_work_revenue_job_search(
     user: UserContext,
 ) -> NovaTodayBrainOut:
     """Run one bounded capability-first Work & Revenue discovery cycle."""
-    reset = reset_live_discovery_opportunities(
-        db,
-        organization_id=organization_id,
-        user=user,
-    )
+    try:
+        reset = reset_live_discovery_opportunities(
+            db,
+            organization_id=organization_id,
+            user=user,
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        constraint = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(constraint, "constraint_name", None) or "unknown"
+        raise NovaTodayError(
+            f"integrity_stage=reset_live_discovery; constraint={constraint_name}",
+            status_code=500,
+        ) from exc
     result = run_autopilot_cycle(
         db,
         organization_id=organization_id,
@@ -2011,6 +2021,7 @@ def _find_nova_anonymous_clients(
     organization_id: str,
     user: UserContext,
 ) -> NovaTodayBrainOut:
+    integrity_stage = "reset_live_discovery"
     """Run one owner-requested Nova Anonymous buyer-intent discovery cycle.
 
     This is discovery/preparation only. It never contacts a buyer, submits a
@@ -2072,6 +2083,7 @@ def _find_nova_anonymous_clients(
             item["capability_registry_matches"] = list(planned.get("capability_registry_matches") or [])
             collected.append(item)
 
+    integrity_stage = "qualify_live_jobs"
     ranked = qualify_and_rank_live_jobs(question, collected)
     qualified = []
     reviewable = []
@@ -2131,14 +2143,24 @@ def _find_nova_anonymous_clients(
         organization_id=organization_id,
         user=user,
     )
-    persisted = persist_ranked_jobs(
-        db,
-        candidates,
-        organization_id=organization_id,
-        user=user,
-        prepare_applications=True,
-        prepare_limit=3,
-    )
+    integrity_stage = "persist_ranked_jobs"
+    try:
+        persisted = persist_ranked_jobs(
+            db,
+            candidates,
+            organization_id=organization_id,
+            user=user,
+            prepare_applications=True,
+            prepare_limit=3,
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        constraint = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(constraint, "constraint_name", None) or "unknown"
+        raise NovaTodayError(
+            f"integrity_stage=persist_ranked_jobs; constraint={constraint_name}",
+            status_code=500,
+        ) from exc
 
     sources: list[dict[str, str]] = []
     seen_urls: set[str] = set()
@@ -2179,6 +2201,7 @@ def _find_nova_anonymous_clients(
             str(candidate.get("description") or "").strip(),
             "Owner review required before any proposal, contact, contract acceptance, or financial action.",
         ) if part]
+        integrity_stage = "today_approval_upsert"
         _upsert_proposed(
             db,
             _card(
@@ -2196,6 +2219,7 @@ def _find_nova_anonymous_clients(
             user=user,
         )
     if held:
+        integrity_stage = "today_approval_commit"
         db.commit()
     answer = (
         f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
@@ -2272,6 +2296,25 @@ def _today_live_or_memory_answer(
                 question=question,
                 organization_id=organization_id,
                 user=user,
+            )
+        except NovaTodayError as exc:
+            logger.exception("Nova Anonymous client search failed")
+            safe_detail = str(exc)
+            if not safe_detail.startswith("integrity_stage="):
+                safe_detail = "pipeline_error=NovaTodayError"
+            return NovaTodayBrainOut(
+                answer=(
+                    "I couldn't complete the Nova Anonymous client search right now. "
+                    f"Safe diagnostic: {safe_detail}. "
+                    "I did not contact any client or submit anything. "
+                    "The failure was recorded in server logs for diagnosis."
+                ),
+                fact_label="AI SUGGESTION",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                source_href="/nova/work",
+                sources=[],
+                verification_status="proposed",
             )
         except Exception as exc:
             logger.exception("Nova Anonymous client search failed")
