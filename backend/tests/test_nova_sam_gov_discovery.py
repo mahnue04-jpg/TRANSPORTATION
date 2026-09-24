@@ -476,3 +476,12 @@ def test_safety_rails_remain_off() -> None:
         isinstance(p, RemotiveLiveProvider) for p in live_providers()
     )
     assert any(isinstance(p, RemoteOkLiveProvider) for p in live_providers())
+
+
+
+def test_sam_title_search_uses_procurement_friendly_terms() -> None:
+    provider = SamGovLiveProvider()
+    assert provider._title_search_term("AI workflow automation project contractor") == "workflow"
+    assert provider._title_search_term("spreadsheet cleanup freelance project") == "data support"
+    assert provider._title_search_term("RFP proposal support contractor remote") == "proposal support"
+    assert provider._title_search_term("business research freelance project") == "research support"
