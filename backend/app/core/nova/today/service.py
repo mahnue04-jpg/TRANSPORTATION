@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
 from urllib.parse import urlparse
 
@@ -2319,6 +2320,210 @@ def _find_nova_anonymous_clients(
     )
 
 
+
+def _find_referenced_work_opportunity(
+    db: Session,
+    *,
+    question: str,
+    organization_id: str,
+    user: UserContext,
+):
+    """Resolve free-text references to a persisted Work & Revenue opportunity.
+
+    This keeps Ask Nova connected to opportunities that Nova itself discovered
+    even when the browser request does not carry action_id/source_ref_id.
+    """
+    from app.core.nova.work_revenue import service as work_service
+
+    text = " ".join(str(question or "").split())
+    lowered = text.lower()
+    identifiers = {
+        token.upper()
+        for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", text)
+        if any(ch.isdigit() for ch in token)
+    }
+    rows = work_service.list_opportunities(
+        db,
+        organization_id=organization_id,
+        user=user,
+        limit=200,
+    )
+    best = None
+    best_score = 0
+    stop = {
+        "review", "work", "revenue", "opportunity", "support", "services",
+        "business", "operations", "client", "job", "nova", "amicor",
+    }
+    for row in rows:
+        blob = " ".join(
+            str(value or "")
+            for value in (
+                row.opportunity_id,
+                row.opportunity_title,
+                row.company_name,
+                row.source_url,
+                row.description,
+                row.requirements,
+                row.notes,
+            )
+        )
+        blob_lower = blob.lower()
+        score = 0
+        if str(row.opportunity_id or "").lower() in lowered:
+            score = max(score, 120)
+        if identifiers and any(token in blob.upper() for token in identifiers):
+            score = max(score, 110)
+        title = " ".join(str(row.opportunity_title or "").lower().split())
+        if title and title in lowered:
+            score = max(score, 100)
+        title_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", title)
+            if len(token) >= 4 and token not in stop
+        }
+        question_tokens = set(re.findall(r"[a-z0-9]+", lowered))
+        hits = len(title_tokens & question_tokens)
+        if title_tokens and hits >= 3:
+            ratio = hits / max(len(title_tokens), 1)
+            if ratio >= 0.55:
+                score = max(score, 60 + hits)
+        if score > best_score:
+            best = row
+            best_score = score
+    return best if best_score >= 60 else None
+
+
+def _answer_saved_work_opportunity(
+    db: Session,
+    *,
+    question: str,
+    organization_id: str,
+    user: UserContext,
+) -> NovaTodayBrainOut | None:
+    """Evaluate a persisted opportunity instead of answering from generic chat context."""
+    intent = " ".join(str(question or "").lower().split())
+    review_words = (
+        "review", "evaluate", "requirements", "qualification", "qualifications",
+        "eligible", "eligibility", "can perform", "cannot perform", "suitable",
+        "owner review", "blocker", "deadline",
+    )
+    if not any(word in intent for word in review_words):
+        return None
+
+    row = _find_referenced_work_opportunity(
+        db,
+        question=question,
+        organization_id=organization_id,
+        user=user,
+    )
+    if row is None:
+        return None
+
+    from app.core.nova.work_revenue import service as work_service
+    from app.core.nova.work_revenue.qualifier import qualify_opportunity
+
+    payload = work_service._opportunity_payload(row)
+    qualification = qualify_opportunity(payload)
+    outcome = str(qualification.get("qualification_outcome") or "INSUFFICIENT_INFORMATION")
+    display_outcome = {
+        "NOVA_CAN_PERFORM": "CAN PERFORM",
+        "NOVA_WITH_OWNER_REVIEW": "NEEDS OWNER REVIEW",
+        "HUMAN_REQUIRED": "NEEDS OWNER REVIEW",
+        "INSUFFICIENT_INFORMATION": "NEEDS OWNER REVIEW",
+        "NOT_SUITABLE": "CANNOT PERFORM",
+    }.get(outcome, "NEEDS OWNER REVIEW")
+
+    source_details = {
+        "set_aside": None,
+        "response_deadline": None,
+        "solicitation_number": None,
+        "notice_id": None,
+        "agency": None,
+        "place_of_performance": None,
+    }
+    # For saved SAM.gov records, refresh the exact notice read-only when possible
+    # so Today can reason over set-aside/deadline fields that are not first-class
+    # columns in the V1 Work & Revenue schema.
+    if str(row.source or "").lower() == "sam_gov" or "sam.gov" in str(row.source_url or "").lower():
+        try:
+            from app.core.nova.v3.multi_source_discovery import SamGovLiveProvider
+            identifiers = [
+                token for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", question)
+                if any(ch.isdigit() for ch in token)
+            ]
+            search_term = identifiers[0] if identifiers else str(row.opportunity_title or "")
+            live_rows = SamGovLiveProvider().search(search_term, limit=10)
+            match = next(
+                (
+                    item for item in live_rows
+                    if str(item.get("source_url") or "") == str(row.source_url or "")
+                    or (search_term and search_term.lower() in " ".join(
+                        str(item.get(key) or "")
+                        for key in ("title", "solicitation_number", "notice_id", "source_url")
+                    ).lower())
+                ),
+                None,
+            )
+            if match:
+                for key in source_details:
+                    source_details[key] = match.get(key)
+                set_aside = str(match.get("set_aside") or "").strip()
+                if set_aside:
+                    display_outcome = "NEEDS OWNER REVIEW"
+                    qualification.setdefault("reasons", [])
+                    qualification["reasons"] = list(qualification.get("reasons") or []) + [
+                        f"Set-aside eligibility must be verified against AMICOR business certifications: {set_aside}"
+                    ]
+        except Exception:
+            # Saved-record evaluation must still work if the upstream source is unavailable.
+            pass
+
+    can_do = list(qualification.get("nova_tasks") or qualification.get("nova_can_do") or [])
+    human = list(qualification.get("human_tasks") or qualification.get("required_human_actions") or [])
+    reasons = list(qualification.get("reasons") or [])
+    missing = list(qualification.get("missing_information") or qualification.get("missing") or [])
+    parts = [
+        f"{display_outcome}: {row.opportunity_title} ({row.company_name}).",
+        f"Stored Work & Revenue record: {row.opportunity_id}.",
+    ]
+    if can_do:
+        parts.append("Nova can perform: " + "; ".join(str(item) for item in can_do[:8]) + ".")
+    if human:
+        parts.append("Human/owner actions: " + "; ".join(str(item) for item in human[:8]) + ".")
+    if reasons:
+        parts.append("Qualification reasons/blockers: " + "; ".join(str(item) for item in reasons[:8]) + ".")
+    if missing:
+        parts.append("Missing or unverified information: " + "; ".join(str(item) for item in missing[:8]) + ".")
+    if source_details["set_aside"]:
+        parts.append(f"Set-aside: {source_details['set_aside']}.")
+    if source_details["solicitation_number"]:
+        parts.append(f"Solicitation: {source_details['solicitation_number']}.")
+    if source_details["response_deadline"]:
+        parts.append(f"Response deadline: {source_details['response_deadline']}.")
+    elif row.application_deadline is not None:
+        parts.append(f"Application deadline: {row.application_deadline.isoformat()}.")
+    if source_details["agency"]:
+        parts.append(f"Agency: {source_details['agency']}.")
+    parts.append(
+        "No application was submitted, no client or agency was contacted, "
+        "no contract was accepted, and no money moved."
+    )
+
+    return NovaTodayBrainOut(
+        answer=" ".join(parts),
+        fact_label="VERIFIED DATA",
+        next_actions=["Review the saved Work & Revenue opportunity"],
+        generated_at=now().isoformat(),
+        source_href=row.source_url or "/nova/work",
+        sources=[{
+            "title": str(row.company_name or "Work & Revenue"),
+            "url": str(row.source_url or "/nova/work"),
+            "label": str(row.opportunity_title or "Saved opportunity"),
+        }] if row.source_url else [],
+        referenced_source_ref_id=row.opportunity_id,
+        verification_status="verified",
+    )
+
+
 def _today_live_or_memory_answer(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -2329,6 +2534,15 @@ def _today_live_or_memory_answer(
     question = str(payload.question or "").strip()
     if not question:
         return None
+
+    saved_opportunity = _answer_saved_work_opportunity(
+        db,
+        question=question,
+        organization_id=organization_id,
+        user=user,
+    )
+    if saved_opportunity is not None:
+        return saved_opportunity
 
     if _is_nova_anonymous_client_request(question):
         try:
