@@ -2523,6 +2523,14 @@ def _answer_saved_work_opportunity(
                 row = None
         else:
             row = None
+
+    # A broad discovery request ("find suitable work", "show opportunities",
+    # etc.) does not identify one persisted opportunity.  Do not force it
+    # through the single-opportunity qualification path, where a null row can
+    # later be dereferenced.  Let the dedicated discovery/search handlers run.
+    if row is None:
+        return None
+
     exact_sam = None
     identifiers = [
         token for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9-]{7,}\b", question)
