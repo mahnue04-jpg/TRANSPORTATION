@@ -2202,25 +2202,43 @@ def _find_nova_anonymous_clients(
             "Owner review required before any proposal, contact, contract acceptance, or financial action.",
         ) if part]
         integrity_stage = "today_approval_upsert"
-        _upsert_proposed(
-            db,
-            _card(
-                source_module="work_revenue",
-                source_ref_id=opp_id,
-                title=f"Review Work & Revenue opportunity: {title}",
-                detail="\n".join(detail_parts)[:4000],
-                href="/nova/work",
-                trust_label="ACTION REQUIRES APPROVAL",
-                priority=70,
-                recommended_action="open_link",
-                explanation="A live buyer opportunity was saved and is waiting for owner review.",
-            ),
-            organization_id=organization_id,
-            user=user,
-        )
+        try:
+            _upsert_proposed(
+                db,
+                _card(
+                    source_module="work_revenue",
+                    source_ref_id=opp_id,
+                    title=f"Review Work & Revenue opportunity: {title}",
+                    detail="\n".join(detail_parts)[:4000],
+                    href="/nova/work",
+                    trust_label="ACTION REQUIRES APPROVAL",
+                    priority=70,
+                    recommended_action="open_link",
+                    explanation="A live buyer opportunity was saved and is waiting for owner review.",
+                ),
+                organization_id=organization_id,
+                user=user,
+            )
+        except IntegrityError as exc:
+            db.rollback()
+            constraint = getattr(getattr(exc, "orig", None), "diag", None)
+            constraint_name = getattr(constraint, "constraint_name", None) or "unknown"
+            raise NovaTodayError(
+                f"integrity_stage=today_approval_upsert; constraint={constraint_name}",
+                status_code=500,
+            ) from exc
     if held:
         integrity_stage = "today_approval_commit"
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            constraint = getattr(getattr(exc, "orig", None), "diag", None)
+            constraint_name = getattr(constraint, "constraint_name", None) or "unknown"
+            raise NovaTodayError(
+                f"integrity_stage=today_approval_commit; constraint={constraint_name}",
+                status_code=500,
+            ) from exc
     answer = (
         f"Nova Anonymous client search completed. I replaced {reset.get('archived_count', 0)} prior "
         f"unprotected live-search opportunities and found {len(qualified)} revenue-ready client "

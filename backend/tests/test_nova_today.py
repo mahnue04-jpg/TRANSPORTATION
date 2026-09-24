@@ -1098,3 +1098,76 @@ def test_nova_anonymous_surfaces_integrity_stage_without_values(monkeypatch, cli
     assert "integrity_stage=reset_live_discovery" in answer
     assert "constraint=uq_safe_constraint_name" in answer
     assert "secret-value" not in answer
+
+
+
+def test_nova_anonymous_surfaces_today_approval_commit_integrity_stage(monkeypatch, client: TestClient) -> None:
+    headers = _headers(client)
+    from app.core.nova.today import service as today_service
+    from sqlalchemy.exc import IntegrityError
+
+    ranked = [{
+        "provider_id": "remotive",
+        "title": "Workflow Automation Contractor",
+        "company_name": "Example Buyer",
+        "source_url": "https://example.com/opportunity/commit",
+        "description": "Project-based workflow automation support.",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "live_qualification": {
+            "qualification_status": "NEEDS_OWNER_REVIEW",
+            "customer_type": "NOVA_ANONYMOUS_CUSTOMER",
+            "revenue_ready": False,
+            "blockers": [],
+            "work_type": "contractor",
+            "discovery_band": "REVIEW",
+            "capability_classification": "CAN_PERFORM",
+        },
+    }]
+
+    monkeypatch.setattr(today_service, "search_multi_source_jobs", lambda *args, **kwargs: {
+        "jobs": [ranked[0]],
+        "providers_queried": ["remotive"],
+        "provider_result_counts": {"remotive": 1},
+        "provider_screened_counts": {"remotive": 1},
+        "provider_errors": [],
+    })
+    monkeypatch.setattr(today_service, "qualify_and_rank_live_jobs", lambda *args, **kwargs: ranked)
+    monkeypatch.setattr(today_service, "reset_live_discovery_opportunities", lambda *args, **kwargs: {"archived_count": 0})
+    monkeypatch.setattr(today_service, "persist_ranked_jobs", lambda *args, **kwargs: [{
+        "work_opportunity_id": "NWO-TEST-APPROVAL",
+        "ready_for_owner_review": False,
+        "package_review_status": "HELD_FOR_OWNER_REVIEW",
+    }])
+    monkeypatch.setattr(today_service, "_upsert_proposed", lambda *args, **kwargs: None)
+
+    original_commit = today_service.Session.commit if hasattr(today_service, "Session") else None
+    class Orig:
+        class Diag:
+            constraint_name = "uq_today_owner_source"
+        diag = Diag()
+
+    db = None
+    def fail_commit():
+        raise IntegrityError("insert hidden", {}, Orig())
+
+    # Patch the request session's commit by wrapping the held path via a fake upsert
+    # that makes the next commit fail through the live db object.
+    def fake_upsert(db_obj, *args, **kwargs):
+        nonlocal db
+        db = db_obj
+        db_obj.commit = fail_commit
+        return None
+
+    monkeypatch.setattr(today_service, "_upsert_proposed", fake_upsert)
+
+    response = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Find clients for AMICOR Nova Anonymous Operations Agent"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()["answer"]
+    assert "integrity_stage=today_approval_commit" in answer
+    assert "constraint=uq_today_owner_source" in answer
+    assert "insert hidden" not in answer
