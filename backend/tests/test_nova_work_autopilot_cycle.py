@@ -83,7 +83,10 @@ def test_autopilot_cycle_is_bounded_deduped_and_never_submits(monkeypatch):
     assert len(captured["jobs"]) == 2
     assert captured["prepare_applications"] is True
     assert captured["prepare_limit"] == 5
+    assert result["application_workspace_count"] == 1
+    assert result["prepared_application_count"] == 1
     assert result["ready_for_owner_review_count"] == 1
+    assert result["held_for_owner_review_count"] == 1
     assert result["external_action_taken"] is False
     assert result["external_submission"] is False
     assert result["contract_acceptance"] is False
