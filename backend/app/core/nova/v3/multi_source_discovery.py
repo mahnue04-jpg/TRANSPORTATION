@@ -15,9 +15,13 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
+from docx import Document
+from pypdf import PdfReader
 
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
@@ -626,10 +630,141 @@ class SamGovLiveProvider:
                     if str(raw.get("description") or "").lower().startswith("http")
                     else None
                 ),
+                "resource_links": [
+                    str(item).strip()
+                    for item in list(raw.get("resourceLinks") or [])
+                    if str(item or "").strip()
+                ][:12],
+                "additional_info_link": str(raw.get("additionalInfoLink") or "").strip() or None,
             },
             simulated=False,
         )
 
+
+    @staticmethod
+    def _allowed_sam_resource_url(value: str) -> bool:
+        """Allow only public SAM.gov attachment/resource URLs."""
+        try:
+            parsed = urlparse(str(value or "").strip())
+        except Exception:
+            return False
+        host = str(parsed.hostname or "").lower()
+        return parsed.scheme == "https" and (host == "sam.gov" or host.endswith(".sam.gov"))
+
+    @staticmethod
+    def _resource_name_hint(url: str, headers: Any) -> str:
+        disposition = str((headers or {}).get("content-disposition") or "")
+        return f"{url} {disposition}".lower()
+
+    @staticmethod
+    def _extract_resource_text(*, url: str, response: Any) -> str:
+        """Extract text from a bounded public solicitation resource without executing it."""
+        content_type = str(response.headers.get("content-type") or "").lower()
+        hint = SamGovLiveProvider._resource_name_hint(url, response.headers)
+        payload = bytes(response.content or b"")
+        if not payload:
+            return ""
+        if len(payload) > 10_000_000:
+            return ""
+        try:
+            if "pdf" in content_type or ".pdf" in hint:
+                reader = PdfReader(BytesIO(payload))
+                text = " ".join(str(page.extract_text() or "") for page in reader.pages[:80])
+                return _clean_html(text)[:18000]
+            if (
+                "wordprocessingml" in content_type
+                or ".docx" in hint
+            ):
+                doc = Document(BytesIO(payload))
+                text = " ".join(str(paragraph.text or "") for paragraph in doc.paragraphs)
+                return _clean_html(text)[:18000]
+            if (
+                content_type.startswith("text/")
+                or "html" in content_type
+                or ".txt" in hint
+                or ".htm" in hint
+            ):
+                return _clean_html(str(response.text or ""))[:18000]
+        except Exception:
+            return ""
+        return ""
+
+    def _fetch_notice_supporting_text(self, row: dict[str, Any]) -> str | None:
+        """Read a few public SAM solicitation attachments for actual scope/duties.
+
+        Amendment descriptions frequently contain only change notices while the
+        real duties live in a PWS/SOW/requirements attachment. This remains
+        read-only, SAM-host allowlisted, byte/page bounded, and never submits.
+        """
+        metadata = dict(row.get("raw_source_metadata") or {})
+        links = [
+            str(item).strip()
+            for item in list(metadata.get("resource_links") or [])
+            if self._allowed_sam_resource_url(str(item or ""))
+        ]
+        if not links:
+            return None
+
+        priority_terms = (
+            "performance work statement", "pws", "statement of work", "sow",
+            "performance requirements", "requirements", "scope", "technical exhibit",
+        )
+        links = sorted(
+            links,
+            key=lambda value: (
+                -sum(1 for term in priority_terms if term in value.lower()),
+                value.lower(),
+            ),
+        )[:6]
+
+        extracted: list[tuple[int, str]] = []
+        key = self._require_key()
+        try:
+            with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+                for link in links:
+                    try:
+                        response = client.get(
+                            link,
+                            headers={
+                                "User-Agent": "AMICOR-Nova/1.0 opportunity-resource-review",
+                                "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/html",
+                            },
+                        )
+                        if response.status_code in {401, 403} and "api.sam.gov" in link:
+                            response = client.get(
+                                link,
+                                params={"api_key": key},
+                                headers={
+                                    "User-Agent": "AMICOR-Nova/1.0 opportunity-resource-review",
+                                    "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/html",
+                                },
+                            )
+                        if response.status_code in {401, 403}:
+                            continue
+                        response.raise_for_status()
+                        text = self._extract_resource_text(url=link, response=response)
+                        if not text:
+                            continue
+                        hint = self._resource_name_hint(link, response.headers)
+                        score = sum(3 for term in priority_terms if term in hint)
+                        score += sum(
+                            1 for term in (
+                                "contractor shall", "performance objective", "task ",
+                                "deliverable", "scope of work", "performance requirement",
+                            )
+                            if term in text.lower()
+                        )
+                        extracted.append((score, text))
+                    except Exception:
+                        continue
+        except Exception:
+            return None
+
+        if not extracted:
+            return None
+        extracted.sort(key=lambda item: item[0], reverse=True)
+        combined = " ".join(text for _, text in extracted[:2])
+        return _clean_html(combined)[:18000] or None
 
     def _fetch_notice_description(self, row: dict[str, Any]) -> str | None:
         """Fetch the public SAM notice description read-only using the configured API key.
@@ -746,6 +881,15 @@ class SamGovLiveProvider:
                     parsed["description"] = detailed
                     metadata = dict(parsed.get("raw_source_metadata") or {})
                     metadata["description_fetched"] = True
+                    parsed["raw_source_metadata"] = metadata
+                supporting = self._fetch_notice_supporting_text(parsed)
+                if supporting:
+                    current = str(parsed.get("description") or "").strip()
+                    parsed["description"] = _clean_html(
+                        f"{current} Supporting solicitation requirements: {supporting}"
+                    )[:22000]
+                    metadata = dict(parsed.get("raw_source_metadata") or {})
+                    metadata["supporting_resource_fetched"] = True
                     parsed["raw_source_metadata"] = metadata
                 return parsed
         return None
