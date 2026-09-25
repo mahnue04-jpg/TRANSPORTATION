@@ -4023,6 +4023,14 @@ def serve_nova_anonymous_agent() -> Response:
     return JSONResponse({"error": "Nova Anonymous Operations Agent page not found"}, status_code=404)
 
 
+@app.get("/nova/marketplace/admin")
+def serve_nova_marketplace_admin(_admin=Depends(_require_admin_ops)) -> Response:
+    page = os.path.join(_static_dir, "nova-marketplace", "admin.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova marketplace admin page not found"}, status_code=404)
+
+
 @app.get("/nova/marketplace/product/{product_slug}")
 def serve_nova_marketplace_product(product_slug: str) -> Response:
     page = os.path.join(_static_dir, "nova-marketplace", "product.html")
