@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Nova Anonymous Operations Agent | AMICOR</title>
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-anonymous-agent/agent.css" />
+</head>
+<body>
+  <main class="agent-main">
+    <section class="hero">
+      <p class="eyebrow">AMICOR NOVA</p>
+      <h1>Nova Anonymous Operations Agent</h1>
+      <p class="lead">Give Nova a supported digital operations task. AMICOR reviews the scope, Nova prepares the work, and an owner reviews the deliverable before external handoff.</p>
+      <div class="capabilities">
+        <span>Administrative operations</span><span>Business research</span><span>Spreadsheets & data</span>
+        <span>Documentation</span><span>Customer-support operations</span><span>Workflow automation</span>
+        <span>Document intelligence</span><span>Proposal / RFP support</span><span>Bookkeeping support</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Request a business task</h2>
+      <p class="hint">Describe the outcome you need. Nova will not accept licensed professional work, physical labor, driving, or any task that requires unsupported external authority.</p>
+      <form id="agent-intake">
+        <label>Business / organization
+          <input id="organization" maxlength="256" autocomplete="organization" />
+        </label>
+        <label>Your name
+          <input id="name" required minlength="2" maxlength="128" autocomplete="name" />
+        </label>
+        <label>Work email
+          <input id="email" required type="email" maxlength="320" autocomplete="email" />
+        </label>
+        <label>Phone (optional)
+          <input id="phone" maxlength="64" autocomplete="tel" />
+        </label>
+        <label>What do you need done?
+          <textarea id="message" required maxlength="4000" rows="8" placeholder="Example: Clean and organize this spreadsheet, identify duplicates and missing fields, then prepare a short summary of what needs attention."></textarea>
+        </label>
+        <label>Preferred contact
+          <select id="contact-method">
+            <option value="email">Email</option>
+            <option value="phone">Phone</option>
+            <option value="either">Either</option>
+          </select>
+        </label>
+        <label class="consent"><input id="consent" type="checkbox" required /> I agree that AMICOR may contact me about this work request.</label>
+        <input id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <button type="submit">Submit Work Request</button>
+      </form>
+      <div id="status" class="status" role="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>How it works</h2>
+      <ol>
+        <li><strong>You submit the task.</strong> Tell us the business result you need.</li>
+        <li><strong>Nova checks capability and scope.</strong> Unsupported or restricted work is rejected or escalated.</li>
+        <li><strong>Nova performs supported digital work.</strong> Work stays within the approved engagement.</li>
+        <li><strong>AMICOR reviews the deliverable.</strong> External delivery remains owner-controlled.</li>
+      </ol>
+      <p class="hint">Early launch is supervised. Payment and fully autonomous external actions are not represented as live until separately verified.</p>
+    </section>
+  </main>
+  <script src="/static/nova-anonymous-agent/agent.js"></script>
+</body>
+</html>

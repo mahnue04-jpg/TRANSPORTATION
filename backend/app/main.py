@@ -3036,6 +3036,21 @@ def marketing_services(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/nova-product")
+def marketing_nova(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "nova.html",
+        page_title="AMICOR Nova — AI Business Operations",
+        meta_description=(
+            "Explore AMICOR Nova and the Nova Anonymous Operations Agent for supported "
+            "business research, administrative operations, documentation, workflows, and digital work."
+        ),
+        active="services",
+        canonical_path="/nova-product",
+        request=request,
+    )
+
+
 @app.get("/for-providers")
 def marketing_providers(request: Request) -> HTMLResponse:
     """Public providers page. `/providers` remains a legacy redirect to `/app/providers`."""
@@ -3995,6 +4010,15 @@ def serve_nova_today() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Today page not found"}, status_code=404)
+
+
+@app.get("/nova/anonymous-agent")
+@app.get("/nova/anonymous-operations")
+def serve_nova_anonymous_agent() -> Response:
+    page = os.path.join(_static_dir, "nova-anonymous-agent", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Anonymous Operations Agent page not found"}, status_code=404)
 
 
 @app.get("/nova/signup")

@@ -112,3 +112,31 @@ def test_marketing_pages_still_serve():
         response = client.get(path)
         assert response.status_code == 200
         assert "AMICOR" in response.text
+
+
+def test_anonymous_operations_requires_work_description(client):
+    response = client.post("/api/marketing/leads", json={
+        "lead_type": "anonymous_operations",
+        "contact_name": "Pilot Client",
+        "work_email": "pilot-anon@example.com",
+        "consent": True,
+        "message": ""
+    })
+    assert response.status_code == 422
+
+
+def test_anonymous_operations_intake_is_accepted(client):
+    response = client.post("/api/marketing/leads", json={
+        "lead_type": "anonymous_operations",
+        "organization_name": "Pilot Company",
+        "contact_name": "Pilot Client",
+        "work_email": "pilot-anon-ok@example.com",
+        "consent": True,
+        "preferred_contact_method": "email",
+        "subject": "Spreadsheet cleanup",
+        "message": "Clean and organize a spreadsheet and prepare a summary."
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["accepted"] is True
+    assert body["data"]["lead_type"] == "anonymous_operations"

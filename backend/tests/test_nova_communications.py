@@ -234,3 +234,24 @@ def test_nova_communications_safety_and_frozen_products(client: TestClient) -> N
     freight = client.get("/nova/freight")
     assert freight.status_code == 200
     assert "New Freight Request" in freight.text or "Freight / Logistics" in freight.text
+
+
+def test_owner_confirmed_send_stays_gated(monkeypatch) -> None:
+    from app.core.nova.communications import service
+    from app.core.nova.communications.schemas import NovaCommsSendRequest
+
+    monkeypatch.delenv("NOVA_COMMUNICATIONS_ALLOW_SEND", raising=False)
+    try:
+        service.send_blocked(NovaCommsSendRequest(confirm_send=False))
+        assert False, "unconfirmed send must fail"
+    except service.NovaCommunicationsError as exc:
+        assert exc.status_code == 400
+
+    try:
+        service.send_blocked(NovaCommsSendRequest(confirm_send=True))
+        assert False, "disabled send must fail"
+    except service.NovaCommunicationsError as exc:
+        assert exc.status_code == 403
+
+    monkeypatch.setenv("NOVA_COMMUNICATIONS_ALLOW_SEND", "1")
+    service.send_blocked(NovaCommsSendRequest(confirm_send=True))
