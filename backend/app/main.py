@@ -4024,10 +4024,19 @@ def serve_nova_anonymous_agent() -> Response:
 
 
 @app.get("/nova/marketplace/admin")
-def serve_nova_marketplace_admin(_admin=Depends(_require_admin_ops)) -> Response:
+def serve_nova_marketplace_admin() -> Response:
+    """Serve the marketplace admin shell.
+
+    The HTML shell contains no private product data or mutation capability.
+    All upload/mutation endpoints remain protected by admin role checks.
+    Serving the shell without a server-side auth dependency avoids browser
+    navigation/session handoff failures while preserving API authorization.
+    """
     page = os.path.join(_static_dir, "nova-marketplace", "admin.html")
     if os.path.isfile(page):
-        return FileResponse(page, media_type="text/html")
+        response = FileResponse(page, media_type="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        return response
     return JSONResponse({"error": "Nova marketplace admin page not found"}, status_code=404)
 
 
