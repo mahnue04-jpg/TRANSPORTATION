@@ -91,6 +91,7 @@ from app.core.nova.payments.router import router as nova_payments_router  # type
 from app.core.nova.tenants.router import router as nova_tenants_router  # type: ignore
 from app.core.nova.signup.router import router as nova_signup_router  # type: ignore
 from app.core.nova.billing.router import router as nova_billing_router  # type: ignore
+from app.core.nova.marketplace.router import router as nova_marketplace_router  # type: ignore
 from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
@@ -492,6 +493,7 @@ app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
 app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
+app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
@@ -4019,6 +4021,31 @@ def serve_nova_anonymous_agent() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Anonymous Operations Agent page not found"}, status_code=404)
+
+
+@app.get("/nova/marketplace/admin")
+def serve_nova_marketplace_admin(_admin=Depends(_require_admin_ops)) -> Response:
+    page = os.path.join(_static_dir, "nova-marketplace", "admin.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova marketplace admin page not found"}, status_code=404)
+
+
+@app.get("/nova/marketplace/product/{product_slug}")
+def serve_nova_marketplace_product(product_slug: str) -> Response:
+    page = os.path.join(_static_dir, "nova-marketplace", "product.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova marketplace product page not found"}, status_code=404)
+
+
+@app.get("/nova/marketplace")
+@app.get("/marketplace")
+def serve_nova_marketplace() -> Response:
+    page = os.path.join(_static_dir, "nova-marketplace", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova marketplace page not found"}, status_code=404)
 
 
 @app.get("/nova/signup")

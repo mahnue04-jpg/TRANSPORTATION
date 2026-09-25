@@ -1,0 +1,151 @@
+{
+  "source": "Recovered OmniCore AI Webflow page inventory",
+  "captured_from": "Webflow Designer screenshots supplied by owner",
+  "migration_policy": "Preserve first; publish only after capability, deliverable, compliance, and checkout verification.",
+  "ready_product_pages": [
+    {
+      "name": "AI Income Starter Kit",
+      "target": "/nova/marketplace/product/ai-income-starter-kit",
+      "status": "deliverable_created"
+    },
+    {
+      "name": "Free AI Side Income Checklist",
+      "target": "/nova/marketplace/product/ai-side-income-checklist",
+      "status": "deliverable_created",
+      "note": "Old Webflow page says Free; migrated catalog currently has a paid-price conflict that must be resolved before checkout."
+    },
+    {
+      "name": "AI Workflow Starter Kit",
+      "target": "/nova/marketplace/product/ai-workflow-starter-kit",
+      "status": "deliverable_created"
+    },
+    {
+      "name": "Automation Blueprint",
+      "target": "/nova/marketplace/product/ai-automation-blueprint",
+      "status": "deliverable_created"
+    },
+    {
+      "name": "AI Prompt Library",
+      "target": "/nova/marketplace/product/ai-prompt-library",
+      "status": "deliverable_created"
+    }
+  ],
+  "service_funnels_to_review": [
+    {
+      "name": "Growth Audit",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "free-audit",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Thank You - Visibility Check",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Home Services Growth",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Choose Your Business Type",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Contractors",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Salons",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Plumbers",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Electricians",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Cleaning Services",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "AutoFlow Ops Assistant",
+      "status": "preserve_for_review",
+      "note": "Potential precursor/related concept to current operations-agent work; verify exact old capability before reuse."
+    },
+    {
+      "name": "Early Access",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Contact",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Become a Vendor",
+      "status": "preserve_for_review"
+    },
+    {
+      "name": "Vendor Guidelines",
+      "status": "preserve_for_review"
+    }
+  ],
+  "legacy_or_sensitive": [
+    {
+      "name": "OmniCore AI Trading Bot Bundle",
+      "status": "hold",
+      "reason": "Financial/trading product requires deliverable, claims, safety, and compliance review before any reuse."
+    },
+    {
+      "name": "thank-you-trading-bot",
+      "status": "hold",
+      "reason": "Legacy trading funnel."
+    },
+    {
+      "name": "BMI Calculator",
+      "status": "hold",
+      "reason": "Health-related calculator requires product-purpose and safety review before migration."
+    },
+    {
+      "name": "Omni-Pricing",
+      "status": "hold",
+      "reason": "Unknown pricing logic; inspect before migration."
+    }
+  ],
+  "webflow_commerce_pages": [
+    {
+      "name": "Checkout",
+      "status": "do_not_migrate_as_checkout",
+      "reason": "AMICOR will use its own verified payment path."
+    },
+    {
+      "name": "Checkout (PayPal)",
+      "status": "do_not_migrate_as_checkout",
+      "reason": "Payment path not part of current AMICOR launch."
+    },
+    {
+      "name": "Order Confirmation",
+      "status": "reference_only"
+    }
+  ],
+  "generic_template_pages": [
+    "Home",
+    "Home Copy",
+    "Home Copy 2",
+    "About",
+    "Team",
+    "Projects",
+    "Project 1 Work",
+    "Project 2 Work",
+    "Project 3 Work",
+    "Blog",
+    "Styleguide",
+    "/thank-you",
+    "Marketplace",
+    "Marketplace Products Template",
+    "Blog Posts Template"
+  ]
+}
