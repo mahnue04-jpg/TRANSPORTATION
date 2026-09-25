@@ -9,8 +9,8 @@ from __future__ import annotations
 PRODUCT_FILES = {
     "ai-income-starter-kit": {
         "filename": "AI_Income_Starter_Kit_AMICOR.pdf",
-        "sha256": "8c2a49d0c865d0570a4e31a64ed103da5244c3fce2fb2c87d9cc00050e591643",
-        "bytes": 181212,
+        "sha256": "b045568ac5a1474c6d8fcf1a621191ecb7bb2381afcf8ed47189d88c9f56da65",
+        "bytes": 200005,
         "price_cents": 900,
         "access": "paid",
     },
