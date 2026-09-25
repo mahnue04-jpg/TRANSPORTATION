@@ -91,6 +91,7 @@ from app.core.nova.payments.router import router as nova_payments_router  # type
 from app.core.nova.tenants.router import router as nova_tenants_router  # type: ignore
 from app.core.nova.signup.router import router as nova_signup_router  # type: ignore
 from app.core.nova.billing.router import router as nova_billing_router  # type: ignore
+from app.core.nova.marketplace.router import router as nova_marketplace_router  # type: ignore
 from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
@@ -492,6 +493,7 @@ app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
 app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
+app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
