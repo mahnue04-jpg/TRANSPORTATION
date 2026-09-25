@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "storage_policy": "PRIVATE_STORAGE_REQUIRED_BEFORE_CHECKOUT",
+  "generated_at": "2026-09-25",
+  "note": "Binary PDF files were created and verified in the working environment. GitHub connector supports UTF-8 text only, so binaries are not committed here. SHA-256 and byte size are recorded to verify the exact files when uploaded to AMICOR-controlled private storage.",
+  "deliverables": {
+    "ai-income-starter-kit": {
+      "filename": "AI_Income_Starter_Kit_AMICOR.pdf",
+      "sha256": "8c2a49d0c865d0570a4e31a64ed103da5244c3fce2fb2c87d9cc00050e591643",
+      "bytes": 181212,
+      "status": "CREATED_VERIFIED_PENDING_PRIVATE_UPLOAD"
+    },
+    "ai-side-income-checklist": {
+      "filename": "AI_Side_Income_Checklist_AMICOR.pdf",
+      "sha256": "26be99103153ebebd24b1da6a4cc7d75dc5306b03ffb0e05ba3dc64200fa14b2",
+      "bytes": 162137,
+      "status": "CREATED_VERIFIED_PENDING_PRIVATE_UPLOAD",
+      "pricing_note": "Old Webflow page says Free; newer marketplace export says $49. Checkout stays blocked until owner resolves price."
+    },
+    "ai-prompt-library": {
+      "filename": "AI_Prompt_Library_AMICOR.pdf",
+      "sha256": "18a5ff5a6f96c10ac41997d93ba9883bd7975e3e7e45b95506aecf9711a9354d",
+      "bytes": 159212,
+      "status": "CREATED_VERIFIED_PENDING_PRIVATE_UPLOAD"
+    },
+    "ai-workflow-starter-kit": {
+      "filename": "AI_Workflow_Starter_Kit_AMICOR.pdf",
+      "sha256": "2fe22cb5c1595c935215090b9a65ad0aa8ec0b1743a60648d5eb2b5cab442573",
+      "bytes": 184588,
+      "status": "CREATED_VERIFIED_PENDING_PRIVATE_UPLOAD"
+    },
+    "ai-automation-blueprint": {
+      "filename": "AI_Automation_Blueprint_AMICOR.pdf",
+      "sha256": "cfdf521887dc3e9472cc2978478a5e9b4a92e622020a399853d63575d25ba490",
+      "bytes": 16122,
+      "status": "CREATED_VERIFIED_PENDING_PRIVATE_UPLOAD"
+    }
+  }
+}
