@@ -23,6 +23,22 @@ async function api(path, options){
   return body;
 }
 
+async function ensureMarketplaceAdminRole(){
+  if (!window.AmiCorSession) return;
+  const profile = typeof window.AmiCorSession.getSessionProfile === "function"
+    ? window.AmiCorSession.getSessionProfile()
+    : null;
+  const role = String(profile && profile.role || "").toLowerCase();
+  if (role === "admin" || role === "super_admin_support") return;
+
+  const authorized = Array.isArray(profile && profile.authorizedRoles)
+    ? profile.authorizedRoles.map(v => String(v || "").toLowerCase())
+    : [];
+  if (authorized.includes("admin") && typeof window.AmiCorSession.switchWorkspaceRole === "function") {
+    await window.AmiCorSession.switchWorkspaceRole("admin");
+  }
+}
+
 async function load(){
  const root=document.getElementById("admin-products");
  try{
@@ -44,9 +60,11 @@ async function load(){
        e.preventDefault();
        const card=form.closest("article"),slug=card.dataset.slug,msg=form.querySelector(".upload-message"),btn=form.querySelector("button"),file=form.querySelector("input").files[0];
        if(!file)return;
-       btn.disabled=true;msg.textContent="Uploading and verifying…";
+       btn.disabled=true;msg.textContent="Checking admin session…";
        const fd=new FormData();fd.append("file",file);
        try{
+         await ensureMarketplaceAdminRole();
+         msg.textContent="Uploading and verifying…";
          await api("/api/nova/marketplace/admin/products/"+encodeURIComponent(slug)+"/file",{method:"POST",body:fd});
          msg.textContent="Verified successfully.";
          await load();
