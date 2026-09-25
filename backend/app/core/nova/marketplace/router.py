@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 
-from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, require_any_role
+from app.auth import (
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    get_current_user,
+    get_user_authorized_roles,
+)
 
 from .manifest import PRODUCT_FILES
 from .purchase_service import (
@@ -26,7 +31,17 @@ router = APIRouter(prefix="/api/nova/marketplace", tags=["nova-marketplace"])
 class MarketplaceCheckoutRequest(BaseModel):
     product_slug: str
     email: str
-require_marketplace_admin = require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)
+def require_marketplace_admin(user=Depends(get_current_user)):
+    """Allow marketplace file administration for accounts explicitly granted admin authority.
+
+    Marketplace administration is an account-level owner/admin capability, so it
+    must not disappear merely because the same authorized user is currently
+    operating another workspace role such as dispatcher or supervisor.
+    """
+    authorized = get_user_authorized_roles(user)
+    if not authorized.intersection({ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}):
+        raise HTTPException(status_code=403, detail="Insufficient role permissions")
+    return user
 
 
 @router.get("/status")
