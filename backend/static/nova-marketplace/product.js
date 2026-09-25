@@ -24,6 +24,38 @@ const money=(p)=>Number(p.price_usd)===0?"FREE":"$"+Number(p.price_usd).toFixed(
       action=`<div class="notice"><strong>Stripe TEST checkout only.</strong> No live charge is enabled. Enter an email only when performing the controlled test.</div><form id="checkout-form"><label>Email for TEST purchase <input id="checkout-email" type="email" required autocomplete="email"></label><button type="submit">Start TEST checkout · ${money(p)}</button><p id="checkout-message"></p></form>`;
     }
     root.innerHTML=`<p class="eyebrow">${free?"FREE RESOURCE":"AMICOR DIGITAL PRODUCT"}</p><h1>${esc(p.name)}</h1><img class="thumb" src="${esc(p.hero_url)}" alt="" style="height:auto;max-height:420px"><p>${esc(p.short_description)}</p><div class="meta">${money(p)} · ${esc(p.pricing_type)}</div><h2>What this product includes</h2><ul>${p.benefits.map(b=>`<li>${esc(b)}</li>`).join("")}</ul>${action}`;
+
+    const params=new URLSearchParams(location.search);
+    if(!free && params.get("purchase")==="success" && params.get("session_id")){
+      const existing=document.getElementById("checkout-complete-message");
+      if(existing) existing.remove();
+      const box=document.createElement("div");
+      box.id="checkout-complete-message";
+      box.className="notice";
+      box.innerHTML="<strong>Confirming your Stripe TEST payment…</strong>";
+      root.appendChild(box);
+      try{
+        const complete=await fetch("/api/nova/marketplace/checkout/complete",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({product_slug:slug,session_id:params.get("session_id")})
+        });
+        const result=await complete.json();
+        if(!complete.ok) throw new Error(result.detail||"Paid download could not be prepared");
+        const token=String(result.download_token||"");
+        if(!token) throw new Error("Secure download token missing");
+        const href="/api/nova/marketplace/products/"+encodeURIComponent(slug)+"/paid-download?token="+encodeURIComponent(token);
+        box.innerHTML='<strong>Payment confirmed.</strong> Your secure download is ready for the next '+esc(result.expires_in_hours||72)+' hours.<br><a class="details" href="'+href+'">Download purchased PDF</a>';
+        history.replaceState({},document.title,location.pathname+"?purchase=success");
+      }catch(err){
+        box.innerHTML="<strong>Payment received, but download setup needs attention.</strong> "+esc(err.message);
+      }
+    }else if(!free && params.get("purchase")==="cancelled"){
+      const box=document.createElement("div");
+      box.className="notice";
+      box.textContent="Stripe TEST checkout was cancelled. No payment was completed.";
+      root.appendChild(box);
+    }
     const form=document.getElementById("checkout-form");
     if(form){
       form.addEventListener("submit",async(e)=>{
