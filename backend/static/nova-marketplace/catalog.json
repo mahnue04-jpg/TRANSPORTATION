@@ -19,7 +19,14 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982d48e4439b5d6667d82d7_425x-_cc294c66bef70c1edb9a58ed5cc18cadf5bb71e7.png",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982d4663c5d6be89d4ed3cb_1_GB6tXauVBaHVGDE4L_FkYg.png",
-      "migration_status": "REVIEW_REQUIRED"
+      "migration_status": "REVIEW_REQUIRED",
+      "deliverable_status": "MISSING_VERIFIED_FILE",
+      "checkout_status": "BLOCKED",
+      "checkout_blockers": [
+        "Verified digital deliverable file is not attached to the AMICOR catalog",
+        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
+        "Post-payment entitlement/download flow is not yet verified"
+      ]
     },
     {
       "slug": "ai-income-starter-kit",
@@ -37,7 +44,14 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982dd1f0e83f9617d8a9364_1749606467126.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982e4f6bbbf4d7f65b9cfcc_1_bwXvLGib_sMQRjgEgq9hVg.png",
-      "migration_status": "REVIEW_REQUIRED"
+      "migration_status": "REVIEW_REQUIRED",
+      "deliverable_status": "MISSING_VERIFIED_FILE",
+      "checkout_status": "BLOCKED",
+      "checkout_blockers": [
+        "Verified digital deliverable file is not attached to the AMICOR catalog",
+        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
+        "Post-payment entitlement/download flow is not yet verified"
+      ]
     },
     {
       "slug": "ai-prompt-library",
@@ -55,7 +69,14 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c6a39584bff3893a7758_1-s2.0-S2215016124002188-ga1.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c6fa42a4fd2f166d2d0e_create_with_ai_a_miro_doc_keyword_ai_ui_designt_sub_header_image_x2.jpg",
-      "migration_status": "REVIEW_REQUIRED"
+      "migration_status": "REVIEW_REQUIRED",
+      "deliverable_status": "MISSING_VERIFIED_FILE",
+      "checkout_status": "BLOCKED",
+      "checkout_blockers": [
+        "Verified digital deliverable file is not attached to the AMICOR catalog",
+        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
+        "Post-payment entitlement/download flow is not yet verified"
+      ]
     },
     {
       "slug": "ai-side-income-checklist",
@@ -73,7 +94,14 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982dd1f0e83f9617d8a9364_1749606467126.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982e4f6bbbf4d7f65b9cfcc_1_bwXvLGib_sMQRjgEgq9hVg.png",
-      "migration_status": "REVIEW_REQUIRED"
+      "migration_status": "REVIEW_REQUIRED",
+      "deliverable_status": "MISSING_VERIFIED_FILE",
+      "checkout_status": "BLOCKED",
+      "checkout_blockers": [
+        "Verified digital deliverable file is not attached to the AMICOR catalog",
+        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
+        "Post-payment entitlement/download flow is not yet verified"
+      ]
     },
     {
       "slug": "ai-workflow-starter-kit",
@@ -90,7 +118,14 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c7c042f0653e22120b36_41598_2024_55186_Fig1_HTML.png",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6983661477f6d7292d7d306b_AI-Driven%20Workflow%20Orchestration.jpg",
-      "migration_status": "REVIEW_REQUIRED"
+      "migration_status": "REVIEW_REQUIRED",
+      "deliverable_status": "MISSING_VERIFIED_FILE",
+      "checkout_status": "BLOCKED",
+      "checkout_blockers": [
+        "Verified digital deliverable file is not attached to the AMICOR catalog",
+        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
+        "Post-payment entitlement/download flow is not yet verified"
+      ]
     }
   ],
   "legacy_review": [
@@ -134,5 +169,11 @@
       "price": "$97.00",
       "issue": "legacy physical classification; deliverable not verified"
     }
-  ]
+  ],
+  "migration_controls": {
+    "source_of_truth": "AMICOR catalog.json",
+    "public_checkout_enabled": false,
+    "live_stripe_allowed": false,
+    "note": "Marketplace must not reuse Nova SaaS subscription checkout. Digital marketplace purchases require a separate one-time payment and entitlement path."
+  }
 }
