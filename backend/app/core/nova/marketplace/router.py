@@ -19,6 +19,7 @@ from .manifest import PRODUCT_FILES
 from .purchase_service import (
     MarketplacePurchaseError,
     entitlement_for_token,
+    complete_marketplace_checkout,
     process_marketplace_webhook,
     start_marketplace_checkout,
     verify_marketplace_webhook,
@@ -102,6 +103,21 @@ def download_marketplace_product(slug: str):
 def marketplace_checkout(req: MarketplaceCheckoutRequest, db: Session = Depends(get_db)):
     try:
         return start_marketplace_checkout(db, product_slug=req.product_slug, email=req.email)
+    except MarketplacePurchaseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/checkout/complete")
+def marketplace_checkout_complete(
+    req: MarketplaceCheckoutCompleteRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return complete_marketplace_checkout(
+            db,
+            session_id=req.session_id,
+            product_slug=req.product_slug,
+        )
     except MarketplacePurchaseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
