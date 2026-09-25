@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "source": "Webflow OmniCore AI migration",
   "checkout_policy": "TEST_ONLY_AFTER_VERIFIED_PRIVATE_FILE",
   "products": [
@@ -37,18 +37,18 @@
       "category": "Automation",
       "price_usd": 9,
       "pricing_type": "One-Time",
-      "short_description": "A beginner-friendly starter kit that shows practical ways to use AI tools to create income streams without technical complexity.",
+      "short_description": "A practical beginner kit with worked examples, copy-and-paste prompts, sample client deliverables, pricing examples, outreach scripts, and a 7-day first-customer plan.",
       "benefits": [
-        "Beginner-friendly introduction to AI income ideas",
-        "Uses simple, accessible AI tools",
-        "No coding experience required",
-        "Helps avoid hype and unrealistic expectations",
-        "Clear steps to follow at your own pace"
+        "Four worked examples that show the customer request, AI prompt, human review, finished deliverable, and sample scope",
+        "Copy-and-paste prompts for spreadsheet cleanup, social content, research briefs, and SOPs",
+        "Sample pricing ranges, client messages, and scope language",
+        "30-minute portfolio exercise plus a 7-day first-customer plan",
+        "Quality-control checklist to prevent unsupported claims and unverified AI output"
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982dd1f0e83f9617d8a9364_1749606467126.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982e4f6bbbf4d7f65b9cfcc_1_bwXvLGib_sMQRjgEgq9hVg.png",
       "migration_status": "MIGRATED",
-      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "deliverable_status": "APPROVED_V2_FILE_FINGERPRINTED",
       "checkout_status": "TEST_ONLY_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
         "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification",
