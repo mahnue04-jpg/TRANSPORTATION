@@ -28,3 +28,12 @@ def test_paid_product_is_marked_paid():
     spec = service.product_spec("ai-automation-blueprint")
     assert spec["access"] == "paid"
     assert spec["price_cents"] == 2900
+
+
+def test_storage_root_falls_back_to_existing_render_disk(monkeypatch, tmp_path):
+    monkeypatch.delenv("AMICOR_MARKETPLACE_PRIVATE_DIR", raising=False)
+    monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE", "render_disk")
+    monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE_PATH", str(tmp_path))
+    root = service.storage_root()
+    assert root == (tmp_path / "marketplace_products").resolve()
+    assert root.is_dir()
