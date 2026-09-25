@@ -32,6 +32,11 @@ router = APIRouter(prefix="/api/nova/marketplace", tags=["nova-marketplace"])
 class MarketplaceCheckoutRequest(BaseModel):
     product_slug: str
     email: str
+
+class MarketplaceCheckoutCompleteRequest(BaseModel):
+    product_slug: str
+    session_id: str
+
 def require_marketplace_admin(user=Depends(get_current_user)):
     """Allow marketplace file administration for accounts explicitly granted admin authority.
 
