@@ -12,6 +12,7 @@ _OVERRIDE: "MarketplaceStripeClient | None" = None
 
 class MarketplaceStripeClient(Protocol):
     def create_checkout_session(self, *, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]: ...
 
 
 def marketplace_secret_key() -> str:
@@ -75,6 +76,12 @@ class FakeMarketplaceStripeClient:
         self.keys[idempotency_key] = sid
         return dict(record)
 
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
+        record = self.sessions.get(str(session_id or ""))
+        if record is None:
+            raise ValueError("Unknown Stripe TEST checkout session.")
+        return dict(record)
+
 
 class LiveMarketplaceStripeClient:
     def __init__(self, api_key: str) -> None:
@@ -114,3 +121,10 @@ class LiveMarketplaceStripeClient:
             return self._dict(created)
         except Exception as exc:
             raise RuntimeError(f"Marketplace Stripe checkout unavailable: {sanitize_stripe_error(exc)}") from exc
+
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
+        try:
+            session = self._client().v1.checkout.sessions.retrieve(str(session_id))
+            return self._dict(session)
+        except Exception as exc:
+            raise RuntimeError(f"Marketplace Stripe session verification unavailable: {sanitize_stripe_error(exc)}") from exc
