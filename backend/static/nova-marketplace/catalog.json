@@ -1,7 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "Webflow OmniCore AI migration",
-  "checkout_policy": "BLOCKED_UNTIL_DELIVERABLE_AND_PAYMENT_VERIFIED",
+  "checkout_policy": "TEST_ONLY_AFTER_VERIFIED_PRIVATE_FILE",
   "products": [
     {
       "slug": "ai-automation-blueprint",
@@ -19,13 +19,12 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982d48e4439b5d6667d82d7_425x-_cc294c66bef70c1edb9a58ed5cc18cadf5bb71e7.png",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982d4663c5d6be89d4ed3cb_1_GB6tXauVBaHVGDE4L_FkYg.png",
-      "migration_status": "REVIEW_REQUIRED",
-      "deliverable_status": "MISSING_VERIFIED_FILE",
-      "checkout_status": "BLOCKED",
+      "migration_status": "MIGRATED",
+      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "checkout_status": "TEST_ONLY_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
-        "Verified digital deliverable file is not attached to the AMICOR catalog",
-        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
-        "Post-payment entitlement/download flow is not yet verified"
+        "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification",
+        "Stripe TEST checkout and webhook must pass controlled end-to-end verification before live payment is considered"
       ],
       "regular_price_usd": 39,
       "role": "advanced_product",
@@ -48,13 +47,12 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982dd1f0e83f9617d8a9364_1749606467126.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982e4f6bbbf4d7f65b9cfcc_1_bwXvLGib_sMQRjgEgq9hVg.png",
-      "migration_status": "REVIEW_REQUIRED",
-      "deliverable_status": "MISSING_VERIFIED_FILE",
-      "checkout_status": "BLOCKED",
+      "migration_status": "MIGRATED",
+      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "checkout_status": "TEST_ONLY_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
-        "Verified digital deliverable file is not attached to the AMICOR catalog",
-        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
-        "Post-payment entitlement/download flow is not yet verified"
+        "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification",
+        "Stripe TEST checkout and webhook must pass controlled end-to-end verification before live payment is considered"
       ],
       "regular_price_usd": 9,
       "role": "entry_product",
@@ -77,13 +75,12 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c6a39584bff3893a7758_1-s2.0-S2215016124002188-ga1.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c6fa42a4fd2f166d2d0e_create_with_ai_a_miro_doc_keyword_ai_ui_designt_sub_header_image_x2.jpg",
-      "migration_status": "REVIEW_REQUIRED",
-      "deliverable_status": "MISSING_VERIFIED_FILE",
-      "checkout_status": "BLOCKED",
+      "migration_status": "MIGRATED",
+      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "checkout_status": "TEST_ONLY_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
-        "Verified digital deliverable file is not attached to the AMICOR catalog",
-        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
-        "Post-payment entitlement/download flow is not yet verified"
+        "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification",
+        "Stripe TEST checkout and webhook must pass controlled end-to-end verification before live payment is considered"
       ],
       "regular_price_usd": 19,
       "role": "low_ticket",
@@ -106,13 +103,11 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982dd1f0e83f9617d8a9364_1749606467126.jpg",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982e4f6bbbf4d7f65b9cfcc_1_bwXvLGib_sMQRjgEgq9hVg.png",
-      "migration_status": "REVIEW_REQUIRED",
-      "deliverable_status": "MISSING_VERIFIED_FILE",
-      "checkout_status": "BLOCKED",
+      "migration_status": "MIGRATED",
+      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "checkout_status": "FREE_DOWNLOAD_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
-        "Verified digital deliverable file is not attached to the AMICOR catalog",
-        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
-        "Post-payment entitlement/download flow is not yet verified"
+        "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification"
       ],
       "regular_price_usd": 0,
       "role": "lead_magnet",
@@ -134,13 +129,12 @@
       ],
       "thumbnail_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6982c7c042f0653e22120b36_41598_2024_55186_Fig1_HTML.png",
       "hero_url": "https://cdn.prod.website-files.com/6927b772d630aa0650af3387/6983661477f6d7292d7d306b_AI-Driven%20Workflow%20Orchestration.jpg",
-      "migration_status": "REVIEW_REQUIRED",
-      "deliverable_status": "MISSING_VERIFIED_FILE",
-      "checkout_status": "BLOCKED",
+      "migration_status": "MIGRATED",
+      "deliverable_status": "APPROVED_FILE_FINGERPRINTED",
+      "checkout_status": "TEST_ONLY_AFTER_PRIVATE_FILE_UPLOAD",
       "checkout_blockers": [
-        "Verified digital deliverable file is not attached to the AMICOR catalog",
-        "One-time marketplace Stripe price/payment path is not yet implemented and tested",
-        "Post-payment entitlement/download flow is not yet verified"
+        "Approved PDF must be uploaded to AMICOR private storage and pass fingerprint verification",
+        "Stripe TEST checkout and webhook must pass controlled end-to-end verification before live payment is considered"
       ],
       "regular_price_usd": 29,
       "role": "core_product",
@@ -194,7 +188,10 @@
     "source_of_truth": "AMICOR catalog.json",
     "public_checkout_enabled": false,
     "live_stripe_allowed": false,
-    "note": "Marketplace must not reuse Nova SaaS subscription checkout. Digital marketplace purchases require a separate one-time payment and entitlement path."
+    "note": "Marketplace uses a dedicated one-time TEST payment path. Nova SaaS subscription checkout is not reused.",
+    "test_checkout_code_ready": true,
+    "paid_entitlement_code_ready": true,
+    "private_file_verification_ready": true
   },
   "bundle": {
     "slug": "amicor-ai-starter-bundle",
