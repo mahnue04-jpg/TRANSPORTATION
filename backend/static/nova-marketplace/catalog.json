@@ -7,7 +7,7 @@
       "slug": "ai-automation-blueprint",
       "name": "AI Automation Blueprint",
       "category": "Automation",
-      "price_usd": 49,
+      "price_usd": 29,
       "pricing_type": "One-Time",
       "short_description": "A practical blueprint for building real AI-powered automations that replace manual work and scale across business workflows.",
       "benefits": [
@@ -26,13 +26,17 @@
         "Verified digital deliverable file is not attached to the AMICOR catalog",
         "One-time marketplace Stripe price/payment path is not yet implemented and tested",
         "Post-payment entitlement/download flow is not yet verified"
-      ]
+      ],
+      "regular_price_usd": 39,
+      "role": "advanced_product",
+      "cta": "Get Automation Blueprint",
+      "launch_pricing": true
     },
     {
       "slug": "ai-income-starter-kit",
       "name": "AI Income Starter Kit",
       "category": "Automation",
-      "price_usd": 49,
+      "price_usd": 9,
       "pricing_type": "One-Time",
       "short_description": "A beginner-friendly starter kit that shows practical ways to use AI tools to create income streams without technical complexity.",
       "benefits": [
@@ -51,13 +55,17 @@
         "Verified digital deliverable file is not attached to the AMICOR catalog",
         "One-time marketplace Stripe price/payment path is not yet implemented and tested",
         "Post-payment entitlement/download flow is not yet verified"
-      ]
+      ],
+      "regular_price_usd": 9,
+      "role": "entry_product",
+      "cta": "Get Starter Kit",
+      "launch_pricing": true
     },
     {
       "slug": "ai-prompt-library",
       "name": "AI Prompt Library",
       "category": "Automation",
-      "price_usd": 49,
+      "price_usd": 12,
       "pricing_type": "One-Time",
       "short_description": "A curated library of high-quality AI prompts designed to help you write, build, automate, and create faster — without starting from scratch.",
       "benefits": [
@@ -76,14 +84,18 @@
         "Verified digital deliverable file is not attached to the AMICOR catalog",
         "One-time marketplace Stripe price/payment path is not yet implemented and tested",
         "Post-payment entitlement/download flow is not yet verified"
-      ]
+      ],
+      "regular_price_usd": 19,
+      "role": "low_ticket",
+      "cta": "Get Prompt Library",
+      "launch_pricing": true
     },
     {
       "slug": "ai-side-income-checklist",
       "name": "AI Side Income Checklist",
       "category": "Automation",
-      "price_usd": 49,
-      "pricing_type": "One-Time",
+      "price_usd": 0,
+      "pricing_type": "Free",
       "short_description": "A simple checklist that helps you identify realistic AI-powered side income ideas and decide what to start with first.",
       "benefits": [
         "Helps identify realistic AI-powered side-income ideas",
@@ -101,13 +113,17 @@
         "Verified digital deliverable file is not attached to the AMICOR catalog",
         "One-time marketplace Stripe price/payment path is not yet implemented and tested",
         "Post-payment entitlement/download flow is not yet verified"
-      ]
+      ],
+      "regular_price_usd": 0,
+      "role": "lead_magnet",
+      "cta": "Get Free Checklist",
+      "launch_pricing": true
     },
     {
       "slug": "ai-workflow-starter-kit",
       "name": "AI Workflow Starter Kit",
       "category": "Automation",
-      "price_usd": 49,
+      "price_usd": 19,
       "pricing_type": "One-Time",
       "short_description": "A beginner-friendly introduction to building simple AI workflows that automate tasks and improve productivity using practical tools and step-by-step guidance.",
       "benefits": [
@@ -125,7 +141,11 @@
         "Verified digital deliverable file is not attached to the AMICOR catalog",
         "One-time marketplace Stripe price/payment path is not yet implemented and tested",
         "Post-payment entitlement/download flow is not yet verified"
-      ]
+      ],
+      "regular_price_usd": 29,
+      "role": "core_product",
+      "cta": "Get Workflow Kit",
+      "launch_pricing": true
     }
   ],
   "legacy_review": [
@@ -175,5 +195,34 @@
     "public_checkout_enabled": false,
     "live_stripe_allowed": false,
     "note": "Marketplace must not reuse Nova SaaS subscription checkout. Digital marketplace purchases require a separate one-time payment and entitlement path."
+  },
+  "bundle": {
+    "slug": "amicor-ai-starter-bundle",
+    "name": "AMICOR AI Starter Bundle",
+    "price_usd": 49,
+    "regular_value_usd": 77,
+    "pricing_type": "One-Time",
+    "includes": [
+      "ai-income-starter-kit",
+      "ai-prompt-library",
+      "ai-workflow-starter-kit",
+      "ai-automation-blueprint"
+    ],
+    "bonus_free_product": "ai-side-income-checklist",
+    "status": "PLANNED_CHECKOUT_BLOCKED",
+    "note": "Bundle price is a launch price. No false countdown or artificial scarcity."
+  },
+  "pricing_strategy": {
+    "effective_stage": "launch",
+    "objective": "reduce purchase friction, create a free-to-paid ladder, and reserve $49 for the multi-product bundle rather than a single short guide",
+    "ladder": [
+      "Free AI Side Income Checklist",
+      "$9 AI Income Starter Kit",
+      "$12 AI Prompt Library",
+      "$19 AI Workflow Starter Kit",
+      "$29 AI Automation Blueprint",
+      "$49 AMICOR AI Starter Bundle"
+    ],
+    "review_after": "Review conversion, refund, completion, and support data after initial real customer activity before raising prices."
   }
 }
