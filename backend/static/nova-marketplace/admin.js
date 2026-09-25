@@ -1,5 +1,28 @@
 const esc=(v)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-async function api(path,options){const r=await fetch(path,{credentials:"include",...(options||{})});let body={};try{body=await r.json()}catch(_){ }if(!r.ok)throw new Error(body.detail||("Request failed: "+r.status));return body}
+
+async function api(path, options){
+  const opts = {...(options||{})};
+  let r;
+  if (window.AmiCorSession && typeof window.AmiCorSession.ensureReady === "function") {
+    await window.AmiCorSession.ensureReady();
+  }
+  if (window.AmiCorSession && typeof window.AmiCorSession.authFetch === "function") {
+    r = await window.AmiCorSession.authFetch(path, opts);
+  } else {
+    const headers = {...(opts.headers||{})};
+    try {
+      const ident = JSON.parse(localStorage.getItem("amicor_identity") || "{}");
+      const token = ident.accessToken || ident.access_token;
+      if (token) headers.Authorization = "Bearer " + token;
+    } catch (_) {}
+    r = await fetch(path,{credentials:"include",...opts,headers});
+  }
+  let body={};
+  try{body=await r.json()}catch(_){}
+  if(!r.ok)throw new Error(body.detail||("Request failed: "+r.status));
+  return body;
+}
+
 async function load(){
  const root=document.getElementById("admin-products");
  try{
