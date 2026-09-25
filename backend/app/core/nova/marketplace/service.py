@@ -17,6 +17,11 @@ class MarketplaceFileError(Exception):
 def storage_root() -> Path:
     raw = (os.getenv("AMICOR_MARKETPLACE_PRIVATE_DIR") or "").strip()
     if not raw:
+        storage_mode = (os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE") or "").strip().lower()
+        existing_root = (os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE_PATH") or "").strip()
+        if storage_mode == "render_disk" and existing_root:
+            raw = str(Path(existing_root) / "marketplace_products")
+    if not raw:
         raise MarketplaceFileError("AMICOR_MARKETPLACE_PRIVATE_DIR is not configured.")
     root = Path(raw).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
