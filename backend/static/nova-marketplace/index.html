@@ -10,18 +10,13 @@
 <main class="market">
 <header><a href="/nova">AMICOR NOVA</a><span>Marketplace migration preview</span></header>
 <section class="hero">
-<p class="eyebrow">MIGRATED FROM WEBFLOW</p>
+<p class="eyebrow">WEBFLOW → AMICOR</p>
 <h1>AMICOR Digital Marketplace</h1>
-<p>Your Webflow product catalog is being moved into AMICOR so you can operate from one website. This preview deliberately keeps checkout disabled until each deliverable and payment path is verified.</p>
+<p>The Webflow catalog is now represented inside AMICOR. Product records below load from the migrated catalog rather than being hard-coded into this page.</p>
 </section>
-<section class="notice"><strong>Migration safety:</strong> placeholder Webflow/example.com access links are not carried into customer buttons. Legacy products marked “Physical” are held for review when their descriptions indicate digital content.</section>
-<section class="grid">
-<article><span class="status">MIGRATED · REVIEW</span><h2>AI Automation Blueprint</h2><p>Practical blueprint for designing, building, and deploying real AI-powered automation across business workflows.</p><div class="meta">$49 · Digital catalog candidate</div><button disabled>Checkout pending verification</button></article>
-<article><span class="status">MIGRATED · REVIEW</span><h2>AI Income Starter Kit</h2><p>Beginner-friendly starter kit focused on practical ways to use AI tools to create income streams.</p><div class="meta">$49 · Digital catalog candidate</div><button disabled>Checkout pending verification</button></article>
-<article><span class="status">MIGRATED · REVIEW</span><h2>AI Prompt Library</h2><p>Curated prompts for writing, business, automation, coding, and creative work.</p><div class="meta">$49 · Digital catalog candidate</div><button disabled>Checkout pending verification</button></article>
-<article><span class="status">MIGRATED · REVIEW</span><h2>AI Side Income Checklist</h2><p>Checklist for evaluating realistic AI-powered side-income ideas and choosing what to start first.</p><div class="meta">$49 · Digital catalog candidate</div><button disabled>Checkout pending verification</button></article>
-<article><span class="status">MIGRATED · REVIEW</span><h2>AI Workflow Starter Kit</h2><p>Beginner-friendly introduction to repeatable AI workflows for tasks, information organization, and productivity.</p><div class="meta">$49 · Digital catalog candidate</div><button disabled>Checkout pending verification</button></article>
-</section>
-<section class="legacy"><h2>Legacy Webflow commerce records</h2><p>Held out of the public catalog until reconciliation is complete. This includes the older OmniCore AI Trading Bot records and duplicate/legacy side-income records. Nothing here is silently discarded.</p></section>
+<section class="notice"><strong>Safe migration:</strong> checkout remains disabled until each digital deliverable and payment path is verified. Placeholder Webflow/example.com links are excluded from customer actions.</section>
+<section id="catalog" class="grid" aria-live="polite"><p>Loading migrated catalog…</p></section>
+<section class="legacy"><h2>Legacy Webflow commerce records</h2><p id="legacy-summary">Loading reconciliation status…</p></section>
 </main>
+<script src="/static/nova-marketplace/marketplace.js"></script>
 </body></html>
