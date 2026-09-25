@@ -45,6 +45,8 @@ services:
         value: /data/onboarding_docs
       - key: NOVA_WORK_INPUT_DIR
         value: /data/onboarding_docs/nova_work_inputs
+      - key: AMICOR_MARKETPLACE_PRIVATE_DIR
+        value: /data/onboarding_docs/marketplace_products
       - key: APP_VERSION
         value: 2026.08.01-phase56a-fast-boot.1
       - key: AMICOR_ENVIRONMENT
