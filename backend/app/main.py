@@ -4021,6 +4021,15 @@ def serve_nova_anonymous_agent() -> Response:
     return JSONResponse({"error": "Nova Anonymous Operations Agent page not found"}, status_code=404)
 
 
+@app.get("/nova/marketplace")
+@app.get("/marketplace")
+def serve_nova_marketplace() -> Response:
+    page = os.path.join(_static_dir, "nova-marketplace", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova marketplace page not found"}, status_code=404)
+
+
 @app.get("/nova/signup")
 @app.get("/nova/early-access")
 def serve_nova_signup() -> Response:
