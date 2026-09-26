@@ -585,6 +585,26 @@ def ask_government(
     user: UserContext,
 ) -> NovaGovBrainOut:
     items = list_items(db, organization_id=organization_id, user=user)
+
+    # Ask Nova is conversational. Do not bury a simple personal/session question
+    # inside government workflow boilerplate.
+    raw_question = (payload.question or "").strip()
+    lowered_question = raw_question.lower()
+    if payload.action == "ask" and lowered_question in {
+        "what is my name", "what's my name", "whats my name", "who am i", "who am i?"
+    }:
+        display_name = str(getattr(user, "display_name", "") or getattr(user, "name", "") or "").strip()
+        if not display_name:
+            display_name = str(getattr(user, "email", "") or "").split("@", 1)[0].strip()
+        answer = f"Your name is {display_name}." if display_name else "I do not have your name in this signed-in session."
+        return NovaGovBrainOut(
+            action=payload.action,
+            answer=answer,
+            fact_label="SIGNED-IN SESSION INFORMATION",
+            next_actions=[],
+            generated_at=datetime.now(timezone.utc),
+        )
+
     context = f"Open government work count: {len(items)}. "
     if payload.item_id:
         row = get_item(db, payload.item_id, organization_id=organization_id, user=user)
