@@ -114,7 +114,7 @@ def test_marketing_pages_still_serve():
         assert "AMICOR" in response.text
 
 
-def test_anonymous_operations_requires_work_description(client):
+def test_anonymous_operations_requires_work_description():
     response = client.post("/api/marketing/leads", json={
         "lead_type": "anonymous_operations",
         "contact_name": "Pilot Client",
@@ -125,7 +125,7 @@ def test_anonymous_operations_requires_work_description(client):
     assert response.status_code == 422
 
 
-def test_anonymous_operations_intake_is_accepted(client):
+def test_anonymous_operations_intake_is_accepted():
     response = client.post("/api/marketing/leads", json={
         "lead_type": "anonymous_operations",
         "organization_name": "Pilot Company",
