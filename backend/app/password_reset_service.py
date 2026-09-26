@@ -74,8 +74,9 @@ def password_reset_email_configured() -> bool:
 def _public_base_url() -> str:
     return (
         os.getenv("AMICOR_PUBLIC_BASE_URL")
+        or os.getenv("NOVA_SIGNUP_PUBLIC_BASE_URL")
         or os.getenv("PUBLIC_BASE_URL")
-        or "http://127.0.0.1:8765"
+        or "https://amicor-health-isf-py.onrender.com"
     ).rstrip("/")
 
 
@@ -168,11 +169,11 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
 
 
 def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[str, Any]:
-    """Consume a one-time token and update only the password hash."""
+    """Consume a one-time token, set a new password, and revoke existing sessions."""
     from app.auth import _validate_password, hash_password
     from app.core.nova.signup.models import NovaSignupAccount
     from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
-    from app.db.models import User as UserModel
+    from app.db.models import RefreshToken as RefreshTokenModel, User as UserModel
 
     ensure_password_reset_schema()
     _validate_password(new_password)
@@ -205,6 +206,11 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
         "is_active": user.is_active,
     }
     user.hashed_password = hash_password(new_password)
+    user.auth_version = int(getattr(user, "auth_version", 0) or 0) + 1
+    db.query(RefreshTokenModel).filter(
+        RefreshTokenModel.user_id == user.id,
+        RefreshTokenModel.revoked == False,  # noqa: E712
+    ).update({RefreshTokenModel.revoked: True}, synchronize_session=False)
     row.used_at = now()
 
     ensure_nova_signup_schema()
