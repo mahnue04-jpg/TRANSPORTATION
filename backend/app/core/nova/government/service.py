@@ -531,8 +531,15 @@ def search_government(
         for part in [payload.government_level, payload.category, payload.state, "government official"]
         if part
     )
-    query = f"{payload.query.strip()} {filters}".strip()
-    web = search_web(query, max_results=4, news_mode=False)
+    query = f'{payload.query.strip()} {filters} official government site:.gov'.strip()
+    web = search_web(query, max_results=6, news_mode=False)
+    official_sources = []
+    for source in (web.get("sources") or []):
+        url = str(source.get("url") or "").lower()
+        if ".gov/" in url or url.endswith(".gov"):
+            official_sources.append(source)
+    if official_sources:
+        web["sources"] = official_sources[:4]
     saved = []
     needle = payload.query.lower()
     for row in list_items(db, organization_id=organization_id, user=user):
@@ -604,7 +611,30 @@ def ask_government(
             answer=answer,
             fact_label="SIGNED-IN SESSION INFORMATION",
             next_actions=[],
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    item_required_actions = {
+        "explain_requirement",
+        "summarize_letter",
+        "missing_documents",
+        "build_checklist",
+        "prepare_email",
+    }
+    if payload.action in item_required_actions and not payload.item_id:
+        labels = {
+            "explain_requirement": "Explain requirement",
+            "summarize_letter": "Summarize letter",
+            "missing_documents": "Missing documents",
+            "build_checklist": "Build checklist",
+            "prepare_email": "Draft inquiry",
+        }
+        return NovaGovBrainOut(
+            action=payload.action,
+            answer=f"{labels[payload.action]} needs a saved government work item. Open a saved item first, then run this tool so Nova uses that item's real notes, checklist, and sources.",
+            fact_label="USER ACTION REQUIRED",
+            next_actions=["Open a saved government work item."],
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
     context = f"Open government work count: {len(items)}. "
