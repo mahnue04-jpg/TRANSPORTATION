@@ -333,6 +333,7 @@ def extract_known_site(text: str) -> tuple[str, str] | None:
         "go to",
         "show me",
         "take me to",
+        "take me directly to",
         "pull up",
         "bring up",
         "launch",

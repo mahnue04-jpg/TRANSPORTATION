@@ -196,6 +196,7 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert access.status_code == 200
         assert access.json()["nova_saas_customer"] is True
         assert "health" in access.json()["blocked_surfaces"]
+        assert "payments_readiness" in access.json()["blocked_surfaces"]
 
         assert client.get("/api/health-isf/rides", headers=headers).status_code == 403
         assert client.get("/api/health-isf/drivers", headers=headers).status_code == 403
@@ -204,6 +205,7 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert client.get("/app", headers=headers).status_code == 403
         assert client.get("/workspace", headers=headers).status_code == 403
         assert client.get("/nova/freight", headers=headers).status_code == 403
+        assert client.get("/nova/payments/readiness", headers=headers).status_code == 403
         assert client.get("/admin", headers=headers).status_code == 403
         assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
         assert client.get("/api/admin/metrics", headers=headers).status_code == 403
@@ -398,6 +400,13 @@ def test_api_admin_prefix_is_blocked_for_nova_customers_only() -> None:
     assert path_blocked_for_nova_customer("/api/admin/unknown-platform-endpoint") is True
     assert path_blocked_for_nova_customer("/api/nova/today/dashboard") is False
     assert path_blocked_for_nova_customer("/nova/workspace") is False
+    assert path_blocked_for_nova_customer("/nova/payments/readiness") is True
+    assert path_blocked_for_nova_customer("/workspace") is True
+    assert path_blocked_for_nova_customer("/app") is True
+    assert path_blocked_for_nova_customer("/nova/freight") is True
+    assert path_blocked_for_nova_customer("/nova/accounting") is False
+    assert path_blocked_for_nova_customer("/nova/accounting/aging") is False
+    assert path_blocked_for_nova_customer("/nova/accounting/trends") is False
 
 
 def test_nova_saas_admin_cannot_access_platform_admin_apis() -> None:

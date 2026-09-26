@@ -250,7 +250,23 @@ class FakeNovaSaasStripeClient:
         return None
 
     def apply_subscription_schedule(self, *, subscription_id: str, plan: dict[str, Any]) -> dict[str, Any]:
-        stripe_phases = build_stripe_schedule_phases(plan, catalog=self.prices)
+        trial_end = None
+        for session in self.sessions.values():
+            pending = session.get("pending_subscription_id") or session.get("subscription")
+            if str(pending or "") != str(subscription_id):
+                continue
+            sub_data = session.get("subscription_data") if isinstance(session.get("subscription_data"), dict) else {}
+            days = sub_data.get("trial_period_days")
+            if days:
+                from datetime import datetime, timedelta, timezone
+
+                trial_end = int((datetime.now(timezone.utc) + timedelta(days=int(days))).timestamp())
+            break
+        stripe_phases = build_stripe_schedule_phases(
+            plan,
+            catalog=self.prices,
+            trial_end=trial_end,
+        )
         existing_id = self.subscription_schedules.get(subscription_id)
         if existing_id:
             self.schedule_update_calls += 1

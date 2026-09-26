@@ -539,7 +539,12 @@
       var currentIdentity = identity();
       document.querySelectorAll(".today-nav a").forEach(function (el) {
         var href = el.getAttribute("href") || "";
-        if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
+        if (
+          href === "/workspace" ||
+          href === "/app" ||
+          href === "/nova/freight" ||
+          href === "/nova/payments/readiness"
+        ) {
           el.classList.toggle("hidden", isCustomer);
         }
       });

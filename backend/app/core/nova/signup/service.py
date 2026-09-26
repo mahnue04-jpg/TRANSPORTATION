@@ -299,7 +299,16 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
             "nova_login",
         ],
         "blocked_surfaces": (
-            ["health", "delivery", "freight", "lifesaver", "driver001", "admin", "internal"]
+            [
+                "health",
+                "delivery",
+                "freight",
+                "payments_readiness",
+                "lifesaver",
+                "driver001",
+                "admin",
+                "internal",
+            ]
             if saas
             else []
         ),

@@ -190,7 +190,7 @@ def test_nova_communications_navigation_and_responsive() -> None:
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
     assert 'href="/nova/communications">Communications' in WS_HTML
     assert 'href="/nova">Nova Home' in COMMS_HTML
-    assert 'href="/nova/workspace">Nova Workspace' in COMMS_HTML
+    assert 'href="/nova/workspace">Workspace' in COMMS_HTML
     assert 'href="/nova/government">Government' in COMMS_HTML
     assert 'href="/nova/business">Business' in COMMS_HTML
     assert 'href="/workspace">Health' in COMMS_HTML

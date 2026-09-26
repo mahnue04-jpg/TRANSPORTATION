@@ -23,6 +23,7 @@ BLOCKED_PREFIXES = (
     "/workspace",
     "/platform-ops",
     "/nova/freight",
+    "/nova/payments",
     "/admin",
 )
 ALLOWED_OVERRIDES = ("/nova/workspace",)

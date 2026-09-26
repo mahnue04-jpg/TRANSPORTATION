@@ -446,7 +446,7 @@ def test_nova_government_navigation_and_responsive() -> None:
     assert 'href="/nova/government">Government' in WS_HTML
     assert 'href="/nova/government">Government' in COMMS_HTML
     assert 'href="/nova">Nova Home' in GOV_HTML
-    assert 'href="/nova/workspace">Nova Workspace' in GOV_HTML
+    assert 'href="/nova/workspace">Workspace' in GOV_HTML
     assert 'href="/nova/communications">Communications' in GOV_HTML
     assert 'href="/nova/business">Business' in GOV_HTML
     assert 'href="/nova#web-search">Web / Search' in GOV_HTML
