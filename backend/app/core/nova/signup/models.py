@@ -1,7 +1,7 @@
 """Nova SaaS signup and customer-tenant tables. Isolated from Health/Freight billing."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.session import Base
 from app.helpers import now, uuid4
 
+STATUS_FREE = "free"
 STATUS_PENDING = "pending"
 STATUS_CHECKOUT_OPEN = "checkout_open"
 STATUS_TRIALING = "trialing"
@@ -25,7 +26,7 @@ HOLD_FOUNDING_STATUSES = (
     STATUS_PAST_DUE,
     STATUS_CANCELED,
 )
-ACTIVATED_STATUSES = (STATUS_TRIALING, STATUS_ACTIVE, STATUS_PAST_DUE)
+ACTIVATED_STATUSES = (STATUS_FREE, STATUS_TRIALING, STATUS_ACTIVE, STATUS_PAST_DUE)
 
 
 class NovaSignupAccount(Base):
@@ -96,3 +97,17 @@ class NovaSignupWebhookEvent(Base):
     signup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     processing_result: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class NovaFreeUsage(Base):
+    __tablename__ = "nova_free_usage"
+    __table_args__ = (
+        Index("ix_nova_free_usage_org_date", "organization_id", "usage_date", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    usage_date: Mapped[date] = mapped_column(DateTime(timezone=False), nullable=False)
+    ask_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
