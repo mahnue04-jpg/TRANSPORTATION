@@ -124,6 +124,20 @@ def test_nova_today_trust_labels_and_responsive() -> None:
     assert "pk_live" not in TODAY_JS
 
 
+def test_nova_customer_voice_entrypoint_and_wiring(client: TestClient) -> None:
+    voice = client.get("/nova/voice", follow_redirects=False)
+    assert voice.status_code == 307
+    assert voice.headers["location"] == "/nova/today#ask-nova"
+    assert 'id="ask-nova"' in TODAY_HTML
+    assert 'id="ask-mic"' in TODAY_HTML
+    assert 'id="stop-speaking"' in TODAY_HTML
+    assert 'src="/static/ux/humanVoiceEngine.js"' in TODAY_HTML
+    assert "window.SpeechRecognition || window.webkitSpeechRecognition" in TODAY_JS
+    assert '$("ask-form").requestSubmit()' in TODAY_JS
+    assert "speakNova(answer)" in TODAY_JS
+    assert "/api/voice/speak" in (STATIC / "ux" / "humanVoiceEngine.js").read_text(encoding="utf-8")
+
+
 def test_nova_today_signed_out_blocks_apis(client: TestClient) -> None:
     assert client.get("/api/nova/today/dashboard").status_code == 401
     assert client.post("/api/nova/today/ask", json={"question": "blocked"}).status_code == 401
