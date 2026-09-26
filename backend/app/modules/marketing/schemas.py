@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-LEAD_TYPES = frozenset({"provider_interest", "contact", "driver_interest"})
+LEAD_TYPES = frozenset({"provider_interest", "contact", "driver_interest", "anonymous_operations"})
 ORG_TYPES = frozenset(
     {
         "hospital",
@@ -28,7 +28,7 @@ MONTHLY_RIDE_BANDS = frozenset(
 
 
 class MarketingLeadCreate(BaseModel):
-    lead_type: Literal["provider_interest", "contact", "driver_interest"]
+    lead_type: Literal["provider_interest", "contact", "driver_interest", "anonymous_operations"]
     organization_name: str | None = Field(default=None, max_length=256)
     contact_name: str = Field(min_length=2, max_length=128)
     work_email: str = Field(min_length=5, max_length=320)
