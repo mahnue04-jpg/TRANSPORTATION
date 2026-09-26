@@ -304,6 +304,24 @@ def test_nova_business_tasks_vendors_documents_expenses_meetings(client: TestCli
     tasks = client.get("/api/nova/business/tasks", headers=headers)
     assert any(row["title"].startswith("Follow up: Customer kickoff") for row in tasks.json())
 
+    other_headers = _headers(client, "staff@amicor.local")
+    foreign_customer = client.post(
+        "/api/nova/business/customers",
+        headers=other_headers,
+        json={"name": "Other tenant customer", "kind": "company"},
+    )
+    assert foreign_customer.status_code == 200
+    blocked_meeting = client.post(
+        "/api/nova/business/meetings",
+        headers=headers,
+        json={
+            "title": "Must not cross customer scope",
+            "start_time": start.isoformat(),
+            "customer_id": foreign_customer.json()["customer_id"],
+        },
+    )
+    assert blocked_meeting.status_code == 404
+
     dash = client.get("/api/nova/business/dashboard", headers=headers)
     assert any(row["item_id"] == gov_id for row in dash.json()["government_items"])
     assert any(row["document_id"] == document.json()["document_id"] for row in dash.json()["documents_attention"])
