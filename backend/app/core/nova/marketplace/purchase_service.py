@@ -189,6 +189,30 @@ def process_marketplace_webhook(db: Session, event: dict[str, Any]) -> dict[str,
 
 
 
+def _rotate_entitlement_token(db: Session, purchase: MarketplacePurchase) -> tuple[str, Any]:
+    raw = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    entitlement = (
+        db.query(MarketplaceEntitlement)
+        .filter(MarketplaceEntitlement.purchase_id == purchase.id)
+        .first()
+    )
+    expires_at = now() + timedelta(hours=ENTITLEMENT_HOURS)
+    if entitlement is None:
+        entitlement = MarketplaceEntitlement(
+            purchase_id=purchase.id,
+            product_slug=purchase.product_slug,
+            email=purchase.email,
+            token_hash=digest,
+            expires_at=expires_at,
+        )
+        db.add(entitlement)
+    else:
+        entitlement.token_hash = digest
+        entitlement.expires_at = expires_at
+    return raw, entitlement
+
+
 def complete_marketplace_checkout(
     db: Session,
     *,
@@ -219,55 +243,38 @@ def complete_marketplace_checkout(
     if purchase.product_slug != slug:
         raise MarketplacePurchaseError("Checkout session does not match this product.", 403)
 
-    try:
-        session = get_marketplace_stripe_client().retrieve_checkout_session(sid)
-    except Exception as exc:
-        raise MarketplacePurchaseError(str(exc), 503) from exc
+    # Prefer the verified webhook state when it already confirmed payment.
+    # This avoids making a second Stripe API call after a successful redirect.
+    if purchase.status != "paid":
+        try:
+            session = get_marketplace_stripe_client().retrieve_checkout_session(sid)
+        except Exception as exc:
+            raise MarketplacePurchaseError(str(exc), 503) from exc
 
-    if str(session.get("id") or "") != sid:
-        raise MarketplacePurchaseError("Stripe checkout session mismatch.", 403)
-    if str(session.get("mode") or "") != "payment":
-        raise MarketplacePurchaseError("Stripe checkout session is not a one-time payment.", 409)
-    if str(session.get("payment_status") or "") != "paid":
-        raise MarketplacePurchaseError("Stripe payment is not confirmed as paid.", 409)
+        if str(session.get("id") or "") != sid:
+            raise MarketplacePurchaseError("Stripe checkout session mismatch.", 403)
+        if str(session.get("mode") or "") != "payment":
+            raise MarketplacePurchaseError("Stripe checkout session is not a one-time payment.", 409)
+        if str(session.get("payment_status") or "") != "paid":
+            raise MarketplacePurchaseError("Stripe payment is not confirmed as paid.", 409)
 
-    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
-    ref = str(
-        metadata.get("amicor_marketplace_purchase_id")
-        or session.get("client_reference_id")
-        or ""
-    ).strip()
-    if ref and ref != purchase.id:
-        raise MarketplacePurchaseError("Stripe checkout session does not match this purchase.", 403)
-    meta_slug = str(metadata.get("amicor_product_slug") or "").strip()
-    if meta_slug and meta_slug != slug:
-        raise MarketplacePurchaseError("Stripe checkout session does not match this product.", 403)
+        metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+        ref = str(
+            metadata.get("amicor_marketplace_purchase_id")
+            or session.get("client_reference_id")
+            or ""
+        ).strip()
+        if ref and ref != purchase.id:
+            raise MarketplacePurchaseError("Stripe checkout session does not match this purchase.", 403)
+        meta_slug = str(metadata.get("amicor_product_slug") or "").strip()
+        if meta_slug and meta_slug != slug:
+            raise MarketplacePurchaseError("Stripe checkout session does not match this product.", 403)
 
-    purchase.status = "paid"
-    purchase.stripe_payment_intent_id = str(session.get("payment_intent") or "") or purchase.stripe_payment_intent_id
-    purchase.updated_at = now()
+        purchase.status = "paid"
+        purchase.stripe_payment_intent_id = str(session.get("payment_intent") or "") or purchase.stripe_payment_intent_id
+        purchase.updated_at = now()
 
-    raw = secrets.token_urlsafe(32)
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    entitlement = (
-        db.query(MarketplaceEntitlement)
-        .filter(MarketplaceEntitlement.purchase_id == purchase.id)
-        .first()
-    )
-    expires_at = now() + timedelta(hours=ENTITLEMENT_HOURS)
-    if entitlement is None:
-        entitlement = MarketplaceEntitlement(
-            purchase_id=purchase.id,
-            product_slug=purchase.product_slug,
-            email=purchase.email,
-            token_hash=digest,
-            expires_at=expires_at,
-        )
-        db.add(entitlement)
-    else:
-        entitlement.token_hash = digest
-        entitlement.expires_at = expires_at
-
+    raw, _entitlement = _rotate_entitlement_token(db, purchase)
     db.commit()
     return {
         "ok": True,
