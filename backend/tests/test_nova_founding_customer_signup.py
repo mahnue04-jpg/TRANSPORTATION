@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.auth import SEED_PASSWORD, ensure_auth_schema, hash_password, seed_default_users
 from app.core.nova.autonomy.ledger import ensure_autonomy_schema
 from app.core.nova.signup.models import (
+    STATUS_FREE,
     STATUS_TRIALING,
     NovaCustomerTenant,
     NovaSignupAccount,
@@ -152,6 +153,56 @@ def test_public_signup_page_has_approved_offer_not_29() -> None:
     body = offer.json()
     assert body["copy"] == FOUNDING_COPY
     assert "$29" not in str(body["copy"])
+
+
+def test_free_signup_has_limited_access_and_daily_ask_cap() -> None:
+    client = _client()
+    payload = _signup_payload()
+    created = client.post("/api/nova/signup/free", json=payload)
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["status"] == STATUS_FREE
+    assert body["login_ready"] is True
+    assert body["plan"]["tier"] == "free"
+    assert body["plan"]["daily_ask_limit"] == 5
+    assert not body.get("checkout_url")
+
+    login = client.post(
+        "/api/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    access = client.get("/api/nova/signup/me/access", headers=headers)
+    assert access.status_code == 200, access.text
+    access_body = access.json()
+    assert access_body["tier"] == "free"
+    assert access_body["free_daily_ask_limit"] == 5
+    assert "nova_today" in access_body["allowed_surfaces"]
+    assert "nova_business" not in access_body["allowed_surfaces"]
+
+    assert client.get("/api/nova/government/dashboard", headers=headers).status_code == 403
+    assert client.get("/api/nova/communications/dashboard", headers=headers).status_code == 403
+    assert client.get("/api/nova/business/dashboard", headers=headers).status_code == 403
+    assert client.get("/api/nova/accounting/summary", headers=headers).status_code == 403
+    assert client.get("/api/nova/work/opportunities", headers=headers).status_code == 403
+    assert client.get("/api/nova/payments/readiness", headers=headers).status_code == 403
+
+    for _ in range(5):
+        asked = client.post(
+            "/api/nova/today/ask",
+            headers=headers,
+            json={"question": "What is my name?"},
+        )
+        assert asked.status_code == 200, asked.text
+    limited = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What is my name?"},
+    )
+    assert limited.status_code == 429
+    assert "5 Ask Nova requests per day" in limited.text
 
 
 def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
