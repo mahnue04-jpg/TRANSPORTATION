@@ -8,6 +8,8 @@ Endpoints (all under /api/auth):
   POST /logout     — revoke refresh token
   POST /switch-role — validate and issue JWT for an authorized workspace role
   POST /admin/reset-password — admin-only reset of an existing account password
+  POST /forgot-password — public customer reset request (generic response)
+  POST /reset-password — consume one-time reset token and set new password
   GET  /me         — return current user info (requires Bearer token)
   GET  /session    — return active JWT session role claims (requires Bearer token)
 """
@@ -25,7 +27,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session
 
@@ -1432,6 +1434,41 @@ def admin_reset_password(
     stored_email = reset_existing_user_password(db, req.email, req.new_password)
     logger.info("Admin password reset completed actor_id=%s target_email=%s", admin.id, stored_email)
     return AdminResetPasswordResponse(status="ok", email=_validate_email(stored_email))
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    new_password: str
+    confirm_password: str
+
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    """Public customer password-reset request. Always returns a generic message."""
+    from app.password_reset_service import request_password_reset
+
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
+    check_rate_limit(f"forgot-password:{ip}", limit=max(5, _RATE_LIMIT_AUTH // 2))
+    return request_password_reset(db, email=req.email)
+
+
+@router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    """Consume a one-time reset token and set a new password."""
+    from app.password_reset_service import apply_password_reset
+
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
+    check_rate_limit(f"reset-password:{ip}", limit=_RATE_LIMIT_AUTH)
+    if req.new_password != req.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    try:
+        return apply_password_reset(db, token=req.token, new_password=req.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/session")

@@ -4076,6 +4076,22 @@ def serve_nova_signup_success() -> Response:
     return JSONResponse({"error": "Nova signup success page not found"}, status_code=404)
 
 
+@app.get("/nova/forgot-password")
+def serve_nova_forgot_password() -> Response:
+    page = os.path.join(_static_dir, "nova-auth", "forgot.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova forgot password page not found"}, status_code=404)
+
+
+@app.get("/nova/reset-password")
+def serve_nova_reset_password() -> Response:
+    page = os.path.join(_static_dir, "nova-auth", "reset.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova reset password page not found"}, status_code=404)
+
+
 @app.get("/nova/accounting")
 def serve_nova_accounting() -> Response:
     page = os.path.join(_static_dir, "nova-accounting", "index.html")
