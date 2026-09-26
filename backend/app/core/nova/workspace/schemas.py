@@ -50,6 +50,7 @@ class NovaWorkspaceFileOut(BaseModel):
     filename: str
     content_type: str | None
     size_bytes: int | None
+    excerpt: str | None
     created_at: datetime
     last_accessed_at: datetime | None
 
