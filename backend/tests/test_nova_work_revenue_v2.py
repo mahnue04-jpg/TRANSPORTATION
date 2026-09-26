@@ -53,7 +53,10 @@ def test_v2_ui_surfaces_present() -> None:
     assert "Capability status" in WORK_HTML
     assert "/api/nova/work/v2/actions/board" in WORK_JS
     assert "approval is not execution" in WORK_JS
-    assert "window.open" not in WORK_JS
+    assert 'action === "open-handoff"' in WORK_JS
+    assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
+    assert "Approved handoff opened." in WORK_JS
+    assert "Nova did not claim it submitted the application." in WORK_JS
 
 
 def test_missing_env_cannot_enable_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
