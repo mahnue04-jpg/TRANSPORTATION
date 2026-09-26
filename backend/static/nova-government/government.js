@@ -68,7 +68,8 @@
       : "Sign in to use Nova Government.";
   }
   function itemHtml(row, extraClass) {
-    return "<div class=\"item " + (extraClass || "") + "\"><button class=\"linkish\" data-open-item=\"" +
+    var active = state.itemId && state.itemId === row.item_id ? " active-government-item" : "";
+    return "<div class=\"item " + (extraClass || "") + active + "\"><button class=\"linkish\" data-open-item=\"" +
       escapeHtml(row.item_id) + "\">" + escapeHtml(row.title) + "</button><div class=\"agency\">" +
       escapeHtml(row.agency || "No agency saved") + " · " + escapeHtml(row.government_level) +
       " · " + escapeHtml(row.status) + "</div><div class=\"muted\">Due " +
@@ -120,7 +121,12 @@
     }
     setSignedIn(true);
     renderDashboard(await api("/api/nova/government/dashboard"));
-    if (state.itemId) await loadItemExtras(state.itemId);
+    if (state.itemId) {
+      await loadItemExtras(state.itemId);
+      if (state.selectedItem) $("active-work").textContent = "Active government work: " + state.selectedItem.title + " · " + state.selectedItem.government_level + " · " + state.selectedItem.category;
+    } else {
+      $("active-work").textContent = "No active government work item selected.";
+    }
     $("brain-output").textContent = "Mrs. Nova Brain is connected to Nova Government. AI SUGGESTION is not an official ruling.";
   }
   async function runBrain(action, question) {
@@ -180,6 +186,37 @@
       showBanner(resultCount ? "Search complete. Results are shown below the search box." : "Search complete. No matching results were returned.", true);
     } catch (err) { showBanner(err.message); }
   });
+  function installSearchVoice() {
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var recognition = null;
+    if (!SpeechRecognition) {
+      $("gov-search-talk").disabled = true;
+      $("gov-search-stop").disabled = true;
+      $("gov-search-voice-status").textContent = "Search voice is not supported by this browser.";
+      return;
+    }
+    $("gov-search-talk").addEventListener("click", function () {
+      if (recognition) return;
+      recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      recognition.onstart = function () { $("gov-search-voice-status").textContent = "Listening for government search…"; };
+      recognition.onresult = function (event) {
+        var transcript = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript : "";
+        if (transcript) $("gov-search").value = transcript;
+      };
+      recognition.onerror = function () { $("gov-search-voice-status").textContent = "Search voice could not hear you. Try again."; };
+      recognition.onend = function () { recognition = null; $("gov-search-voice-status").textContent = "Voice ready."; };
+      recognition.start();
+    });
+    $("gov-search-stop").addEventListener("click", function () {
+      if (recognition) recognition.stop();
+      $("gov-search-voice-status").textContent = "Voice ready.";
+    });
+  }
+  installSearchVoice();
+
   $("ask-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try { await runBrain("ask"); } catch (err) { showBanner(err.message); }
@@ -280,8 +317,10 @@
       state.itemId = openBtn.getAttribute("data-open-item");
       var item = await api("/api/nova/government/items/" + encodeURIComponent(state.itemId));
       state.selectedItem = item;
-      showBanner("Active government work: " + item.title + " · " + item.government_level + " · " + item.category + ".", true);
-      await loadItemExtras(state.itemId);
+      $("active-work").textContent = "Active government work: " + item.title + " · " + item.government_level + " · " + item.category;
+      showBanner("Opened: " + item.title + ". Government tools now use this saved item's notes, checklist, and evidence.", true);
+      await refresh();
+      $("active-work").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (err) { showBanner(err.message); }
   });
   document.querySelectorAll("[data-gov-filter]").forEach(function (button) {
