@@ -84,10 +84,13 @@ def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
     old_password = payload["password"]
     new_password = f"NewPass1!{uuid4()[:6]}"
 
-    assert client.post(
+    login_before_reset = client.post(
         "/api/auth/login",
         json={"email": payload["email"], "password": old_password},
-    ).status_code == 200
+    )
+    assert login_before_reset.status_code == 200
+    access_token_before_reset = login_before_reset.json()["access_token"]
+    refresh_token_before_reset = login_before_reset.json()["refresh_token"]
 
     with SessionLocal() as db:
         before = db.query(UserModel).filter(UserModel.email == payload["email"].lower()).one()
@@ -147,6 +150,17 @@ def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
         "/api/auth/login",
         json={"email": payload["email"], "password": new_password},
     ).status_code == 200
+
+    old_access = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {access_token_before_reset}"},
+    )
+    assert old_access.status_code == 401
+    old_refresh = client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": refresh_token_before_reset},
+    )
+    assert old_refresh.status_code == 401
 
     with SessionLocal() as db:
         after = db.query(UserModel).filter(UserModel.email == payload["email"].lower()).one()
