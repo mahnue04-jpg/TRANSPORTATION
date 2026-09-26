@@ -440,6 +440,31 @@ def test_nova_government_user_and_org_isolation(client: TestClient) -> None:
     )
     assert cross.status_code == 403
 
+    foreign_project = client.post(
+        "/api/nova/workspace/projects",
+        headers=other,
+        json={"title": "Other user's government workspace"},
+    )
+    assert foreign_project.status_code == 200
+    blocked_create = client.post(
+        "/api/nova/government/items",
+        headers=owner,
+        json={
+            "title": "Must not link foreign workspace",
+            "category": "licensing",
+            "government_level": "state",
+            "workspace_id": foreign_project.json()["workspace_id"],
+        },
+    )
+    assert blocked_create.status_code == 404
+
+    blocked_update = client.patch(
+        f"/api/nova/government/items/{item_id}",
+        headers=owner,
+        json={"workspace_id": foreign_project.json()["workspace_id"]},
+    )
+    assert blocked_update.status_code == 404
+
 
 def test_nova_government_navigation_and_responsive() -> None:
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
