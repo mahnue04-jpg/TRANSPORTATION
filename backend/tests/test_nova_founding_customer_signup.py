@@ -383,6 +383,7 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert client.get("/admin", headers=headers).status_code == 403
         assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
         assert client.get("/api/admin/metrics", headers=headers).status_code == 403
+        assert client.get("/api/marketing/admin/leads", headers=headers).status_code == 403
         assert client.post(
             "/api/nova/tenants/provision",
             headers=headers,
