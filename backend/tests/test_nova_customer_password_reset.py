@@ -62,8 +62,8 @@ def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
     payload = _free_signup(client)
     asked = client.post("/api/auth/forgot-password", json={"email": payload["email"].upper()})
     assert asked.status_code == 200, asked.text
-    assert asked.json()["message"] == missing.json()["message"]
-    assert asked.json()["email_delivery"] in {"config_required", "not_configured", "send_failed", "sent", "attempted"}
+    assert asked.json() == missing.json()
+    assert set(asked.json()) == {"status", "message"}
     token = get_test_reset_token(payload["email"])
     assert token
     assert token not in asked.text
