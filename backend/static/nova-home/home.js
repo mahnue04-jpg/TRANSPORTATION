@@ -103,15 +103,19 @@
       $("login-form").classList.remove("hidden");
       return;
     }
-    var body = { question: question, mode: "founder_advisor" };
+    var body = { question: question };
     var orgId = organizationId();
     if (orgId) body.organization_id = String(orgId);
-    var result = await api("/api/nova/ask", {
+    var result = await api("/api/nova/today/ask", {
       method: "POST",
       body: JSON.stringify(body)
     });
-    $("brain-output").textContent = "AI SUGGESTION\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
-    showBanner("Mrs. Nova Brain answered using existing Nova intelligence APIs.", true);
+    var trust = result.fact_label || "AI SUGGESTION";
+    $("brain-output").textContent = trust + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
+    if (result.source_href) {
+      $("brain-output").textContent += "\n\nSource: " + result.source_href;
+    }
+    showBanner("Mrs. Nova Brain answered through the live Nova Today intelligence path.", true);
   }
   function renderSearch(data) {
     var sources = (data && data.sources) || [];
