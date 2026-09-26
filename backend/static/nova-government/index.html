@@ -38,7 +38,9 @@
     <div id="banner" class="banner hidden"></div>
 
     <section class="command-card" aria-label="Government search and Mrs. Nova Brain">
-      <form id="search-form" class="ask-row">
+      <h2 class="command-heading">Search government sources</h2>
+      <p class="hint">Search is separate from Ask Nova. Results appear directly below this search box.</p>
+      <form id="search-form" class="ask-row search-row">
         <label class="sr-only" for="gov-search">Government search</label>
         <input id="gov-search" type="search" placeholder="Find an agency, license, form, or deadline" />
         <select id="search-level" aria-label="Government level">
@@ -60,11 +62,18 @@
         </select>
         <button type="submit">Search</button>
       </form>
-      <form id="ask-form" class="ask-row">
-        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about this government work" />
+      <div id="search-results" class="inline-results">Enter a government topic above. Results will appear here.</div>
+
+      <div class="command-divider"></div>
+      <h2 class="command-heading">Ask Mrs. Nova</h2>
+      <p class="hint">Ask Nova is for your question. The government action buttons below are separate tools.</p>
+      <form id="ask-form" class="ask-row nova-ask-row">
+        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova a question" />
         <button type="submit">Ask Nova</button>
       </form>
-      <div class="command-actions">
+      <div class="command-divider"></div>
+      <h2 class="command-heading">Government tools</h2>
+      <div class="command-actions government-tools">
         <button type="button" data-brain="explain_requirement" class="secondary">Explain requirement</button>
         <button type="button" data-brain="summarize_letter" class="secondary">Summarize letter</button>
         <button type="button" data-brain="find_agency" class="secondary">Find agency</button>
@@ -185,13 +194,13 @@
         </form>
         <div id="source-list">Open a work item first.</div>
       </article>
-      <article class="card"><h2>Search results</h2><div id="search-results">Search official pages with existing /api/search. Results are not filings.</div></article>
+
     </section>
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/ux/humanVoiceEngine.js?v=20260926.1"></script>
-  <script src="/static/nova-government/government.js"></script>
-  <script src="/static/ux/novaVoiceControls.js?v=20260926.3"></script>
+  <script src="/static/ux/humanVoiceEngine.js?v=20260926.2"></script>
+  <script src="/static/nova-government/government.js?v=20260926.2"></script>
+  <script src="/static/ux/novaVoiceControls.js?v=20260926.4"></script>
 </body>
 </html>
