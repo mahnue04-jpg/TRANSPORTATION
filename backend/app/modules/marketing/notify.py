@@ -25,13 +25,20 @@ def _safe_label(value: object, limit: int = 200) -> str:
 
 def build_lead_notification(lead: Any) -> tuple[str, str]:
     lead_type = _safe_label(getattr(lead, "lead_type", ""), 64)
-    subject = f"[Amicor Lead] {lead_type} — {_safe_label(getattr(lead, 'contact_name', ''), 80)}"
+    lead_labels = {
+        "anonymous_operations": "Nova Operations Agent",
+        "provider_interest": "Provider Interest",
+        "driver_interest": "Driver Interest",
+        "contact": "Contact",
+    }
+    display_type = lead_labels.get(lead_type, lead_type or "Website Lead")
+    subject = f"[Amicor Lead] {display_type} — {_safe_label(getattr(lead, 'contact_name', ''), 80)}"
     lines = [
         "A new website lead was submitted.",
         "",
         f"Lead ID: {_safe_label(getattr(lead, 'id', ''), 64)}",
         f"Status: {_safe_label(getattr(lead, 'status', 'new'), 32)}",
-        f"Inquiry type: {lead_type}",
+        f"Inquiry type: {display_type}",
         f"Subject: {_safe_label(getattr(lead, 'subject', ''), 80)}",
         f"Name: {_safe_label(getattr(lead, 'contact_name', ''), 128)}",
         f"Organization: {_safe_label(getattr(lead, 'organization_name', ''), 200)}",
