@@ -14,6 +14,7 @@ from app.auth import (
 from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
 from app.core.nova.signup.service import (
     SignupError,
+    activate_free_signup,
     create_signup,
     customer_access,
     offer_payload,
@@ -76,6 +77,30 @@ def post_nova_signup(req: NovaSignupRequest, request: Request, db: Session = Dep
     if "password" in str(started).lower() and req.password in str(started):
         raise HTTPException(status_code=500, detail="Signup response leaked credentials")
     return started
+
+
+@router.post("/free")
+def post_nova_free_signup(req: NovaSignupRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
+    check_rate_limit(f"nova-free-signup:{ip}", limit=_RATE_LIMIT_AUTH)
+    try:
+        row = create_signup(
+            db,
+            business_name=req.business_name,
+            contact_name=req.contact_name,
+            email=req.email,
+            phone=req.phone,
+            industry=req.industry,
+            password=req.password,
+            terms_accepted=req.terms_accepted,
+        )
+        result = activate_free_signup(db, signup_id=row.id)
+    except Exception as exc:
+        _raise(exc)
+        raise
+    if "password" in str(result).lower() and req.password in str(result):
+        raise HTTPException(status_code=500, detail="Signup response leaked credentials")
+    return result
 
 
 @router.post("/checkout")
