@@ -133,10 +133,11 @@
         opportunity_id: state.opportunityId
       })
     });
+    await refresh();
+
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response.");
     $("fact-label").textContent = result.fact_label || "AI SUGGESTION is not accounting or a filing.";
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or booked.", true);
-    await refresh();
   }
 
   if (session() && session().restore) session().restore();
