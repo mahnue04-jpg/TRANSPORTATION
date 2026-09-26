@@ -92,6 +92,12 @@ def create_marketing_lead(
         if not (payload.message or "").strip():
             raise HTTPException(status_code=422, detail="Message is required")
 
+    if payload.lead_type == "anonymous_operations":
+        if not payload.consent:
+            raise HTTPException(status_code=422, detail="Consent is required")
+        if not (payload.message or "").strip():
+            raise HTTPException(status_code=422, detail="Work description is required")
+
     ip = _client_ip(request)
     if _rate_limited(ip):
         raise HTTPException(status_code=429, detail="Too many submissions. Please try again later.")
