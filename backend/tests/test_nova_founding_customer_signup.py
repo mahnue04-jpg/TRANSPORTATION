@@ -206,6 +206,7 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert client.get("/workspace", headers=headers).status_code == 403
         assert client.get("/nova/freight", headers=headers).status_code == 403
         assert client.get("/nova/payments/readiness", headers=headers).status_code == 403
+        assert client.get("/api/nova/payments/readiness", headers=headers).status_code == 403
         assert client.get("/admin", headers=headers).status_code == 403
         assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
         assert client.get("/api/admin/metrics", headers=headers).status_code == 403
@@ -401,6 +402,7 @@ def test_api_admin_prefix_is_blocked_for_nova_customers_only() -> None:
     assert path_blocked_for_nova_customer("/api/nova/today/dashboard") is False
     assert path_blocked_for_nova_customer("/nova/workspace") is False
     assert path_blocked_for_nova_customer("/nova/payments/readiness") is True
+    assert path_blocked_for_nova_customer("/api/nova/payments/readiness") is True
     assert path_blocked_for_nova_customer("/workspace") is True
     assert path_blocked_for_nova_customer("/app") is True
     assert path_blocked_for_nova_customer("/nova/freight") is True
