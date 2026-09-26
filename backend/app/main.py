@@ -4000,6 +4000,15 @@ def serve_nova_creative() -> Response:
     return JSONResponse({"error": "Nova Creative Studio page not found"}, status_code=404)
 
 
+@app.get("/nova/marketing")
+@app.get("/nova/flyers")
+def serve_nova_marketing() -> Response:
+    page = os.path.join(_static_dir, "nova-marketing", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Marketing page not found"}, status_code=404)
+
+
 @app.get("/nova/v3-lab")
 def serve_nova_v3_lab() -> Response:
     page = os.path.join(_static_dir, "nova-v3-lab", "index.html")
