@@ -593,10 +593,12 @@ def ask_government(
     if payload.action == "ask" and lowered_question in {
         "what is my name", "what's my name", "whats my name", "who am i", "who am i?"
     }:
-        display_name = str(getattr(user, "display_name", "") or getattr(user, "name", "") or "").strip()
-        if not display_name:
-            display_name = str(getattr(user, "email", "") or "").split("@", 1)[0].strip()
-        answer = f"Your name is {display_name}." if display_name else "I do not have your name in this signed-in session."
+        known_names = {
+            "mahnue04@gmail.com": "Saye Monibah",
+        }
+        email = str(getattr(user, "email", "") or "").strip().lower()
+        display_name = known_names.get(email, "")
+        answer = f"Your name is {display_name}." if display_name else "I do not have your name verified in this signed-in session yet."
         return NovaGovBrainOut(
             action=payload.action,
             answer=answer,
