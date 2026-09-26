@@ -25,6 +25,7 @@ CONTACT_METHODS = frozenset({"email", "phone", "either"})
 MONTHLY_RIDE_BANDS = frozenset(
     {"1-25", "26-75", "76-200", "200+", "unsure", ""}
 )
+OPERATIONS_SERVICE_PLANS = frozenset({"starter_49", "business_149", "monthly_499", "not_sure", ""})
 
 
 class MarketingLeadCreate(BaseModel):
@@ -43,6 +44,7 @@ class MarketingLeadCreate(BaseModel):
     consent: bool = False
     source_path: str | None = Field(default=None, max_length=256)
     lead_source: str | None = Field(default=None, max_length=128)
+    service_plan: str | None = Field(default=None, max_length=32)
     # Honeypot — must remain empty. Bots that fill it are rejected silently.
     website: str | None = Field(default=None, max_length=200)
 
@@ -78,6 +80,15 @@ class MarketingLeadCreate(BaseModel):
         if value not in CONTACT_METHODS:
             raise ValueError("Unsupported preferred contact method")
         return value
+
+    @field_validator("service_plan")
+    @classmethod
+    def validate_service_plan(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in OPERATIONS_SERVICE_PLANS:
+            raise ValueError("Unsupported operations service plan")
+        return value or None
 
     @field_validator("estimated_monthly_rides")
     @classmethod
