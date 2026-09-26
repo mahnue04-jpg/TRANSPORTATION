@@ -138,6 +138,74 @@ def test_nova_customer_voice_entrypoint_and_wiring(client: TestClient) -> None:
     assert "/api/voice/speak" in (STATIC / "ux" / "humanVoiceEngine.js").read_text(encoding="utf-8")
 
 
+def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _headers(client)
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_weather",
+        lambda location: {
+            "location": "Minneapolis, Minnesota, United States",
+            "temperature_f": 72,
+            "apparent_f": 71,
+            "humidity_pct": 45,
+            "wind_mph": 8,
+            "condition": "Clear",
+            "observed_at": "2026-09-26T12:00",
+            "source": "Open-Meteo",
+        },
+    )
+    weather = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What is the weather in Minneapolis?"},
+    )
+    assert weather.status_code == 200, weather.text
+    assert weather.json()["fact_label"] == "VERIFIED DATA"
+    assert "72" in weather.json()["answer"]
+    assert "Open-Meteo" in weather.json()["answer"]
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_news",
+        lambda query, limit=5: [
+            {
+                "title": "Test headline - Example News",
+                "link": "https://example.com/news",
+                "published": "Sat, 26 Sep 2026 12:00:00 GMT",
+                "source": "Example News",
+            }
+        ],
+    )
+    news = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Latest news about small business"},
+    )
+    assert news.status_code == 200, news.text
+    assert news.json()["fact_label"] == "VERIFIED DATA"
+    assert "Test headline" in news.json()["answer"]
+    assert news.json()["source_href"] == "https://example.com/news"
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_web_search",
+        lambda query, max_results=5: {
+            "status": "ok",
+            "response": "Live result summary",
+            "sources": [
+                {"title": "Example source", "url": "https://example.com/source", "label": "Example"}
+            ],
+        },
+    )
+    web = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Search the web for Minnesota small business resources"},
+    )
+    assert web.status_code == 200, web.text
+    assert web.json()["fact_label"] == "VERIFIED DATA"
+    assert web.json()["answer"] == "Live result summary"
+    assert web.json()["sources"][0]["url"] == "https://example.com/source"
+
+
 def test_nova_today_signed_out_blocks_apis(client: TestClient) -> None:
     assert client.get("/api/nova/today/dashboard").status_code == 401
     assert client.post("/api/nova/today/ask", json={"question": "blocked"}).status_code == 401
