@@ -97,6 +97,8 @@ def create_marketing_lead(
             raise HTTPException(status_code=422, detail="Consent is required")
         if not (payload.message or "").strip():
             raise HTTPException(status_code=422, detail="Work description is required")
+        if not payload.service_plan:
+            raise HTTPException(status_code=422, detail="Choose a starting service option")
 
     ip = _client_ip(request)
     if _rate_limited(ip):
@@ -138,6 +140,7 @@ def create_marketing_lead(
             message=payload.message,
             consent=bool(payload.consent),
             lead_source=lead_source or "website",
+            service_plan=payload.service_plan,
             source_path=payload.source_path or str(request.headers.get("referer") or "")[:256],
             user_agent=(request.headers.get("user-agent") or "")[:512],
             notify_status="pending",
