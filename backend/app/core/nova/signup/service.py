@@ -23,6 +23,7 @@ from app.core.nova.signup.models import (
     ACTIVATED_STATUSES,
     HOLD_FOUNDING_STATUSES,
     STATUS_ACTIVE,
+    STATUS_FREE,
     STATUS_CANCELED,
     STATUS_CHECKOUT_OPEN,
     STATUS_EXPIRED,
@@ -31,6 +32,7 @@ from app.core.nova.signup.models import (
     STATUS_PENDING,
     STATUS_TRIALING,
     NovaCustomerTenant,
+    NovaFreeUsage,
     NovaSignupAccount,
     NovaSignupWebhookEvent,
 )
@@ -54,6 +56,7 @@ from app.helpers import now
 logger = logging.getLogger("amicor.nova.signup")
 
 SUCCESS_PAYMENT_STATUSES = frozenset({"paid", "no_payment_required"})
+FREE_DAILY_ASK_LIMIT = 5
 
 
 class SignupError(Exception):
@@ -184,7 +187,7 @@ def start_checkout(db: Session, *, signup_id: str) -> dict[str, Any]:
     row = db.get(NovaSignupAccount, signup_id)
     if row is None:
         raise SignupError("Signup not found", status_code=404)
-    if row.status in ACTIVATED_STATUSES:
+    if row.status in ACTIVATED_STATUSES and row.status != STATUS_FREE:
         raise SignupError("Signup already activated", status_code=409)
 
     occupied = founding_occupied_count(db)
@@ -271,6 +274,110 @@ def signup_status(db: Session, signup_id: str) -> dict[str, Any]:
     return checkout_view(db, row)
 
 
+def activate_free_signup(db: Session, *, signup_id: str) -> dict[str, Any]:
+    ensure_nova_signup_schema()
+    row = db.get(NovaSignupAccount, signup_id)
+    if row is None:
+        raise SignupError("Signup not found", status_code=404)
+    if row.status in ACTIVATED_STATUSES:
+        if row.status == STATUS_FREE and row.organization_id:
+            return checkout_view(db, row)
+        raise SignupError("Signup already activated", status_code=409)
+    try:
+        tenant = provision_isolated_nova_tenant(
+            db,
+            organization_name=row.business_name,
+            owner_email=row.email,
+            owner_display_name=row.contact_name,
+            hashed_password=row.password_hash,
+            actor_user_id="nova-free-signup",
+        )
+    except TenantProvisionError as exc:
+        raise SignupError(str(exc), status_code=exc.status_code) from exc
+
+    row.status = STATUS_FREE
+    row.organization_id = tenant.organization_id
+    row.owner_user_id = tenant.owner_user_id
+    row.founding_reserved = False
+    row.founding_slot = None
+    row.updated_at = now()
+
+    existing_tenant = (
+        db.query(NovaCustomerTenant)
+        .filter(NovaCustomerTenant.signup_id == row.id)
+        .first()
+    )
+    if existing_tenant is None:
+        db.add(
+            NovaCustomerTenant(
+                signup_id=row.id,
+                organization_id=tenant.organization_id,
+                owner_user_id=tenant.owner_user_id,
+                founding_member=False,
+                founding_slot=None,
+                subscription_status=STATUS_FREE,
+                product_scope="nova",
+            )
+        )
+    else:
+        existing_tenant.subscription_status = STATUS_FREE
+        existing_tenant.updated_at = now()
+    db.commit()
+    db.refresh(row)
+    return checkout_view(db, row)
+
+
+def consume_free_ask(db: Session, *, organization_id: str | None) -> dict[str, Any]:
+    ensure_nova_signup_schema()
+    org_id = str(organization_id or "").strip()
+    if not org_id:
+        return {"is_free": False, "allowed": True, "limit": None, "used": 0, "remaining": None}
+    tenant = (
+        db.query(NovaCustomerTenant)
+        .filter(NovaCustomerTenant.organization_id == org_id)
+        .first()
+    )
+    if tenant is None or str(tenant.subscription_status or "").lower() != STATUS_FREE:
+        return {"is_free": False, "allowed": True, "limit": None, "used": 0, "remaining": None}
+
+    usage_date = now().date()
+    row = (
+        db.query(NovaFreeUsage)
+        .filter(
+            NovaFreeUsage.organization_id == org_id,
+            NovaFreeUsage.usage_date == usage_date,
+        )
+        .first()
+    )
+    if row is None:
+        row = NovaFreeUsage(
+            organization_id=org_id,
+            usage_date=usage_date,
+            ask_count=0,
+        )
+        db.add(row)
+        db.flush()
+    if int(row.ask_count or 0) >= FREE_DAILY_ASK_LIMIT:
+        db.rollback()
+        return {
+            "is_free": True,
+            "allowed": False,
+            "limit": FREE_DAILY_ASK_LIMIT,
+            "used": int(row.ask_count or 0),
+            "remaining": 0,
+        }
+    row.ask_count = int(row.ask_count or 0) + 1
+    row.updated_at = now()
+    db.commit()
+    return {
+        "is_free": True,
+        "allowed": True,
+        "limit": FREE_DAILY_ASK_LIMIT,
+        "used": int(row.ask_count or 0),
+        "remaining": max(0, FREE_DAILY_ASK_LIMIT - int(row.ask_count or 0)),
+    }
+
+
 def customer_access(db: Session, *, organization_id: str | None, user_id: str | None) -> dict[str, Any]:
     ensure_nova_signup_schema()
     saas = is_nova_saas_customer_org(db, organization_id)
@@ -281,33 +388,57 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
             .filter(NovaCustomerTenant.organization_id == str(organization_id))
             .first()
         )
+    subscription_status = str(tenant.subscription_status or "") if tenant is not None else None
+    free_tier = subscription_status == STATUS_FREE
+    paid_surfaces = [
+        "nova_home",
+        "nova_today",
+        "nova_command_center",
+        "nova_workspace",
+        "nova_search",
+        "nova_communications",
+        "nova_government",
+        "nova_business",
+        "nova_accounting",
+        "nova_accounting_aging",
+        "nova_accounting_trends",
+        "nova_login",
+    ]
+    free_surfaces = [
+        "nova_home",
+        "nova_today",
+        "nova_workspace",
+        "nova_search",
+        "nova_login",
+    ]
     return {
         "nova_saas_customer": saas,
         "product_scope": "nova" if saas else "internal",
-        "allowed_surfaces": [
-            "nova_home",
-            "nova_today",
-            "nova_command_center",
-            "nova_workspace",
-            "nova_search",
-            "nova_communications",
-            "nova_government",
-            "nova_business",
-            "nova_accounting",
-            "nova_accounting_aging",
-            "nova_accounting_trends",
-            "nova_login",
-        ],
+        "tier": "free" if free_tier else ("paid" if saas else "internal"),
+        "allowed_surfaces": free_surfaces if free_tier else paid_surfaces,
         "blocked_surfaces": (
-            ["health", "delivery", "freight", "lifesaver", "driver001", "admin", "internal"]
+            [
+                "health",
+                "delivery",
+                "freight",
+                "lifesaver",
+                "driver001",
+                "admin",
+                "internal",
+                *(
+                    ["nova_communications", "nova_government", "nova_business", "nova_accounting"]
+                    if free_tier
+                    else []
+                ),
+            ]
             if saas
             else []
         ),
+        "free_daily_ask_limit": FREE_DAILY_ASK_LIMIT if free_tier else None,
         "founding_member": bool(tenant.founding_member) if tenant is not None else False,
-        "subscription_status": tenant.subscription_status if tenant is not None else None,
+        "subscription_status": subscription_status,
         "owner_user_id": tenant.owner_user_id if tenant is not None else user_id,
     }
-
 
 def verify_webhook(payload: bytes, signature: str | None) -> dict[str, Any]:
     override = get_nova_saas_stripe_override()
@@ -550,7 +681,7 @@ def _activate_from_checkout(db: Session, session_obj: dict[str, Any]) -> dict[st
     row = db.get(NovaSignupAccount, signup_id)
     if row is None:
         return {"handled": True, "result": "missing_signup", "activated": False}
-    if row.status in ACTIVATED_STATUSES and row.organization_id:
+    if row.status in ACTIVATED_STATUSES and row.status != STATUS_FREE and row.organization_id:
         return {"handled": True, "result": "already_activated", "activated": True, "signup_id": row.id}
 
     subscription_id = str(session_obj.get("subscription") or "") or None
@@ -610,6 +741,13 @@ def _activate_from_checkout(db: Session, session_obj: dict[str, Any]) -> dict[st
                 stripe_subscription_id=subscription_id,
             )
         )
+    else:
+        existing_tenant.founding_member = bool(row.founding_reserved)
+        existing_tenant.founding_slot = row.founding_slot
+        existing_tenant.subscription_status = STATUS_TRIALING
+        existing_tenant.stripe_customer_id = customer_id
+        existing_tenant.stripe_subscription_id = subscription_id
+        existing_tenant.updated_at = now()
     return {
         "handled": True,
         "result": "activated",
