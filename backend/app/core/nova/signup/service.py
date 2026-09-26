@@ -284,7 +284,20 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
     return {
         "nova_saas_customer": saas,
         "product_scope": "nova" if saas else "internal",
-        "allowed_surfaces": ["nova_today", "nova_command_center", "nova_workspace", "nova_login"],
+        "allowed_surfaces": [
+            "nova_home",
+            "nova_today",
+            "nova_command_center",
+            "nova_workspace",
+            "nova_search",
+            "nova_communications",
+            "nova_government",
+            "nova_business",
+            "nova_accounting",
+            "nova_accounting_aging",
+            "nova_accounting_trends",
+            "nova_login",
+        ],
         "blocked_surfaces": (
             ["health", "delivery", "freight", "lifesaver", "driver001", "admin", "internal"]
             if saas
