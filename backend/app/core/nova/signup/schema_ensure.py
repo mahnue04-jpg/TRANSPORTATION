@@ -12,6 +12,7 @@ def ensure_nova_signup_schema(engine=None) -> None:
     names = set(inspector.get_table_names())
     from app.core.nova.signup.models import (
         NovaCustomerTenant,
+        NovaFreeUsage,
         NovaSignupAccount,
         NovaSignupWebhookEvent,
     )
@@ -22,3 +23,5 @@ def ensure_nova_signup_schema(engine=None) -> None:
         NovaCustomerTenant.__table__.create(bind=bind, checkfirst=True)
     if "nova_signup_webhook_events" not in names:
         NovaSignupWebhookEvent.__table__.create(bind=bind, checkfirst=True)
+    if "nova_free_usage" not in names:
+        NovaFreeUsage.__table__.create(bind=bind, checkfirst=True)
