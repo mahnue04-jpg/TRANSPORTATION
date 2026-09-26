@@ -91,7 +91,7 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "Approved handoff opened." in WORK_JS
     assert "Nova did not claim it submitted the application." in WORK_JS
     assert "Approve for future submission" in WORK_JS
-    assert "Record manual submission (Nova will not send)" in WORK_JS
+    assert "Record manual submission after I send it" in WORK_JS
     assert "Prepare application drafts" in WORK_JS
 
 
