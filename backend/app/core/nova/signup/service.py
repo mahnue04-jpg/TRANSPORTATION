@@ -247,7 +247,10 @@ def checkout_view(
     plan: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    plan = plan or billing_plan(founding_eligible=bool(row.founding_reserved))
+    if row.status == STATUS_FREE:
+        plan = {"tier": "free", "daily_ask_limit": FREE_DAILY_ASK_LIMIT, "price": 0}
+    else:
+        plan = plan or billing_plan(founding_eligible=bool(row.founding_reserved))
     return {
         "signup_id": row.id,
         "status": row.status,
