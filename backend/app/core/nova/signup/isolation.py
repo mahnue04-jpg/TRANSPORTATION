@@ -18,6 +18,7 @@ BLOCKED_PREFIXES = (
     "/api/payments",
     "/api/platform-ops",
     "/api/nova/freight",
+    "/api/nova/payments",
     "/api/approval-engine",
     "/app",
     "/workspace",
