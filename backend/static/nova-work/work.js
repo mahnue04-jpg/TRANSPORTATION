@@ -192,7 +192,8 @@
       bits.push(actionButton("needs-changes", row.application_id, "Request changes"));
     }
     if (row.approved_for_future_submission && !row.manual_submission_recorded) {
-      bits.push(actionButton("record-manual", row.application_id, "Record manual submission (Nova will not send)"));
+      bits.push(actionButton("open-handoff", row.application_id, "Open approved application handoff"));
+      bits.push(actionButton("record-manual", row.application_id, "Record manual submission after I send it"));
     }
     if (!bits.length) return "";
     return "<div class=\"action-row\">" + bits.join("") + "</div>";
@@ -873,9 +874,23 @@
         body: JSON.stringify({ decision: "NEEDS_CHANGES" })
       });
       showBanner("Returned for changes. Drafts remain internal.", true);
+    } else if (action === "open-handoff") {
+      var handoff = await api("/api/nova/work/applications/" + id + "/submit", { method: "POST" });
+      var target = handoff && handoff.application_url ? String(handoff.application_url) : "";
+      if (!target) {
+        showBanner((handoff && handoff.reason) || "No external application URL is available yet.", false);
+      } else {
+        var opened = window.open(target, "_blank", "noopener,noreferrer");
+        var detail = (handoff && handoff.reason) || "Complete the final external step on the provider site.";
+        if (opened) {
+          showBanner("Approved handoff opened. " + detail + " Return here after you submit and click Record manual submission.", true);
+        } else {
+          showBanner("Browser blocked the new tab. Open this source URL manually: " + target, false);
+        }
+      }
     } else if (action === "record-manual") {
       await api("/api/nova/work/applications/" + id + "/record-manual-submission", { method: "POST" });
-      showBanner("Manual submission recorded. Nova did not contact the source.", true);
+      showBanner("Manual submission recorded after owner/operator handoff. Nova did not claim it submitted the application.", true);
     } else if (action === "autonomous-preview") {
       setWorkActionStatus(id, "Checking autonomous readiness...", true);
       var autoDetail = await api("/api/nova/work/opportunities/" + id + "/detail");
