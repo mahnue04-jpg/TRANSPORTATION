@@ -40,6 +40,7 @@ class MarketingWebsiteLead(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lead_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    service_plan: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
     notify_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -71,6 +72,8 @@ def ensure_marketing_schema() -> None:
             alters.append("ALTER TABLE marketing_website_leads ADD COLUMN lead_source VARCHAR(128)")
         if "notify_status" not in existing_cols:
             alters.append("ALTER TABLE marketing_website_leads ADD COLUMN notify_status VARCHAR(32)")
+        if "service_plan" not in existing_cols:
+            alters.append("ALTER TABLE marketing_website_leads ADD COLUMN service_plan VARCHAR(32)")
         if not alters:
             return
         with engine.begin() as conn:
