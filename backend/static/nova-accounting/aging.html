@@ -14,7 +14,7 @@
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
       <div>
         <p class="brand-kicker">AMICOR NOVA</p>
-        <h1>Pending funds aging</h1>
+        <h1>Accounting aging</h1>
       </div>
     </div>
     <nav class="page-nav" aria-label="Nova destinations">
@@ -34,7 +34,7 @@
   </header>
 
   <main class="page-main">
-    <p class="disclaimer">Read-only aging of pending customer payments and unpaid Freight invoices. These pipelines are never combined. Age is measured since created. No canonical due date exists. Stripe remains TEST. No collections, reminders, invoices, refunds, or exports are created here.</p>
+    <p class="disclaimer" id="aging-disclaimer">Read-only aging view. Sign in to load the data available to your Nova account. No collections, reminders, invoices, refunds, or exports are created here.</p>
     <div id="banner" class="banner hidden"></div>
 
     <section class="panel" aria-label="Session">
@@ -51,15 +51,15 @@
       </form>
     </section>
 
-    <section class="panel" id="customer-section" aria-label="Customer payment pipeline">
-      <h2>Customer payment pipeline</h2>
-      <p class="hint">payment_status=pending only. Age since created. Stripe TEST. No due date is applied.</p>
+    <section class="panel" id="customer-section" aria-label="Aging section one">
+      <h2 id="customer-section-title">Aging section</h2>
+      <p class="hint" id="customer-section-hint">Sign in to load this aging view.</p>
       <div id="customer-box"><p class="hint">Sign in to load aging totals.</p></div>
     </section>
 
-    <section class="panel" id="freight-section" aria-label="Freight invoice pipeline">
-      <h2>Freight invoice pipeline</h2>
-      <p class="hint">Draft, ready, payment_pending, and failed stay separate. Age since created. Draft is not collectible revenue. Stripe TEST. No due date is applied.</p>
+    <section class="panel" id="freight-section" aria-label="Aging section two">
+      <h2 id="freight-section-title">Aging section</h2>
+      <p class="hint" id="freight-section-hint">Sign in to load this aging view.</p>
       <div id="freight-box"><p class="hint">Sign in to load aging totals.</p></div>
     </section>
   </main>
