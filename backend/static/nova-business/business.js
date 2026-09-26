@@ -3,7 +3,15 @@
 (function () {
   var state = { customerId: null, opportunityId: null };
 
-  function $(id) { return document.getElementById(id); }
+  function $(id) {
+    var el = document.getElementById(id);
+    if (el) return el;
+    // A missing optional/stale UI target must never crash the whole Nova surface.
+    // Return a detached inert element so legacy render/event code can safely no-op.
+    var fallback = document.createElement("div");
+    fallback.setAttribute("data-missing-ui-target", id);
+    return fallback;
+  }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
   function identity() {
