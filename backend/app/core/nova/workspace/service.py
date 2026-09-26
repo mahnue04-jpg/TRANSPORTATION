@@ -80,6 +80,7 @@ def file_out(row: NovaWorkspaceFile) -> NovaWorkspaceFileOut:
         filename=row.filename,
         content_type=row.content_type,
         size_bytes=row.size_bytes,
+        excerpt=row.excerpt,
         created_at=row.created_at,
         last_accessed_at=row.last_accessed_at,
     )
@@ -313,6 +314,29 @@ def add_file(
     )
     db.commit()
     db.refresh(row)
+    return row
+
+
+def get_file(
+    db: Session,
+    file_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    touch: bool = True,
+) -> NovaWorkspaceFile:
+    query = db.query(NovaWorkspaceFile).filter(
+        NovaWorkspaceFile.file_id == file_id,
+        NovaWorkspaceFile.organization_id == organization_id,
+    )
+    query = _owner_filter(query, NovaWorkspaceFile, user)
+    row = query.first()
+    if row is None:
+        raise NovaWorkspaceError("Workspace file not found", status_code=404)
+    if touch:
+        row.last_accessed_at = now()
+        db.commit()
+        db.refresh(row)
     return row
 
 
