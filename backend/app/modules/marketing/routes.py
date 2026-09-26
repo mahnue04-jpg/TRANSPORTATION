@@ -7,9 +7,11 @@ from collections import defaultdict, deque
 from datetime import timedelta
 from threading import Lock
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, require_any_role
 from app.db.session import get_db
 from app.helpers import now
 from app.modules.marketing.models import MarketingWebsiteLead, ensure_marketing_schema
@@ -26,6 +28,29 @@ _RATE_HITS: dict[str, deque[float]] = defaultdict(deque)
 _RATE_LIMIT = 8
 _RATE_WINDOW_SEC = 600
 _DUPLICATE_WINDOW = timedelta(minutes=10)
+
+
+class MarketingLeadStatusUpdate(BaseModel):
+    status: str
+
+
+def _lead_out(row: MarketingWebsiteLead) -> dict:
+    return {
+        "lead_id": row.id,
+        "lead_type": row.lead_type,
+        "status": row.status,
+        "organization_name": row.organization_name,
+        "contact_name": row.contact_name,
+        "work_email": row.work_email,
+        "phone": row.phone,
+        "preferred_contact_method": row.preferred_contact_method,
+        "subject": row.subject,
+        "message": row.message,
+        "service_plan": row.service_plan,
+        "lead_source": row.lead_source,
+        "notify_status": row.notify_status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def _client_ip(request: Request) -> str:
@@ -177,3 +202,55 @@ def create_marketing_lead(
             },
         },
     )
+
+
+@router.get("/admin/leads")
+def list_marketing_leads(
+    lead_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    _admin=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    """Internal lead inbox. Never exposed to Nova SaaS customer tenants."""
+    ensure_marketing_schema()
+    query = db.query(MarketingWebsiteLead)
+    if lead_type:
+        query = query.filter(MarketingWebsiteLead.lead_type == lead_type)
+    if status:
+        query = query.filter(MarketingWebsiteLead.status == status)
+    rows = query.order_by(MarketingWebsiteLead.created_at.desc()).limit(limit).all()
+    return {"count": len(rows), "leads": [_lead_out(row) for row in rows]}
+
+
+@router.get("/admin/leads/{lead_id}")
+def get_marketing_lead(
+    lead_id: str,
+    _admin=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    ensure_marketing_schema()
+    row = db.get(MarketingWebsiteLead, lead_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return _lead_out(row)
+
+
+@router.patch("/admin/leads/{lead_id}/status")
+def update_marketing_lead_status(
+    lead_id: str,
+    payload: MarketingLeadStatusUpdate,
+    _admin=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    ensure_marketing_schema()
+    status = str(payload.status or "").strip().lower()
+    if status not in {"new", "contacted", "qualified", "closed"}:
+        raise HTTPException(status_code=422, detail="Unsupported lead status")
+    row = db.get(MarketingWebsiteLead, lead_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    row.status = status
+    db.commit()
+    db.refresh(row)
+    return _lead_out(row)
