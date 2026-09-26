@@ -128,10 +128,11 @@
         item_id: state.itemId
       })
     });
+    await refresh();
+
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
     $("fact-label").textContent = result.fact_label || "AI SUGGESTION is not an official government ruling.";
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was filed or sent.", true);
-    await refresh();
   }
 
   if (session() && session().restore) session().restore();
