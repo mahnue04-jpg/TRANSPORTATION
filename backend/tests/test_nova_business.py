@@ -400,9 +400,12 @@ def test_nova_business_navigation_and_responsive() -> None:
     assert 'href="/nova/workspace">Workspace' in BIZ_HTML
     assert 'href="/nova/communications">Communications' in BIZ_HTML
     assert 'href="/nova/government">Government' in BIZ_HTML
-    assert 'href="/workspace">Health' in BIZ_HTML
-    assert 'href="/app">Delivery' in BIZ_HTML
-    assert 'href="/nova/freight">Freight' in BIZ_HTML
+    assert 'href="/nova/today#ask-nova">Voice' in BIZ_HTML
+    assert 'href="/workspace">Health' not in BIZ_HTML
+    assert 'href="/workspace">Tools' not in BIZ_HTML
+    assert 'href="/app">Delivery' not in BIZ_HTML
+    assert 'href="/nova/freight">Freight' not in BIZ_HTML
+    assert 'href="/nova/payments/readiness">Payments Readiness' not in BIZ_HTML
     assert 'name="viewport"' in BIZ_HTML
     assert "@media (max-width: 720px)" in BIZ_CSS
     assert "@media (min-width: 1280px)" in BIZ_CSS
