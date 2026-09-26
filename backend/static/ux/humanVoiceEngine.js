@@ -61,6 +61,9 @@
     out = out.replace(/\[[^\]]+\]\([^\)]+\)/g, " ");
     out = out.replace(/[_*#~>|]+/g, " ");
     out = out.replace(/\b(?:meta|provider|route|routing|intent)\.[a-z_]+\b/gi, " ");
+    out = out.replace(/AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA(?: from an OFFICIAL SOURCE or CONFIRMED IN WRITING record)?\.?/gi, " ");
+    out = out.replace(/EXPIRED OR SUPERSEDED sources are not current\.?/gi, " ");
+    out = out.replace(/Not an official government ruling\.?/gi, " ");
     INTERNAL_TERMS.forEach((pattern) => {
       out = out.replace(pattern, " ");
     });
@@ -171,7 +174,10 @@
         }
         try {
           const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-          const preferred = voices.find((v) => /aria|jenny|guy|google|natural|neural|samantha|daniel/i.test(String(v && v.name || ""))) || null;
+          const englishVoices = voices.filter((v) => /^en(?:-|$)/i.test(String(v && v.lang || "")));
+          const preferred = englishVoices.find((v) => /aria|jenny|guy|google|natural|neural|samantha|daniel/i.test(String(v && v.name || "")))
+            || englishVoices[0]
+            || null;
           const utter = new SpeechSynthesisUtterance(text);
           utter.voice = preferred;
           utter.lang = preferred && preferred.lang ? preferred.lang : "en-US";
