@@ -4,7 +4,8 @@
   var activeRecognition = null;
   var voiceEngine = null;
   var speakingFallback = false;
-  var lastAutoSpokenText = "";\n  var autoReadTimer = null;
+  var lastAutoSpokenText = "";
+  var autoReadTimer = null;
 
   function voice() {
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
