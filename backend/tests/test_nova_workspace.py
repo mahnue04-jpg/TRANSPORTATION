@@ -76,6 +76,35 @@ def test_nova_workspace_signed_out_blocks_apis(client: TestClient) -> None:
     ).status_code == 401
 
 
+def test_nova_workspace_file_reopen_and_isolation(client: TestClient) -> None:
+    headers = _headers(client)
+    other_headers = _headers(client, "staff@amicor.local")
+    created = client.post(
+        "/api/nova/workspace/files",
+        headers=headers,
+        json={
+            "filename": "customer-notes.txt",
+            "content_type": "text/plain",
+            "size_bytes": 27,
+            "excerpt": "Persistent customer file text",
+        },
+    )
+    assert created.status_code == 200, created.text
+    file_id = created.json()["file_id"]
+    assert created.json()["excerpt"] == "Persistent customer file text"
+
+    reopened = client.get(f"/api/nova/workspace/files/{file_id}", headers=headers)
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["excerpt"] == "Persistent customer file text"
+    assert reopened.json()["last_accessed_at"]
+
+    blocked = client.get(f"/api/nova/workspace/files/{file_id}", headers=other_headers)
+    assert blocked.status_code == 404
+
+    assert 'data-open-file=' in WS_JS
+    assert '"/api/nova/workspace/files/"' in WS_JS
+
+
 def test_nova_workspace_authenticated_dashboard_and_brain(client: TestClient) -> None:
     headers = _headers(client)
     dash = client.get("/api/nova/workspace/dashboard", headers=headers)
