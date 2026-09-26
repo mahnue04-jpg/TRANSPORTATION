@@ -1,7 +1,7 @@
 "use strict";
 
 (function () {
-  var state = { itemId: null };
+  var state = { itemId: null, dashboard: null, selectedItem: null };
 
   function $(id) {
     var el = document.getElementById(id);
@@ -76,6 +76,7 @@
       "</div></div>";
   }
   function renderDashboard(data) {
+    state.dashboard = data;
     $("section-list").innerHTML = listHtml(data.sections, "No sections yet.", function (row) {
       return "<div class=\"item\"><strong>" + escapeHtml(row.label) + "</strong><div class=\"muted\">" +
         escapeHtml(row.count) + " saved items</div></div>";
@@ -185,7 +186,14 @@
   });
   document.querySelectorAll("[data-brain]").forEach(function (button) {
     button.addEventListener("click", async function () {
-      try { await runBrain(button.getAttribute("data-brain")); } catch (err) { showBanner(err.message); }
+      var action = button.getAttribute("data-brain");
+      var needsItem = ["explain_requirement", "summarize_letter", "missing_documents", "build_checklist", "prepare_email"].indexOf(action) >= 0;
+      if (needsItem && !state.itemId) {
+        $("brain-output").textContent = "Open or save a government work item first. Then run this tool so Nova uses the correct notes, checklist, and evidence.";
+        showBanner("This government tool needs an active saved work item.");
+        return;
+      }
+      try { await runBrain(action); } catch (err) { showBanner(err.message); }
     });
   });
   $("item-form").addEventListener("submit", async function (event) {
@@ -209,7 +217,8 @@
         })
       });
       state.itemId = created.item_id;
-      showBanner("Government work saved as USER-SAVED INFORMATION. Nothing was filed.", true);
+      state.selectedItem = created;
+      showBanner("Government work saved under " + created.government_level + " / " + created.category + ". It is now the active work item.", true);
       await refresh();
     } catch (err) { showBanner(err.message); }
   });
@@ -270,10 +279,32 @@
     try {
       state.itemId = openBtn.getAttribute("data-open-item");
       var item = await api("/api/nova/government/items/" + encodeURIComponent(state.itemId));
-      showBanner("Opened USER-SAVED INFORMATION: " + item.title + ".", true);
+      state.selectedItem = item;
+      showBanner("Active government work: " + item.title + " · " + item.government_level + " · " + item.category + ".", true);
       await loadItemExtras(state.itemId);
     } catch (err) { showBanner(err.message); }
   });
+  document.querySelectorAll("[data-gov-filter]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (!state.dashboard) return;
+      var kind = button.getAttribute("data-filter-kind");
+      var value = button.getAttribute("data-gov-filter");
+      var rows = state.dashboard.saved_work || [];
+      if (value !== "all") {
+        rows = rows.filter(function (row) {
+          if (kind === "level") return row.government_level === value || (value === "city" && row.government_level === "local");
+          if (kind === "category") return row.category === value;
+          return true;
+        });
+      }
+      $("work-list").innerHTML = listHtml(rows, "No saved government work in this section yet.", function (row) {
+        return itemHtml(row);
+      });
+      $("work-list").scrollIntoView({ behavior: "smooth", block: "center" });
+      showBanner("Showing " + rows.length + " saved government work item" + (rows.length === 1 ? "" : "s") + " for " + button.textContent.trim() + ".", true);
+    });
+  });
+
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });

@@ -88,6 +88,7 @@
       <p id="session-meta" class="hint">Sign in to use Nova Government.</p>
       <pre id="brain-output">Mrs. Nova Brain is ready when you are signed in.</pre>
       <p id="fact-label" class="hint">Trust labels: VERIFIED DATA · USER-SAVED INFORMATION · AI SUGGESTION. Government sources: OFFICIAL SOURCE · CONFIRMED IN WRITING · EXPIRED OR SUPERSEDED. AI SUGGESTION is not an official government ruling.</p>
+      <p class="hint">Sign in/out controls apply to your Nova account, not to a city, county, state, or federal agency.</p>
       <div class="command-actions">
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
@@ -140,21 +141,20 @@
     </section>
 
     <section class="section-nav" aria-label="Government sections">
-      <article class="card compact"><h3>Federal</h3></article>
-      <article class="card compact"><h3>State</h3></article>
-      <article class="card compact"><h3>County</h3></article>
-      <article class="card compact"><h3>City / Local</h3></article>
-      <article class="card compact"><h3>Licensing &amp; Permits</h3></article>
-      <article class="card compact"><h3>Taxes</h3></article>
-      <article class="card compact"><h3>Grants &amp; Funding</h3></article>
-      <article class="card compact"><h3>Certifications</h3></article>
-      <article class="card compact"><h3>Transportation / DOT</h3></article>
-      <article class="card compact"><h3>Business Registration</h3></article>
-      <article class="card compact"><h3>Compliance</h3></article>
-      <article class="card compact"><h3>Benefits / Public Services</h3></article>
-      <article class="card compact"><h3>Forms &amp; Documents</h3></article>
-      <article class="card compact"><h3>Deadlines</h3></article>
-      <article class="card compact"><h3>Saved Government Work</h3></article>
+      <button type="button" class="card compact section-button" data-filter-kind="level" data-gov-filter="federal">Federal</button>
+      <button type="button" class="card compact section-button" data-filter-kind="level" data-gov-filter="state">State</button>
+      <button type="button" class="card compact section-button" data-filter-kind="level" data-gov-filter="county">County</button>
+      <button type="button" class="card compact section-button" data-filter-kind="level" data-gov-filter="city">City / Local</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="licensing">Licensing &amp; Permits</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="taxes">Taxes</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="grants">Grants &amp; Funding</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="certifications">Certifications</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="transportation">Transportation / DOT</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="business_registration">Business Registration</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="compliance">Compliance</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="benefits">Benefits / Public Services</button>
+      <button type="button" class="card compact section-button" data-filter-kind="category" data-gov-filter="forms">Forms &amp; Documents</button>
+      <button type="button" class="card compact section-button" data-filter-kind="all" data-gov-filter="all">Saved Government Work</button>
     </section>
 
     <section class="dashboard" aria-label="Government dashboard">
@@ -200,7 +200,7 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/ux/humanVoiceEngine.js?v=20260926.2"></script>
-  <script src="/static/nova-government/government.js?v=20260926.2"></script>
+  <script src="/static/nova-government/government.js?v=20260926.3"></script>
   <script src="/static/ux/novaVoiceControls.js?v=20260926.4"></script>
 </body>
 </html>
