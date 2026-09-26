@@ -424,6 +424,16 @@ def test_nova_government_brain_actions_and_search(client: TestClient) -> None:
     assert "/api/nova/government/search" in GOV_JS
 
 
+
+def test_nova_government_live_test_round2_guards_and_ui() -> None:
+    assert 'id="gov-search-talk"' in GOV_HTML
+    assert 'id="gov-search-stop"' in GOV_HTML
+    assert 'id="active-work"' in GOV_HTML
+    assert "Opened: " in GOV_JS
+    assert "installSearchVoice" in GOV_JS
+    assert "active-government-item" in GOV_JS
+
+
 def test_nova_government_user_and_org_isolation(client: TestClient) -> None:
     owner = _headers(client, "dispatcher@amicor.local")
     other = _headers(client, "staff@amicor.local")

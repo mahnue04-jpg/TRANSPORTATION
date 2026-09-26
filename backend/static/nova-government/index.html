@@ -62,6 +62,11 @@
         </select>
         <button type="submit">Search</button>
       </form>
+      <div class="command-actions search-voice-actions">
+        <button type="button" id="gov-search-talk" class="secondary">🎤 Talk search</button>
+        <button type="button" id="gov-search-stop" class="secondary">■ Stop</button>
+        <span id="gov-search-voice-status" class="hint">Voice ready.</span>
+      </div>
       <div id="search-results" class="inline-results">Enter a government topic above. Results will appear here.</div>
 
       <div class="command-divider"></div>
@@ -157,6 +162,7 @@
       <button type="button" class="card compact section-button" data-filter-kind="all" data-gov-filter="all">Saved Government Work</button>
     </section>
 
+    <div id="active-work" class="banner ok">No active government work item selected.</div>
     <section class="dashboard" aria-label="Government dashboard">
       <article class="card"><h2>Section counts</h2><div id="section-list"></div></article>
       <article class="card"><h2>Saved Government Work</h2><div id="work-list">Sign in to see saved work.</div></article>
@@ -200,7 +206,7 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/ux/humanVoiceEngine.js?v=20260926.2"></script>
-  <script src="/static/nova-government/government.js?v=20260926.3"></script>
+  <script src="/static/nova-government/government.js?v=20260926.5"></script>
   <script src="/static/ux/novaVoiceControls.js?v=20260926.4"></script>
 </body>
 </html>
