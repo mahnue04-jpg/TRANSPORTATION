@@ -134,6 +134,7 @@ def test_anonymous_operations_intake_is_accepted():
         "consent": True,
         "preferred_contact_method": "email",
         "subject": "Spreadsheet cleanup",
+        "service_plan": "free_scope",
         "message": "Clean and organize a spreadsheet and prepare a summary."
     })
     assert response.status_code == 200
@@ -154,7 +155,7 @@ def test_anonymous_operations_internal_inbox_and_status():
         "work_email": "anon-inbox@example.com",
         "consent": True,
         "preferred_contact_method": "email",
-        "service_plan": "scope_check",
+        "service_plan": "free_scope",
         "subject": "Operations support",
         "message": "Organize business records and prepare an operating summary."
     })
@@ -165,7 +166,7 @@ def test_anonymous_operations_internal_inbox_and_status():
 
     login = client.post(
         "/api/auth/login",
-        json={"email": "dispatcher@amicor.local", "password": SEED_PASSWORD},
+        json={"email": "admin@amicor.local", "password": SEED_PASSWORD},
     )
     assert login.status_code == 200, login.text
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -180,7 +181,7 @@ def test_anonymous_operations_internal_inbox_and_status():
 
     detail = client.get(f"/api/marketing/admin/leads/{lead_id}", headers=headers)
     assert detail.status_code == 200, detail.text
-    assert detail.json()["service_plan"] == "scope_check"
+    assert detail.json()["service_plan"] == "free_scope"
     assert "operating summary" in detail.json()["message"]
 
     qualified = client.patch(
