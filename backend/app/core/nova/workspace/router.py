@@ -151,6 +151,22 @@ def list_files(
     ]
 
 
+@router.get("/files/{file_id}", response_model=NovaWorkspaceFileOut)
+def get_file(
+    file_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    org_id = _resolve_org(user, organization_id)
+    try:
+        return service.file_out(
+            service.get_file(db, file_id, organization_id=org_id, user=user, touch=True)
+        )
+    except service.NovaWorkspaceError as exc:
+        _raise(exc)
+
+
 @router.post("/files", response_model=NovaWorkspaceFileOut)
 def add_file(
     payload: NovaWorkspaceFileCreate,
