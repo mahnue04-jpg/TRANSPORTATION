@@ -118,10 +118,11 @@
         notification_id: state.notificationId
       })
     });
+    await refresh();
+
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
     if (result.draft) showBanner("Draft saved. Nothing was sent.", true);
     else showBanner("Mrs. Nova Brain used existing Nova intelligence APIs.", true);
-    await refresh();
   }
   function speakText(text) {
     if (window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
