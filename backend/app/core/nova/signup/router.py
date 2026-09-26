@@ -114,6 +114,27 @@ def post_nova_checkout(req: NovaCheckoutRequest, request: Request, db: Session =
         raise
 
 
+@router.post("/me/upgrade")
+def post_nova_free_upgrade(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ensure_nova_signup_schema()
+    from app.core.nova.signup.models import NovaCustomerTenant
+    tenant = (
+        db.query(NovaCustomerTenant)
+        .filter(NovaCustomerTenant.organization_id == str(user.organization_id or ""))
+        .first()
+    )
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Nova customer account not found")
+    try:
+        return start_checkout(db, signup_id=tenant.signup_id)
+    except Exception as exc:
+        _raise(exc)
+        raise
+
+
 @router.get("/me/access")
 def get_nova_customer_access(
     user: UserContext = Depends(get_current_user_context),
