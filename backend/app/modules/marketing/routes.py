@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, require_any_role
+from app.core.nova.signup.isolation import is_nova_saas_customer_org
 from app.db.session import get_db
 from app.helpers import now
 from app.modules.marketing.models import MarketingWebsiteLead, ensure_marketing_schema
@@ -32,6 +33,16 @@ _DUPLICATE_WINDOW = timedelta(minutes=10)
 
 class MarketingLeadStatusUpdate(BaseModel):
     status: str
+
+
+def _require_internal_marketing_admin(
+    user=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    organization_id = str(getattr(user, "organization_id", "") or "").strip()
+    if organization_id and is_nova_saas_customer_org(db, organization_id):
+        raise HTTPException(status_code=403, detail="Internal marketing access required")
+    return user
 
 
 def _lead_out(row: MarketingWebsiteLead) -> dict:
@@ -209,7 +220,7 @@ def list_marketing_leads(
     lead_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    _admin=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
+    _admin=Depends(_require_internal_marketing_admin),
     db: Session = Depends(get_db),
 ):
     """Internal lead inbox. Never exposed to Nova SaaS customer tenants."""
