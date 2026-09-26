@@ -100,8 +100,8 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/workspace" data-destination="workspace"' in HOME_HTML
     assert 'href="#web-search" data-destination="search"' in HOME_HTML
     assert 'href="/nova/workspace#files" data-destination="files"' in HOME_HTML
-    assert 'href="/workspace" data-destination="voice"' in HOME_HTML
-    assert 'href="/workspace" data-destination="tools"' in HOME_HTML
+    assert 'href="/nova/workspace" data-destination="voice"' in HOME_HTML
+    assert 'href="/nova/workspace" data-destination="tools"' in HOME_HTML
     assert 'href="/workspace" data-destination="health"' in HOME_HTML
     assert 'href="/app" data-destination="delivery"' in HOME_HTML
     assert 'href="/nova/freight" data-destination="freight"' in HOME_HTML
@@ -109,6 +109,9 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML
     assert 'href="/nova/payments/readiness" data-destination="payments-readiness"' in HOME_HTML
+    assert HOME_HTML.count('data-internal-product="true"') >= 4
+    assert "/api/nova/signup/me/access" in HOME_JS
+    assert "nova_saas_customer" in HOME_JS
     assert 'data-later="true"' not in HOME_HTML
     assert HOME_HTML.count("Coming later") == 0
 
