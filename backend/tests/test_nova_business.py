@@ -304,6 +304,24 @@ def test_nova_business_tasks_vendors_documents_expenses_meetings(client: TestCli
     tasks = client.get("/api/nova/business/tasks", headers=headers)
     assert any(row["title"].startswith("Follow up: Customer kickoff") for row in tasks.json())
 
+    other_headers = _headers(client, "staff@amicor.local")
+    foreign_customer = client.post(
+        "/api/nova/business/customers",
+        headers=other_headers,
+        json={"name": "Other tenant customer", "kind": "company"},
+    )
+    assert foreign_customer.status_code == 200
+    blocked_meeting = client.post(
+        "/api/nova/business/meetings",
+        headers=headers,
+        json={
+            "title": "Must not cross customer scope",
+            "start_time": start.isoformat(),
+            "customer_id": foreign_customer.json()["customer_id"],
+        },
+    )
+    assert blocked_meeting.status_code == 404
+
     dash = client.get("/api/nova/business/dashboard", headers=headers)
     assert any(row["item_id"] == gov_id for row in dash.json()["government_items"])
     assert any(row["document_id"] == document.json()["document_id"] for row in dash.json()["documents_attention"])
@@ -397,12 +415,15 @@ def test_nova_business_navigation_and_responsive() -> None:
     assert 'href="/nova/business">Business' in COMMS_HTML
     assert 'href="/nova/business">Business' in GOV_HTML
     assert 'href="/nova">Nova Home' in BIZ_HTML
-    assert 'href="/nova/workspace">Nova Workspace' in BIZ_HTML
+    assert 'href="/nova/workspace">Workspace' in BIZ_HTML
     assert 'href="/nova/communications">Communications' in BIZ_HTML
     assert 'href="/nova/government">Government' in BIZ_HTML
-    assert 'href="/workspace">Health' in BIZ_HTML
-    assert 'href="/app">Delivery' in BIZ_HTML
-    assert 'href="/nova/freight">Freight' in BIZ_HTML
+    assert 'href="/nova/today#ask-nova">Voice' in BIZ_HTML
+    assert 'href="/workspace">Health' not in BIZ_HTML
+    assert 'href="/workspace">Tools' not in BIZ_HTML
+    assert 'href="/app">Delivery' not in BIZ_HTML
+    assert 'href="/nova/freight">Freight' not in BIZ_HTML
+    assert 'href="/nova/payments/readiness">Payments Readiness' not in BIZ_HTML
     assert 'name="viewport"' in BIZ_HTML
     assert "@media (max-width: 720px)" in BIZ_CSS
     assert "@media (min-width: 1280px)" in BIZ_CSS

@@ -62,7 +62,7 @@
     var currency = slice.currency ? slice.currency : "Currency not recorded";
     var oldest = slice.oldest_age_days == null ? "Unavailable" : String(slice.oldest_age_days) + " days";
     return "<div class=\"currency-block\">" +
-      "<h4>" + escapeHtml(currency) + " · Stripe TEST</h4>" +
+      "<h4>" + escapeHtml(currency) + "</h4>" +
       "<div class=\"aging-meta\">" +
       "<p>Total pending records<br><strong>" + escapeHtml(String(slice.count || 0)) + "</strong></p>" +
       "<p>Total pending amount<br><strong>" + escapeHtml(moneyText(slice.amount, slice.currency)) + "</strong></p>" +
@@ -99,7 +99,7 @@
     $("login-form").classList.add("hidden");
     var ident = identity();
     $("session-meta").textContent = on
-      ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Stripe TEST · read-only"
+      ? ((ident && (ident.name || ident.email)) || "Signed in") + " · read-only"
       : "Sign in to load aging totals.";
   }
   async function refresh() {
@@ -112,6 +112,13 @@
     $("as-of").textContent = aging.calculated_as_of_utc
       ? "Calculated as of " + aging.calculated_as_of_utc + " UTC"
       : "Calculated as of Unavailable";
+    $("aging-disclaimer").textContent = aging.disclaimer || "Read-only accounting aging.";
+    $("customer-section-title").textContent =
+      (aging.customer_payment_pipeline && aging.customer_payment_pipeline.label) || "Aging section";
+    $("freight-section-title").textContent =
+      (aging.freight_invoice_pipeline && aging.freight_invoice_pipeline.label) || "Aging section";
+    $("customer-section-hint").textContent = "Read-only. See each group below for what the age and amount represent.";
+    $("freight-section-hint").textContent = "Read-only. See each group below for what the age and amount represent.";
     try {
       renderSection("customer-box", aging.customer_payment_pipeline);
       renderSection("freight-box", aging.freight_invoice_pipeline);

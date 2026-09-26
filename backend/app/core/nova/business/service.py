@@ -703,6 +703,10 @@ def list_meetings(db: Session, *, organization_id: str, user: UserContext) -> li
 
 
 def create_meeting(db: Session, payload: NovaBizMeetingCreate, *, organization_id: str, user: UserContext):
+    if payload.customer_id:
+        get_customer(db, payload.customer_id, organization_id=organization_id, user=user)
+    if payload.opportunity_id:
+        get_opportunity(db, payload.opportunity_id, organization_id=organization_id, user=user)
     _require_workspace(db, payload.workspace_id, organization_id)
     start = payload.start_time
     end = payload.end_time or (datetime.fromisoformat(start.replace("Z", "+00:00")) + timedelta(hours=1)).isoformat()

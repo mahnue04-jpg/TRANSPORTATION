@@ -79,6 +79,42 @@ def _owner_filter(query, model, user: UserContext):
     return query.filter(model.owner_user_id == user.user_id)
 
 
+def _require_workspace_project(
+    db: Session,
+    workspace_id: str | None,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> None:
+    if not workspace_id:
+        return
+    query = db.query(NovaWorkspaceProject).filter(
+        NovaWorkspaceProject.workspace_id == workspace_id,
+        NovaWorkspaceProject.organization_id == organization_id,
+    )
+    query = _owner_filter(query, NovaWorkspaceProject, user)
+    if query.first() is None:
+        raise NovaGovernmentError("Associated Nova Workspace project not found", status_code=404)
+
+
+def _require_workspace_file(
+    db: Session,
+    file_id: str | None,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> None:
+    if not file_id:
+        return
+    query = db.query(NovaWorkspaceFile).filter(
+        NovaWorkspaceFile.file_id == file_id,
+        NovaWorkspaceFile.organization_id == organization_id,
+    )
+    query = _owner_filter(query, NovaWorkspaceFile, user)
+    if query.first() is None:
+        raise NovaGovernmentError("Associated Nova Workspace file not found", status_code=404)
+
+
 def work_out(row: NovaGovernmentWorkItem) -> NovaGovWorkOut:
     return NovaGovWorkOut(
         item_id=row.item_id,
@@ -156,28 +192,18 @@ def create_item(
     organization_id: str,
     user: UserContext,
 ) -> NovaGovernmentWorkItem:
-    if payload.workspace_id:
-        exists = (
-            db.query(NovaWorkspaceProject)
-            .filter(
-                NovaWorkspaceProject.workspace_id == payload.workspace_id,
-                NovaWorkspaceProject.organization_id == organization_id,
-            )
-            .first()
-        )
-        if exists is None:
-            raise NovaGovernmentError("Associated Nova Workspace project not found", status_code=404)
-    if payload.file_id:
-        file_row = (
-            db.query(NovaWorkspaceFile)
-            .filter(
-                NovaWorkspaceFile.file_id == payload.file_id,
-                NovaWorkspaceFile.organization_id == organization_id,
-            )
-            .first()
-        )
-        if file_row is None:
-            raise NovaGovernmentError("Associated Nova Workspace file not found", status_code=404)
+    _require_workspace_project(
+        db,
+        payload.workspace_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    _require_workspace_file(
+        db,
+        payload.file_id,
+        organization_id=organization_id,
+        user=user,
+    )
     row = None
     for _ in range(5):
         row = NovaGovernmentWorkItem(
@@ -232,6 +258,18 @@ def update_item(
         raise NovaGovernmentError("Invalid government category", status_code=422)
     if "filing_status" in data and data["filing_status"] not in FILING_STATUSES:
         raise NovaGovernmentError("Invalid filing status", status_code=422)
+    _require_workspace_project(
+        db,
+        data.get("workspace_id"),
+        organization_id=organization_id,
+        user=user,
+    )
+    _require_workspace_file(
+        db,
+        data.get("file_id"),
+        organization_id=organization_id,
+        user=user,
+    )
     for key, value in data.items():
         setattr(row, key, value)
     row.updated_at = now()
@@ -249,17 +287,12 @@ def add_checklist(
     user: UserContext,
 ) -> NovaGovernmentChecklistItem:
     get_item(db, item_id, organization_id=organization_id, user=user)
-    if payload.file_id:
-        file_row = (
-            db.query(NovaWorkspaceFile)
-            .filter(
-                NovaWorkspaceFile.file_id == payload.file_id,
-                NovaWorkspaceFile.organization_id == organization_id,
-            )
-            .first()
-        )
-        if file_row is None:
-            raise NovaGovernmentError("Associated Nova Workspace file not found", status_code=404)
+    _require_workspace_file(
+        db,
+        payload.file_id,
+        organization_id=organization_id,
+        user=user,
+    )
     row = NovaGovernmentChecklistItem(
         checklist_id=_new_id("NGC-"),
         item_id=item_id,

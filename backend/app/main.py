@@ -4008,6 +4008,12 @@ def serve_nova_v3_lab() -> Response:
     return JSONResponse({"error": "Nova V3 lab page not found"}, status_code=404)
 
 
+@app.get("/nova/voice")
+def serve_nova_voice() -> Response:
+    """Stable customer-safe Voice entrypoint inside Nova."""
+    return RedirectResponse(url="/nova/today#ask-nova", status_code=307)
+
+
 @app.get("/nova/today")
 def serve_nova_today() -> Response:
     page = os.path.join(_static_dir, "nova-today", "index.html")
@@ -4074,6 +4080,22 @@ def serve_nova_signup_success() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova signup success page not found"}, status_code=404)
+
+
+@app.get("/nova/forgot-password")
+def serve_nova_forgot_password() -> Response:
+    page = os.path.join(_static_dir, "nova-auth", "forgot.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova forgot password page not found"}, status_code=404)
+
+
+@app.get("/nova/reset-password")
+def serve_nova_reset_password() -> Response:
+    page = os.path.join(_static_dir, "nova-auth", "reset.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova reset password page not found"}, status_code=404)
 
 
 @app.get("/nova/accounting")

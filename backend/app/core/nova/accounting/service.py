@@ -121,6 +121,118 @@ def _unavailable(
     )
 
 
+def _is_nova_saas_customer(db: Session, organization_id: str) -> bool:
+    try:
+        from app.core.nova.signup.isolation import is_nova_saas_customer_org
+        return is_nova_saas_customer_org(db, organization_id)
+    except Exception:
+        return False
+
+
+def _business_metric_filters(model, organization_id: str, cutoff: datetime | None):
+    filters = [model.organization_id == organization_id]
+    if cutoff is not None:
+        filters.extend([model.created_at.isnot(None), model.created_at >= cutoff])
+    return filters
+
+
+def _saas_business_metrics(
+    db: Session,
+    organization_id: str,
+    window: str,
+    cutoff: datetime | None,
+) -> list[NovaAccountingMetric]:
+    from app.core.nova.business.models import NovaBusinessExpense, NovaBusinessOpportunity
+    from app.core.nova.business.schemas import OPEN_OPP_STATUSES
+
+    opp_filters = _business_metric_filters(NovaBusinessOpportunity, organization_id, cutoff)
+    expense_filters = _business_metric_filters(NovaBusinessExpense, organization_id, cutoff)
+
+    open_total, open_count = _sum_count(
+        db,
+        NovaBusinessOpportunity.estimated_value,
+        *opp_filters,
+        NovaBusinessOpportunity.status.in_(OPEN_OPP_STATUSES),
+    )
+    won_total, won_count = _sum_count(
+        db,
+        NovaBusinessOpportunity.estimated_value,
+        *opp_filters,
+        NovaBusinessOpportunity.status == "won",
+    )
+    expected_total, expected_count = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    NovaBusinessOpportunity.estimated_value
+                    * NovaBusinessOpportunity.probability
+                    / 100.0
+                ),
+                0,
+            ),
+            func.count(),
+        )
+        .filter(
+            *opp_filters,
+            NovaBusinessOpportunity.status.in_(OPEN_OPP_STATUSES),
+        )
+        .one()
+    )
+    expense_total, expense_count = _sum_count(
+        db,
+        NovaBusinessExpense.amount,
+        *expense_filters,
+    )
+
+    timestamp = "nova_business_records.created_at"
+    return [
+        _metric(
+            key="business_open_pipeline",
+            label="Open opportunity pipeline",
+            definition="User-saved open Nova Business opportunity values.",
+            state="calculated",
+            window=window,
+            timestamp_field=timestamp,
+            source_note="Operational pipeline estimate from this customer's Nova Business records. Not collected cash.",
+            amount_usd=_usd(open_total),
+            count=open_count,
+        ),
+        _metric(
+            key="business_expected_revenue",
+            label="Probability-weighted expected revenue",
+            definition="Open opportunity estimated value multiplied by the user-saved probability percentage.",
+            state="calculated",
+            window=window,
+            timestamp_field=timestamp,
+            source_note="Forecast from customer-saved opportunity values and probabilities. Not a payment or accounting ledger.",
+            amount_usd=_usd(expected_total),
+            count=int(expected_count or 0),
+        ),
+        _metric(
+            key="business_won_value",
+            label="Won opportunity value",
+            definition="User-saved opportunities currently marked won.",
+            state="calculated",
+            window=window,
+            timestamp_field=timestamp,
+            source_note="Won opportunity value from Nova Business. This does not prove that cash was collected.",
+            amount_usd=_usd(won_total),
+            count=won_count,
+        ),
+        _metric(
+            key="business_recorded_expenses",
+            label="Recorded business expenses",
+            definition="User-saved Nova Business expense records.",
+            state="calculated",
+            window=window,
+            timestamp_field=timestamp,
+            source_note="Expenses entered by this customer in Nova Business. Not bank-synced and not independently verified.",
+            amount_usd=_usd(expense_total),
+            count=expense_count,
+        ),
+    ]
+
+
 def _sum_count(db: Session, amount_col, *filters) -> tuple[object, int]:
     total, count = (
         db.query(func.coalesce(func.sum(amount_col), 0), func.count())
@@ -349,6 +461,22 @@ def summary(
 
     resolved = parse_window(window)
     cutoff = window_cutoff(resolved)
+
+    if _is_nova_saas_customer(db, organization_id):
+        return NovaAccountingSummaryOut(
+            organization_id=organization_id,
+            window=resolved,  # type: ignore[arg-type]
+            window_label=WINDOW_LABELS[resolved],
+            window_cutoff_utc=cutoff.isoformat() if cutoff else None,
+            metrics=_saas_business_metrics(db, organization_id, resolved, cutoff),
+            disclaimer=(
+                "Customer-safe read-only business finance view from this tenant's Nova Business records. "
+                "Opportunity values are operational estimates, won values are not proof of collected cash, "
+                "and recorded expenses are user-entered. Internal AMICOR Health, Delivery, Freight, and "
+                "platform-payment ledgers are not read for Nova SaaS customers."
+            ),
+        )
+
     metrics: list[NovaAccountingMetric] = []
     metrics.append(
         _safe(

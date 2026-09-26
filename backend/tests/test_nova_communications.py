@@ -190,12 +190,15 @@ def test_nova_communications_navigation_and_responsive() -> None:
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
     assert 'href="/nova/communications">Communications' in WS_HTML
     assert 'href="/nova">Nova Home' in COMMS_HTML
-    assert 'href="/nova/workspace">Nova Workspace' in COMMS_HTML
+    assert 'href="/nova/workspace">Workspace' in COMMS_HTML
     assert 'href="/nova/government">Government' in COMMS_HTML
     assert 'href="/nova/business">Business' in COMMS_HTML
-    assert 'href="/workspace">Health' in COMMS_HTML
-    assert 'href="/app">Delivery' in COMMS_HTML
-    assert 'href="/nova/freight">Freight' in COMMS_HTML
+    assert 'href="/nova/today#ask-nova">Voice' in COMMS_HTML
+    assert 'href="/workspace">Tools' not in COMMS_HTML
+    assert 'href="/workspace">Health' not in COMMS_HTML
+    assert 'href="/app">Delivery' not in COMMS_HTML
+    assert 'href="/nova/freight">Freight' not in COMMS_HTML
+    assert 'href="/nova/payments/readiness">Payments Readiness' not in COMMS_HTML
     assert 'name="viewport"' in COMMS_HTML
     assert "@media (max-width: 720px)" in COMMS_CSS
     assert "@media (min-width: 1280px)" in COMMS_CSS

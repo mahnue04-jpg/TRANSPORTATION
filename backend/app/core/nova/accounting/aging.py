@@ -222,6 +222,74 @@ def _freight_group(db: Session, organization_id: str, as_of: datetime, status: s
     )
 
 
+def _is_nova_saas_customer(db: Session, organization_id: str) -> bool:
+    try:
+        from app.core.nova.signup.isolation import is_nova_saas_customer_org
+        return is_nova_saas_customer_org(db, organization_id)
+    except Exception:
+        return False
+
+
+def _saas_open_opportunity_group(db: Session, organization_id: str, as_of: datetime) -> NovaAgingGroup:
+    from app.core.nova.business.models import NovaBusinessOpportunity
+    from app.core.nova.business.schemas import OPEN_OPP_STATUSES
+
+    rows = (
+        db.query(
+            NovaBusinessOpportunity.created_at,
+            NovaBusinessOpportunity.estimated_value,
+        )
+        .filter(
+            NovaBusinessOpportunity.organization_id == organization_id,
+            NovaBusinessOpportunity.status.in_(OPEN_OPP_STATUSES),
+        )
+        .all()
+    )
+    typed = [(stamp, amount, "USD") for stamp, amount in rows]
+    return NovaAgingGroup(
+        key="business_open_opportunities",
+        label="Open opportunity age",
+        timestamp_field="nova_business_opportunities.created_at",
+        due_date_field=None,
+        uses_due_date=False,
+        collectible=False,
+        stripe_mode="N/A",
+        source_note=(
+            "Age since each customer-saved Nova Business opportunity was created. "
+            "Estimated values are pipeline estimates, not invoices and not collected cash."
+        ),
+        currencies=_aggregate(typed, as_of=as_of, amount_mode="money"),
+    )
+
+
+def _saas_expense_group(db: Session, organization_id: str, as_of: datetime) -> NovaAgingGroup:
+    from app.core.nova.business.models import NovaBusinessExpense
+
+    rows = (
+        db.query(
+            NovaBusinessExpense.created_at,
+            NovaBusinessExpense.amount,
+        )
+        .filter(NovaBusinessExpense.organization_id == organization_id)
+        .all()
+    )
+    typed = [(stamp, amount, "USD") for stamp, amount in rows]
+    return NovaAgingGroup(
+        key="business_recorded_expenses",
+        label="Recorded expense age",
+        timestamp_field="nova_business_expenses.created_at",
+        due_date_field=None,
+        uses_due_date=False,
+        collectible=False,
+        stripe_mode="N/A",
+        source_note=(
+            "Age since each customer-entered Nova Business expense was recorded. "
+            "These are user-entered records and are not bank-synced or independently verified."
+        ),
+        currencies=_aggregate(typed, as_of=as_of, amount_mode="money"),
+    )
+
+
 def _safe_group(reader, *args, fallback: NovaAgingGroup) -> NovaAgingGroup:
     try:
         return reader(*args)
@@ -233,6 +301,31 @@ def aging(db: Session, *, organization_id: str, user: UserContext) -> NovaAccoun
     if normalize_role(user.role) not in ACCOUNTING_ROLES:
         raise NovaAccountingError("Accounting aging is limited to finance-authorized Nova roles", status_code=403)
     as_of = now()
+
+    if _is_nova_saas_customer(db, organization_id):
+        opportunity_group = _saas_open_opportunity_group(db, organization_id, as_of)
+        expense_group = _saas_expense_group(db, organization_id, as_of)
+        return NovaAccountingAgingOut(
+            organization_id=organization_id,
+            calculated_as_of_utc=as_of.isoformat(),
+            stripe_mode="N/A",
+            customer_payment_pipeline=NovaAgingSection(
+                key="business_opportunity_pipeline",
+                label="Business opportunity pipeline",
+                groups=[opportunity_group],
+            ),
+            freight_invoice_pipeline=NovaAgingSection(
+                key="business_expense_records",
+                label="Business expense records",
+                groups=[expense_group],
+            ),
+            disclaimer=(
+                "Customer-safe aging from this tenant's Nova Business records only. "
+                "Opportunity age is not receivables aging, and recorded expenses are user-entered. "
+                "Internal AMICOR Health, Delivery, Freight, and platform-payment ledgers are not read."
+            ),
+        )
+
     try:
         customer_group = _customer_group(db, organization_id, as_of)
         customer = NovaAgingSection(

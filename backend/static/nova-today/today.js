@@ -536,11 +536,26 @@
     try {
       var access = await api("/api/nova/signup/me/access");
       var isCustomer = !!(access && access.nova_saas_customer);
-      var currentIdentity = identity();
+      var isFree = !!(access && access.tier === "free");
       document.querySelectorAll(".today-nav a").forEach(function (el) {
         var href = el.getAttribute("href") || "";
-        if (href === "/workspace" || href === "/app" || href === "/nova/freight") {
+        if (
+          href === "/workspace" ||
+          href === "/app" ||
+          href === "/nova/freight" ||
+          href === "/nova/payments/readiness" ||
+          href === "/nova/work"
+        ) {
           el.classList.toggle("hidden", isCustomer);
+        }
+        if (
+          href === "/nova/communications" ||
+          href === "/nova/government" ||
+          href === "/nova/business" ||
+          href === "/nova/accounting" ||
+          href.indexOf("/nova/accounting/") === 0
+        ) {
+          el.classList.toggle("hidden", isFree);
         }
       });
       var linkedPanel = document.querySelector('[aria-label="Health, Delivery, and Freight"]');
@@ -549,6 +564,18 @@
       if (productLinksPanel) productLinksPanel.classList.toggle("hidden", isCustomer);
       var workRevenuePanel = document.querySelector('[aria-label="Work and Revenue"]');
       if (workRevenuePanel && isCustomer) workRevenuePanel.classList.add("hidden");
+      var freeNotice = $("free-plan-notice");
+      if (freeNotice) freeNotice.classList.toggle("hidden", !isFree);
+      var upgradeToday = $("upgrade-nova-today");
+      if (upgradeToday) upgradeToday.classList.toggle("hidden", !isFree);
+      [
+        "Communications",
+        "Government / Compliance",
+        "Business / Operations"
+      ].forEach(function (label) {
+        var panel = document.querySelector('[aria-label="' + label + '"]');
+        if (panel) panel.classList.toggle("hidden", isFree);
+      });
     } catch (_) {}
   }
 

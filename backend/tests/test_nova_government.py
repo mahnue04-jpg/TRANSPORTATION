@@ -440,22 +440,48 @@ def test_nova_government_user_and_org_isolation(client: TestClient) -> None:
     )
     assert cross.status_code == 403
 
+    foreign_project = client.post(
+        "/api/nova/workspace/projects",
+        headers=other,
+        json={"title": "Other user's government workspace"},
+    )
+    assert foreign_project.status_code == 200
+    blocked_create = client.post(
+        "/api/nova/government/items",
+        headers=owner,
+        json={
+            "title": "Must not link foreign workspace",
+            "category": "licensing",
+            "government_level": "state",
+            "workspace_id": foreign_project.json()["workspace_id"],
+        },
+    )
+    assert blocked_create.status_code == 404
+
+    blocked_update = client.patch(
+        f"/api/nova/government/items/{item_id}",
+        headers=owner,
+        json={"workspace_id": foreign_project.json()["workspace_id"]},
+    )
+    assert blocked_update.status_code == 404
+
 
 def test_nova_government_navigation_and_responsive() -> None:
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
     assert 'href="/nova/government">Government' in WS_HTML
     assert 'href="/nova/government">Government' in COMMS_HTML
     assert 'href="/nova">Nova Home' in GOV_HTML
-    assert 'href="/nova/workspace">Nova Workspace' in GOV_HTML
+    assert 'href="/nova/workspace">Workspace' in GOV_HTML
     assert 'href="/nova/communications">Communications' in GOV_HTML
     assert 'href="/nova/business">Business' in GOV_HTML
     assert 'href="/nova#web-search">Web / Search' in GOV_HTML
     assert 'href="/nova/workspace#files">Files' in GOV_HTML
-    assert 'href="/workspace">Voice' in GOV_HTML
-    assert 'href="/workspace">Tools' in GOV_HTML
-    assert 'href="/workspace">Health' in GOV_HTML
-    assert 'href="/app">Delivery' in GOV_HTML
-    assert 'href="/nova/freight">Freight' in GOV_HTML
+    assert 'href="/nova/today#ask-nova">Voice' in GOV_HTML
+    assert 'href="/workspace">Tools' not in GOV_HTML
+    assert 'href="/workspace">Health' not in GOV_HTML
+    assert 'href="/app">Delivery' not in GOV_HTML
+    assert 'href="/nova/freight">Freight' not in GOV_HTML
+    assert 'href="/nova/payments/readiness">Payments Readiness' not in GOV_HTML
     assert 'name="viewport"' in GOV_HTML
     assert "width=device-width" in GOV_HTML
     assert "@media (max-width: 720px)" in GOV_CSS

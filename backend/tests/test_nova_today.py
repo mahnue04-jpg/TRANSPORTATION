@@ -55,6 +55,21 @@ def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def _user_from_login(client: TestClient, email: str = "dispatcher@amicor.local"):
+    from app.auth import UserContext
+
+    headers = _headers(client, email)
+    me = client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200, me.text
+    body = me.json()
+    return UserContext(
+        user_id=body["user_id"],
+        email=body.get("email") or email,
+        role=body.get("role") or "dispatcher",
+        organization_id=body.get("organization_id"),
+    )
+
+
 def _counts() -> dict[str, int]:
     from app.core.nova.freight.models import NovaFreightShipment
     from app.modules.health_isf.models import HealthISFRide
@@ -107,6 +122,88 @@ def test_nova_today_trust_labels_and_responsive() -> None:
     assert "/api/email/send" not in TODAY_JS
     assert "sk_live" not in TODAY_JS
     assert "pk_live" not in TODAY_JS
+
+
+def test_nova_customer_voice_entrypoint_and_wiring(client: TestClient) -> None:
+    voice = client.get("/nova/voice", follow_redirects=False)
+    assert voice.status_code == 307
+    assert voice.headers["location"] == "/nova/today#ask-nova"
+    assert 'id="ask-nova"' in TODAY_HTML
+    assert 'id="ask-mic"' in TODAY_HTML
+    assert 'id="stop-speaking"' in TODAY_HTML
+    assert 'src="/static/ux/humanVoiceEngine.js"' in TODAY_HTML
+    assert "window.SpeechRecognition || window.webkitSpeechRecognition" in TODAY_JS
+    assert '$("ask-form").requestSubmit()' in TODAY_JS
+    assert "speakNova(answer)" in TODAY_JS
+    assert "/api/voice/speak" in (STATIC / "ux" / "humanVoiceEngine.js").read_text(encoding="utf-8")
+
+
+def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _headers(client)
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_weather",
+        lambda location: {
+            "location": "Minneapolis, Minnesota, United States",
+            "temperature_f": 72,
+            "apparent_f": 71,
+            "humidity_pct": 45,
+            "wind_mph": 8,
+            "condition": "Clear",
+            "observed_at": "2026-09-26T12:00",
+            "source": "Open-Meteo",
+        },
+    )
+    weather = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What is the weather in Minneapolis?"},
+    )
+    assert weather.status_code == 200, weather.text
+    assert weather.json()["fact_label"] == "VERIFIED DATA"
+    assert "72" in weather.json()["answer"]
+    assert "Open-Meteo" in weather.json()["answer"]
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_news",
+        lambda query, limit=5: [
+            {
+                "title": "Test headline - Example News",
+                "link": "https://example.com/news",
+                "published": "Sat, 26 Sep 2026 12:00:00 GMT",
+                "source": "Example News",
+            }
+        ],
+    )
+    news = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Latest news about small business"},
+    )
+    assert news.status_code == 200, news.text
+    assert news.json()["fact_label"] == "VERIFIED DATA"
+    assert "Test headline" in news.json()["answer"]
+    assert news.json()["source_href"] == "https://example.com/news"
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_web_search",
+        lambda query, max_results=5: {
+            "status": "ok",
+            "response": "Live result summary",
+            "sources": [
+                {"title": "Example source", "url": "https://example.com/source", "label": "Example"}
+            ],
+        },
+    )
+    web = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "Search the web for Minnesota small business resources"},
+    )
+    assert web.status_code == 200, web.text
+    assert web.json()["fact_label"] == "VERIFIED DATA"
+    assert web.json()["answer"] == "Live result summary"
+    assert web.json()["sources"][0]["url"] == "https://example.com/source"
 
 
 def test_nova_today_signed_out_blocks_apis(client: TestClient) -> None:
@@ -499,6 +596,7 @@ def test_nova_today_customer_navigation_gate_is_refreshed_after_login() -> None:
     assert 'href === "/workspace"' in TODAY_JS
     assert 'href === "/app"' in TODAY_JS
     assert 'href === "/nova/freight"' in TODAY_JS
+    assert 'href === "/nova/payments/readiness"' in TODAY_JS
     assert "await applyProductAccess();" in TODAY_JS
 
 
@@ -515,8 +613,8 @@ def test_nova_today_owner_work_is_hidden_until_authorized() -> None:
 def test_nova_today_renders_clickable_web_sources() -> None:
     assert 'id="brain-sources"' in TODAY_HTML
     assert "function renderBrainSources" in TODAY_JS
-    assert 'target="_blank"' in TODAY_JS
-    assert 'rel="noopener noreferrer"' in TODAY_JS
+    assert 'target=\\"_blank\\"' in TODAY_JS
+    assert 'rel=\\"noopener noreferrer\\"' in TODAY_JS
     assert "result.sources || []" in TODAY_JS
 
 

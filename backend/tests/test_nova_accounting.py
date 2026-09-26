@@ -284,6 +284,167 @@ def test_nova_accounting_aggregation_privacy_and_isolation(client: TestClient) -
         db.commit()
 
 
+def test_nova_saas_accounting_never_reads_internal_product_ledgers(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.nova.business.models import NovaBusinessExpense, NovaBusinessOpportunity
+    from app.core.nova.signup.models import NovaCustomerTenant
+    from app.helpers import now
+
+    headers, org_id = _headers(client)
+    with SessionLocal() as db:
+        tenant = db.query(NovaCustomerTenant).filter(NovaCustomerTenant.organization_id == org_id).first()
+        created_tenant = False
+        if tenant is None:
+            tenant = NovaCustomerTenant(
+                tenant_id="NCT-ACCT-" + uuid4().replace("-", "")[:8].upper(),
+                organization_id=org_id,
+                organization_name="Accounting SaaS Test",
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(tenant)
+            created_tenant = True
+        opp_id = "NBO-ACCT-" + uuid4().replace("-", "")[:8].upper()
+        expense_id = "NBE-ACCT-" + uuid4().replace("-", "")[:8].upper()
+        db.add(
+            NovaBusinessOpportunity(
+                opportunity_id=opp_id,
+                organization_id=org_id,
+                owner_user_id="accounting-test",
+                title="Customer SaaS opportunity",
+                estimated_value=1000,
+                probability=50,
+                status="qualified",
+            )
+        )
+        db.add(
+            NovaBusinessExpense(
+                expense_id=expense_id,
+                organization_id=org_id,
+                owner_user_id="accounting-test",
+                amount=125,
+                description="Customer-entered expense",
+            )
+        )
+        db.commit()
+
+    def internal_ledger_read(*_args, **_kwargs):
+        raise AssertionError("Nova SaaS accounting attempted to read an internal AMICOR product ledger")
+
+    for name in (
+        "_confirmed_customer_payments",
+        "_pending_customer_payments",
+        "_completed_trip_ride",
+        "_completed_trip_platform",
+        "_freight_paid_invoices",
+        "_freight_unpaid_invoices",
+    ):
+        monkeypatch.setattr("app.core.nova.accounting.service." + name, internal_ledger_read)
+
+    dash = client.get("/api/nova/accounting/summary", headers=headers)
+    assert dash.status_code == 200, dash.text
+    body = dash.json()
+    keys = {row["key"] for row in body["metrics"]}
+    assert keys == {
+        "business_open_pipeline",
+        "business_expected_revenue",
+        "business_won_value",
+        "business_recorded_expenses",
+    }
+    by_key = {row["key"]: row for row in body["metrics"]}
+    assert by_key["business_open_pipeline"]["amount_usd"] >= 1000
+    assert by_key["business_expected_revenue"]["amount_usd"] >= 500
+    assert by_key["business_recorded_expenses"]["amount_usd"] >= 125
+    blob = json.dumps(body).lower()
+    assert "health_isf" not in blob
+    assert "nova_freight" not in blob
+    assert "amicor_customer_payments" not in blob
+    assert "internal amicor health" in blob
+
+    with SessionLocal() as db:
+        db.query(NovaBusinessOpportunity).filter(NovaBusinessOpportunity.opportunity_id == opp_id).delete(synchronize_session=False)
+        db.query(NovaBusinessExpense).filter(NovaBusinessExpense.expense_id == expense_id).delete(synchronize_session=False)
+        if created_tenant:
+            db.query(NovaCustomerTenant).filter(NovaCustomerTenant.organization_id == org_id).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_nova_saas_aging_and_trends_do_not_read_internal_product_ledgers(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.nova.business.models import NovaBusinessExpense, NovaBusinessOpportunity
+    from app.core.nova.signup.models import NovaCustomerTenant
+    from app.helpers import now
+
+    headers, org_id = _headers(client)
+    with SessionLocal() as db:
+        tenant = db.query(NovaCustomerTenant).filter(NovaCustomerTenant.organization_id == org_id).first()
+        created_tenant = False
+        if tenant is None:
+            tenant = NovaCustomerTenant(
+                tenant_id="NCT-AGE-" + uuid4().replace("-", "")[:8].upper(),
+                organization_id=org_id,
+                organization_name="Accounting Aging SaaS Test",
+                created_at=now(),
+                updated_at=now(),
+            )
+            db.add(tenant)
+            created_tenant = True
+        opp_id = "NBO-AGE-" + uuid4().replace("-", "")[:8].upper()
+        expense_id = "NBE-AGE-" + uuid4().replace("-", "")[:8].upper()
+        db.add(NovaBusinessOpportunity(
+            opportunity_id=opp_id,
+            organization_id=org_id,
+            owner_user_id="accounting-test",
+            title="Aging customer opportunity",
+            estimated_value=800,
+            probability=50,
+            status="qualified",
+        ))
+        db.add(NovaBusinessExpense(
+            expense_id=expense_id,
+            organization_id=org_id,
+            owner_user_id="accounting-test",
+            amount=75,
+            description="Aging customer expense",
+        ))
+        db.commit()
+
+    def internal_read(*_args, **_kwargs):
+        raise AssertionError("Nova SaaS aging/trends attempted to read an internal AMICOR product ledger")
+
+    monkeypatch.setattr("app.core.nova.accounting.aging._customer_group", internal_read)
+    monkeypatch.setattr("app.core.nova.accounting.aging._freight_group", internal_read)
+    for name in ("_customer_confirmed", "_customer_pending", "_trip_totals", "_freight_paid", "_freight_unpaid"):
+        monkeypatch.setattr("app.core.nova.accounting.trends." + name, internal_read)
+
+    aged = client.get("/api/nova/accounting/aging", headers=headers)
+    assert aged.status_code == 200, aged.text
+    aged_blob = json.dumps(aged.json()).lower()
+    assert "business opportunity pipeline" in aged_blob
+    assert "business expense records" in aged_blob
+    assert "nova_freight_invoices" not in aged_blob
+    assert "amicor_customer_payments" not in aged_blob
+    assert "health_isf" not in aged_blob
+
+    trend = client.get("/api/nova/accounting/trends?months=3", headers=headers)
+    assert trend.status_code == 200, trend.text
+    trend_body = trend.json()
+    assert {row["key"] for row in trend_body["streams"]} == {
+        "business_open_pipeline",
+        "business_won_value",
+        "business_recorded_expenses",
+    }
+    trend_blob = json.dumps(trend_body).lower()
+    assert "nova_freight_invoices" not in trend_blob
+    assert "amicor_customer_payments" not in trend_blob
+    assert "health_isf" not in trend_blob
+
+    with SessionLocal() as db:
+        db.query(NovaBusinessOpportunity).filter(NovaBusinessOpportunity.opportunity_id == opp_id).delete(synchronize_session=False)
+        db.query(NovaBusinessExpense).filter(NovaBusinessExpense.expense_id == expense_id).delete(synchronize_session=False)
+        if created_tenant:
+            db.query(NovaCustomerTenant).filter(NovaCustomerTenant.organization_id == org_id).delete(synchronize_session=False)
+        db.commit()
+
+
 def test_nova_accounting_fail_soft(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args, **_kwargs):
         raise RuntimeError("payment ledger unavailable")

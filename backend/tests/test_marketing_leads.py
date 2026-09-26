@@ -134,9 +134,67 @@ def test_anonymous_operations_intake_is_accepted():
         "consent": True,
         "preferred_contact_method": "email",
         "subject": "Spreadsheet cleanup",
+        "service_plan": "free_scope",
         "message": "Clean and organize a spreadsheet and prepare a summary."
     })
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["accepted"] is True
     assert body["data"]["lead_type"] == "anonymous_operations"
+
+
+def test_anonymous_operations_internal_inbox_and_status():
+    from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
+
+    ensure_auth_schema()
+    seed_default_users()
+    submitted = client.post("/api/marketing/leads", json={
+        "lead_type": "anonymous_operations",
+        "organization_name": "Inbox Test Company",
+        "contact_name": "Inbox Test Client",
+        "work_email": "anon-inbox@example.com",
+        "consent": True,
+        "preferred_contact_method": "email",
+        "service_plan": "free_scope",
+        "subject": "Operations support",
+        "message": "Organize business records and prepare an operating summary."
+    })
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+
+    assert client.get("/api/marketing/admin/leads").status_code == 401
+
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "admin@amicor.local", "password": SEED_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    inbox = client.get(
+        "/api/marketing/admin/leads",
+        params={"lead_type": "anonymous_operations", "status": "new"},
+        headers=headers,
+    )
+    assert inbox.status_code == 200, inbox.text
+    assert any(row["lead_id"] == lead_id for row in inbox.json()["leads"])
+
+    detail = client.get(f"/api/marketing/admin/leads/{lead_id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["service_plan"] == "free_scope"
+    assert "operating summary" in detail.json()["message"]
+
+    qualified = client.patch(
+        f"/api/marketing/admin/leads/{lead_id}/status",
+        headers=headers,
+        json={"status": "qualified"},
+    )
+    assert qualified.status_code == 200, qualified.text
+    assert qualified.json()["status"] == "qualified"
+
+    bad = client.patch(
+        f"/api/marketing/admin/leads/{lead_id}/status",
+        headers=headers,
+        json={"status": "paid"},
+    )
+    assert bad.status_code == 422

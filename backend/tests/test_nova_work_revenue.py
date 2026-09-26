@@ -86,9 +86,12 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "opp-source-url" in WORK_HTML
     assert "@media (max-width: 720px)" in WORK_CSS
     assert "escapeHtml" in WORK_JS
-    assert "window.open" not in WORK_JS
+    assert 'action === "open-handoff"' in WORK_JS
+    assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
+    assert "Approved handoff opened." in WORK_JS
+    assert "Nova did not claim it submitted the application." in WORK_JS
     assert "Approve for future submission" in WORK_JS
-    assert "Record manual submission (Nova will not send)" in WORK_JS
+    assert "Record manual submission after I send it" in WORK_JS
     assert "Prepare application drafts" in WORK_JS
 
 
@@ -879,7 +882,10 @@ def test_today_work_cards_are_informational_and_action_safe() -> None:
     assert 'data-work-card="approvals"' in TODAY_HTML
     assert 'data-work-card="active-work"' in TODAY_HTML
     assert 'data-work-card="revenue"' in TODAY_HTML
-    assert 'href="/nova/work">Work</a>' in TODAY_HTML
+    assert 'href="/nova/work">Work</a>' not in TODAY_HTML
+    assert 'href="/nova/work"' not in TODAY_HTML
+    assert 'var isCustomer = !!(access && access.nova_saas_customer);' in TODAY_JS
+    assert 'if (workRevenuePanel && isCustomer) workRevenuePanel.classList.add("hidden");' in TODAY_JS
     assert "/api/nova/work/today-summary" in TODAY_JS
     assert "MANUAL" in TODAY_JS
     assert "SIMULATED / TEST" in TODAY_JS
@@ -1424,7 +1430,10 @@ def test_phase2_dashboard_and_today_surface_new_sections() -> None:
     assert "CONTRACTED REVENUE" in TODAY_JS
     assert "RECEIVED REVENUE" in TODAY_JS
     assert "Submit Application" not in WORK_JS
-    assert "window.open" not in WORK_JS
+    assert 'action === "open-handoff"' in WORK_JS
+    assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
+    assert "Approved handoff opened." in WORK_JS
+    assert "Manual submission recorded after owner/operator handoff." in WORK_JS
 
 
 

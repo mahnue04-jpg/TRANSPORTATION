@@ -424,6 +424,7 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
                 "health",
                 "delivery",
                 "freight",
+                "payments_readiness",
                 "lifesaver",
                 "driver001",
                 "admin",

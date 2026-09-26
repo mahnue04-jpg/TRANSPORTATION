@@ -203,6 +203,129 @@ def test_free_signup_has_limited_access_and_daily_ask_cap() -> None:
     )
     assert limited.status_code == 429
     assert "5 Ask Nova requests per day" in limited.text
+    assert "Upgrade" in limited.text
+
+    # Direct endpoint remains blocked after "refresh" via a second login session.
+    login_again = client.post(
+        "/api/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    assert login_again.status_code == 200
+    headers2 = {"Authorization": f"Bearer {login_again.json()['access_token']}"}
+    still_limited = client.post(
+        "/api/nova/today/ask",
+        headers=headers2,
+        json={"question": "What is my name?"},
+    )
+    assert still_limited.status_code == 429
+
+    assert client.get("/nova/communications", headers=headers).status_code == 403
+    assert client.get("/nova/government", headers=headers).status_code == 403
+    assert client.get("/nova/business", headers=headers).status_code == 403
+    assert client.get("/nova/accounting", headers=headers).status_code == 403
+    assert client.get("/nova/accounting/aging", headers=headers).status_code == 403
+    assert client.get("/nova/accounting/trends", headers=headers).status_code == 403
+    assert client.get("/nova/work", headers=headers).status_code == 403
+    assert client.get("/api/nova/v3/status", headers=headers).status_code in {401, 403, 404}
+
+
+def test_free_daily_ask_limit_resets_on_new_calendar_date(monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.nova.signup import service as signup_service
+
+    fixed = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(signup_service, "now", lambda: fixed)
+
+    client = _client()
+    payload = _signup_payload()
+    created = client.post("/api/nova/signup/free", json=payload)
+    assert created.status_code == 200, created.text
+    login = client.post(
+        "/api/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    for _ in range(5):
+        assert client.post(
+            "/api/nova/today/ask",
+            headers=headers,
+            json={"question": "ping"},
+        ).status_code == 200
+    assert client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "ping"},
+    ).status_code == 429
+
+    monkeypatch.setattr(signup_service, "now", lambda: fixed + timedelta(days=1))
+    reset_ok = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "ping after reset"},
+    )
+    assert reset_ok.status_code == 200, reset_ok.text
+
+
+def test_free_to_paid_upgrade_preserves_same_account() -> None:
+    fake = FakeNovaSaasStripeClient()
+    set_nova_saas_stripe_override(fake)
+    try:
+        client = _client()
+        payload = _signup_payload()
+        created = client.post("/api/nova/signup/free", json=payload)
+        assert created.status_code == 200, created.text
+        signup_id = created.json()["signup_id"]
+        login = client.post(
+            "/api/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        before = client.get("/api/auth/me", headers=headers).json()
+
+        upgrade = client.post("/api/nova/signup/me/upgrade", headers=headers)
+        assert upgrade.status_code == 200, upgrade.text
+        body = upgrade.json()
+        assert body["signup_id"] == signup_id
+        assert body.get("checkout_url")
+        assert body.get("checkout_session_id")
+        assert fake.created_count == 1
+
+        session = fake.complete_session(body["checkout_session_id"], payment_status="no_payment_required")
+        webhook = client.post(
+            "/api/nova/signup/stripe/webhook",
+            json={
+                "id": f"evt_upgrade_{uuid4()[:12]}",
+                "type": "checkout.session.completed",
+                "data": {"object": session},
+            },
+        )
+        assert webhook.status_code == 200, webhook.text
+        assert webhook.json()["activated"] is True
+        assert webhook.json()["organization_id"] == before["organization_id"]
+        assert webhook.json()["owner_user_id"] == before["user_id"]
+
+        after_login = client.post(
+            "/api/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        )
+        assert after_login.status_code == 200
+        headers2 = {"Authorization": f"Bearer {after_login.json()['access_token']}"}
+        after = client.get("/api/auth/me", headers=headers2).json()
+        assert after["user_id"] == before["user_id"]
+        assert after["organization_id"] == before["organization_id"]
+        access = client.get("/api/nova/signup/me/access", headers=headers2).json()
+        assert access["tier"] == "paid"
+        assert access["subscription_status"] == "trialing"
+        assert "nova_business" in access["allowed_surfaces"]
+        assert client.get("/api/nova/business/dashboard", headers=headers2).status_code == 200
+        assert client.get("/nova/payments/readiness", headers=headers2).status_code == 403
+        assert client.get("/workspace", headers=headers2).status_code == 403
+        assert client.get("/app", headers=headers2).status_code == 403
+        assert client.get("/nova/freight", headers=headers2).status_code == 403
+    finally:
+        set_nova_saas_stripe_override(None)
 
 
 def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
@@ -247,6 +370,7 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert access.status_code == 200
         assert access.json()["nova_saas_customer"] is True
         assert "health" in access.json()["blocked_surfaces"]
+        assert "payments_readiness" in access.json()["blocked_surfaces"]
 
         assert client.get("/api/health-isf/rides", headers=headers).status_code == 403
         assert client.get("/api/health-isf/drivers", headers=headers).status_code == 403
@@ -255,9 +379,11 @@ def test_signup_checkout_webhook_intro_and_tenant_isolation() -> None:
         assert client.get("/app", headers=headers).status_code == 403
         assert client.get("/workspace", headers=headers).status_code == 403
         assert client.get("/nova/freight", headers=headers).status_code == 403
+        assert client.get("/nova/payments/readiness", headers=headers).status_code == 403
         assert client.get("/admin", headers=headers).status_code == 403
         assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
         assert client.get("/api/admin/metrics", headers=headers).status_code == 403
+        assert client.get("/api/marketing/admin/leads", headers=headers).status_code == 403
         assert client.post(
             "/api/nova/tenants/provision",
             headers=headers,
@@ -449,6 +575,13 @@ def test_api_admin_prefix_is_blocked_for_nova_customers_only() -> None:
     assert path_blocked_for_nova_customer("/api/admin/unknown-platform-endpoint") is True
     assert path_blocked_for_nova_customer("/api/nova/today/dashboard") is False
     assert path_blocked_for_nova_customer("/nova/workspace") is False
+    assert path_blocked_for_nova_customer("/nova/payments/readiness") is True
+    assert path_blocked_for_nova_customer("/workspace") is True
+    assert path_blocked_for_nova_customer("/app") is True
+    assert path_blocked_for_nova_customer("/nova/freight") is True
+    assert path_blocked_for_nova_customer("/nova/accounting") is False
+    assert path_blocked_for_nova_customer("/nova/accounting/aging") is False
+    assert path_blocked_for_nova_customer("/nova/accounting/trends") is False
 
 
 def test_nova_saas_admin_cannot_access_platform_admin_apis() -> None:
@@ -599,7 +732,9 @@ def test_retry_after_partial_schedule_creation_succeeds() -> None:
         assert fake.schedule_create_calls == 1
         assert fake.schedule_update_calls == 1
         assert len(fake.schedules) == 1
-        assert fake.last_stripe_phases[0]["duration"] == {"interval": "month", "interval_count": 3}
+        assert len(fake.last_stripe_phases) == 3
+        assert "duration" not in fake.last_stripe_phases[0]
+        assert fake.last_stripe_phases[1]["duration"] == {"interval": "month", "interval_count": 3}
         status = client.get(f"/api/nova/signup/{signup_id}").json()
         assert status["status"] == "trialing"
         assert status["founding_slot"] == slot

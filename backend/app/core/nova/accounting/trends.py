@@ -317,6 +317,84 @@ def _freight_unpaid(db: Session, organization_id: str, keys: list[str], current_
     )
 
 
+def _is_nova_saas_customer(db: Session, organization_id: str) -> bool:
+    try:
+        from app.core.nova.signup.isolation import is_nova_saas_customer_org
+        return is_nova_saas_customer_org(db, organization_id)
+    except Exception:
+        return False
+
+
+def _saas_business_group(
+    db: Session,
+    organization_id: str,
+    keys: list[str],
+    current_key: str,
+    first: datetime,
+    as_of: datetime,
+    *,
+    kind: str,
+) -> NovaTrendGroup:
+    from app.core.nova.business.models import NovaBusinessExpense, NovaBusinessOpportunity
+    from app.core.nova.business.schemas import OPEN_OPP_STATUSES
+
+    if kind == "open_pipeline":
+        rows = (
+            db.query(NovaBusinessOpportunity.created_at, NovaBusinessOpportunity.estimated_value)
+            .filter(
+                NovaBusinessOpportunity.organization_id == organization_id,
+                NovaBusinessOpportunity.status.in_(OPEN_OPP_STATUSES),
+            )
+            .all()
+        )
+        key = "business_open_pipeline"
+        label = "Open opportunity pipeline"
+        timestamp_field = "nova_business_opportunities.created_at"
+        note = "Customer-saved open opportunity values grouped by creation month. Pipeline estimate only; not collected cash."
+    elif kind == "won":
+        rows = (
+            db.query(NovaBusinessOpportunity.created_at, NovaBusinessOpportunity.estimated_value)
+            .filter(
+                NovaBusinessOpportunity.organization_id == organization_id,
+                NovaBusinessOpportunity.status == "won",
+            )
+            .all()
+        )
+        key = "business_won_value"
+        label = "Won opportunity value"
+        timestamp_field = "nova_business_opportunities.created_at"
+        note = "Customer-saved won opportunity values grouped by creation month. Won status does not prove cash collection."
+    else:
+        rows = (
+            db.query(NovaBusinessExpense.created_at, NovaBusinessExpense.amount)
+            .filter(NovaBusinessExpense.organization_id == organization_id)
+            .all()
+        )
+        key = "business_recorded_expenses"
+        label = "Recorded business expenses"
+        timestamp_field = "nova_business_expenses.created_at"
+        note = "Customer-entered Nova Business expenses grouped by record creation month. Not bank-synced or independently verified."
+
+    typed = [(stamp, amount, "USD") for stamp, amount in rows]
+    return NovaTrendGroup(
+        key=key,
+        label=label,
+        state="calculated",
+        cohort="created_at_month",
+        timestamp_field=timestamp_field,
+        stripe_mode="N/A",
+        source_note=note,
+        currencies=_aggregate(
+            typed,
+            keys=keys,
+            current_key=current_key,
+            first=first,
+            as_of=as_of,
+            amount_mode="money",
+        ),
+    )
+
+
 def _safe_group(reader, *args, fallback: NovaTrendGroup, **kwargs) -> NovaTrendGroup:
     try:
         return reader(*args, **kwargs)
@@ -335,6 +413,46 @@ def trends(db: Session, *, organization_id: str, user: UserContext, months: int 
     as_of = now()
     first, keys = month_window(as_of, resolved)
     current_key = month_key(as_of) or keys[-1]
+
+    if _is_nova_saas_customer(db, organization_id):
+        streams = [
+            _stream(
+                "business_open_pipeline",
+                "Open opportunity pipeline",
+                _saas_business_group(
+                    db, organization_id, keys, current_key, first, as_of, kind="open_pipeline"
+                ),
+            ),
+            _stream(
+                "business_won_value",
+                "Won opportunity value",
+                _saas_business_group(
+                    db, organization_id, keys, current_key, first, as_of, kind="won"
+                ),
+            ),
+            _stream(
+                "business_recorded_expenses",
+                "Recorded business expenses",
+                _saas_business_group(
+                    db, organization_id, keys, current_key, first, as_of, kind="expenses"
+                ),
+            ),
+        ]
+        return NovaAccountingTrendsOut(
+            organization_id=organization_id,
+            months=resolved,  # type: ignore[arg-type]
+            calculated_as_of_utc=as_of.isoformat(),
+            range_start_utc=first.isoformat(),
+            stripe_mode="N/A",
+            streams=streams,
+            disclaimer=(
+                "Customer-safe monthly trends from this tenant's Nova Business records only. "
+                "Opportunity values are operational estimates, won status is not proof of collected cash, "
+                "and expenses are user-entered. Internal AMICOR Health, Delivery, Freight, and "
+                "platform-payment ledgers are not read."
+            ),
+        )
+
     streams: list[NovaTrendStream] = []
     streams.append(
         _stream(
