@@ -3,7 +3,8 @@
 (function () {
   var activeRecognition = null;
   var voiceEngine = null;
-  var speakingFallback = false;\n  var lastAutoSpokenText = "";\n  var autoReadTimer = null;
+  var speakingFallback = false;
+  var lastAutoSpokenText = "";\n  var autoReadTimer = null;
 
   function voice() {
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
@@ -76,12 +77,27 @@
     button.className = "secondary";
     button.setAttribute("data-nova-read-result", "1");
     button.setAttribute("aria-label", "Read Nova answer aloud");
-    button.textContent = "🔊 Read answer";
+    button.textContent = "🎙 Read aloud";
     button.addEventListener("click", function () {
       lastAutoSpokenText = "";
       readBrainOutput("manual");
     });
-    target.insertAdjacentElement("afterend", button);
+
+    var stopButton = document.createElement("button");
+    stopButton.type = "button";
+    stopButton.className = "secondary";
+    stopButton.setAttribute("data-nova-read-stop", "1");
+    stopButton.setAttribute("aria-label", "Stop Nova reading");
+    stopButton.textContent = "⏹ Stop";
+    stopButton.addEventListener("click", function () {
+      stopAll();
+    });
+
+    var controls = document.createElement("div");
+    controls.className = "command-actions nova-read-controls";
+    controls.appendChild(button);
+    controls.appendChild(stopButton);
+    target.insertAdjacentElement("afterend", controls);
   }
 
   function setStatus(host, message) {
@@ -239,6 +255,8 @@
     eligibleInputs().forEach(function (pair) {
       enhanceForm(pair[0], pair[1]);
     });
+    installBrainAutoRead();
+    installReadResultButton();
   }
 
   if (document.readyState === "loading") {
