@@ -451,11 +451,12 @@ def test_nova_government_navigation_and_responsive() -> None:
     assert 'href="/nova/business">Business' in GOV_HTML
     assert 'href="/nova#web-search">Web / Search' in GOV_HTML
     assert 'href="/nova/workspace#files">Files' in GOV_HTML
-    assert 'href="/workspace">Voice' in GOV_HTML
-    assert 'href="/workspace">Tools' in GOV_HTML
-    assert 'href="/workspace">Health' in GOV_HTML
-    assert 'href="/app">Delivery' in GOV_HTML
-    assert 'href="/nova/freight">Freight' in GOV_HTML
+    assert 'href="/nova/today#ask-nova">Voice' in GOV_HTML
+    assert 'href="/workspace">Tools' not in GOV_HTML
+    assert 'href="/workspace">Health' not in GOV_HTML
+    assert 'href="/app">Delivery' not in GOV_HTML
+    assert 'href="/nova/freight">Freight' not in GOV_HTML
+    assert 'href="/nova/payments/readiness">Payments Readiness' not in GOV_HTML
     assert 'name="viewport"' in GOV_HTML
     assert "width=device-width" in GOV_HTML
     assert "@media (max-width: 720px)" in GOV_CSS
