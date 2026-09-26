@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
+from app.core.nova.signup.service import consume_free_ask
 from app.core.nova.today import service
 from app.core.nova.today.schemas import (
     NovaTodayActionCreate,
@@ -66,12 +67,24 @@ def ask_today(
     db: Session = Depends(get_db),
 ):
     try:
+        org_id = _resolve_org(user, payload.organization_id)
+        usage = consume_free_ask(db, organization_id=org_id)
+        if usage.get("is_free") and not usage.get("allowed"):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Free AMICOR Nova includes 5 Ask Nova requests per day. "
+                    "Upgrade to continue with full Nova access."
+                ),
+            )
         return service.ask_today(
             db,
             payload,
-            organization_id=_resolve_org(user, payload.organization_id),
+            organization_id=org_id,
             user=user,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         _raise(exc)
 
