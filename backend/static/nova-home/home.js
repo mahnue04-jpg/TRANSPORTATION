@@ -73,6 +73,14 @@
         document.querySelectorAll('[data-internal-product="true"]').forEach(function (el) {
           el.classList.add("hidden");
         });
+        if (access.tier === "free") {
+          document.querySelectorAll('[data-paid-nova="true"]').forEach(function (el) {
+            el.classList.add("hidden");
+          });
+          if ($("upgrade-nova")) $("upgrade-nova").classList.remove("hidden");
+          var limit = access.free_daily_ask_limit || 5;
+          $("session-meta").textContent += " · Free plan · up to " + limit + " Ask Nova requests/day";
+        }
       }
     } catch (_) {}
   }
@@ -211,6 +219,23 @@
     await refreshBrain();
     showBanner("Signed in. Mrs. Nova Brain is available.", true);
   });
+  if ($("upgrade-nova")) {
+    $("upgrade-nova").addEventListener("click", async function () {
+      try {
+        $("upgrade-nova").disabled = true;
+        var result = await api("/api/nova/signup/me/upgrade", { method: "POST" });
+        if (result && result.checkout_url) {
+          window.location.href = result.checkout_url;
+          return;
+        }
+        showBanner("Upgrade checkout is not available yet.");
+      } catch (err) {
+        showBanner(err.message || "Upgrade is unavailable right now.");
+      } finally {
+        $("upgrade-nova").disabled = false;
+      }
+    });
+  }
   $("sign-out").addEventListener("click", async function () {
     if (session() && session().logout) await session().logout();
     window.location.href = "/nova";
