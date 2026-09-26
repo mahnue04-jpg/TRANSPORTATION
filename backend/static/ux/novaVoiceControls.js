@@ -3,7 +3,7 @@
 (function () {
   var activeRecognition = null;
   var voiceEngine = null;
-  var speakingFallback = false;
+  var speakingFallback = false;\n  var lastAutoSpokenText = "";\n  var autoReadTimer = null;
 
   function voice() {
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
@@ -44,6 +44,44 @@
       utterance.onend = function () { speakingFallback = false; };
       window.speechSynthesis.speak(utterance);
     } catch (_) {}
+  }
+
+  function readBrainOutput(reason) {
+    var target = document.getElementById("brain-output");
+    var value = target ? String(target.textContent || "").trim() : "";
+    if (!value || value === lastAutoSpokenText) return false;
+    lastAutoSpokenText = value;
+    speak(value);
+    return true;
+  }
+
+  function installBrainAutoRead() {
+    var target = document.getElementById("brain-output");
+    if (!target || target.dataset.novaAutoReadReady === "1" || !window.MutationObserver) return;
+    target.dataset.novaAutoReadReady = "1";
+    var observer = new MutationObserver(function () {
+      window.clearTimeout(autoReadTimer);
+      autoReadTimer = window.setTimeout(function () {
+        readBrainOutput("result-change");
+      }, 180);
+    });
+    observer.observe(target, { childList: true, subtree: true, characterData: true });
+  }
+
+  function installReadResultButton() {
+    var target = document.getElementById("brain-output");
+    if (!target || document.querySelector("[data-nova-read-result]")) return;
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.setAttribute("data-nova-read-result", "1");
+    button.setAttribute("aria-label", "Read Nova answer aloud");
+    button.textContent = "🔊 Read answer";
+    button.addEventListener("click", function () {
+      lastAutoSpokenText = "";
+      readBrainOutput("manual");
+    });
+    target.insertAdjacentElement("afterend", button);
   }
 
   function setStatus(host, message) {
