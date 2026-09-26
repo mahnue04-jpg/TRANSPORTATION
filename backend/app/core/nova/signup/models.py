@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -107,7 +107,7 @@ class NovaFreeUsage(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
     organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    usage_date: Mapped[date] = mapped_column(DateTime(timezone=False), nullable=False)
+    usage_date: Mapped[date] = mapped_column(Date, nullable=False)
     ask_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
