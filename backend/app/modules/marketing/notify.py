@@ -48,6 +48,7 @@ def build_lead_notification(lead: Any) -> tuple[str, str]:
         f"Organization type: {_safe_label(getattr(lead, 'organization_type', ''), 64)}",
         f"Preferred contact: {_safe_label(getattr(lead, 'preferred_contact_method', ''), 32)}",
         f"Lead source: {_safe_label(getattr(lead, 'lead_source', '') or getattr(lead, 'source_path', ''), 200)}",
+        f"Service plan: {_safe_label(getattr(lead, 'service_plan', ''), 64)}",
         f"Consent: {bool(getattr(lead, 'consent', False))}",
         f"Submitted at: {_safe_label(getattr(lead, 'created_at', ''), 64)}",
         "",
