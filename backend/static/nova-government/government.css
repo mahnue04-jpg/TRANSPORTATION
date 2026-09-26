@@ -175,3 +175,32 @@ button {
 @media (min-width: 1600px) {
   .gov-header, .gov-main { width: min(1440px, calc(100% - 64px)); }
 }
+
+
+/* Government command center: keep Search, Ask Nova, and quick tools visually separate. */
+.command-heading { margin: 18px 0 4px; font-size: 1.05rem; }
+.command-divider { border-top: 1px solid var(--nova-line); margin: 18px 0 4px; }
+.inline-results {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--nova-line);
+  border-radius: 10px;
+  background: rgba(8, 20, 34, 0.72);
+  min-height: 56px;
+}
+.search-results-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.inline-results a { color: var(--nova-accent); overflow-wrap: anywhere; }
+.nova-ask-row { grid-template-columns: 1fr auto; }
+.nova-voice-controls { grid-column: 1 / -1; }
+.nova-read-controls { grid-template-columns: 1fr 1fr; }
+.government-tools { margin-bottom: 6px; }
+@media (max-width: 720px) {
+  .search-row, .nova-ask-row { grid-template-columns: 1fr; }
+  .nova-read-controls { grid-template-columns: 1fr; }
+}

@@ -174,6 +174,7 @@
 
   function enhanceForm(form, input) {
     if (!form || !input || form.dataset.novaVoiceReady === "1") return;
+    if (form.querySelector("#ask-mic")) return;
     form.dataset.novaVoiceReady = "1";
 
     var host = document.createElement("div");
@@ -244,8 +245,8 @@
   function eligibleInputs() {
     var found = [];
     document.querySelectorAll("form").forEach(function (form) {
-      if (form.id === "login-form") return;
-      var input = form.querySelector("#ask-input, #command-input, input[type='search']");
+      if (form.id !== "ask-form" && form.id !== "command-form") return;
+      var input = form.querySelector("#ask-input, #command-input");
       if (!input) return;
       found.push([form, input]);
     });

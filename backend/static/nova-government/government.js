@@ -128,11 +128,13 @@
       $("login-form").classList.remove("hidden");
       return;
     }
+    var explicitQuestion = typeof question === "string" ? question.trim() : "";
+    var askQuestion = action === "ask" ? (explicitQuestion || $("ask-input").value.trim()) : explicitQuestion;
     var result = await api("/api/nova/government/ask", {
       method: "POST",
       body: JSON.stringify({
         action: action,
-        question: question || $("ask-input").value.trim(),
+        question: askQuestion || null,
         item_id: state.itemId
       })
     });
@@ -158,16 +160,23 @@
         })
       });
       var sources = (result.web && result.web.sources) || [];
+      var webAnswer = result.web && result.web.response ? String(result.web.response) : "";
+      var resultCount = sources.length + ((result.saved_work || []).length);
       $("search-results").innerHTML =
-        "<p class=\"muted\">" + escapeHtml(result.disclaimer || "") + "</p>" +
-        listHtml(result.saved_work, "<div class=\"muted\">No matching saved work.</div>", function (row) {
+        "<div class=\"search-results-header\"><strong>Search results</strong><span class=\"muted\">" +
+          escapeHtml(resultCount) + " result" + (resultCount === 1 ? "" : "s") + "</span></div>" +
+        (webAnswer ? "<p>" + escapeHtml(webAnswer) + "</p>" : "") +
+        listHtml(result.saved_work, "", function (row) {
           return itemHtml(row);
         }) +
-        listHtml(sources, "<div class=\"muted\">No web sources returned.</div>", function (row) {
-          return "<div class=\"item\">" + escapeHtml(row.title || row.url || "Source") +
-            "<div class=\"muted\">" + escapeHtml(row.url || "") + "</div></div>";
-        });
-      showBanner("Search reused existing Nova/web search. Results are research aids only.", true);
+        listHtml(sources, resultCount ? "" : "<div class=\"muted\">No matching results found. Try a more specific agency, license, permit, grant, or location.</div>", function (row) {
+          var url = escapeHtml(row.url || "");
+          return "<div class=\"item\"><strong>" + escapeHtml(row.title || row.url || "Source") + "</strong>" +
+            (url ? "<div><a href=\"" + url + "\" target=\"_blank\" rel=\"noopener\">Open source</a></div>" : "") + "</div>";
+        }) +
+        "<p class=\"muted\">" + escapeHtml(result.disclaimer || "") + "</p>";
+      $("search-results").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      showBanner(resultCount ? "Search complete. Results are shown below the search box." : "Search complete. No matching results were returned.", true);
     } catch (err) { showBanner(err.message); }
   });
   $("ask-form").addEventListener("submit", async function (event) {
