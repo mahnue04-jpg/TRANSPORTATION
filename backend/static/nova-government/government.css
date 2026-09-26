@@ -204,3 +204,15 @@ button {
   .search-row, .nova-ask-row { grid-template-columns: 1fr; }
   .nova-read-controls { grid-template-columns: 1fr; }
 }
+
+.section-button {
+  width: 100%;
+  text-align: left;
+  color: var(--nova-text);
+  background: transparent;
+}
+.section-button:hover,
+.section-button:focus-visible {
+  border-color: var(--nova-accent);
+  background: rgba(255,255,255,0.04);
+}
