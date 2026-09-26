@@ -81,15 +81,15 @@ def test_nova_home_authenticated_mrs_nova_brain(client: TestClient) -> None:
     status = client.get("/api/nova/status", headers=headers)
     assert status.status_code == 200
     asked = client.post(
-        "/api/nova/ask",
+        "/api/nova/today/ask",
         headers=headers,
-        json={"question": "Summarize today's operating priorities.", "mode": "founder_advisor"},
+        json={"question": "Summarize today's operating priorities."},
     )
     assert asked.status_code == 200, asked.text
     payload = asked.json()
-    assert payload["mode"] == "founder_advisor"
     assert payload["answer"]
-    assert "/api/nova/ask" in HOME_JS
+    assert "/api/nova/today/ask" in HOME_JS
+    assert '"/api/nova/ask"' not in HOME_JS
     assert "Mrs. Nova Brain" in HOME_HTML
     assert "Mr. Nova" not in HOME_HTML
     assert "second assistant" not in HOME_JS.lower()
