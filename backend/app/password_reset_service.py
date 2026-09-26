@@ -123,23 +123,19 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     from app.db.models import User as UserModel
 
     ensure_password_reset_schema()
+    public_response = {"status": "ok", "message": GENERIC_REQUEST_MESSAGE}
     try:
         normalized = _validate_email(email)
     except Exception:
-        return {
-            "status": "ok",
-            "message": GENERIC_REQUEST_MESSAGE,
-            "email_delivery": "config_required" if not password_reset_email_configured() else "attempted",
-        }
+        return public_response
 
     user = (
         db.query(UserModel)
         .filter(func.lower(UserModel.email) == normalized)
         .first()
     )
-    delivery = "config_required" if not password_reset_email_configured() else "attempted"
     if user is None or not bool(getattr(user, "is_active", True)):
-        return {"status": "ok", "message": GENERIC_REQUEST_MESSAGE, "email_delivery": delivery}
+        return public_response
 
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
@@ -168,11 +164,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
     if _test_capture_enabled():
         _TEST_CAPTURE[normalized] = plain
-    if not send_result.get("sent"):
-        delivery = str(send_result.get("reason") or "config_required")
-    else:
-        delivery = "sent"
-    return {"status": "ok", "message": GENERIC_REQUEST_MESSAGE, "email_delivery": delivery}
+    return public_response
 
 
 def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[str, Any]:
