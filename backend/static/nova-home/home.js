@@ -65,6 +65,17 @@
     var el = $("today-attention-count");
     if (el) el.textContent = text;
   }
+  async function refreshCustomerScope() {
+    if (!token()) return;
+    try {
+      var access = await api("/api/nova/signup/me/access");
+      if (access && access.nova_saas_customer) {
+        document.querySelectorAll('[data-internal-product="true"]').forEach(function (el) {
+          el.classList.add("hidden");
+        });
+      }
+    } catch (_) {}
+  }
   async function refreshTodayCount() {
     if (!token()) {
       setTodayCountCopy("Open the Command Center.");
@@ -96,6 +107,7 @@
       $("brain-output").textContent = err.message;
     }
     await refreshTodayCount();
+    await refreshCustomerScope();
   }
   async function askBrain(question) {
     if (!token()) {
