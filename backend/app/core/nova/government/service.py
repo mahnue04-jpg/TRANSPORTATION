@@ -532,14 +532,30 @@ def search_government(
         if part
     )
     query = f'{payload.query.strip()} {filters} official government site:.gov'.strip()
-    web = search_web(query, max_results=6, news_mode=False)
-    official_sources = []
+    web = search_web(query, max_results=10, news_mode=False)
+    query_terms = {
+        term for term in payload.query.lower().replace("/", " ").replace("-", " ").split()
+        if len(term) >= 4 and term not in {"government", "official", "requirements"}
+    }
+    scored_sources = []
     for source in (web.get("sources") or []):
         url = str(source.get("url") or "").lower()
-        if ".gov/" in url or url.endswith(".gov"):
-            official_sources.append(source)
-    if official_sources:
-        web["sources"] = official_sources[:4]
+        if not (".gov/" in url or url.endswith(".gov")):
+            continue
+        haystack = " ".join(
+            str(source.get(key) or "").lower() for key in ("title", "url", "snippet")
+        )
+        relevance = sum(1 for term in query_terms if term in haystack)
+        if relevance:
+            scored_sources.append((relevance, source))
+    scored_sources.sort(key=lambda pair: pair[0], reverse=True)
+    web["sources"] = [source for _, source in scored_sources[:4]]
+    # Provider summaries can include fallback/Wikipedia prose even when the final
+    # links are official. Build the displayed summary only from accepted .gov hits.
+    if web["sources"]:
+        web["response"] = "Official government results matching your search are listed below."
+    else:
+        web["response"] = "No relevant official .gov result matched this search. Try the agency name, license/permit type, and state or city."
     saved = []
     needle = payload.query.lower()
     for row in list_items(db, organization_id=organization_id, user=user):
@@ -617,23 +633,49 @@ def ask_government(
     item_required_actions = {
         "explain_requirement",
         "summarize_letter",
+        "find_agency",
         "missing_documents",
         "build_checklist",
+        "next_step",
+        "compare_levels",
         "prepare_email",
+        "identify_deadlines",
     }
     if payload.action in item_required_actions and not payload.item_id:
         labels = {
             "explain_requirement": "Explain requirement",
             "summarize_letter": "Summarize letter",
+            "find_agency": "Find agency",
             "missing_documents": "Missing documents",
             "build_checklist": "Build checklist",
+            "next_step": "Next step",
+            "compare_levels": "Compare levels",
             "prepare_email": "Draft inquiry",
+            "identify_deadlines": "Identify deadlines",
         }
         return NovaGovBrainOut(
             action=payload.action,
             answer=f"{labels[payload.action]} needs a saved government work item. Open a saved item first, then run this tool so Nova uses that item's real notes, checklist, and sources.",
             fact_label="USER ACTION REQUIRED",
             next_actions=["Open a saved government work item."],
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    if payload.action == "summarize_open_work" and not payload.item_id:
+        open_items = [row for row in items if row.status not in {"closed", "approved"}]
+        if not open_items:
+            answer = "USER-SAVED INFORMATION: 0 saved open Government work items found."
+        else:
+            lines = [
+                f"- {row.title} — {row.government_level} / {row.category}; status {row.status}; due {row.due_date or 'none'}; renewal {row.renewal_date or 'none'}."
+                for row in open_items[:20]
+            ]
+            answer = "USER-SAVED INFORMATION: " + str(len(open_items)) + " saved open Government work item(s) found.\n" + "\n".join(lines)
+        return NovaGovBrainOut(
+            action=payload.action,
+            answer=answer,
+            fact_label="USER-SAVED INFORMATION. Not an official government ruling.",
+            next_actions=[],
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
