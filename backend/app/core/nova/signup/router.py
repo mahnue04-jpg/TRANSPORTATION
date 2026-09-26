@@ -14,6 +14,7 @@ from app.auth import (
 from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
 from app.core.nova.signup.service import (
     SignupError,
+    activate_free_signup,
     create_signup,
     customer_access,
     offer_payload,
@@ -78,12 +79,57 @@ def post_nova_signup(req: NovaSignupRequest, request: Request, db: Session = Dep
     return started
 
 
+@router.post("/free")
+def post_nova_free_signup(req: NovaSignupRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
+    check_rate_limit(f"nova-free-signup:{ip}", limit=_RATE_LIMIT_AUTH)
+    try:
+        row = create_signup(
+            db,
+            business_name=req.business_name,
+            contact_name=req.contact_name,
+            email=req.email,
+            phone=req.phone,
+            industry=req.industry,
+            password=req.password,
+            terms_accepted=req.terms_accepted,
+        )
+        result = activate_free_signup(db, signup_id=row.id)
+    except Exception as exc:
+        _raise(exc)
+        raise
+    if "password" in str(result).lower() and req.password in str(result):
+        raise HTTPException(status_code=500, detail="Signup response leaked credentials")
+    return result
+
+
 @router.post("/checkout")
 def post_nova_checkout(req: NovaCheckoutRequest, request: Request, db: Session = Depends(get_db)):
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "anon")
     check_rate_limit(f"nova-signup-checkout:{ip}", limit=_RATE_LIMIT_AUTH)
     try:
         return start_checkout(db, signup_id=req.signup_id)
+    except Exception as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/me/upgrade")
+def post_nova_free_upgrade(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    ensure_nova_signup_schema()
+    from app.core.nova.signup.models import NovaCustomerTenant
+    tenant = (
+        db.query(NovaCustomerTenant)
+        .filter(NovaCustomerTenant.organization_id == str(user.organization_id or ""))
+        .first()
+    )
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Nova customer account not found")
+    try:
+        return start_checkout(db, signup_id=tenant.signup_id)
     except Exception as exc:
         _raise(exc)
         raise

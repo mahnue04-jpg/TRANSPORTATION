@@ -57,6 +57,7 @@
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
         <a class="button secondary" href="/nova/workspace">Open Nova Workspace</a>
+        <button type="button" id="upgrade-nova" class="secondary hidden">Upgrade Nova</button>
       </div>
       <form id="login-form" class="login-grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
@@ -118,37 +119,37 @@
         <p>AMICOR Nova Freight V1 remains a separate frozen product.</p>
         <a class="button" href="/nova/freight" data-destination="freight">Open Freight</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-separate-product="true">
         <h3>Marketplace</h3>
-        <p>AMICOR digital products migrated from Webflow. Draft catalog with checkout held until verification.</p>
+        <p>Separate AMICOR digital-product storefront. Marketplace purchases are not included in an AMICOR Nova subscription.</p>
         <a class="button" href="/nova/marketplace" data-destination="marketplace">Open Marketplace</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Communications</h3>
         <p>Nova-owned inbox, email drafts, calendar, and notifications.</p>
         <a class="button" href="/nova/communications" data-destination="communications">Open Communications</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Government</h3>
         <p>Nova-owned research, documents, deadlines, and assistance. Not a live agency filing system.</p>
         <a class="button" href="/nova/government" data-destination="government">Open Government</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Business</h3>
         <p>Nova-owned operations, customers, opportunities, and tasks. Not a ledger or live CRM engine.</p>
         <a class="button" href="/nova/business" data-destination="business">Open Business</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Accounting</h3>
         <p>Read-only AMICOR accounting views. Not a ledger write surface.</p>
         <a class="button" href="/nova/accounting" data-destination="accounting">Open Accounting</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Aging</h3>
         <p>Read-only pending-funds aging. No payouts or Stripe charges.</p>
         <a class="button" href="/nova/accounting/aging" data-destination="aging">Open Aging</a>
       </article>
-      <article class="tile">
+      <article class="tile" data-paid-nova="true">
         <h3>Trends</h3>
         <p>Read-only monthly accounting trends. No financial mutations.</p>
         <a class="button" href="/nova/accounting/trends" data-destination="trends">Open Trends</a>

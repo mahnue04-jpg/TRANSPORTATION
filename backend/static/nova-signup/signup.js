@@ -34,7 +34,10 @@
   form.addEventListener("submit", function (event) {
     event.preventDefault();
     submitBtn.disabled = true;
-    fetch("/api/nova/signup", {
+    var selected = document.querySelector('input[name="signup_tier"]:checked');
+    var tier = selected ? selected.value : "free";
+    var endpoint = tier === "paid" ? "/api/nova/signup" : "/api/nova/signup/free";
+    fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -62,7 +65,12 @@
           window.location.href = result.body.checkout_url;
           return;
         }
-        show("Account created, but checkout is not available yet.", false);
+        if (result.body.status === "free" && result.body.login_ready) {
+          show("Free AMICOR Nova account created. Sign in to start using your daily Nova access.", true);
+          window.setTimeout(function () { window.location.href = "/nova"; }, 1200);
+          return;
+        }
+        show("Account created, but the next step is not available yet.", false);
         submitBtn.disabled = false;
       })
       .catch(function () {
