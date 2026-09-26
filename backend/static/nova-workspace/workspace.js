@@ -77,7 +77,8 @@
         escapeHtml(row.title) + "</button><div class=\"muted\">" + escapeHtml(row.preview || "Continue this thread") + "</div></div>";
     });
     $("recent-files").innerHTML = listHtml(data.recent_files, "No files yet.", function (row) {
-      return "<div class=\"item\"><strong>" + escapeHtml(row.filename) + "</strong><div class=\"muted\">" +
+      return "<div class=\"item\"><button class=\"linkish\" data-open-file=\"" + escapeHtml(row.file_id) + "\">" +
+        escapeHtml(row.filename) + "</button><div class=\"muted\">" +
         escapeHtml(row.content_type || "file") + " · " + escapeHtml(row.created_at) + "</div></div>";
     });
     $("recent-searches").innerHTML = listHtml(data.saved_searches, "No searches yet.", function (row) {
@@ -201,11 +202,19 @@
   document.addEventListener("click", async function (event) {
     var projectBtn = event.target.closest("[data-open-project]");
     var convoBtn = event.target.closest("[data-open-convo]");
+    var fileBtn = event.target.closest("[data-open-file]");
     try {
       if (projectBtn) {
         state.projectId = projectBtn.getAttribute("data-open-project");
         await api("/api/nova/workspace/projects/" + encodeURIComponent(state.projectId));
         showBanner("Opened project " + state.projectId + ".", true);
+      }
+      if (fileBtn) {
+        var fileId = fileBtn.getAttribute("data-open-file");
+        var fileRow = await api("/api/nova/workspace/files/" + encodeURIComponent(fileId));
+        $("brain-output").textContent = "FILE: " + (fileRow.filename || fileId) + "\n\n" +
+          (fileRow.excerpt || "No readable text was extracted from this file.");
+        showBanner("Opened saved Workspace file " + fileId + ".", true);
       }
       if (convoBtn) {
         state.conversationId = convoBtn.getAttribute("data-open-convo");
