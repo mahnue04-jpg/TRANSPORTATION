@@ -303,6 +303,7 @@ def _access_token_payload(user: Any, session_role: str | None = None) -> dict[st
         "email": user.email,
         "role": role,
         "organization_id": getattr(user, "organization_id", None),
+        "auth_version": int(getattr(user, "auth_version", 0) or 0),
     }
 
 
@@ -372,6 +373,7 @@ def ensure_auth_schema() -> None:
             "organization_id": "VARCHAR(36)",
             "authorized_roles": "VARCHAR(512)",
             "session_role": "VARCHAR(32)",
+            "auth_version": "INTEGER NOT NULL DEFAULT 0",
         }
         for column_name, column_type in auth_columns.items():
             if column_name in columns:
@@ -776,6 +778,10 @@ def get_current_user(
     user = db.query(UserModel).filter(UserModel.id == user_id).first() # type: ignore
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid or inactive user")
+    token_auth_version = int(payload.get("auth_version", 0) or 0)
+    user_auth_version = int(getattr(user, "auth_version", 0) or 0)
+    if token_auth_version != user_auth_version:
+        raise HTTPException(status_code=401, detail="Session invalidated")
     return user
 
 
