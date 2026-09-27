@@ -346,7 +346,8 @@
           facts.agency_name ? "Agency exact text: " + facts.agency_name : "Agency: no exact agency phrase extracted.",
           (facts.requirements || []).length ? "Requirement evidence:\n- " + facts.requirements.join("\n- ") : "Requirements: no exact requirement phrases extracted.",
           (facts.fees || []).length ? "Fee evidence:\n- " + facts.fees.join("\n- ") : "Fees: no exact fee phrases extracted.",
-          (facts.deadlines || []).length ? "Deadline evidence:\n- " + facts.deadlines.join("\n- ") : "Deadlines: no exact deadline phrases extracted."
+          (facts.deadlines || []).length ? "Deadline evidence:\n- " + facts.deadlines.join("\n- ") : "Deadlines: no exact deadline phrases extracted.",
+          (facts.evidence_phrases || []).length ? "Other exact source evidence:\n- " + facts.evidence_phrases.join("\n- ") : "Other source evidence: no relevant exact phrases extracted."
         ];
         $("brain-output").textContent = lines.join("\n\n");
         $("fact-label").textContent = "VERIFIED SOURCE TEXT — APPLICABILITY NOT INFERRED.";

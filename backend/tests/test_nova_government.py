@@ -737,3 +737,22 @@ def test_missing_documents_and_build_checklist_are_distinct_grounded_tools():
     assert 'EVIDENCE-GROUNDED WORK CHECKLIST' in source
     assert 'HOLD: Do not create a filing/submission step' in source
     assert 'Only a document explicitly required by saved official evidence should be called missing.' in source
+
+
+def test_exact_source_extract_keeps_verbatim_fallback_evidence(monkeypatch):
+    from app.core.nova.government import service
+
+    monkeypatch.setattr("app.ai.ask_openai", lambda prompt: "{}")
+    page = (
+        "Minnesota Department of Employment and Economic Development helps businesses. "
+        "You may need one or more licenses before operating your business. "
+        "Some licenses and permits are issued by local governments. "
+        "Contact the issuing agency to determine application requirements and fees."
+    )
+    facts = service._exact_source_extract(page)
+    assert facts["agency_name"] == "Minnesota Department of Employment and Economic Development helps businesses"
+    assert "You may need one or more licenses before operating your business." in facts["evidence_phrases"]
+    assert "Some licenses and permits are issued by local governments." in facts["evidence_phrases"]
+    assert facts["requirements"] == []
+    assert facts["fees"] == []
+    assert facts["deadlines"] == []
