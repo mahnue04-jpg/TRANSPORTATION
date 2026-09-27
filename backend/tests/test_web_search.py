@@ -158,6 +158,31 @@ class WebSearchProviderFallbackTests(unittest.TestCase):
         self.assertEqual(len(payload["sources"]), 1)
         self.assertEqual(payload["sources"][0]["url"], "https://mn.gov/example/license")
 
+    @patch("app.web_search.logging_utils.log_request_lifecycle")
+    @patch("app.web_search.get_breaker")
+    @patch("app.web_search._wikipedia_search")
+    @patch("app.web_search._bing_rss_search")
+    @patch("app.web_search._duckduckgo_search")
+    @patch("app.web_search._tavily_search")
+    def test_search_web_skips_official_but_irrelevant_result(
+        self, tavily_mock, duckduckgo_mock, bing_mock, wikipedia_mock, get_breaker_mock, _log_mock
+    ) -> None:
+        get_breaker_mock.side_effect = lambda *_args, **_kwargs: _FakeBreaker()
+        tavily_mock.return_value = {"provider": "tavily", "answer": "", "results": [{"title": "About Minnesota", "url": "https://mn.gov/portal/about-minnesota", "snippet": "State history and geography"}]}
+        duckduckgo_mock.return_value = {"provider": "duckduckgo", "answer": "", "results": [{"title": "Business Licenses and Permits", "url": "https://mn.gov/deed/business/starting-business/legal-regulatory/", "snippet": "Find licenses and permits for a Minnesota business"}]}
+        bing_mock.return_value = {"provider": "bing-rss", "answer": "", "results": []}
+        wikipedia_mock.return_value = {"provider": "wikipedia", "answer": "", "results": []}
+
+        payload = search_web(
+            "Minnesota business license requirements",
+            max_results=4,
+            news_mode=False,
+            require_domains=["gov"],
+            require_terms=["license", "licenses", "licensing", "permit", "permits"],
+        )
+        self.assertEqual(payload["meta"]["provider"], "duckduckgo")
+        self.assertEqual(payload["sources"][0]["title"], "Business Licenses and Permits")
+
 
 if __name__ == "__main__":
     unittest.main()
