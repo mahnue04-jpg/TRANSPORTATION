@@ -723,3 +723,17 @@ def test_nova_government_safety_and_frozen_products(client: TestClient) -> None:
     freight = client.get("/nova/freight")
     assert freight.status_code == 200
     assert "New Freight Request" in freight.text or "Freight / Logistics" in freight.text
+
+
+def test_missing_documents_and_build_checklist_are_distinct_grounded_tools():
+    """Regression contract: missing-doc review must not collapse into checklist workflow."""
+    import inspect
+    from app.core.nova.government import service
+
+    source = inspect.getsource(service.brain)
+    assert 'if payload.action == "missing_documents":' in source
+    assert 'MISSING DOCUMENT REVIEW' in source
+    assert 'if payload.action == "build_checklist":' in source
+    assert 'EVIDENCE-GROUNDED WORK CHECKLIST' in source
+    assert 'HOLD: Do not create a filing/submission step' in source
+    assert 'Only a document explicitly required by saved official evidence should be called missing.' in source
