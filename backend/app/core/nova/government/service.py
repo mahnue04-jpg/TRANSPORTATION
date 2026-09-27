@@ -533,10 +533,29 @@ def search_government(
     )
     query = f'{payload.query.strip()} {filters} official government site:.gov'.strip()
     web = search_web(query, max_results=10, news_mode=False)
+    normalized_query = payload.query.lower().replace("/", " ").replace("-", " ")
     query_terms = {
-        term for term in payload.query.lower().replace("/", " ").replace("-", " ").split()
+        term for term in normalized_query.split()
         if len(term) >= 4 and term not in {"government", "official", "requirements"}
     }
+    intent_groups = {
+        "licensing": {"license", "licenses", "licensing", "permit", "permits"},
+        "registration": {"registration", "register", "registered", "formation"},
+        "tax": {"tax", "taxes", "taxation"},
+        "grant": {"grant", "grants", "funding"},
+        "certification": {"certification", "certifications", "certified"},
+        "transportation": {"transportation", "transport", "dot", "carrier"},
+    }
+    required_intent_terms: set[str] = set()
+    for group_terms in intent_groups.values():
+        if any(term in normalized_query for term in group_terms):
+            required_intent_terms.update(group_terms)
+    if payload.category:
+        category_key = payload.category.lower()
+        for group_name, group_terms in intent_groups.items():
+            if group_name in category_key or category_key in group_name:
+                required_intent_terms.update(group_terms)
+
     scored_sources = []
     for source in (web.get("sources") or []):
         url = str(source.get("url") or "").lower()
@@ -545,8 +564,11 @@ def search_government(
         haystack = " ".join(
             str(source.get(key) or "").lower() for key in ("title", "url", "snippet")
         )
-        relevance = sum(1 for term in query_terms if term in haystack)
-        if relevance:
+        matched_terms = {term for term in query_terms if term in haystack}
+        if required_intent_terms and not any(term in haystack for term in required_intent_terms):
+            continue
+        relevance = len(matched_terms)
+        if relevance >= 2 or (relevance >= 1 and required_intent_terms):
             scored_sources.append((relevance, source))
     scored_sources.sort(key=lambda pair: pair[0], reverse=True)
     web["sources"] = [source for _, source in scored_sources[:4]]
