@@ -138,6 +138,26 @@ class WebSearchProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["sources"], [])
         self.assertFalse(payload["meta"]["search_available"])
 
+    @patch("app.web_search.logging_utils.log_request_lifecycle")
+    @patch("app.web_search.get_breaker")
+    @patch("app.web_search._wikipedia_search")
+    @patch("app.web_search._bing_rss_search")
+    @patch("app.web_search._duckduckgo_search")
+    @patch("app.web_search._tavily_search")
+    def test_search_web_continues_until_required_domain_is_found(
+        self, tavily_mock, duckduckgo_mock, bing_mock, wikipedia_mock, get_breaker_mock, _log_mock
+    ) -> None:
+        get_breaker_mock.side_effect = lambda *_args, **_kwargs: _FakeBreaker()
+        tavily_mock.return_value = {"provider": "tavily", "answer": "", "results": [{"title": "General result", "url": "https://example.com/license", "snippet": "license"}]}
+        duckduckgo_mock.return_value = {"provider": "duckduckgo", "answer": "", "results": [{"title": "Official licensing", "url": "https://mn.gov/example/license", "snippet": "Minnesota license"}]}
+        bing_mock.return_value = {"provider": "bing-rss", "answer": "", "results": []}
+        wikipedia_mock.return_value = {"provider": "wikipedia", "answer": "", "results": []}
+
+        payload = search_web("Minnesota business license", max_results=4, news_mode=False, require_domains=["gov"])
+        self.assertEqual(payload["meta"]["provider"], "duckduckgo")
+        self.assertEqual(len(payload["sources"]), 1)
+        self.assertEqual(payload["sources"][0]["url"], "https://mn.gov/example/license")
+
 
 if __name__ == "__main__":
     unittest.main()

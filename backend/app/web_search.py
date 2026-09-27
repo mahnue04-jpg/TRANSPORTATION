@@ -261,13 +261,16 @@ def _fallback_response(*, news_mode: bool) -> str:
     return "I couldn't fetch live search results right now. Please try again in a moment."
 
 
-def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dict: # type: ignore
+def search_web(query: str, max_results: int = 4, news_mode: bool = False, *, require_domains: list[str] | None = None) -> dict: # type: ignore
     normalized_query = _sanitize_query_text(query)
     if news_mode:
         today = datetime.now(UTC).strftime("%B %d, %Y")
         normalized_query = f"{normalized_query} latest news {today}".strip()
 
-    cache_key = _cache_key(normalized_query, max_results, news_mode)
+    required_domains = [domain.lower().lstrip(".") for domain in (require_domains or []) if domain]
+    domain_cache_suffix = ",".join(sorted(required_domains))
+    cache_query = f"{normalized_query}|domains:{domain_cache_suffix}" if domain_cache_suffix else normalized_query
+    cache_key = _cache_key(cache_query, max_results, news_mode)
     cached = _cache_get(cache_key) # pyright: ignore[reportUnknownVariableType]
     if cached:
         cached.setdefault("meta", {}) # type: ignore
@@ -376,6 +379,17 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dic
             result = fn(normalized_query, max_results) # type: ignore
             provider_latency_ms[pname] = int((time.perf_counter() - t0) * 1000)
             if result and result.get("results"): # type: ignore
+                if required_domains:
+                    filtered_results = []
+                    for item in result.get("results", []):
+                        host = (urlparse(str(item.get("url") or "")).hostname or "").lower()
+                        if any(host == domain or host.endswith("." + domain) for domain in required_domains):
+                            filtered_results.append(item)
+                    if not filtered_results:
+                        provider_errors.append(f"{pname}: no required-domain results")
+                        continue
+                    result = dict(result)
+                    result["results"] = filtered_results
                 breaker.record_success() # type: ignore
                 logging_utils.log_request_lifecycle(
                     logger,
