@@ -261,15 +261,31 @@ def _fallback_response(*, news_mode: bool) -> str:
     return "I couldn't fetch live search results right now. Please try again in a moment."
 
 
-def search_web(query: str, max_results: int = 4, news_mode: bool = False, *, require_domains: list[str] | None = None) -> dict: # type: ignore
+def search_web(
+    query: str,
+    max_results: int = 4,
+    news_mode: bool = False,
+    *,
+    require_domains: list[str] | None = None,
+    require_terms: list[str] | None = None,
+) -> dict: # type: ignore
     normalized_query = _sanitize_query_text(query)
     if news_mode:
         today = datetime.now(UTC).strftime("%B %d, %Y")
         normalized_query = f"{normalized_query} latest news {today}".strip()
 
     required_domains = [domain.lower().lstrip(".") for domain in (require_domains or []) if domain]
+    required_terms = [term.lower().strip() for term in (require_terms or []) if term and term.strip()]
     domain_cache_suffix = ",".join(sorted(required_domains))
-    cache_query = f"{normalized_query}|domains:{domain_cache_suffix}" if domain_cache_suffix else normalized_query
+    term_cache_suffix = ",".join(sorted(required_terms))
+    cache_suffix_parts = []
+    if domain_cache_suffix:
+        cache_suffix_parts.append(f"domains:{domain_cache_suffix}")
+    if term_cache_suffix:
+        cache_suffix_parts.append(f"terms:{term_cache_suffix}")
+    cache_query = normalized_query
+    if cache_suffix_parts:
+        cache_query = f"{normalized_query}|{'|'.join(cache_suffix_parts)}"
     cache_key = _cache_key(cache_query, max_results, news_mode)
     cached = _cache_get(cache_key) # pyright: ignore[reportUnknownVariableType]
     if cached:
@@ -379,14 +395,24 @@ def search_web(query: str, max_results: int = 4, news_mode: bool = False, *, req
             result = fn(normalized_query, max_results) # type: ignore
             provider_latency_ms[pname] = int((time.perf_counter() - t0) * 1000)
             if result and result.get("results"): # type: ignore
-                if required_domains:
+                if required_domains or required_terms:
                     filtered_results = []
                     for item in result.get("results", []):
                         host = (urlparse(str(item.get("url") or "")).hostname or "").lower()
-                        if any(host == domain or host.endswith("." + domain) for domain in required_domains):
-                            filtered_results.append(item)
+                        if required_domains and not any(
+                            host == domain or host.endswith("." + domain) for domain in required_domains
+                        ):
+                            continue
+                        if required_terms:
+                            haystack = " ".join(
+                                str(item.get(key) or "").lower()
+                                for key in ("title", "url", "snippet")
+                            )
+                            if not any(term in haystack for term in required_terms):
+                                continue
+                        filtered_results.append(item)
                     if not filtered_results:
-                        provider_errors.append(f"{pname}: no required-domain results")
+                        provider_errors.append(f"{pname}: no required-domain/term results")
                         continue
                     result = dict(result)
                     result["results"] = filtered_results
