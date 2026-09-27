@@ -140,15 +140,28 @@ def extract_news_query(text: str) -> str | None:
         "latest news",
         "what is the news",
         "what's the news",
+        "what is the latest news",
+        "what's the latest news",
+        "what is the latest news today",
+        "what's the latest news today",
         "show me the news",
+        "show me the latest news",
         "headlines",
         "latest headlines",
+        "latest headlines today",
     }
     normalized = re.sub(r"[^a-z ]+", "", lowered).strip()
     if normalized in generic:
         return None
-    candidate = re.sub(r"(?i)\b(latest|current|today'?s|today|show me|what is|what's|give me|news|headlines?)\b", " ", value)
+    candidate = re.sub(
+        r"(?i)\b(latest|current|today'?s|today|show me|what is|what's|give me|news|headlines?)\b",
+        " ",
+        value,
+    )
     candidate = _clean(candidate).strip(" ?!.,")
+    stop_only = {"the", "a", "an", "about", "on", "for", "of"}
+    if candidate.lower() in stop_only:
+        return None
     return candidate or None
 
 
@@ -242,6 +255,25 @@ def fetch_news(query: str | None = None, *, limit: int = 5) -> list[dict[str, st
                 }
             )
     return items
+
+
+def format_news_search_fallback(result: dict[str, Any], query: str | None = None) -> str:
+    sources = [
+        item for item in (result.get("sources") or [])
+        if isinstance(item, dict) and _clean(item.get("title"))
+    ]
+    if not sources:
+        return "I could not find current news results right now."
+
+    heading = f"Here is a quick news briefing for {query}:" if query else "Here is a quick news briefing:"
+    lines = [heading]
+    for index, item in enumerate(sources[:5], 1):
+        title = _clean(str(item.get("title") or ""))
+        label = _clean(str(item.get("label") or "Source"))
+        lines.append(f"{index}. {title} ({label})")
+    lines.append("Open a source link below to read the full story.")
+    return "\n".join(lines)
+
 
 
 def _clean_news_title(title: str, source: str) -> str:
