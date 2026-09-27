@@ -833,6 +833,28 @@ def ask_government(
             if source.verification_status in {"official_source", "confirmed_in_writing"}
         ]
         verified_agencies = [source.agency_name for source in verified if source.agency_name]
+        saved_checks = list_checklist(db, row.item_id, organization_id=organization_id, user=user)
+        open_saved_checks = [check.label for check in saved_checks if not check.completed]
+        verified_source_summary = "; ".join(
+            f"{source.page_title} ({source.verification_status})"
+            + (f" — {source.source_url}" if source.source_url else "")
+            for source in verified[:6]
+        )
+
+        if payload.action == "explain_requirement" and verified:
+            answer = (
+                f"VERIFIED DATA: saved evidence includes {verified_source_summary}. "
+                f"USER-SAVED INFORMATION: '{row.title}' remains a research item with status {row.status}. "
+                "The saved source verifies where the research came from, but source metadata alone does not prove that a specific license, permit, document, fee, or deadline applies to this business. "
+                "Capture the applicable requirement from the official page or confirmed correspondence before treating it as required."
+            )
+            return NovaGovBrainOut(
+                action=payload.action,
+                answer=answer,
+                fact_label="VERIFIED SOURCE SAVED + APPLICABILITY VERIFICATION REQUIRED. Not an official government ruling.",
+                next_actions=["Review the saved official source and record the specific applicable requirement."],
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
 
         if payload.action == "explain_requirement" and not verified:
             answer = (
@@ -851,13 +873,52 @@ def ask_government(
                 label = "VERIFICATION REQUIRED. No verified agency saved."
             return NovaGovBrainOut(action=payload.action, answer=answer, fact_label=label, next_actions=["Search and save an official government source."], generated_at=datetime.now(timezone.utc).isoformat())
 
-        if payload.action in {"missing_documents", "build_checklist"} and not verified:
-            answer = (
-                "No verified required-document list is available for this work item yet. "
-                "Nova will not create or treat generic documents as government requirements without an OFFICIAL SOURCE or CONFIRMED IN WRITING evidence. "
-                "Verify the applicable requirement and agency first, then build the checklist from that evidence."
+        if payload.action in {"missing_documents", "build_checklist"}:
+            if open_saved_checks:
+                answer = (
+                    "USER-SAVED INFORMATION: the currently saved incomplete checklist item(s) are: "
+                    + ", ".join(open_saved_checks)
+                    + ". "
+                    + (
+                        "A verified source is saved, but Nova has not stored source-derived document requirements. "
+                        if verified
+                        else "No verified source-derived document requirements are saved. "
+                    )
+                    + "Nova will not add generic documents, forms, identification, fees, zoning items, insurance, or tax registrations as government requirements without evidence that specifically supports them."
+                )
+                label = "USER-SAVED CHECKLIST + VERIFICATION REQUIRED. No additional requirement inferred."
+            else:
+                answer = (
+                    "No source-derived required-document checklist is saved for this work item. "
+                    + (
+                        f"VERIFIED DATA: saved evidence includes {verified_source_summary}. "
+                        if verified
+                        else "VERIFIED DATA: no official or confirmed source is saved. "
+                    )
+                    + "Nova will not create a filing checklist from generic assumptions. Record only requirements explicitly supported by the official source or confirmed correspondence."
+                )
+                label = "VERIFICATION REQUIRED. No verified document requirements saved."
+            return NovaGovBrainOut(
+                action=payload.action,
+                answer=answer,
+                fact_label=label,
+                next_actions=["Review the saved official evidence and record only explicitly supported checklist items."],
+                generated_at=datetime.now(timezone.utc).isoformat(),
             )
-            return NovaGovBrainOut(action=payload.action, answer=answer, fact_label="VERIFICATION REQUIRED. No verified document requirements saved.", next_actions=["Save an official or confirmed source before building the checklist."], generated_at=datetime.now(timezone.utc).isoformat())
+
+        if payload.action == "next_step" and verified:
+            answer = (
+                f"VERIFIED DATA: saved evidence includes {verified_source_summary}. "
+                "Next organizational step: review that official evidence and record the specific regulated activity, responsible agency, required documents, fees, and deadlines only where the source explicitly establishes them. "
+                "Do not create a filing checklist or submission timeline from the page title or source status alone."
+            )
+            return NovaGovBrainOut(
+                action=payload.action,
+                answer=answer,
+                fact_label="VERIFIED SOURCE SAVED + APPLICABILITY VERIFICATION REQUIRED. Not an official government ruling.",
+                next_actions=["Extract and save the specific applicable requirement from the official evidence."],
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
 
         if payload.action == "next_step" and not verified:
             answer = (
@@ -900,17 +961,29 @@ def ask_government(
                     generated_at=datetime.now(timezone.utc).isoformat(),
                 )
 
-        if payload.action == "prepare_email" and not verified:
+        if payload.action == "prepare_email":
+            evidence_note = (
+                f"I found an official source titled '{verified[0].page_title}', but I am seeking confirmation of how it applies to our specific activity. "
+                if verified
+                else ""
+            )
             body = (
                 f"Subject: Request for guidance regarding {row.title}\n\n"
                 "Hello,\n\n"
                 f"I am researching whether our activity is subject to the requirement described as '{row.title}'. "
-                "Please confirm whether a license, permit, registration, or other requirement applies; which agency is responsible; "
-                "what documents and fees are required; and whether any filing, renewal, or response deadlines apply.\n\n"
+                + evidence_note
+                + "Please confirm whether a license, permit, registration, or other requirement applies; which agency is responsible; "
+                "what documents and fees, if any, are required; and whether any filing, renewal, or response deadlines apply.\n\n"
                 "Thank you."
             )
             link_draft(db, row.item_id, NovaGovDraftLink(subject=f"Inquiry regarding {row.title}", body=body), organization_id=organization_id, user=user)
-            return NovaGovBrainOut(action=payload.action, answer=body, fact_label="AI SUGGESTION — DRAFT ONLY. No requirements assumed and nothing sent.", next_actions=["Review and customize the draft before any manual send."], generated_at=datetime.now(timezone.utc).isoformat())
+            return NovaGovBrainOut(
+                action=payload.action,
+                answer=body,
+                fact_label="AI SUGGESTION — DRAFT ONLY. No requirements assumed and nothing sent.",
+                next_actions=["Review and customize the draft before any manual send."],
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
 
     context = f"Open government work count: {len(items)}. "
     if payload.item_id:

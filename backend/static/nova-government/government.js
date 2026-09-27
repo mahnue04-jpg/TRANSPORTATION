@@ -100,6 +100,22 @@
         escapeHtml(row.agency || "") + " · " + escapeHtml(row.status) + "</div></div>";
     });
   }
+  function populateItemForm(item) {
+    if (!item) return;
+    $("item-title").value = item.title || "";
+    $("item-agency").value = item.agency || "";
+    $("item-level").value = item.government_level || "state";
+    $("item-category").value = item.category || "licensing";
+    $("item-state").value = item.state || "";
+    $("item-county").value = item.county || "";
+    $("item-city").value = item.city || "";
+    $("item-due").value = item.due_date || "";
+    $("item-renewal").value = item.renewal_date || "";
+    $("item-workspace").value = item.workspace_id || "";
+    $("item-file").value = item.file_id || "";
+    $("item-notes").value = item.notes || "";
+  }
+
   async function loadItemExtras(itemId) {
     var checks = await api("/api/nova/government/items/" + encodeURIComponent(itemId) + "/checklist");
     $("check-list").innerHTML = listHtml(checks, "No checklist items yet.", function (row) {
@@ -317,6 +333,7 @@
       state.itemId = openBtn.getAttribute("data-open-item");
       var item = await api("/api/nova/government/items/" + encodeURIComponent(state.itemId));
       state.selectedItem = item;
+      populateItemForm(item);
       $("active-work").textContent = "Active government work: " + item.title + " · " + item.government_level + " · " + item.category;
       showBanner("Opened: " + item.title + ". Government tools now use this saved item's notes, checklist, and evidence.", true);
       await refresh();
