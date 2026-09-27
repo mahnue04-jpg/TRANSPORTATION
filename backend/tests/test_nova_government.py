@@ -338,6 +338,72 @@ def test_nova_government_sources_verification_and_programs(client: TestClient) -
     assert any(row["program_name"] == "Example small business grant" for row in programs.json())
 
 
+def test_nova_government_source_inspection_is_exact_and_gov_only(client: TestClient, monkeypatch) -> None:
+    from app.core.nova.government import service as gov_service
+
+    headers = _headers(client)
+    item = _create_item(client, headers, title="Official source inspection", agency=None, category="licensing")
+    source = client.post(
+        f"/api/nova/government/items/{item['item_id']}/sources",
+        headers=headers,
+        json={
+            "page_title": "Official licensing page",
+            "source_url": "https://agency.example.gov/licenses",
+            "verification_status": "official_source",
+        },
+    ).json()
+
+    monkeypatch.setattr(
+        gov_service,
+        "_fetch_official_gov_text",
+        lambda url: (
+            "Minnesota Department of Example. Businesses in category X must submit Form ABC. Fee is $25. Deadline is October 1.",
+            url,
+        ),
+    )
+    monkeypatch.setattr(
+        gov_service,
+        "_exact_source_extract",
+        lambda text: {
+            "agency_name": "Minnesota Department of Example",
+            "requirements": ["Businesses in category X must submit Form ABC."],
+            "fees": ["Fee is $25."],
+            "deadlines": ["Deadline is October 1."],
+        },
+    )
+    inspected = client.post(
+        f"/api/nova/government/sources/{source['source_id']}/inspect",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    body = inspected.json()
+    assert body["facts"]["agency_name"] == "Minnesota Department of Example"
+    assert body["facts"]["requirements"] == ["Businesses in category X must submit Form ABC."]
+    assert "does not by itself prove" in body["warning"]
+
+    unsafe = client.post(
+        f"/api/nova/government/items/{item['item_id']}/sources",
+        headers=headers,
+        json={
+            "page_title": "Not government",
+            "source_url": "https://example.com/licenses",
+            "verification_status": "official_source",
+        },
+    ).json()
+    blocked = client.post(
+        f"/api/nova/government/sources/{unsafe['source_id']}/inspect",
+        headers=headers,
+    )
+    assert blocked.status_code == 422
+
+
+def test_nova_government_source_inspection_ui() -> None:
+    assert "Inspect official source" in GOV_JS
+    assert "data-inspect-source" in GOV_JS
+    assert "/api/nova/government/sources/" in GOV_JS
+    assert "APPLICABILITY NOT INFERRED" in GOV_JS
+
+
 def test_nova_government_official_source_does_not_invent_requirements(client: TestClient) -> None:
     headers = _headers(client)
     item = _create_item(
