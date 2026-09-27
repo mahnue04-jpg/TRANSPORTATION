@@ -1026,36 +1026,81 @@ def ask_government(
                 label = "VERIFICATION REQUIRED. No verified agency saved."
             return NovaGovBrainOut(action=payload.action, answer=answer, fact_label=label, next_actions=["Search and save an official government source."], generated_at=datetime.now(timezone.utc).isoformat())
 
-        if payload.action in {"missing_documents", "build_checklist"}:
+        if payload.action == "missing_documents":
             if open_saved_checks:
                 answer = (
-                    "USER-SAVED INFORMATION: the currently saved incomplete checklist item(s) are: "
+                    "MISSING DOCUMENT REVIEW — USER-SAVED CHECKLIST. "
+                    "The currently incomplete saved checklist item(s) are: "
                     + ", ".join(open_saved_checks)
                     + ". "
                     + (
-                        "A verified source is saved, but Nova has not stored source-derived document requirements. "
+                        "A verified source is saved, but Nova has not found a source-derived document requirement beyond those saved checklist items. "
                         if verified
-                        else "No verified source-derived document requirements are saved. "
+                        else "No verified official or confirmed source is saved for additional document requirements. "
                     )
-                    + "Nova will not add generic documents, forms, identification, fees, zoning items, insurance, or tax registrations as government requirements without evidence that specifically supports them."
+                    + "Only a document explicitly required by saved official evidence should be called missing."
                 )
-                label = "USER-SAVED CHECKLIST + VERIFICATION REQUIRED. No additional requirement inferred."
+                label = "USER-SAVED CHECKLIST + VERIFICATION REQUIRED. No additional document inferred."
+                actions = ["Complete or verify the saved incomplete checklist item(s).", "Record any additional required document only when official evidence explicitly supports it."]
             else:
                 answer = (
-                    "No source-derived required-document checklist is saved for this work item. "
+                    "MISSING DOCUMENT REVIEW: no verified required documents are currently recorded for this work item. "
                     + (
                         f"VERIFIED DATA: saved evidence includes {verified_source_summary}. "
                         if verified
                         else "VERIFIED DATA: no official or confirmed source is saved. "
                     )
-                    + "Nova will not create a filing checklist from generic assumptions. Record only requirements explicitly supported by the official source or confirmed correspondence."
+                    + "Because no required document has been established by saved evidence, Nova cannot truthfully label any document as missing yet. "
+                    "This is different from a filing checklist: it answers only which verified required documents are absent."
                 )
-                label = "VERIFICATION REQUIRED. No verified document requirements saved."
+                label = "VERIFICATION REQUIRED. No verified missing documents established."
+                actions = ["Inspect the official source for explicit document requirements.", "Save each verified required document before tracking whether it is present or missing."]
             return NovaGovBrainOut(
                 action=payload.action,
                 answer=answer,
                 fact_label=label,
-                next_actions=["Review the saved official evidence and record only explicitly supported checklist items."],
+                next_actions=actions,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+        if payload.action == "build_checklist":
+            verified_requirement_lines: list[str] = []
+            for source in verified:
+                notes = source.notes or ""
+                for part in notes.split(" | "):
+                    if part.startswith("Requirement exact text: "):
+                        verified_requirement_lines.append(part.removeprefix("Requirement exact text: ").strip())
+            checklist_lines = []
+            if verified_requirement_lines:
+                checklist_lines.extend(
+                    f"- VERIFIED REQUIREMENT: {value}" for value in dict.fromkeys(verified_requirement_lines)
+                )
+            if open_saved_checks:
+                checklist_lines.extend(
+                    f"- USER-SAVED CHECKLIST: {value}" for value in open_saved_checks
+                )
+            if not verified_requirement_lines:
+                checklist_lines.extend([
+                    "- RESEARCH STEP: Verify whether the saved official source applies to the specific business activity.",
+                    "- RESEARCH STEP: Identify and save the responsible agency from official evidence.",
+                    "- RESEARCH STEP: Capture any explicitly stated required documents/forms.",
+                    "- RESEARCH STEP: Capture any explicitly stated fees and deadlines.",
+                    "- HOLD: Do not create a filing/submission step until the requirement and its applicability are verified.",
+                ])
+            answer = (
+                "EVIDENCE-GROUNDED WORK CHECKLIST — this is an organizational research checklist, not a filing checklist or government ruling.\n"
+                + "\n".join(checklist_lines)
+                + (
+                    "\nVerified source saved: " + verified_source_summary
+                    if verified
+                    else "\nNo verified official or confirmed source is saved yet."
+                )
+            )
+            return NovaGovBrainOut(
+                action=payload.action,
+                answer=answer,
+                fact_label="ORGANIZATIONAL CHECKLIST. VERIFIED facts are labeled; research steps are not government requirements.",
+                next_actions=["Complete the research steps in order and convert a step into a filing requirement only when official evidence explicitly establishes it."],
                 generated_at=datetime.now(timezone.utc).isoformat(),
             )
 
