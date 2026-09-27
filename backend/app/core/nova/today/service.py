@@ -27,7 +27,10 @@ from app.core.nova.business.service import dashboard as business_dashboard
 from app.core.nova.communications.schemas import NovaCommsDraftCreate
 from app.core.nova.communications.service import create_draft as create_communications_draft
 from app.core.nova.communications.service import dashboard as communications_dashboard
+from app.core.nova.government.schemas import NovaGovBrainRequest
+from app.core.nova.government.service import ask_government as government_ask
 from app.core.nova.government.service import dashboard as government_dashboard
+from app.core.nova.government.service import list_items as government_list_items
 from app.core.nova.service import NovaCoreService
 from app.core.nova.today.live_tools import (
     asks_for_name,
@@ -2707,6 +2710,72 @@ def _answer_saved_work_opportunity(
     )
 
 
+def _today_government_grounded_answer(
+    db: Session,
+    *,
+    question: str,
+    organization_id: str,
+    user: UserContext,
+) -> NovaTodayBrainOut | None:
+    """Route clearly referenced saved Government work through Government evidence rules."""
+    lowered = " ".join(str(question or "").lower().split())
+    gov_terms = ("government", "license", "licensing", "permit", "regulation", "requirement", "work item")
+    if not any(term in lowered for term in gov_terms):
+        return None
+
+    try:
+        rows = government_list_items(
+            db,
+            organization_id=organization_id,
+            user=user,
+        )
+    except Exception:
+        logger.exception("today_government_context_lookup_failed")
+        return None
+
+    best = None
+    best_score = 0
+    qtokens = set(re.findall(r"[a-z0-9]+", lowered))
+    stop = {"what", "need", "next", "this", "that", "work", "item", "government", "requirements"}
+    for row in rows:
+        title = " ".join(str(getattr(row, "title", "") or "").lower().split())
+        if not title:
+            continue
+        score = 0
+        if title in lowered:
+            score = 100
+        else:
+            ttokens = {t for t in re.findall(r"[a-z0-9]+", title) if len(t) >= 4 and t not in stop}
+            hits = len(ttokens & qtokens)
+            if hits >= 2:
+                score = 60 + hits
+        if score > best_score:
+            best, best_score = row, score
+
+    if best is None or best_score < 60:
+        return None
+
+    grounded = government_ask(
+        db,
+        NovaGovBrainRequest(
+            action="next_step",
+            question=question,
+            item_id=best.item_id,
+        ),
+        organization_id=organization_id,
+        user=user,
+    )
+    return NovaTodayBrainOut(
+        answer=grounded.answer,
+        fact_label=grounded.fact_label,
+        next_actions=list(grounded.next_actions or []),
+        generated_at=grounded.generated_at,
+        source_href="/nova/government",
+        referenced_source_ref_id=best.item_id,
+        verification_status="verified" if "VERIFIED" in str(grounded.fact_label or "").upper() else "proposed",
+    )
+
+
 def _today_live_or_memory_answer(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -2717,6 +2786,15 @@ def _today_live_or_memory_answer(
     question = str(payload.question or "").strip()
     if not question:
         return None
+
+    government_answer = _today_government_grounded_answer(
+        db,
+        question=question,
+        organization_id=organization_id,
+        user=user,
+    )
+    if government_answer is not None:
+        return government_answer
 
     saved_opportunity = _answer_saved_work_opportunity(
         db,
@@ -2912,31 +2990,112 @@ def _today_live_or_memory_answer(
                 generated_at=now().isoformat(),
                 source_href="https://open-meteo.com/",
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "today_live_weather_failed provider=open_meteo stage=weather exception=%s location=%s",
+                type(exc).__name__,
+                location,
+            )
+            try:
+                fallback = fetch_web_search(f"current weather {location}", max_results=5)
+                sources = [
+                    item for item in (fallback.get("sources") or [])
+                    if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
+                ]
+                if sources:
+                    return NovaTodayBrainOut(
+                        answer=format_web_search(fallback, f"current weather {location}"),
+                        fact_label="VERIFIED DATA",
+                        next_actions=[],
+                        generated_at=now().isoformat(),
+                        source_href=str(sources[0].get("url") or "") or None,
+                        sources=[
+                            {
+                                "title": str(item.get("title") or item.get("label") or "Weather source"),
+                                "url": str(item.get("url") or ""),
+                                "label": str(item.get("label") or ""),
+                            }
+                            for item in sources[:5]
+                        ],
+                        verification_status="verified",
+                    )
+            except Exception as fallback_exc:
+                logger.warning(
+                    "today_live_weather_fallback_failed provider=web_search stage=weather_fallback exception=%s",
+                    type(fallback_exc).__name__,
+                )
             return NovaTodayBrainOut(
                 answer=f"I couldn’t retrieve live weather for {location} right now. Please try again in a moment.",
                 fact_label="AI SUGGESTION",
                 next_actions=[],
                 generated_at=now().isoformat(),
+                verification_status="unavailable",
             )
 
     if is_news_request(question):
         query = extract_news_query(question)
         try:
             items = fetch_news(query, limit=5)
+            if not items:
+                raise ValueError("news provider returned no items")
             return NovaTodayBrainOut(
                 answer=format_news(items, query),
                 fact_label="VERIFIED DATA",
                 next_actions=[],
                 generated_at=now().isoformat(),
-                source_href=items[0]["link"] if items else None,
+                source_href=items[0]["link"],
+                sources=[
+                    {
+                        "title": str(item.get("title") or "News source"),
+                        "url": str(item.get("link") or ""),
+                        "label": str(item.get("source") or "News"),
+                    }
+                    for item in items[:5]
+                    if str(item.get("link") or "").startswith(("http://", "https://"))
+                ],
+                verification_status="verified",
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "today_live_news_failed provider=google_news_rss stage=news exception=%s query=%s",
+                type(exc).__name__,
+                query or "general",
+            )
+            try:
+                fallback_query = f"latest news {query}".strip() if query else "latest news today"
+                fallback = fetch_web_search(fallback_query, max_results=5)
+                sources = [
+                    item for item in (fallback.get("sources") or [])
+                    if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
+                ]
+                if sources:
+                    return NovaTodayBrainOut(
+                        answer=format_web_search(fallback, fallback_query),
+                        fact_label="VERIFIED DATA",
+                        next_actions=[],
+                        generated_at=now().isoformat(),
+                        source_href=str(sources[0].get("url") or "") or None,
+                        sources=[
+                            {
+                                "title": str(item.get("title") or item.get("label") or "News source"),
+                                "url": str(item.get("url") or ""),
+                                "label": str(item.get("label") or ""),
+                            }
+                            for item in sources[:5]
+                        ],
+                        verification_status="verified",
+                    )
+            except Exception as fallback_exc:
+                logger.warning(
+                    "today_live_news_fallback_failed provider=web_search stage=news_fallback exception=%s",
+                    type(fallback_exc).__name__,
+                )
             return NovaTodayBrainOut(
                 answer="I couldn’t retrieve live news right now. Please try again in a moment.",
                 fact_label="AI SUGGESTION",
                 next_actions=[],
                 generated_at=now().isoformat(),
+                verification_status="unavailable",
             )
 
     return None
