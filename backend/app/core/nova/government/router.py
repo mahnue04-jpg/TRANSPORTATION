@@ -209,6 +209,20 @@ def add_source(
         _raise(exc)
 
 
+@router.post("/sources/{source_id}/inspect")
+def inspect_source(
+    source_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    org_id = _resolve_org(user, organization_id)
+    try:
+        return service.inspect_source(db, source_id, organization_id=org_id, user=user)
+    except service.NovaGovernmentError as exc:
+        _raise(exc)
+
+
 @router.post("/items/{item_id}/calendar", response_model=NovaGovWorkOut)
 def link_calendar(
     item_id: str,
