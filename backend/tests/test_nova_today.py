@@ -206,6 +206,81 @@ def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypa
     assert web.json()["sources"][0]["url"] == "https://example.com/source"
 
 
+
+def test_nova_today_weather_and_news_use_web_fallbacks(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _headers(client)
+
+    def fail_weather(_location):
+        raise RuntimeError("weather down")
+
+    monkeypatch.setattr("app.core.nova.today.service.fetch_weather", fail_weather)
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_web_search",
+        lambda query, max_results=5: {
+            "status": "ok",
+            "response": "Fallback live weather result",
+            "sources": [{"title": "Weather source", "url": "https://example.com/weather", "label": "Example"}],
+        },
+    )
+    weather = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What is the weather in Minneapolis today?"},
+    )
+    assert weather.status_code == 200, weather.text
+    assert weather.json()["fact_label"] == "VERIFIED DATA"
+    assert "Fallback live weather result" in weather.json()["answer"]
+
+    def fail_news(_query, limit=5):
+        raise RuntimeError("news down")
+
+    monkeypatch.setattr("app.core.nova.today.service.fetch_news", fail_news)
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_web_search",
+        lambda query, max_results=5: {
+            "status": "ok",
+            "response": "Fallback live news result",
+            "sources": [{"title": "News source", "url": "https://example.com/news", "label": "Example"}],
+        },
+    )
+    news = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What is the latest news today?"},
+    )
+    assert news.status_code == 200, news.text
+    assert news.json()["fact_label"] == "VERIFIED DATA"
+    assert "Fallback live news result" in news.json()["answer"]
+
+
+def test_nova_today_government_named_work_item_stays_grounded(client: TestClient) -> None:
+    headers = _headers(client)
+    created = client.post(
+        "/api/nova/government/items",
+        headers=headers,
+        json={
+            "title": "Minnesota Business License Requirements",
+            "government_level": "state",
+            "category": "licensing",
+            "status": "researching",
+        },
+    )
+    assert created.status_code == 200, created.text
+    asked = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What do I need to do next for this Minnesota Business License Requirements work item?"},
+    )
+    assert asked.status_code == 200, asked.text
+    body = asked.json()
+    assert body["referenced_source_ref_id"] == created.json()["item_id"]
+    assert body["source_href"] == "/nova/government"
+    answer = body["answer"].lower()
+    for forbidden in ("secretary of state", "pay fees", "ssn", "ein", "zoning", "insurance"):
+        assert forbidden not in answer
+    assert "verified" in answer or "evidence" in answer or "research" in answer
+
+
 def test_nova_today_signed_out_blocks_apis(client: TestClient) -> None:
     assert client.get("/api/nova/today/dashboard").status_code == 401
     assert client.post("/api/nova/today/ask", json={"question": "blocked"}).status_code == 401
