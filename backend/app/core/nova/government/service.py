@@ -608,6 +608,34 @@ def search_government(
         if fallback_sources:
             web["sources"] = fallback_sources
             web["status"] = fallback_web.get("status") or web.get("status")
+
+    # Conservative official-source recovery for known government portals.
+    # These are discovery links only; their presence never proves that a
+    # particular license, permit, fee, document, or deadline applies.
+    if not web["sources"] and required_intent_terms.intersection(intent_groups["licensing"]):
+        is_minnesota = (
+            "minnesota" in normalized_query
+            or str(payload.state or "").strip().lower() in {"mn", "minnesota"}
+        )
+        if is_minnesota:
+            official_candidates = [
+                {
+                    "title": "Business Licenses and Permits",
+                    "url": "https://mn.gov/deed/business/starting-business/legal-regulatory/",
+                    "label": "mn.gov",
+                    "snippet": "Minnesota DEED official guidance for identifying business licenses and permits.",
+                },
+                {
+                    "title": "Minnesota eLicense",
+                    "url": "https://mn.gov/elicense/",
+                    "label": "mn.gov",
+                    "snippet": "Official Minnesota licensing portal for licenses, permits, registrations, and certifications.",
+                },
+            ]
+            recovered = rank_sources(official_candidates)
+            if recovered:
+                web["sources"] = recovered
+                web["status"] = "partial"
     # Provider summaries can include fallback/Wikipedia prose even when the final
     # links are official. Build the displayed summary only from accepted .gov hits.
     if web["sources"]:
