@@ -532,7 +532,6 @@ def search_government(
         if part
     )
     query = f'{payload.query.strip()} {filters} official government site:.gov'.strip()
-    web = search_web(query, max_results=10, news_mode=False, require_domains=["gov"])
     normalized_query = payload.query.lower().replace("/", " ").replace("-", " ")
     query_terms = {
         term for term in normalized_query.split()
@@ -555,6 +554,14 @@ def search_government(
         for group_name, group_terms in intent_groups.items():
             if group_name in category_key or category_key in group_name:
                 required_intent_terms.update(group_terms)
+
+    web = search_web(
+        query,
+        max_results=10,
+        news_mode=False,
+        require_domains=["gov"],
+        require_terms=sorted(required_intent_terms),
+    )
 
     def rank_sources(sources: list[dict]) -> list[dict]:
         scored_sources = []
@@ -590,7 +597,13 @@ def search_government(
             + intent_terms[:4]
             + ["official", "government", "site:.gov"]
         ).strip()
-        fallback_web = search_web(fallback_query, max_results=12, news_mode=False, require_domains=["gov"])
+        fallback_web = search_web(
+            fallback_query,
+            max_results=12,
+            news_mode=False,
+            require_domains=["gov"],
+            require_terms=sorted(required_intent_terms),
+        )
         fallback_sources = rank_sources(fallback_web.get("sources") or [])
         if fallback_sources:
             web["sources"] = fallback_sources
