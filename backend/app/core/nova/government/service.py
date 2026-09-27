@@ -532,7 +532,7 @@ def search_government(
         if part
     )
     query = f'{payload.query.strip()} {filters} official government site:.gov'.strip()
-    web = search_web(query, max_results=10, news_mode=False)
+    web = search_web(query, max_results=10, news_mode=False, require_domains=["gov"])
     normalized_query = payload.query.lower().replace("/", " ").replace("-", " ")
     query_terms = {
         term for term in normalized_query.split()
@@ -590,7 +590,7 @@ def search_government(
             + intent_terms[:4]
             + ["official", "government", "site:.gov"]
         ).strip()
-        fallback_web = search_web(fallback_query, max_results=12, news_mode=False)
+        fallback_web = search_web(fallback_query, max_results=12, news_mode=False, require_domains=["gov"])
         fallback_sources = rank_sources(fallback_web.get("sources") or [])
         if fallback_sources:
             web["sources"] = fallback_sources
