@@ -24,6 +24,29 @@ def test_rank_news_query_extraction():
     assert live_tools.extract_news_query("latest news about artificial intelligence") == "about artificial intelligence"
 
 
+
+def test_generic_latest_news_today_has_no_bogus_topic():
+    assert live_tools.extract_news_query("What is the latest news today?") is None
+    assert live_tools.extract_news_query("What's the latest news today?") is None
+    assert live_tools.extract_news_query("latest news about artificial intelligence") == "about artificial intelligence"
+
+
+def test_news_search_fallback_formats_headlines_not_provider_dump():
+    answer = live_tools.format_news_search_fallback(
+        {
+            "response": "Search results for latest news the: a long provider dump that should not be shown.",
+            "sources": [
+                {"title": "First current headline", "url": "https://example.com/1", "label": "Example One"},
+                {"title": "Second current headline", "url": "https://example.com/2", "label": "Example Two"},
+            ],
+        }
+    )
+    assert "Search results for" not in answer
+    assert "First current headline (Example One)" in answer
+    assert "Second current headline (Example Two)" in answer
+    assert "https://" not in answer
+
+
 def test_format_weather():
     answer = live_tools.format_weather(
         {
