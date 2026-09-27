@@ -406,8 +406,9 @@ def test_nova_government_brain_actions_and_search(client: TestClient) -> None:
         assert "AI SUGGESTION" in body["fact_label"] or "USER-SAVED" in body["fact_label"]
         assert "official government ruling" in body["fact_label"].lower()
     checks = client.get(f"/api/nova/government/items/{item['item_id']}/checklist", headers=headers)
-    labels = {row["label"] for row in checks.json()}
-    assert "EIN letter" in labels
+    assert checks.status_code == 200
+    # Government suggestions must not auto-promote generic documents into requirements.
+    assert "EIN letter" not in {row["label"] for row in checks.json()}
     refreshed = client.get(f"/api/nova/government/items/{item['item_id']}", headers=headers)
     assert refreshed.json()["draft_id"]
 
@@ -424,6 +425,41 @@ def test_nova_government_brain_actions_and_search(client: TestClient) -> None:
     assert "/api/nova/government/search" in GOV_JS
 
 
+
+
+
+def test_nova_government_search_rejects_generic_state_portal(client: TestClient, monkeypatch) -> None:
+    headers = _headers(client)
+
+    def fake_search_web(query: str, max_results: int = 4, news_mode: bool = False) -> dict:
+        return {
+            "status": "ok",
+            "response": "provider prose",
+            "sources": [
+                {
+                    "title": "About Minnesota / mn.gov // Minnesota's State Portal",
+                    "url": "https://mn.gov/portal/about-minnesota/",
+                    "snippet": "General information about Minnesota, state symbols, geography, and government.",
+                },
+                {
+                    "title": "Business Licenses and Permits",
+                    "url": "https://mn.gov/deed/business/starting-business/licenses-regulations/",
+                    "snippet": "Information about Minnesota business licenses, permits, and regulatory requirements.",
+                },
+            ],
+        }
+
+    monkeypatch.setattr("app.core.nova.government.service.search_web", fake_search_web)
+    response = client.post(
+        "/api/nova/government/search",
+        headers=headers,
+        json={"query": "Minnesota business license requirements"},
+    )
+    assert response.status_code == 200, response.text
+    sources = response.json()["web"]["sources"]
+    assert len(sources) == 1
+    assert sources[0]["title"] == "Business Licenses and Permits"
+    assert "About Minnesota" not in {source["title"] for source in sources}
 
 
 def test_nova_government_evidence_boundaries(client: TestClient) -> None:
