@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import html
+import json
+import re
+from urllib.parse import urlparse
 
+import requests
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -388,6 +393,154 @@ def list_sources(
         .order_by(NovaGovernmentSource.created_at.desc())
         .all()
     )
+
+
+def get_source(
+    db: Session,
+    source_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaGovernmentSource:
+    query = db.query(NovaGovernmentSource).filter(
+        NovaGovernmentSource.source_id == source_id,
+        NovaGovernmentSource.organization_id == organization_id,
+    )
+    query = _owner_filter(query, NovaGovernmentSource, user)
+    row = query.first()
+    if row is None:
+        raise NovaGovernmentError("Government source not found", status_code=404)
+    get_item(db, row.item_id, organization_id=organization_id, user=user)
+    return row
+
+
+def _official_gov_url(value: str | None) -> bool:
+    if not value:
+        return False
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return parsed.scheme == "https" and (host.endswith(".gov") or host == "gov")
+
+
+def _visible_html_text(markup: str) -> str:
+    text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\\1>", " ", markup)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return re.sub(r"\\s+", " ", text).strip()
+
+
+def _fetch_official_gov_text(url: str) -> tuple[str, str]:
+    if not _official_gov_url(url):
+        raise NovaGovernmentError("Source inspection only supports saved HTTPS .gov URLs", status_code=422)
+    try:
+        response = requests.get(
+            url,
+            timeout=12,
+            allow_redirects=True,
+            stream=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; Amicor-Nova-Government/1.0)"},
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise NovaGovernmentError("Official source could not be retrieved right now", status_code=502) from exc
+    final_url = response.url
+    if not _official_gov_url(final_url):
+        response.close()
+        raise NovaGovernmentError("Official source redirected outside an HTTPS .gov domain", status_code=422)
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "text/html" not in content_type and "text/plain" not in content_type:
+        response.close()
+        raise NovaGovernmentError("Source inspection currently supports government HTML/text pages only", status_code=422)
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=16384):
+        if not chunk:
+            continue
+        remaining = 262144 - total
+        if remaining <= 0:
+            break
+        chunks.append(chunk[:remaining])
+        total += min(len(chunk), remaining)
+        if total >= 262144:
+            break
+    encoding = response.encoding or "utf-8"
+    response.close()
+    markup = b"".join(chunks).decode(encoding, errors="replace")
+    return _visible_html_text(markup)[:20000], final_url
+
+
+def _exact_source_extract(text: str) -> dict:
+    facts = {"agency_name": None, "requirements": [], "fees": [], "deadlines": []}
+    if not text.strip():
+        return facts
+    try:
+        from app.ai import ask_openai
+        prompt = (
+            "Extract exact evidence phrases from this official government page. "
+            "Return JSON only with keys agency_name, requirements, fees, deadlines. "
+            "Every non-null string MUST be copied verbatim from the supplied page text; "
+            "do not paraphrase, infer applicability, or add facts. Use at most 5 items per list. "
+            "If the page does not explicitly state something, return null or an empty list.\n\n"
+            + text[:12000]
+        )
+        raw = str(ask_openai(prompt) or "").strip()
+        raw = re.sub(r"^\x60\x60\x60(?:json)?\\s*|\\s*\x60\x60\x60$", "", raw, flags=re.IGNORECASE)
+        parsed = json.loads(raw)
+    except Exception:
+        return facts
+    lowered = text.lower()
+    agency = str(parsed.get("agency_name") or "").strip()
+    if agency and agency.lower() in lowered:
+        facts["agency_name"] = agency
+    for key in ("requirements", "fees", "deadlines"):
+        values = parsed.get(key) or []
+        if not isinstance(values, list):
+            continue
+        accepted = []
+        for value in values[:5]:
+            phrase = str(value or "").strip()
+            if phrase and phrase.lower() in lowered:
+                accepted.append(phrase)
+        facts[key] = accepted
+    return facts
+
+
+def inspect_source(
+    db: Session,
+    source_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> dict:
+    row = get_source(db, source_id, organization_id=organization_id, user=user)
+    if row.verification_status != "official_source":
+        raise NovaGovernmentError("Only sources marked official_source can be inspected automatically", status_code=422)
+    if not row.source_url:
+        raise NovaGovernmentError("Official source has no URL to inspect", status_code=422)
+    text, final_url = _fetch_official_gov_text(row.source_url)
+    facts = _exact_source_extract(text)
+    if facts["agency_name"]:
+        row.agency_name = facts["agency_name"]
+    evidence_lines = []
+    if facts["agency_name"]:
+        evidence_lines.append("Agency exact text: " + facts["agency_name"])
+    for label, key in (("Requirement exact text", "requirements"), ("Fee exact text", "fees"), ("Deadline exact text", "deadlines")):
+        for value in facts[key]:
+            evidence_lines.append(label + ": " + value)
+    row.notes = (
+        "SOURCE INSPECTION - exact-text extraction only; applicability not inferred. "
+        + (" | ".join(evidence_lines) if evidence_lines else "No structured facts extracted; review excerpt manually.")
+    )[:4000]
+    row.retrieved_at = now()
+    db.commit()
+    db.refresh(row)
+    return {
+        "source": source_out(row).model_dump(),
+        "final_url": final_url,
+        "facts": facts,
+        "excerpt": text[:3500],
+        "warning": "SOURCE INSPECTION only. Extracted text does not by itself prove that a requirement applies to this business.",
+    }
 
 
 def create_program(

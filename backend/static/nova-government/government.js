@@ -125,8 +125,14 @@
     });
     var sources = await api("/api/nova/government/items/" + encodeURIComponent(itemId) + "/sources");
     $("source-list").innerHTML = listHtml(sources, "No sources saved.", function (row) {
+      var inspect = row.verification_status === "official_source" && row.source_url
+        ? "<button type=\"button\" class=\"linkish\" data-inspect-source=\"" + escapeHtml(row.source_id) + "\">Inspect official source</button>"
+        : "";
       return "<div class=\"item\"><strong>" + escapeHtml(row.page_title) + "</strong><div class=\"muted\">" +
-        escapeHtml(row.verification_status) + " · " + escapeHtml(row.source_url || "no URL") + "</div></div>";
+        escapeHtml(row.verification_status) + " · " + escapeHtml(row.source_url || "no URL") + "</div>" +
+        (row.agency_name ? "<div class=\"muted\">Agency evidence: " + escapeHtml(row.agency_name) + "</div>" : "") +
+        (row.notes ? "<div class=\"muted\">" + escapeHtml(row.notes) + "</div>" : "") +
+        inspect + "</div>";
     });
   }
   async function refresh() {
@@ -327,6 +333,32 @@
     } catch (err) { showBanner(err.message); }
   });
   document.addEventListener("click", async function (event) {
+    var inspectBtn = event.target.closest("[data-inspect-source]");
+    if (inspectBtn) {
+      try {
+        var sourceId = inspectBtn.getAttribute("data-inspect-source");
+        inspectBtn.disabled = true;
+        showBanner("Inspecting the saved official government source…");
+        var inspected = await api("/api/nova/government/sources/" + encodeURIComponent(sourceId) + "/inspect", { method: "POST" });
+        var facts = inspected.facts || {};
+        var lines = [
+          inspected.warning || "SOURCE INSPECTION only.",
+          facts.agency_name ? "Agency exact text: " + facts.agency_name : "Agency: no exact agency phrase extracted.",
+          (facts.requirements || []).length ? "Requirement evidence:\n- " + facts.requirements.join("\n- ") : "Requirements: no exact requirement phrases extracted.",
+          (facts.fees || []).length ? "Fee evidence:\n- " + facts.fees.join("\n- ") : "Fees: no exact fee phrases extracted.",
+          (facts.deadlines || []).length ? "Deadline evidence:\n- " + facts.deadlines.join("\n- ") : "Deadlines: no exact deadline phrases extracted."
+        ];
+        $("brain-output").textContent = lines.join("\n\n");
+        $("fact-label").textContent = "VERIFIED SOURCE TEXT — APPLICABILITY NOT INFERRED.";
+        await loadItemExtras(state.itemId);
+        showBanner("Official source inspected. Extracted text is evidence, not a ruling that it applies.", true);
+      } catch (err) {
+        showBanner(err.message);
+      } finally {
+        inspectBtn.disabled = false;
+      }
+      return;
+    }
     var openBtn = event.target.closest("[data-open-item]");
     if (!openBtn) return;
     try {
