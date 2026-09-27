@@ -469,10 +469,56 @@ def _fetch_official_gov_text(url: str) -> tuple[str, str]:
     return _visible_html_text(markup)[:20000], final_url
 
 
+def _source_sentence_candidates(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\\s+", text)
+    candidates: list[str] = []
+    for part in parts:
+        value = re.sub(r"\\s+", " ", part).strip()
+        if 35 <= len(value) <= 650:
+            candidates.append(value)
+    return candidates
+
+
+def _deterministic_source_evidence(text: str) -> dict:
+    sentences = _source_sentence_candidates(text)
+    agency_name = None
+    agency_patterns = [
+        r"\\bMinnesota Department of [A-Z][A-Za-z &-]{3,100}",
+        r"\\b[A-Z][A-Za-z &-]{2,80} Department of [A-Z][A-Za-z &-]{2,100}",
+    ]
+    for pattern in agency_patterns:
+        match = re.search(pattern, text)
+        if match:
+            agency_name = match.group(0).strip(" .,:;-")
+            break
+
+    evidence_phrases: list[str] = []
+    markers = (
+        "license", "permit", "registration", "required", "require", "must ",
+        "need to", "fee", "fees", "renewal", "deadline", "due ", "application",
+        "local government", "state license", "federal license",
+    )
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if any(marker in lowered for marker in markers):
+            evidence_phrases.append(sentence)
+        if len(evidence_phrases) >= 6:
+            break
+    return {"agency_name": agency_name, "evidence_phrases": evidence_phrases}
+
+
 def _exact_source_extract(text: str) -> dict:
-    facts = {"agency_name": None, "requirements": [], "fees": [], "deadlines": []}
+    facts = {
+        "agency_name": None,
+        "requirements": [],
+        "fees": [],
+        "deadlines": [],
+        "evidence_phrases": [],
+    }
     if not text.strip():
         return facts
+
+    parsed = {}
     try:
         from app.ai import ask_openai
         prompt = (
@@ -480,14 +526,16 @@ def _exact_source_extract(text: str) -> dict:
             "Return JSON only with keys agency_name, requirements, fees, deadlines. "
             "Every non-null string MUST be copied verbatim from the supplied page text; "
             "do not paraphrase, infer applicability, or add facts. Use at most 5 items per list. "
-            "If the page does not explicitly state something, return null or an empty list.\n\n"
+            "Only place a statement under requirements when the page explicitly states a requirement; "
+            "general guidance belongs nowhere. If the page does not explicitly state something, return null or an empty list.\n\n"
             + text[:12000]
         )
         raw = str(ask_openai(prompt) or "").strip()
         raw = re.sub(r"^\x60\x60\x60(?:json)?\\s*|\\s*\x60\x60\x60$", "", raw, flags=re.IGNORECASE)
         parsed = json.loads(raw)
     except Exception:
-        return facts
+        parsed = {}
+
     lowered = text.lower()
     agency = str(parsed.get("agency_name") or "").strip()
     if agency and agency.lower() in lowered:
@@ -502,6 +550,11 @@ def _exact_source_extract(text: str) -> dict:
             if phrase and phrase.lower() in lowered:
                 accepted.append(phrase)
         facts[key] = accepted
+
+    fallback = _deterministic_source_evidence(text)
+    if not facts["agency_name"] and fallback["agency_name"]:
+        facts["agency_name"] = fallback["agency_name"]
+    facts["evidence_phrases"] = fallback["evidence_phrases"]
     return facts
 
 
@@ -527,6 +580,8 @@ def inspect_source(
     for label, key in (("Requirement exact text", "requirements"), ("Fee exact text", "fees"), ("Deadline exact text", "deadlines")):
         for value in facts[key]:
             evidence_lines.append(label + ": " + value)
+    for value in facts.get("evidence_phrases") or []:
+        evidence_lines.append("Source evidence exact text: " + value)
     row.notes = (
         "SOURCE INSPECTION - exact-text extraction only; applicability not inferred. "
         + (" | ".join(evidence_lines) if evidence_lines else "No structured facts extracted; review excerpt manually.")
