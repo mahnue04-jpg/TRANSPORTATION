@@ -490,6 +490,12 @@ def _deterministic_source_evidence(text: str) -> dict:
         match = re.search(pattern, text)
         if match:
             agency_name = match.group(0).strip(" .,:;-")
+            agency_name = re.split(
+                r"\\s+(?:helps?|provides?|offers?|administers?|oversees?|issues?|maintains?|is|has)\\b",
+                agency_name,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip()
             break
 
     evidence_phrases: list[str] = []
