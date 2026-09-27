@@ -425,6 +425,51 @@ def test_nova_government_brain_actions_and_search(client: TestClient) -> None:
 
 
 
+
+def test_nova_government_evidence_boundaries(client: TestClient) -> None:
+    headers = _headers(client)
+    item = _create_item(
+        client,
+        headers,
+        title="Unverified Minnesota license research",
+        agency=None,
+        category="licensing",
+        source_reference=None,
+        description=None,
+        notes=None,
+    )
+    item_id = item["item_id"]
+
+    explain = client.post("/api/nova/government/ask", headers=headers, json={"action": "explain_requirement", "item_id": item_id})
+    assert explain.status_code == 200
+    assert "not yet a verified legal requirement" in explain.json()["answer"]
+
+    agency = client.post("/api/nova/government/ask", headers=headers, json={"action": "find_agency", "item_id": item_id})
+    assert agency.status_code == 200
+    assert "No responsible agency is verified" in agency.json()["answer"]
+
+    checklist = client.post("/api/nova/government/ask", headers=headers, json={"action": "build_checklist", "item_id": item_id})
+    assert checklist.status_code == 200
+    assert "No verified required-document list" in checklist.json()["answer"]
+    saved_checks = client.get(f"/api/nova/government/items/{item_id}/checklist", headers=headers)
+    assert saved_checks.status_code == 200
+    assert saved_checks.json() == []
+
+    deadlines = client.post("/api/nova/government/ask", headers=headers, json={"action": "identify_deadlines", "item_id": item_id})
+    assert deadlines.status_code == 200
+    assert "due date none recorded" in deadlines.json()["answer"]
+    assert "renewal date none recorded" in deadlines.json()["answer"]
+
+    letter = client.post("/api/nova/government/ask", headers=headers, json={"action": "summarize_letter", "item_id": item_id})
+    assert letter.status_code == 200
+    assert "No government letter or correspondence is saved" in letter.json()["answer"]
+
+    open_work = client.post("/api/nova/government/ask", headers=headers, json={"action": "summarize_open_work", "item_id": item_id})
+    assert open_work.status_code == 200
+    assert "saved open Government work item" in open_work.json()["answer"]
+    assert "Articles / formation document" not in open_work.json()["answer"]
+
+
 def test_nova_government_live_test_round2_guards_and_ui() -> None:
     assert 'id="gov-search-talk"' in GOV_HTML
     assert 'id="gov-search-stop"' in GOV_HTML
