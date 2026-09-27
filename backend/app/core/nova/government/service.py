@@ -556,22 +556,45 @@ def search_government(
             if group_name in category_key or category_key in group_name:
                 required_intent_terms.update(group_terms)
 
-    scored_sources = []
-    for source in (web.get("sources") or []):
-        url = str(source.get("url") or "").lower()
-        if not (".gov/" in url or url.endswith(".gov")):
-            continue
-        haystack = " ".join(
-            str(source.get(key) or "").lower() for key in ("title", "url", "snippet")
-        )
-        matched_terms = {term for term in query_terms if term in haystack}
-        if required_intent_terms and not any(term in haystack for term in required_intent_terms):
-            continue
-        relevance = len(matched_terms)
-        if relevance >= 2 or (relevance >= 1 and required_intent_terms):
-            scored_sources.append((relevance, source))
-    scored_sources.sort(key=lambda pair: pair[0], reverse=True)
-    web["sources"] = [source for _, source in scored_sources[:4]]
+    def rank_sources(sources: list[dict]) -> list[dict]:
+        scored_sources = []
+        for source in sources:
+            url = str(source.get("url") or "").lower()
+            if not (".gov/" in url or url.endswith(".gov")):
+                continue
+            haystack = " ".join(
+                str(source.get(key) or "").lower() for key in ("title", "url", "snippet")
+            )
+            matched_terms = {term for term in query_terms if term in haystack}
+            if required_intent_terms and not any(term in haystack for term in required_intent_terms):
+                continue
+            relevance = len(matched_terms)
+            if relevance >= 2 or (relevance >= 1 and required_intent_terms):
+                scored_sources.append((relevance, source))
+        scored_sources.sort(key=lambda pair: pair[0], reverse=True)
+        return [source for _, source in scored_sources[:4]]
+
+    web["sources"] = rank_sources(web.get("sources") or [])
+
+    if not web["sources"] and required_intent_terms:
+        location_terms = [
+            term for term in normalized_query.split()
+            if len(term) >= 4
+            and term not in {"business", "government", "official", "requirements"}
+            and term not in required_intent_terms
+        ]
+        intent_terms = sorted(required_intent_terms)
+        fallback_query = " ".join(
+            location_terms[:3]
+            + ["business"]
+            + intent_terms[:4]
+            + ["official", "government", "site:.gov"]
+        ).strip()
+        fallback_web = search_web(fallback_query, max_results=12, news_mode=False)
+        fallback_sources = rank_sources(fallback_web.get("sources") or [])
+        if fallback_sources:
+            web["sources"] = fallback_sources
+            web["status"] = fallback_web.get("status") or web.get("status")
     # Provider summaries can include fallback/Wikipedia prose even when the final
     # links are official. Build the displayed summary only from accepted .gov hits.
     if web["sources"]:
