@@ -338,6 +338,54 @@ def test_nova_government_sources_verification_and_programs(client: TestClient) -
     assert any(row["program_name"] == "Example small business grant" for row in programs.json())
 
 
+def test_nova_government_official_source_does_not_invent_requirements(client: TestClient) -> None:
+    headers = _headers(client)
+    item = _create_item(
+        client,
+        headers,
+        title="Minnesota Business License Requirements",
+        agency=None,
+        category="licensing",
+        status="researching",
+    )
+    source = client.post(
+        f"/api/nova/government/items/{item['item_id']}/sources",
+        headers=headers,
+        json={
+            "page_title": "Business Licenses and Permits",
+            "source_url": "https://mn.gov/deed/business/starting-business/legal-regulatory/",
+            "verification_status": "official_source",
+        },
+    )
+    assert source.status_code == 200, source.text
+
+    for action in ("explain_requirement", "missing_documents", "build_checklist", "next_step"):
+        asked = client.post(
+            "/api/nova/government/ask",
+            headers=headers,
+            json={"action": action, "item_id": item["item_id"]},
+        )
+        assert asked.status_code == 200, asked.text
+        answer = asked.json()["answer"].lower()
+        assert "official" in answer or "verified" in answer
+        for invented in ("ssn", "zoning", "insurance certificate", "application fee"):
+            assert invented not in answer
+
+    checks = client.get(
+        f"/api/nova/government/items/{item['item_id']}/checklist",
+        headers=headers,
+    )
+    assert checks.status_code == 200
+    assert checks.json() == []
+
+
+def test_nova_government_ui_populates_active_item_form() -> None:
+    assert "function populateItemForm(item)" in GOV_JS
+    assert '$("item-category").value = item.category || "licensing";' in GOV_JS
+    assert '$("item-level").value = item.government_level || "state";' in GOV_JS
+    assert "populateItemForm(item);" in GOV_JS
+
+
 def test_nova_government_communications_link_and_no_send_or_file(client: TestClient) -> None:
     headers = _headers(client)
     item = _create_item(client, headers, title="Agency inquiry draft")
