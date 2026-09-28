@@ -1170,6 +1170,10 @@ _ADMIN_TECH_TITLE_REJECT = re.compile(
     r"software developer|software engineer|tech lead)\b",
     re.I,
 )
+_ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT = re.compile(
+    r"\b(digital assets?|crypto(?:currency)?|blockchain)\b",
+    re.I,
+)
 _ADMIN_EMPLOYEE_SIGNALS = re.compile(
     r"\b(full[- ]?time|part[- ]?time|employee|w-?2|salary|benefits|401\(k\)|401k|"
     r"join our team|permanent position|staff position)\b",
@@ -1341,6 +1345,19 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # their descriptions contain generic words like support/operations.
     if _ADMIN_TECH_TITLE_REJECT.search(title) and not title_has_admin:
         return False
+
+    # Domain-specialist analyst roles (for example digital-asset/blockchain
+    # operations) are not administrative support simply because the title also
+    # contains "operations analyst".
+    if _ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT.search(title):
+        explicit_admin = bool(re.search(
+            r"\b(administrative|admin(?:istrative)? assistant|virtual assistant|office|clerical|"
+            r"operations support|business operations support|project administration|data entry)\b",
+            title,
+            re.I,
+        ))
+        if not explicit_admin:
+            return False
 
     # This query family is explicitly for contract/vendor work, not employee jobs.
     if _ADMIN_EMPLOYEE_SIGNALS.search(combined) and not re.search(
