@@ -413,6 +413,14 @@ def v3_live_job_discover(
     try:
         multi = search_multi_source_jobs(payload.query, limit=payload.limit)
         ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
+        visible_ranked = [
+            job for job in ranked
+            if str(
+                (job.get("live_qualification") or {}).get("qualification_status")
+                or job.get("qualification_status")
+                or ""
+            ) != OUTCOME_NOT_QUALIFIED
+        ]
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
