@@ -583,7 +583,10 @@ def v3_live_job_prepare(
             elif live_status == OUTCOME_NEEDS_OWNER_REVIEW and work_id not in held_for_owner_review:
                 held_for_owner_review.append(work_id)
 
-        buckets = partition_by_qualification(selected)
+        # Diagnostics must describe the full ranked set. The selected set is
+        # intentionally QUALIFIED-only, so counting only selected rows hides why
+        # a live search returned zero saveable opportunities.
+        buckets = partition_by_qualification(ranked)
         return {
             "query": payload.query,
             "source": "multi_source",
@@ -597,6 +600,7 @@ def v3_live_job_prepare(
             "external_submission": False,
             "financial_execution": False,
             "ranked_count": len(visible_ranked),
+            "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
             "prepared_count": len(prepared),
             "prepared": prepared,
