@@ -205,3 +205,24 @@ button {
   width: 100%;
   box-sizing: border-box;
 }
+
+
+/* Keep the live Work board scannable; full qualification evidence stays behind View details. */
+.opportunity-card {
+  line-height: 1.4;
+}
+.opportunity-summary {
+  margin-top: 4px;
+}
+.opportunity-details {
+  margin-top: 8px;
+  padding: 8px 0;
+}
+.opportunity-details summary {
+  cursor: pointer;
+  color: var(--nova-accent);
+  font-weight: 700;
+}
+.opportunity-details[open] summary {
+  margin-bottom: 8px;
+}
