@@ -413,6 +413,14 @@ def v3_live_job_discover(
     try:
         multi = search_multi_source_jobs(payload.query, limit=payload.limit)
         ranked = qualify_and_rank_live_jobs(payload.query, multi["jobs"])
+        visible_ranked = [
+            job for job in ranked
+            if str(
+                (job.get("live_qualification") or {}).get("qualification_status")
+                or job.get("qualification_status")
+                or ""
+            ) != OUTCOME_NOT_QUALIFIED
+        ]
         selected = [
             job for job in ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
@@ -429,7 +437,10 @@ def v3_live_job_discover(
             user=user,
             prepare_applications=False,
         )
-        buckets = partition_by_qualification(selected)
+        # Diagnostics must describe the full ranked set. The selected set is
+        # intentionally QUALIFIED-only, so counting only selected rows hides why
+        # a live search returned zero saveable opportunities.
+        buckets = partition_by_qualification(ranked)
         return {
             "query": payload.query,
             "source": "multi_source",
@@ -442,6 +453,7 @@ def v3_live_job_discover(
             "external_submission": False,
             "financial_execution": False,
             "ranked_count": len(visible_ranked),
+            "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
             "qualification_counts": {
                 OUTCOME_QUALIFIED: len(buckets[OUTCOME_QUALIFIED]),
@@ -579,7 +591,10 @@ def v3_live_job_prepare(
             elif live_status == OUTCOME_NEEDS_OWNER_REVIEW and work_id not in held_for_owner_review:
                 held_for_owner_review.append(work_id)
 
-        buckets = partition_by_qualification(selected)
+        # Diagnostics must describe the full ranked set. The selected set is
+        # intentionally QUALIFIED-only, so counting only selected rows hides why
+        # a live search returned zero saveable opportunities.
+        buckets = partition_by_qualification(ranked)
         return {
             "query": payload.query,
             "source": "multi_source",
@@ -593,6 +608,7 @@ def v3_live_job_prepare(
             "external_submission": False,
             "financial_execution": False,
             "ranked_count": len(visible_ranked),
+            "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
             "prepared_count": len(prepared),
             "prepared": prepared,

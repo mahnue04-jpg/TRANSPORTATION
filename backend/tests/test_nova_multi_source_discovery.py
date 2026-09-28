@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.core.nova.v3 import live_discovery
+from app.core.nova.v3 import live_discovery, multi_source_discovery
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.live_qualification import (
@@ -304,7 +304,7 @@ def test_multiple_provider_results_merge() -> None:
         [_b2b_project(provider_id="remoteok", url="https://remoteok.com/remote-jobs/b2b")],
     )
     result = search_multi_source_jobs(
-        "spreadsheet project",
+        "spreadsheet",
         limit=10,
         providers_override=[a, b],
     )

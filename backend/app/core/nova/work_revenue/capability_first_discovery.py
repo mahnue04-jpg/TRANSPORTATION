@@ -450,6 +450,8 @@ def generate_capability_first_queries(
             q = str(query).strip()
             if not q or is_banned_query(q):
                 continue
+            if not re.search(r"\b(remote|freelance|contractor)\b", q, re.I):
+                q = f"{q} remote contractor"
             key = q.lower()
             if key in seen:
                 continue
@@ -525,7 +527,17 @@ def _planned_family_duty_match(family_id: str | None, duty_matches: list[str]) -
     allowed = _FAMILY_DUTY_MATCHES.get(str(family_id or "").strip())
     if allowed is None:
         return None
-    return bool(allowed.intersection(str(item or "").strip() for item in duty_matches))
+    normalized_matches = {
+        str(item or "").strip()
+        for item in duty_matches
+        if str(item or "").strip()
+    }
+    # No classified duty evidence is not the same as a confirmed family mismatch.
+    # Preserve the caller's INSUFFICIENT_INFORMATION/owner-review path instead of
+    # turning sparse provider records into a hard REJECT.
+    if not normalized_matches:
+        return None
+    return bool(allowed.intersection(normalized_matches))
 
 
 def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) -> dict[str, Any]:
@@ -586,14 +598,43 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     family = match_query_to_family(query or "")
     planned_family_id = str(job.get("search_family") or "").strip() or None
     planned_family = SEARCH_FAMILIES.get(planned_family_id) if planned_family_id else None
-    family_duty_match = _planned_family_duty_match(
-        planned_family_id,
-        list(duty["capability_registry_matches"]),
-    )
+    family_candidates = [
+        str(item or "").strip()
+        for item in list(job.get("search_family_candidates") or [])
+        if str(item or "").strip()
+    ]
+    if planned_family_id and planned_family_id not in family_candidates:
+        family_candidates.insert(0, planned_family_id)
+
+    duty_matches = list(duty["capability_registry_matches"])
+    candidate_matches = [
+        _planned_family_duty_match(family_id, duty_matches)
+        for family_id in family_candidates
+    ]
+    if any(match is True for match in candidate_matches):
+        family_duty_match = True
+    elif candidate_matches and all(match is False for match in candidate_matches):
+        family_duty_match = False
+    elif planned_family_id:
+        family_duty_match = _planned_family_duty_match(planned_family_id, duty_matches)
+    else:
+        family_duty_match = None
     # Search-provider keyword hits are not enough. For the high-volume owner
     # families, require the listing's actual duties to overlap the family that
     # caused Nova to search it. This keeps bookkeeping from surfacing AI
     # trainers/developers and keeps admin/data searches from drifting.
+    if family_duty_match is None and family_candidates and not duty_matches:
+        obvious_human_evaluator = bool(
+            re.search(
+                r"\b(ai trainer|model evaluator|quality evaluator|human evaluator|rater|annotator|"
+                r"rate model responses|evaluate model responses|image qa evaluator)\b",
+                text,
+                re.I,
+            )
+        )
+        if obvious_human_evaluator:
+            family_duty_match = False
+
     if family_duty_match is False:
         score = min(score, 35)
         band = "REJECT"
@@ -602,6 +643,7 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "discovery_band": band,
         "capability_match": bool(duty["capability_registry_matches"]),
         "planned_family_duty_match": family_duty_match,
+        "search_family_candidates": family_candidates,
         "remote_eligibility": "YES" if remote_ok else "NO",
         "vendor_contract_compatibility": "YES" if preferred_hits else "UNKNOWN",
         "physical_presence_requirement": duty["required_physical_presence"],

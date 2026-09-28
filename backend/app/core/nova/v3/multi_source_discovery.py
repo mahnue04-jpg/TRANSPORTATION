@@ -182,17 +182,21 @@ def _identity_text(value: Any) -> str:
 
 
 def opportunity_dedupe_key(row: dict[str, Any]) -> str:
-    # Stable provider identifiers are stronger than URL variations.
     provider = str(row.get("provider_id") or "").strip().lower()
     identifier = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
+    # SAM notice IDs are canonical across notice URL variants.
     if provider == "sam_gov" and identifier:
         return "sam_notice:" + identifier
-    if provider and identifier:
-        return f"provider:{provider}:{identifier}"
 
+    # A canonical public URL is stronger for cross-provider duplicates: the same
+    # listing can be syndicated by more than one feed with different provider IDs.
     url = _canonical_source_url(str(row.get("source_url") or ""))
     if url:
         return "url:" + url
+
+    # Fall back to provider identity when no actionable URL exists.
+    if provider and identifier:
+        return f"provider:{provider}:{identifier}"
 
     # Last-resort identity intentionally ignores provider so the same buyer/title
     # found through two feeds does not appear twice.
@@ -1205,7 +1209,7 @@ _ADMIN_STRONG_TITLE = re.compile(
     r"\b("
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|virtual assistant|office assistant|office administrator|"
-    r"operations (?:assistant|support|coordinator|administrator)|"
+    r"operations (?:assistant|support|coordinator|administrator|analyst(?: contractor)?)|"
     r"business operations (?:assistant|support|coordinator)|"
     r"data entry (?:assistant|clerk|specialist|contractor)|"
     r"records (?:assistant|clerk|specialist|coordinator)|"
@@ -1299,7 +1303,11 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     if not _ADMIN_STRONG_TITLE.search(title):
         return False
 
-    return title_has_admin or body_has_admin
+    # Reaching this point means the title matched an approved administrative
+    # archetype and all employee/geo/paid-access guards passed. Do not require
+    # a second, narrower keyword hit that can incorrectly reject valid titles
+    # such as "Operations Analyst Contractor".
+    return True
 
 
 def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1319,6 +1327,19 @@ def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if pid and pid not in sources:
             sources.append(pid)
         existing["provenance_sources"] = sources
+
+        # The same live listing can be returned by multiple capability-planned
+        # queries. Preserve every family that found it so later qualification
+        # does not judge the listing only against whichever query happened to
+        # arrive first.
+        family_candidates = list(existing.get("search_family_candidates") or [])
+        for family_id in (existing.get("search_family"), row.get("search_family")):
+            family_id = str(family_id or "").strip()
+            if family_id and family_id not in family_candidates:
+                family_candidates.append(family_id)
+        if family_candidates:
+            existing["search_family_candidates"] = family_candidates
+
         # Prefer richer description / compensation when duplicate collapses.
         if len(str(row.get("description") or "")) > len(str(existing.get("description") or "")):
             existing["description"] = row.get("description")
