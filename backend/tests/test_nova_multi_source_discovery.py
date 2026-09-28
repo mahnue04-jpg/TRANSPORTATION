@@ -861,3 +861,56 @@ def test_provider_identifier_dedupes_same_listing_across_query_variants() -> Non
     second["source_url"] = "https://remoteok.com/remote-jobs/b2b?utm_campaign=second-search"
     collapsed = dedupe_opportunities([first, second])
     assert len(collapsed) == 1
+
+def test_us_remote_search_rejects_explicit_foreign_only_listing() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    row = {
+        "provider_id": "remotive",
+        "title": "Customer Service Inbound",
+        "description": "Freelance customer support contract.",
+        "geography": "Europe",
+        "remote_status": "remote",
+        "job_type": "freelance",
+    }
+    assert _query_relevant(
+        row,
+        "bookkeeping support contractor remote United States",
+    ) is False
+
+
+def test_remote_search_rejects_location_bound_sam_notice() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    row = {
+        "provider_id": "sam_gov",
+        "title": "Business Operations Support Services",
+        "description": "Contractor support services.",
+        "geography": "Fort Benning, Georgia, 31905, UNITED STATES",
+        "place_of_performance": "Fort Benning, Georgia, 31905, UNITED STATES",
+        "remote_status": "unknown",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        row,
+        "AI operations support contractor remote United States",
+    ) is False
+
+
+def test_remote_search_keeps_remote_sam_notice() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    row = {
+        "provider_id": "sam_gov",
+        "title": "Remote Administrative Support Services",
+        "description": "Remote contractor support services.",
+        "geography": "Remote, Nationwide, UNITED STATES",
+        "place_of_performance": "Remote, Nationwide, UNITED STATES",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        row,
+        "administrative support contractor remote United States",
+    ) is True
+
