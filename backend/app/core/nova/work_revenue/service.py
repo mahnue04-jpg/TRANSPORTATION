@@ -1914,6 +1914,12 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         .filter(NovaWorkDeliverable.owner_confirmed_delivered.is_(False))
         .count()
     )
+    all_opportunities = list_opportunity_outs(
+        db,
+        organization_id=organization_id,
+        user=user,
+        limit=LIST_MAX_LIMIT,
+    )
     return TodaySummaryOut(
         work_opportunities=dash.counts["work_opportunities"],
         applications_needing_approval=dash.counts["applications_needing_approval"],
@@ -1928,7 +1934,7 @@ def today_summary(db: Session, *, organization_id: str, user: UserContext) -> To
         submitted=dash.counts["submitted"],
         closed=dash.counts["closed"],
         cards=today_cards(dash.counts),
-        source_counts=_today_source_counts(dash.opportunity_list),
+        source_counts=_today_source_counts(all_opportunities),
         approval_states=_today_approval_states(dash.applications),
         active_engagements=int(dash.counts.get("active_engagements") or 0),
         active_tasks=_today_active_tasks(dash.engagements),
