@@ -271,3 +271,21 @@ def test_nova_anonymous_client_queries_are_buyer_intent_and_capability_backed() 
     assert generated
     assert any("automation" in query or "operations support" in query for query in generated)
     assert all(not is_banned_query(query) for query in generated)
+
+
+
+def test_compound_owner_request_spreads_search_budget_across_requested_families() -> None:
+    rows = targeted_queries_for_request(
+        "remote administrative support, spreadsheet analysis, research, AI operations, bookkeeping support",
+        max_queries=5,
+    )
+    families = {row["search_family"] for row in rows}
+    assert families == {
+        "administrative_operations",
+        "data_spreadsheet",
+        "research_analysis",
+        "ai_automation",
+        "bookkeeping_support",
+    }
+    assert len(rows) == 5
+    assert all("remote" in row["query"].lower() or "freelance" in row["query"].lower() or "contractor" in row["query"].lower() for row in rows)

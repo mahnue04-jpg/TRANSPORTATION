@@ -302,28 +302,36 @@ _FAMILY_REQUEST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-def resolve_requested_family(query: str) -> str | None:
-    """Resolve a user request to one narrow capability family when possible."""
+def resolve_requested_families(query: str) -> list[str]:
+    """Resolve every capability family explicitly requested by the owner."""
     text = re.sub(r"\s+", " ", str(query or "").strip())
     if not text:
-        return None
-    for family_id, pattern in _FAMILY_REQUEST_PATTERNS:
-        if pattern.search(text):
-            return family_id
-    return None
+        return []
+    return [
+        family_id
+        for family_id, pattern in _FAMILY_REQUEST_PATTERNS
+        if pattern.search(text)
+    ]
+
+
+def resolve_requested_family(query: str) -> str | None:
+    """Backward-compatible single-family resolver."""
+    families = resolve_requested_families(query)
+    return families[0] if families else None
 
 
 def targeted_queries_for_request(query: str, *, max_queries: int = 5) -> list[dict[str, Any]]:
-    """Return capability-backed query variants for the user's requested work type.
+    """Return capability-backed query variants for the owner's requested work.
 
-    If no known family is detected, preserve the exact user query only. This
-    prevents a bookkeeping request from drifting into unrelated job families.
+    Compound owner requests are split across the explicitly named capability
+    families instead of being mislabeled as only the first matching family.
     """
     normalized = re.sub(r"\s+", " ", str(query or "").strip())
     if not normalized:
         return []
-    family_id = resolve_requested_family(normalized)
-    if not family_id:
+    limit = max(1, int(max_queries))
+    family_ids = resolve_requested_families(normalized)
+    if not family_ids:
         return [{
             "query": normalized,
             "search_family": None,
@@ -333,27 +341,66 @@ def targeted_queries_for_request(query: str, *, max_queries: int = 5) -> list[di
             "geography": "United States remote nationwide",
             "preferred_signals": list(_REMOTE_VENDOR_TERMS),
         }]
-    generated = generate_capability_first_queries(families=[family_id])
-    rows = [{
-        "query": normalized,
-        "search_family": family_id,
-        "search_family_label": SEARCH_FAMILIES[family_id]["label"],
-        "capability_registry_matches": [
-            cid for cid in SEARCH_FAMILIES[family_id]["capability_ids"] if cid in _supported_capability_keys()
-        ],
-        "why_searched": f"Owner requested {SEARCH_FAMILIES[family_id]['label']}; Nova restricted discovery to this capability family.",
-        "geography": "United States remote nationwide",
-        "preferred_signals": list(_REMOTE_VENDOR_TERMS),
-    }]
-    seen = {normalized.lower()}
-    for item in generated:
-        if len(rows) >= max(1, int(max_queries)):
+
+    supported = _supported_capability_keys()
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # For a compound request, give each requested family at least one focused
+    # query before adding variants. This prevents one broad family from
+    # consuming the whole search budget.
+    for family_id in family_ids:
+        if len(rows) >= limit:
             break
-        key = str(item["query"]).lower()
+        generated = generate_capability_first_queries(families=[family_id])
+        candidate = generated[0] if generated else None
+        if candidate is None:
+            continue
+        key = str(candidate["query"]).lower()
         if key in seen:
             continue
         seen.add(key)
-        rows.append(item)
+        rows.append(candidate)
+
+    # Fill any remaining budget round-robin from the requested families.
+    offsets = {family_id: 1 for family_id in family_ids}
+    while len(rows) < limit:
+        added = False
+        for family_id in family_ids:
+            generated = generate_capability_first_queries(families=[family_id])
+            index = offsets[family_id]
+            offsets[family_id] = index + 1
+            if index >= len(generated):
+                continue
+            item = generated[index]
+            key = str(item["query"]).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(item)
+            added = True
+            if len(rows) >= limit:
+                break
+        if not added:
+            break
+
+    # If only one family was requested, preserve the owner's exact wording as
+    # the first query while retaining the family label.
+    if len(family_ids) == 1:
+        family_id = family_ids[0]
+        exact = {
+            "query": normalized,
+            "search_family": family_id,
+            "search_family_label": SEARCH_FAMILIES[family_id]["label"],
+            "capability_registry_matches": [
+                cid for cid in SEARCH_FAMILIES[family_id]["capability_ids"] if cid in supported
+            ],
+            "why_searched": f"Owner requested {SEARCH_FAMILIES[family_id]['label']}; Nova restricted discovery to this capability family.",
+            "geography": "United States remote nationwide",
+            "preferred_signals": list(_REMOTE_VENDOR_TERMS),
+        }
+        rows = [exact] + [row for row in rows if str(row["query"]).lower() != normalized.lower()]
+        rows = rows[:limit]
     return rows
 
 
@@ -504,6 +551,8 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         band = "REJECT"
 
     family = match_query_to_family(query or "")
+    planned_family_id = str(job.get("search_family") or "").strip() or None
+    planned_family = SEARCH_FAMILIES.get(planned_family_id) if planned_family_id else None
     return {
         "discovery_score": score,
         "discovery_band": band,
@@ -524,9 +573,12 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "deliverables_nova_can_produce": duty["deliverables_nova_can_produce"],
         "owner_review_needed": duty["owner_review_needed"] or band == "OWNER_REVIEW",
         "state_restriction_detected": state_restricted,
-        "search_family": (family or {}).get("family_id"),
-        "search_family_label": (family or {}).get("label"),
-        "why_searched": (family or {}).get("why_searched")
+        "search_family": planned_family_id or (family or {}).get("family_id"),
+        "search_family_label": str(job.get("search_family_label") or "").strip()
+        or (planned_family or {}).get("label")
+        or (family or {}).get("label"),
+        "why_searched": str(job.get("why_searched") or "").strip()
+        or (family or {}).get("why_searched")
         or "Capability-first remote/digital discovery against verified Nova capabilities.",
         "title_used_for_decision": False,
         "nationwide_remote_allowed": True,

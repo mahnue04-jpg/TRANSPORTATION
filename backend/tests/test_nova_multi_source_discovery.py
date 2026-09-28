@@ -837,3 +837,27 @@ def test_vendor_intent_search_filters_employee_only_feed_results() -> None:
     }
     assert _query_relevant(employee, "business operations support contractor remote") is False
     assert _query_relevant(contractor, "business operations support contractor remote") is True
+
+
+def test_dedupe_ignores_tracking_query_and_url_fragment() -> None:
+    first = _b2b_project(
+        provider_id="remoteok",
+        url="https://remoteok.com/remote-jobs/b2b?utm_source=nova#apply",
+    )
+    second = _b2b_project(
+        provider_id="remoteok",
+        url="https://remoteok.com/remote-jobs/b2b/?ref=feed",
+    )
+    # Force URL identity so this specifically exercises canonical URL cleanup.
+    first["provider_identifier"] = ""
+    second["provider_identifier"] = ""
+    collapsed = dedupe_opportunities([first, second])
+    assert len(collapsed) == 1
+
+
+def test_provider_identifier_dedupes_same_listing_across_query_variants() -> None:
+    first = _b2b_project(provider_id="remoteok", url="https://remoteok.com/remote-jobs/b2b")
+    second = dict(first)
+    second["source_url"] = "https://remoteok.com/remote-jobs/b2b?utm_campaign=second-search"
+    collapsed = dedupe_opportunities([first, second])
+    assert len(collapsed) == 1

@@ -28,6 +28,7 @@ from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.multi_source_discovery import (
+    dedupe_opportunities,
     provider_catalog,
     provider_health_snapshot,
     search_multi_source_jobs,
@@ -440,14 +441,14 @@ def v3_live_job_discover(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
-            "ranked_count": len(ranked),
+            "ranked_count": len(visible_ranked),
             "selected_count": len(selected),
             "qualification_counts": {
                 OUTCOME_QUALIFIED: len(buckets[OUTCOME_QUALIFIED]),
                 OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
                 OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
             },
-            "ranked_jobs": ranked,
+            "ranked_jobs": visible_ranked,
             "saved": saved,
             "persistent_results": persistent_results,
         }
@@ -487,9 +488,21 @@ def v3_live_job_prepare(
             provider_errors.extend(multi_part.get("provider_errors") or [])
             provider_health = multi_part.get("provider_health") or provider_health
 
+        # The same provider item can appear under multiple planned family queries.
+        # Collapse the combined set once more before qualification so the owner
+        # sees one canonical opportunity, not one copy per search variant.
+        collected = dedupe_opportunities(collected)
         ranked = qualify_and_rank_live_jobs(payload.query, collected)
-        selected = [
+        visible_ranked = [
             job for job in ranked
+            if str(
+                (job.get("live_qualification") or {}).get("qualification_status")
+                or job.get("qualification_status")
+                or ""
+            ) != OUTCOME_NOT_QUALIFIED
+        ]
+        selected = [
+            job for job in visible_ranked
             if int(job.get("relevance_score") or 0) >= payload.min_relevance_score
             and str((job.get("live_qualification") or {}).get("qualification_status") or job.get("qualification_status") or "") == OUTCOME_QUALIFIED
             and bool((job.get("live_qualification") or {}).get("revenue_ready", job.get("revenue_ready")))
@@ -593,6 +606,7 @@ def v3_live_job_prepare(
             "auto_prepared_only_qualified": True,
             "held_for_owner_review": held_for_owner_review,
             "skipped_not_qualified": skipped_not_qualified,
+            "rejected_from_live_results": len(ranked) - len(visible_ranked),
             "ranked_jobs": ranked,
             "persistent_results": persistent_results,
         }
