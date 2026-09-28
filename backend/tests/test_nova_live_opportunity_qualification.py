@@ -530,3 +530,26 @@ def test_revenue_gate_requires_actionable_source_and_real_buyer() -> None:
     assert result["buyer_verified"] is False
     assert result["source_actionable"] is False
     assert result["revenue_ready"] is False
+
+def test_content_reviewer_is_not_qualified_as_nova_vendor_work() -> None:
+    result = qualify_live_job(
+        {
+            "provider_id": "remotive",
+            "provider_identifier": "content-reviewer-1",
+            "title": "Content Reviewer - United States",
+            "company_name": "Example Review Co",
+            "description": (
+                "Freelance content reviewer responsible for reviewing and judging content quality. "
+                "Independent contractor engagement. No membership fee."
+            ),
+            "source_url": "https://remotive.com/remote-jobs/content-reviewer-1",
+            "geography": "United States",
+            "remote_status": "remote",
+            "compensation_text": "$25/hr",
+            "job_type": "freelance",
+            "source_attribution": "Remotive",
+        }
+    )
+    assert result["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert "human_evaluator_or_annotation_role" in result["blockers"]
+
