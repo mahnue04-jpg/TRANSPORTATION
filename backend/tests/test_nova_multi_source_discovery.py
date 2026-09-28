@@ -914,3 +914,36 @@ def test_remote_search_keeps_remote_sam_notice() -> None:
         "administrative support contractor remote United States",
     ) is True
 
+def test_bookkeeping_search_rejects_unrelated_operations_analyst() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    unrelated = {
+        "provider_id": "remotive",
+        "title": "Junior Digital Assets Operations Analyst",
+        "description": "Support digital asset operations and internal workflows.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        unrelated,
+        "bookkeeping support contractor remote no CPA",
+    ) is False
+
+
+def test_bookkeeping_search_keeps_actual_bookkeeping_work() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    relevant = {
+        "provider_id": "remotive",
+        "title": "Remote Bookkeeping Support Contractor",
+        "description": "Invoice tracking, expense categorization, and reconciliation support.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        relevant,
+        "bookkeeping support contractor remote no CPA",
+    ) is True
+
