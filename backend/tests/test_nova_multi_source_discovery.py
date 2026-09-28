@@ -947,3 +947,36 @@ def test_bookkeeping_search_keeps_actual_bookkeeping_work() -> None:
         "bookkeeping support contractor remote no CPA",
     ) is True
 
+def test_ai_search_rejects_generic_digital_operations_analyst() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    unrelated = {
+        "provider_id": "remotive",
+        "title": "Junior Digital Assets Operations Analyst",
+        "description": "Support digital asset operations, reporting, and internal workflows.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        unrelated,
+        "AI operations contractor remote",
+    ) is False
+
+
+def test_ai_search_keeps_actual_workflow_automation_contract() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    relevant = {
+        "provider_id": "remotive",
+        "title": "AI Workflow Automation Contractor",
+        "description": "Build Zapier and API integration workflows with AI-assisted document automation.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        relevant,
+        "AI operations contractor remote",
+    ) is True
+
