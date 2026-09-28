@@ -93,6 +93,9 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "Approve for future submission" in WORK_JS
     assert "Record manual submission after I send it" in WORK_JS
     assert "Prepare application drafts" in WORK_JS
+    assert "View details" in WORK_JS
+    assert "controlled test co|duty-class-prod-test|simulated\\/test fixture" in WORK_JS
+    assert ".opportunity-details" in WORK_CSS
 
 
 def test_signed_out_blocks_apis(client: TestClient) -> None:
