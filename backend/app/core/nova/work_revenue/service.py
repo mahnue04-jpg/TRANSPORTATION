@@ -1735,11 +1735,26 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     ]
     won = [item for item in outs if item.status == "WON"]
     archived = [item for item in outs if item.archived or item.status in {"CLOSED", "REJECTED"}]
-    approvals = [item for item in applications if item.approval_state == "READY_FOR_OWNER_REVIEW"]
-    draft_ready = [item for item in applications if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
-    approved = [item for item in applications if item.approved_for_future_submission]
-    submitted = [item for item in outs if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"]
-    needs_owner = [item for item in real_outs if item.owner_action_required or item.missing_owner_facts]
+    approvals = [item for item in visible_apps if item.approval_state == "READY_FOR_OWNER_REVIEW"]
+    draft_ready = [item for item in visible_apps if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
+    approved = [item for item in visible_apps if item.approved_for_future_submission]
+    submitted = [
+        item for item in live_opportunity_list
+        if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"
+    ]
+    visible_ids = {item.opportunity_id for item in live_opportunity_list}
+    visible_apps = [
+        item for item in applications
+        if item.opportunity_id in visible_ids
+    ]
+    visible_actions = [
+        item for item in actions
+        if not item.opportunity_id or item.opportunity_id in visible_ids
+    ]
+    needs_owner = [
+        item for item in live_opportunity_list
+        if item.owner_action_required or item.missing_owner_facts
+    ]
     lost = [item for item in outs if item.status in {"REJECTED", "CLOSED"}]
     active = [item for item in outs if item.status in {"APPLICATION_PREPARED", "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER"}]
     missing_info = [item for item in real_outs if item.qualification_outcome == "INSUFFICIENT_INFORMATION"]
@@ -1765,10 +1780,11 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     revenue_summary["awaiting_owner_payment_confirmation"] = recon.get("awaiting_owner_payment_confirmation") or 0
     return DashboardOut(
         counts={
-            "work_opportunities": len(real_outs),
-            "opportunities_found": len(real_outs),
+            "work_opportunities": len(live_opportunity_list),
+            "opportunities_found": len(live_opportunity_list),
             "simulated_fixtures": len(test_outs),
-            "real_opportunities": len(real_outs),
+            "real_opportunities": len(live_opportunity_list),
+            "historical_real_opportunities": len(real_outs) - len(live_opportunity_list),
             "new": len([item for item in real_outs if item.status == "DISCOVERED"]),
             "needs_review": len([item for item in real_outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
             "qualified": len(qualified),
@@ -1784,7 +1800,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "applications_needing_approval": len(approvals),
             "follow_ups_due": len(follow_ups),
             "interviews": len(interviews),
-            "owner_action_required": len(actions),
+            "owner_action_required": len(visible_actions),
             "work_won": len(won),
             "active_engagements": len(
                 [item for item in engagement_rows if item["status"] in ACTIVE_ENGAGEMENT_COUNT_STATUSES]
