@@ -352,21 +352,24 @@
     var cannotDo = Array.isArray(cap.nova_cannot_do) ? cap.nova_cannot_do.join("; ") : (cap.nova_cannot_do || "None identified");
     var why = cap.blocking_reason || cap.owner_review_reason || (cap.capability_classification === "CAN_PERFORM" ? "Duties match Nova digital capabilities." : "");
     var duties = row.description || cap.actual_duties || "";
-    return "<div class=\"item\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
+    var detailsId = "opp-details-" + String(row.opportunity_id || "").replace(/[^A-Za-z0-9_-]/g, "");
+    return "<div class=\"item opportunity-card\" data-opportunity-id=\"" + escapeHtml(row.opportunity_id) + "\">" +
       "<strong>" + escapeHtml(row.opportunity_title) + "</strong>" +
       (simulated ? " <span class=\"muted\">simulated/test fixture</span>" : "") +
-      "<div class=\"muted\">" + escapeHtml(row.company_name) +
-      " · source " + escapeHtml(row.source || row.source_type) +
+      "<div class=\"muted opportunity-summary\">" + escapeHtml(row.company_name) +
       " · " + escapeHtml(row.status) +
-      (cap.capability_classification ? " · capability " + escapeHtml(cap.capability_classification) : "") +
+      (cap.capability_classification ? " · " + escapeHtml(cap.capability_classification) : "") +
       (cap.capability_fit_score !== undefined && cap.capability_fit_score !== null ? " · fit " + escapeHtml(cap.capability_fit_score) : "") +
+      (row.application_state ? " · " + escapeHtml(row.application_state) : "") +
+      "</div>" +
+      "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
+      "<details class=\"opportunity-details\" id=\"" + escapeHtml(detailsId) + "\"><summary>View details</summary>" +
+      "<div class=\"muted\">source " + escapeHtml(row.source || row.source_type) +
       (cap.discovery_score != null ? " · discovery " + escapeHtml(cap.discovery_score) : "") +
       (row.qualification_outcome ? " · " + escapeHtml(row.qualification_outcome) : "") +
       (row.lifecycle_outcome ? " · " + escapeHtml(row.lifecycle_outcome) : "") +
       (row.owner_action_required ? " · OWNER ACTION REQUIRED" : "") +
-      (row.application_state ? " · application " + escapeHtml(row.application_state) : "") +
-      (row.updated_at ? " · updated " + escapeHtml(row.updated_at) : "") +
-      "</div>" +
+      (row.updated_at ? " · updated " + escapeHtml(row.updated_at) : "") + "</div>" +
       (cap.why_searched ? "<div>Why Nova searched: " + escapeHtml(cap.why_searched) + "</div>" : "") +
       (cap.search_family_label || cap.search_family ? "<div>Search family: " + escapeHtml(cap.search_family_label || cap.search_family) + "</div>" : "") +
       (cap.capability_registry_matches && cap.capability_registry_matches.length ? "<div>Capability registry match: " + escapeHtml(cap.capability_registry_matches.join(", ")) + "</div>" : "") +
@@ -375,8 +378,7 @@
       "<div>Nova cannot do: " + escapeHtml(cannotDo) + "</div>" +
       (cap.remote_eligibility ? "<div>Remote eligibility: " + escapeHtml(cap.remote_eligibility) + "</div>" : "") +
       (cap.vendor_contract_compatibility ? "<div>Vendor/contract compatibility: " + escapeHtml(cap.vendor_contract_compatibility) + "</div>" : "") +
-      "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
-      "<div>Owner review needed: " + review + "</div>" +
+      "<div>Owner review needed: " + review + "</div></details>" +
       "<div class=\"command-actions\">" +
       actionButton("autonomous-preview", row.opportunity_id, "Preview Autonomous Work") + " " +
       ((cap.capability_classification === "CAN_PERFORM" && row.status === "QUALIFIED")
@@ -468,7 +470,11 @@
       "No manually submitted records. NOT SENT BY NOVA.",
       applicationItem
     );
-    if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(data.engagements, "No active internal work.", function (row) {
+    var visibleEngagements = (data.engagements || []).filter(function (row) {
+      var blob = String(row.client_name || "") + " " + String(row.engagement_id || "");
+      return !/controlled test co|duty-class-prod-test|simulated\/test fixture/i.test(blob);
+    });
+    if ($("active-work-list")) $("active-work-list").innerHTML = listHtml(visibleEngagements, "No active internal work.", function (row) {
       var completionControls = row.source === "nova_autonomous"
         ? "<div class=\"owner-completion-box\">" +
           (row.status !== "COMPLETE"

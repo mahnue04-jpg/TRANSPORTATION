@@ -93,6 +93,9 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "Approve for future submission" in WORK_JS
     assert "Record manual submission after I send it" in WORK_JS
     assert "Prepare application drafts" in WORK_JS
+    assert "View details" in WORK_JS
+    assert "controlled test co|duty-class-prod-test|simulated\\/test fixture" in WORK_JS
+    assert ".opportunity-details" in WORK_CSS
 
 
 def test_signed_out_blocks_apis(client: TestClient) -> None:
@@ -164,6 +167,33 @@ def test_qualification_digital_physical_credential_and_missing() -> None:
     cpa_q = qualify_opportunity(cpa)
     assert cpa_q["licenses_required"] is True
     assert cpa_q["outcome"] in {"HUMAN_REQUIRED", "NOT_SUITABLE"}
+
+
+def test_dashboard_keeps_insufficient_information_out_of_primary_inbox(client: TestClient) -> None:
+    headers = _headers(client)
+    created = _create_opp(
+        client,
+        headers,
+        opportunity_title="Incomplete live opportunity",
+        description="",
+        requirements="",
+        skills_required=[],
+    )
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{created['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200, qualified.text
+    assert qualified.json()["outcome"] == "INSUFFICIENT_INFORMATION"
+
+    dash = client.get("/api/nova/work/dashboard", headers=headers)
+    assert dash.status_code == 200, dash.text
+    body = dash.json()
+    assert all(
+        item["opportunity_id"] != created["opportunity_id"]
+        for item in body["opportunity_inbox"]
+    )
+    assert body["counts"]["missing_information"] >= 1
 
 
 def test_capability_registry_does_not_claim_prohibited_work() -> None:
