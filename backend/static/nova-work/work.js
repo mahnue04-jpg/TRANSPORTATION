@@ -457,17 +457,24 @@
     if ($("count-facts-ready")) $("count-facts-ready").textContent = (counts.facts_readiness_percent || 0) + "%";
     $("inbox-list").innerHTML = listHtml(data.opportunity_inbox, "No opportunities in inbox.", oppItem);
     $("qualified-list").innerHTML = listHtml(data.qualified_work, "No qualified work.", oppItem);
-    $("app-list").innerHTML = listHtml(data.applications, "No applications.", applicationItem);
+    var activeOpportunityIds = {};
+    (data.opportunity_list || []).forEach(function (row) {
+      if (row && row.opportunity_id) activeOpportunityIds[String(row.opportunity_id)] = true;
+    });
+    var activeApplications = (data.applications || []).filter(function (row) {
+      return row && row.opportunity_id && activeOpportunityIds[String(row.opportunity_id)];
+    });
+    $("app-list").innerHTML = listHtml(activeApplications, "No active applications.", applicationItem);
     $("approval-list").innerHTML = listHtml(data.owner_approvals, "No applications waiting for owner approval.", applicationItem);
     if ($("needs-review-list")) $("needs-review-list").innerHTML = listHtml(data.owner_approvals, "Nothing needs owner review.", applicationItem);
     if ($("approved-list")) $("approved-list").innerHTML = listHtml(
-      (data.applications || []).filter(function (row) { return row.approved_for_future_submission && !row.manual_submission_recorded; }),
-      "No approved-for-future-submission items.",
+      activeApplications.filter(function (row) { return row.approved_for_future_submission && !row.manual_submission_recorded; }),
+      "No active approved-for-future-submission items.",
       applicationItem
     );
     if ($("submitted-list")) $("submitted-list").innerHTML = listHtml(
-      (data.applications || []).filter(function (row) { return row.manual_submission_recorded; }),
-      "No manually submitted records. NOT SENT BY NOVA.",
+      activeApplications.filter(function (row) { return row.manual_submission_recorded; }),
+      "No active manually submitted records. NOT SENT BY NOVA.",
       applicationItem
     );
     var visibleEngagements = (data.engagements || []).filter(function (row) {
