@@ -331,7 +331,7 @@ def test_bookkeeping_family_keeps_actual_bookkeeping_duties() -> None:
     assert scored["planned_family_duty_match"] is True
     assert scored["discovery_band"] != "REJECT"
 
-def test_missing_duty_evidence_is_not_a_confirmed_family_mismatch() -> None:
+def test_sparse_listing_without_family_evidence_is_rejected() -> None:
     scored = score_discovery_candidate(
         {
             "title": "Remote support opportunity",
@@ -343,7 +343,23 @@ def test_missing_duty_evidence_is_not_a_confirmed_family_mismatch() -> None:
         },
         query="bookkeeping support contractor remote",
     )
-    assert scored["planned_family_duty_match"] is None
+    assert scored["planned_family_duty_match"] is False
+    assert scored["discovery_band"] == "REJECT"
+
+
+def test_sparse_listing_with_family_text_evidence_can_survive() -> None:
+    scored = score_discovery_candidate(
+        {
+            "title": "Remote bookkeeping support",
+            "description": "Remote contract opportunity for invoice tracking and reconciliation support.",
+            "remote_status": "remote",
+            "job_type": "contract",
+            "search_family": "bookkeeping_support",
+            "search_family_label": "Bookkeeping / financial admin support",
+        },
+        query="bookkeeping support contractor remote",
+    )
+    assert scored["planned_family_duty_match"] is True
     assert scored["discovery_band"] != "REJECT"
 
 def test_listing_discovered_by_multiple_families_accepts_any_matching_family() -> None:
@@ -361,4 +377,25 @@ def test_listing_discovered_by_multiple_families_accepts_any_matching_family() -
     assert scored["planned_family_duty_match"] is True
     assert "research_analysis" in scored["search_family_candidates"]
     assert scored["discovery_band"] != "REJECT"
+
+def test_generic_family_evidence_gate_blocks_cross_family_drift() -> None:
+    cases = [
+        ("research_analysis", "Digital Asset Operations Analyst", "Support digital asset operations and internal workflows."),
+        ("data_spreadsheet", "Customer Success Specialist", "Handle customer relationships and account coordination."),
+        ("document_writing", "Sales Operations Associate", "Coordinate sales operations and pipeline follow-up."),
+        ("administrative_operations", "Blockchain Analyst", "Monitor digital asset market operations."),
+    ]
+    for family_id, title, description in cases:
+        scored = score_discovery_candidate(
+            {
+                "title": title,
+                "description": description,
+                "remote_status": "remote",
+                "job_type": "contract",
+                "search_family": family_id,
+            },
+            query="remote contractor",
+        )
+        assert scored["planned_family_duty_match"] is False
+        assert scored["discovery_band"] == "REJECT"
 

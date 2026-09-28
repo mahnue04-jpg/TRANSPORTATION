@@ -1224,6 +1224,15 @@ _BOOKKEEPING_RESULT_SIGNALS = re.compile(
     r"ledger|quickbooks|xero)\b",
     re.I,
 )
+_AI_AUTOMATION_QUERY_HINTS = re.compile(
+    r"\b(ai|artificial intelligence|automation|prompt|workflow automation|ai operations)\b",
+    re.I,
+)
+_AI_AUTOMATION_RESULT_SIGNALS = re.compile(
+    r"\b(ai|artificial intelligence|automation|workflow automation|zapier|make\.com|"
+    r"n8n|api integration|prompt engineering|prompt workflow|llm|ai agent|agent workflow)\b",
+    re.I,
+)
 
 
 _ADMIN_STRONG_TITLE = re.compile(
@@ -1307,6 +1316,12 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # feeds, where generic operations/analyst roles can otherwise be mislabeled.
     if _BOOKKEEPING_QUERY_HINTS.search(query_text):
         if not _BOOKKEEPING_RESULT_SIGNALS.search(" ".join([title, description])):
+            return False
+
+    # AI/automation searches must contain an actual AI/automation duty signal.
+    # Generic "operations" or "digital assets" titles are not enough.
+    if _AI_AUTOMATION_QUERY_HINTS.search(query_text):
+        if not _AI_AUTOMATION_RESULT_SIGNALS.search(" ".join([title, description])):
             return False
 
     # For any explicit vendor/contract/project search, remove obvious employee-
