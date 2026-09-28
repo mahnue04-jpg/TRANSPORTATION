@@ -1319,6 +1319,19 @@ def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if pid and pid not in sources:
             sources.append(pid)
         existing["provenance_sources"] = sources
+
+        # The same live listing can be returned by multiple capability-planned
+        # queries. Preserve every family that found it so later qualification
+        # does not judge the listing only against whichever query happened to
+        # arrive first.
+        family_candidates = list(existing.get("search_family_candidates") or [])
+        for family_id in (existing.get("search_family"), row.get("search_family")):
+            family_id = str(family_id or "").strip()
+            if family_id and family_id not in family_candidates:
+                family_candidates.append(family_id)
+        if family_candidates:
+            existing["search_family_candidates"] = family_candidates
+
         # Prefer richer description / compensation when duplicate collapses.
         if len(str(row.get("description") or "")) > len(str(existing.get("description") or "")):
             existing["description"] = row.get("description")
