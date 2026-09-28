@@ -607,7 +607,7 @@ def v3_live_job_prepare(
             "held_for_owner_review": held_for_owner_review,
             "skipped_not_qualified": skipped_not_qualified,
             "rejected_from_live_results": len(ranked) - len(visible_ranked),
-            "ranked_jobs": ranked,
+            "ranked_jobs": visible_ranked,
             "persistent_results": persistent_results,
         }
     except work_service.NovaWorkError as exc:
