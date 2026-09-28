@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     score_discovery_candidate,
     search_family_catalog,
     resolve_requested_family,
+    resolve_requested_families,
     targeted_queries_for_request,
 )
 from app.core.nova.work_revenue.flags import EXTERNAL_SUBMISSION_ENABLED, FINANCIAL_ACTIONS_ENABLED
