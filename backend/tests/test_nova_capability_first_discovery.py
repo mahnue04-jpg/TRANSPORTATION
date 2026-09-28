@@ -399,3 +399,20 @@ def test_generic_family_evidence_gate_blocks_cross_family_drift() -> None:
         assert scored["planned_family_duty_match"] is False
         assert scored["discovery_band"] == "REJECT"
 
+def test_compound_owner_search_covers_all_requested_families() -> None:
+    query = (
+        "Remote administrative support, bookkeeping, spreadsheet/data cleanup, "
+        "research, AI operations, document preparation, virtual assistant, and "
+        "project support contracts that Nova can perform remotely in the United States."
+    )
+    requested = resolve_requested_families(query)
+    rows = targeted_queries_for_request(query, max_queries=min(10, max(5, len(requested) + 2)))
+    covered = {row.get("search_family") for row in rows}
+    assert set(requested).issubset(covered)
+    assert "administrative_operations" in covered
+    assert "bookkeeping_support" in covered
+    assert "data_spreadsheet" in covered
+    assert "research_analysis" in covered
+    assert "ai_automation" in covered
+    assert "document_writing" in covered
+
