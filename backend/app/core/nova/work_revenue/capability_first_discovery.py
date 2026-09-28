@@ -497,6 +497,80 @@ def search_family_catalog() -> list[dict[str, Any]]:
     return rows
 
 
+_FAMILY_TEXT_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "administrative_operations": re.compile(
+        r"\b(administrative support|administrative operations|virtual assistant|"
+        r"document preparation|project administration|scheduling support|data entry|"
+        r"crm (?:cleanup|organization)|workflow documentation|business operations support)\b",
+        re.I,
+    ),
+    "bookkeeping_support": re.compile(
+        r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|"
+        r"invoice (?:tracking|preparation|processing)|expense (?:organization|categorization)|"
+        r"financial spreadsheet|transaction categorization|ledger|quickbooks|xero)\b",
+        re.I,
+    ),
+    "data_spreadsheet": re.compile(
+        r"\b(spreadsheet|excel|google sheets|csv|data cleanup|data cleaning|"
+        r"data validation|data organization|dashboard reporting|inventory data analysis)\b",
+        re.I,
+    ),
+    "research_analysis": re.compile(
+        r"\b(internet research|business research|market research|competitor research|"
+        r"supplier research|lead research|information gathering|research report|data research)\b",
+        re.I,
+    ),
+    "document_writing": re.compile(
+        r"\b(business document|proposal drafting|rfp support|sop (?:creation|writing)|"
+        r"process documentation|document formatting|business correspondence|"
+        r"report preparation|content operations)\b",
+        re.I,
+    ),
+    "customer_support_operations": re.compile(
+        r"\b(email support|chat support|customer support operations|ticket triage|"
+        r"faq support|response drafting|support knowledge base|crm organization)\b",
+        re.I,
+    ),
+    "web_software": re.compile(
+        r"\b(website updates?|html|css|qa testing|technical documentation|"
+        r"website administration|api integration|software documentation|web development)\b",
+        re.I,
+    ),
+    "logistics_digital": re.compile(
+        r"\b(inventory reconciliation|warehouse reporting|logistics data support|"
+        r"shipment tracking|inventory data cleanup|warehouse documentation|route analysis|"
+        r"dispatch administrative support|inventory analyst)\b",
+        re.I,
+    ),
+    "transportation_digital": re.compile(
+        r"\b(dispatch support|route planning|transportation reporting|shipment tracking|"
+        r"logistics administration|delivery data analysis|delivery documentation|"
+        r"fleet spreadsheet reporting)\b",
+        re.I,
+    ),
+    "healthcare_non_clinical": re.compile(
+        r"\b(healthcare administrative support|healthcare data cleanup|records organization|"
+        r"medical document formatting|non-clinical scheduling support|"
+        r"healthcare reporting support|healthcare operations research)\b",
+        re.I,
+    ),
+    "ai_automation": re.compile(
+        r"\b(ai workflow automation|ai workflow support|workflow automation|"
+        r"ai research support|automation contractor|prompt (?:document )?workflow|"
+        r"ai content operations|ai data quality|api integration|zapier|make\.com|n8n|"
+        r"prompt engineering|llm|ai agent|agent workflow)\b",
+        re.I,
+    ),
+}
+
+
+def _family_text_evidence(family_id: str | None, text: str) -> bool | None:
+    pattern = _FAMILY_TEXT_EVIDENCE.get(str(family_id or "").strip())
+    if pattern is None:
+        return None
+    return bool(pattern.search(str(text or "")))
+
+
 _FAMILY_DUTY_MATCHES: dict[str, frozenset[str]] = {
     "administrative_operations": frozenset({
         "administrative_support", "data_organization", "document_preparation",
@@ -619,11 +693,21 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         family_duty_match = _planned_family_duty_match(planned_family_id, duty_matches)
     else:
         family_duty_match = None
-    # Search-provider keyword hits are not enough. For the high-volume owner
-    # families, require the listing's actual duties to overlap the family that
-    # caused Nova to search it. This keeps bookkeeping from surfacing AI
-    # trainers/developers and keeps admin/data searches from drifting.
+    # Search-provider keyword hits are not enough. When structured duty
+    # classification is sparse, require concrete text evidence for at least one
+    # planned family. This is the generic anti-drift gate used across all major
+    # capability families, rather than adding one-off filters for every bad title.
     if family_duty_match is None and family_candidates and not duty_matches:
+        evidence_matches = [
+            _family_text_evidence(family_id, text)
+            for family_id in family_candidates
+        ]
+        known_evidence = [match for match in evidence_matches if match is not None]
+        if any(match is True for match in known_evidence):
+            family_duty_match = True
+        elif known_evidence:
+            family_duty_match = False
+
         obvious_human_evaluator = bool(
             re.search(
                 r"\b(ai trainer|model evaluator|quality evaluator|human evaluator|rater|annotator|"
