@@ -551,6 +551,8 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         band = "REJECT"
 
     family = match_query_to_family(query or "")
+    planned_family_id = str(job.get("search_family") or "").strip() or None
+    planned_family = SEARCH_FAMILIES.get(planned_family_id) if planned_family_id else None
     return {
         "discovery_score": score,
         "discovery_band": band,
@@ -571,9 +573,12 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "deliverables_nova_can_produce": duty["deliverables_nova_can_produce"],
         "owner_review_needed": duty["owner_review_needed"] or band == "OWNER_REVIEW",
         "state_restriction_detected": state_restricted,
-        "search_family": (family or {}).get("family_id"),
-        "search_family_label": (family or {}).get("label"),
-        "why_searched": (family or {}).get("why_searched")
+        "search_family": planned_family_id or (family or {}).get("family_id"),
+        "search_family_label": str(job.get("search_family_label") or "").strip()
+        or (planned_family or {}).get("label")
+        or (family or {}).get("label"),
+        "why_searched": str(job.get("why_searched") or "").strip()
+        or (family or {}).get("why_searched")
         or "Capability-first remote/digital discovery against verified Nova capabilities.",
         "title_used_for_decision": False,
         "nationwide_remote_allowed": True,
