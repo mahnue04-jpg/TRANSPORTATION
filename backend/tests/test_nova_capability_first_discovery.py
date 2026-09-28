@@ -289,3 +289,44 @@ def test_compound_owner_request_spreads_search_budget_across_requested_families(
     }
     assert len(rows) == 5
     assert all("remote" in row["query"].lower() or "freelance" in row["query"].lower() or "contractor" in row["query"].lower() for row in rows)
+
+
+
+def test_bookkeeping_family_rejects_unrelated_ai_trainer() -> None:
+    ranked = qualify_and_rank_live_jobs(
+        "remote administrative support, spreadsheet analysis, research, AI operations, bookkeeping support",
+        [{
+            "provider_id": "remotive",
+            "provider_identifier": "trainer-1",
+            "title": "AI Trainer Image QA Evaluator",
+            "company_name": "Example",
+            "description": "Evaluate images and rate model responses for quality.",
+            "source_url": "https://example.com/jobs/trainer-1",
+            "remote_status": "remote",
+            "job_type": "contract",
+            "search_family": "bookkeeping_support",
+            "search_family_label": "Bookkeeping / financial admin support",
+        }],
+    )
+    assert ranked[0]["discovery_band"] == "REJECT"
+    assert ranked[0]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert ranked[0]["live_qualification"]["auto_prepare_allowed"] is False
+
+
+def test_bookkeeping_family_keeps_actual_bookkeeping_duties() -> None:
+    scored = score_discovery_candidate(
+        {
+            "title": "Remote bookkeeping support contractor",
+            "description": (
+                "Remote contractor providing bookkeeping support, financial spreadsheet "
+                "preparation, reconciliation support, and invoice tracking."
+            ),
+            "remote_status": "remote",
+            "job_type": "contract",
+            "search_family": "bookkeeping_support",
+            "search_family_label": "Bookkeeping / financial admin support",
+        },
+        query="bookkeeping support contractor remote no CPA",
+    )
+    assert scored["planned_family_duty_match"] is True
+    assert scored["discovery_band"] != "REJECT"

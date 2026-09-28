@@ -919,12 +919,21 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "nationwide_remote_allowed": True,
             }
         )
-        # Keep CANNOT / INSUFFICIENT from auto-prepare path already enforced.
-        if discovery["discovery_band"] == "REJECT" and qual.get("qualification_status") == OUTCOME_QUALIFIED:
-            if discovery["actual_duty_fit"] in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
-                qual["qualification_status"] = OUTCOME_NOT_QUALIFIED
-                qual["qualification_outcome"] = OUTCOME_NOT_QUALIFIED
-                qual["auto_prepare_allowed"] = False
+        # A rejected discovery candidate must never remain owner-visible as a
+        # viable QUALIFIED/NEEDS_OWNER_REVIEW row. REJECT can come from hard
+        # capability failure or from planned-family duty mismatch.
+        if discovery["discovery_band"] == "REJECT":
+            qual["qualification_status"] = OUTCOME_NOT_QUALIFIED
+            qual["qualification_outcome"] = OUTCOME_NOT_QUALIFIED
+            qual["auto_prepare_allowed"] = False
+            if discovery.get("planned_family_duty_match") is False:
+                qual.setdefault("blockers", []).append("planned_family_duty_mismatch")
+                qual.setdefault("reasons", []).append(
+                    "Actual duties do not match the capability family used for this search."
+                )
+                qual["owner_review_reason"] = (
+                    "Actual duties do not match the requested capability family."
+                )
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
         row["relevance_score"] = base + bonus
