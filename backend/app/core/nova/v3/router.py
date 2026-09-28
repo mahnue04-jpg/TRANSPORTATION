@@ -429,7 +429,10 @@ def v3_live_job_discover(
             user=user,
             prepare_applications=False,
         )
-        buckets = partition_by_qualification(selected)
+        # Diagnostics must describe the full ranked set. The selected set is
+        # intentionally QUALIFIED-only, so counting only selected rows hides why
+        # a live search returned zero saveable opportunities.
+        buckets = partition_by_qualification(ranked)
         return {
             "query": payload.query,
             "source": "multi_source",
@@ -442,6 +445,7 @@ def v3_live_job_discover(
             "external_submission": False,
             "financial_execution": False,
             "ranked_count": len(visible_ranked),
+            "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
             "qualification_counts": {
                 OUTCOME_QUALIFIED: len(buckets[OUTCOME_QUALIFIED]),
