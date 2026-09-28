@@ -2531,8 +2531,8 @@ def test_restore_invoice_support_ui_is_safe() -> None:
     assert "nothing sent · nothing charged · nothing received" in WORK_JS
 
 
-def test_dashboard_default_opportunity_list_excludes_historical_test_and_incomplete_rows(client, auth_headers):
-    headers = auth_headers("admin@amicor.local")
+def test_dashboard_default_opportunity_list_excludes_historical_test_and_incomplete_rows(client: TestClient) -> None:
+    headers = _headers(client)
 
     def create(title, source_type="manual"):
         response = client.post(
