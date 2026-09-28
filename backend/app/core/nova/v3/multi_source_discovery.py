@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 from docx import Document
@@ -144,23 +144,65 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
     }
 
 
+_TRACKING_QUERY_KEYS = {
+    "ref", "referrer", "source", "src", "campaign", "campaign_id",
+    "fbclid", "gclid", "mc_cid", "mc_eid",
+}
+
+
+def _canonical_source_url(value: str) -> str:
+    """Normalize harmless URL variation so repeated listings collapse."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return raw.lower()
+    host = str(parsed.hostname or "").lower()
+    if not host:
+        return raw.lower()
+    port = parsed.port
+    netloc = host
+    if port and not ((parsed.scheme.lower() == "https" and port == 443) or (parsed.scheme.lower() == "http" and port == 80)):
+        netloc = f"{host}:{port}"
+    path = re.sub(r"/+", "/", parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/")
+    query = [
+        (key, val)
+        for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in _TRACKING_QUERY_KEYS
+    ]
+    return urlunparse((parsed.scheme.lower() or "https", netloc, path, "", urlencode(sorted(query)), ""))
+
+
+def _identity_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
 def opportunity_dedupe_key(row: dict[str, Any]) -> str:
-    # SAM.gov: stable government notice/opportunity id wins over URL churn.
-    if str(row.get("provider_id") or "").strip().lower() == "sam_gov":
-        notice = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
-        if notice:
-            return "sam_notice:" + notice
-    url = str(row.get("source_url") or "").strip().lower()
+    # Stable provider identifiers are stronger than URL variations.
+    provider = str(row.get("provider_id") or "").strip().lower()
+    identifier = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
+    if provider == "sam_gov" and identifier:
+        return "sam_notice:" + identifier
+    if provider and identifier:
+        return f"provider:{provider}:{identifier}"
+
+    url = _canonical_source_url(str(row.get("source_url") or ""))
     if url:
         return "url:" + url
+
+    # Last-resort identity intentionally ignores provider so the same buyer/title
+    # found through two feeds does not appear twice.
     blob = "|".join(
         [
-            str(row.get("company_name") or "").strip().lower(),
-            str(row.get("title") or "").strip().lower(),
-            str(row.get("provider_identifier") or "").strip().lower(),
+            _identity_text(row.get("company_name") or row.get("client")),
+            _identity_text(row.get("title")),
         ]
     )
-    return "hash:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+    return "identity:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
 
 @dataclass
