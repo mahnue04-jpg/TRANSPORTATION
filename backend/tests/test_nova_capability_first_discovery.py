@@ -330,3 +330,19 @@ def test_bookkeeping_family_keeps_actual_bookkeeping_duties() -> None:
     )
     assert scored["planned_family_duty_match"] is True
     assert scored["discovery_band"] != "REJECT"
+
+def test_missing_duty_evidence_is_not_a_confirmed_family_mismatch() -> None:
+    scored = score_discovery_candidate(
+        {
+            "title": "Remote support opportunity",
+            "description": "Remote contract opportunity; see source for complete scope.",
+            "remote_status": "remote",
+            "job_type": "contract",
+            "search_family": "bookkeeping_support",
+            "search_family_label": "Bookkeeping / financial admin support",
+        },
+        query="bookkeeping support contractor remote",
+    )
+    assert scored["planned_family_duty_match"] is None
+    assert scored["discovery_band"] != "REJECT"
+
