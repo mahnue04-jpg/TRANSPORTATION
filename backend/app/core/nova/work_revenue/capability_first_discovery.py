@@ -596,10 +596,27 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     family = match_query_to_family(query or "")
     planned_family_id = str(job.get("search_family") or "").strip() or None
     planned_family = SEARCH_FAMILIES.get(planned_family_id) if planned_family_id else None
-    family_duty_match = _planned_family_duty_match(
-        planned_family_id,
-        list(duty["capability_registry_matches"]),
-    )
+    family_candidates = [
+        str(item or "").strip()
+        for item in list(job.get("search_family_candidates") or [])
+        if str(item or "").strip()
+    ]
+    if planned_family_id and planned_family_id not in family_candidates:
+        family_candidates.insert(0, planned_family_id)
+
+    duty_matches = list(duty["capability_registry_matches"])
+    candidate_matches = [
+        _planned_family_duty_match(family_id, duty_matches)
+        for family_id in family_candidates
+    ]
+    if any(match is True for match in candidate_matches):
+        family_duty_match = True
+    elif candidate_matches and all(match is False for match in candidate_matches):
+        family_duty_match = False
+    elif planned_family_id:
+        family_duty_match = _planned_family_duty_match(planned_family_id, duty_matches)
+    else:
+        family_duty_match = None
     # Search-provider keyword hits are not enough. For the high-volume owner
     # families, require the listing's actual duties to overlap the family that
     # caused Nova to search it. This keeps bookkeeping from surfacing AI
@@ -612,6 +629,7 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "discovery_band": band,
         "capability_match": bool(duty["capability_registry_matches"]),
         "planned_family_duty_match": family_duty_match,
+        "search_family_candidates": family_candidates,
         "remote_eligibility": "YES" if remote_ok else "NO",
         "vendor_contract_compatibility": "YES" if preferred_hits else "UNKNOWN",
         "physical_presence_requirement": duty["required_physical_presence"],
