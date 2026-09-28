@@ -2529,3 +2529,70 @@ def test_restore_invoice_support_ui_is_safe() -> None:
     assert "/restore" in WORK_JS
     assert "estimated revenue restored" in WORK_JS
     assert "nothing sent · nothing charged · nothing received" in WORK_JS
+
+
+def test_dashboard_default_opportunity_list_excludes_historical_test_and_incomplete_rows(client: TestClient) -> None:
+    headers = _headers(client)
+
+    def create(title, source_type="manual"):
+        response = client.post(
+            "/api/nova/work/opportunities",
+            headers=headers,
+            json={
+                "company_name": "Default List Test Co",
+                "opportunity_title": title,
+                "description": "Remote spreadsheet analysis, research, and administrative support.",
+                "source": source_type,
+                "source_type": source_type,
+                "remote_status": "remote",
+                "physical_presence_required": "false",
+            },
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    live = create("Live digital support opportunity")
+    fixture = create("Simulated fixture opportunity", "simulated")
+    incomplete = create("Incomplete opportunity")
+    archived = create("Archived opportunity")
+
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{live['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200
+
+    fixture_qualified = client.post(
+        f"/api/nova/work/opportunities/{fixture['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    assert fixture_qualified.status_code == 200
+
+    incomplete_update = client.patch(
+        f"/api/nova/work/opportunities/{incomplete['opportunity_id']}",
+        headers=headers,
+        json={"status": "REVIEWING"},
+    )
+    assert incomplete_update.status_code == 200
+
+    archived_update = client.patch(
+        f"/api/nova/work/opportunities/{archived['opportunity_id']}",
+        headers=headers,
+        json={"archived": True, "archive_reason": "Historical test record"},
+    )
+    assert archived_update.status_code == 200
+
+    dashboard = client.get("/api/nova/work/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+    ids = {row["opportunity_id"] for row in dashboard.json()["opportunity_list"]}
+    assert live["opportunity_id"] in ids
+    assert fixture["opportunity_id"] not in ids
+    assert archived["opportunity_id"] not in ids
+
+    # Incomplete records remain available through explicit review/history filters
+    # rather than cluttering the default live list.
+    missing = client.get(
+        "/api/nova/work/opportunities?view_filter=missing_information&limit=100",
+        headers=headers,
+    )
+    assert missing.status_code == 200
