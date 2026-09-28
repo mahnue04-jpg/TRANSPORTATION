@@ -1,7 +1,19 @@
 "use strict";
 
 (function () {
+  var ACTIVE_ITEM_KEY = "amicor.nova.government.activeItemId";
   var state = { itemId: null, dashboard: null, selectedItem: null };
+
+  function rememberActiveItem(itemId) {
+    state.itemId = itemId || null;
+    try {
+      if (state.itemId) window.sessionStorage.setItem(ACTIVE_ITEM_KEY, state.itemId);
+      else window.sessionStorage.removeItem(ACTIVE_ITEM_KEY);
+    } catch (_) {}
+  }
+  function restoreActiveItem() {
+    try { return window.sessionStorage.getItem(ACTIVE_ITEM_KEY) || null; } catch (_) { return null; }
+  }
 
   function $(id) {
     var el = document.getElementById(id);
@@ -143,9 +155,20 @@
     }
     setSignedIn(true);
     renderDashboard(await api("/api/nova/government/dashboard"));
+    if (!state.itemId) rememberActiveItem(restoreActiveItem());
     if (state.itemId) {
-      await loadItemExtras(state.itemId);
-      if (state.selectedItem) $("active-work").textContent = "Active government work: " + state.selectedItem.title + " · " + state.selectedItem.government_level + " · " + state.selectedItem.category;
+      try {
+        var item = await api("/api/nova/government/items/" + encodeURIComponent(state.itemId));
+        state.selectedItem = item;
+        populateItemForm(item);
+        await loadItemExtras(state.itemId);
+        $("active-work").textContent = "Active government work: " + item.title + " · " + item.government_level + " · " + item.category;
+      } catch (err) {
+        rememberActiveItem(null);
+        state.selectedItem = null;
+        $("active-work").textContent = "No active government work item selected.";
+        if (err && err.message !== "Not found / unavailable.") throw err;
+      }
     } else {
       $("active-work").textContent = "No active government work item selected.";
     }
@@ -275,7 +298,7 @@
           notes: $("item-notes").value || null
         })
       });
-      state.itemId = created.item_id;
+      rememberActiveItem(created.item_id);
       state.selectedItem = created;
       showBanner("Government work saved under " + created.government_level + " / " + created.category + ". It is now the active work item.", true);
       await refresh();
@@ -363,7 +386,7 @@
     var openBtn = event.target.closest("[data-open-item]");
     if (!openBtn) return;
     try {
-      state.itemId = openBtn.getAttribute("data-open-item");
+      rememberActiveItem(openBtn.getAttribute("data-open-item"));
       var item = await api("/api/nova/government/items/" + encodeURIComponent(state.itemId));
       state.selectedItem = item;
       populateItemForm(item);
@@ -426,6 +449,8 @@
     showBanner("Signed in. Nova Government is available.", true);
   });
   $("sign-out").addEventListener("click", async function () {
+    rememberActiveItem(null);
+    state.selectedItem = null;
     if (session() && session().logout) await session().logout();
     window.location.href = "/nova/government";
   });
