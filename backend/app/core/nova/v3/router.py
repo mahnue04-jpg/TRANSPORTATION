@@ -17,6 +17,7 @@ from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.capability_catalog import capability_catalog, capability_search_queries
 from app.core.nova.work_revenue.capability_first_discovery import (
     generate_capability_first_queries,
+    resolve_requested_families,
     search_family_catalog,
     targeted_queries_for_request,
 )
@@ -478,7 +479,13 @@ def v3_live_job_prepare(
 ):
     org_id = _org(user, payload.organization_id)
     try:
-        search_plan = targeted_queries_for_request(payload.query, max_queries=5)
+        requested_families = resolve_requested_families(payload.query)
+        # Compound owner searches must cover every explicitly requested family.
+        # The old fixed budget of five silently dropped later families (for
+        # example administrative support in a six-family query), which could
+        # turn a valid search into a zero-result session after strict filtering.
+        search_budget = min(10, max(5, len(requested_families) + 2))
+        search_plan = targeted_queries_for_request(payload.query, max_queries=search_budget)
         collected: list[dict[str, Any]] = []
         sources: list[str] = []
         provider_counts: dict[str, int] = {}
