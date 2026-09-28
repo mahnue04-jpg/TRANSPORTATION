@@ -1714,7 +1714,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         and not item.archived
     ]
     qualified = []
-    for item in real_outs:
+    for item in live_opportunity_list:
         duty_class = ((item.qualification or {}).get("capability_classification"))
         if duty_class in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}:
             continue
@@ -1735,13 +1735,6 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     ]
     won = [item for item in outs if item.status == "WON"]
     archived = [item for item in outs if item.archived or item.status in {"CLOSED", "REJECTED"}]
-    approvals = [item for item in visible_apps if item.approval_state == "READY_FOR_OWNER_REVIEW"]
-    draft_ready = [item for item in visible_apps if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
-    approved = [item for item in visible_apps if item.approved_for_future_submission]
-    submitted = [
-        item for item in live_opportunity_list
-        if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"
-    ]
     visible_ids = {item.opportunity_id for item in live_opportunity_list}
     visible_apps = [
         item for item in applications
@@ -1750,6 +1743,13 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
     visible_actions = [
         item for item in actions
         if not item.opportunity_id or item.opportunity_id in visible_ids
+    ]
+    approvals = [item for item in visible_apps if item.approval_state == "READY_FOR_OWNER_REVIEW"]
+    draft_ready = [item for item in visible_apps if item.approval_state in {"DRAFT", "READY_FOR_OWNER_REVIEW"}]
+    approved = [item for item in visible_apps if item.approved_for_future_submission]
+    submitted = [
+        item for item in live_opportunity_list
+        if item.status == "SUBMITTED" or item.application_state == "submitted_externally_recorded"
     ]
     needs_owner = [
         item for item in live_opportunity_list
@@ -1785,8 +1785,8 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
             "simulated_fixtures": len(test_outs),
             "real_opportunities": len(live_opportunity_list),
             "historical_real_opportunities": len(real_outs) - len(live_opportunity_list),
-            "new": len([item for item in real_outs if item.status == "DISCOVERED"]),
-            "needs_review": len([item for item in real_outs if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
+            "new": len([item for item in live_opportunity_list if item.status == "DISCOVERED"]),
+            "needs_review": len([item for item in live_opportunity_list if item.status in {"REVIEWING", "OWNER_REVIEW"}]),
             "qualified": len(qualified),
             "not_qualified": len([item for item in real_outs if item.status == "NOT_QUALIFIED"]),
             "needs_owner_input": len(needs_owner),
