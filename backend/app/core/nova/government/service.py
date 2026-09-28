@@ -435,7 +435,7 @@ def _fetch_official_gov_text(url: str) -> tuple[str, str]:
     try:
         response = requests.get(
             url,
-            timeout=12,
+            timeout=(3.05, 6),
             allow_redirects=True,
             stream=True,
             headers={"User-Agent": "Mozilla/5.0 (compatible; Amicor-Nova-Government/1.0)"},
@@ -514,54 +514,19 @@ def _deterministic_source_evidence(text: str) -> dict:
 
 
 def _exact_source_extract(text: str) -> dict:
-    facts = {
-        "agency_name": None,
+    """Fast, deterministic exact-text extraction for source inspection.
+
+    Source inspection is an interactive verification aid. Keep it bounded and
+    avoid a second network hop to an LLM, which can add up to ~30 seconds.
+    """
+    fallback = _deterministic_source_evidence(text)
+    return {
+        "agency_name": fallback.get("agency_name"),
         "requirements": [],
         "fees": [],
         "deadlines": [],
-        "evidence_phrases": [],
+        "evidence_phrases": fallback.get("evidence_phrases") or [],
     }
-    if not text.strip():
-        return facts
-
-    parsed = {}
-    try:
-        from app.ai import ask_openai
-        prompt = (
-            "Extract exact evidence phrases from this official government page. "
-            "Return JSON only with keys agency_name, requirements, fees, deadlines. "
-            "Every non-null string MUST be copied verbatim from the supplied page text; "
-            "do not paraphrase, infer applicability, or add facts. Use at most 5 items per list. "
-            "Only place a statement under requirements when the page explicitly states a requirement; "
-            "general guidance belongs nowhere. If the page does not explicitly state something, return null or an empty list.\n\n"
-            + text[:12000]
-        )
-        raw = str(ask_openai(prompt) or "").strip()
-        raw = re.sub(r"^\x60\x60\x60(?:json)?\\s*|\\s*\x60\x60\x60$", "", raw, flags=re.IGNORECASE)
-        parsed = json.loads(raw)
-    except Exception:
-        parsed = {}
-
-    lowered = text.lower()
-    agency = str(parsed.get("agency_name") or "").strip()
-    if agency and agency.lower() in lowered:
-        facts["agency_name"] = agency
-    for key in ("requirements", "fees", "deadlines"):
-        values = parsed.get(key) or []
-        if not isinstance(values, list):
-            continue
-        accepted = []
-        for value in values[:5]:
-            phrase = str(value or "").strip()
-            if phrase and phrase.lower() in lowered:
-                accepted.append(phrase)
-        facts[key] = accepted
-
-    fallback = _deterministic_source_evidence(text)
-    if not facts["agency_name"] and fallback["agency_name"]:
-        facts["agency_name"] = fallback["agency_name"]
-    facts["evidence_phrases"] = fallback["evidence_phrases"]
-    return facts
 
 
 def inspect_source(
