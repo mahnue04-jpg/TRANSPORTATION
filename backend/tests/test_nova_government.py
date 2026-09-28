@@ -397,6 +397,46 @@ def test_nova_government_source_inspection_is_exact_and_gov_only(client: TestCli
     assert blocked.status_code == 422
 
 
+
+def test_nova_government_source_inspection_does_not_wait_for_ai(client: TestClient, monkeypatch) -> None:
+    from app.core.nova.government import service as gov_service
+
+    headers = _headers(client)
+    item = _create_item(client, headers, title="Fast source inspection", agency=None, category="licensing")
+    source = client.post(
+        f"/api/nova/government/items/{item['item_id']}/sources",
+        headers=headers,
+        json={
+            "page_title": "Fast official page",
+            "source_url": "https://agency.example.gov/licenses",
+            "verification_status": "official_source",
+        },
+    ).json()
+    monkeypatch.setattr(
+        gov_service,
+        "_fetch_official_gov_text",
+        lambda url: (
+            "Minnesota Department of Example. Businesses may need a license. Application information is available here.",
+            url,
+        ),
+    )
+
+    def fail_if_ai_called(*_args, **_kwargs):
+        raise AssertionError("source inspection must not make an AI network call")
+
+    import app.ai as ai_module
+    monkeypatch.setattr(ai_module, "ask_openai", fail_if_ai_called)
+
+    inspected = client.post(
+        f"/api/nova/government/sources/{source['source_id']}/inspect",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    body = inspected.json()
+    assert body["facts"]["evidence_phrases"]
+    assert "applicability" in body["warning"].lower()
+
+
 def test_nova_government_source_inspection_ui() -> None:
     assert "Inspect official source" in GOV_JS
     assert "data-inspect-source" in GOV_JS
