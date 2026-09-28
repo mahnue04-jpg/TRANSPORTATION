@@ -44,6 +44,7 @@ from app.core.nova.today.live_tools import (
     fetch_web_search,
     fetch_weather,
     format_news,
+    format_news_search_fallback,
     format_weather,
     format_web_search,
     is_news_request,
@@ -3070,7 +3071,7 @@ def _today_live_or_memory_answer(
                 ]
                 if sources:
                     return NovaTodayBrainOut(
-                        answer=format_web_search(fallback, fallback_query),
+                        answer=format_news_search_fallback(fallback, query),
                         fact_label="VERIFIED DATA",
                         next_actions=[],
                         generated_at=now().isoformat(),
