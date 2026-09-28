@@ -980,3 +980,19 @@ def test_ai_search_keeps_actual_workflow_automation_contract() -> None:
         "AI operations contractor remote",
     ) is True
 
+def test_admin_search_rejects_digital_asset_operations_analyst() -> None:
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+
+    unrelated = {
+        "provider_id": "remotive",
+        "title": "Junior Digital Assets Operations Analyst",
+        "description": "Support digital asset operations and internal workflows.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(
+        unrelated,
+        "remote administrative support contractor",
+    ) is False
+
