@@ -182,17 +182,21 @@ def _identity_text(value: Any) -> str:
 
 
 def opportunity_dedupe_key(row: dict[str, Any]) -> str:
-    # Stable provider identifiers are stronger than URL variations.
     provider = str(row.get("provider_id") or "").strip().lower()
     identifier = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
+    # SAM notice IDs are canonical across notice URL variants.
     if provider == "sam_gov" and identifier:
         return "sam_notice:" + identifier
-    if provider and identifier:
-        return f"provider:{provider}:{identifier}"
 
+    # A canonical public URL is stronger for cross-provider duplicates: the same
+    # listing can be syndicated by more than one feed with different provider IDs.
     url = _canonical_source_url(str(row.get("source_url") or ""))
     if url:
         return "url:" + url
+
+    # Fall back to provider identity when no actionable URL exists.
+    if provider and identifier:
+        return f"provider:{provider}:{identifier}"
 
     # Last-resort identity intentionally ignores provider so the same buyer/title
     # found through two feeds does not appear twice.
@@ -1205,7 +1209,7 @@ _ADMIN_STRONG_TITLE = re.compile(
     r"\b("
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|virtual assistant|office assistant|office administrator|"
-    r"operations (?:assistant|support|coordinator|administrator)|"
+    r"operations (?:assistant|support|coordinator|administrator|analyst(?: contractor)?)|"
     r"business operations (?:assistant|support|coordinator)|"
     r"data entry (?:assistant|clerk|specialist|contractor)|"
     r"records (?:assistant|clerk|specialist|coordinator)|"
