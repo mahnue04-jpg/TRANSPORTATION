@@ -154,6 +154,8 @@ _HUMAN_EVALUATOR_TOKENS = (
     "rank responses against",
     "evaluate ai generated",
     "evaluate and score",
+    "content reviewer",
+    "content evaluator",
 )
 
 _INDIVIDUAL_SPECIALIST_TOKENS = (
