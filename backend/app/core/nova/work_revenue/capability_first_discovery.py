@@ -525,7 +525,17 @@ def _planned_family_duty_match(family_id: str | None, duty_matches: list[str]) -
     allowed = _FAMILY_DUTY_MATCHES.get(str(family_id or "").strip())
     if allowed is None:
         return None
-    return bool(allowed.intersection(str(item or "").strip() for item in duty_matches))
+    normalized_matches = {
+        str(item or "").strip()
+        for item in duty_matches
+        if str(item or "").strip()
+    }
+    # No classified duty evidence is not the same as a confirmed family mismatch.
+    # Preserve the caller's INSUFFICIENT_INFORMATION/owner-review path instead of
+    # turning sparse provider records into a hard REJECT.
+    if not normalized_matches:
+        return None
+    return bool(allowed.intersection(normalized_matches))
 
 
 def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) -> dict[str, Any]:
