@@ -1694,7 +1694,16 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
 
     real_outs = [item for item in outs if not _is_test_fixture(item)]
     test_outs = [item for item in outs if _is_test_fixture(item)]
-    inbox = [item for item in real_outs if item.status in {"DISCOVERED", "REVIEWING"}]
+    # The primary inbox is actionable discovery work, not the holding area for
+    # incomplete qualification. Keep INSUFFICIENT_INFORMATION available through
+    # Needs Review / Missing Information filters without mixing it into the live inbox.
+    inbox = [
+        item
+        for item in real_outs
+        if item.status in {"DISCOVERED", "REVIEWING"}
+        and item.qualification_outcome != "INSUFFICIENT_INFORMATION"
+        and not item.archived
+    ]
     qualified = []
     for item in real_outs:
         duty_class = ((item.qualification or {}).get("capability_classification"))
