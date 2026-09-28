@@ -452,6 +452,67 @@ def test_nova_government_ui_populates_active_item_form() -> None:
     assert "populateItemForm(item);" in GOV_JS
 
 
+
+def test_nova_government_ui_preserves_active_item_across_navigation() -> None:
+    assert 'var ACTIVE_ITEM_KEY = "amicor.nova.government.activeItemId";' in GOV_JS
+    assert "window.sessionStorage.setItem(ACTIVE_ITEM_KEY, state.itemId)" in GOV_JS
+    assert "window.sessionStorage.getItem(ACTIVE_ITEM_KEY)" in GOV_JS
+    assert "rememberActiveItem(created.item_id);" in GOV_JS
+    assert 'rememberActiveItem(openBtn.getAttribute("data-open-item"));' in GOV_JS
+    assert "rememberActiveItem(null);" in GOV_JS
+
+
+def test_nova_government_all_visible_brain_tools_have_safe_active_item_behavior(client: TestClient) -> None:
+    headers = _headers(client)
+    item = _create_item(
+        client,
+        headers,
+        title="Full Government tool audit",
+        agency=None,
+        category="licensing",
+        source_reference=None,
+        description=None,
+        notes=None,
+    )
+    actions = (
+        "explain_requirement",
+        "summarize_letter",
+        "find_agency",
+        "missing_documents",
+        "build_checklist",
+        "next_step",
+        "compare_levels",
+        "prepare_email",
+        "identify_deadlines",
+        "summarize_open_work",
+    )
+    for action in actions:
+        asked = client.post(
+            "/api/nova/government/ask",
+            headers=headers,
+            json={"action": action, "item_id": item["item_id"]},
+        )
+        assert asked.status_code == 200, (action, asked.text)
+        body = asked.json()
+        assert body["answer"].strip(), action
+        combined = (body["fact_label"] + "\n" + body["answer"]).lower()
+        assert "official government ruling" in combined or "verification required" in combined or "draft only" in combined
+        for forbidden in (
+            "you must file",
+            "you are required to submit",
+            "you must pay",
+            "deadline is tomorrow",
+        ):
+            assert forbidden not in combined, (action, combined)
+
+    checks = client.get(
+        f"/api/nova/government/items/{item['item_id']}/checklist",
+        headers=headers,
+    )
+    assert checks.status_code == 200
+    assert checks.json() == []
+
+
 def test_nova_government_communications_link_and_no_send_or_file(client: TestClient) -> None:
     headers = _headers(client)
     item = _create_item(client, headers, title="Agency inquiry draft")
