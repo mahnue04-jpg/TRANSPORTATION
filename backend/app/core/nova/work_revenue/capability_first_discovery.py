@@ -450,6 +450,8 @@ def generate_capability_first_queries(
             q = str(query).strip()
             if not q or is_banned_query(q):
                 continue
+            if not re.search(r"\b(remote|freelance|contractor)\b", q, re.I):
+                q = f"{q} remote contractor"
             key = q.lower()
             if key in seen:
                 continue
@@ -621,6 +623,18 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     # families, require the listing's actual duties to overlap the family that
     # caused Nova to search it. This keeps bookkeeping from surfacing AI
     # trainers/developers and keeps admin/data searches from drifting.
+    if family_duty_match is None and family_candidates and not duty_matches:
+        obvious_human_evaluator = bool(
+            re.search(
+                r"\b(ai trainer|model evaluator|quality evaluator|human evaluator|rater|annotator|"
+                r"rate model responses|evaluate model responses|image qa evaluator)\b",
+                text,
+                re.I,
+            )
+        )
+        if obvious_human_evaluator:
+            family_duty_match = False
+
     if family_duty_match is False:
         score = min(score, 35)
         band = "REJECT"
