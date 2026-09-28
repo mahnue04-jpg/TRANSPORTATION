@@ -494,3 +494,90 @@ def test_live_bridge_recovers_integrity_error_on_duplicate_insert(monkeypatch, c
     finally:
         db.rollback()
         db.close()
+
+
+
+def test_prepare_deduplicates_across_search_plan_and_hides_rejected_results(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_live(monkeypatch)
+    from app.core.nova.v3 import router as v3_router
+
+    duplicate = _qualified_job(
+        title="Remote Administrative Reporting Contractor",
+        company_name="Canonical Buyer LLC",
+        source_url="https://remotive.com/remote-jobs/canonical-live-result",
+        description=(
+            "Remote B2B contractor project for administrative support, spreadsheet reporting, "
+            "research, bookkeeping support, and AI-assisted workflow documentation. "
+            "AI tools allowed. No membership fee."
+        ),
+        compensation_text="$45/hr",
+    )
+    rejected = _qualified_job(
+        title="Senior Software Engineer",
+        company_name="Employee Only Co",
+        source_url="https://remotive.com/remote-jobs/rejected-live-result",
+        description="Full-time W-2 employee software engineering role with benefits.",
+        job_type="full_time",
+        compensation_text="$150,000 salary",
+    )
+
+    def fake_search(query: str, limit: int = 10):
+        return {
+            "jobs": [dict(duplicate), dict(rejected)],
+            "providers_queried": ["remotive"],
+            "provider_result_counts": {"remotive": 2},
+            "provider_errors": [],
+            "provider_health": [],
+        }
+
+    captured = {}
+
+    def fake_rank(query: str, jobs: list[dict]):
+        captured["jobs"] = list(jobs)
+        good = dict(jobs[0])
+        good["qualification_status"] = OUTCOME_QUALIFIED
+        good["relevance_score"] = 90
+        good["revenue_ready"] = True
+        good["live_qualification"] = {
+            "qualification_status": OUTCOME_QUALIFIED,
+            "revenue_ready": True,
+        }
+        bad = dict(jobs[1])
+        bad["qualification_status"] = OUTCOME_NOT_QUALIFIED
+        bad["relevance_score"] = 95
+        bad["revenue_ready"] = False
+        bad["live_qualification"] = {
+            "qualification_status": OUTCOME_NOT_QUALIFIED,
+            "revenue_ready": False,
+        }
+        return [good, bad]
+
+    monkeypatch.setattr(v3_router, "search_multi_source_jobs", fake_search)
+    monkeypatch.setattr(v3_router, "qualify_and_rank_live_jobs", fake_rank)
+
+    headers = _headers(client)
+    response = client.post(
+        "/api/nova/v3/live/jobs/prepare",
+        headers=headers,
+        json={
+            "query": "remote administrative support, spreadsheet analysis, research, AI operations, bookkeeping support",
+            "limit": 10,
+            "save_limit": 5,
+            "prepare_limit": 1,
+            "min_relevance_score": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["search_plan"]) == 5
+    assert len(captured["jobs"]) == 2
+    assert body["ranked_count"] == 1
+    assert len(body["ranked_jobs"]) == 1
+    assert body["ranked_jobs"][0]["source_url"] == duplicate["source_url"]
+    assert body["rejected_from_live_results"] == 1
+    assert body["selected_count"] == 1
+    assert body["external_submission"] is False
+    assert body["financial_execution"] is False
