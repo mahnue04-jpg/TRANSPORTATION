@@ -1213,6 +1213,18 @@ _EMPLOYEE_ONLY_SIGNALS = re.compile(
     re.I,
 )
 
+_BOOKKEEPING_QUERY_HINTS = re.compile(
+    r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|"
+    r"invoice|expense|financial spreadsheet|financial reporting|transaction categorization)\b",
+    re.I,
+)
+_BOOKKEEPING_RESULT_SIGNALS = re.compile(
+    r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|"
+    r"invoice|expense|financial spreadsheet|financial report|transaction categorization|"
+    r"ledger|quickbooks|xero)\b",
+    re.I,
+)
+
 
 _ADMIN_STRONG_TITLE = re.compile(
     r"\b("
@@ -1289,6 +1301,13 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         and remote_status != "remote"
     ):
         return False
+
+    # Capability-family searches need a positive duty signal, not merely a
+    # provider keyword hit. Bookkeeping is especially noisy on broad remote-job
+    # feeds, where generic operations/analyst roles can otherwise be mislabeled.
+    if _BOOKKEEPING_QUERY_HINTS.search(query_text):
+        if not _BOOKKEEPING_RESULT_SIGNALS.search(" ".join([title, description])):
+            return False
 
     # For any explicit vendor/contract/project search, remove obvious employee-
     # only feed results before expensive qualification. This preserves true
