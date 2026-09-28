@@ -1303,7 +1303,11 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     if not _ADMIN_STRONG_TITLE.search(title):
         return False
 
-    return title_has_admin or body_has_admin
+    # Reaching this point means the title matched an approved administrative
+    # archetype and all employee/geo/paid-access guards passed. Do not require
+    # a second, narrower keyword hit that can incorrectly reject valid titles
+    # such as "Operations Analyst Contractor".
+    return True
 
 
 def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
