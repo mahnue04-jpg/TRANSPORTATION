@@ -1189,6 +1189,15 @@ _ADMIN_US_GEO = re.compile(
     r"\b(united states|usa|u\.s\.|us only|nationwide|worldwide|anywhere|remote)\b",
     re.I,
 )
+_EXPLICIT_US_OR_WORLD_GEO = re.compile(
+    r"\b(united states|usa|u\.s\.|us only|nationwide|worldwide|anywhere)\b",
+    re.I,
+)
+_US_REMOTE_QUERY = re.compile(
+    r"\b(united states|usa|u\.s\.|nationwide|remote)\b",
+    re.I,
+)
+_REMOTE_QUERY = re.compile(r"\b(remote|virtual|telework|nationwide)\b", re.I)
 
 
 _VENDOR_INTENT_QUERY = re.compile(
@@ -1259,7 +1268,27 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     description = str(row.get("description") or "")
     geography = str(row.get("geography") or "")
     job_type = str(row.get("job_type") or row.get("contract_type") or "")
+    provider_id = str(row.get("provider_id") or "").strip().lower()
+    remote_status = str(row.get("remote_status") or "").strip().lower()
+    place_of_performance = str(row.get("place_of_performance") or geography or "")
+    query_text = str(query or "")
     combined = " ".join([title, description, geography, job_type])
+
+    # User-requested U.S./remote discovery must not surface an explicitly
+    # foreign-only listing merely because the listing itself also says "remote".
+    if _US_REMOTE_QUERY.search(query_text):
+        if _ADMIN_NON_US_GEO.search(geography) and not _EXPLICIT_US_OR_WORLD_GEO.search(geography):
+            return False
+
+    # SAM.gov notices with a concrete place of performance are not remote
+    # opportunities unless SAM itself marked the notice remote/virtual/telework.
+    if (
+        provider_id == "sam_gov"
+        and _REMOTE_QUERY.search(query_text)
+        and place_of_performance.strip()
+        and remote_status != "remote"
+    ):
+        return False
 
     # For any explicit vendor/contract/project search, remove obvious employee-
     # only feed results before expensive qualification. This preserves true
