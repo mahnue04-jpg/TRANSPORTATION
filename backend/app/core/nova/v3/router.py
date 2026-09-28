@@ -592,7 +592,7 @@ def v3_live_job_prepare(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
-            "ranked_count": len(ranked),
+            "ranked_count": len(visible_ranked),
             "selected_count": len(selected),
             "prepared_count": len(prepared),
             "prepared": prepared,
