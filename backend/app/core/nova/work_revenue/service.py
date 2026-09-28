@@ -1694,6 +1694,15 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
 
     real_outs = [item for item in outs if not _is_test_fixture(item)]
     test_outs = [item for item in outs if _is_test_fixture(item)]
+    live_opportunity_list = [
+        item
+        for item in real_outs
+        if not item.archived
+        and item.status not in {"CLOSED", "REJECTED"}
+        and item.qualification_outcome != "INSUFFICIENT_INFORMATION"
+        and ((item.qualification or {}).get("capability_classification")) not in {CANNOT_PERFORM, INSUFFICIENT_INFORMATION}
+        and (item.lifecycle_outcome or "") not in {"NOT_SUITABLE", "PROHIBITED"}
+    ]
     # The primary inbox is actionable discovery work, not the holding area for
     # incomplete qualification. Keep INSUFFICIENT_INFORMATION available through
     # Needs Review / Missing Information filters without mixing it into the live inbox.
@@ -1808,7 +1817,7 @@ def dashboard(db: Session, *, organization_id: str, user: UserContext) -> Dashbo
         won_work=won,
         owner_actions=[owner_action_out(item) for item in actions],
         rejected_or_archived=archived,
-        opportunity_list=outs,
+        opportunity_list=live_opportunity_list,
         engagements=engagement_rows,
         revenue_summary=revenue_summary,
         guardrails=engine_guardrails(),
