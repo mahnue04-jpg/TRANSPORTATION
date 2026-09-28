@@ -495,6 +495,39 @@ def search_family_catalog() -> list[dict[str, Any]]:
     return rows
 
 
+_FAMILY_DUTY_MATCHES: dict[str, frozenset[str]] = {
+    "administrative_operations": frozenset({
+        "administrative_support", "data_organization", "document_preparation",
+        "workflow_documentation", "reporting", "spreadsheet_analysis",
+    }),
+    "bookkeeping_support": frozenset({
+        "bookkeeping_support", "spreadsheet_analysis", "reporting", "data_organization",
+    }),
+    "data_spreadsheet": frozenset({
+        "spreadsheet_analysis", "reporting", "data_organization",
+    }),
+    "research_analysis": frozenset({
+        "research", "reporting", "spreadsheet_analysis",
+    }),
+    "ai_automation": frozenset({
+        "ai_assisted_analysis", "workflow_documentation", "document_preparation",
+        "data_organization", "reporting", "research", "content_operations",
+        "web_software_support",
+    }),
+}
+
+
+def _planned_family_duty_match(family_id: str | None, duty_matches: list[str]) -> bool | None:
+    """Whether discovered duties actually fit the capability family that found the row.
+
+    None means the family does not yet have a strict mapping and keeps legacy scoring.
+    """
+    allowed = _FAMILY_DUTY_MATCHES.get(str(family_id or "").strip())
+    if allowed is None:
+        return None
+    return bool(allowed.intersection(str(item or "").strip() for item in duty_matches))
+
+
 def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) -> dict[str, Any]:
     """Immediate post-discovery scoring before or with qualification."""
     text = " ".join(
@@ -553,10 +586,22 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     family = match_query_to_family(query or "")
     planned_family_id = str(job.get("search_family") or "").strip() or None
     planned_family = SEARCH_FAMILIES.get(planned_family_id) if planned_family_id else None
+    family_duty_match = _planned_family_duty_match(
+        planned_family_id,
+        list(duty["capability_registry_matches"]),
+    )
+    # Search-provider keyword hits are not enough. For the high-volume owner
+    # families, require the listing's actual duties to overlap the family that
+    # caused Nova to search it. This keeps bookkeeping from surfacing AI
+    # trainers/developers and keeps admin/data searches from drifting.
+    if family_duty_match is False:
+        score = min(score, 35)
+        band = "REJECT"
     return {
         "discovery_score": score,
         "discovery_band": band,
         "capability_match": bool(duty["capability_registry_matches"]),
+        "planned_family_duty_match": family_duty_match,
         "remote_eligibility": "YES" if remote_ok else "NO",
         "vendor_contract_compatibility": "YES" if preferred_hits else "UNKNOWN",
         "physical_presence_requirement": duty["required_physical_presence"],
