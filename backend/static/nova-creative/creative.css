@@ -82,3 +82,19 @@ button.secondary { background: #2f2a24; }
   font-size: 0.75rem;
   background: #ece6da;
 }
+
+
+.generated-media {
+  margin: 12px 0;
+  border: 1px solid var(--line, #2a4a6a);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(0,0,0,.18);
+}
+
+.generated-media img {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  object-fit: contain;
+}
