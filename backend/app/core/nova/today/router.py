@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
-from app.core.nova.signup.service import consume_free_ask
+from app.core.nova.signup.service import consume_free_ask, customer_access
 from app.core.nova.today import service
 from app.core.nova.today.schemas import (
     NovaTodayActionCreate,
@@ -68,6 +68,12 @@ def ask_today(
 ):
     try:
         org_id = _resolve_org(user, payload.organization_id)
+        access = customer_access(db, organization_id=org_id, user_id=user.user_id)
+        if access.get("trial_expired"):
+            raise HTTPException(
+                status_code=403,
+                detail="Your 7-day AMICOR Nova trial has ended. Upgrade to continue using Ask Nova and Operations Agent features.",
+            )
         usage = consume_free_ask(db, organization_id=org_id)
         if usage.get("is_free") and not usage.get("allowed"):
             raise HTTPException(
