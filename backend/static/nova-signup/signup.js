@@ -5,6 +5,7 @@
   var form = document.getElementById("signup-form");
   var offerCopy = document.getElementById("offer-copy");
   var offerSlots = document.getElementById("offer-slots");
+  var paymentMode = document.getElementById("payment-mode");
   var submitBtn = document.getElementById("submit-btn");
 
   function show(message, ok) {
@@ -26,9 +27,16 @@
       } else {
         offerSlots.textContent = "Founding slots are filled. New customers still receive 7-day introductory access, then $99/month.";
       }
+      var mode = String(offer.payment_mode || "not_configured");
+      if (mode === "live") paymentMode.textContent = "Secure checkout: LIVE production Stripe is ready.";
+      else if (mode === "test") paymentMode.textContent = "Secure checkout: Stripe TEST mode is ready; no live charge.";
+      else if (mode === "live_gated") paymentMode.textContent = "Secure checkout: live Stripe detected but production activation is still gated.";
+      else if (mode === "test_incomplete") paymentMode.textContent = "Secure checkout: Stripe TEST configuration is incomplete.";
+      else paymentMode.textContent = "Secure checkout is not configured yet.";
     })
     .catch(function () {
       offerSlots.textContent = "Offer details will be confirmed at checkout.";
+      if (paymentMode) paymentMode.textContent = "Secure checkout readiness could not be confirmed.";
     });
 
   form.addEventListener("submit", function (event) {

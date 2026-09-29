@@ -71,6 +71,26 @@ def nova_live_stripe_enabled() -> bool:
     }
 
 
+def stripe_runtime_mode() -> str:
+    """Return non-secret public readiness state for Nova SaaS checkout."""
+    secret = stripe_secret_key()
+    publishable = stripe_publishable_key()
+    webhook = nova_saas_webhook_secret()
+    if not secret:
+        return "not_configured"
+    if is_live_stripe_key(secret):
+        ready = (
+            nova_live_stripe_enabled()
+            and publishable.startswith("pk_live_")
+            and bool(webhook)
+        )
+        return "live" if ready else "live_gated"
+    if secret.startswith("sk_test_"):
+        ready = publishable.startswith("pk_test_") and bool(webhook)
+        return "test" if ready else "test_incomplete"
+    return "unknown"
+
+
 def sanitize_stripe_error(message: Any, max_len: int = 240) -> str:
     text = str(message or "").replace("\n", " ").replace("\r", " ").strip()
     text = _SECRET_PATTERN.sub("[REDACTED]", text)

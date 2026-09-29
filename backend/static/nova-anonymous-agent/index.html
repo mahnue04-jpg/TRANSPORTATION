@@ -37,7 +37,7 @@
 
     <section class="card">
       <h2>Launch pricing</h2>
-      <p class="hint">Start free, then move into paid work only when you need Nova to do more. AMICOR confirms scope before any paid work begins.</p>
+      <p class="hint">Start free, then move into paid work only when you need Nova to do more. Paid selections use secure Stripe Checkout when production payments are configured. AMICOR reviews scope before execution begins.</p>
       <div class="capabilities">
         <span><strong>Free Scope Check</strong> — describe one business task and receive a capability/scope response; no completed deliverable is included</span>
         <span><strong>$49 Starter Task</strong> — one small, clearly defined supported digital task with an AMICOR-reviewed deliverable</span>
@@ -83,6 +83,7 @@
           </select>
         </label>
         <label class="consent"><input id="consent" type="checkbox" required /> I agree that AMICOR may contact me about this work request.</label>
+        <label class="consent"><input id="terms-accepted" type="checkbox" /> For a paid option, I accept the <a href="/terms" target="_blank" rel="noopener">AMICOR terms</a> and understand scope is reviewed before execution.</label>
         <input id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
         <button type="submit">Submit Work Request</button>
       </form>
@@ -97,7 +98,7 @@
         <li><strong>Nova performs supported digital work.</strong> Work stays within the approved engagement.</li>
         <li><strong>AMICOR reviews the deliverable.</strong> External delivery remains owner-controlled.</li>
       </ol>
-      <p class="hint">Early launch is supervised. The free option provides scope/capability feedback only; paid plans cover supported execution within the stated limits. AMICOR confirms scope, pricing, and delivery before paid work begins. Fully autonomous external actions are not represented as live until separately verified.</p>
+      <p class="hint">Early launch is supervised. The free option provides scope/capability feedback only; paid plans cover supported execution within the stated limits. Secure checkout does not authorize unsupported work, contract acceptance, filings, or other restricted external actions.</p>
     </section>
   </main>
   <script src="/static/nova-anonymous-agent/agent.js"></script>

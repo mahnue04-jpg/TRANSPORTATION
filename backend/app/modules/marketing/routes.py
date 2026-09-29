@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from datetime import timedelta
 from threading import Lock
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,15 @@ from app.db.session import get_db
 from app.helpers import now
 from app.modules.marketing.models import MarketingWebsiteLead, ensure_marketing_schema
 from app.modules.marketing.notify import send_lead_notification
+from app.modules.marketing.operations_billing import (
+    AGENT_PLANS,
+    AGENT_PRODUCT,
+    agent_checkout_mode,
+    checkout_payload,
+    get_agent_stripe_client,
+    plan_payload,
+    verify_agent_webhook,
+)
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -60,6 +69,7 @@ def _lead_out(row: MarketingWebsiteLead) -> dict:
         "service_plan": row.service_plan,
         "lead_source": row.lead_source,
         "notify_status": row.notify_status,
+        "payment_status": row.payment_status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -155,6 +165,11 @@ def create_marketing_lead(
                     "lead_type": duplicate.lead_type,
                     "status": duplicate.status,
                     "duplicate": True,
+                    "payment_status": duplicate.payment_status,
+                    "checkout_available": bool(
+                        duplicate.lead_type == "anonymous_operations"
+                        and duplicate.service_plan in {"starter_49", "launch_99", "business_299"}
+                    ),
                     "email_notification": {"attempted": False, "sent": False, "reason": "duplicate"},
                 },
             )
@@ -180,6 +195,14 @@ def create_marketing_lead(
             source_path=payload.source_path or str(request.headers.get("referer") or "")[:256],
             user_agent=(request.headers.get("user-agent") or "")[:512],
             notify_status="pending",
+            payment_status=(
+                "not_required"
+                if payload.lead_type == "anonymous_operations"
+                and payload.service_plan in {"free_scope", "not_sure"}
+                else "pending"
+                if payload.lead_type == "anonymous_operations" and payload.service_plan
+                else None
+            ),
         )
         db.add(lead)
         db.commit()
@@ -205,6 +228,11 @@ def create_marketing_lead(
             "lead_id": lead.id,
             "lead_type": lead.lead_type,
             "status": lead.status,
+            "payment_status": lead.payment_status,
+            "checkout_available": bool(
+                lead.lead_type == "anonymous_operations"
+                and lead.service_plan in {"starter_49", "launch_99", "business_299"}
+            ),
             "duplicate": False,
             "email_notification": {
                 "attempted": bool(notify_result.get("attempted")),
@@ -214,6 +242,163 @@ def create_marketing_lead(
         },
     )
 
+
+
+
+@router.get("/nova-agent/checkout-status")
+def nova_agent_checkout_status():
+    """Public non-secret launch status for the Operations Agent payment lane."""
+    return {
+        "product": "Nova Anonymous Operations Agent",
+        "mode": agent_checkout_mode(),
+        "plans": {
+            key: {
+                "label": spec["label"],
+                "amount_cents": int(spec["amount_cents"]),
+                "checkout_required": spec["mode"] in {"payment", "subscription"},
+                "billing_mode": spec["mode"],
+            }
+            for key, spec in AGENT_PLANS.items()
+        },
+    }
+
+
+@router.post("/leads/{lead_id}/checkout")
+def create_nova_agent_checkout(
+    lead_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Create Stripe Checkout only for a saved paid Operations Agent request."""
+    ensure_marketing_schema()
+    if _rate_limited("nova-agent-checkout:" + _client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many checkout attempts. Please try again later.")
+
+    lead = db.get(MarketingWebsiteLead, lead_id)
+    if lead is None or lead.lead_type != "anonymous_operations":
+        raise HTTPException(status_code=404, detail="Operations Agent request not found")
+    if not lead.consent:
+        raise HTTPException(status_code=422, detail="Consent is required before checkout")
+
+    try:
+        plan = plan_payload(str(lead.service_plan or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if plan["mode"] not in {"payment", "subscription"}:
+        raise HTTPException(status_code=422, detail="This starting option does not require checkout")
+
+    if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
+        return {
+            "checkout_url": lead.checkout_url,
+            "checkout_session_id": lead.stripe_checkout_session_id,
+            "payment_status": lead.payment_status,
+            "plan": lead.service_plan,
+            "mode": agent_checkout_mode(),
+        }
+
+    try:
+        client = get_agent_stripe_client()
+        customer = client.create_customer(
+            payload={
+                "email": lead.work_email,
+                "name": lead.contact_name,
+                "metadata": {
+                    "nova_product": AGENT_PRODUCT,
+                    "nova_agent_lead_id": lead.id,
+                },
+            },
+            idempotency_key=f"nova-agent-customer:{lead.id}",
+        )
+        customer_id = str(customer.get("id") or "").strip()
+        if not customer_id:
+            raise RuntimeError("Stripe customer was not created")
+        payload = checkout_payload(
+            lead_id=lead.id,
+            email=lead.work_email,
+            plan_key=str(lead.service_plan),
+            customer_id=customer_id,
+        )
+        session = client.create_checkout_session(
+            payload=payload,
+            idempotency_key=f"nova-agent-checkout:{lead.id}:{lead.service_plan}",
+        )
+        session_id = str(session.get("id") or "").strip()
+        checkout_url = str(session.get("url") or "").strip()
+        if not session_id or not checkout_url:
+            raise RuntimeError("Stripe Checkout session was not created")
+    except Exception as exc:
+        logger.warning("nova_agent_checkout_failed lead_id=%s exc_type=%s", lead.id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Secure checkout is not available yet.") from exc
+
+    lead.stripe_customer_id = customer_id
+    lead.stripe_checkout_session_id = session_id
+    lead.checkout_url = checkout_url
+    lead.payment_status = "pending"
+    db.commit()
+    return {
+        "checkout_url": checkout_url,
+        "checkout_session_id": session_id,
+        "payment_status": "pending",
+        "plan": lead.service_plan,
+        "mode": agent_checkout_mode(),
+    }
+
+
+@router.post("/nova-agent/stripe/webhook")
+async def nova_agent_stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
+):
+    """Confirm Operations Agent payment state from Stripe; never executes client work."""
+    ensure_marketing_schema()
+    raw = await request.body()
+    try:
+        event = verify_agent_webhook(raw, stripe_signature)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    event_type = str(event.get("type") or "")
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    obj = data.get("object") if isinstance(data, dict) and isinstance(data.get("object"), dict) else {}
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    if str(metadata.get("nova_product") or "") != AGENT_PRODUCT:
+        return {"ok": True, "handled": False, "result": "unrelated"}
+
+    lead_id = str(metadata.get("nova_agent_lead_id") or obj.get("client_reference_id") or "").strip()
+    lead = db.get(MarketingWebsiteLead, lead_id) if lead_id else None
+    if lead is None or lead.lead_type != "anonymous_operations":
+        return {"ok": True, "handled": False, "result": "lead_not_found"}
+
+    result = "ignored"
+    if event_type == "checkout.session.completed":
+        payment_status = str(obj.get("payment_status") or "")
+        if payment_status in {"paid", "no_payment_required"}:
+            lead.payment_status = "paid"
+            lead.status = "qualified"
+            subscription = obj.get("subscription")
+            if isinstance(subscription, dict):
+                subscription = subscription.get("id")
+            if subscription:
+                lead.stripe_subscription_id = str(subscription)
+            result = "paid"
+        else:
+            lead.payment_status = "pending"
+            result = "checkout_completed_pending"
+    elif event_type in {"checkout.session.async_payment_failed", "invoice.payment_failed"}:
+        lead.payment_status = "failed"
+        result = "payment_failed"
+    elif event_type == "checkout.session.expired":
+        lead.payment_status = "expired"
+        result = "checkout_expired"
+    elif event_type == "invoice.paid":
+        lead.payment_status = "paid"
+        result = "renewal_paid"
+
+    db.commit()
+    return {"ok": True, "handled": True, "result": result, "lead_id": lead.id}
 
 @router.get("/admin/leads")
 def list_marketing_leads(

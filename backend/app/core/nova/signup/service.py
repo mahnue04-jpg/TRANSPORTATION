@@ -49,6 +49,7 @@ from app.core.nova.signup.stripe_client import (
     get_nova_saas_stripe_override,
     nova_saas_webhook_secret,
     sanitize_stripe_error,
+    stripe_runtime_mode,
 )
 from app.core.nova.tenants.provision import TenantProvisionError, provision_isolated_nova_tenant
 from app.helpers import now
@@ -87,7 +88,10 @@ def founding_occupied_count(db: Session) -> int:
 
 
 def offer_payload(db: Session) -> dict[str, Any]:
-    return public_offer(occupied=founding_occupied_count(db))
+    payload = public_offer(occupied=founding_occupied_count(db))
+    payload["payment_mode"] = stripe_runtime_mode()
+    payload["paid_checkout_available"] = payload["payment_mode"] in {"test", "live"}
+    return payload
 
 
 def _next_founding_slot(db: Session) -> int | None:
