@@ -828,3 +828,10 @@ def test_invoice_parent_subscription_metadata_can_resolve_signup() -> None:
         },
     }
     assert _signup_id_from_event(obj) == signup_id
+
+
+def test_paid_nova_surfaces_include_creative_studio() -> None:
+    from app.core.nova.signup.service import customer_access
+    with SessionLocal() as db:
+        body = customer_access(db, organization_id=None, user_id="internal-test")
+    assert "nova_creative" in body["allowed_surfaces"]

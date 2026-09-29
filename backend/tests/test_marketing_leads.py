@@ -339,3 +339,9 @@ def test_anonymous_operations_free_scope_never_opens_checkout():
         headers={"X-Forwarded-For": "198.51.100.222"},
     )
     assert checkout.status_code == 422
+
+
+def test_operations_agent_links_shared_image_generator() -> None:
+    page = (ROOT / "static" / "nova-anonymous-agent" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/nova/creative"' in page
+    assert "Creative image generation" in page
