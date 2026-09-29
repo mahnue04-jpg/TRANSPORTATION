@@ -803,3 +803,16 @@ def test_creative_ui_has_branded_png_export_contract() -> None:
     assert "/static/branding/amicor-logo-full.png" in js
     assert 'canvas.toDataURL("image/png")' in js
     assert "Branded PNG prepared with the official AMICOR logo." in js
+
+
+def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert "local branded promo-video export" in html
+    assert "Full AI Video Provider status" in html
+    assert "async function createPromoVideo" in js
+    assert "MediaRecorder" in js
+    assert "captureStream" in js
+    assert "Create 8s branded video" in js
+    assert 'video/webm' in js
+    assert "-promo.webm" in js
