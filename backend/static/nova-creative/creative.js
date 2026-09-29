@@ -64,6 +64,73 @@
     link.remove();
   }
 
+  async function createPromoVideo(imageUrl, fileStem) {
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+      throw new Error("This browser does not support local video export.");
+    }
+    var artwork = await loadImage(imageUrl);
+    var logo = await loadImage("/static/branding/amicor-logo-full.png");
+    var canvas = document.createElement("canvas");
+    canvas.width = artwork.naturalWidth || artwork.width;
+    canvas.height = artwork.naturalHeight || artwork.height;
+    var ctx = canvas.getContext("2d");
+    var durationMs = 8000;
+    var fps = 30;
+    var stream = canvas.captureStream(fps);
+    var preferred = "video/webm;codecs=vp9";
+    var mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(preferred)) ? preferred : "video/webm";
+    var recorder = new MediaRecorder(stream, { mimeType: mime });
+    var chunks = [];
+    recorder.ondataavailable = function (event) {
+      if (event.data && event.data.size) chunks.push(event.data);
+    };
+    var done = new Promise(function (resolve, reject) {
+      recorder.onerror = function () { reject(new Error("Video recording failed.")); };
+      recorder.onstop = function () { resolve(new Blob(chunks, { type: mime })); };
+    });
+
+    function drawFrame(progress) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      var zoom = 1 + (0.035 * progress);
+      var drawW = canvas.width * zoom;
+      var drawH = canvas.height * zoom;
+      var dx = (canvas.width - drawW) / 2;
+      var dy = (canvas.height - drawH) / 2;
+      ctx.drawImage(artwork, dx, dy, drawW, drawH);
+
+      var targetWidth = Math.max(140, Math.round(canvas.width * 0.22));
+      var targetHeight = Math.max(1, Math.round(targetWidth * ((logo.naturalHeight || logo.height) / Math.max(1, logo.naturalWidth || logo.width))));
+      var margin = Math.max(24, Math.round(canvas.width * 0.035));
+      var padX = Math.max(10, Math.round(targetWidth * 0.05));
+      var padY = Math.max(8, Math.round(targetHeight * 0.12));
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillRect(margin - padX, margin - padY, targetWidth + (padX * 2), targetHeight + (padY * 2));
+      ctx.drawImage(logo, margin, margin, targetWidth, targetHeight);
+    }
+
+    recorder.start(250);
+    var start = performance.now();
+    await new Promise(function (resolve) {
+      function tick(now) {
+        var progress = Math.min(1, (now - start) / durationMs);
+        drawFrame(progress);
+        if (progress < 1) requestAnimationFrame(tick);
+        else resolve();
+      }
+      requestAnimationFrame(tick);
+    });
+    recorder.stop();
+    var blob = await done;
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.download = (fileStem || "amicor-nova") + "-promo.webm";
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+
   function detailText(body, fallback) {
     if (!body) return fallback;
     var detail = body.detail;
@@ -166,7 +233,9 @@
           "</figure>" +
           (isAmicor ? "<button type=\"button\" class=\"secondary branded-download\" data-image-url=\"" +
             escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
-            "\">Download branded PNG</button>" : "");
+            "\">Download branded PNG</button> <button type=\"button\" class=\"secondary promo-video\" data-image-url=\"" +
+            escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
+            "\">Create 8s branded video</button>" : "");
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -183,6 +252,20 @@
           showBanner("Branded PNG prepared with the official AMICOR logo.", true);
         } catch (err) {
           showBanner(err.message || "Branded image export failed.", false);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .promo-video"), function (button) {
+      button.addEventListener("click", async function () {
+        button.disabled = true;
+        showBanner("Working: creating 8-second branded promo video...", true);
+        try {
+          await createPromoVideo(button.getAttribute("data-image-url"), button.getAttribute("data-file-stem"));
+          showBanner("Branded promo video created and downloaded.", true);
+        } catch (err) {
+          showBanner(err.message || "Promo video export failed.", false);
         } finally {
           button.disabled = false;
         }
