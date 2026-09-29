@@ -1692,7 +1692,17 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     if _ADMIN_NON_US_GEO.search(geography) and not _ADMIN_US_GEO.search(geography):
         return False
 
-    # Positive-fit gate: for an admin search, do not keep generic managers,
+    # Public RFP/vendor notices are scoped by deliverables, not job titles.
+    # Their titles are often procurement labels (for example "Data Reporting
+    # Services") that would fail the employee-job title gate even when the body
+    # clearly describes Nova-compatible administrative/digital work.
+    provider_type = str(row.get("provider_type") or "").strip().lower()
+    if provider_type in {"public_rfp_feed", "government_contracting", "vendor_project_board"}:
+        if not (title_has_admin or body_has_admin or _SAM_DIGITAL_RELEVANCE.search(" ".join([title, description]))):
+            return False
+        return True
+
+    # Positive-fit gate for ordinary job feeds: do not keep generic managers,
     # schedulers, sales roles, or other jobs merely because their body contains
     # words such as "operations" or "support". The title itself must map to an
     # administrative work archetype Nova is actually allowed to pursue.
@@ -1700,9 +1710,7 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         return False
 
     # Reaching this point means the title matched an approved administrative
-    # archetype and all employee/geo/paid-access guards passed. Do not require
-    # a second, narrower keyword hit that can incorrectly reject valid titles
-    # such as "Operations Analyst Contractor".
+    # archetype and all employee/geo/paid-access guards passed.
     return True
 
 
