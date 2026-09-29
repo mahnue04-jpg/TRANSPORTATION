@@ -218,6 +218,19 @@ def test_no_card_trial_expires_after_seven_days(monkeypatch) -> None:
     assert asked.status_code == 403
     assert "trial has ended" in asked.text.lower()
 
+    # Expiry is enforced centrally for new Nova write actions, not only Ask Nova.
+    business_write = client.post(
+        "/api/nova/business/customers",
+        headers=headers,
+        json={"name": "After Trial Customer"},
+    )
+    assert business_write.status_code == 403
+    assert "trial has ended" in business_write.text.lower()
+
+    # Read access remains available so the customer's account/prior work can still be reviewed.
+    dashboard = client.get("/api/nova/today/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+
 
 def test_free_to_paid_upgrade_preserves_same_account() -> None:
     fake = FakeNovaSaasStripeClient()
