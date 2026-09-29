@@ -432,6 +432,7 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
         "nova_communications",
         "nova_government",
         "nova_business",
+        "nova_creative",
         "nova_accounting",
         "nova_accounting_aging",
         "nova_accounting_trends",
