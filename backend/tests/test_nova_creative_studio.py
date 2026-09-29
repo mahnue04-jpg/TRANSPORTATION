@@ -746,3 +746,33 @@ def test_image_generation_saves_provider_url_and_ui_renders_media(monkeypatch):
     assert "generated-media" in js
     assert "Generating image..." in js
     assert ".generated-media img" in css
+
+
+def test_brand_safe_image_prompt_and_aspect_selector_static_contract() -> None:
+    from app.core.nova.creative_studio.generation import generate_content_pack
+
+    pack = generate_content_pack(
+        topic="AMICOR Nova helping small business owners organize work with AI",
+        audience="small business owners",
+        objective="awareness",
+        tone="professional and modern",
+        platform="Instagram",
+        cta="Learn more about AMICOR Nova",
+        brand_name="AMICOR Nova",
+    )
+    prompt = pack["image_prompt"].lower()
+    assert "do not draw, imitate, or spell any brand logo or wordmark" in prompt
+    assert "upper-left brand-safe area" in prompt
+
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+    assert 'id="image-aspect"' in html
+    assert 'value="1:1"' in html
+    assert 'value="4:5"' in html
+    assert 'value="9:16"' in html
+    assert 'value="16:9"' in html
+    assert '$("image-aspect").value' in js
+    assert "/static/branding/amicor-logo-full.png" in js
+    assert "official-brand-overlay" in js
+    assert ".official-brand-overlay" in css
