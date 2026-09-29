@@ -22,6 +22,48 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+  function loadImage(src) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error("Could not load image for branded export.")); };
+      img.src = src;
+    });
+  }
+  async function downloadBrandedImage(imageUrl, fileStem) {
+    var artwork = await loadImage(imageUrl);
+    var logo = await loadImage("/static/branding/amicor-logo-full.png");
+    var canvas = document.createElement("canvas");
+    canvas.width = artwork.naturalWidth || artwork.width;
+    canvas.height = artwork.naturalHeight || artwork.height;
+    var ctx = canvas.getContext("2d");
+    ctx.drawImage(artwork, 0, 0, canvas.width, canvas.height);
+
+    var targetWidth = Math.max(140, Math.round(canvas.width * 0.28));
+    var targetHeight = Math.max(1, Math.round(targetWidth * ((logo.naturalHeight || logo.height) / Math.max(1, logo.naturalWidth || logo.width))));
+    var margin = Math.max(18, Math.round(canvas.width * 0.025));
+    var padX = Math.max(12, Math.round(targetWidth * 0.06));
+    var padY = Math.max(10, Math.round(targetHeight * 0.14));
+
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.beginPath();
+    var x = margin - padX, y = margin - padY, w = targetWidth + (padX * 2), h = targetHeight + (padY * 2);
+    var r = Math.max(8, Math.round(Math.min(w, h) * 0.08));
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.drawImage(logo, margin, margin, targetWidth, targetHeight);
+    var link = document.createElement("a");
+    link.download = (fileStem || "amicor-nova") + "-branded.png";
+    link.href = canvas.toDataURL("image/png");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
   function detailText(body, fallback) {
     if (!body) return fallback;
     var detail = body.detail;
@@ -121,7 +163,10 @@
         media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
           escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" />" +
           (isAmicor ? "<img class=\"official-brand-overlay\" src=\"/static/branding/amicor-logo-full.png\" alt=\"AMICOR official logo\" />" : "") +
-          "</figure>";
+          "</figure>" +
+          (isAmicor ? "<button type=\"button\" class=\"secondary branded-download\" data-image-url=\"" +
+            escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
+            "\">Download branded PNG</button>" : "");
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -129,6 +174,20 @@
         media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .branded-download"), function (button) {
+      button.addEventListener("click", async function () {
+        button.disabled = true;
+        showBanner("Working: preparing branded PNG...", true);
+        try {
+          await downloadBrandedImage(button.getAttribute("data-image-url"), button.getAttribute("data-file-stem"));
+          showBanner("Branded PNG prepared with the official AMICOR logo.", true);
+        } catch (err) {
+          showBanner(err.message || "Branded image export failed.", false);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
   }
   async function boot() {
     if (!token()) {
