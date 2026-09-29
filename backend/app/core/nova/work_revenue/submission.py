@@ -308,7 +308,7 @@ def submit_via_confirmed_email(
     db: Session,
     application_id: str,
     *,
-    to_email: str,
+    to_email: str | None,
     organization_id: str,
     user: UserContext,
 ) -> dict[str, Any]:
