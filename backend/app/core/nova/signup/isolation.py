@@ -10,6 +10,7 @@ from starlette.responses import Response
 
 from app.auth import decode_access_token
 from app.db.session import SessionLocal
+from app.helpers import now
 
 BLOCKED_PREFIXES = (
     "/api/admin",
@@ -85,7 +86,12 @@ class NovaCustomerProductGuardMiddleware(BaseHTTPMiddleware):
             path == prefix or path.startswith(prefix + "/")
             for prefix in FREE_BLOCKED_PREFIXES
         )
-        if not global_block and not free_candidate:
+        trial_candidate = (
+            path.startswith("/api/nova/")
+            or path == "/api/search"
+            or path.startswith("/api/search/")
+        )
+        if not global_block and not free_candidate and not trial_candidate:
             return await call_next(request)  # type: ignore[misc]
 
         auth_header = request.headers.get("Authorization", "")
@@ -104,10 +110,32 @@ class NovaCustomerProductGuardMiddleware(BaseHTTPMiddleware):
         try:
             with SessionLocal() as db:
                 tenant = nova_customer_tenant(db, org_id)
+                trial_expired = False
+                if tenant is not None and str(tenant.subscription_status or "").lower() == "trialing":
+                    from app.core.nova.signup.models import NovaSignupAccount
+                    signup = db.get(NovaSignupAccount, tenant.signup_id)
+                    trial_expired = bool(
+                        signup is not None
+                        and signup.intro_ends_at is not None
+                        and now() >= signup.intro_ends_at
+                    )
         except Exception:
             return await call_next(request)  # type: ignore[misc]
         if tenant is None:
             return await call_next(request)  # type: ignore[misc]
+        if trial_expired and trial_candidate:
+            write_like = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+            live_search = path == "/api/search" or path.startswith("/api/search/")
+            if write_like or live_search:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": (
+                            "Your 7-day AMICOR Nova trial has ended. "
+                            "Your account and prior work remain available to review; upgrade to continue new Nova work."
+                        )
+                    },
+                )
         if global_block:
             return JSONResponse(
                 status_code=403,
