@@ -433,7 +433,7 @@ class ApplicationStatusUpdate(BaseModel):
 
 class EmailSubmissionConfirm(BaseModel):
     organization_id: str | None = None
-    to_email: str = Field(min_length=3, max_length=320)
+    to_email: str | None = Field(default=None, min_length=3, max_length=320)
     confirm_send: Literal[True]
     confirm_listing_accepts_email: Literal[True]
 
