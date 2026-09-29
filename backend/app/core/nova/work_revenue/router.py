@@ -1,4 +1,4 @@
-"""Nova Work & Revenue Engine APIs. Local-only Phase 1. No Stripe and no external apply."""
+"""Nova Work & Revenue Engine APIs. External actions stay approval-gated and channel-specific."""
 from __future__ import annotations
 
 import os
