@@ -48,8 +48,8 @@ from app.core.nova.signup.stripe_client import (
     get_nova_saas_stripe_client,
     get_nova_saas_stripe_override,
     nova_saas_webhook_secret,
-    sanitize_stripe_error,,
-    stripe_runtime_mode
+    sanitize_stripe_error,
+    stripe_runtime_mode,
 )
 from app.core.nova.tenants.provision import TenantProvisionError, provision_isolated_nova_tenant
 from app.helpers import now
