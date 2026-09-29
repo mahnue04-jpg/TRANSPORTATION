@@ -191,7 +191,8 @@
       bits.push(actionButton("reject", row.application_id, "Reject"));
       bits.push(actionButton("needs-changes", row.application_id, "Request changes"));
     }
-    if (row.approved_for_future_submission && !row.manual_submission_recorded) {
+    if (row.approved_for_future_submission && !row.manual_submission_recorded && !row.externally_submitted) {
+      bits.push(actionButton("submit-email", row.application_id, "Submit by verified application email"));
       bits.push(actionButton("open-handoff", row.application_id, "Open approved application handoff"));
       bits.push(actionButton("record-manual", row.application_id, "Record manual submission after I send it"));
     }
@@ -887,6 +888,32 @@
         body: JSON.stringify({ decision: "NEEDS_CHANGES" })
       });
       showBanner("Returned for changes. Drafts remain internal.", true);
+    } else if (action === "submit-email") {
+      var emailConfirmed = window.confirm(
+        "Submit this OWNER-APPROVED application by email only if the saved listing explicitly says email applications/proposals are accepted. Nova will use the exact email found in the listing and the unchanged approved package. Continue?"
+      );
+      if (!emailConfirmed) {
+        showBanner("Email submission cancelled. Nothing was sent.");
+        return;
+      }
+      var emailResult = await api("/api/nova/work/applications/" + id + "/submit-email", {
+        method: "POST",
+        body: JSON.stringify({
+          confirm_send: true,
+          confirm_listing_accepts_email: true
+        })
+      });
+      if (emailResult && emailResult.externally_submitted) {
+        showBanner(
+          "APPLICATION SUBMITTED · verified email channel · provider " +
+          String(emailResult.provider_id || "email") +
+          " · recipient " + String(emailResult.recipient || "") +
+          " · no contract accepted · no financial action taken.",
+          true
+        );
+      } else {
+        showBanner("Email transport did not confirm submission. Nothing was marked submitted.");
+      }
     } else if (action === "open-handoff") {
       var handoff = await api("/api/nova/work/applications/" + id + "/submit", { method: "POST" });
       var target = handoff && handoff.application_url ? String(handoff.application_url) : "";

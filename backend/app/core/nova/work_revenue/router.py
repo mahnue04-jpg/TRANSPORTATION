@@ -1,4 +1,4 @@
-"""Nova Work & Revenue Engine APIs. Local-only Phase 1. No Stripe and no external apply."""
+"""Nova Work & Revenue Engine APIs. External actions stay approval-gated and channel-specific."""
 from __future__ import annotations
 
 import os
@@ -39,6 +39,7 @@ from app.core.nova.work_revenue.schemas import (
     DisclosurePolicyCreate,
     EngagementCreate,
     EngagementUpdate,
+    EmailSubmissionConfirm,
     InvoiceSupportCreate,
     InvoiceSupportDecision,
     MaterialRevise,
@@ -435,6 +436,32 @@ def submit_application(
         return submission.submit_or_handoff(
             db,
             application_id,
+            organization_id=org_id,
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/applications/{application_id}/submit-email")
+def submit_application_email(
+    application_id: str,
+    payload: EmailSubmissionConfirm,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner-confirmed real email submission for listings that explicitly accept email applications."""
+    org_id = _resolve_org(user, payload.organization_id)
+    if payload.confirm_send is not True or payload.confirm_listing_accepts_email is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Owner must confirm the send and that the listing explicitly accepts email applications.",
+        )
+    try:
+        return submission.submit_via_confirmed_email(
+            db,
+            application_id,
+            to_email=payload.to_email,
             organization_id=org_id,
             user=user,
         )
