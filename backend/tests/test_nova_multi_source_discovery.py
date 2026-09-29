@@ -21,6 +21,7 @@ from app.core.nova.v3.live_qualification import (
 from app.core.nova.v3.multi_source_discovery import (
     PENDING_PROVIDERS,
     MinnesotaOspLiveProvider,
+    JobicyLiveProvider,
     _parse_mn_osp_page,
     PROVIDER_TYPES,
     ProviderMeta,
@@ -1047,4 +1048,23 @@ def test_minnesota_osp_provider_registered_live() -> None:
     assert provider.meta.enabled is True
     assert provider.meta.provider_type == "public_rfp_feed"
     assert provider.meta.supports_external_submission is False
+
+def test_jobicy_provider_registered_live() -> None:
+    provider = next(p for p in live_providers() if p.meta.provider_id == "jobicy")
+    assert isinstance(provider, JobicyLiveProvider)
+    assert provider.meta.enabled is True
+    assert provider.meta.access_mode == "api"
+    assert provider.meta.requires_login is False
+    assert provider.meta.supports_external_submission is False
+
+
+def test_jobicy_query_tag_removes_generic_work_terms() -> None:
+    tag = JobicyLiveProvider._query_tag(
+        "AI workflow automation contractor remote freelance project business vendor"
+    )
+    assert "contractor" not in tag
+    assert "remote" not in tag
+    assert "vendor" not in tag
+    assert "workflow" in tag
+    assert "automation" in tag
 

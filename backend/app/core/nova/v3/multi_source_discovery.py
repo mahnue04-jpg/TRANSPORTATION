@@ -624,6 +624,124 @@ class MinnesotaOspLiveProvider:
         return [row for _, row in scored[:capped]]
 
 
+
+
+class JobicyLiveProvider:
+    """Public Jobicy remote-jobs API. Discovery-only."""
+
+    meta = ProviderMeta(
+        provider_id="jobicy",
+        label="Jobicy",
+        provider_type="remote_contract_feed",
+        enabled=True,
+        access_status="public_api",
+        access_mode="api",
+        requires_login=False,
+        requires_fee=False,
+        supports_detail_fetch=False,
+        supports_external_submission=False,
+        terms_safety_notes=(
+            "Uses Jobicy's public remote jobs API for read-only discovery. "
+            "Preserves Jobicy source URLs and attribution. No auto-apply."
+        ),
+        priority=PROVIDER_TYPE_PRIORITY["remote_contract_feed"] + 2,
+    )
+    API_URL = "https://jobicy.com/api/v2/remote-jobs"
+
+    @staticmethod
+    def _query_tag(query: str) -> str:
+        """Reduce long owner prompts to a concise public API keyword tag."""
+        tokens = [
+            token
+            for token in re.findall(r"[a-z0-9+#.]+", str(query or "").lower())
+            if len(token) > 2
+            and token not in {
+                "remote", "contract", "contractor", "freelance", "vendor", "project",
+                "business", "support", "services", "service", "work", "united",
+                "states", "usa", "company", "role", "jobs", "job",
+            }
+        ]
+        return " ".join(tokens[:6]).strip()
+
+    def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        capped = max(1, min(25, int(limit)))
+        params: dict[str, Any] = {
+            "count": capped,
+            "geo": "usa",
+        }
+        tag = self._query_tag(query)
+        if tag:
+            params["tag"] = tag
+
+        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+            response = client.get(
+                self.API_URL,
+                params=params,
+                headers={"User-Agent": "AMICOR-Nova/1.0 multi-source-discovery"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        out: list[dict[str, Any]] = []
+        for raw in list(payload.get("jobs") or [])[:capped]:
+            if not isinstance(raw, dict):
+                continue
+            source_url = str(raw.get("url") or "").strip()
+            title = str(raw.get("jobTitle") or "").strip()
+            company = str(raw.get("companyName") or "").strip()
+            if not source_url or not title or not company:
+                continue
+
+            job_types = raw.get("jobType") or []
+            if isinstance(job_types, str):
+                job_types = [job_types]
+            job_type_text = ", ".join(str(item) for item in job_types if item)
+            contract_type = "contract" if re.search(
+                r"\b(contract|contractor|freelance|temporary|project)\b",
+                job_type_text,
+                re.I,
+            ) else (job_type_text or "unknown")
+
+            salary_parts = [
+                str(raw.get("annualSalaryMin") or "").strip(),
+                str(raw.get("annualSalaryMax") or "").strip(),
+                str(raw.get("salaryCurrency") or "").strip(),
+            ]
+            compensation = " - ".join(part for part in salary_parts[:2] if part)
+            if compensation and salary_parts[2]:
+                compensation = f"{compensation} {salary_parts[2]}"
+            compensation = compensation or None
+
+            out.append(
+                normalize_opportunity(
+                    provider_id="jobicy",
+                    provider_type="remote_contract_feed",
+                    provider_identifier=str(raw.get("id") or source_url),
+                    source_name="Jobicy",
+                    source_attribution="Jobicy",
+                    source_url=source_url,
+                    title=title,
+                    company_name=company,
+                    description=_clean_html(raw.get("jobDescription") or raw.get("jobExcerpt"))[:5000],
+                    compensation_text=compensation,
+                    contract_type=contract_type,
+                    job_type=contract_type,
+                    remote_status="remote",
+                    geography=str(raw.get("jobGeo") or "United States"),
+                    fee_required="no",
+                    publication_date=(str(raw.get("pubDate") or "").strip() or None),
+                    raw_source_metadata={
+                        "origin": "jobicy_public_api",
+                        "job_industry": list(raw.get("jobIndustry") or []),
+                        "job_level": raw.get("jobLevel"),
+                        "job_type_raw": list(job_types),
+                    },
+                    simulated=False,
+                )
+            )
+        return out
+
+
 # Capability-aligned digital/remote contracting signals for SAM.gov pre-filter.
 _SAM_DIGITAL_RELEVANCE = re.compile(
     r"\b("
@@ -1296,6 +1414,7 @@ def live_providers() -> list[LiveDiscoveryProvider]:
         MinnesotaOspLiveProvider(),
         RemotiveLiveProvider(),
         RemoteOkLiveProvider(),
+        JobicyLiveProvider(),
         SamGovLiveProvider(),
     ]
 
