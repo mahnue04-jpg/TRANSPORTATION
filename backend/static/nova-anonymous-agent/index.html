@@ -24,6 +24,19 @@
 </head>
 <body>
   <main class="agent-main">
+    <section class="card" aria-label="Customer account">
+      <div id="agent-account-signed-out">
+        <strong>Already have an AMICOR Nova account?</strong>
+        <p class="hint">Sign in once and use the same account for Ask Nova and the Operations Agent.</p>
+        <a class="button" href="/nova?signin=1">Sign in to existing account</a>
+      </div>
+      <div id="agent-account-signed-in" class="hidden">
+        <strong id="agent-account-name">Signed in</strong>
+        <p class="hint">Your Nova account is active on this browser.</p>
+        <a class="button" href="/nova">Open my Nova account</a>
+        <button type="button" class="secondary" id="agent-sign-out">Sign out</button>
+      </div>
+    </section>
     <section class="hero">
       <p class="eyebrow">AMICOR NOVA</p>
       <h1>Nova Anonymous Operations Agent</h1>
@@ -103,6 +116,7 @@
       <p class="hint">Early launch is supervised. The 7-day trial lets customers experience supported Nova work before choosing a paid option; paid plans cover supported execution within the stated limits. Secure checkout does not authorize unsupported work, contract acceptance, filings, or other restricted external actions.</p>
     </section>
   </main>
+  <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-anonymous-agent/agent.js"></script>
 </body>
 </html>
