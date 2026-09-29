@@ -233,3 +233,9 @@ def test_nova_home_does_not_host_under_delivery() -> None:
     assert 'href="/app"' in HOME_HTML
     assert 'href="/workspace"' in HOME_HTML
     assert 'href="/nova/freight"' in HOME_HTML
+
+
+def test_nova_home_exposes_shared_creative_studio() -> None:
+    html = (ROOT / "static" / "nova-home" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/nova/creative"' in html
+    assert "Generate an image" in html
