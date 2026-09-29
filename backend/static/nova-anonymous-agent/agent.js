@@ -1,6 +1,31 @@
 (function(){
   "use strict";
   var form=document.getElementById("agent-intake");
+  function refreshAccountState(){
+    var manager=window.AmiCorSession||null;
+    if(manager&&manager.restore) manager.restore();
+    var current=manager&&manager.getCurrent?manager.getCurrent():null;
+    var ident=current&&current.identity?current.identity:null;
+    var signedIn=!!(ident&&manager&&manager.getAccessToken&&manager.getAccessToken());
+    var out=document.getElementById("agent-account-signed-out");
+    var inside=document.getElementById("agent-account-signed-in");
+    if(out) out.classList.toggle("hidden",signedIn);
+    if(inside) inside.classList.toggle("hidden",!signedIn);
+    if(signedIn){
+      var name=document.getElementById("agent-account-name");
+      if(name) name.textContent="Signed in as "+(ident.name||ident.email||"AMICOR Nova customer");
+    }
+  }
+  refreshAccountState();
+  var signOut=document.getElementById("agent-sign-out");
+  if(signOut){
+    signOut.addEventListener("click",async function(){
+      var manager=window.AmiCorSession||null;
+      if(manager&&manager.logout) await manager.logout();
+      window.location.href="/nova/anonymous-agent";
+    });
+  }
+
   var status=document.getElementById("status");
   var paidPlans={starter_49:true,launch_99:true,business_299:true};
   function setStatus(message,ok){status.textContent=message;status.className="status "+(ok?"ok":"err");}

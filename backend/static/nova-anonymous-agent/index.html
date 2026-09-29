@@ -24,6 +24,19 @@
 </head>
 <body>
   <main class="agent-main">
+    <section class="card" aria-label="Customer account">
+      <div id="agent-account-signed-out">
+        <strong>Already have an AMICOR Nova account?</strong>
+        <p class="hint">Sign in once and use the same account for Ask Nova and the Operations Agent.</p>
+        <a class="button" href="/nova?signin=1">Sign in to existing account</a>
+      </div>
+      <div id="agent-account-signed-in" class="hidden">
+        <strong id="agent-account-name">Signed in</strong>
+        <p class="hint">Your Nova account is active on this browser.</p>
+        <a class="button" href="/nova">Open my Nova account</a>
+        <button type="button" class="secondary" id="agent-sign-out">Sign out</button>
+      </div>
+    </section>
     <section class="hero">
       <p class="eyebrow">AMICOR NOVA</p>
       <h1>Nova Anonymous Operations Agent</h1>
@@ -43,13 +56,14 @@
         <span><strong>Keep your workspace</strong> — your account and prior work remain available to review after the trial.</span>
         <span><strong>Upgrade only if you want to continue</strong> — $49 Starter Task · $99/month Launch Operations · $299/month Business Operations.</span>
       </div>
-      <p><a class="button" href="/nova/signup">Start My Free 7-Day Trial</a></p>
+      <p><a class="button" href="/nova/signup">Start My Free 7-Day Trial</a> <a class="button secondary" href="/nova?signin=1">Existing customer sign in</a></p>
       <p class="hint">Complex projects are quoted separately. Licensed professional work, regulated advice, physical work, and unsupported external authority are excluded.</p>
     </section>
 
     <section class="card">
       <h2>Already a customer or choosing paid work?</h2>
-      <p class="hint">The form below remains available for paid task requests. New customers should start with the 7-day trial above so they can experience Nova first.</p>
+      <p><a class="button" href="/nova?signin=1">Sign in to my AMICOR Nova account</a></p>
+      <p class="hint">Existing trial and paid customers should sign in first. The form below remains available for a paid task request; new customers should start with the 7-day trial above.</p>
       <h3>Request a business task</h3>
       <p class="hint">Describe the outcome you need. Nova will not accept licensed professional work, physical labor, driving, or any task that requires unsupported external authority.</p>
       <form id="agent-intake">
@@ -102,6 +116,7 @@
       <p class="hint">Early launch is supervised. The 7-day trial lets customers experience supported Nova work before choosing a paid option; paid plans cover supported execution within the stated limits. Secure checkout does not authorize unsupported work, contract acceptance, filings, or other restricted external actions.</p>
     </section>
   </main>
+  <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-anonymous-agent/agent.js"></script>
 </body>
 </html>
