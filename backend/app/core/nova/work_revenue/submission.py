@@ -222,3 +222,147 @@ def submit_or_handoff(
         "Provider claims live submission support but no concrete adapter executed",
         status_code=409,
     )
+
+def _approved_email_body(
+    db: Session,
+    *,
+    application_id: str,
+    organization_id: str,
+) -> str:
+    """Build a sendable body from owner-approved materials only."""
+    rows = (
+        db.query(NovaWorkMaterial)
+        .filter(
+            NovaWorkMaterial.application_id == application_id,
+            NovaWorkMaterial.organization_id == organization_id,
+        )
+        .order_by(NovaWorkMaterial.created_at.asc())
+        .all()
+    )
+    by_kind = {str(row.kind or ""): row for row in rows}
+    chosen = by_kind.get("cover_letter") or by_kind.get("proposal") or by_kind.get("capability_statement")
+    if chosen is None:
+        raise service.NovaWorkError("No approved application message material is available", status_code=409)
+    body = str(chosen.body or "").strip()
+    if "OWNER INPUT REQUIRED" in body.upper():
+        raise service.NovaWorkError(
+            "Application package still contains OWNER INPUT REQUIRED markers; resolve them before sending",
+            status_code=409,
+        )
+    # Materials are intentionally drafted with internal-only labels. Once the
+    # owner has approved the unchanged package, strip only the leading draft
+    # banner so the outbound message does not falsely claim it is still internal.
+    lines = body.splitlines()
+    while lines and (
+        lines[0].strip().upper().startswith("DRAFT")
+        or "OWNER MUST APPROVE" in lines[0].strip().upper()
+    ):
+        lines.pop(0)
+    cleaned = "\n".join(lines).strip()
+    if not cleaned:
+        raise service.NovaWorkError("Approved application message is empty", status_code=409)
+    return cleaned
+
+
+def submit_via_confirmed_email(
+    db: Session,
+    application_id: str,
+    *,
+    to_email: str,
+    organization_id: str,
+    user: UserContext,
+) -> dict[str, Any]:
+    """Send one owner-approved application email through Nova Communications.
+
+    This is not autonomous bulk outreach. The owner must approve the application,
+    provide/verify the exact application email from the listing, attest that the
+    listing accepts email applications, and explicitly confirm this send.
+    """
+    application = service.get_application(
+        db,
+        application_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    opportunity = service.get_opportunity(
+        db,
+        application.opportunity_id,
+        organization_id=organization_id,
+        user=user,
+    )
+    if application.approval_state != "APPROVED" or not application.approved_for_future_submission:
+        raise service.NovaWorkError("Owner approval is required before email submission", status_code=409)
+    if application.externally_submitted or application.manual_submission_recorded:
+        raise service.NovaWorkError("Application has already been recorded as submitted", status_code=409)
+    if _materials_changed_after_approval(
+        db,
+        application_id=application.application_id,
+        organization_id=organization_id,
+        decided_at=getattr(application, "decided_at", None),
+    ):
+        raise service.NovaWorkError(
+            "Application materials changed after owner approval; return to owner review before sending",
+            status_code=409,
+        )
+
+    recipient = str(to_email or "").strip()
+    if not recipient or "@" not in recipient or recipient.startswith("@") or recipient.endswith("@"):
+        raise service.NovaWorkError("A valid application email address is required", status_code=422)
+
+    body = _approved_email_body(
+        db,
+        application_id=application.application_id,
+        organization_id=organization_id,
+    )
+    subject = f"Application / Proposal — {opportunity.opportunity_title} — AMICOR"
+
+    # Reuse the existing owner-confirmed Nova Communications transport. It
+    # requires NOVA_COMMUNICATIONS_ALLOW_SEND=1 and a connected email provider.
+    from app.core.nova.communications import service as communications_service
+    from app.core.nova.communications.schemas import NovaCommsSendRequest
+
+    try:
+        sent = communications_service.send_confirmed(
+            db,
+            NovaCommsSendRequest(
+                to=[recipient],
+                subject=subject,
+                body=body,
+                confirm_send=True,
+                organization_id=organization_id,
+            ),
+            organization_id=organization_id,
+            user=user,
+        )
+    except Exception as exc:
+        if isinstance(exc, service.NovaWorkError):
+            raise
+        detail = str(exc)
+        raise service.NovaWorkError(
+            f"Application email was not sent: {detail}",
+            status_code=int(getattr(exc, "status_code", 502) or 502),
+        ) from exc
+
+    provider = str((sent or {}).get("provider") or "email")
+    recorded = service.record_confirmed_external_submission(
+        db,
+        application.application_id,
+        organization_id=organization_id,
+        user=user,
+        provider=f"email:{provider}",
+        receipt=f"Recipient {recipient}; provider reported status=sent",
+    )
+    return {
+        "status": "SUBMITTED",
+        "submission_mode": "owner_confirmed_email",
+        "application_id": recorded.application_id,
+        "opportunity_id": recorded.opportunity_id,
+        "provider_id": provider,
+        "recipient": recipient,
+        "externally_submitted": True,
+        "external_action_taken": True,
+        "owner_confirmed": True,
+        "financial_execution": False,
+        "contract_acceptance": False,
+    }
+
