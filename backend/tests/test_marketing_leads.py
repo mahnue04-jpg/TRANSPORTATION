@@ -227,3 +227,115 @@ def test_anonymous_operations_accepts_all_public_launch_plans():
         payload["service_plan"] = plan
         response = client.post("/api/marketing/leads", json=payload)
         assert response.status_code == 200, (plan, response.text)
+
+
+def test_anonymous_operations_paid_checkout_uses_selected_price():
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.routes import _RATE_HITS
+
+    _RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.201"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Checkout Test Company",
+                "contact_name": "Checkout Client",
+                "work_email": "agent-checkout@example.com",
+                "consent": True,
+                "preferred_contact_method": "email",
+                "service_plan": "starter_49",
+                "subject": "Starter task",
+                "message": "Prepare a supported spreadsheet cleanup deliverable.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        data = submitted.json()["data"]
+        assert data["checkout_available"] is True
+        assert data["payment_status"] == "pending"
+
+        checkout = client.post(
+            f"/api/marketing/leads/{data['lead_id']}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.202"},
+        )
+        assert checkout.status_code == 200, checkout.text
+        body = checkout.json()
+        assert body["plan"] == "starter_49"
+        assert body["payment_status"] == "pending"
+        assert body["checkout_url"].startswith("https://checkout.stripe.com/")
+        assert fake.last_payload is not None
+        assert fake.last_payload["mode"] == "payment"
+        price_data = fake.last_payload["line_items"][0]["price_data"]
+        assert price_data["unit_amount"] == 4900
+        assert "recurring" not in price_data
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_anonymous_operations_subscription_checkout_is_monthly():
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.routes import _RATE_HITS
+
+    _RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.211"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Monthly Test Company",
+                "contact_name": "Monthly Client",
+                "work_email": "agent-monthly@example.com",
+                "consent": True,
+                "preferred_contact_method": "email",
+                "service_plan": "business_299",
+                "subject": "Business operations",
+                "message": "Request supported ongoing digital business operations.",
+            },
+        )
+        lead_id = submitted.json()["data"]["lead_id"]
+        checkout = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.212"},
+        )
+        assert checkout.status_code == 200, checkout.text
+        assert fake.last_payload is not None
+        assert fake.last_payload["mode"] == "subscription"
+        price_data = fake.last_payload["line_items"][0]["price_data"]
+        assert price_data["unit_amount"] == 29900
+        assert price_data["recurring"]["interval"] == "month"
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_anonymous_operations_free_scope_never_opens_checkout():
+    from app.modules.marketing.routes import _RATE_HITS
+
+    _RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.221"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Free Scope Client",
+            "work_email": "agent-free-scope@example.com",
+            "consent": True,
+            "preferred_contact_method": "email",
+            "service_plan": "free_scope",
+            "message": "Check whether this administrative task is in scope.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    data = submitted.json()["data"]
+    assert data["checkout_available"] is False
+    assert data["payment_status"] == "not_required"
+    checkout = client.post(
+        f"/api/marketing/leads/{data['lead_id']}/checkout",
+        headers={"X-Forwarded-For": "198.51.100.222"},
+    )
+    assert checkout.status_code == 422
