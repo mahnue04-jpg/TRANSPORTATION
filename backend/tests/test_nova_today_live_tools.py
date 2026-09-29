@@ -197,3 +197,23 @@ def test_fetch_web_search_passthrough(monkeypatch):
     result = live_tools.fetch_web_search("movies playing today")
     assert result["status"] == "success"
     assert result["sources"][0]["url"] == "https://example.com"
+
+
+def test_product_vendor_local_and_visual_discovery_route_to_live_web():
+    live_requests = [
+        "Show me different toilets",
+        "Find car parts for my vehicle",
+        "Pull up toys for a five year old",
+        "Find a vendor for office supplies",
+        "Recommend restaurants near me",
+        "Show me photos of toilets",
+        "Where can I buy auto parts?",
+        "Find a pharmacy nearby",
+    ]
+    for request in live_requests:
+        assert live_tools.is_web_search_request(request) is True
+
+    # Stable general-knowledge questions should use Nova Brain rather than
+    # wasting a live-search call.
+    assert live_tools.is_web_search_request("How many bones are in an adult human body?") is False
+    assert live_tools.is_web_search_request("How many teeth does an adult human have?") is False
