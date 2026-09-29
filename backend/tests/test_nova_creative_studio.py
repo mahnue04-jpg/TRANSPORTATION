@@ -776,3 +776,21 @@ def test_brand_safe_image_prompt_and_aspect_selector_static_contract() -> None:
     assert "/static/branding/amicor-logo-full.png" in js
     assert "official-brand-overlay" in js
     assert ".official-brand-overlay" in css
+
+
+def test_brand_safe_image_prompt_excludes_model_brand_text() -> None:
+    from app.core.nova.creative_studio.generation import generate_content_pack
+
+    pack = generate_content_pack(
+        topic="AMICOR Nova helping small business owners organize work with AI",
+        audience="small business owners",
+        objective="awareness",
+        tone="professional and friendly",
+        platform="Instagram",
+        cta="Learn more about AMICOR Nova",
+        brand_name="AMICOR Nova",
+    )
+    prompt = pack["image_prompt"]
+    assert "brand 'AMICOR Nova'" not in prompt
+    assert "specifically do not render the words AMICOR or Nova" in prompt
+    assert "no text or objects" in prompt
