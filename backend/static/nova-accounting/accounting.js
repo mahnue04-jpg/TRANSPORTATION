@@ -49,6 +49,64 @@
     if (typeof amount !== "number") return "Unavailable";
     return "$" + amount.toFixed(2);
   }
+  function documentMoney(amount, currency) {
+    if (typeof amount !== "number") return "Not found";
+    return (currency === "USD" ? "$" : "") + amount.toFixed(2) + (currency && currency !== "USD" && currency !== "UNKNOWN" ? " " + currency : "");
+  }
+  function renderDocumentResult(result) {
+    var host = $("financial-document-result");
+    if (!host) return;
+    var fields = [
+      ["Type", result.document_type || "Unknown"],
+      ["Vendor / customer", result.vendor_or_customer || "Not found"],
+      ["Invoice #", result.invoice_number || "—"],
+      ["Receipt #", result.receipt_number || "—"],
+      ["Document date", result.document_date || "Not found"],
+      ["Due date", result.due_date || "—"],
+      ["Subtotal", documentMoney(result.subtotal, result.currency)],
+      ["Tax", documentMoney(result.tax, result.currency)],
+      ["Tip", documentMoney(result.tip, result.currency)],
+      ["Total", documentMoney(result.total, result.currency)],
+      ["Confidence", typeof result.confidence === "number" ? Math.round(result.confidence * 100) + "%" : "Unknown"]
+    ];
+    var warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    var check = result.math_check || {};
+    var checkClass = check.status === "matches" ? "document-check-ok" : "document-check-review";
+    var checkText = check.status === "matches" ? "Numbers reconcile." :
+      (check.status === "review" ? "Numbers need review. Difference: " + documentMoney(check.difference, result.currency) : "Not enough data to reconcile totals.");
+    host.innerHTML =
+      "<div class=\"document-summary-grid\">" +
+      fields.map(function (row) {
+        return "<div class=\"document-field\"><strong>" + escapeHtml(row[0]) + "</strong><span>" + escapeHtml(row[1]) + "</span></div>";
+      }).join("") +
+      "</div>" +
+      "<p class=\"" + checkClass + "\">" + escapeHtml(checkText) + "</p>" +
+      (warnings.length ? "<div><strong>Review flags</strong><ul class=\"document-warnings\">" +
+        warnings.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("") + "</ul></div>" : "<p class=\"document-check-ok\">No review flags detected.</p>") +
+      "<p class=\"hint\">Review only. Nova did not send an invoice, collect payment, or write to a ledger.</p>";
+    host.classList.remove("hidden");
+  }
+  async function uploadAndProcessDocument(file) {
+    if (!token()) throw new Error("Sign in before processing a financial document.");
+    var headers = {};
+    if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
+    else if (token()) headers.Authorization = "Bearer " + token();
+    var form = new FormData();
+    form.append("file", file);
+    var uploadResponse = await fetch("/api/upload", { method: "POST", headers: headers, body: form });
+    var uploadBody = null;
+    try { uploadBody = await uploadResponse.json(); } catch (_) {}
+    if (!uploadResponse.ok) throw new Error(errorText(uploadBody, "Document upload failed."));
+    if (!uploadBody || !uploadBody.extracted_text) throw new Error("Nova could not extract readable text from this document.");
+    return api("/api/nova/accounting/process-document", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: uploadBody.filename || file.name,
+        upload_category: uploadBody.upload_category || null,
+        extracted_text: uploadBody.extracted_text
+      })
+    });
+  }
   var currentWindow = "all";
   function renderMetrics(metrics) {
     var host = $("metrics-box");
@@ -104,6 +162,30 @@
       currentWindow = btn.getAttribute("data-window") || "all";
       setWindowButtons();
       refresh().catch(function (err) { showBanner(err.message || String(err)); });
+    });
+  });
+  $("financial-document-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var input = $("financial-document-file");
+    var file = input && input.files && input.files[0];
+    if (!file) {
+      showBanner("Choose a receipt or invoice first.");
+      return;
+    }
+    $("financial-document-process").disabled = true;
+    $("financial-document-status").textContent = "Nova is reading and checking " + file.name + "…";
+    $("financial-document-result").classList.add("hidden");
+    uploadAndProcessDocument(file).then(function (result) {
+      renderDocumentResult(result);
+      $("financial-document-status").textContent = result.review_required
+        ? "Processed. Review the flagged fields before using the result."
+        : "Processed. Review the extracted fields before using the result.";
+      showBanner("Document processed for review. No financial action was executed.", true);
+    }).catch(function (err) {
+      $("financial-document-status").textContent = "Processing failed.";
+      showBanner(err.message || String(err));
+    }).finally(function () {
+      $("financial-document-process").disabled = false;
     });
   });
   $("sign-in-toggle").addEventListener("click", function () {
