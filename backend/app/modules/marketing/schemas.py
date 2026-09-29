@@ -25,7 +25,7 @@ CONTACT_METHODS = frozenset({"email", "phone", "either"})
 MONTHLY_RIDE_BANDS = frozenset(
     {"1-25", "26-75", "76-200", "200+", "unsure", ""}
 )
-OPERATIONS_SERVICE_PLANS = frozenset({"starter_49", "business_149", "monthly_499", "not_sure", ""})
+OPERATIONS_SERVICE_PLANS = frozenset({"free_scope", "starter_49", "launch_99", "business_299", "not_sure", ""})
 
 
 class MarketingLeadCreate(BaseModel):
