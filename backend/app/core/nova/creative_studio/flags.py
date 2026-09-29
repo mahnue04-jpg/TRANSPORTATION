@@ -18,8 +18,13 @@ CLIENT_CONTACT_ENABLED = False
 
 
 def image_provider_configured() -> bool:
-    """True only when an owner-set server-side key exists. Never logs the value."""
-    return bool(str(os.getenv("NOVA_CREATIVE_IMAGE_API_KEY") or "").strip())
+    """Use the existing server-side OpenAI credential; never expose its value."""
+    return bool(str(os.getenv("OPENAI_API_KEY") or "").strip())
+
+
+def image_provider_live_enabled() -> bool:
+    """Credentials alone never activate cost-bearing image generation."""
+    return _env_true("NOVA_CREATIVE_IMAGE_LIVE_ENABLED")
 
 
 def video_provider_configured() -> bool:
@@ -37,6 +42,7 @@ def creative_guardrails() -> dict[str, bool | str]:
         "EXTERNAL_PUBLISHING_ENABLED": EXTERNAL_PUBLISHING_ENABLED,
         "CLIENT_CONTACT_ENABLED": CLIENT_CONTACT_ENABLED,
         "IMAGE_PROVIDER_CONFIGURED": image_provider_configured(),
+        "IMAGE_PROVIDER_LIVE_ENABLED": image_provider_live_enabled(),
         "VIDEO_PROVIDER_CONFIGURED": video_provider_configured(),
         "VOICE_PROVIDER_CONFIGURED": voice_provider_configured(),
         "PLANNING_MODE_AVAILABLE": True,
