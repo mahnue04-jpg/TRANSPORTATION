@@ -9,6 +9,7 @@ owner's approval.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -264,6 +265,45 @@ def _approved_email_body(
     return cleaned
 
 
+_EMAIL_RE = re.compile(r"(?i)(?<![A-Z0-9._%+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![A-Z0-9._%+-])")
+_APPLY_CONTEXT_RE = re.compile(
+    r"(?i)\b(apply|application|resume|résumé|proposal|cv|send|email)\b"
+)
+
+
+def _explicit_application_emails(opportunity: Any) -> list[str]:
+    """Return only emails explicitly presented in application/submission context."""
+    source_url = str(getattr(opportunity, "source_url", None) or "").strip()
+    candidates: list[str] = []
+    if source_url.lower().startswith("mailto:"):
+        address = source_url[7:].split("?", 1)[0].strip()
+        if address and "@" in address:
+            candidates.append(address)
+
+    text = "\n".join(
+        str(value or "")
+        for value in (
+            getattr(opportunity, "description", None),
+            getattr(opportunity, "requirements", None),
+        )
+    )
+    for match in _EMAIL_RE.finditer(text):
+        start = max(0, match.start() - 120)
+        end = min(len(text), match.end() + 120)
+        context = text[start:end]
+        if _APPLY_CONTEXT_RE.search(context):
+            candidates.append(match.group(1))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = item.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            out.append(item.strip())
+    return out
+
+
 def submit_via_confirmed_email(
     db: Session,
     application_id: str,
@@ -305,9 +345,23 @@ def submit_via_confirmed_email(
             status_code=409,
         )
 
+    explicit_emails = _explicit_application_emails(opportunity)
     recipient = str(to_email or "").strip()
-    if not recipient or "@" not in recipient or recipient.startswith("@") or recipient.endswith("@"):
-        raise service.NovaWorkError("A valid application email address is required", status_code=422)
+    if recipient:
+        if "@" not in recipient or recipient.startswith("@") or recipient.endswith("@"):
+            raise service.NovaWorkError("A valid application email address is required", status_code=422)
+        if recipient.lower() not in {item.lower() for item in explicit_emails}:
+            raise service.NovaWorkError(
+                "The supplied email is not explicitly identified as an application/submission email in the saved listing.",
+                status_code=409,
+            )
+    else:
+        if len(explicit_emails) != 1:
+            raise service.NovaWorkError(
+                "Nova could not verify exactly one email application address from the saved listing. Use the approved provider handoff instead.",
+                status_code=409,
+            )
+        recipient = explicit_emails[0]
 
     body = _approved_email_body(
         db,
