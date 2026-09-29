@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any, Protocol
+
+from app.ai import get_client
 
 from app.core.nova.creative_studio.flags import (
     image_provider_configured,
+    image_provider_live_enabled,
     video_provider_configured,
     voice_provider_configured,
 )
@@ -67,37 +71,84 @@ class VoiceGenerationProvider(Protocol):
         ...
 
 
-class DisabledImageProvider:
-    provider_id = "image_unconfigured"
+class OpenAIImageProvider:
+    provider_id = "openai_image"
 
     def status(self) -> ProviderStatus:
-        configured = image_provider_configured()
-        if not configured:
+        if not image_provider_configured():
             return ProviderStatus(
                 provider_id=self.provider_id,
                 kind="image",
                 status=CONFIG_REQUIRED,
-                message="No approved image provider credentials configured. Prompt/spec only.",
+                message="The existing OpenAI server credential is not configured.",
                 configured=False,
             )
-        # Credentials may exist but live generation is not activated in V1 without owner enable.
+        if not image_provider_live_enabled():
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                kind="image",
+                status=DISABLED,
+                message="Image provider is configured but live generation is OFF until owner activation.",
+                configured=True,
+            )
         return ProviderStatus(
             provider_id=self.provider_id,
             kind="image",
-            status=DISABLED,
-            message="Image credentials present but live image generation remains DISABLED until owner activation.",
+            status=AVAILABLE,
+            message="Nova Studio image generation is available.",
             configured=True,
         )
 
+    @staticmethod
+    def _size(aspect_ratio: str) -> str:
+        return {
+            "1:1": "1024x1024",
+            "4:5": "1024x1536",
+            "9:16": "1024x1536",
+            "16:9": "1536x1024",
+        }.get(aspect_ratio, "1024x1024")
+
     def generate(self, *, prompt: str, aspect_ratio: str) -> dict[str, Any]:
         st = self.status()
+        if st.status != AVAILABLE:
+            return {
+                "status": st.status,
+                "message": st.message,
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "url": None,
+                "asset_generated": False,
+            }
+        model = str(os.getenv("NOVA_CREATIVE_IMAGE_MODEL") or "gpt-image-2").strip()
+        result = get_client().images.generate(
+            model=model,
+            prompt=prompt,
+            size=self._size(aspect_ratio),
+            n=1,
+        )
+        rows = list(getattr(result, "data", None) or [])
+        row = rows[0] if rows else None
+        image_url = str(getattr(row, "url", "") or "").strip() or None
+        encoded = str(getattr(row, "b64_json", "") or "").strip() or None
+        if not image_url and encoded:
+            image_url = "data:image/png;base64," + encoded
+        if not image_url:
+            return {
+                "status": ERROR,
+                "message": "Image provider returned no image asset.",
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "url": None,
+                "asset_generated": False,
+            }
         return {
-            "status": st.status,
-            "message": st.message,
+            "status": "GENERATED",
+            "message": "Image generated successfully.",
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
-            "url": None,
-            "asset_generated": False,
+            "url": image_url,
+            "asset_generated": True,
+            "model": model,
         }
 
 
@@ -158,7 +209,7 @@ class DisabledVoiceProvider:
 
 
 def image_provider() -> ImageGenerationProvider:
-    return DisabledImageProvider()
+    return OpenAIImageProvider()
 
 
 def video_provider() -> VideoGenerationProvider:
