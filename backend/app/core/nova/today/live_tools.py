@@ -428,8 +428,20 @@ def extract_web_query(text: str, preferred_location: str | None = None) -> str:
     return query or value
 
 
-def fetch_web_search(query: str, *, max_results: int = 5) -> dict[str, Any]:
-    result = search_web(query, max_results=max_results, news_mode=False)
+def fetch_web_search(
+    query: str,
+    *,
+    max_results: int = 5,
+    require_domains: list[str] | None = None,
+    require_terms: list[str] | None = None,
+) -> dict[str, Any]:
+    result = search_web(
+        query,
+        max_results=max_results,
+        news_mode=False,
+        require_domains=require_domains,
+        require_terms=require_terms,
+    )
     if not isinstance(result, dict):
         return {"response": "I couldn't fetch live web results right now.", "sources": [], "status": "degraded"}
     return result
