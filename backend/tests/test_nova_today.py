@@ -213,7 +213,7 @@ def test_nova_today_natural_grant_request_uses_live_grounded_research(client: Te
 
     monkeypatch.setattr(
         "app.core.nova.today.service.fetch_web_search",
-        lambda query, max_results=8: {
+        lambda query, max_results=8, require_domains=None, require_terms=None: {
             "status": "ok",
             "response": "Found a current Minnesota small-business grant program with an official application page.",
             "sources": [
@@ -244,6 +244,39 @@ def test_nova_today_natural_grant_request_uses_live_grounded_research(client: Te
     assert body["sources"][0]["url"] == "https://example.gov/grants/business"
     assert body["source_href"] == "https://example.gov/grants/business"
     assert body["verification_status"] == "verified"
+
+
+def test_nova_today_grant_research_retries_with_relevance_filters(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _headers(client)
+    calls = []
+
+    def fake_search(query, max_results=8, require_domains=None, require_terms=None):
+        calls.append((query, require_domains, require_terms))
+        if len(calls) == 1:
+            return {"status": "ok", "response": "free online games", "sources": []}
+        return {
+            "status": "ok",
+            "response": "Official small business funding resource",
+            "sources": [{
+                "title": "Official small business funding resource",
+                "url": "https://www.sba.gov/funding-programs",
+                "label": "sba.gov",
+                "snippet": "Funding programs for small businesses",
+            }],
+        }
+
+    monkeypatch.setattr("app.core.nova.today.service.fetch_web_search", fake_search)
+    monkeypatch.setattr("app.core.nova.today.service.NovaCoreService._can_use_llm", lambda: False)
+    asked = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "What free grants are available for my delivery company?"},
+    )
+    assert asked.status_code == 200, asked.text
+    body = asked.json()
+    assert len(calls) >= 2
+    assert body["sources"][0]["url"] == "https://www.sba.gov/funding-programs"
+    assert "free online games" not in body["answer"].lower()
 
 
 def test_nova_today_current_external_research_intent_does_not_require_magic_words() -> None:

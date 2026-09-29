@@ -2784,26 +2784,60 @@ def _grounded_web_research_answer(
     query: str,
     organization_id: str,
 ) -> NovaTodayBrainOut:
-    """Search current public sources, then explain findings without inventing missing details."""
-    result = fetch_web_search(query, max_results=8)
-    raw_sources = result.get("sources") or []
-    source_rows = [
-        {
-            "title": str(item.get("title") or item.get("label") or item.get("url") or "Source"),
-            "url": str(item.get("url") or ""),
-            "label": str(item.get("label") or ""),
-        }
-        for item in raw_sources
-        if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
-    ][:8]
-    provider_summary = format_web_search(result, query)
+    """Run several relevance-gated searches, then explain the best current evidence."""
+    lowered = question.lower()
+    is_grant = "grant" in lowered or "funding" in lowered
+    search_specs: list[tuple[str, list[str] | None, list[str] | None]] = [(query, None, None)]
+    if is_grant:
+        subject_terms = ["grant", "funding", "business", "small business", "delivery", "logistics", "transportation"]
+        search_specs = [
+            (query, None, subject_terms),
+            (f"{query} small business grant funding", None, ["grant", "funding", "small business"]),
+            (f"{query} official government grant program", ["grants.gov", "sba.gov"], None),
+        ]
 
+    gathered: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    summaries: list[str] = []
+    for search_query, domains, terms in search_specs:
+        try:
+            result = fetch_web_search(
+                search_query,
+                max_results=8,
+                require_domains=domains,
+                require_terms=terms,
+            )
+        except Exception:
+            logger.exception("today_web_research_search_failed", extra={"query": search_query[:160]})
+            continue
+        summary = format_web_search(result, search_query)
+        if summary:
+            summaries.append(summary)
+        for item in result.get("sources") or []:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "")
+            if not url.startswith(("http://", "https://")) or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            gathered.append(
+                {
+                    "title": str(item.get("title") or item.get("label") or url),
+                    "url": url,
+                    "label": str(item.get("label") or ""),
+                    "snippet": str(item.get("snippet") or ""),
+                }
+            )
+            if len(gathered) >= 10:
+                break
+        if len(gathered) >= 10:
+            break
+
+    source_rows = gathered[:10]
     evidence_lines = []
-    if provider_summary:
-        evidence_lines.append("Search summary: " + provider_summary)
     for index, row in enumerate(source_rows, 1):
         evidence_lines.append(
-            f"Source {index}: {row['title']} | {row['label'] or 'Source'} | {row['url']}"
+            f"Source {index}: {row['title']} | {row['label'] or 'Source'} | {row['url']} | {row['snippet']}"
         )
 
     answer = ""
@@ -2813,13 +2847,14 @@ def _grounded_web_research_answer(
             f"{question.strip()}\n\n"
             "LIVE WEB EVIDENCE (use only this evidence for current factual claims):\n"
             + "\n".join(evidence_lines)
-            + "\n\nInstructions: Explain the actual options visible in the evidence in plain language. "
-            "For grants/funding, identify named programs when present, what each appears to support, "
-            "eligibility, award amount, deadline/status, and application next step only when the evidence provides it. "
-            "If a detail is missing, say 'not verified from the current search' instead of guessing. "
-            "When the user asks for the best or recommended option, give a recommendation only if the evidence supports "
-            "a meaningful fit; explain the reason and uncertainty. Do not invent eligibility or deadlines. "
-            "Tell the user the clickable source links are provided below."
+            + "\n\nInstructions: Act as a professional research assistant. Give the user a useful shortlist, not generic categories. "
+            "Name each concrete program, opportunity, organization, document, or resource actually supported by the evidence. "
+            "Explain what it is, likely relevance to the user's request, eligibility, amount/cost, deadline/status, and next step "
+            "only when the evidence establishes those details. Mark missing details as not verified. "
+            "Do not treat an irrelevant result as evidence merely because it contains a keyword. "
+            "For grants or funding, distinguish actual grants from loans, contests, directories, and general guidance. "
+            "When asked for a recommendation, explain which listed options appear most relevant and why, without inventing facts. "
+            "Tell the user that clickable source links are provided below."
         )
         synthesized = NovaCoreService.ask(
             db,
@@ -2833,26 +2868,20 @@ def _grounded_web_research_answer(
             answer = candidate
 
     if not answer:
-        lines = [f"I searched current public sources for: {query}."]
-        if provider_summary:
-            lines.append("")
-            lines.append("What I found:")
-            lines.append(provider_summary)
+        lines = [f"I researched current public sources for: {query}."]
         if source_rows:
-            lines.append("")
-            lines.append("Current sources:")
+            lines += ["", "Current sources to review:"]
             for index, row in enumerate(source_rows, 1):
                 lines.append(f"{index}. {row['title']}" + (f" — {row['label']}" if row["label"] else ""))
-            lines.append("")
-            lines.append(
-                "Open the source links below to verify eligibility, award amount, deadline, and application instructions. "
-                "I will not guess at any of those details if the current search did not provide them."
-            )
+            lines += [
+                "",
+                "I found relevant current sources, but I could not safely verify every eligibility, amount, or deadline detail from the search snippets alone. Open the clickable sources below for the official details.",
+            ]
         else:
-            lines.append("")
-            lines.append(
-                "I could not verify a current program from the live search, so I am not going to give you a generic or invented grant list."
-            )
+            lines += [
+                "",
+                "I could not verify a relevant current result after multiple searches. I will not substitute unrelated results or invent a program.",
+            ]
         answer = "\n".join(lines)
 
     return NovaTodayBrainOut(
