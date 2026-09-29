@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
 import os
+from pathlib import Path
+import uuid
 from typing import Any, Protocol
 
 from app.ai import get_client
@@ -131,7 +134,24 @@ class OpenAIImageProvider:
         image_url = str(getattr(row, "url", "") or "").strip() or None
         encoded = str(getattr(row, "b64_json", "") or "").strip() or None
         if not image_url and encoded:
-            image_url = "data:image/png;base64," + encoded
+            try:
+                binary = base64.b64decode(encoded)
+            except Exception as exc:
+                raise RuntimeError("Image provider returned invalid image data") from exc
+            configured_dir = str(os.getenv("NOVA_CREATIVE_IMAGE_ASSET_DIR") or "").strip()
+            if configured_dir:
+                root = Path(configured_dir)
+                public_prefix = str(
+                    os.getenv("NOVA_CREATIVE_IMAGE_PUBLIC_PREFIX")
+                    or "/static/generated/nova-creative"
+                ).rstrip("/")
+            else:
+                root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
+                public_prefix = "/static/generated/nova-creative"
+            root.mkdir(parents=True, exist_ok=True)
+            filename = f"nova-{uuid.uuid4().hex}.png"
+            (root / filename).write_bytes(binary)
+            image_url = f"{public_prefix}/{filename}"
         if not image_url:
             return {
                 "status": ERROR,

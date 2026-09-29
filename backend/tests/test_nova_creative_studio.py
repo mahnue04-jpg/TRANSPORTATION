@@ -704,3 +704,45 @@ def test_http_persistence_survives_new_service_session(client: TestClient):
         assert svc.store.get_project(project_id, "not-the-owner") is None
     finally:
         db.close()
+
+
+def test_image_generation_saves_provider_url_and_ui_renders_media(monkeypatch):
+    from app.core.nova.creative_studio import service as service_module
+
+    class FakeImageProvider:
+        provider_id = "fake_image"
+
+        def generate(self, *, prompt: str, aspect_ratio: str):
+            return {
+                "status": "GENERATED",
+                "message": "generated",
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "url": "/static/generated/nova-creative/test-image.png",
+                "asset_generated": True,
+                "model": "test-model",
+            }
+
+    monkeypatch.setattr(service_module, "image_provider", lambda: FakeImageProvider())
+    svc = _svc()
+    project = svc.create_project(
+        "owner-a",
+        {"title": "Image persistence", "project_type": "social_image", "platform": "Instagram"},
+    )
+    result = svc.request_image_generation(
+        "owner-a",
+        project["id"],
+        aspect_ratio="1:1",
+        prompt="A clean business operations dashboard",
+    )
+    assert result["url"] == "/static/generated/nova-creative/test-image.png"
+    assert result["asset"]["url"] == result["url"]
+    assert result["asset"]["status"] == "GENERATED"
+    assert result["provider"]["asset_generated"] is True
+
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+    assert 'row.kind === "image" && row.url' in js
+    assert "generated-media" in js
+    assert "Generating image..." in js
+    assert ".generated-media img" in css

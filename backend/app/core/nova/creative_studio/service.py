@@ -407,6 +407,7 @@ class CreativeStudioService:
             prompt = generated["asset"]["content"]
         result = image_provider().generate(prompt=prompt, aspect_ratio=aspect_ratio)
         status = result.get("status") or CONFIG_REQUIRED
+        generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
             owner_id=owner_id,
             project_id=project_id,
@@ -415,7 +416,7 @@ class CreativeStudioService:
             content=prompt or "",
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
             metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}, "aspect_ratio": aspect_ratio},
-            url=None,  # never invent
+            url=generated_url,
         )
         self._finish_job(
             job,
@@ -424,7 +425,7 @@ class CreativeStudioService:
             asset_ids=[asset.id],
             provider=image_provider().provider_id,
         )
-        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
+        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)

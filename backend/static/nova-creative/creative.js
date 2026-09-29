@@ -115,9 +115,15 @@
     }
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
+      var media = "";
+      if (row.kind === "image" && row.url) {
+        media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
+          escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" /></figure>";
+      }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
-        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? " · URL present" : " · no media URL") + "</div>" +
+        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? " · media ready" : " · no media URL") + "</div>" +
+        media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
   }
@@ -257,7 +263,7 @@
         caption: { working: "Working: Generate Caption...", ok: "Caption generated." },
         storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
         "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
-        image: { working: "Working: Image Generation status...", ok: "Image provider status updated." },
+        image: { working: "Working: Generating image...", ok: "Image generated and added to this project." },
         video: { working: "Working: Video Generation status...", ok: "Video provider status updated." },
         voice: { working: "Working: Voice Generation status...", ok: "Voice provider status updated." },
         export: { working: "Working: Export Project Package...", ok: "Project package exported." }
