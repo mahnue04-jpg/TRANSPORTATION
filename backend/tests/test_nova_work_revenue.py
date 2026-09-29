@@ -2596,3 +2596,9 @@ def test_dashboard_default_opportunity_list_excludes_historical_test_and_incompl
         headers=headers,
     )
     assert missing.status_code == 200
+
+
+def test_work_revenue_links_shared_creative_studio() -> None:
+    html = (ROOT / "static" / "nova-work" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/nova/creative"' in html
+    assert "Nova Creative Image Generator" in html
