@@ -432,6 +432,198 @@ class RemoteOkLiveProvider:
         return [row for _, row in scored[:capped]]
 
 
+
+
+_MN_OSP_PAGE_URLS = (
+    ("mn_osp_pt", "Minnesota OSP Professional/Technical", "https://osp.admin.mn.gov/PT-auto"),
+    ("mn_osp_gs", "Minnesota OSP Goods/Services", "https://osp.admin.mn.gov/GS-auto"),
+)
+_MN_OSP_IGNORE_QUERY_TOKENS = {
+    "remote", "contract", "contractor", "freelance", "project", "vendor", "work",
+    "support", "services", "service", "united", "states", "usa", "business",
+}
+
+
+def _mn_osp_text(html_text: str) -> str:
+    """Convert the public OSP listing page to stable line-oriented text."""
+    text = str(html_text or "")
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(?:p|div|li|tr|td|th|h[1-6])>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    lines = []
+    for raw in text.splitlines():
+        line = re.sub(r"\s+", " ", raw).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _mn_osp_field(block: str, label: str) -> str | None:
+    pattern = re.compile(rf"(?im)^{re.escape(label)}\s*:\s*(.+)$")
+    match = pattern.search(block)
+    return match.group(1).strip() if match else None
+
+
+def _parse_mn_osp_page(
+    html_text: str,
+    *,
+    provider_id: str,
+    source_name: str,
+    source_url: str,
+) -> list[dict[str, Any]]:
+    """Parse Minnesota OSP public solicitation pages into vendor opportunities."""
+    text = _mn_osp_text(html_text)
+    chunks = re.split(r"(?=REFERENCE NUMBER:\s*[A-Z0-9-]+)", text, flags=re.I)
+    out: list[dict[str, Any]] = []
+    for block in chunks:
+        ref = _mn_osp_field(block, "REFERENCE NUMBER")
+        title = _mn_osp_field(block, "Title")
+        agency = (
+            _mn_osp_field(block, "Contracting Agency")
+            or _mn_osp_field(block, "Purchasing Agency")
+        )
+        if not ref or not title or not agency:
+            continue
+
+        lowered = block.lower()
+        # Single-source notices are informational and are not open work Nova can bid.
+        if "single source" in lowered and (
+            "not a request for bid" in lowered
+            or "not a request for proposal" in lowered
+            or "no solicitation documents" in lowered
+        ):
+            continue
+
+        deadline = _mn_osp_field(block, "Response to this solicitation is due no later than")
+        solicitation_number = _mn_osp_field(block, "Solicitation Number")
+        estimated_cost = _mn_osp_field(block, "Estimated Cost")
+
+        description = ""
+        desc_match = re.search(
+            r"(?is)(?:Description of Work|Notes)\s*:\s*(.+?)(?:Date This Solicitation Was Posted\s*:|Category Codes\s*:|$)",
+            block,
+        )
+        if desc_match:
+            description = re.sub(r"\s+", " ", desc_match.group(1)).strip()
+        if not description:
+            description = re.sub(r"\s+", " ", block).strip()
+
+        posted = _mn_osp_field(block, "Date This Solicitation Was Posted")
+        out.append(
+            normalize_opportunity(
+                provider_id=provider_id,
+                provider_type="public_rfp_feed",
+                provider_identifier=ref,
+                source_name=source_name,
+                source_attribution=source_name,
+                source_url=source_url,
+                title=title,
+                company_name=agency,
+                description=description[:5000],
+                compensation_text=estimated_cost,
+                contract_type="RFP / vendor solicitation",
+                job_type="contract",
+                remote_status="unknown",
+                geography="Minnesota vendor opportunity",
+                fee_required="no",
+                publication_date=posted,
+                solicitation_number=solicitation_number or ref,
+                agency=agency,
+                response_deadline=deadline,
+                raw_source_metadata={
+                    "reference_number": ref,
+                    "origin": "mn_osp_public_posting",
+                    "submission_channel": (
+                        "supplier_portal"
+                        if "supplier portal" in lowered or "swift system" in lowered
+                        else "listing_instructions"
+                    ),
+                },
+                simulated=False,
+            )
+        )
+    return out
+
+
+class MinnesotaOspLiveProvider:
+    """Official Minnesota public procurement postings, discovery-only."""
+
+    meta = ProviderMeta(
+        provider_id="mn_osp",
+        label="Minnesota Office of State Procurement",
+        provider_type="public_rfp_feed",
+        enabled=True,
+        access_status="public_page",
+        access_mode="page",
+        requires_login=False,
+        requires_fee=False,
+        supports_detail_fetch=False,
+        supports_external_submission=False,
+        terms_safety_notes=(
+            "Read-only discovery from official public Minnesota OSP solicitation pages. "
+            "No Supplier Portal login automation, no bid submission, no CAPTCHA bypass."
+        ),
+        priority=PROVIDER_TYPE_PRIORITY["public_rfp_feed"],
+    )
+
+    def __init__(self) -> None:
+        self._cache: list[dict[str, Any]] | None = None
+
+    def _load(self) -> list[dict[str, Any]]:
+        if self._cache is not None:
+            return list(self._cache)
+        rows: list[dict[str, Any]] = []
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            for provider_id, source_name, source_url in _MN_OSP_PAGE_URLS:
+                response = client.get(
+                    source_url,
+                    headers={"User-Agent": "AMICOR-Nova/1.0 public-procurement-discovery"},
+                )
+                response.raise_for_status()
+                rows.extend(
+                    _parse_mn_osp_page(
+                        response.text,
+                        provider_id=provider_id,
+                        source_name=source_name,
+                        source_url=source_url,
+                    )
+                )
+        self._cache = dedupe_opportunities(rows)
+        return list(self._cache)
+
+    def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        capped = max(1, min(25, int(limit)))
+        rows = self._load()
+        tokens = {
+            token for token in re.findall(r"[a-z0-9]+", str(query or "").lower())
+            if len(token) > 2 and token not in _MN_OSP_IGNORE_QUERY_TOKENS
+        }
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for row in rows:
+            blob = " ".join(
+                [
+                    str(row.get("title") or ""),
+                    str(row.get("company_name") or ""),
+                    str(row.get("description") or ""),
+                ]
+            ).lower()
+            hits = sum(1 for token in tokens if token in blob)
+            # Keep exact capability-keyword hits even when the owner's query is broad.
+            capability_hit = bool(_SAM_DIGITAL_RELEVANCE.search(blob))
+            if tokens and hits == 0 and not capability_hit:
+                continue
+            scored.append((hits + (2 if capability_hit else 0), row))
+        scored.sort(
+            key=lambda item: (
+                item[0],
+                str(item[1].get("publication_date") or ""),
+            ),
+            reverse=True,
+        )
+        return [row for _, row in scored[:capped]]
+
+
 # Capability-aligned digital/remote contracting signals for SAM.gov pre-filter.
 _SAM_DIGITAL_RELEVANCE = re.compile(
     r"\b("
@@ -1100,7 +1292,12 @@ PENDING_PROVIDERS: list[PendingProvider] = [
 
 
 def live_providers() -> list[LiveDiscoveryProvider]:
-    return [RemotiveLiveProvider(), RemoteOkLiveProvider(), SamGovLiveProvider()]
+    return [
+        MinnesotaOspLiveProvider(),
+        RemotiveLiveProvider(),
+        RemoteOkLiveProvider(),
+        SamGovLiveProvider(),
+    ]
 
 
 def all_provider_metas() -> list[ProviderMeta]:
