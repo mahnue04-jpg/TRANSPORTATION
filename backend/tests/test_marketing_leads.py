@@ -210,3 +210,20 @@ def test_public_business_page_positions_ask_nova_and_operations_agent():
     sitemap = client.get("/sitemap.xml")
     assert sitemap.status_code == 200
     assert "/business" in sitemap.text
+
+
+def test_anonymous_operations_accepts_all_public_launch_plans():
+    base = {
+        "lead_type": "anonymous_operations",
+        "contact_name": "Launch Client",
+        "work_email": "launch-client@example.com",
+        "preferred_contact_method": "email",
+        "message": "Please review this supported digital operations request.",
+        "consent": True,
+    }
+    for plan in ("free_scope", "starter_49", "launch_99", "business_299", "not_sure"):
+        payload = dict(base)
+        payload["work_email"] = f"{plan}@example.com"
+        payload["service_plan"] = plan
+        response = client.post("/api/marketing/leads", json=payload)
+        assert response.status_code == 200, (plan, response.text)
