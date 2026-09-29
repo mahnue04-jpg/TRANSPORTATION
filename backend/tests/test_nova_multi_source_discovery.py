@@ -23,6 +23,7 @@ from app.core.nova.v3.multi_source_discovery import (
     MinnesotaOspLiveProvider,
     JobicyLiveProvider,
     _parse_mn_osp_page,
+    _query_relevant,
     PROVIDER_TYPES,
     ProviderMeta,
     RemotiveLiveProvider,
@@ -1067,4 +1068,48 @@ def test_jobicy_query_tag_removes_generic_work_terms() -> None:
     assert "vendor" not in tag
     assert "workflow" in tag
     assert "automation" in tag
+
+def test_public_rfp_admin_search_accepts_body_capability_match() -> None:
+    row = normalize_opportunity(
+        provider_id="mn_osp_pt",
+        provider_type="public_rfp_feed",
+        provider_identifier="RFP-ADMIN-1",
+        source_name="Minnesota OSP Professional/Technical",
+        source_attribution="Minnesota OSP Professional/Technical",
+        source_url="https://osp.admin.mn.gov/PT-auto",
+        title="Business Process Support Services",
+        company_name="Minnesota Example Agency",
+        description=(
+            "Vendor will provide administrative operations support, document preparation, "
+            "spreadsheet reporting, records organization, and workflow documentation."
+        ),
+        contract_type="RFP / vendor solicitation",
+        job_type="contract",
+        remote_status="unknown",
+        geography="Minnesota vendor opportunity",
+        fee_required="no",
+        simulated=False,
+    )
+    assert _query_relevant(row, "remote administrative operations contractor") is True
+
+
+def test_public_rfp_admin_search_still_rejects_unrelated_rfp() -> None:
+    row = normalize_opportunity(
+        provider_id="mn_osp_pt",
+        provider_type="public_rfp_feed",
+        provider_identifier="RFP-UNRELATED-1",
+        source_name="Minnesota OSP Professional/Technical",
+        source_attribution="Minnesota OSP Professional/Technical",
+        source_url="https://osp.admin.mn.gov/PT-auto",
+        title="Building Roof Replacement",
+        company_name="Minnesota Example Agency",
+        description="Vendor will remove and replace roofing materials at the facility.",
+        contract_type="RFP / vendor solicitation",
+        job_type="contract",
+        remote_status="unknown",
+        geography="Minnesota vendor opportunity",
+        fee_required="no",
+        simulated=False,
+    )
+    assert _query_relevant(row, "remote administrative operations contractor") is False
 
