@@ -117,8 +117,11 @@
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
       if (row.kind === "image" && row.url) {
+        var isAmicor = String(row.content || "").toUpperCase().indexOf("AMICOR") >= 0;
         media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
-          escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" /></figure>";
+          escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" />" +
+          (isAmicor ? "<img class=\"official-brand-overlay\" src=\"/static/branding/amicor-logo-full.png\" alt=\"AMICOR official logo\" />" : "") +
+          "</figure>";
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -280,10 +283,10 @@
       else if (action === "storyboard") path += "generate/storyboard";
       else if (action === "image-prompt") {
         path += "generate/image-prompt";
-        requestBody = { aspect_ratio: "9:16" };
+        requestBody = { aspect_ratio: $("image-aspect").value || "9:16" };
       } else if (action === "image") {
         path += "generate/image";
-        requestBody = { aspect_ratio: "9:16" };
+        requestBody = { aspect_ratio: $("image-aspect").value || "9:16" };
       } else if (action === "video") path += "generate/video";
       else if (action === "voice") path += "generate/voice";
       else if (action === "export") {
