@@ -110,11 +110,12 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML
     assert 'href="/nova/payments/readiness" data-destination="payments-readiness"' in HOME_HTML
     assert HOME_HTML.count('data-internal-product="true"') >= 4
-    assert 'data-separate-product="true"' in HOME_HTML
-    assert "Marketplace purchases are not included in an AMICOR Nova subscription." in HOME_HTML
+    assert 'data-destination="marketplace"' not in HOME_HTML
+    assert "Marketplace purchases are not included in an AMICOR Nova subscription." not in HOME_HTML
     assert "/api/nova/signup/me/access" in HOME_JS
     assert "nova_saas_customer" in HOME_JS
     assert 'data-later="true"' not in HOME_HTML
+    assert 'new URLSearchParams(window.location.search).get("signin") === "1"' in HOME_JS
     assert HOME_HTML.count("Coming later") == 0
 
 
