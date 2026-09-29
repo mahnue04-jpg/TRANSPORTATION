@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.accounting import aging as aging_service
 from app.core.nova.accounting import service
 from app.core.nova.accounting import trends as trends_service
+from app.core.nova.accounting.document_processor import analyze_financial_document
 from app.core.nova.accounting.schemas import (
     NovaAccountingAgingOut,
     NovaAccountingSummaryOut,
@@ -22,6 +24,12 @@ router = APIRouter(
     tags=["nova-accounting"],
     dependencies=[Depends(require_nova_access)],
 )
+
+
+class FinancialDocumentProcessIn(BaseModel):
+    filename: str = Field(default="uploaded-document", max_length=255)
+    upload_category: str | None = Field(default=None, max_length=80)
+    extracted_text: str = Field(min_length=1, max_length=250000)
 
 
 def _resolve_org(user: UserContext, requested: str | None) -> str:
@@ -79,6 +87,20 @@ def accounting_trends(
         )
     except service.NovaAccountingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/process-document")
+def process_financial_document(
+    payload: FinancialDocumentProcessIn,
+    user: UserContext = Depends(get_current_user_context),
+):
+    # Authentication + require_nova_access are enforced by the router.
+    # This endpoint is intentionally read-only: no ledger write, send, collection, or payment action.
+    return analyze_financial_document(
+        text=payload.extracted_text,
+        filename=payload.filename,
+        upload_category=payload.upload_category,
+    )
 
 
 @router.post("/pay")

@@ -50,6 +50,19 @@
       </form>
     </section>
 
+    <section class="panel" aria-label="Invoice and receipt processor">
+      <h2>Invoice &amp; Receipt Processor</h2>
+      <p class="hint">Upload a receipt, invoice, PDF, spreadsheet, document, or clear photo. Nova reads the document, checks the numbers, and prepares a review-only summary. Nothing is sent, charged, paid, or written to a ledger automatically.</p>
+      <form id="financial-document-form" class="document-form">
+        <label class="wide">Document
+          <input id="financial-document-file" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.json,image/png,image/jpeg,image/webp" required />
+        </label>
+        <button type="submit" id="financial-document-process">Upload &amp; Process</button>
+      </form>
+      <p id="financial-document-status" class="hint">No document processed yet.</p>
+      <div id="financial-document-result" class="document-result hidden" aria-live="polite"></div>
+    </section>
+
     <section class="panel" aria-label="Time window">
       <h2>Time window</h2>
       <p class="hint">All time is the default. 30 days and 7 days use each metric’s own timestamp. A card marked All time only cannot be filtered.</p>
