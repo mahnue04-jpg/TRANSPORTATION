@@ -53,7 +53,23 @@
       <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
       <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
       <a class="button secondary hidden" id="upgrade-nova-today" href="/nova">Upgrade Nova</a>
+      <button type="button" id="compact-toggle" class="secondary" aria-pressed="true">Compact view: on</button>
     </div>
+
+    <section class="launch-strip" aria-label="Nova product launch">
+      <article>
+        <span class="trust">PUBLIC PRODUCT</span>
+        <strong>Ask Nova</strong>
+        <span>Free: up to 5 requests/day. Paid: 7-day introductory access, then subscription pricing.</span>
+        <a href="/nova/signup">Start / upgrade</a>
+      </article>
+      <article>
+        <span class="trust">PUBLIC PRODUCT</span>
+        <strong>Nova Anonymous Operations Agent</strong>
+        <span>Free Scope Check · $49 Starter Task · $99/month Launch Operations · $299/month Business Operations.</span>
+        <a href="/nova/anonymous-agent">Open Agent</a>
+      </article>
+    </section>
     <form id="login-form" class="login-grid hidden">
       <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
       <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
@@ -61,19 +77,19 @@
       <p class="hint"><a href="/nova/forgot-password">Forgot password?</a></p>
     </form>
 
-    <section class="panel" aria-label="Recent activity">
+    <section class="panel compact-panel" aria-label="Recent activity">
       <h2>Recent Activity</h2>
       <p class="hint">Owner results from real Nova Today decisions. Empty means nothing has been approved or dismissed yet.</p>
       <div id="activity-box" class="card-list activity-strip">No recent owner activity.</div>
     </section>
 
-    <section class="panel" aria-label="What needs attention now">
+    <section class="panel compact-panel" aria-label="What needs attention now">
       <h2>Attention Now</h2>
       <p class="hint">What needs attention now from real saved Nova records. Empty means there is no real item today.</p>
       <div id="attention-box" class="card-list">Sign in to load today's ranked work.</div>
     </section>
 
-    <section class="panel" aria-label="Communications">
+    <section class="panel compact-panel" aria-label="Communications">
       <h2>Communications</h2>
       <p class="hint">Unread and important saved or connector messages. Prepare draft only. Nova will not send mail.</p>
       <div id="connector-health" class="hint">Connector status loads after sign-in.</div>
@@ -83,19 +99,19 @@
       <div id="communications-box" class="card-list">No communications loaded.</div>
     </section>
 
-    <section class="panel" aria-label="Government / Compliance">
+    <section class="panel compact-panel" aria-label="Government / Compliance">
       <h2>Government / Compliance</h2>
       <p class="hint">User-saved deadlines and renewals only. Nova does not invent filings or file them.</p>
       <div id="government-box" class="card-list">No government items loaded.</div>
     </section>
 
-    <section class="panel" aria-label="Business / Operations">
+    <section class="panel compact-panel" aria-label="Business / Operations">
       <h2>Business / Operations</h2>
       <p class="hint">Follow-ups and tasks already stored in Nova Business.</p>
       <div id="business-box" class="card-list">No business items loaded.</div>
     </section>
 
-    <section class="panel hidden" aria-label="Work and Revenue">
+    <section class="panel compact-panel hidden" aria-label="Work and Revenue">
       <h2>Work &amp; Revenue</h2>
       <p class="hint" id="work-mode-hint">Manual, simulated, and live-discovered opportunities are counted separately. Live discovery status comes from the production Work &amp; Revenue summary.</p>
       <p id="work-mode" class="hint">Sign in to load Work &amp; Revenue mode.</p>
@@ -127,24 +143,24 @@
       </div>
     </section>
 
-    <section class="panel" aria-label="Workspace">
+    <section class="panel compact-panel" aria-label="Workspace">
       <h2>Workspace</h2>
       <div id="workspace-box" class="card-list">No workspace items loaded.</div>
     </section>
 
-    <section class="panel" aria-label="Approval queue">
+    <section class="panel compact-panel" aria-label="Approval queue">
       <h2>Approval Queue</h2>
       <p class="hint">Approve only opens a V1 link, saves a Communications draft, creates a Business task, acknowledges an item, or re-checks a source. Re-check does not send or recreate.</p>
       <div id="queue-box" class="card-list">No items waiting for approval.</div>
     </section>
 
-    <section class="panel" id="review-panel" aria-label="Review item">
+    <section class="panel compact-panel" id="review-panel" aria-label="Review item">
       <h2>Review item</h2>
       <p class="hint">Select an item to review, ask Nova about it, then approve or dismiss.</p>
       <div id="review-box" class="card-list">No item selected.</div>
     </section>
 
-    <section class="brain-card" id="ask-nova" aria-label="Ask Nova">
+    <section class="brain-card compact-panel" id="ask-nova" aria-label="Ask Nova">
       <div class="brain-layout">
         <div class="avatar-wrap">
           <img class="mrs-nova-avatar" src="/static/branding/amicor-mark.png" alt="Mrs. Nova Brain" />
@@ -168,7 +184,7 @@
     </section>
 
 
-    <section class="panel" aria-label="Mrs. Nova recommendations">
+    <section class="panel compact-panel" aria-label="Mrs. Nova recommendations">
       <h2>Recommendations</h2>
       <div id="recommendations-box" class="card-list">No recommendations loaded.</div>
     </section>

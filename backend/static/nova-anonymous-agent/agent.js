@@ -13,7 +13,7 @@
       work_email:document.getElementById("email").value.trim(),
       phone:document.getElementById("phone").value.trim()||null,
       preferred_contact_method:document.getElementById("contact-method").value,
-      subject:"Nova No-Human Operations work request",
+      subject:"Nova Anonymous Operations Agent work request",
       service_plan:document.getElementById("service-plan").value,
       message:document.getElementById("message").value.trim(),
       consent:document.getElementById("consent").checked,

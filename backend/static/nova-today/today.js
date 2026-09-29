@@ -1,6 +1,7 @@
 "use strict";
 
 (function () {
+  window.setTimeout(initCompactView, 0);
   function $(id) {
     var el = document.getElementById(id);
     if (el) return el;
@@ -29,6 +30,25 @@
     el.classList.remove("hidden");
     el.classList.toggle("ok", !!ok);
   }
+  function setCompactView(enabled) {
+    document.body.classList.toggle("compact-view", !!enabled);
+    var toggle = $("compact-toggle");
+    toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    toggle.textContent = enabled ? "Compact view: on" : "Compact view: off";
+    try { window.localStorage.setItem("nova_today_compact", enabled ? "1" : "0"); } catch (_) {}
+  }
+  function initCompactView() {
+    var enabled = true;
+    try {
+      var saved = window.localStorage.getItem("nova_today_compact");
+      if (saved === "0") enabled = false;
+    } catch (_) {}
+    setCompactView(enabled);
+    $("compact-toggle").addEventListener("click", function () {
+      setCompactView(!document.body.classList.contains("compact-view"));
+    });
+  }
+
   function hideBanner() {
     var el = $("banner");
     if (!el) return;
