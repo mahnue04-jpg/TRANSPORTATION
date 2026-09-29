@@ -89,7 +89,7 @@
         escapeHtml((row.content || "").slice(0, 180)) + "</div></div>";
     });
   }
-  async function refresh() {
+  async function refresh(preserveBrain) {
     if (!token()) {
       setSignedIn(false);
       $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
@@ -98,7 +98,7 @@
     setSignedIn(true);
     var data = await api("/api/nova/workspace/dashboard");
     renderDashboard(data);
-    $("brain-output").textContent = "Mrs. Nova Brain is connected to this Nova Workspace.";
+    if (!preserveBrain) $("brain-output").textContent = "Mrs. Nova Brain is connected to this Nova Workspace.";
   }
   async function runBrain(action, question) {
     if (!token()) {
@@ -124,7 +124,7 @@
       });
     }
     showBanner("Mrs. Nova Brain used existing Nova intelligence APIs.", true);
-    await refresh();
+    await refresh(true);
   }
 
   if (session() && session().restore) session().restore();
