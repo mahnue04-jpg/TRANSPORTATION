@@ -18,7 +18,14 @@
       business_name:field("business_name"),contact_name:field("contact_name"),email:field("email"),phone:field("phone"),industry:field("industry"),
       password:document.getElementById("password").value,terms_accepted:document.getElementById("terms_accepted").checked
     })}).then(function(r){return r.json().then(function(body){return{ok:r.ok,body:body};});}).then(function(result){
-      if(!result.ok){show((result.body&&result.body.detail)||"Signup failed.");submitBtn.disabled=false;return;}
+      if(!result.ok){
+        var detail=(result.body&&result.body.detail)||"Signup failed.";
+        if(String(detail).toLowerCase().indexOf("already registered")>=0){
+          banner.innerHTML='This email already has an AMICOR Nova account. <a href="/nova?signin=1">Sign in to your existing account</a>.';
+          banner.classList.remove("hidden");banner.classList.remove("ok");
+        }else{show(detail);}
+        submitBtn.disabled=false;return;
+      }
       if(result.body.login_ready){
         show("Your 7-day AMICOR Nova trial is active. Sign in to use Ask Nova and the Operations Agent.",true);
         window.setTimeout(function(){window.location.href="/nova";},1200);return;
