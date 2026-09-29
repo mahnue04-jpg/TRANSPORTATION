@@ -23,6 +23,7 @@ from app.core.nova.v3.multi_source_discovery import (
     MinnesotaOspLiveProvider,
     JobicyLiveProvider,
     _parse_mn_osp_page,
+    _query_relevant,
     PROVIDER_TYPES,
     ProviderMeta,
     RemotiveLiveProvider,
