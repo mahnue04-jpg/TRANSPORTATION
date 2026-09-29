@@ -794,3 +794,12 @@ def test_brand_safe_image_prompt_excludes_model_brand_text() -> None:
     assert "brand 'AMICOR Nova'" not in prompt
     assert "specifically do not render the words AMICOR or Nova" in prompt
     assert "no text or objects" in prompt
+
+
+def test_creative_ui_has_branded_png_export_contract() -> None:
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert "downloadBrandedImage" in js
+    assert 'Download branded PNG' in js
+    assert "/static/branding/amicor-logo-full.png" in js
+    assert 'canvas.toDataURL("image/png")' in js
+    assert "Branded PNG prepared with the official AMICOR logo." in js
