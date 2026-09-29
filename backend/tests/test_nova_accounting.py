@@ -860,3 +860,44 @@ def test_invoice_receipt_processor_flags_uncertain_or_bad_math() -> None:
     assert result["math_check"]["status"] == "review"
     assert result["review_required"] is True
     assert result["actions"]["send_invoice"] is False
+
+
+def test_nova_accounting_document_processor_ui_contract() -> None:
+    assert "Invoice &amp; Receipt Processor" in ACCT_HTML
+    assert 'id="financial-document-form"' in ACCT_HTML
+    assert 'id="financial-document-file"' in ACCT_HTML
+    assert "/api/upload" in ACCT_JS
+    assert "/api/nova/accounting/process-document" in ACCT_JS
+    assert "FormData" in ACCT_JS
+    assert "Review only" in ACCT_JS
+    assert "save_to_ledger" not in ACCT_JS
+    assert ".document-form" in ACCT_CSS
+
+
+def test_nova_accounting_process_document_endpoint_is_auth_read_only(client: TestClient) -> None:
+    payload = {
+        "filename": "invoice.txt",
+        "upload_category": "invoice",
+        "extracted_text": (
+            "North Star Services\n"
+            "Invoice #INV-100\n"
+            "09/28/2026\n"
+            "Due 10/15/2026\n"
+            "Subtotal $100.00\n"
+            "Tax $8.00\n"
+            "Total $108.00\n"
+        ),
+    }
+    assert client.post("/api/nova/accounting/process-document", json=payload).status_code == 401
+    headers, _org = _headers(client)
+    before = _counts()
+    response = client.post("/api/nova/accounting/process-document", headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["invoice_number"] == "INV-100"
+    assert body["total"] == pytest.approx(108.0)
+    assert body["math_check"]["status"] == "matches"
+    assert body["actions"]["save_to_ledger"] is False
+    assert body["actions"]["send_invoice"] is False
+    assert body["actions"]["collect_payment"] is False
+    assert _counts() == before
