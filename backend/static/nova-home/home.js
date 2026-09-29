@@ -178,6 +178,10 @@
 
   if (session() && session().restore) session().restore();
   refreshBrain();
+  if (new URLSearchParams(window.location.search).get("signin") === "1") {
+    $("login-form").classList.remove("hidden");
+    window.setTimeout(function () { if ($("login-email")) $("login-email").focus(); }, 100);
+  }
 
   $("command-form").addEventListener("submit", async function (event) {
     event.preventDefault();
