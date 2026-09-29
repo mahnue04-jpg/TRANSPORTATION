@@ -98,3 +98,40 @@ button.secondary { background: #2f2a24; }
   max-height: 560px;
   object-fit: contain;
 }
+
+
+.image-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.image-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.image-controls select {
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.generated-media {
+  position: relative;
+}
+
+.official-brand-overlay {
+  position: absolute;
+  top: 2.5%;
+  left: 2.5%;
+  width: 28%;
+  max-width: 260px;
+  height: auto;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.92);
+  object-fit: contain;
+}

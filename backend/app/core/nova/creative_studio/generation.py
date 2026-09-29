@@ -378,6 +378,8 @@ def generate_content_pack(
     image_prompt = (
         f"Clean modern social creative for {platform}, brand '{brand}', "
         f"audience '{audience}', tone '{tone}', benefit '{benefit}', "
+        f"do not draw, imitate, or spell any brand logo or wordmark; "
+        f"leave a clean upper-left brand-safe area for the official logo overlay; "
         f"no third-party logos, no deceptive claims, high readability, marketing still."
     )
     shot_list = [

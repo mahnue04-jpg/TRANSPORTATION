@@ -26,7 +26,7 @@
   </header>
 
   <main class="studio-main">
-    <p class="disclaimer">Creative Studio V1 is planning / script / storyboard mode. Image, video, and voice providers stay CONFIG_REQUIRED until owner-approved credentials exist. No fake media URLs. External publishing, submission, and financial execution remain OFF.</p>
+    <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, and owner-enabled image generation. Video and voice remain provider-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
     <div id="banner" class="banner hidden"></div>
 
     <section class="card" aria-label="Sign in">
@@ -114,6 +114,17 @@
 
     <section class="card" aria-label="Generate">
       <h2>Generate</h2>
+      <div class="image-controls">
+        <label>Image aspect ratio
+          <select id="image-aspect">
+            <option value="1:1">1:1 square</option>
+            <option value="4:5">4:5 portrait</option>
+            <option value="9:16" selected>9:16 vertical</option>
+            <option value="16:9">16:9 landscape</option>
+          </select>
+        </label>
+        <span class="hint">AMICOR previews use the official logo overlay.</span>
+      </div>
       <div class="actions wrap">
         <button type="button" data-action="script">3. Generate Script</button>
         <button type="button" data-action="caption">4. Generate Caption</button>
