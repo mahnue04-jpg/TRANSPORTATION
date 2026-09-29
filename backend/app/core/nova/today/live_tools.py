@@ -383,7 +383,27 @@ def is_web_search_request(text: str) -> bool:
             "rfp opportunities",
         )
     )
-    return natural_funding or (has_topic and has_research_intent)
+
+    # Product, vendor, local-place, food, and visual-discovery questions require
+    # current external results even when the user never says "search the web".
+    discovery_actions = (
+        "find", "show me", "pull up", "recommend", "compare", "buy", "shop for",
+        "where can i get", "where can i buy", "near me", "nearby", "available",
+        "photos of", "pictures of", "images of",
+    )
+    discovery_topics = (
+        "toy", "toys", "toilet", "toilets", "car part", "car parts", "auto part",
+        "auto parts", "vendor", "vendors", "supplier", "suppliers", "restaurant",
+        "restaurants", "food", "grocery", "groceries", "store", "stores", "product",
+        "products", "hotel", "hotels", "clinic", "clinics", "hospital", "hospitals",
+        "pharmacy", "pharmacies", "mechanic", "mechanics",
+    )
+    discovery_request = (
+        any(action in lowered for action in discovery_actions)
+        and any(topic in lowered for topic in discovery_topics)
+    )
+
+    return natural_funding or discovery_request or (has_topic and has_research_intent)
 
 
 def extract_known_site(text: str) -> tuple[str, str] | None:
