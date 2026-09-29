@@ -108,7 +108,7 @@ def test_honeypot_filtered():
 
 
 def test_marketing_pages_still_serve():
-    for path in ("/", "/for-providers", "/for-drivers", "/contact"):
+    for path in ("/", "/business", "/nova-product", "/for-providers", "/for-drivers", "/contact"):
         response = client.get(path)
         assert response.status_code == 200
         assert "AMICOR" in response.text
@@ -198,3 +198,15 @@ def test_anonymous_operations_internal_inbox_and_status():
         json={"status": "paid"},
     )
     assert bad.status_code == 422
+
+
+def test_public_business_page_positions_ask_nova_and_operations_agent():
+    response = client.get("/business")
+    assert response.status_code == 200
+    assert "Ask Nova" in response.text
+    assert "Nova Anonymous Operations Agent" in response.text
+    assert 'href="/nova/signup"' in response.text
+    assert 'href="/nova/anonymous-agent"' in response.text
+    sitemap = client.get("/sitemap.xml")
+    assert sitemap.status_code == 200
+    assert "/business" in sitemap.text

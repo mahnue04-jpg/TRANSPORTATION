@@ -2809,11 +2809,12 @@ def _summarize_document_text(text: str | None, max_len: int = 420) -> str | None
 
 # ── Public marketing website ──────────────────────────────────────────────────
 _MARKETING_DIR = os.path.join(_static_dir, "marketing")
-_MARKETING_NAV_KEYS = ("home", "about", "services", "providers", "drivers", "contact")
+_MARKETING_NAV_KEYS = ("home", "about", "services", "business", "providers", "drivers", "contact")
 _MARKETING_SITEMAP_PATHS = (
     "/",
     "/about",
     "/services",
+    "/business",
     "/nova-product",
     "/nova/anonymous-agent",
     "/for-providers",
@@ -3036,6 +3037,21 @@ def marketing_services(request: Request) -> HTMLResponse:
         ),
         active="services",
         canonical_path="/services",
+        request=request,
+    )
+
+
+@app.get("/business")
+def marketing_business(request: Request) -> HTMLResponse:
+    return _build_marketing_response(
+        "business.html",
+        page_title="AMICOR Nova Business — Ask Nova & Operations Agent",
+        meta_description=(
+            "Start with Ask Nova for ongoing AI business assistance or hire the Nova Anonymous "
+            "Operations Agent for defined digital operations work."
+        ),
+        active="business",
+        canonical_path="/business",
         request=request,
     )
 
