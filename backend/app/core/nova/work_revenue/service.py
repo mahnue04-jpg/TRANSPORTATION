@@ -1487,6 +1487,48 @@ def record_manual_submission(
     return application
 
 
+def record_confirmed_external_submission(
+    db: Session,
+    application_id: str,
+    *,
+    organization_id: str,
+    user: UserContext,
+    provider: str,
+    receipt: str | None = None,
+) -> NovaWorkApplication:
+    """Mark externally submitted only after a verified transport reports success."""
+    application = get_application(db, application_id, organization_id=organization_id, user=user)
+    if application.approval_state != "APPROVED" or not application.approved_for_future_submission:
+        raise NovaWorkError("Owner approval is required before external submission", status_code=409)
+    if application.externally_submitted:
+        raise NovaWorkError("Application is already externally submitted", status_code=409)
+    opportunity = get_opportunity(db, application.opportunity_id, organization_id=organization_id, user=user)
+    previous = opportunity.status
+    if opportunity.status == "APPROVED_TO_APPLY":
+        _apply_status(db, opportunity, "APPLICATION_PREPARED", user, "Approved application package already prepared")
+    if opportunity.status == "APPLICATION_PREPARED":
+        _apply_status(db, opportunity, "SUBMITTED", user, f"Confirmed external submission via {provider}")
+    elif opportunity.status != "SUBMITTED":
+        raise NovaWorkError(f"Cannot record external submission from opportunity state {opportunity.status}", status_code=409)
+    application.externally_submitted = True
+    application.manual_submission_recorded = False
+    application.updated_at = now()
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="APPLICATION_EXTERNALLY_SUBMITTED",
+        summary=f"Owner-confirmed external submission completed via {provider}.",
+        ref_id=application.application_id,
+        entity_type="application",
+        actor_category="OWNER",
+        reason=(receipt or "")[:400] or None,
+    )
+    db.commit()
+    db.refresh(application)
+    return application
+
+
 def update_application_status(
     db: Session,
     application_id: str,
