@@ -191,7 +191,8 @@ def start_checkout(db: Session, *, signup_id: str) -> dict[str, Any]:
     row = db.get(NovaSignupAccount, signup_id)
     if row is None:
         raise SignupError("Signup not found", status_code=404)
-    if row.status in ACTIVATED_STATUSES and row.status != STATUS_FREE:
+    no_card_trial = row.status == STATUS_TRIALING and not row.stripe_subscription_id
+    if row.status in ACTIVATED_STATUSES and row.status != STATUS_FREE and not no_card_trial:
         raise SignupError("Signup already activated", status_code=409)
 
     occupied = founding_occupied_count(db)
@@ -251,7 +252,16 @@ def checkout_view(
     plan: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if row.status == STATUS_FREE:
+    no_card_trial = row.status == STATUS_TRIALING and not row.stripe_subscription_id
+    if no_card_trial:
+        plan = {
+            "tier": "trial",
+            "trial_days": 7,
+            "price": 0,
+            "card_required": False,
+            "products": ["ask_nova", "operations_agent"],
+        }
+    elif row.status == STATUS_FREE:
         plan = {"tier": "free", "daily_ask_limit": FREE_DAILY_ASK_LIMIT, "price": 0}
     else:
         plan = plan or billing_plan(founding_eligible=bool(row.founding_reserved))
@@ -302,12 +312,16 @@ def activate_free_signup(db: Session, *, signup_id: str) -> dict[str, Any]:
     except TenantProvisionError as exc:
         raise SignupError(str(exc), status_code=exc.status_code) from exc
 
-    row.status = STATUS_FREE
+    stamp = now()
+    row.status = STATUS_TRIALING
     row.organization_id = tenant.organization_id
     row.owner_user_id = tenant.owner_user_id
+    row.intro_started_at = stamp
+    row.intro_ends_at = intro_end_at(stamp)
     row.founding_reserved = False
     row.founding_slot = None
-    row.updated_at = now()
+    row.current_unit_amount = 0
+    row.updated_at = stamp
 
     existing_tenant = (
         db.query(NovaCustomerTenant)
@@ -322,12 +336,12 @@ def activate_free_signup(db: Session, *, signup_id: str) -> dict[str, Any]:
                 owner_user_id=tenant.owner_user_id,
                 founding_member=False,
                 founding_slot=None,
-                subscription_status=STATUS_FREE,
+                subscription_status=STATUS_TRIALING,
                 product_scope="nova",
             )
         )
     else:
-        existing_tenant.subscription_status = STATUS_FREE
+        existing_tenant.subscription_status = STATUS_TRIALING
         existing_tenant.updated_at = now()
     db.commit()
     db.refresh(row)
@@ -396,6 +410,17 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
             .first()
         )
     subscription_status = str(tenant.subscription_status or "") if tenant is not None else None
+    signup = db.get(NovaSignupAccount, tenant.signup_id) if tenant is not None else None
+    no_card_trial = bool(
+        signup is not None
+        and subscription_status == STATUS_TRIALING
+        and not signup.stripe_subscription_id
+    )
+    trial_expired = bool(
+        no_card_trial
+        and signup.intro_ends_at is not None
+        and now() >= signup.intro_ends_at
+    )
     free_tier = subscription_status == STATUS_FREE
     paid_surfaces = [
         "nova_home",
@@ -421,8 +446,24 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
     return {
         "nova_saas_customer": saas,
         "product_scope": "nova" if saas else "internal",
-        "tier": "free" if free_tier else ("paid" if saas else "internal"),
-        "allowed_surfaces": free_surfaces if free_tier else paid_surfaces,
+        "tier": (
+            "trial_expired"
+            if trial_expired
+            else "trial"
+            if no_card_trial
+            else "free"
+            if free_tier
+            else ("paid" if saas else "internal")
+        ),
+        "allowed_surfaces": (
+            ["nova_home", "nova_today", "nova_login"]
+            if trial_expired
+            else paid_surfaces
+            if no_card_trial
+            else free_surfaces
+            if free_tier
+            else paid_surfaces
+        ),
         "blocked_surfaces": (
             [
                 "health",
@@ -443,6 +484,11 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
             else []
         ),
         "free_daily_ask_limit": FREE_DAILY_ASK_LIMIT if free_tier else None,
+        "trial_days": 7 if no_card_trial else None,
+        "trial_started_at": signup.intro_started_at.isoformat() if no_card_trial and signup and signup.intro_started_at else None,
+        "trial_ends_at": signup.intro_ends_at.isoformat() if no_card_trial and signup and signup.intro_ends_at else None,
+        "trial_expired": trial_expired,
+        "products": ["ask_nova", "operations_agent"] if no_card_trial else None,
         "founding_member": bool(tenant.founding_member) if tenant is not None else False,
         "subscription_status": subscription_status,
         "owner_user_id": tenant.owner_user_id if tenant is not None else user_id,

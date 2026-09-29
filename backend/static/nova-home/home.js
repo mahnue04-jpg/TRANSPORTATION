@@ -73,13 +73,19 @@
         document.querySelectorAll('[data-internal-product="true"]').forEach(function (el) {
           el.classList.add("hidden");
         });
-        if (access.tier === "free") {
-          document.querySelectorAll('[data-paid-nova="true"]').forEach(function (el) {
-            el.classList.add("hidden");
-          });
+        if (access.tier === "trial") {
           if ($("upgrade-nova")) $("upgrade-nova").classList.remove("hidden");
-          var limit = access.free_daily_ask_limit || 5;
-          $("session-meta").textContent += " · Free plan · up to " + limit + " Ask Nova requests/day";
+          var ends = access.trial_ends_at ? new Date(access.trial_ends_at) : null;
+          var days = ends ? Math.max(1, Math.ceil((ends.getTime() - Date.now()) / 86400000)) : 7;
+          $("session-meta").textContent += " · Free trial · " + days + " day" + (days === 1 ? "" : "s") + " remaining · Ask Nova + Operations Agent";
+        } else if (access.tier === "trial_expired") {
+          document.querySelectorAll('[data-paid-nova="true"]').forEach(function (el) { el.classList.add("hidden"); });
+          if ($("upgrade-nova")) $("upgrade-nova").classList.remove("hidden");
+          $("session-meta").textContent += " · Free trial ended · upgrade to continue new Nova work";
+          showBanner("Your 7-day Nova trial has ended. Your account remains available; upgrade to continue new Ask Nova or Operations Agent work.");
+        } else if (access.tier === "free") {
+          if ($("upgrade-nova")) $("upgrade-nova").classList.remove("hidden");
+          $("session-meta").textContent += " · Legacy free plan";
         }
       }
     } catch (_) {}

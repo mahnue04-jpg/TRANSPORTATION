@@ -155,17 +155,20 @@ def test_public_signup_page_has_approved_offer_not_29() -> None:
     assert "$29" not in str(body["copy"])
 
 
-def test_free_signup_has_limited_access_and_daily_ask_cap() -> None:
+def test_free_signup_starts_shared_seven_day_no_card_trial() -> None:
     client = _client()
     payload = _signup_payload()
     created = client.post("/api/nova/signup/free", json=payload)
     assert created.status_code == 200, created.text
     body = created.json()
-    assert body["status"] == STATUS_FREE
+    assert body["status"] == STATUS_TRIALING
     assert body["login_ready"] is True
-    assert body["plan"]["tier"] == "free"
-    assert body["plan"]["daily_ask_limit"] == 5
+    assert body["plan"]["tier"] == "trial"
+    assert body["plan"]["trial_days"] == 7
+    assert body["plan"]["card_required"] is False
+    assert body["plan"]["products"] == ["ask_nova", "operations_agent"]
     assert not body.get("checkout_url")
+    assert body["intro_ends_at"]
 
     login = client.post(
         "/api/auth/login",
@@ -177,94 +180,56 @@ def test_free_signup_has_limited_access_and_daily_ask_cap() -> None:
     access = client.get("/api/nova/signup/me/access", headers=headers)
     assert access.status_code == 200, access.text
     access_body = access.json()
-    assert access_body["tier"] == "free"
-    assert access_body["free_daily_ask_limit"] == 5
+    assert access_body["tier"] == "trial"
+    assert access_body["trial_expired"] is False
+    assert access_body["products"] == ["ask_nova", "operations_agent"]
     assert "nova_today" in access_body["allowed_surfaces"]
-    assert "nova_business" not in access_body["allowed_surfaces"]
+    assert "nova_business" in access_body["allowed_surfaces"]
 
-    assert client.get("/api/nova/government/dashboard", headers=headers).status_code == 403
-    assert client.get("/api/nova/communications/dashboard", headers=headers).status_code == 403
-    assert client.get("/api/nova/business/dashboard", headers=headers).status_code == 403
-    assert client.get("/api/nova/accounting/summary", headers=headers).status_code == 403
-    assert client.get("/api/nova/work/opportunities", headers=headers).status_code == 403
-    assert client.get("/api/nova/payments/readiness", headers=headers).status_code == 403
-
-    for _ in range(5):
+    for _ in range(6):
         asked = client.post(
             "/api/nova/today/ask",
             headers=headers,
             json={"question": "What is my name?"},
         )
         assert asked.status_code == 200, asked.text
-    limited = client.post(
-        "/api/nova/today/ask",
-        headers=headers,
-        json={"question": "What is my name?"},
-    )
-    assert limited.status_code == 429
-    assert "5 Ask Nova requests per day" in limited.text
-    assert "Upgrade" in limited.text
-
-    # Direct endpoint remains blocked after "refresh" via a second login session.
-    login_again = client.post(
-        "/api/auth/login",
-        json={"email": payload["email"], "password": payload["password"]},
-    )
-    assert login_again.status_code == 200
-    headers2 = {"Authorization": f"Bearer {login_again.json()['access_token']}"}
-    still_limited = client.post(
-        "/api/nova/today/ask",
-        headers=headers2,
-        json={"question": "What is my name?"},
-    )
-    assert still_limited.status_code == 429
-
-    assert client.get("/nova/communications", headers=headers).status_code == 403
-    assert client.get("/nova/government", headers=headers).status_code == 403
-    assert client.get("/nova/business", headers=headers).status_code == 403
-    assert client.get("/nova/accounting", headers=headers).status_code == 403
-    assert client.get("/nova/accounting/aging", headers=headers).status_code == 403
-    assert client.get("/nova/accounting/trends", headers=headers).status_code == 403
-    assert client.get("/nova/work", headers=headers).status_code == 403
-    assert client.get("/api/nova/v3/status", headers=headers).status_code in {401, 403, 404}
 
 
-def test_free_daily_ask_limit_resets_on_new_calendar_date(monkeypatch) -> None:
+def test_no_card_trial_expires_after_seven_days(monkeypatch) -> None:
     from datetime import datetime, timedelta, timezone
-
     from app.core.nova.signup import service as signup_service
 
-    fixed = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(signup_service, "now", lambda: fixed)
-
     client = _client()
     payload = _signup_payload()
     created = client.post("/api/nova/signup/free", json=payload)
     assert created.status_code == 200, created.text
-    login = client.post(
-        "/api/auth/login",
-        json={"email": payload["email"], "password": payload["password"]},
-    )
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    for _ in range(5):
-        assert client.post(
-            "/api/nova/today/ask",
-            headers=headers,
-            json={"question": "ping"},
-        ).status_code == 200
-    assert client.post(
-        "/api/nova/today/ask",
-        headers=headers,
-        json={"question": "ping"},
-    ).status_code == 429
 
-    monkeypatch.setattr(signup_service, "now", lambda: fixed + timedelta(days=1))
-    reset_ok = client.post(
-        "/api/nova/today/ask",
+    login = client.post("/api/auth/login", json={"email": payload["email"], "password": payload["password"]})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/api/nova/signup/me/access", headers=headers).json()["tier"] == "trial"
+
+    monkeypatch.setattr(signup_service, "now", lambda: fixed + timedelta(days=8))
+    access = client.get("/api/nova/signup/me/access", headers=headers).json()
+    assert access["tier"] == "trial_expired"
+    assert access["trial_expired"] is True
+    asked = client.post("/api/nova/today/ask", headers=headers, json={"question": "continue work"})
+    assert asked.status_code == 403
+    assert "trial has ended" in asked.text.lower()
+
+    # Expiry is enforced centrally for new Nova write actions, not only Ask Nova.
+    business_write = client.post(
+        "/api/nova/business/customers",
         headers=headers,
-        json={"question": "ping after reset"},
+        json={"name": "After Trial Customer"},
     )
-    assert reset_ok.status_code == 200, reset_ok.text
+    assert business_write.status_code == 403
+    assert "trial has ended" in business_write.text.lower()
+
+    # Read access remains available so the customer's account/prior work can still be reviewed.
+    dashboard = client.get("/api/nova/today/dashboard", headers=headers)
+    assert dashboard.status_code == 200
 
 
 def test_free_to_paid_upgrade_preserves_same_account() -> None:
@@ -275,6 +240,7 @@ def test_free_to_paid_upgrade_preserves_same_account() -> None:
         payload = _signup_payload()
         created = client.post("/api/nova/signup/free", json=payload)
         assert created.status_code == 200, created.text
+        assert created.json()["status"] == STATUS_TRIALING
         signup_id = created.json()["signup_id"]
         login = client.post(
             "/api/auth/login",
