@@ -1,6 +1,7 @@
 """Nova SaaS customer product-scope guard. Does not modify Health/Freight routers."""
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Callable
 
 from fastapi.responses import JSONResponse
@@ -69,6 +70,25 @@ def is_nova_saas_customer_org(db, organization_id: str | None) -> bool:
     return nova_customer_tenant(db, organization_id) is not None
 
 
+def migrate_legacy_free_tenant(db, tenant) -> bool:
+    """Move pre-launch permanent-free Nova accounts onto the unified 7-day no-card trial."""
+    if tenant is None or str(tenant.subscription_status or "").lower() != "free":
+        return False
+    from app.core.nova.signup.models import NovaSignupAccount
+    signup = db.get(NovaSignupAccount, tenant.signup_id)
+    if signup is None or signup.stripe_subscription_id:
+        return False
+    stamp = now()
+    tenant.subscription_status = "trialing"
+    tenant.updated_at = stamp
+    signup.status = "trialing"
+    signup.intro_started_at = stamp
+    signup.intro_ends_at = stamp + timedelta(days=7)
+    signup.updated_at = stamp
+    db.commit()
+    return True
+
+
 def path_blocked_for_nova_customer(path: str) -> bool:
     normalized = str(path or "")
     if any(normalized == override or normalized.startswith(override + "/") for override in ALLOWED_OVERRIDES):
@@ -110,6 +130,7 @@ class NovaCustomerProductGuardMiddleware(BaseHTTPMiddleware):
         try:
             with SessionLocal() as db:
                 tenant = nova_customer_tenant(db, org_id)
+                migrate_legacy_free_tenant(db, tenant)
                 trial_expired = False
                 if tenant is not None and str(tenant.subscription_status or "").lower() == "trialing":
                     from app.core.nova.signup.models import NovaSignupAccount
