@@ -29,6 +29,7 @@
         <li>Includes Nova Home/Ask Nova, Today, Workspace, live web/news/weather lookup, Communications, Government research/tracking, Business operations, and read-only Accounting/Aging/Trends</li>
       </ul>
       <p class="hint" id="offer-slots">Checking founding availability…</p>
+      <p class="hint" id="payment-mode">Checking secure checkout readiness…</p>
       <p class="hint">This subscription is AMICOR Nova only. It does not include AMICOR Health, Delivery, Freight, Lifesaver, the Marketplace, the Nova Anonymous Operations Agent, Driver onboarding, Nova Work & Revenue, or internal Payments Readiness. Government filing, money movement, and other restricted external actions are not included unless separately verified and authorized.</p>
     </section>
 
@@ -51,7 +52,7 @@
         I accept the <a href="/terms" target="_blank" rel="noopener">AMICOR terms</a> and the founding-customer offer above.
       </label>
       <button type="submit" id="submit-btn">Create AMICOR Nova account</button>
-      <p class="hint">Free accounts do not require payment. Paid early access currently uses Stripe TEST checkout only; no live charge is created. Customer billing will not be advertised as live until the production payment path is separately verified.</p>
+      <p class="hint">Free accounts do not require payment. Paid early access uses secure Stripe Checkout only when the configured payment mode is available. Live charging remains fail-closed until production Stripe keys, webhook signing, and the live enable switch are all configured.</p>
     </form>
   </main>
   <script src="/static/nova-signup/signup.js"></script>
