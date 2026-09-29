@@ -18,7 +18,7 @@ from app.auth import (
     _validate_password,
     hash_password,
 )
-from app.core.nova.signup.isolation import is_nova_saas_customer_org
+from app.core.nova.signup.isolation import is_nova_saas_customer_org, migrate_legacy_free_tenant
 from app.core.nova.signup.models import (
     ACTIVATED_STATUSES,
     HOLD_FOUNDING_STATUSES,
@@ -409,6 +409,7 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
             .filter(NovaCustomerTenant.organization_id == str(organization_id))
             .first()
         )
+    migrate_legacy_free_tenant(db, tenant)
     subscription_status = str(tenant.subscription_status or "") if tenant is not None else None
     signup = db.get(NovaSignupAccount, tenant.signup_id) if tenant is not None else None
     no_card_trial = bool(
