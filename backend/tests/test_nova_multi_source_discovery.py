@@ -20,6 +20,8 @@ from app.core.nova.v3.live_qualification import (
 )
 from app.core.nova.v3.multi_source_discovery import (
     PENDING_PROVIDERS,
+    MinnesotaOspLiveProvider,
+    _parse_mn_osp_page,
     PROVIDER_TYPES,
     ProviderMeta,
     RemotiveLiveProvider,
@@ -995,4 +997,54 @@ def test_admin_search_rejects_digital_asset_operations_analyst() -> None:
         unrelated,
         "remote administrative support contractor",
     ) is False
+
+def test_minnesota_osp_public_page_parses_open_vendor_solicitation() -> None:
+    sample = """
+    <div>REFERENCE NUMBER: 12345</div>
+    <div>Title: Data Reporting and Administrative Support</div>
+    <div>Contracting Agency: Minnesota Example Agency</div>
+    <div>Solicitation Number: EVT0001234</div>
+    <div>Estimated Cost: $25,001-$50,000</div>
+    <div>Response to this solicitation is due no later than: 10/15/2026 at 03:00 PM</div>
+    <div>Description of Work: Vendor will provide spreadsheet cleanup, reporting, document preparation, and administrative operations support.</div>
+    <div>Date This Solicitation Was Posted: 09/28/2026</div>
+    """
+    rows = _parse_mn_osp_page(
+        sample,
+        provider_id="mn_osp_pt",
+        source_name="Minnesota OSP Professional/Technical",
+        source_url="https://osp.admin.mn.gov/PT-auto",
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["provider_type"] == "public_rfp_feed"
+    assert row["provider_identifier"] == "12345"
+    assert row["company_name"] == "Minnesota Example Agency"
+    assert row["job_type"] == "contract"
+    assert row["simulated"] is False
+    assert row["response_deadline"] == "10/15/2026 at 03:00 PM"
+
+
+def test_minnesota_osp_skips_single_source_notice_that_is_not_open_bid() -> None:
+    sample = """
+    <div>REFERENCE NUMBER: SS-1</div>
+    <div>Title: Proprietary Software Renewal</div>
+    <div>Purchasing Agency: Minnesota Example Agency</div>
+    <div>Notes: This is a single source posting. This is not a request for bid and there are no solicitation documents.</div>
+    """
+    rows = _parse_mn_osp_page(
+        sample,
+        provider_id="mn_osp_gs",
+        source_name="Minnesota OSP Goods/Services",
+        source_url="https://osp.admin.mn.gov/GS-auto",
+    )
+    assert rows == []
+
+
+def test_minnesota_osp_provider_registered_live() -> None:
+    provider = next(p for p in live_providers() if p.meta.provider_id == "mn_osp")
+    assert isinstance(provider, MinnesotaOspLiveProvider)
+    assert provider.meta.enabled is True
+    assert provider.meta.provider_type == "public_rfp_feed"
+    assert provider.meta.supports_external_submission is False
 
