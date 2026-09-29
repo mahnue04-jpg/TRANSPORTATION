@@ -77,9 +77,22 @@
     var durationMs = 8000;
     var fps = 30;
     var stream = canvas.captureStream(fps);
-    var preferred = "video/webm;codecs=vp9";
-    var mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(preferred)) ? preferred : "video/webm";
-    var recorder = new MediaRecorder(stream, { mimeType: mime });
+    var candidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    var mime = "";
+    if (MediaRecorder.isTypeSupported) {
+      for (var i = 0; i < candidates.length; i += 1) {
+        if (MediaRecorder.isTypeSupported(candidates[i])) {
+          mime = candidates[i];
+          break;
+        }
+      }
+    }
+    var recorder;
+    try {
+      recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    } catch (err) {
+      throw new Error("This browser cannot start local WebM video recording.");
+    }
     var chunks = [];
     recorder.ondataavailable = function (event) {
       if (event.data && event.data.size) chunks.push(event.data);
@@ -121,14 +134,46 @@
     });
     recorder.stop();
     var blob = await done;
-    var url = URL.createObjectURL(blob);
+    if (!blob || !blob.size) {
+      throw new Error("Video recording finished but produced an empty file.");
+    }
+    return {
+      blob: blob,
+      fileName: (fileStem || "amicor-nova") + "-promo.webm"
+    };
+  }
+
+  function showPromoVideoDownload(result) {
+    var old = document.getElementById("promo-video-result");
+    if (old) old.remove();
+
+    var url = URL.createObjectURL(result.blob);
+    var wrap = document.createElement("div");
+    wrap.id = "promo-video-result";
+    wrap.className = "item";
+
+    var video = document.createElement("video");
+    video.controls = true;
+    video.playsInline = true;
+    video.src = url;
+    video.style.maxWidth = "100%";
+    video.style.display = "block";
+    video.style.marginBottom = "10px";
+
     var link = document.createElement("a");
-    link.download = (fileStem || "amicor-nova") + "-promo.webm";
     link.href = url;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    link.download = result.fileName;
+    link.textContent = "Download video";
+    link.className = "button secondary";
+
+    wrap.appendChild(video);
+    wrap.appendChild(link);
+    $("asset-list").prepend(wrap);
+
+    setTimeout(function () {
+      if (!document.body.contains(wrap)) URL.revokeObjectURL(url);
+    }, 600000);
+    return link;
   }
 
   function detailText(body, fallback) {
@@ -262,8 +307,10 @@
         button.disabled = true;
         showBanner("Working: creating 8-second branded promo video...", true);
         try {
-          await createPromoVideo(button.getAttribute("data-image-url"), button.getAttribute("data-file-stem"));
-          showBanner("Branded promo video created and downloaded.", true);
+          var result = await createPromoVideo(button.getAttribute("data-image-url"), button.getAttribute("data-file-stem"));
+          var downloadLink = showPromoVideoDownload(result);
+          showBanner("Branded promo video created. Use the Download video link below to save it.", true);
+          downloadLink.focus();
         } catch (err) {
           showBanner(err.message || "Promo video export failed.", false);
         } finally {
