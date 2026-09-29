@@ -326,12 +326,14 @@ def is_web_search_capability_question(text: str) -> bool:
 
 
 def is_web_search_request(text: str) -> bool:
+    """Recognize both explicit browsing commands and natural current-research questions."""
     lowered = _clean(text).lower()
     if is_weather_request(text) or is_news_request(text):
         return False
     if is_web_search_capability_question(text):
         return False
-    return any(
+
+    explicit = any(
         phrase in lowered
         for phrase in (
             "search the web",
@@ -354,6 +356,34 @@ def is_web_search_request(text: str) -> bool:
             "open x",
         )
     )
+    if explicit:
+        return True
+
+    external_topics = (
+        "grant", "funding", "loan program", "contract", "rfp", "bid opportunity",
+        "solicitation", "government program", "business program", "license", "permit",
+        "regulation", "requirement", "deadline", "eligibility", "eligible", "price",
+        "pricing", "rate", "fee", "vendor", "supplier", "program",
+    )
+    research_intent = (
+        "available", "current", "latest", "today", "open now", "recommend",
+        "recommendation", "best", "qualify", "eligible", "apply", "application",
+        "deadline", "find", "search", "what kind", "which", "where can",
+    )
+    has_topic = any(term in lowered for term in external_topics)
+    has_research_intent = any(term in lowered for term in research_intent)
+
+    # Natural phrasing such as "free grants for my delivery company" is itself a
+    # current external-research request even without the words "search the web".
+    natural_funding = any(
+        phrase in lowered
+        for phrase in (
+            "grants for", "grant for", "free grants", "funding for",
+            "contracts for", "contract opportunities", "bid opportunities",
+            "rfp opportunities",
+        )
+    )
+    return natural_funding or (has_topic and has_research_intent)
 
 
 def extract_known_site(text: str) -> tuple[str, str] | None:

@@ -2777,6 +2777,95 @@ def _today_government_grounded_answer(
     )
 
 
+def _grounded_web_research_answer(
+    db: Session,
+    *,
+    question: str,
+    query: str,
+    organization_id: str,
+) -> NovaTodayBrainOut:
+    """Search current public sources, then explain findings without inventing missing details."""
+    result = fetch_web_search(query, max_results=8)
+    raw_sources = result.get("sources") or []
+    source_rows = [
+        {
+            "title": str(item.get("title") or item.get("label") or item.get("url") or "Source"),
+            "url": str(item.get("url") or ""),
+            "label": str(item.get("label") or ""),
+        }
+        for item in raw_sources
+        if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
+    ][:8]
+    provider_summary = format_web_search(result, query)
+
+    evidence_lines = []
+    if provider_summary:
+        evidence_lines.append("Search summary: " + provider_summary)
+    for index, row in enumerate(source_rows, 1):
+        evidence_lines.append(
+            f"Source {index}: {row['title']} | {row['label'] or 'Source'} | {row['url']}"
+        )
+
+    answer = ""
+    if source_rows and NovaCoreService._can_use_llm():
+        research_prompt = (
+            "PRIMARY USER PROMPT (answer this directly):\n"
+            f"{question.strip()}\n\n"
+            "LIVE WEB EVIDENCE (use only this evidence for current factual claims):\n"
+            + "\n".join(evidence_lines)
+            + "\n\nInstructions: Explain the actual options visible in the evidence in plain language. "
+            "For grants/funding, identify named programs when present, what each appears to support, "
+            "eligibility, award amount, deadline/status, and application next step only when the evidence provides it. "
+            "If a detail is missing, say 'not verified from the current search' instead of guessing. "
+            "When the user asks for the best or recommended option, give a recommendation only if the evidence supports "
+            "a meaningful fit; explain the reason and uncertainty. Do not invent eligibility or deadlines. "
+            "Tell the user the clickable source links are provided below."
+        )
+        synthesized = NovaCoreService.ask(
+            db,
+            organization_id=organization_id,
+            mode="founder_advisor",
+            question=research_prompt,
+            require_operational_next_actions=False,
+        )
+        candidate = str(synthesized.answer or "").strip()
+        if candidate and "do not currently have that live" not in candidate.lower():
+            answer = candidate
+
+    if not answer:
+        lines = [f"I searched current public sources for: {query}."]
+        if provider_summary:
+            lines.append("")
+            lines.append("What I found:")
+            lines.append(provider_summary)
+        if source_rows:
+            lines.append("")
+            lines.append("Current sources:")
+            for index, row in enumerate(source_rows, 1):
+                lines.append(f"{index}. {row['title']}" + (f" — {row['label']}" if row["label"] else ""))
+            lines.append("")
+            lines.append(
+                "Open the source links below to verify eligibility, award amount, deadline, and application instructions. "
+                "I will not guess at any of those details if the current search did not provide them."
+            )
+        else:
+            lines.append("")
+            lines.append(
+                "I could not verify a current program from the live search, so I am not going to give you a generic or invented grant list."
+            )
+        answer = "\n".join(lines)
+
+    return NovaTodayBrainOut(
+        answer=answer,
+        fact_label="VERIFIED DATA" if source_rows else "AI SUGGESTION",
+        next_actions=[],
+        generated_at=now().isoformat(),
+        source_href=source_rows[0]["url"] if source_rows else None,
+        sources=source_rows,
+        verification_status="verified" if source_rows else "unavailable",
+    )
+
+
 def _today_live_or_memory_answer(
     db: Session,
     payload: NovaTodayBrainRequest,
@@ -2943,29 +3032,19 @@ def _today_live_or_memory_answer(
         preferred_location = str(profile.get("preferred_location") or "").strip()
         query = extract_web_query(question, preferred_location)
         try:
-            result = fetch_web_search(query, max_results=5)
-            sources = result.get("sources") or []
-            source_rows = [
-                {
-                    "title": str(item.get("title") or item.get("label") or item.get("url") or "Source"),
-                    "url": str(item.get("url") or ""),
-                    "label": str(item.get("label") or ""),
-                }
-                for item in sources
-                if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
-            ]
-            return NovaTodayBrainOut(
-                answer=format_web_search(result, query),
-                fact_label="VERIFIED DATA" if source_rows else "AI SUGGESTION",
-                next_actions=[],
-                generated_at=now().isoformat(),
-                source_href=source_rows[0]["url"] if source_rows else None,
-                sources=source_rows,
-                verification_status="verified" if source_rows else "unavailable",
+            return _grounded_web_research_answer(
+                db,
+                question=question,
+                query=query,
+                organization_id=organization_id,
             )
         except Exception:
+            logger.exception("today_grounded_web_research_failed")
             return NovaTodayBrainOut(
-                answer="I couldn’t complete the live web search right now. Please try again in a moment.",
+                answer=(
+                    "I couldn’t complete the live research right now. I am not going to replace it with a generic "
+                    "or invented answer. Please try again in a moment."
+                ),
                 fact_label="AI SUGGESTION",
                 next_actions=[],
                 generated_at=now().isoformat(),

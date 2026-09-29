@@ -207,6 +207,56 @@ def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypa
 
 
 
+
+def test_nova_today_natural_grant_request_uses_live_grounded_research(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _headers(client)
+
+    monkeypatch.setattr(
+        "app.core.nova.today.service.fetch_web_search",
+        lambda query, max_results=8: {
+            "status": "ok",
+            "response": "Found a current Minnesota small-business grant program with an official application page.",
+            "sources": [
+                {
+                    "title": "Minnesota Business Grant Program",
+                    "url": "https://example.gov/grants/business",
+                    "label": "Official government source",
+                },
+                {
+                    "title": "Program eligibility",
+                    "url": "https://example.gov/grants/business/eligibility",
+                    "label": "Official government source",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr("app.core.nova.today.service.NovaCoreService._can_use_llm", lambda: False)
+
+    asked = client.post(
+        "/api/nova/today/ask",
+        headers=headers,
+        json={"question": "free grants recommendation for my delivery company?"},
+    )
+    assert asked.status_code == 200, asked.text
+    body = asked.json()
+    assert body["fact_label"] == "VERIFIED DATA"
+    assert "searched current public sources" in body["answer"].lower()
+    assert body["sources"][0]["url"] == "https://example.gov/grants/business"
+    assert body["source_href"] == "https://example.gov/grants/business"
+    assert body["verification_status"] == "verified"
+
+
+def test_nova_today_current_external_research_intent_does_not_require_magic_words() -> None:
+    from app.core.nova.today.live_tools import is_web_search_request
+
+    assert is_web_search_request("What grants are available for a Minnesota delivery company?")
+    assert is_web_search_request("Which current government contracts are available for logistics businesses?")
+    assert is_web_search_request("What is the application deadline for this business program?")
+    assert is_web_search_request("Recommend funding for a small delivery business")
+    assert not is_web_search_request("Can you search the web?")
+    assert not is_web_search_request("What needs attention now?")
+
+
 def test_nova_today_weather_and_news_use_web_fallbacks(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     headers = _headers(client)
 
