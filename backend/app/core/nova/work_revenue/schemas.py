@@ -431,6 +431,11 @@ class ApplicationStatusUpdate(BaseModel):
     notes: str | None = None
 
 
+class EmailSubmissionConfirm(BaseModel):
+    organization_id: str | None = None
+    confirm_send: Literal[True]
+
+
 class MaterialOut(BaseModel):
     material_id: str
     application_id: str
