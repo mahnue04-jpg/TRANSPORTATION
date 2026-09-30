@@ -278,12 +278,37 @@ class RunwayVideoProvider:
             raise RuntimeError("Runway generated video but Nova could not save the MP4 asset.") from exc
         return f"{public_prefix}/{filename}"
 
-    def _public_asset_url(self, value: str | None) -> str | None:
+    def _prompt_image_value(self, value: str | None) -> str | None:
         raw = str(value or "").strip()
         if not raw:
             return None
+        if raw.startswith("data:image/"):
+            return raw
         if raw.startswith("https://"):
             return raw
+
+        # Prefer sending generated local images inline as data URIs. This avoids
+        # Runway having to fetch an ephemeral Render static URL that can return
+        # 404 across instances or after a deploy.
+        if raw.startswith("/static/"):
+            backend_root = Path(__file__).resolve().parents[4]
+            local_path = backend_root / raw.lstrip("/")
+            try:
+                data = local_path.read_bytes()
+            except OSError:
+                data = b""
+            if data:
+                suffix = local_path.suffix.lower()
+                mime = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(suffix, "image/png")
+                encoded = base64.b64encode(data).decode("ascii")
+                return f"data:{mime};base64,{encoded}"
+
+        # Last-resort public URL for non-local assets.
         if raw.startswith("/"):
             base = str(
                 os.getenv("AMICOR_PUBLIC_URL")
@@ -319,12 +344,12 @@ class RunwayVideoProvider:
         model = str(os.getenv("NOVA_CREATIVE_VIDEO_MODEL") or "gen4.5").strip()
 
         task_id = str(brief.get("resume_task_id") or "").strip()
-        prompt_image = self._public_asset_url(brief.get("prompt_image_url"))
+        prompt_image = self._prompt_image_value(brief.get("prompt_image_url"))
         if not task_id:
             if not prompt_image:
                 return {
                     "status": ERROR,
-                    "message": "Nova could not resolve a public source image URL for Runway motion generation.",
+                    "message": "Nova could not load the generated source image for Runway motion generation.",
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
