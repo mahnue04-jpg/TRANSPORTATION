@@ -1,7 +1,14 @@
 (function () {
   var tokenKey = "amicor_nova_creative_token";
-  var activeProjectId = null;
+  var activeProjectKey = "amicor_nova_creative_active_project";
+  var activeProjectId = localStorage.getItem(activeProjectKey) || null;
   var activeBrandId = null;
+
+  function setActiveProjectId(value) {
+    activeProjectId = value || null;
+    if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
+    else localStorage.removeItem(activeProjectKey);
+  }
 
   function $(id) { return document.getElementById(id); }
   function token() { return localStorage.getItem(tokenKey) || ""; }
@@ -445,7 +452,11 @@
   }
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");
-    $("project-list").innerHTML = (body.projects || []).map(function (row) {
+    var rows = body.projects || [];
+    if (activeProjectId && !rows.some(function (row) { return row.id === activeProjectId; })) {
+      setActiveProjectId(null);
+    }
+    $("project-list").innerHTML = rows.map(function (row) {
       var active = row.id === activeProjectId ? " · ACTIVE" : "";
       return "<div class=\"item\" data-id=\"" + escapeHtml(row.id) + "\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" + active +
@@ -453,7 +464,7 @@
     }).join("") || "<p class=\"hint\">No projects yet.</p>";
     Array.prototype.forEach.call(document.querySelectorAll("#project-list .item"), function (el) {
       el.addEventListener("click", function () {
-        activeProjectId = el.getAttribute("data-id");
+        setActiveProjectId(el.getAttribute("data-id"));
         refreshProjects();
         refreshAssets();
       });
@@ -626,7 +637,7 @@
   });
   $("sign-out").addEventListener("click", function () {
     setToken("");
-    activeProjectId = null;
+    setActiveProjectId(null);
     setSignedIn(false);
     showBanner("Signed out.", true);
   });
@@ -693,7 +704,7 @@
           brand_profile_id: activeBrandId
         })
       });
-      activeProjectId = row.id;
+      setActiveProjectId(row.id);
       showBanner("Project created", true);
       await refreshProjects();
       await refreshAssets();
