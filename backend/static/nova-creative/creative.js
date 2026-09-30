@@ -486,7 +486,7 @@
         storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
         "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
         image: { working: "Working: Generating image...", ok: "Image generated and added to this project." },
-        video: { working: "Working: generating AI video. This may take up to 90 seconds...", ok: "AI video generation finished." },
+        video: { working: "Working: generating the next storyboard scene as a real AI motion clip. This may take up to 90 seconds...", ok: "Scene video generation finished." },
         voice: { working: "Working: generating voice narration...", ok: "Voice narration generated." },
         export: { working: "Working: Export Project Package...", ok: "Project package exported." }
       };
@@ -525,7 +525,9 @@
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
         if (providerStatus === "PROCESSING") {
-          showBanner(providerMessage || "Video is still processing. Click Generate AI Video again shortly.", true);
+          showBanner(providerMessage || "This storyboard scene is still processing. Click Generate Next AI Scene again shortly.", true);
+        } else if (body && body.provider && body.provider.all_scenes_generated) {
+          showBanner("All storyboard scenes now have AI motion clips. Next step: build the final promo.", true);
         } else if ((action === "video" || action === "voice" || action === "image") &&
             providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
           showBanner(providerMessage || (action + " generation failed."), false);
