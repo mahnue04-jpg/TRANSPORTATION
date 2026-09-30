@@ -230,15 +230,22 @@ class RunwayVideoProvider:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            message = detail[:800]
+            message = detail[:1200]
             try:
                 parsed = json.loads(detail)
-                message = str(
+                primary = str(
                     parsed.get("error")
                     or parsed.get("message")
                     or parsed.get("detail")
-                    or message
+                    or "Runway validation failed"
                 )
+                issues = parsed.get("issues") or []
+                issue_text = "; ".join(
+                    f"{'.'.join(str(x) for x in (item.get('path') or [])) or 'request'}: {item.get('message')}"
+                    for item in issues
+                    if isinstance(item, dict) and item.get("message")
+                )
+                message = f"{primary}" + (f" — {issue_text}" if issue_text else "")
             except Exception:
                 pass
             raise RuntimeError(f"Runway API error ({exc.code}): {message}") from exc
@@ -284,9 +291,8 @@ class RunwayVideoProvider:
             or "Professional small-business operations promo video"
         ).strip()
         platform = str(brief.get("platform") or "").strip().lower()
-        # The configured Runway API version (2024-11-06) expects the
-        # resolution-style ratio values documented for /v1/image_to_video.
-        ratio = "768:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:768"
+        # Current Gen-4.5 text-to-video ratios documented by Runway.
+        ratio = "720:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:720"
         duration = int(str(os.getenv("NOVA_CREATIVE_VIDEO_DURATION_SECONDS") or "5"))
         if duration not in {5, 10}:
             duration = 5
