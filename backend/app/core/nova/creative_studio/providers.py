@@ -284,7 +284,9 @@ class RunwayVideoProvider:
             or "Professional small-business operations promo video"
         ).strip()
         platform = str(brief.get("platform") or "").strip().lower()
-        ratio = "720:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:720"
+        # The configured Runway API version (2024-11-06) expects the
+        # resolution-style ratio values documented for /v1/image_to_video.
+        ratio = "768:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:768"
         duration = int(str(os.getenv("NOVA_CREATIVE_VIDEO_DURATION_SECONDS") or "5"))
         if duration not in {5, 10}:
             duration = 5
