@@ -29,6 +29,35 @@ from app.core.nova.creative_studio.flags import (
     voice_provider_live_enabled,
 )
 
+
+
+def _creative_media_root_and_prefix() -> tuple[Path, str]:
+    configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
+    if configured:
+        root = Path(configured)
+        prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or "/media/nova-creative").rstrip("/")
+        return root, prefix
+
+    persistent_parent = Path("/data/onboarding_docs")
+    if persistent_parent.exists():
+        return persistent_parent / "nova_creative_media", "/media/nova-creative"
+
+    root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
+    return root, "/static/generated/nova-creative"
+
+
+def _resolve_creative_media_url(value: str | None) -> Path | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    root, prefix = _creative_media_root_and_prefix()
+    if raw.startswith(prefix + "/"):
+        return root / raw.rsplit("/", 1)[-1]
+    if raw.startswith("/static/generated/nova-creative/"):
+        backend_root = Path(__file__).resolve().parents[4]
+        return backend_root / raw.lstrip("/")
+    return None
+
 AVAILABLE = "AVAILABLE"
 CONFIG_REQUIRED = "CONFIG_REQUIRED"
 DISABLED = "DISABLED"
@@ -154,11 +183,10 @@ class OpenAIImageProvider:
                 root = Path(configured_dir)
                 public_prefix = str(
                     os.getenv("NOVA_CREATIVE_IMAGE_PUBLIC_PREFIX")
-                    or "/static/generated/nova-creative"
+                    or "/media/nova-creative"
                 ).rstrip("/")
             else:
-                root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
-                public_prefix = "/static/generated/nova-creative"
+                root, public_prefix = _creative_media_root_and_prefix()
             root.mkdir(parents=True, exist_ok=True)
             filename = f"nova-{uuid.uuid4().hex}.png"
             (root / filename).write_bytes(binary)
@@ -263,11 +291,10 @@ class RunwayVideoProvider:
             root = Path(configured_dir)
             public_prefix = str(
                 os.getenv("NOVA_CREATIVE_VIDEO_PUBLIC_PREFIX")
-                or "/static/generated/nova-creative"
+                or "/media/nova-creative"
             ).rstrip("/")
         else:
-            root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
-            public_prefix = "/static/generated/nova-creative"
+            root, public_prefix = _creative_media_root_and_prefix()
         root.mkdir(parents=True, exist_ok=True)
         filename = f"nova-{uuid.uuid4().hex}.mp4"
         target = root / filename
@@ -290,9 +317,8 @@ class RunwayVideoProvider:
         # Prefer sending generated local images inline as data URIs. This avoids
         # Runway having to fetch an ephemeral Render static URL that can return
         # 404 across instances or after a deploy.
-        if raw.startswith("/static/"):
-            backend_root = Path(__file__).resolve().parents[4]
-            local_path = backend_root / raw.lstrip("/")
+        local_path = _resolve_creative_media_url(raw)
+        if local_path is not None:
             try:
                 data = local_path.read_bytes()
             except OSError:
@@ -537,11 +563,10 @@ class OpenAIVoiceProvider:
             root = Path(configured_dir)
             public_prefix = str(
                 os.getenv("NOVA_CREATIVE_VOICE_PUBLIC_PREFIX")
-                or "/static/generated/nova-creative"
+                or "/media/nova-creative"
             ).rstrip("/")
         else:
-            root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
-            public_prefix = "/static/generated/nova-creative"
+            root, public_prefix = _creative_media_root_and_prefix()
         root.mkdir(parents=True, exist_ok=True)
         filename = f"nova-{uuid.uuid4().hex}.mp3"
         (root / filename).write_bytes(bytes(binary))
