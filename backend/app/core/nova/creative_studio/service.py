@@ -435,15 +435,20 @@ class CreativeStudioService:
 
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
-
-        # Keep the active asset list usable: old failed video attempts do not
-        # help a new generation and can accumulate quickly during provider tests.
         self.store.delete_failed_video_assets(project_id, owner_id)
-
         job = self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
+        scenes = self.store.list_scenes(project_id, owner_id)
+
+        if not scenes:
+            raise CreativeStudioError(
+                "STORYBOARD_REQUIRED",
+                "Generate the storyboard before generating scene videos.",
+                http_status=422,
+            )
 
         resume_task_id = None
+        scene_index = None
         for candidate in reversed(self.store.list_assets(project_id, owner_id)):
             if candidate.kind != "video":
                 continue
@@ -453,46 +458,62 @@ class CreativeStudioService:
                 and provider_result.get("task_id")
             ):
                 resume_task_id = str(provider_result["task_id"])
+                brief_meta = provider_result.get("brief") or {}
+                try:
+                    scene_index = int(brief_meta.get("scene_index"))
+                except (TypeError, ValueError):
+                    scene_index = None
                 break
 
-        scenes = self.store.list_scenes(project_id, owner_id)
-        first_scene_prompt = ""
-        if scenes:
-            first_scene_prompt = str(
-                scenes[0].visual_prompt or scenes[0].description or ""
-            ).strip()
-
-        prompt_text = first_scene_prompt or " ".join(
-            part for part in [
-                project.title,
-                project.objective,
-                (brief.topic if brief else ""),
-                (brief.style if brief else ""),
-                project.tone,
-            ] if part
-        )
-
-        source_image_url = None
-        for candidate in reversed(self.store.list_assets(project_id, owner_id)):
-            if not (
-                candidate.kind == "image"
-                and candidate.url
-                and str(candidate.status or "").upper() == "GENERATED"
-            ):
+        completed_scene_indexes: set[int] = set()
+        for candidate in self.store.list_assets(project_id, owner_id):
+            if candidate.kind != "video" or str(candidate.status or "").upper() != "GENERATED":
+                continue
+            provider_result = (candidate.metadata or {}).get("provider_result") or {}
+            brief_meta = provider_result.get("brief") or {}
+            try:
+                completed_scene_indexes.add(int(brief_meta.get("scene_index")))
+            except (TypeError, ValueError):
                 continue
 
-            candidate_url = str(candidate.url).strip()
-            if candidate_url.startswith("/static/"):
-                # Render's filesystem is ephemeral. A DB asset record can
-                # outlive the actual generated file after a deploy/restart.
-                backend_root = Path(__file__).resolve().parents[4]
-                local_path = backend_root / candidate_url.lstrip("/")
-                if not local_path.is_file():
-                    continue
-            source_image_url = candidate_url
-            break
+        if scene_index is None:
+            remaining = [int(scene.index) for scene in scenes if int(scene.index) not in completed_scene_indexes]
+            if not remaining:
+                self._finish_job(
+                    job,
+                    status="GENERATED",
+                    message="All storyboard scenes already have AI motion clips.",
+                    asset_ids=[],
+                    provider=video_provider().provider_id,
+                )
+                return {
+                    "job": job.as_dict(),
+                    "provider": {
+                        "status": "GENERATED",
+                        "message": "All storyboard scenes already have AI motion clips.",
+                        "all_scenes_generated": True,
+                        "completed_scene_indexes": sorted(completed_scene_indexes),
+                    },
+                    "asset": None,
+                    "url": None,
+                }
+            scene_index = remaining[0]
 
-        if not source_image_url and not resume_task_id:
+        scene = next((row for row in scenes if int(row.index) == int(scene_index)), scenes[0])
+        prompt_text = str(scene.visual_prompt or scene.description or "").strip()
+        if not prompt_text:
+            prompt_text = " ".join(
+                part for part in [
+                    project.title,
+                    project.objective,
+                    (brief.topic if brief else ""),
+                    (brief.style if brief else ""),
+                    project.tone,
+                ] if part
+            )
+
+        source_image_url = None
+        if not resume_task_id:
             aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
                 "tiktok", "instagram", "youtube shorts"
             } else "16:9"
@@ -500,31 +521,25 @@ class CreativeStudioService:
                 owner_id,
                 project_id,
                 aspect_ratio=aspect_ratio,
-                prompt=first_scene_prompt or None,
+                prompt=prompt_text,
             )
             source_image_url = str(image_result.get("url") or "").strip() or None
             if not source_image_url:
                 message = str(
                     (image_result.get("provider") or {}).get("message")
-                    or "Nova could not create a source scene for AI motion."
+                    or f"Nova could not create source art for scene {scene_index}."
                 )
                 asset = self._save_text_asset(
                     owner_id=owner_id,
                     project_id=project_id,
                     kind="video",
-                    title="AI video generation result",
-                    content=prompt_text or project.title,
+                    title=f"Scene {scene_index} AI motion result",
+                    content=prompt_text,
                     status="ERROR",
-                    metadata={"provider_result": {"status": "ERROR", "message": message}},
+                    metadata={"provider_result": {"status": "ERROR", "message": message, "brief": {"scene_index": scene_index}}},
                     url=None,
                 )
-                self._finish_job(
-                    job,
-                    status="ERROR",
-                    message=message,
-                    asset_ids=[asset.id],
-                    provider=video_provider().provider_id,
-                )
+                self._finish_job(job, status="ERROR", message=message, asset_ids=[asset.id], provider=video_provider().provider_id)
                 return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
 
         result = video_provider().generate(
@@ -536,6 +551,8 @@ class CreativeStudioService:
                 "prompt_text": prompt_text,
                 "prompt_image_url": source_image_url,
                 "resume_task_id": resume_task_id,
+                "scene_index": scene_index,
+                "scene_heading": scene.heading,
             }
         )
         status = result.get("status") or CONFIG_REQUIRED
@@ -544,10 +561,14 @@ class CreativeStudioService:
             owner_id=owner_id,
             project_id=project_id,
             kind="video",
-            title="AI motion video result",
-            content=prompt_text or project.title,
+            title=f"Scene {scene_index} AI motion result",
+            content=prompt_text,
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
+            metadata={
+                "provider_result": {k: v for k, v in result.items() if k != "url"},
+                "scene_index": scene_index,
+                "scene_heading": scene.heading,
+            },
             url=generated_url,
         )
         self._finish_job(
@@ -562,6 +583,8 @@ class CreativeStudioService:
             "asset": asset.as_dict(),
             "provider": result,
             "url": generated_url,
+            "scene_index": scene_index,
+            "scene_count": len(scenes),
         }
 
     def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None) -> dict[str, Any]:
@@ -569,10 +592,16 @@ class CreativeStudioService:
         job = self._start_job(owner_id, project_id, "voice")
         text = script or ""
         if not text:
-            for asset in self.store.list_assets(project_id, owner_id):
-                if asset.kind == "voiceover":
+            assets = self.store.list_assets(project_id, owner_id)
+            for asset in reversed(assets):
+                if asset.kind == "script" and asset.title == "Short video full script":
                     text = asset.content
                     break
+            if not text:
+                for asset in reversed(assets):
+                    if asset.kind == "voiceover":
+                        text = asset.content
+                        break
         result = voice_provider().generate(script=text or "No voiceover script available.")
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
