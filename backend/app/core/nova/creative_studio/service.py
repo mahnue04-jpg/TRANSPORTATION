@@ -816,6 +816,114 @@ class CreativeStudioService:
         if not scenes:
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
 
+        # Self-healing assembly path: when provider-backed scene video is missing
+        # (including Runway credit exhaustion), create a deterministic local motion
+        # clip from generated scene art instead of blocking the entire promo.
+        assets = self.store.list_assets(project_id, owner_id)
+        existing_scene_videos: dict[int, CreativeAsset] = {}
+        for candidate in assets:
+            if candidate.kind != "video" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
+                continue
+            local_path = _resolve_creative_media_url(candidate.url)
+            if local_path is not None and not local_path.is_file():
+                continue
+            idx = (candidate.metadata or {}).get("scene_index")
+            if idx is None:
+                provider_result = (candidate.metadata or {}).get("provider_result") or {}
+                idx = ((provider_result.get("brief") or {}).get("scene_index"))
+            try:
+                existing_scene_videos[int(idx)] = candidate
+            except (TypeError, ValueError):
+                continue
+
+        aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
+            "tiktok", "instagram", "youtube shorts"
+        } else "16:9"
+
+        for scene in scenes:
+            scene_idx = int(scene.index)
+            if scene_idx in existing_scene_videos:
+                continue
+
+            prompt_text = str(scene.visual_prompt or scene.description or "").strip()
+            if not prompt_text:
+                prompt_text = " ".join(
+                    part for part in [project.title, project.objective, project.tone] if part
+                ).strip()
+
+            image_result = self.request_image_generation(
+                owner_id,
+                project_id,
+                aspect_ratio=aspect_ratio,
+                prompt=prompt_text,
+            )
+            source_image_url = str(image_result.get("url") or "").strip() or None
+            if not source_image_url:
+                raise CreativeStudioError(
+                    "SCENE_IMAGE_FAILED",
+                    f"Nova could not create source art for scene {scene_idx}.",
+                    http_status=422,
+                )
+
+            motion = self._build_local_scene_motion(
+                source_image_url=source_image_url,
+                platform=project.platform,
+                duration_seconds=5,
+            )
+            if str(motion.get("status") or "").upper() != "GENERATED" or not motion.get("url"):
+                raise CreativeStudioError(
+                    "LOCAL_SCENE_MOTION_FAILED",
+                    str(motion.get("message") or f"Nova could not create local motion for scene {scene_idx}."),
+                    http_status=422,
+                )
+
+            scene_asset = self._save_text_asset(
+                owner_id=owner_id,
+                project_id=project_id,
+                kind="video",
+                title=f"Scene {scene_idx} local motion result",
+                content=prompt_text,
+                status="GENERATED",
+                metadata={
+                    "scene_index": scene_idx,
+                    "scene_heading": scene.heading,
+                    "provider_result": {
+                        **{k: v for k, v in motion.items() if k != "url"},
+                        "brief": {
+                            "project_id": project_id,
+                            "title": project.title,
+                            "platform": project.platform,
+                            "prompt_text": prompt_text,
+                            "prompt_image_url": source_image_url,
+                            "scene_index": scene_idx,
+                            "scene_heading": scene.heading,
+                        },
+                    },
+                },
+                url=str(motion.get("url") or ""),
+            )
+            existing_scene_videos[scene_idx] = scene_asset
+
+        # Voice should also self-heal. Reuse a valid narration when present;
+        # otherwise generate it now so Build Final Promo can be a one-click path.
+        assets = self.store.list_assets(project_id, owner_id)
+        has_audio = False
+        for candidate in reversed(assets):
+            if candidate.kind != "audio" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
+                continue
+            local_path = _resolve_creative_media_url(candidate.url)
+            if local_path is None or local_path.is_file():
+                has_audio = True
+                break
+        if not has_audio:
+            voice_result = self.request_voice_generation(owner_id, project_id)
+            if not voice_result.get("url"):
+                raise CreativeStudioError(
+                    "VOICE_GENERATION_FAILED",
+                    str((voice_result.get("provider") or {}).get("message") or "Nova could not generate voice narration."),
+                    http_status=422,
+                )
+
         assets = self.store.list_assets(project_id, owner_id)
         video_by_scene: dict[int, CreativeAsset] = {}
         for asset in assets:
