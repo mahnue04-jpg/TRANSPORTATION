@@ -62,6 +62,36 @@
       <p class="hint">Complex projects are quoted separately. Licensed professional work, regulated advice, physical work, and unsupported external authority are excluded.</p>
     </section>
 
+    <section class="card demo-card" id="operations-demo">
+      <p class="eyebrow">LIVE CAPABILITY DEMO</p>
+      <h2>See Nova organize a lead workflow</h2>
+      <p class="hint"><strong>Sandbox only.</strong> This demonstration does not send email, update a live CRM, charge money, contact customers, or take external action. It shows how Nova can structure repetitive operations and escalate decisions to a human owner.</p>
+      <div class="demo-grid">
+        <label>Lead / customer name
+          <input id="demo-name" maxlength="120" value="Jordan Lee" />
+        </label>
+        <label>Business
+          <input id="demo-business" maxlength="160" value="Northstar Home Services" />
+        </label>
+      </div>
+      <label>Incoming request
+        <textarea id="demo-request" rows="5" maxlength="1200">We need help organizing customer inquiries, following up on estimates that have not received responses, and making sure urgent requests get to the owner.</textarea>
+      </label>
+      <div class="demo-actions">
+        <button type="button" id="run-operations-demo">Run Nova Demo</button>
+        <button type="button" class="secondary" id="reset-operations-demo">Reset</button>
+      </div>
+      <div id="demo-output" class="demo-output hidden" aria-live="polite">
+        <div class="demo-step"><span>1</span><div><strong>Intake normalized</strong><p id="demo-intake"></p></div></div>
+        <div class="demo-step"><span>2</span><div><strong>AI-assisted classification</strong><p id="demo-classification"></p></div></div>
+        <div class="demo-step"><span>3</span><div><strong>Operations record</strong><p id="demo-record"></p></div></div>
+        <div class="demo-step"><span>4</span><div><strong>Follow-up draft</strong><p id="demo-followup"></p></div></div>
+        <div class="demo-step"><span>5</span><div><strong>Human escalation</strong><p id="demo-escalation"></p></div></div>
+        <div class="demo-step"><span>6</span><div><strong>Daily report impact</strong><p id="demo-report"></p></div></div>
+      </div>
+      <p class="hint demo-disclosure">Demo results are generated from the text entered above using a safe local ruleset for illustration. Client deployments can connect approved tools and AI providers only after scope, access, and approval rules are configured.</p>
+    </section>
+
     <section class="card">
       <h2>Already a customer or choosing paid work?</h2>
       <p><a class="button" href="/nova?signin=1">Sign in to my AMICOR Nova account</a></p>
