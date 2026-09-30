@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import logging
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +17,35 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.db.session import SessionLocal, get_db
+
+logger = logging.getLogger(__name__)
+_scene_lock = threading.Lock()
+
+
+def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
+    db = None
+    job = None
+    try:
+        db = SessionLocal()
+        service = get_service(db)
+        job = next(row for row in service.store.list_jobs(project_id, owner_id) if row.id == job_id)
+        deadline = time.monotonic() + 900
+        while True:
+            service._finish_job(job, status="RUNNING", message="Generating scene artwork and video.", asset_ids=job.result_asset_ids)
+            result = service.request_video_generation(owner_id, project_id, job=job)
+            if result.get("provider", {}).get("status") != "PROCESSING":
+                break
+            if time.monotonic() >= deadline:
+                service._finish_job(job, status="ERROR", message="Runway is still processing. Retry to resume the saved task without generating new artwork.", asset_ids=job.result_asset_ids)
+                break
+    except Exception as exc:
+        logger.exception("Creative scene job failed: job=%s project=%s", job_id, project_id)
+        if db is not None and job is not None:
+            db.rollback()
+            service._finish_job(job, status="ERROR", message=f"Scene generation failed: {type(exc).__name__}: {exc}", asset_ids=job.result_asset_ids)
+    finally:
+        if db is not None:
+            db.close()
 
 router = APIRouter(
     prefix="/api/nova/creative",
@@ -327,12 +358,31 @@ def clear_failed_video_assets(
 @router.post("/projects/{project_id}/generate/video")
 def generate_video(
     project_id: str,
+    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).request_video_generation(user.user_id, project_id)
+        service = get_service(db)
+        service._project_or_404(user.user_id, project_id)
+        if not service.store.list_scenes(project_id, user.user_id):
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard before generating scene videos.", http_status=422)
+        # Persist the job before responding so refresh/retries can reattach to it.
+        # The lock serializes enqueueing in this single-worker Render service.
+        with _scene_lock:
+            jobs = service.store.list_jobs(project_id, user.user_id)
+            for existing in jobs:
+                if existing.kind != "video" or existing.status not in {"QUEUED", "RUNNING"}:
+                    continue
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(existing.updated_at).replace(tzinfo=timezone.utc)).total_seconds()
+                if age < 1200:
+                    return {"status": "PROCESSING", "job": existing.as_dict(), "already_running": True}
+                service._finish_job(existing, status="ERROR", message="Scene job was interrupted or timed out. Retry resumes any saved Runway task.", asset_ids=existing.result_asset_ids)
+            job = service._start_job(user.user_id, project_id, "video")
+            service._finish_job(job, status="QUEUED", message="Scene generation queued.", asset_ids=[])
+            background_tasks.add_task(_run_scene_background, user.user_id, project_id, job.id)
+        return {"status": "PROCESSING", "job": job.as_dict(), "already_running": False}
     except CreativeStudioError as exc:
         _raise(exc)
         raise

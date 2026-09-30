@@ -115,6 +115,7 @@ def test_provider_disabled_and_no_fake_asset_url():
     assert image["url"] is None
     assert image["provider"]["asset_generated"] is False
     assert image["job"]["status"] == CONFIG_REQUIRED
+    svc.generate_storyboard("owner-a", project["id"])
     video = svc.request_video_generation("owner-a", project["id"])
     assert video["url"] is None
     assert video["job"]["status"] == CONFIG_REQUIRED
@@ -246,6 +247,7 @@ def test_providers_never_claim_media_generated_without_asset():
         "owner-a",
         {"title": "Media gate", "project_type": "social_image", "platform": "Instagram"},
     )
+    svc.generate_storyboard("owner-a", project["id"])
     for fn_name, kwargs in (
         ("request_image_generation", {"aspect_ratio": "16:9"}),
         ("request_video_generation", {}),
@@ -424,7 +426,8 @@ def test_create_project_ux_static_contract(client: TestClient):
     assert "Session expired. Sign in again. (401)" in js
     assert "Access denied. (403)" in js
     assert "Validation failed. (422)" in js or "(422)" in js
-    assert "Temporary system error. (500)" in js
+    assert 'res.status >= 500' in js
+    assert 'detailText(body, "Temporary system error. (" + res.status + ")")' in js
     assert "Network error." in js
     work = client.get("/nova/work")
     assert work.status_code == 200
@@ -761,7 +764,7 @@ def test_brand_safe_image_prompt_and_aspect_selector_static_contract() -> None:
         brand_name="AMICOR Nova",
     )
     prompt = pack["image_prompt"].lower()
-    assert "do not draw, imitate, or spell any brand logo or wordmark" in prompt
+    assert "do not include any brand name, company name, logo, wordmark" in prompt
     assert "upper-left brand-safe area" in prompt
 
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
@@ -808,8 +811,8 @@ def test_creative_ui_has_branded_png_export_contract() -> None:
 def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
-    assert "local branded promo-video export" in html
-    assert "Full AI Video Provider status" in html
+    assert "local branded image-animation fallback" in html
+    assert "Provider status" in html
     assert "async function createPromoVideo" in js
     assert "MediaRecorder" in js
     assert "captureStream" in js
@@ -821,7 +824,7 @@ def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
 def test_creative_ui_exposes_live_video_and_voice_actions() -> None:
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
-    assert "8. Generate AI Video" in html
+    assert "8. Generate Next AI Scene" in html
     assert "9. Generate Voice" in html
     assert "Download AI video" in js
     assert "Download voice" in js
@@ -837,5 +840,5 @@ def test_media_provider_owner_gates_are_explicit() -> None:
     assert "RUNWAYML_API_SECRET" in flags
     assert "class RunwayVideoProvider" in providers
     assert "class OpenAIVoiceProvider" in providers
-    assert "api.dev.runwayml.com/v1/image_to_video" in providers
+    assert "client.image_to_video.create" in providers
     assert "audio.speech.create" in providers
