@@ -176,6 +176,216 @@
     return link;
   }
 
+
+  function loadVideo(src) {
+    return new Promise(function (resolve, reject) {
+      var video = document.createElement("video");
+      video.playsInline = true;
+      video.preload = "auto";
+      video.muted = true;
+      video.onloadedmetadata = function () { resolve(video); };
+      video.onerror = function () { reject(new Error("Could not load one of the generated scene videos.")); };
+      video.src = src;
+      video.load();
+    });
+  }
+
+  function loadAudio(src) {
+    return new Promise(function (resolve, reject) {
+      var audio = document.createElement("audio");
+      audio.preload = "auto";
+      audio.onloadedmetadata = function () { resolve(audio); };
+      audio.onerror = function () { reject(new Error("Could not load the generated Nova voice track.")); };
+      audio.src = src;
+      audio.load();
+    });
+  }
+
+  function sceneIndexFromAsset(row) {
+    var metadata = row.metadata || {};
+    var direct = Number(metadata.scene_index);
+    if (Number.isFinite(direct)) return direct;
+    var provider = metadata.provider_result || {};
+    var brief = provider.brief || {};
+    var nested = Number(brief.scene_index);
+    return Number.isFinite(nested) ? nested : 9999;
+  }
+
+  async function buildFinalPromo(detail) {
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+      throw new Error("This browser does not support final promo recording.");
+    }
+
+    var assets = detail.assets || [];
+    var clips = assets.filter(function (row) {
+      return row.kind === "video" && row.url && String(row.status || "").toUpperCase() === "GENERATED";
+    }).sort(function (a, b) {
+      return sceneIndexFromAsset(a) - sceneIndexFromAsset(b);
+    });
+
+    if (!clips.length) {
+      throw new Error("Generate at least one AI scene before building the final promo.");
+    }
+
+    var audioAssets = assets.filter(function (row) {
+      return row.kind === "audio" && row.url && String(row.status || "").toUpperCase() === "GENERATED";
+    });
+    var voiceAsset = audioAssets.length ? audioAssets[audioAssets.length - 1] : null;
+
+    var firstVideo = await loadVideo(clips[0].url);
+    var logo = await loadImage("/static/branding/amicor-logo-full.png");
+    var canvas = document.createElement("canvas");
+    canvas.width = firstVideo.videoWidth || 720;
+    canvas.height = firstVideo.videoHeight || 1280;
+    var ctx = canvas.getContext("2d");
+    var fps = 30;
+    var canvasStream = canvas.captureStream(fps);
+
+    var audioContext = null;
+    var audioElement = null;
+    var audioDestination = null;
+    var outputTracks = canvasStream.getVideoTracks().slice();
+
+    if (voiceAsset) {
+      audioElement = await loadAudio(voiceAsset.url);
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        audioContext = new AudioCtx();
+        if (audioContext.state === "suspended") await audioContext.resume();
+        audioDestination = audioContext.createMediaStreamDestination();
+        var source = audioContext.createMediaElementSource(audioElement);
+        source.connect(audioDestination);
+        source.connect(audioContext.destination);
+        Array.prototype.push.apply(outputTracks, audioDestination.stream.getAudioTracks());
+      }
+    }
+
+    var outputStream = new MediaStream(outputTracks);
+    var candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+    var mime = "";
+    if (MediaRecorder.isTypeSupported) {
+      for (var i = 0; i < candidates.length; i += 1) {
+        if (MediaRecorder.isTypeSupported(candidates[i])) {
+          mime = candidates[i];
+          break;
+        }
+      }
+    }
+    var recorder = mime ? new MediaRecorder(outputStream, { mimeType: mime }) : new MediaRecorder(outputStream);
+    var chunks = [];
+    recorder.ondataavailable = function (event) {
+      if (event.data && event.data.size) chunks.push(event.data);
+    };
+    var stopped = new Promise(function (resolve, reject) {
+      recorder.onerror = function () { reject(new Error("Final promo recording failed.")); };
+      recorder.onstop = function () { resolve(); };
+    });
+
+    function drawLogo() {
+      var targetWidth = Math.max(130, Math.round(canvas.width * 0.22));
+      var targetHeight = Math.max(1, Math.round(targetWidth * ((logo.naturalHeight || logo.height) / Math.max(1, logo.naturalWidth || logo.width))));
+      var margin = Math.max(20, Math.round(canvas.width * 0.03));
+      var padX = Math.max(10, Math.round(targetWidth * 0.05));
+      var padY = Math.max(8, Math.round(targetHeight * 0.12));
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillRect(margin - padX, margin - padY, targetWidth + padX * 2, targetHeight + padY * 2);
+      ctx.drawImage(logo, margin, margin, targetWidth, targetHeight);
+    }
+
+    async function playClip(row, existingVideo) {
+      var video = existingVideo || await loadVideo(row.url);
+      video.currentTime = 0;
+      video.muted = true;
+      await video.play();
+      await new Promise(function (resolve) {
+        function draw() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          drawLogo();
+          if (video.ended || video.paused) resolve();
+          else requestAnimationFrame(draw);
+        }
+        requestAnimationFrame(draw);
+      });
+      video.pause();
+    }
+
+    recorder.start(250);
+    if (audioElement) {
+      audioElement.currentTime = 0;
+      await audioElement.play();
+    }
+
+    for (var clipIndex = 0; clipIndex < clips.length; clipIndex += 1) {
+      await playClip(clips[clipIndex], clipIndex === 0 ? firstVideo : null);
+    }
+
+    if (audioElement && !audioElement.ended) {
+      await new Promise(function (resolve) {
+        function holdLastFrame() {
+          drawLogo();
+          if (audioElement.ended) resolve();
+          else requestAnimationFrame(holdLastFrame);
+        }
+        requestAnimationFrame(holdLastFrame);
+      });
+    }
+
+    recorder.stop();
+    await stopped;
+    if (audioElement) audioElement.pause();
+    if (audioContext) await audioContext.close();
+
+    var blob = new Blob(chunks, { type: mime || "video/webm" });
+    if (!blob.size) throw new Error("Final promo recording produced an empty file.");
+    return {
+      blob: blob,
+      fileName: "amicor-nova-final-promo.webm",
+      clipCount: clips.length,
+      hasVoice: Boolean(voiceAsset)
+    };
+  }
+
+  function showFinalPromoDownload(result) {
+    var old = document.getElementById("final-promo-result");
+    if (old) old.remove();
+    var url = URL.createObjectURL(result.blob);
+    var wrap = document.createElement("div");
+    wrap.id = "final-promo-result";
+    wrap.className = "item";
+
+    var title = document.createElement("strong");
+    title.textContent = "Final AMICOR Nova promo";
+    var meta = document.createElement("div");
+    meta.className = "muted";
+    meta.textContent = result.clipCount + " AI scene clip(s)" + (result.hasVoice ? " · Nova voice included" : " · no voice track");
+
+    var video = document.createElement("video");
+    video.controls = true;
+    video.playsInline = true;
+    video.src = url;
+    video.style.maxWidth = "100%";
+    video.style.display = "block";
+    video.style.margin = "10px 0";
+
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = result.fileName;
+    link.textContent = "Download final promo";
+    link.className = "button secondary";
+
+    wrap.appendChild(title);
+    wrap.appendChild(meta);
+    wrap.appendChild(video);
+    wrap.appendChild(link);
+    $("asset-list").prepend(wrap);
+    link.focus();
+
+    setTimeout(function () {
+      if (!document.body.contains(wrap)) URL.revokeObjectURL(url);
+    }, 600000);
+  }
+
   function detailText(body, fallback) {
     if (!body) return fallback;
     var detail = body.detail;
@@ -327,6 +537,28 @@
       });
     });
   }
+  var buildFinal = $("build-final-promo");
+  if (buildFinal) {
+    buildFinal.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the promo project first.", false);
+        return;
+      }
+      buildFinal.disabled = true;
+      showBanner("Working: combining AI scenes, Nova voice, and AMICOR branding...", true);
+      try {
+        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+        var result = await buildFinalPromo(detail);
+        showFinalPromoDownload(result);
+        showBanner("Final branded promo created. Use Download final promo below.", true);
+      } catch (err) {
+        showBanner(err.message || "Final promo assembly failed.", false);
+      } finally {
+        buildFinal.disabled = false;
+      }
+    });
+  }
+
   var clearFailed = $("clear-failed-video-assets");
   if (clearFailed) {
     clearFailed.addEventListener("click", async function () {
