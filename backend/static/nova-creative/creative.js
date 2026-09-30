@@ -281,6 +281,14 @@
             "\">Download branded PNG</button> <button type=\"button\" class=\"secondary promo-video\" data-image-url=\"" +
             escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
             "\">Create 8s branded video</button>" : "");
+      } else if (row.kind === "video" && row.url) {
+        media = "<figure class=\"generated-media\"><video controls playsinline preload=\"metadata\" src=\"" +
+          escapeHtml(row.url) + "\"></video></figure><a class=\"button secondary\" href=\"" +
+          escapeHtml(row.url) + "\" download>Download AI video</a>";
+      } else if (row.kind === "audio" && row.url) {
+        media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
+          escapeHtml(row.url) + "\"></audio></div><a class=\"button secondary\" href=\"" +
+          escapeHtml(row.url) + "\" download>Download voice</a>";
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -456,8 +464,8 @@
         storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
         "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
         image: { working: "Working: Generating image...", ok: "Image generated and added to this project." },
-        video: { working: "Working: Video Generation status...", ok: "Video provider status updated." },
-        voice: { working: "Working: Voice Generation status...", ok: "Voice provider status updated." },
+        video: { working: "Working: generating AI video. This may take up to 90 seconds...", ok: "AI video generation finished." },
+        voice: { working: "Working: generating voice narration...", ok: "Voice narration generated." },
         export: { working: "Working: Export Project Package...", ok: "Project package exported." }
       };
       var meta = labels[action];
