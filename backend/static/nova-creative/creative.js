@@ -327,6 +327,28 @@
       });
     });
   }
+  var clearFailed = $("clear-failed-video-assets");
+  if (clearFailed) {
+    clearFailed.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the project you want to clean first.", false);
+        return;
+      }
+      clearFailed.disabled = true;
+      try {
+        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/clear-failed-video", {
+          method: "POST"
+        });
+        showBanner("Cleaned " + String(result.deleted || 0) + " failed video attempt(s).", true);
+        await refreshAssets();
+      } catch (err) {
+        showBanner(err.message || "Could not clean failed video attempts.", false);
+      } finally {
+        clearFailed.disabled = false;
+      }
+    });
+  }
+
   async function boot() {
     if (!token()) {
       setSignedIn(false);
