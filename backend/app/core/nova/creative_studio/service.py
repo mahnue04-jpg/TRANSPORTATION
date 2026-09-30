@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.core.nova.creative_studio.export import export_project_package
@@ -434,6 +435,11 @@ class CreativeStudioService:
 
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
+
+        # Keep the active asset list usable: old failed video attempts do not
+        # help a new generation and can accumulate quickly during provider tests.
+        self.store.delete_failed_video_assets(project_id, owner_id)
+
         job = self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
 
@@ -468,13 +474,23 @@ class CreativeStudioService:
 
         source_image_url = None
         for candidate in reversed(self.store.list_assets(project_id, owner_id)):
-            if (
+            if not (
                 candidate.kind == "image"
                 and candidate.url
                 and str(candidate.status or "").upper() == "GENERATED"
             ):
-                source_image_url = candidate.url
-                break
+                continue
+
+            candidate_url = str(candidate.url).strip()
+            if candidate_url.startswith("/static/"):
+                # Render's filesystem is ephemeral. A DB asset record can
+                # outlive the actual generated file after a deploy/restart.
+                backend_root = Path(__file__).resolve().parents[4]
+                local_path = backend_root / candidate_url.lstrip("/")
+                if not local_path.is_file():
+                    continue
+            source_image_url = candidate_url
+            break
 
         if not source_image_url and not resume_task_id:
             aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
