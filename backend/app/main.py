@@ -2688,6 +2688,25 @@ if os.path.isdir(_static_dir):
     # Keep an assets alias for SPA bundle compatibility.
     app.mount("/assets", StaticFiles(directory=_static_dir), name="assets")
 
+# Creative Studio media uses the Render persistent disk when available so
+# generated images/audio/video survive deploys and restarts.
+_nova_media_configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
+if _nova_media_configured:
+    _nova_media_dir = _nova_media_configured
+elif os.path.isdir("/data/onboarding_docs"):
+    _nova_media_dir = "/data/onboarding_docs/nova_creative_media"
+else:
+    _nova_media_dir = os.path.join(_static_dir, "generated", "nova-creative")
+try:
+    os.makedirs(_nova_media_dir, exist_ok=True)
+    app.mount(
+        "/media/nova-creative",
+        StaticFiles(directory=_nova_media_dir),
+        name="nova-creative-media",
+    )
+except OSError:
+    logger.warning("Nova Creative Studio media directory unavailable: %s", _nova_media_dir)
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
