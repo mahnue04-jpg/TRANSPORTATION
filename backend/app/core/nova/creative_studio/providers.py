@@ -273,6 +273,18 @@ class RunwayVideoProvider:
             raise RuntimeError("Runway generated video but Nova could not save the MP4 asset.") from exc
         return f"{public_prefix}/{filename}"
 
+    def _public_asset_url(self, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("https://"):
+            return raw
+        if raw.startswith("/"):
+            base = str(os.getenv("AMICOR_PUBLIC_URL") or "").strip().rstrip("/")
+            if base.startswith("https://"):
+                return base + raw
+        return None
+
     def generate(self, *, brief: dict[str, Any]) -> dict[str, Any]:
         st = self.status()
         if st.status != AVAILABLE:
@@ -298,16 +310,21 @@ class RunwayVideoProvider:
             duration = 5
         model = str(os.getenv("NOVA_CREATIVE_VIDEO_MODEL") or "gen4.5").strip()
 
+        prompt_image = self._public_asset_url(brief.get("prompt_image_url"))
+        payload = {
+            "model": model,
+            "promptText": prompt_text[:1000],
+            "ratio": ratio,
+            "duration": duration,
+        }
+        if prompt_image:
+            payload["promptImage"] = prompt_image
+
         try:
             created = self._request_json(
                 "POST",
                 "https://api.dev.runwayml.com/v1/image_to_video",
-                payload={
-                    "model": model,
-                    "promptText": prompt_text[:1000],
-                    "ratio": ratio,
-                    "duration": duration,
-                },
+                payload=payload,
             )
         except RuntimeError as exc:
             return {
@@ -361,6 +378,7 @@ class RunwayVideoProvider:
                     "task_id": task_id,
                     "duration_seconds": duration,
                     "ratio": ratio,
+                    "prompt_image_url": prompt_image,
                 }
             if state in {"FAILED", "CANCELED"}:
                 return {
