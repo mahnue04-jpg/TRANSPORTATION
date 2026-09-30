@@ -832,8 +832,7 @@ class CreativeStudioService:
         fps = 25
         scene_duration = 5
 
-        # Build one fresh persistent image for each storyboard scene. This avoids
-        # dependency on Runway credits and avoids concatenating heterogeneous MP4s.
+        all_assets = self.store.list_assets(project_id, owner_id)
         image_paths: list[Path] = []
         for scene in scenes:
             prompt_text = str(scene.visual_prompt or scene.description or "").strip()
@@ -841,26 +840,41 @@ class CreativeStudioService:
                 prompt_text = " ".join(
                     part for part in [project.title, project.objective, project.tone] if part
                 ).strip()
-            image_result = self.request_image_generation(
-                owner_id,
-                project_id,
-                aspect_ratio="9:16" if vertical else "16:9",
-                prompt=prompt_text,
-            )
-            image_url = str(image_result.get("url") or "").strip()
-            image_path = _resolve_creative_media_url(image_url)
-            if not image_url or image_path is None or not image_path.is_file():
-                raise CreativeStudioError(
-                    "SCENE_IMAGE_FAILED",
-                    f"Nova could not create usable artwork for scene {scene.index}.",
-                    http_status=422,
+
+            image_path: Path | None = None
+            for candidate in reversed(all_assets):
+                if (
+                    candidate.kind == "image"
+                    and str(candidate.status or "").upper() == "GENERATED"
+                    and candidate.url
+                    and str(candidate.content or "").strip() == prompt_text
+                ):
+                    candidate_path = _resolve_creative_media_url(candidate.url)
+                    if candidate_path is not None and candidate_path.is_file():
+                        image_path = candidate_path
+                        break
+
+            if image_path is None:
+                image_result = self.request_image_generation(
+                    owner_id,
+                    project_id,
+                    aspect_ratio="9:16" if vertical else "16:9",
+                    prompt=prompt_text,
                 )
+                image_url = str(image_result.get("url") or "").strip()
+                image_path = _resolve_creative_media_url(image_url)
+                if not image_url or image_path is None or not image_path.is_file():
+                    raise CreativeStudioError(
+                        "SCENE_IMAGE_FAILED",
+                        f"Nova could not create usable artwork for scene {scene.index}.",
+                        http_status=422,
+                    )
+                all_assets = self.store.list_assets(project_id, owner_id)
             image_paths.append(image_path)
 
-        # Reuse valid voice narration or generate it automatically.
-        assets = self.store.list_assets(project_id, owner_id)
+        all_assets = self.store.list_assets(project_id, owner_id)
         audio: CreativeAsset | None = None
-        for candidate in reversed(assets):
+        for candidate in reversed(all_assets):
             if candidate.kind != "audio" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
                 continue
             candidate_path = _resolve_creative_media_url(candidate.url)
@@ -869,7 +883,6 @@ class CreativeStudioService:
                 break
         if audio is None:
             voice_result = self.request_voice_generation(owner_id, project_id)
-            audio_dict = voice_result.get("asset") or {}
             audio_url = str(voice_result.get("url") or "").strip()
             if not audio_url:
                 raise CreativeStudioError(
@@ -877,19 +890,19 @@ class CreativeStudioService:
                     str((voice_result.get("provider") or {}).get("message") or "Nova could not generate voice narration."),
                     http_status=422,
                 )
-            assets = self.store.list_assets(project_id, owner_id)
+            all_assets = self.store.list_assets(project_id, owner_id)
             audio = next(
                 (
-                    item for item in reversed(assets)
+                    item for item in reversed(all_assets)
                     if item.kind == "audio"
                     and str(item.status or "").upper() == "GENERATED"
                     and item.url == audio_url
                 ),
                 None,
             )
+
         if audio is None or not audio.url:
             raise CreativeStudioError("VOICE_REQUIRED", "Nova could not locate the generated voice narration.", http_status=422)
-
         audio_path = _resolve_creative_media_url(audio.url)
         if audio_path is None or not audio_path.is_file():
             raise CreativeStudioError("MEDIA_MISSING", "Generated voice media is unavailable.", http_status=422)
@@ -908,34 +921,31 @@ class CreativeStudioService:
                 temp_root = Path(temp_dir)
                 segment_paths: list[Path] = []
 
-                # Render each scene image into the same normalized H.264 format.
                 for offset, image_path in enumerate(image_paths):
                     segment_path = temp_root / f"scene-{offset + 1}.mp4"
-                    frames = scene_duration * fps
                     vf = (
-                        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                        f"crop={width}:{height},"
-                        f"zoompan=z='1+0.035*on/{max(frames - 1, 1)}':"
-                        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                        f"d={frames}:s={width}x{height}:fps={fps},"
-                        "format=yuv420p"
+                        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                        f"fps={fps},format=yuv420p"
                     )
                     segment_cmd = [
                         ffmpeg, "-y",
                         "-loop", "1",
+                        "-framerate", str(fps),
                         "-i", str(image_path),
+                        "-t", str(scene_duration),
                         "-vf", vf,
-                        "-frames:v", str(frames),
                         "-an",
                         "-c:v", "libx264",
                         "-preset", "veryfast",
                         "-crf", "22",
+                        "-pix_fmt", "yuv420p",
                         "-movflags", "+faststart",
                         str(segment_path),
                     ]
-                    segment_run = subprocess.run(segment_cmd, capture_output=True, text=True, timeout=150)
-                    if segment_run.returncode != 0 or not segment_path.is_file():
-                        detail = (segment_run.stderr or segment_run.stdout or "")[-1600:]
+                    segment_run = subprocess.run(segment_cmd, capture_output=True, text=True, timeout=120)
+                    if segment_run.returncode != 0 or not segment_path.is_file() or segment_path.stat().st_size < 1024:
+                        detail = (segment_run.stderr or segment_run.stdout or "")[-1800:]
                         raise RuntimeError(f"scene {offset + 1} render failed: {detail}")
                     segment_paths.append(segment_path)
 
@@ -949,45 +959,42 @@ class CreativeStudioService:
                     ffmpeg, "-y",
                     "-f", "concat", "-safe", "0",
                     "-i", str(concat_file),
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "22",
-                    "-an",
+                    "-c", "copy",
                     str(joined_path),
                 ]
-                join_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=180)
+                join_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=120)
                 if join_run.returncode != 0 or not joined_path.is_file():
-                    detail = (join_run.stderr or join_run.stdout or "")[-1600:]
+                    detail = (join_run.stderr or join_run.stdout or "")[-1800:]
                     raise RuntimeError("scene join failed: " + detail)
 
                 final_cmd = [
                     ffmpeg, "-y",
                     "-i", str(joined_path),
                     "-i", str(audio_path),
-                    "-loop", "1",
                     "-i", str(logo_path),
                     "-filter_complex",
-                    "[2:v]scale=170:-1[logo];[0:v][logo]overlay=24:24:format=auto[v]",
+                    "[2:v]scale=170:-1[logo];[0:v][logo]overlay=24:24:repeatlast=1[v]",
                     "-map", "[v]",
                     "-map", "1:a:0",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "21",
+                    "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
                     "-b:a", "160k",
                     "-movflags", "+faststart",
                     "-shortest",
                     str(output_path),
                 ]
-                final_run = subprocess.run(final_cmd, capture_output=True, text=True, timeout=240)
-                if final_run.returncode != 0 or not output_path.is_file():
-                    detail = (final_run.stderr or final_run.stdout or "")[-1800:]
+                final_run = subprocess.run(final_cmd, capture_output=True, text=True, timeout=180)
+                if final_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
+                    detail = (final_run.stderr or final_run.stdout or "")[-2200:]
                     raise RuntimeError("final render failed: " + detail)
         except Exception as exc:
-            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_direct")
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_compat")
             raise CreativeStudioError(
                 "FINAL_ASSEMBLY_FAILED",
-                f"Nova final promo render failed: {str(exc)[-900:]}",
+                f"Nova final promo render failed: {str(exc)[-1200:]}",
                 http_status=422,
             ) from exc
 
@@ -997,11 +1004,11 @@ class CreativeStudioService:
             project_id=project_id,
             kind="video",
             title="Final AMICOR Nova promo",
-            content="Final promo rendered directly from storyboard scene artwork with Nova voice narration and official AMICOR branding.",
+            content="Final promo rendered from storyboard artwork with Nova voice narration and official AMICOR branding.",
             status="GENERATED",
             metadata={
                 "final_promo": True,
-                "render_mode": "direct_scene_image_render",
+                "render_mode": "ffmpeg_compat_stills",
                 "scene_count": len(scenes),
                 "voice_asset_id": audio.id,
                 "brand_overlay": "official_amicor_logo",
@@ -1013,7 +1020,7 @@ class CreativeStudioService:
             status="GENERATED",
             message="Final AMICOR Nova promo rendered successfully.",
             asset_ids=[asset.id],
-            provider="nova_ffmpeg_direct",
+            provider="nova_ffmpeg_compat",
         )
         return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 
