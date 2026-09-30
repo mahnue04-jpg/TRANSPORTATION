@@ -549,6 +549,36 @@
       });
     });
   }
+  var resetMedia = $("reset-project-media");
+  if (resetMedia) {
+    resetMedia.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the project you want to reset first.", false);
+        return;
+      }
+      if (!window.confirm("Reset all generated media for the active project? Script, captions, storyboard, and brief will be preserved.")) {
+        return;
+      }
+      resetMedia.disabled = true;
+      showBanner("Working: removing old media clutter from the active project...", true);
+      try {
+        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/reset-media", {
+          method: "POST"
+        });
+        showBanner(
+          "Media reset complete. Removed " + String(result.deleted_asset_records || 0) +
+          " old media record(s). Script, captions, storyboard, and brief were preserved.",
+          true
+        );
+        await refreshAssets();
+      } catch (err) {
+        showBanner(err.message || "Could not reset active project media.", false);
+      } finally {
+        resetMedia.disabled = false;
+      }
+    });
+  }
+
   var clearFailed = $("clear-failed-video-assets");
   if (clearFailed) {
     clearFailed.addEventListener("click", async function () {
