@@ -427,7 +427,7 @@
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
     if (res.status === 422) throw new Error(detailText(body, "Validation failed. (422)"));
-    if (res.status >= 500) throw new Error("Temporary system error. (500)");
+    if (res.status >= 500) throw new Error(detailText(body, "Temporary system error. (" + res.status + ")"));
     if (!res.ok) {
       throw new Error(detailText(body, "Request failed. (" + res.status + ")"));
     }
