@@ -53,6 +53,89 @@ class CreativeStudioService:
     def __init__(self, store: CreativeStudioStore | DbCreativeStudioStore | None = None):
         self.store = store or get_store()
 
+    def _build_local_scene_motion(
+        self,
+        *,
+        source_image_url: str,
+        platform: str,
+        duration_seconds: int = 5,
+    ) -> dict[str, Any]:
+        source_path = _resolve_creative_media_url(source_image_url)
+        if source_path is None or not source_path.is_file():
+            return {
+                "status": "ERROR",
+                "message": "Nova local motion fallback could not load the generated source image.",
+                "url": None,
+                "asset_generated": False,
+            }
+
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return {
+                "status": "ERROR",
+                "message": "Nova local motion fallback media engine is unavailable.",
+                "url": None,
+                "asset_generated": False,
+            }
+
+        vertical = str(platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
+        width, height = (720, 1280) if vertical else (1280, 720)
+        duration = max(2, min(int(duration_seconds or 5), 10))
+        output_dir, public_prefix = _creative_media_root_and_prefix()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"nova-local-motion-{new_id('scene').split('_', 1)[1]}.mp4"
+
+        filter_expr = (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
+            f"zoompan=z='min(zoom+0.0008,1.06)':"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={duration * 25}:s={width}x{height}:fps=25,"
+            "format=yuv420p"
+        )
+        cmd = [
+            ffmpeg, "-y",
+            "-loop", "1",
+            "-i", str(source_path),
+            "-vf", filter_expr,
+            "-t", str(duration),
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "21",
+            "-movflags", "+faststart",
+            str(output_path),
+        ]
+        try:
+            run = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except Exception as exc:
+            return {
+                "status": "ERROR",
+                "message": f"Nova local motion fallback failed: {exc}",
+                "url": None,
+                "asset_generated": False,
+            }
+        if run.returncode != 0 or not output_path.is_file():
+            return {
+                "status": "ERROR",
+                "message": "Nova local motion fallback could not create the scene video.",
+                "url": None,
+                "asset_generated": False,
+            }
+        return {
+            "status": "GENERATED",
+            "message": "Runway credits were unavailable, so Nova created this scene with the local motion fallback.",
+            "url": public_prefix + "/" + output_path.name,
+            "asset_generated": True,
+            "provider": "nova_ffmpeg_fallback",
+            "generation_mode": "local_image_motion_fallback",
+            "duration_seconds": duration,
+            "ratio": f"{width}:{height}",
+        }
+
+
     def guardrails(self) -> dict[str, Any]:
         return {
             **creative_guardrails(),
@@ -605,6 +688,37 @@ class CreativeStudioService:
                 "scene_heading": scene.heading,
             }
         )
+
+        runway_message = str(result.get("message") or "")
+        credit_exhausted = (
+            str(result.get("status") or "").upper() == "ERROR"
+            and (
+                "not have enough credits" in runway_message.lower()
+                or "insufficient credits" in runway_message.lower()
+                or "credit balance" in runway_message.lower()
+            )
+        )
+        if credit_exhausted and source_image_url and not resume_task_id:
+            fallback = self._build_local_scene_motion(
+                source_image_url=source_image_url,
+                platform=project.platform,
+                duration_seconds=5,
+            )
+            if str(fallback.get("status") or "").upper() == "GENERATED":
+                fallback["brief"] = {
+                    "project_id": project_id,
+                    "title": project.title,
+                    "objective": project.objective,
+                    "platform": project.platform,
+                    "prompt_text": prompt_text,
+                    "prompt_image_url": source_image_url,
+                    "resume_task_id": None,
+                    "scene_index": scene_index,
+                    "scene_heading": scene.heading,
+                }
+                fallback["runway_error"] = runway_message
+                result = fallback
+
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
@@ -626,7 +740,7 @@ class CreativeStudioService:
             status=status,
             message=str(result.get("message") or status),
             asset_ids=[asset.id],
-            provider=video_provider().provider_id,
+            provider=str(result.get("provider") or video_provider().provider_id),
         )
         return {
             "job": job.as_dict(),
