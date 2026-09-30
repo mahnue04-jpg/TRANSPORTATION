@@ -601,6 +601,37 @@
     });
   }
 
+  async function waitForFinalPromo(projectId, queuedAt) {
+    var startedMs = Date.parse(queuedAt || "") || Date.now();
+    var attempts = 0;
+    while (attempts < 48) {
+      await new Promise(function (resolve) { setTimeout(resolve, 5000); });
+      attempts += 1;
+      var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+      var assets = detail.assets || [];
+      var fresh = assets.filter(function (row) {
+        if (row.title !== "Final AMICOR Nova promo") return false;
+        var createdMs = Date.parse(row.created_at || "") || 0;
+        return createdMs >= startedMs - 2000;
+      });
+      var finished = fresh.slice().reverse().find(function (row) {
+        return row.status === "GENERATED" && row.url && row.media_available !== false;
+      });
+      if (finished) return { status: "GENERATED", asset: finished };
+      var failed = fresh.slice().reverse().find(function (row) {
+        return row.status === "ERROR";
+      });
+      if (failed) {
+        throw new Error(failed.content || "Final promo render failed.");
+      }
+      if (attempts % 2 === 0) {
+        showBanner("Nova is rendering the final promo in the background... " + String(attempts * 5) + "s", true);
+        await refreshAssets();
+      }
+    }
+    throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
+  }
+
   var finalPromoButton = $("build-final-promo");
   if (finalPromoButton) {
     finalPromoButton.addEventListener("click", async function () {
@@ -608,12 +639,16 @@
         showBanner("Select the project you want to assemble first.", false);
         return;
       }
+      var selectedProjectId = activeProjectId;
       finalPromoButton.disabled = true;
-      showBanner("Working: building the complete promo. Nova will create any missing scene motion locally, generate voice if needed, then assemble the final MP4...", true);
+      showBanner("Starting final promo render in the background...", true);
       try {
-        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/final-promo", {
+        var started = await api("/api/nova/creative/projects/" + encodeURIComponent(selectedProjectId) + "/assemble/final-promo", {
           method: "POST"
         });
+        renderOutput(started);
+        showBanner(started.message || "Final promo render started.", true);
+        var result = await waitForFinalPromo(selectedProjectId, started.queued_at);
         renderOutput(result);
         showBanner("Final AMICOR Nova promo created successfully. Scrolling to the finished video now.", true);
         await refreshAssets();
@@ -628,6 +663,7 @@
       }
     });
   }
+
 
   async function boot() {
     if (!token()) {

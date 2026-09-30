@@ -3,22 +3,54 @@
 from __future__ import annotations
 
 import os
+import threading
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 
 router = APIRouter(
     prefix="/api/nova/creative",
     tags=["nova-creative-studio"],
     dependencies=[Depends(require_nova_access)],
 )
+
+_final_promo_lock = threading.Lock()
+_final_promo_running: set[tuple[str, str]] = set()
+
+
+def _run_final_promo_background(owner_id: str, project_id: str) -> None:
+    key = (owner_id, project_id)
+    db = SessionLocal()
+    try:
+        service = get_service(db)
+        try:
+            service.assemble_final_promo(owner_id, project_id)
+        except Exception as exc:
+            try:
+                service._save_text_asset(
+                    owner_id=owner_id,
+                    project_id=project_id,
+                    kind="video",
+                    title="Final AMICOR Nova promo",
+                    content=f"Background final promo render failed: {type(exc).__name__}: {exc}",
+                    status="ERROR",
+                    metadata={"background_final_promo": True, "error_type": type(exc).__name__},
+                    url=None,
+                )
+            except Exception:
+                pass
+    finally:
+        db.close()
+        with _final_promo_lock:
+            _final_promo_running.discard(key)
 
 
 def _owner_emails() -> set[str]:
@@ -331,23 +363,39 @@ def generate_voice(
 @router.post("/projects/{project_id}/assemble/final-promo")
 def assemble_final_promo(
     project_id: str,
+    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
+    # Validate ownership/project existence quickly before queueing.
     try:
-        return get_service(db).assemble_final_promo(user.user_id, project_id)
+        get_service(db)._project_or_404(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "FINAL_PROMO_FAILED",
-                "message": f"Nova final promo failed safely: {type(exc).__name__}: {exc}",
-            },
-        ) from exc
+
+    key = (user.user_id, project_id)
+    with _final_promo_lock:
+        already_running = key in _final_promo_running
+        if not already_running:
+            _final_promo_running.add(key)
+
+    queued_at = datetime.now(timezone.utc).isoformat()
+    if not already_running:
+        background_tasks.add_task(_run_final_promo_background, user.user_id, project_id)
+
+    return {
+        "status": "PROCESSING",
+        "message": (
+            "Final promo render is already running."
+            if already_running
+            else "Final promo render started in the background."
+        ),
+        "project_id": project_id,
+        "queued_at": queued_at,
+        "already_running": already_running,
+    }
 
 
 @router.post("/projects/{project_id}/export")
