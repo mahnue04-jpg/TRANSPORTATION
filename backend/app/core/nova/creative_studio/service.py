@@ -60,80 +60,90 @@ class CreativeStudioService:
         platform: str,
         duration_seconds: int = 5,
     ) -> dict[str, Any]:
-        source_path = _resolve_creative_media_url(source_image_url)
-        if source_path is None or not source_path.is_file():
-            return {
-                "status": "ERROR",
-                "message": "Nova local motion fallback could not load the generated source image.",
-                "url": None,
-                "asset_generated": False,
-            }
-
         try:
-            import imageio_ffmpeg
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
-            return {
-                "status": "ERROR",
-                "message": "Nova local motion fallback media engine is unavailable.",
-                "url": None,
-                "asset_generated": False,
-            }
+            source_path = _resolve_creative_media_url(source_image_url)
+            if source_path is None or not source_path.is_file():
+                return {
+                    "status": "ERROR",
+                    "message": "Nova local motion fallback could not load the generated source image.",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": "nova_ffmpeg_fallback",
+                }
 
-        vertical = str(platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
-        width, height = (720, 1280) if vertical else (1280, 720)
-        duration = max(2, min(int(duration_seconds or 5), 10))
-        output_dir, public_prefix = _creative_media_root_and_prefix()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"nova-local-motion-{new_id('scene').split('_', 1)[1]}.mp4"
+            try:
+                import imageio_ffmpeg
+                ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception as exc:
+                return {
+                    "status": "ERROR",
+                    "message": f"Nova local motion fallback media engine is unavailable: {exc}",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": "nova_ffmpeg_fallback",
+                }
 
-        filter_expr = (
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},"
-            f"zoompan=z='min(zoom+0.0008,1.06)':"
-            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={duration * 25}:s={width}x{height}:fps=25,"
-            "format=yuv420p"
-        )
-        cmd = [
-            ffmpeg, "-y",
-            "-loop", "1",
-            "-i", str(source_path),
-            "-vf", filter_expr,
-            "-t", str(duration),
-            "-an",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "21",
-            "-movflags", "+faststart",
-            str(output_path),
-        ]
-        try:
+            vertical = str(platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
+            width, height = (720, 1280) if vertical else (1280, 720)
+            duration = max(2, min(int(duration_seconds or 5), 10))
+            output_dir, public_prefix = _creative_media_root_and_prefix()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"nova-local-motion-{new_id('scene').split('_', 1)[-1]}.mp4"
+
+            # Use a conservative Ken Burns style zoom that is broadly supported
+            # by bundled FFmpeg builds on Render.
+            frames = duration * 25
+            filter_expr = (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},"
+                f"zoompan=z='1+0.04*on/{max(frames - 1, 1)}':"
+                f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"d={frames}:s={width}x{height}:fps=25,"
+                "format=yuv420p"
+            )
+            cmd = [
+                ffmpeg, "-y",
+                "-loop", "1",
+                "-i", str(source_path),
+                "-vf", filter_expr,
+                "-frames:v", str(frames),
+                "-an",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "23",
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
             run = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if run.returncode != 0 or not output_path.is_file():
+                detail = (run.stderr or run.stdout or "").strip().splitlines()
+                tail = detail[-1] if detail else "unknown FFmpeg error"
+                return {
+                    "status": "ERROR",
+                    "message": f"Nova local motion fallback could not create the scene video: {tail[:300]}",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": "nova_ffmpeg_fallback",
+                }
+
+            return {
+                "status": "GENERATED",
+                "message": "Runway credits were unavailable, so Nova created this scene with the local motion fallback.",
+                "url": public_prefix + "/" + output_path.name,
+                "asset_generated": True,
+                "provider": "nova_ffmpeg_fallback",
+                "generation_mode": "local_image_motion_fallback",
+                "duration_seconds": duration,
+                "ratio": f"{width}:{height}",
+            }
         except Exception as exc:
             return {
                 "status": "ERROR",
-                "message": f"Nova local motion fallback failed: {exc}",
+                "message": f"Nova local motion fallback failed safely: {type(exc).__name__}: {exc}",
                 "url": None,
                 "asset_generated": False,
+                "provider": "nova_ffmpeg_fallback",
             }
-        if run.returncode != 0 or not output_path.is_file():
-            return {
-                "status": "ERROR",
-                "message": "Nova local motion fallback could not create the scene video.",
-                "url": None,
-                "asset_generated": False,
-            }
-        return {
-            "status": "GENERATED",
-            "message": "Runway credits were unavailable, so Nova created this scene with the local motion fallback.",
-            "url": public_prefix + "/" + output_path.name,
-            "asset_generated": True,
-            "provider": "nova_ffmpeg_fallback",
-            "generation_mode": "local_image_motion_fallback",
-            "duration_seconds": duration,
-            "ratio": f"{width}:{height}",
-        }
 
 
     def guardrails(self) -> dict[str, Any]:
