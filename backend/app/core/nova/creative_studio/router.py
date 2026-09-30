@@ -264,6 +264,20 @@ def generate_image(
         raise
 
 
+@router.post("/projects/{project_id}/assets/reset-media")
+def reset_project_media(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).reset_project_media(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assets/clear-failed-video")
 def clear_failed_video_assets(
     project_id: str,
