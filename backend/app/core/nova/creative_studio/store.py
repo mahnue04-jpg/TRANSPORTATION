@@ -98,6 +98,19 @@ class CreativeStudioStore:
             key=lambda a: a.created_at,
         )
 
+    def delete_failed_video_assets(self, project_id: str, owner_id: str) -> int:
+        ids = [
+            a.id
+            for a in self.assets.values()
+            if a.project_id == project_id
+            and a.owner_id == owner_id
+            and a.kind == "video"
+            and str(a.status or "").upper() == "ERROR"
+        ]
+        for asset_id in ids:
+            self.assets.pop(asset_id, None)
+        return len(ids)
+
     def save_scene(self, row: CreativeScene) -> CreativeScene:
         self.scenes[row.id] = row
         return row
@@ -240,6 +253,20 @@ class DbCreativeStudioStore:
             .all()
         )
         return [self._asset_from_orm(row) for row in rows]
+
+    def delete_failed_video_assets(self, project_id: str, owner_id: str) -> int:
+        count = (
+            self.db.query(NovaCreativeAsset)
+            .filter(
+                NovaCreativeAsset.project_id == project_id,
+                NovaCreativeAsset.owner_id == owner_id,
+                NovaCreativeAsset.kind == "video",
+                NovaCreativeAsset.status == "ERROR",
+            )
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return int(count or 0)
 
     def save_scene(self, row: CreativeScene) -> CreativeScene:
         orm = self.db.get(NovaCreativeScene, row.id)
