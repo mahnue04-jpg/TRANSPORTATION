@@ -450,6 +450,33 @@ class CreativeStudioService:
         deleted = self.store.delete_failed_video_assets(project_id, owner_id)
         return {"project_id": project_id, "deleted": deleted, "status": "CLEANED"}
 
+
+    def reset_project_media(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        self._project_or_404(owner_id, project_id)
+        removable_kinds = {"image_prompt", "image", "video", "audio"}
+        rows = self.store.delete_assets_by_kinds(project_id, owner_id, removable_kinds)
+
+        removed_files = 0
+        for asset in rows:
+            if not asset.url:
+                continue
+            path = _resolve_creative_media_url(asset.url)
+            if path is None or not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed_files += 1
+            except OSError:
+                pass
+
+        return {
+            "project_id": project_id,
+            "status": "MEDIA_RESET",
+            "deleted_asset_records": len(rows),
+            "deleted_media_files": removed_files,
+            "preserved": ["script", "voiceover", "subtitle", "caption", "hashtags", "storyboard"],
+        }
+
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         self.store.delete_failed_video_assets(project_id, owner_id)
