@@ -491,7 +491,8 @@
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
-      if (row.kind === "image" && row.url) {
+      var mediaAvailable = row.media_available !== false;
+      if (row.kind === "image" && row.url && mediaAvailable) {
         var isAmicor = String(row.content || "").toUpperCase().indexOf("AMICOR") >= 0;
         media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
           escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" />" +
@@ -502,18 +503,18 @@
             "\">Download branded PNG</button> <button type=\"button\" class=\"secondary promo-video\" data-image-url=\"" +
             escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
             "\">Create 8s branded video</button>" : "");
-      } else if (row.kind === "video" && row.url) {
+      } else if (row.kind === "video" && row.url && mediaAvailable) {
         media = "<figure class=\"generated-media\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"></video></figure><a class=\"button secondary\" href=\"" +
           escapeHtml(row.url) + "\" download>Download AI video</a>";
-      } else if (row.kind === "audio" && row.url) {
+      } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"></audio></div><a class=\"button secondary\" href=\"" +
           escapeHtml(row.url) + "\" download>Download voice</a>";
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
-        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? " · media ready" : " · no media URL") + "</div>" +
+        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
         media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
