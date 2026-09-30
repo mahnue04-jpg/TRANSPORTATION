@@ -306,6 +306,20 @@ def generate_voice(
         raise
 
 
+@router.post("/projects/{project_id}/assemble/final-promo")
+def assemble_final_promo(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).assemble_final_promo(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/export")
 def export_project(
     project_id: str,
