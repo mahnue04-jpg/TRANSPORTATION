@@ -285,7 +285,11 @@ class RunwayVideoProvider:
         if raw.startswith("https://"):
             return raw
         if raw.startswith("/"):
-            base = str(os.getenv("AMICOR_PUBLIC_URL") or "").strip().rstrip("/")
+            base = str(
+                os.getenv("AMICOR_PUBLIC_URL")
+                or os.getenv("RENDER_EXTERNAL_URL")
+                or ""
+            ).strip().rstrip("/")
             if base.startswith("https://"):
                 return base + raw
         return None
@@ -315,10 +319,19 @@ class RunwayVideoProvider:
         model = str(os.getenv("NOVA_CREATIVE_VIDEO_MODEL") or "gen4.5").strip()
 
         task_id = str(brief.get("resume_task_id") or "").strip()
+        prompt_image = self._public_asset_url(brief.get("prompt_image_url"))
         if not task_id:
-            # Runway SDK 5.20.1+ supports Gen-4.5 text-to-video by omitting
-            # prompt_image. Pinning the SDK prevents Render from reusing an
-            # older cached schema that incorrectly requires prompt_image.
+            if not prompt_image:
+                return {
+                    "status": ERROR,
+                    "message": "Nova could not resolve a public source image URL for Runway motion generation.",
+                    "brief": brief,
+                    "url": None,
+                    "asset_generated": False,
+                    "model": model,
+                    "duration_seconds": duration,
+                    "ratio": ratio,
+                }
             if RunwayML is None:
                 return {
                     "status": ERROR,
@@ -334,6 +347,7 @@ class RunwayVideoProvider:
                 client = RunwayML(api_key=self._key())
                 created = client.image_to_video.create(
                     model=model,
+                    prompt_image=prompt_image,
                     prompt_text=prompt_text[:1000],
                     ratio=ratio,
                     duration=duration,
@@ -341,7 +355,7 @@ class RunwayVideoProvider:
             except Exception as exc:
                 return {
                     "status": ERROR,
-                    "message": f"Runway SDK error: {exc}",
+                    "message": f"Runway motion generation error: {exc}",
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
@@ -358,7 +372,7 @@ class RunwayVideoProvider:
             if not task_id:
                 return {
                     "status": ERROR,
-                    "message": "Runway SDK did not return a video task id.",
+                    "message": "Runway did not return a motion-video task id.",
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
@@ -405,7 +419,7 @@ class RunwayVideoProvider:
                     "task_id": task_id,
                     "duration_seconds": duration,
                     "ratio": ratio,
-                    "generation_mode": "text_to_video",
+                    "generation_mode": "image_to_motion",
                 }
 
             if state in {"FAILED", "CANCELED"}:
@@ -420,7 +434,7 @@ class RunwayVideoProvider:
 
         return {
             "status": "PROCESSING",
-            "message": "Runway is still generating this video. Click Generate AI Video again to continue checking the same task.",
+            "message": "Runway is still generating this motion clip. Click Generate Real AI Video again to continue checking the same task.",
             "brief": brief,
             "url": None,
             "asset_generated": False,

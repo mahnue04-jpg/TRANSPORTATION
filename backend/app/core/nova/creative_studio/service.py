@@ -427,12 +427,16 @@ class CreativeStudioService:
         )
         return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
+    def clear_failed_video_assets(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        self._project_or_404(owner_id, project_id)
+        deleted = self.store.delete_failed_video_assets(project_id, owner_id)
+        return {"project_id": project_id, "deleted": deleted, "status": "CLEANED"}
+
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
 
-        # Resume the most recent unfinished Runway task instead of starting over.
         resume_task_id = None
         for candidate in reversed(self.store.list_assets(project_id, owner_id)):
             if candidate.kind != "video":
@@ -446,11 +450,13 @@ class CreativeStudioService:
                 break
 
         scenes = self.store.list_scenes(project_id, owner_id)
-        scene_prompt = " ".join(
-            str(scene.visual_prompt or scene.description or "").strip()
-            for scene in scenes[:4]
-        ).strip()
-        prompt_text = scene_prompt or " ".join(
+        first_scene_prompt = ""
+        if scenes:
+            first_scene_prompt = str(
+                scenes[0].visual_prompt or scenes[0].description or ""
+            ).strip()
+
+        prompt_text = first_scene_prompt or " ".join(
             part for part in [
                 project.title,
                 project.objective,
@@ -460,6 +466,51 @@ class CreativeStudioService:
             ] if part
         )
 
+        source_image_url = None
+        for candidate in reversed(self.store.list_assets(project_id, owner_id)):
+            if (
+                candidate.kind == "image"
+                and candidate.url
+                and str(candidate.status or "").upper() == "GENERATED"
+            ):
+                source_image_url = candidate.url
+                break
+
+        if not source_image_url and not resume_task_id:
+            aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
+                "tiktok", "instagram", "youtube shorts"
+            } else "16:9"
+            image_result = self.request_image_generation(
+                owner_id,
+                project_id,
+                aspect_ratio=aspect_ratio,
+                prompt=first_scene_prompt or None,
+            )
+            source_image_url = str(image_result.get("url") or "").strip() or None
+            if not source_image_url:
+                message = str(
+                    (image_result.get("provider") or {}).get("message")
+                    or "Nova could not create a source scene for AI motion."
+                )
+                asset = self._save_text_asset(
+                    owner_id=owner_id,
+                    project_id=project_id,
+                    kind="video",
+                    title="AI video generation result",
+                    content=prompt_text or project.title,
+                    status="ERROR",
+                    metadata={"provider_result": {"status": "ERROR", "message": message}},
+                    url=None,
+                )
+                self._finish_job(
+                    job,
+                    status="ERROR",
+                    message=message,
+                    asset_ids=[asset.id],
+                    provider=video_provider().provider_id,
+                )
+                return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
+
         result = video_provider().generate(
             brief={
                 "project_id": project_id,
@@ -467,6 +518,7 @@ class CreativeStudioService:
                 "objective": project.objective,
                 "platform": project.platform,
                 "prompt_text": prompt_text,
+                "prompt_image_url": source_image_url,
                 "resume_task_id": resume_task_id,
             }
         )
@@ -476,7 +528,7 @@ class CreativeStudioService:
             owner_id=owner_id,
             project_id=project_id,
             kind="video",
-            title="AI video generation result",
+            title="AI motion video result",
             content=prompt_text or project.title,
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
             metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
