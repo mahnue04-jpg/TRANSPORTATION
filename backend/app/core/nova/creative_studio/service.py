@@ -430,20 +430,44 @@ class CreativeStudioService:
     def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "video")
-        result = video_provider().generate(brief={"project_id": project_id, "title": project.title})
+        brief = self._brief_for(owner_id, project)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        scene_prompt = " ".join(
+            str(scene.visual_prompt or scene.description or "").strip()
+            for scene in scenes[:4]
+        ).strip()
+        prompt_text = scene_prompt or " ".join(
+            part for part in [
+                project.title,
+                project.objective,
+                (brief.topic if brief else ""),
+                (brief.style if brief else ""),
+                project.tone,
+            ] if part
+        )
+        result = video_provider().generate(
+            brief={
+                "project_id": project_id,
+                "title": project.title,
+                "objective": project.objective,
+                "platform": project.platform,
+                "prompt_text": prompt_text,
+            }
+        )
         status = result.get("status") or CONFIG_REQUIRED
+        generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
             owner_id=owner_id,
             project_id=project_id,
             kind="video",
-            title="Video generation status",
-            content="Video file not produced.",
+            title="AI video generation result",
+            content=prompt_text or project.title,
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={"provider_result": result},
-            url=None,
+            metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
+            url=generated_url,
         )
         self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=video_provider().provider_id)
-        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
+        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
     def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None) -> dict[str, Any]:
         self._project_or_404(owner_id, project_id)
@@ -456,18 +480,19 @@ class CreativeStudioService:
                     break
         result = voice_provider().generate(script=text or "No voiceover script available.")
         status = result.get("status") or CONFIG_REQUIRED
+        generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
             owner_id=owner_id,
             project_id=project_id,
             kind="audio",
-            title="Voice generation status",
+            title="Voice generation result",
             content=text or "",
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={"provider_result": result},
-            url=None,
+            metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
+            url=generated_url,
         )
         self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=voice_provider().provider_id)
-        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
+        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)
