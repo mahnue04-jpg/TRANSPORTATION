@@ -609,13 +609,13 @@
         return;
       }
       finalPromoButton.disabled = true;
-      showBanner("Working: assembling scene clips, voice, and AMICOR branding into the final MP4...", true);
+      showBanner("Working: building the complete promo. Nova will create any missing scene motion locally, generate voice if needed, then assemble the final MP4...", true);
       try {
         var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/final-promo", {
           method: "POST"
         });
         renderOutput(result);
-        showBanner("Final AMICOR Nova promo created. Scrolling to the finished video now.", true);
+        showBanner("Final AMICOR Nova promo created successfully. Scrolling to the finished video now.", true);
         await refreshAssets();
         var assetList = $("asset-list");
         if (assetList && assetList.scrollIntoView) {
