@@ -30,6 +30,8 @@ from app.core.nova.creative_studio.providers import (
     provider_statuses,
     video_provider,
     voice_provider,
+    _creative_media_root_and_prefix,
+    _resolve_creative_media_url,
 )
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
 from app.core.nova.creative_studio.store import CreativeStudioStore, DbCreativeStudioStore, get_db_store, get_store
@@ -663,12 +665,13 @@ class CreativeStudioService:
         backend_root = Path(__file__).resolve().parents[4]
 
         def local_media(url: str) -> Path:
-            raw = str(url or "").strip()
-            if not raw.startswith("/static/"):
-                raise CreativeStudioError("MEDIA_NOT_LOCAL", "Final assembly requires locally saved Creative Studio media.", http_status=422)
-            path = backend_root / raw.lstrip("/")
-            if not path.is_file():
-                raise CreativeStudioError("MEDIA_MISSING", "A generated media file is no longer present after a server restart. Regenerate the missing scene or voice.", http_status=422)
+            path = _resolve_creative_media_url(url)
+            if path is None or not path.is_file():
+                raise CreativeStudioError(
+                    "MEDIA_MISSING",
+                    "A generated media file is missing. Regenerate the missing scene or voice after persistent media storage is enabled.",
+                    http_status=422,
+                )
             return path
 
         clip_paths = [local_media(video_by_scene[idx].url or "") for idx in expected]
@@ -683,7 +686,7 @@ class CreativeStudioService:
         except Exception as exc:
             raise CreativeStudioError("FFMPEG_UNAVAILABLE", "Final promo media engine is unavailable.", http_status=500) from exc
 
-        output_dir = backend_root / "static" / "generated" / "nova-creative"
+        output_dir, public_prefix = _creative_media_root_and_prefix()
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[1]}.mp4"
 
@@ -734,7 +737,7 @@ class CreativeStudioService:
             self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg")
             raise CreativeStudioError("FINAL_ASSEMBLY_FAILED", "Nova could not assemble the final promo video.", http_status=500) from exc
 
-        public_url = "/static/generated/nova-creative/" + output_path.name
+        public_url = public_prefix + "/" + output_path.name
         asset = self._save_text_asset(
             owner_id=owner_id,
             project_id=project_id,
