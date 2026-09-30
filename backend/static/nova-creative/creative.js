@@ -349,6 +349,69 @@
     });
   }
 
+  var finalPromoButton = $("build-final-promo");
+  if (finalPromoButton) {
+    finalPromoButton.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the project you want to assemble first.", false);
+        return;
+      }
+      finalPromoButton.disabled = true;
+      showBanner("Working: checking scene clips and voice for final promo...", true);
+      try {
+        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+        var videos = (detail.assets || []).filter(function (row) {
+          return row.kind === "video" && row.status === "GENERATED" && row.url;
+        }).sort(function (a, b) {
+          var ai = Number((a.metadata || {}).scene_index || 999);
+          var bi = Number((b.metadata || {}).scene_index || 999);
+          return ai - bi;
+        });
+        var audios = (detail.assets || []).filter(function (row) {
+          return row.kind === "audio" && row.status === "GENERATED" && row.url;
+        });
+        var sceneCount = (detail.scenes || []).length;
+        if (!sceneCount) throw new Error("Generate the storyboard first.");
+        if (videos.length < sceneCount) {
+          throw new Error("Generate all storyboard scene videos first. " + videos.length + " of " + sceneCount + " are ready.");
+        }
+        if (!audios.length) {
+          throw new Error("Generate the voice narration before building the final promo.");
+        }
+
+        var old = document.getElementById("final-promo-manifest");
+        if (old) old.remove();
+        var wrap = document.createElement("div");
+        wrap.id = "final-promo-manifest";
+        wrap.className = "item";
+        var title = document.createElement("strong");
+        title.textContent = "Final promo package ready";
+        var note = document.createElement("div");
+        note.className = "muted";
+        note.textContent = sceneCount + " scene clips + voice narration are ready for final assembly.";
+        wrap.appendChild(title);
+        wrap.appendChild(note);
+
+        videos.forEach(function (row, index) {
+          var line = document.createElement("div");
+          line.textContent = "Scene " + (index + 1) + ": " + (row.title || "AI motion clip");
+          wrap.appendChild(line);
+        });
+
+        var voiceLine = document.createElement("div");
+        voiceLine.textContent = "Voice: " + (audios[audios.length - 1].title || "Voice narration");
+        wrap.appendChild(voiceLine);
+
+        $("asset-list").prepend(wrap);
+        showBanner("All scene clips and voice are ready. Final server-side mux/export is the next step.", true);
+      } catch (err) {
+        showBanner(err.message || "Final promo assembly check failed.", false);
+      } finally {
+        finalPromoButton.disabled = false;
+      }
+    });
+  }
+
   async function boot() {
     if (!token()) {
       setSignedIn(false);
