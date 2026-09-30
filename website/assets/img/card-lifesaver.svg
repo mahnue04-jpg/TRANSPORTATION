@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="lifeTitle lifeDesc">
+  <title id="lifeTitle">Lifesaver connected-care concept</title>
+  <desc id="lifeDesc">Illustrative connected home and cloud diagram. In development. Not a medical device or emergency service.</desc>
+  <rect width="640" height="280" rx="24" fill="#07141f"/>
+  <rect x="20" y="24" width="600" height="232" rx="18" fill="#102233" stroke="#9ad7ea" stroke-opacity=".28"/>
+  <circle cx="168" cy="142" r="70" fill="#0b1c2a"/>
+  <circle cx="168" cy="142" r="46" fill="none" stroke="#9ad7ea" stroke-opacity=".5" stroke-width="3"/>
+  <circle cx="168" cy="142" r="10" fill="#5ee0c4"/>
+  <circle cx="168" cy="90" r="6" fill="#9ad7ea"/>
+  <circle cx="214" cy="168" r="6" fill="#9ad7ea"/>
+  <circle cx="122" cy="168" r="6" fill="#9ad7ea"/>
+  <text x="168" y="230" text-anchor="middle" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="12">Home edge</text>
+  <path d="M238 142 H310" stroke="#5aa7c8" stroke-width="3" stroke-dasharray="6 6"/>
+  <rect x="318" y="64" width="270" height="152" rx="16" fill="#0b1c2a"/>
+  <text x="453" y="100" text-anchor="middle" fill="#9ad7ea" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700">AMICOR CLOUD</text>
+  <text x="453" y="132" text-anchor="middle" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700">Connected care</text>
+  <text x="453" y="160" text-anchor="middle" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="12">Initiative in development</text>
+  <text x="453" y="182" text-anchor="middle" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="12">Not a diagnostic product</text>
+</svg>

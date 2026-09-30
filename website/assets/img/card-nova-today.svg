@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="todayTitle todayDesc">
+  <title id="todayTitle">AMICOR Nova Today sample command center</title>
+  <desc id="todayDesc">Illustrative daily command center with Today selected and sample attention items. Not live operator data.</desc>
+  <rect width="640" height="280" rx="24" fill="#07141f"/>
+  <rect x="16" y="16" width="608" height="248" rx="18" fill="#102233" stroke="#5ee0c4" stroke-opacity=".22"/>
+  <text x="36" y="48" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="15" font-weight="700">Today</text>
+  <text x="92" y="48" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="12">Command center</text>
+  <rect x="430" y="30" width="172" height="24" rx="12" fill="#12344c"/>
+  <text x="516" y="46" text-anchor="middle" fill="#b7e0ff" font-family="Segoe UI, sans-serif" font-size="10" font-weight="700">SAMPLE WORKSPACE</text>
+  <rect x="36" y="72" width="180" height="72" rx="12" fill="#0b1c2a"/>
+  <text x="52" y="96" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="10">ATTENTION</text>
+  <text x="52" y="122" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="18" font-weight="700">Owner review</text>
+  <rect x="228" y="72" width="180" height="72" rx="12" fill="#0b1c2a"/>
+  <text x="244" y="96" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="10">WORK</text>
+  <text x="244" y="122" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="18" font-weight="700">In queue</text>
+  <rect x="420" y="72" width="180" height="72" rx="12" fill="#0b1c2a"/>
+  <text x="436" y="96" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="10">REVENUE</text>
+  <text x="436" y="122" fill="#7ad69a" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700">Owner-confirmed</text>
+  <rect x="36" y="160" width="564" height="80" rx="12" fill="#0b1c2a"/>
+  <rect x="52" y="176" width="8" height="48" rx="4" fill="#5ee0c4"/>
+  <text x="76" y="196" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700">Next recommended action</text>
+  <text x="76" y="218" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="12">Draft waits for owner review. Nothing is sent from this public page.</text>
+</svg>

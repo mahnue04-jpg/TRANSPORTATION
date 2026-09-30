@@ -1,0 +1,9 @@
+# Cloudflare Pages config for the AMICOR public website folder.
+# Deploy this directory as the Pages project root. No build step.
+name = "amicor-public"
+compatibility_date = "2026-09-11"
+pages_build_output_dir = "."
+
+[[kv_namespaces]]
+binding = "AMICOR_LEADS"
+id = "aef188e1167a41c98ee81deabbbce50d"

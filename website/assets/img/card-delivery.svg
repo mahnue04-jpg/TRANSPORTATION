@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="delTitle delDesc">
+  <title id="delTitle">AMICOR Delivery operations concept</title>
+  <desc id="delDesc">Illustrative local delivery map and status board. Coming soon. Not a live ordering service.</desc>
+  <rect width="640" height="280" rx="24" fill="#07141f"/>
+  <rect x="20" y="24" width="600" height="232" rx="18" fill="#102233" stroke="#3dba8b" stroke-opacity=".3"/>
+  <circle cx="170" cy="140" r="78" fill="#0b1c2a"/>
+  <circle cx="170" cy="140" r="52" fill="none" stroke="#3dba8b" stroke-opacity=".45" stroke-width="2"/>
+  <path d="M120 156 C140 112 168 104 196 128 C214 146 214 168 190 176" fill="none" stroke="#7ee0b5" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="196" cy="128" r="7" fill="#3dba8b"/>
+  <circle cx="132" cy="164" r="6" fill="#5ee0c4"/>
+  <rect x="92" y="188" width="56" height="28" rx="8" fill="#163044"/>
+  <rect x="112" y="176" width="72" height="32" rx="8" fill="#1a3d34"/>
+  <rect x="330" y="48" width="260" height="184" rx="14" fill="#0b1c2a"/>
+  <text x="350" y="78" fill="#7ee0b5" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700">COMING SOON</text>
+  <text x="350" y="108" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700">Local operations</text>
+  <text x="350" y="140" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="13">Pickup / Handoff / Complete</text>
+  <text x="350" y="168" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="13">Not a live marketplace</text>
+  <rect x="350" y="188" width="148" height="22" rx="8" fill="#1a3d34"/>
+</svg>
