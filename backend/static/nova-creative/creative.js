@@ -500,7 +500,14 @@
         var body = await api(path, options);
         if (selectedProjectId) activeProjectId = selectedProjectId;
         renderOutput(body);
-        showBanner(meta.ok, true);
+        var providerStatus = body && body.provider && body.provider.status;
+        var providerMessage = body && body.provider && body.provider.message;
+        if ((action === "video" || action === "voice" || action === "image") &&
+            providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
+          showBanner(providerMessage || (action + " generation failed."), false);
+        } else {
+          showBanner(meta.ok, true);
+        }
         await refreshAssets();
         await refreshProjects();
         if (selectedProjectId) activeProjectId = selectedProjectId;

@@ -230,7 +230,18 @@ class RunwayVideoProvider:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Runway API error ({exc.code}): {detail[:500]}") from exc
+            message = detail[:800]
+            try:
+                parsed = json.loads(detail)
+                message = str(
+                    parsed.get("error")
+                    or parsed.get("message")
+                    or parsed.get("detail")
+                    or message
+                )
+            except Exception:
+                pass
+            raise RuntimeError(f"Runway API error ({exc.code}): {message}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Runway API connection failed: {exc.reason}") from exc
 
@@ -279,16 +290,28 @@ class RunwayVideoProvider:
             duration = 5
         model = str(os.getenv("NOVA_CREATIVE_VIDEO_MODEL") or "gen4.5").strip()
 
-        created = self._request_json(
-            "POST",
-            "https://api.dev.runwayml.com/v1/image_to_video",
-            payload={
+        try:
+            created = self._request_json(
+                "POST",
+                "https://api.dev.runwayml.com/v1/image_to_video",
+                payload={
+                    "model": model,
+                    "promptText": prompt_text[:1000],
+                    "ratio": ratio,
+                    "duration": duration,
+                },
+            )
+        except RuntimeError as exc:
+            return {
+                "status": ERROR,
+                "message": str(exc),
+                "brief": brief,
+                "url": None,
+                "asset_generated": False,
                 "model": model,
-                "promptText": prompt_text[:1000],
+                "duration_seconds": duration,
                 "ratio": ratio,
-                "duration": duration,
-            },
-        )
+            }
         task_id = str(created.get("id") or "").strip()
         if not task_id:
             return {
@@ -303,7 +326,17 @@ class RunwayVideoProvider:
         task: dict[str, Any] = {"id": task_id, "status": "PENDING"}
         while time.monotonic() < deadline:
             time.sleep(5)
-            task = self._request_json("GET", f"https://api.dev.runwayml.com/v1/tasks/{task_id}")
+            try:
+                task = self._request_json("GET", f"https://api.dev.runwayml.com/v1/tasks/{task_id}")
+            except RuntimeError as exc:
+                return {
+                    "status": ERROR,
+                    "message": str(exc),
+                    "brief": brief,
+                    "url": None,
+                    "asset_generated": False,
+                    "task_id": task_id,
+                }
             state = str(task.get("status") or "").upper()
             if state == "SUCCEEDED":
                 outputs = list(task.get("output") or [])
