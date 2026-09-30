@@ -502,7 +502,9 @@
         renderOutput(body);
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
-        if ((action === "video" || action === "voice" || action === "image") &&
+        if (providerStatus === "PROCESSING") {
+          showBanner(providerMessage || "Video is still processing. Click Generate AI Video again shortly.", true);
+        } else if ((action === "video" || action === "voice" || action === "image") &&
             providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
           showBanner(providerMessage || (action + " generation failed."), false);
         } else {

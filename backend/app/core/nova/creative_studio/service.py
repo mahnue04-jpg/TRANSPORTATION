@@ -431,58 +431,19 @@ class CreativeStudioService:
         project = self._project_or_404(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
-        assets = self.store.list_assets(project_id, owner_id)
-        source_image_url = None
-        for candidate in reversed(assets):
-            if candidate.kind == "image" and candidate.url and candidate.status == "GENERATED":
-                source_image_url = candidate.url
-                break
 
-        # Runway image-to-video requires a real promptImage. Older/duplicate
-        # storyboard projects may not have an image asset attached, so create
-        # one automatically instead of sending a null promptImage.
-        if not source_image_url:
-            aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
-                "tiktok", "instagram", "youtube shorts"
-            } else "16:9"
-            generated_image = self.request_image_generation(
-                owner_id,
-                project_id,
-                aspect_ratio=aspect_ratio,
-            )
-            source_image_url = str(generated_image.get("url") or "").strip() or None
-            if not source_image_url:
-                image_message = str(
-                    (generated_image.get("provider") or {}).get("message")
-                    or "A source image could not be generated for AI video."
-                )
-                asset = self._save_text_asset(
-                    owner_id=owner_id,
-                    project_id=project_id,
-                    kind="video",
-                    title="AI video generation result",
-                    content="Video generation requires a source image.",
-                    status="ERROR",
-                    metadata={"provider_result": {"status": "ERROR", "message": image_message}},
-                    url=None,
-                )
-                self._finish_job(
-                    job,
-                    status="ERROR",
-                    message=image_message,
-                    asset_ids=[asset.id],
-                    provider=video_provider().provider_id,
-                )
-                return {
-                    "job": job.as_dict(),
-                    "asset": asset.as_dict(),
-                    "provider": {
-                        "status": "ERROR",
-                        "message": image_message,
-                        "asset_generated": False,
-                    },
-                    "url": None,
-                }
+        # Resume the most recent unfinished Runway task instead of starting over.
+        resume_task_id = None
+        for candidate in reversed(self.store.list_assets(project_id, owner_id)):
+            if candidate.kind != "video":
+                continue
+            provider_result = (candidate.metadata or {}).get("provider_result") or {}
+            if (
+                str(provider_result.get("status") or "").upper() == "PROCESSING"
+                and provider_result.get("task_id")
+            ):
+                resume_task_id = str(provider_result["task_id"])
+                break
 
         scenes = self.store.list_scenes(project_id, owner_id)
         scene_prompt = " ".join(
@@ -498,6 +459,7 @@ class CreativeStudioService:
                 project.tone,
             ] if part
         )
+
         result = video_provider().generate(
             brief={
                 "project_id": project_id,
@@ -505,7 +467,7 @@ class CreativeStudioService:
                 "objective": project.objective,
                 "platform": project.platform,
                 "prompt_text": prompt_text,
-                "prompt_image_url": source_image_url,
+                "resume_task_id": resume_task_id,
             }
         )
         status = result.get("status") or CONFIG_REQUIRED
@@ -520,8 +482,19 @@ class CreativeStudioService:
             metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
             url=generated_url,
         )
-        self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=video_provider().provider_id)
-        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
+        self._finish_job(
+            job,
+            status=status,
+            message=str(result.get("message") or status),
+            asset_ids=[asset.id],
+            provider=video_provider().provider_id,
+        )
+        return {
+            "job": job.as_dict(),
+            "asset": asset.as_dict(),
+            "provider": result,
+            "url": generated_url,
+        }
 
     def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None) -> dict[str, Any]:
         self._project_or_404(owner_id, project_id)

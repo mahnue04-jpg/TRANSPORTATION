@@ -303,52 +303,52 @@ class RunwayVideoProvider:
             or "Professional small-business operations promo video"
         ).strip()
         platform = str(brief.get("platform") or "").strip().lower()
-        # Current Gen-4.5 text-to-video ratios documented by Runway.
         ratio = "720:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:720"
         duration = int(str(os.getenv("NOVA_CREATIVE_VIDEO_DURATION_SECONDS") or "5"))
-        if duration not in {5, 10}:
+        if duration < 2 or duration > 10:
             duration = 5
         model = str(os.getenv("NOVA_CREATIVE_VIDEO_MODEL") or "gen4.5").strip()
 
-        prompt_image = self._public_asset_url(brief.get("prompt_image_url"))
-        payload = {
-            "model": model,
-            "promptText": prompt_text[:1000],
-            "ratio": ratio,
-            "duration": duration,
-        }
-        if prompt_image:
-            payload["promptImage"] = prompt_image
-
-        try:
-            created = self._request_json(
-                "POST",
-                "https://api.dev.runwayml.com/v1/image_to_video",
-                payload=payload,
-            )
-        except RuntimeError as exc:
-            return {
-                "status": ERROR,
-                "message": str(exc),
-                "brief": brief,
-                "url": None,
-                "asset_generated": False,
-                "model": model,
-                "duration_seconds": duration,
-                "ratio": ratio,
-            }
-        task_id = str(created.get("id") or "").strip()
+        task_id = str(brief.get("resume_task_id") or "").strip()
         if not task_id:
-            return {
-                "status": ERROR,
-                "message": "Runway did not return a video task id.",
-                "brief": brief,
-                "url": None,
-                "asset_generated": False,
+            # Gen-4.5 supports true text-to-video. Omit promptImage entirely.
+            payload = {
+                "model": model,
+                "promptText": prompt_text[:1000],
+                "ratio": ratio,
+                "duration": duration,
             }
+            try:
+                created = self._request_json(
+                    "POST",
+                    "https://api.dev.runwayml.com/v1/image_to_video",
+                    payload=payload,
+                )
+            except RuntimeError as exc:
+                return {
+                    "status": ERROR,
+                    "message": str(exc),
+                    "brief": brief,
+                    "url": None,
+                    "asset_generated": False,
+                    "model": model,
+                    "duration_seconds": duration,
+                    "ratio": ratio,
+                }
+            task_id = str(created.get("id") or "").strip()
+            if not task_id:
+                return {
+                    "status": ERROR,
+                    "message": "Runway did not return a video task id.",
+                    "brief": brief,
+                    "url": None,
+                    "asset_generated": False,
+                }
 
-        deadline = time.monotonic() + int(str(os.getenv("NOVA_CREATIVE_VIDEO_WAIT_SECONDS") or "90"))
+        wait_seconds = int(str(os.getenv("NOVA_CREATIVE_VIDEO_WAIT_SECONDS") or "90"))
+        deadline = time.monotonic() + max(15, wait_seconds)
         task: dict[str, Any] = {"id": task_id, "status": "PENDING"}
+
         while time.monotonic() < deadline:
             time.sleep(5)
             try:
@@ -362,11 +362,19 @@ class RunwayVideoProvider:
                     "asset_generated": False,
                     "task_id": task_id,
                 }
+
             state = str(task.get("status") or "").upper()
             if state == "SUCCEEDED":
                 outputs = list(task.get("output") or [])
                 if not outputs:
-                    break
+                    return {
+                        "status": ERROR,
+                        "message": "Runway completed the task but returned no video output.",
+                        "brief": brief,
+                        "url": None,
+                        "asset_generated": False,
+                        "task_id": task_id,
+                    }
                 saved_url = self._save_remote_video(str(outputs[0]))
                 return {
                     "status": "GENERATED",
@@ -378,8 +386,9 @@ class RunwayVideoProvider:
                     "task_id": task_id,
                     "duration_seconds": duration,
                     "ratio": ratio,
-                    "prompt_image_url": prompt_image,
+                    "generation_mode": "text_to_video",
                 }
+
             if state in {"FAILED", "CANCELED"}:
                 return {
                     "status": ERROR,
@@ -391,12 +400,16 @@ class RunwayVideoProvider:
                 }
 
         return {
-            "status": ERROR,
-            "message": "Runway video generation is still processing. Try Generate AI Video again shortly.",
+            "status": "PROCESSING",
+            "message": "Runway is still generating this video. Click Generate AI Video again to continue checking the same task.",
             "brief": brief,
             "url": None,
             "asset_generated": False,
             "task_id": task_id,
+            "model": model,
+            "duration_seconds": duration,
+            "ratio": ratio,
+            "generation_mode": "text_to_video",
         }
 
 
