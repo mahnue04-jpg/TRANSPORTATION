@@ -816,215 +816,163 @@ class CreativeStudioService:
         if not scenes:
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
 
-        # Self-healing assembly path: when provider-backed scene video is missing
-        # (including Runway credit exhaustion), create a deterministic local motion
-        # clip from generated scene art instead of blocking the entire promo.
-        assets = self.store.list_assets(project_id, owner_id)
-        existing_scene_videos: dict[int, CreativeAsset] = {}
-        for candidate in assets:
-            if candidate.kind != "video" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
-                continue
-            local_path = _resolve_creative_media_url(candidate.url)
-            if local_path is not None and not local_path.is_file():
-                continue
-            idx = (candidate.metadata or {}).get("scene_index")
-            if idx is None:
-                provider_result = (candidate.metadata or {}).get("provider_result") or {}
-                idx = ((provider_result.get("brief") or {}).get("scene_index"))
-            try:
-                existing_scene_videos[int(idx)] = candidate
-            except (TypeError, ValueError):
-                continue
+        backend_root = Path(__file__).resolve().parents[4]
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception as exc:
+            raise CreativeStudioError(
+                "FFMPEG_UNAVAILABLE",
+                f"Nova final-video media engine is unavailable: {exc}",
+                http_status=422,
+            ) from exc
 
-        aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
-            "tiktok", "instagram", "youtube shorts"
-        } else "16:9"
+        vertical = str(project.platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
+        width, height = (720, 1280) if vertical else (1280, 720)
+        fps = 25
+        scene_duration = 5
 
+        # Build one fresh persistent image for each storyboard scene. This avoids
+        # dependency on Runway credits and avoids concatenating heterogeneous MP4s.
+        image_paths: list[Path] = []
         for scene in scenes:
-            scene_idx = int(scene.index)
-            if scene_idx in existing_scene_videos:
-                continue
-
             prompt_text = str(scene.visual_prompt or scene.description or "").strip()
             if not prompt_text:
                 prompt_text = " ".join(
                     part for part in [project.title, project.objective, project.tone] if part
                 ).strip()
-
             image_result = self.request_image_generation(
                 owner_id,
                 project_id,
-                aspect_ratio=aspect_ratio,
+                aspect_ratio="9:16" if vertical else "16:9",
                 prompt=prompt_text,
             )
-            source_image_url = str(image_result.get("url") or "").strip() or None
-            if not source_image_url:
+            image_url = str(image_result.get("url") or "").strip()
+            image_path = _resolve_creative_media_url(image_url)
+            if not image_url or image_path is None or not image_path.is_file():
                 raise CreativeStudioError(
                     "SCENE_IMAGE_FAILED",
-                    f"Nova could not create source art for scene {scene_idx}.",
+                    f"Nova could not create usable artwork for scene {scene.index}.",
                     http_status=422,
                 )
+            image_paths.append(image_path)
 
-            motion = self._build_local_scene_motion(
-                source_image_url=source_image_url,
-                platform=project.platform,
-                duration_seconds=5,
-            )
-            if str(motion.get("status") or "").upper() != "GENERATED" or not motion.get("url"):
-                raise CreativeStudioError(
-                    "LOCAL_SCENE_MOTION_FAILED",
-                    str(motion.get("message") or f"Nova could not create local motion for scene {scene_idx}."),
-                    http_status=422,
-                )
-
-            scene_asset = self._save_text_asset(
-                owner_id=owner_id,
-                project_id=project_id,
-                kind="video",
-                title=f"Scene {scene_idx} local motion result",
-                content=prompt_text,
-                status="GENERATED",
-                metadata={
-                    "scene_index": scene_idx,
-                    "scene_heading": scene.heading,
-                    "provider_result": {
-                        **{k: v for k, v in motion.items() if k != "url"},
-                        "brief": {
-                            "project_id": project_id,
-                            "title": project.title,
-                            "platform": project.platform,
-                            "prompt_text": prompt_text,
-                            "prompt_image_url": source_image_url,
-                            "scene_index": scene_idx,
-                            "scene_heading": scene.heading,
-                        },
-                    },
-                },
-                url=str(motion.get("url") or ""),
-            )
-            existing_scene_videos[scene_idx] = scene_asset
-
-        # Voice should also self-heal. Reuse a valid narration when present;
-        # otherwise generate it now so Build Final Promo can be a one-click path.
+        # Reuse valid voice narration or generate it automatically.
         assets = self.store.list_assets(project_id, owner_id)
-        has_audio = False
+        audio: CreativeAsset | None = None
         for candidate in reversed(assets):
             if candidate.kind != "audio" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
                 continue
-            local_path = _resolve_creative_media_url(candidate.url)
-            if local_path is None or local_path.is_file():
-                has_audio = True
+            candidate_path = _resolve_creative_media_url(candidate.url)
+            if candidate_path is None or candidate_path.is_file():
+                audio = candidate
                 break
-        if not has_audio:
+        if audio is None:
             voice_result = self.request_voice_generation(owner_id, project_id)
-            if not voice_result.get("url"):
+            audio_dict = voice_result.get("asset") or {}
+            audio_url = str(voice_result.get("url") or "").strip()
+            if not audio_url:
                 raise CreativeStudioError(
                     "VOICE_GENERATION_FAILED",
                     str((voice_result.get("provider") or {}).get("message") or "Nova could not generate voice narration."),
                     http_status=422,
                 )
-
-        assets = self.store.list_assets(project_id, owner_id)
-        video_by_scene: dict[int, CreativeAsset] = {}
-        for asset in assets:
-            if asset.kind != "video" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
-                continue
-            local_path = _resolve_creative_media_url(asset.url)
-            if local_path is not None and not local_path.is_file():
-                continue
-            idx = (asset.metadata or {}).get("scene_index")
-            if idx is None:
-                provider_result = (asset.metadata or {}).get("provider_result") or {}
-                idx = ((provider_result.get("brief") or {}).get("scene_index"))
-            try:
-                scene_idx = int(idx)
-            except (TypeError, ValueError):
-                continue
-            video_by_scene[scene_idx] = asset
-
-        expected = [int(scene.index) for scene in scenes]
-        missing = [idx for idx in expected if idx not in video_by_scene]
-        if missing:
-            raise CreativeStudioError(
-                "SCENES_INCOMPLETE",
-                "Generate all storyboard scene videos first. Missing scene(s): " + ", ".join(str(x) for x in missing),
-                http_status=422,
+            assets = self.store.list_assets(project_id, owner_id)
+            audio = next(
+                (
+                    item for item in reversed(assets)
+                    if item.kind == "audio"
+                    and str(item.status or "").upper() == "GENERATED"
+                    and item.url == audio_url
+                ),
+                None,
             )
+        if audio is None or not audio.url:
+            raise CreativeStudioError("VOICE_REQUIRED", "Nova could not locate the generated voice narration.", http_status=422)
 
-        audio = None
-        for asset in reversed(assets):
-            if asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
-                continue
-            local_path = _resolve_creative_media_url(asset.url)
-            if local_path is not None and not local_path.is_file():
-                continue
-            audio = asset
-            break
-        if audio is None:
-            raise CreativeStudioError("VOICE_REQUIRED", "Generate the voice narration first.", http_status=422)
+        audio_path = _resolve_creative_media_url(audio.url)
+        if audio_path is None or not audio_path.is_file():
+            raise CreativeStudioError("MEDIA_MISSING", "Generated voice media is unavailable.", http_status=422)
 
-        backend_root = Path(__file__).resolve().parents[4]
-
-        def local_media(url: str) -> Path:
-            path = _resolve_creative_media_url(url)
-            if path is None or not path.is_file():
-                raise CreativeStudioError(
-                    "MEDIA_MISSING",
-                    "A generated media file is missing. Regenerate the missing scene or voice after persistent media storage is enabled.",
-                    http_status=422,
-                )
-            return path
-
-        clip_paths = [local_media(video_by_scene[idx].url or "") for idx in expected]
-        audio_path = local_media(audio.url or "")
         logo_path = backend_root / "static" / "branding" / "amicor-logo-full.png"
         if not logo_path.is_file():
-            raise CreativeStudioError("LOGO_MISSING", "Official AMICOR logo asset is unavailable.", http_status=500)
-
-        try:
-            import imageio_ffmpeg
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception as exc:
-            raise CreativeStudioError("FFMPEG_UNAVAILABLE", "Final promo media engine is unavailable.", http_status=500) from exc
+            raise CreativeStudioError("LOGO_MISSING", "Official AMICOR logo asset is unavailable.", http_status=422)
 
         output_dir, public_prefix = _creative_media_root_and_prefix()
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[1]}.mp4"
-
+        output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[-1]}.mp4"
         job = self._start_job(owner_id, project_id, "short_video_assembly")
+
         try:
-            with tempfile.TemporaryDirectory(prefix="nova-promo-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="nova-final-") as temp_dir:
                 temp_root = Path(temp_dir)
+                segment_paths: list[Path] = []
+
+                # Render each scene image into the same normalized H.264 format.
+                for offset, image_path in enumerate(image_paths):
+                    segment_path = temp_root / f"scene-{offset + 1}.mp4"
+                    frames = scene_duration * fps
+                    vf = (
+                        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                        f"crop={width}:{height},"
+                        f"zoompan=z='1+0.035*on/{max(frames - 1, 1)}':"
+                        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                        f"d={frames}:s={width}x{height}:fps={fps},"
+                        "format=yuv420p"
+                    )
+                    segment_cmd = [
+                        ffmpeg, "-y",
+                        "-loop", "1",
+                        "-i", str(image_path),
+                        "-vf", vf,
+                        "-frames:v", str(frames),
+                        "-an",
+                        "-c:v", "libx264",
+                        "-preset", "veryfast",
+                        "-crf", "22",
+                        "-movflags", "+faststart",
+                        str(segment_path),
+                    ]
+                    segment_run = subprocess.run(segment_cmd, capture_output=True, text=True, timeout=150)
+                    if segment_run.returncode != 0 or not segment_path.is_file():
+                        detail = (segment_run.stderr or segment_run.stdout or "")[-1600:]
+                        raise RuntimeError(f"scene {offset + 1} render failed: {detail}")
+                    segment_paths.append(segment_path)
+
                 concat_file = temp_root / "clips.txt"
                 concat_file.write_text(
-                    "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in clip_paths) + "\n",
+                    "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in segment_paths) + "\n",
                     encoding="utf-8",
                 )
-                joined = temp_root / "joined.mp4"
-
+                joined_path = temp_root / "joined.mp4"
                 join_cmd = [
                     ffmpeg, "-y",
                     "-f", "concat", "-safe", "0",
                     "-i", str(concat_file),
-                    "-c", "copy",
-                    str(joined),
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "22",
+                    "-an",
+                    str(joined_path),
                 ]
-                joined_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=180)
-                if joined_run.returncode != 0:
-                    raise RuntimeError("clip join failed: " + joined_run.stderr[-1200:])
+                join_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=180)
+                if join_run.returncode != 0 or not joined_path.is_file():
+                    detail = (join_run.stderr or join_run.stdout or "")[-1600:]
+                    raise RuntimeError("scene join failed: " + detail)
 
                 final_cmd = [
                     ffmpeg, "-y",
-                    "-i", str(joined),
+                    "-i", str(joined_path),
                     "-i", str(audio_path),
+                    "-loop", "1",
                     "-i", str(logo_path),
                     "-filter_complex",
-                    "[2:v]scale=180:-1[logo];[0:v][logo]overlay=24:24[v]",
+                    "[2:v]scale=170:-1[logo];[0:v][logo]overlay=24:24:format=auto[v]",
                     "-map", "[v]",
                     "-map", "1:a:0",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
-                    "-crf", "20",
+                    "-crf", "21",
                     "-c:a", "aac",
                     "-b:a", "160k",
                     "-movflags", "+faststart",
@@ -1033,10 +981,15 @@ class CreativeStudioService:
                 ]
                 final_run = subprocess.run(final_cmd, capture_output=True, text=True, timeout=240)
                 if final_run.returncode != 0 or not output_path.is_file():
-                    raise RuntimeError("final mux failed: " + final_run.stderr[-1200:])
+                    detail = (final_run.stderr or final_run.stdout or "")[-1800:]
+                    raise RuntimeError("final render failed: " + detail)
         except Exception as exc:
-            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg")
-            raise CreativeStudioError("FINAL_ASSEMBLY_FAILED", "Nova could not assemble the final promo video.", http_status=500) from exc
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_direct")
+            raise CreativeStudioError(
+                "FINAL_ASSEMBLY_FAILED",
+                f"Nova final promo render failed: {str(exc)[-900:]}",
+                http_status=422,
+            ) from exc
 
         public_url = public_prefix + "/" + output_path.name
         asset = self._save_text_asset(
@@ -1044,11 +997,12 @@ class CreativeStudioService:
             project_id=project_id,
             kind="video",
             title="Final AMICOR Nova promo",
-            content="Final assembled promo from storyboard scene clips with full voice narration and AMICOR logo overlay.",
+            content="Final promo rendered directly from storyboard scene artwork with Nova voice narration and official AMICOR branding.",
             status="GENERATED",
             metadata={
                 "final_promo": True,
-                "scene_indexes": expected,
+                "render_mode": "direct_scene_image_render",
+                "scene_count": len(scenes),
                 "voice_asset_id": audio.id,
                 "brand_overlay": "official_amicor_logo",
             },
@@ -1057,9 +1011,9 @@ class CreativeStudioService:
         self._finish_job(
             job,
             status="GENERATED",
-            message="Final AMICOR Nova promo assembled successfully.",
+            message="Final AMICOR Nova promo rendered successfully.",
             asset_ids=[asset.id],
-            provider="nova_ffmpeg",
+            provider="nova_ffmpeg_direct",
         )
         return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 

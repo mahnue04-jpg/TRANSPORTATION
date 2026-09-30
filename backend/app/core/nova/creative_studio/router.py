@@ -340,6 +340,14 @@ def assemble_final_promo(
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "FINAL_PROMO_FAILED",
+                "message": f"Nova final promo failed safely: {type(exc).__name__}: {exc}",
+            },
+        ) from exc
 
 
 @router.post("/projects/{project_id}/export")
