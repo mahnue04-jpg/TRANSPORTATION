@@ -548,28 +548,6 @@
       });
     });
   }
-  var buildFinal = $("build-final-promo");
-  if (buildFinal) {
-    buildFinal.addEventListener("click", async function () {
-      if (!activeProjectId) {
-        showBanner("Select the promo project first.", false);
-        return;
-      }
-      buildFinal.disabled = true;
-      showBanner("Working: combining AI scenes, Nova voice, and AMICOR branding...", true);
-      try {
-        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
-        var result = await buildFinalPromo(detail);
-        showFinalPromoDownload(result);
-        showBanner("Final branded promo created. Use Download final promo below.", true);
-      } catch (err) {
-        showBanner(err.message || "Final promo assembly failed.", false);
-      } finally {
-        buildFinal.disabled = false;
-      }
-    });
-  }
-
   var clearFailed = $("clear-failed-video-assets");
   if (clearFailed) {
     clearFailed.addEventListener("click", async function () {
@@ -606,8 +584,12 @@
           method: "POST"
         });
         renderOutput(result);
-        showBanner("Final AMICOR Nova promo created. Use Download AI video in the Asset list.", true);
+        showBanner("Final AMICOR Nova promo created. Scrolling to the finished video now.", true);
         await refreshAssets();
+        var assetList = $("asset-list");
+        if (assetList && assetList.scrollIntoView) {
+          assetList.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
       } catch (err) {
         showBanner(err.message || "Final promo assembly failed.", false);
       } finally {
