@@ -304,6 +304,14 @@ def generate_video(
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "VIDEO_GENERATION_FAILED",
+                "message": f"Nova video generation failed safely: {type(exc).__name__}: {exc}",
+            },
+        ) from exc
 
 
 @router.post("/projects/{project_id}/generate/voice")
