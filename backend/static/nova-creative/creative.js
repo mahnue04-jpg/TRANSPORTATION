@@ -349,6 +349,69 @@
     });
   }
 
+  var finalPromoButton = $("build-final-promo");
+  if (finalPromoButton) {
+    finalPromoButton.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the project you want to assemble first.", false);
+        return;
+      }
+      finalPromoButton.disabled = true;
+      showBanner("Working: checking scene clips and voice for final promo...", true);
+      try {
+        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+        var videos = (detail.assets || []).filter(function (row) {
+          return row.kind === "video" && row.status === "GENERATED" && row.url;
+        }).sort(function (a, b) {
+          var ai = Number((a.metadata || {}).scene_index || 999);
+          var bi = Number((b.metadata || {}).scene_index || 999);
+          return ai - bi;
+        });
+        var audios = (detail.assets || []).filter(function (row) {
+          return row.kind === "audio" && row.status === "GENERATED" && row.url;
+        });
+        var sceneCount = (detail.scenes || []).length;
+        if (!sceneCount) throw new Error("Generate the storyboard first.");
+        if (videos.length < sceneCount) {
+          throw new Error("Generate all storyboard scene videos first. " + videos.length + " of " + sceneCount + " are ready.");
+        }
+        if (!audios.length) {
+          throw new Error("Generate the voice narration before building the final promo.");
+        }
+
+        var old = document.getElementById("final-promo-manifest");
+        if (old) old.remove();
+        var wrap = document.createElement("div");
+        wrap.id = "final-promo-manifest";
+        wrap.className = "item";
+        var title = document.createElement("strong");
+        title.textContent = "Final promo package ready";
+        var note = document.createElement("div");
+        note.className = "muted";
+        note.textContent = sceneCount + " scene clips + voice narration are ready for final assembly.";
+        wrap.appendChild(title);
+        wrap.appendChild(note);
+
+        videos.forEach(function (row, index) {
+          var line = document.createElement("div");
+          line.textContent = "Scene " + (index + 1) + ": " + (row.title || "AI motion clip");
+          wrap.appendChild(line);
+        });
+
+        var voiceLine = document.createElement("div");
+        voiceLine.textContent = "Voice: " + (audios[audios.length - 1].title || "Voice narration");
+        wrap.appendChild(voiceLine);
+
+        $("asset-list").prepend(wrap);
+        showBanner("All scene clips and voice are ready. Final server-side mux/export is the next step.", true);
+      } catch (err) {
+        showBanner(err.message || "Final promo assembly check failed.", false);
+      } finally {
+        finalPromoButton.disabled = false;
+      }
+    });
+  }
+
   async function boot() {
     if (!token()) {
       setSignedIn(false);
@@ -486,7 +549,7 @@
         storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
         "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
         image: { working: "Working: Generating image...", ok: "Image generated and added to this project." },
-        video: { working: "Working: generating AI video. This may take up to 90 seconds...", ok: "AI video generation finished." },
+        video: { working: "Working: generating the next storyboard scene as a real AI motion clip. This may take up to 90 seconds...", ok: "Scene video generation finished." },
         voice: { working: "Working: generating voice narration...", ok: "Voice narration generated." },
         export: { working: "Working: Export Project Package...", ok: "Project package exported." }
       };
@@ -525,7 +588,9 @@
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
         if (providerStatus === "PROCESSING") {
-          showBanner(providerMessage || "Video is still processing. Click Generate AI Video again shortly.", true);
+          showBanner(providerMessage || "This storyboard scene is still processing. Click Generate Real AI Video again shortly.", true);
+        } else if (body && body.provider && body.provider.all_scenes_generated) {
+          showBanner("All storyboard scenes now have AI motion clips. Next step: build the final promo.", true);
         } else if ((action === "video" || action === "voice" || action === "image") &&
             providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
           showBanner(providerMessage || (action + " generation failed."), false);
