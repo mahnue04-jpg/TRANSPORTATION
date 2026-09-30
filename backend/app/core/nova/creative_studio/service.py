@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Any
 
 from app.core.nova.creative_studio.export import export_project_package
@@ -619,6 +621,144 @@ class CreativeStudioService:
         )
         self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=voice_provider().provider_id)
         return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
+
+    def assemble_final_promo(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        if not scenes:
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+
+        assets = self.store.list_assets(project_id, owner_id)
+        video_by_scene: dict[int, CreativeAsset] = {}
+        for asset in assets:
+            if asset.kind != "video" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
+                continue
+            idx = (asset.metadata or {}).get("scene_index")
+            if idx is None:
+                provider_result = (asset.metadata or {}).get("provider_result") or {}
+                idx = ((provider_result.get("brief") or {}).get("scene_index"))
+            try:
+                scene_idx = int(idx)
+            except (TypeError, ValueError):
+                continue
+            video_by_scene[scene_idx] = asset
+
+        expected = [int(scene.index) for scene in scenes]
+        missing = [idx for idx in expected if idx not in video_by_scene]
+        if missing:
+            raise CreativeStudioError(
+                "SCENES_INCOMPLETE",
+                "Generate all storyboard scene videos first. Missing scene(s): " + ", ".join(str(x) for x in missing),
+                http_status=422,
+            )
+
+        audio = None
+        for asset in reversed(assets):
+            if asset.kind == "audio" and str(asset.status or "").upper() == "GENERATED" and asset.url:
+                audio = asset
+                break
+        if audio is None:
+            raise CreativeStudioError("VOICE_REQUIRED", "Generate the voice narration first.", http_status=422)
+
+        backend_root = Path(__file__).resolve().parents[4]
+
+        def local_media(url: str) -> Path:
+            raw = str(url or "").strip()
+            if not raw.startswith("/static/"):
+                raise CreativeStudioError("MEDIA_NOT_LOCAL", "Final assembly requires locally saved Creative Studio media.", http_status=422)
+            path = backend_root / raw.lstrip("/")
+            if not path.is_file():
+                raise CreativeStudioError("MEDIA_MISSING", "A generated media file is no longer present after a server restart. Regenerate the missing scene or voice.", http_status=422)
+            return path
+
+        clip_paths = [local_media(video_by_scene[idx].url or "") for idx in expected]
+        audio_path = local_media(audio.url or "")
+        logo_path = backend_root / "static" / "branding" / "amicor-logo-full.png"
+        if not logo_path.is_file():
+            raise CreativeStudioError("LOGO_MISSING", "Official AMICOR logo asset is unavailable.", http_status=500)
+
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception as exc:
+            raise CreativeStudioError("FFMPEG_UNAVAILABLE", "Final promo media engine is unavailable.", http_status=500) from exc
+
+        output_dir = backend_root / "static" / "generated" / "nova-creative"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[1]}.mp4"
+
+        job = self._start_job(owner_id, project_id, "short_video_assembly")
+        try:
+            with tempfile.TemporaryDirectory(prefix="nova-promo-") as temp_dir:
+                temp_root = Path(temp_dir)
+                concat_file = temp_root / "clips.txt"
+                concat_file.write_text(
+                    "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in clip_paths) + "\n",
+                    encoding="utf-8",
+                )
+                joined = temp_root / "joined.mp4"
+
+                join_cmd = [
+                    ffmpeg, "-y",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(concat_file),
+                    "-c", "copy",
+                    str(joined),
+                ]
+                joined_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=180)
+                if joined_run.returncode != 0:
+                    raise RuntimeError("clip join failed: " + joined_run.stderr[-1200:])
+
+                final_cmd = [
+                    ffmpeg, "-y",
+                    "-i", str(joined),
+                    "-i", str(audio_path),
+                    "-i", str(logo_path),
+                    "-filter_complex",
+                    "[2:v]scale=180:-1[logo];[0:v][logo]overlay=24:24[v]",
+                    "-map", "[v]",
+                    "-map", "1:a:0",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-b:a", "160k",
+                    "-movflags", "+faststart",
+                    "-shortest",
+                    str(output_path),
+                ]
+                final_run = subprocess.run(final_cmd, capture_output=True, text=True, timeout=240)
+                if final_run.returncode != 0 or not output_path.is_file():
+                    raise RuntimeError("final mux failed: " + final_run.stderr[-1200:])
+        except Exception as exc:
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg")
+            raise CreativeStudioError("FINAL_ASSEMBLY_FAILED", "Nova could not assemble the final promo video.", http_status=500) from exc
+
+        public_url = "/static/generated/nova-creative/" + output_path.name
+        asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="video",
+            title="Final AMICOR Nova promo",
+            content="Final assembled promo from storyboard scene clips with full voice narration and AMICOR logo overlay.",
+            status="GENERATED",
+            metadata={
+                "final_promo": True,
+                "scene_indexes": expected,
+                "voice_asset_id": audio.id,
+                "brand_overlay": "official_amicor_logo",
+            },
+            url=public_url,
+        )
+        self._finish_job(
+            job,
+            status="GENERATED",
+            message="Final AMICOR Nova promo assembled successfully.",
+            asset_ids=[asset.id],
+            provider="nova_ffmpeg",
+        )
+        return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
+
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)
