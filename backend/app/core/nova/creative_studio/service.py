@@ -438,6 +438,52 @@ class CreativeStudioService:
                 source_image_url = candidate.url
                 break
 
+        # Runway image-to-video requires a real promptImage. Older/duplicate
+        # storyboard projects may not have an image asset attached, so create
+        # one automatically instead of sending a null promptImage.
+        if not source_image_url:
+            aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
+                "tiktok", "instagram", "youtube shorts"
+            } else "16:9"
+            generated_image = self.request_image_generation(
+                owner_id,
+                project_id,
+                aspect_ratio=aspect_ratio,
+            )
+            source_image_url = str(generated_image.get("url") or "").strip() or None
+            if not source_image_url:
+                image_message = str(
+                    (generated_image.get("provider") or {}).get("message")
+                    or "A source image could not be generated for AI video."
+                )
+                asset = self._save_text_asset(
+                    owner_id=owner_id,
+                    project_id=project_id,
+                    kind="video",
+                    title="AI video generation result",
+                    content="Video generation requires a source image.",
+                    status="ERROR",
+                    metadata={"provider_result": {"status": "ERROR", "message": image_message}},
+                    url=None,
+                )
+                self._finish_job(
+                    job,
+                    status="ERROR",
+                    message=image_message,
+                    asset_ids=[asset.id],
+                    provider=video_provider().provider_id,
+                )
+                return {
+                    "job": job.as_dict(),
+                    "asset": asset.as_dict(),
+                    "provider": {
+                        "status": "ERROR",
+                        "message": image_message,
+                        "asset_generated": False,
+                    },
+                    "url": None,
+                }
+
         scenes = self.store.list_scenes(project_id, owner_id)
         scene_prompt = " ".join(
             str(scene.visual_prompt or scene.description or "").strip()
