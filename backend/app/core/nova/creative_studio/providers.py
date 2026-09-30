@@ -13,6 +13,11 @@ import urllib.request
 import uuid
 from typing import Any, Protocol
 
+try:
+    from runwayml import RunwayML
+except Exception:  # pragma: no cover - surfaced by provider status/generation path
+    RunwayML = None  # type: ignore[assignment]
+
 from app.ai import get_client
 
 from app.core.nova.creative_studio.flags import (
@@ -311,23 +316,12 @@ class RunwayVideoProvider:
 
         task_id = str(brief.get("resume_task_id") or "").strip()
         if not task_id:
-            # Gen-4.5 supports true text-to-video. Omit promptImage entirely.
-            payload = {
-                "model": model,
-                "promptText": prompt_text[:1000],
-                "ratio": ratio,
-                "duration": duration,
-            }
-            try:
-                created = self._request_json(
-                    "POST",
-                    "https://api.dev.runwayml.com/v1/image_to_video",
-                    payload=payload,
-                )
-            except RuntimeError as exc:
+            # Use Runway's official SDK for request serialization. Gen-4.5
+            # text-to-video is created by omitting prompt_image entirely.
+            if RunwayML is None:
                 return {
                     "status": ERROR,
-                    "message": str(exc),
+                    "message": "Runway Python SDK is not installed on the server.",
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
@@ -335,11 +329,35 @@ class RunwayVideoProvider:
                     "duration_seconds": duration,
                     "ratio": ratio,
                 }
-            task_id = str(created.get("id") or "").strip()
+            try:
+                client = RunwayML(api_key=self._key())
+                created = client.image_to_video.create(
+                    model=model,
+                    prompt_text=prompt_text[:1000],
+                    ratio=ratio,
+                    duration=duration,
+                )
+            except Exception as exc:
+                return {
+                    "status": ERROR,
+                    "message": f"Runway SDK error: {exc}",
+                    "brief": brief,
+                    "url": None,
+                    "asset_generated": False,
+                    "model": model,
+                    "duration_seconds": duration,
+                    "ratio": ratio,
+                }
+
+            task_id = str(
+                getattr(created, "id", None)
+                or (created.get("id") if isinstance(created, dict) else "")
+                or ""
+            ).strip()
             if not task_id:
                 return {
                     "status": ERROR,
-                    "message": "Runway did not return a video task id.",
+                    "message": "Runway SDK did not return a video task id.",
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
