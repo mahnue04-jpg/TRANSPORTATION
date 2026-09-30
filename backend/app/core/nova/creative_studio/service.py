@@ -108,9 +108,22 @@ class CreativeStudioService:
         row = self.store.get_project(project_id, owner_id)
         if row is None:
             raise CreativeStudioError("NOT_FOUND", "Project not found", http_status=404)
+
+        def asset_payload(asset: CreativeAsset) -> dict[str, Any]:
+            payload = asset.as_dict()
+            if asset.url and asset.kind in {"image", "video", "audio"}:
+                local_path = _resolve_creative_media_url(asset.url)
+                if local_path is not None:
+                    payload["media_available"] = local_path.is_file()
+                else:
+                    payload["media_available"] = str(asset.url).startswith(("http://", "https://"))
+            else:
+                payload["media_available"] = None
+            return payload
+
         return {
             "project": row.as_dict(),
-            "assets": [a.as_dict() for a in self.store.list_assets(project_id, owner_id)],
+            "assets": [asset_payload(a) for a in self.store.list_assets(project_id, owner_id)],
             "scenes": [s.as_dict() for s in self.store.list_scenes(project_id, owner_id)],
             "jobs": [j.as_dict() for j in self.store.list_jobs(project_id, owner_id)],
             "brief": (
@@ -474,6 +487,11 @@ class CreativeStudioService:
         for candidate in self.store.list_assets(project_id, owner_id):
             if candidate.kind != "video" or str(candidate.status or "").upper() != "GENERATED":
                 continue
+            if not candidate.url:
+                continue
+            candidate_path = _resolve_creative_media_url(candidate.url)
+            if candidate_path is not None and not candidate_path.is_file():
+                continue
             provider_result = (candidate.metadata or {}).get("provider_result") or {}
             brief_meta = provider_result.get("brief") or {}
             try:
@@ -635,6 +653,9 @@ class CreativeStudioService:
         for asset in assets:
             if asset.kind != "video" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
                 continue
+            local_path = _resolve_creative_media_url(asset.url)
+            if local_path is not None and not local_path.is_file():
+                continue
             idx = (asset.metadata or {}).get("scene_index")
             if idx is None:
                 provider_result = (asset.metadata or {}).get("provider_result") or {}
@@ -656,9 +677,13 @@ class CreativeStudioService:
 
         audio = None
         for asset in reversed(assets):
-            if asset.kind == "audio" and str(asset.status or "").upper() == "GENERATED" and asset.url:
-                audio = asset
-                break
+            if asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
+                continue
+            local_path = _resolve_creative_media_url(asset.url)
+            if local_path is not None and not local_path.is_file():
+                continue
+            audio = asset
+            break
         if audio is None:
             raise CreativeStudioError("VOICE_REQUIRED", "Generate the voice narration first.", http_status=422)
 
