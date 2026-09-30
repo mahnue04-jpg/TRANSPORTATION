@@ -431,6 +431,13 @@ class CreativeStudioService:
         project = self._project_or_404(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
+        assets = self.store.list_assets(project_id, owner_id)
+        source_image_url = None
+        for candidate in reversed(assets):
+            if candidate.kind == "image" and candidate.url and candidate.status == "GENERATED":
+                source_image_url = candidate.url
+                break
+
         scenes = self.store.list_scenes(project_id, owner_id)
         scene_prompt = " ".join(
             str(scene.visual_prompt or scene.description or "").strip()
@@ -452,6 +459,7 @@ class CreativeStudioService:
                 "objective": project.objective,
                 "platform": project.platform,
                 "prompt_text": prompt_text,
+                "prompt_image_url": source_image_url,
             }
         )
         status = result.get("status") or CONFIG_REQUIRED
