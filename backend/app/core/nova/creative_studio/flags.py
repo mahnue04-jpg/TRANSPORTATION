@@ -28,11 +28,29 @@ def image_provider_live_enabled() -> bool:
 
 
 def video_provider_configured() -> bool:
-    return bool(str(os.getenv("NOVA_CREATIVE_VIDEO_API_KEY") or "").strip())
+    """Runway Dev credential for real AI video generation."""
+    return bool(
+        str(
+            os.getenv("RUNWAYML_API_SECRET")
+            or os.getenv("NOVA_CREATIVE_VIDEO_API_KEY")
+            or ""
+        ).strip()
+    )
+
+
+def video_provider_live_enabled() -> bool:
+    """Credentials alone never activate cost-bearing video generation."""
+    return _env_true("NOVA_CREATIVE_VIDEO_LIVE_ENABLED")
 
 
 def voice_provider_configured() -> bool:
-    return bool(str(os.getenv("NOVA_CREATIVE_VOICE_API_KEY") or "").strip())
+    """Reuse the existing OpenAI server credential for speech generation."""
+    return bool(str(os.getenv("OPENAI_API_KEY") or "").strip())
+
+
+def voice_provider_live_enabled() -> bool:
+    """Credentials alone never activate cost-bearing voice generation."""
+    return _env_true("NOVA_CREATIVE_VOICE_LIVE_ENABLED")
 
 
 def creative_guardrails() -> dict[str, bool | str]:
@@ -44,7 +62,9 @@ def creative_guardrails() -> dict[str, bool | str]:
         "IMAGE_PROVIDER_CONFIGURED": image_provider_configured(),
         "IMAGE_PROVIDER_LIVE_ENABLED": image_provider_live_enabled(),
         "VIDEO_PROVIDER_CONFIGURED": video_provider_configured(),
+        "VIDEO_PROVIDER_LIVE_ENABLED": video_provider_live_enabled(),
         "VOICE_PROVIDER_CONFIGURED": voice_provider_configured(),
+        "VOICE_PROVIDER_LIVE_ENABLED": voice_provider_live_enabled(),
         "PLANNING_MODE_AVAILABLE": True,
         "MODE": "PLANNING_SCRIPT_STORYBOARD",
     }

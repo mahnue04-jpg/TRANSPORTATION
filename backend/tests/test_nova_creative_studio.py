@@ -816,3 +816,26 @@ def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
     assert "Create 8s branded video" in js
     assert 'video/webm' in js
     assert "-promo.webm" in js
+
+
+def test_creative_ui_exposes_live_video_and_voice_actions() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert "8. Generate AI Video" in html
+    assert "9. Generate Voice" in html
+    assert "Download AI video" in js
+    assert "Download voice" in js
+    assert "<video controls playsinline" in js
+    assert "<audio controls" in js
+
+
+def test_media_provider_owner_gates_are_explicit() -> None:
+    flags = (CREATIVE_PY / "flags.py").read_text(encoding="utf-8")
+    providers = (CREATIVE_PY / "providers.py").read_text(encoding="utf-8")
+    assert "NOVA_CREATIVE_VIDEO_LIVE_ENABLED" in flags
+    assert "NOVA_CREATIVE_VOICE_LIVE_ENABLED" in flags
+    assert "RUNWAYML_API_SECRET" in flags
+    assert "class RunwayVideoProvider" in providers
+    assert "class OpenAIVoiceProvider" in providers
+    assert "api.dev.runwayml.com/v1/image_to_video" in providers
+    assert "audio.speech.create" in providers
