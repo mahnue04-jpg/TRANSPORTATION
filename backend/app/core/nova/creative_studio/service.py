@@ -102,13 +102,14 @@ class CreativeStudioService:
                 "format=yuv420p"
             )
             cmd = [
-                ffmpeg, "-y",
+                ffmpeg, "-y", "-threads", "1", "-filter_threads", "1",
                 "-loop", "1",
                 "-i", str(source_path),
                 "-vf", filter_expr,
                 "-frames:v", str(frames),
                 "-an",
                 "-c:v", "libx264",
+                "-threads", "1",
                 "-preset", "veryfast",
                 "-crf", "23",
                 "-movflags", "+faststart",
@@ -570,10 +571,11 @@ class CreativeStudioService:
             "preserved": ["script", "voiceover", "subtitle", "caption", "hashtags", "storyboard"],
         }
 
-    def request_video_generation(self, owner_id: str, project_id: str) -> dict[str, Any]:
+    def request_video_generation(self, owner_id: str, project_id: str, *, job: GenerationJob | None = None) -> dict[str, Any]:
+        background = job is not None
         project = self._project_or_404(owner_id, project_id)
         self.store.delete_failed_video_assets(project_id, owner_id)
-        job = self._start_job(owner_id, project_id, "video")
+        job = job or self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
         scenes = self.store.list_scenes(project_id, owner_id)
 
@@ -584,8 +586,21 @@ class CreativeStudioService:
                 http_status=422,
             )
 
+        provider_state = video_provider().status()
+        if provider_state.status != "AVAILABLE":
+            result = {"status": provider_state.status, "message": provider_state.message, "url": None, "asset_generated": False}
+            asset = self._save_text_asset(
+                owner_id=owner_id, project_id=project_id, kind="video",
+                title="Scene video provider unavailable", content="",
+                status="PROVIDER_CONFIG_REQUIRED" if provider_state.status == CONFIG_REQUIRED else provider_state.status,
+                metadata={"provider_result": result}, url=None,
+            )
+            self._finish_job(job, status=provider_state.status, message=provider_state.message, asset_ids=[asset.id])
+            return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
+
         # Resume an unfinished Runway task before advancing to the next scene.
         resume_task_id = None
+        resume_asset = None
         scene_index = None
         for candidate in reversed(self.store.list_assets(project_id, owner_id)):
             if candidate.kind != "video":
@@ -596,6 +611,7 @@ class CreativeStudioService:
                 and provider_result.get("task_id")
             ):
                 resume_task_id = str(provider_result["task_id"])
+                resume_asset = candidate
                 brief_meta = provider_result.get("brief") or {}
                 try:
                     scene_index = int(brief_meta.get("scene_index"))
@@ -660,11 +676,15 @@ class CreativeStudioService:
             aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
                 "tiktok", "instagram", "youtube shorts"
             } else "16:9"
-            image_result = self.request_image_generation(
-                owner_id,
-                project_id,
-                aspect_ratio=aspect_ratio,
-                prompt=prompt_text,
+            # Reuse valid source artwork on retries; don't pay for the same image
+            # again after a downstream timeout or provider failure.
+            reusable = next((asset for asset in reversed(self.store.list_assets(project_id, owner_id))
+                if asset.kind == "image" and asset.status == "GENERATED"
+                and asset.content == prompt_text and asset.url
+                and (_resolve_creative_media_url(asset.url) is not None
+                     and _resolve_creative_media_url(asset.url).is_file())), None)
+            image_result = {"url": reusable.url} if reusable else self.request_image_generation(
+                owner_id, project_id, aspect_ratio=aspect_ratio, prompt=prompt_text,
             )
             source_image_url = str(image_result.get("url") or "").strip() or None
             if not source_image_url:
@@ -748,23 +768,28 @@ class CreativeStudioService:
 
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
-        asset = self._save_text_asset(
-            owner_id=owner_id,
-            project_id=project_id,
-            kind="video",
-            title=f"Scene {scene_index} AI motion result",
-            content=prompt_text,
-            status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={
-                "provider_result": {k: v for k, v in result.items() if k != "url"},
-                "scene_index": scene_index,
-                "scene_heading": scene.heading,
-            },
-            url=generated_url,
-        )
+        metadata = {
+            "provider_result": {k: v for k, v in result.items() if k != "url"},
+            "scene_index": scene_index,
+            "scene_heading": scene.heading,
+        }
+        if resume_asset is not None:
+            # Replace the pending marker so a completed task cannot be resumed
+            # forever and polling doesn't create duplicate video rows.
+            resume_asset.status = "PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status
+            resume_asset.metadata = metadata
+            resume_asset.url = generated_url
+            asset = self.store.save_asset(resume_asset)
+        else:
+            asset = self._save_text_asset(
+                owner_id=owner_id, project_id=project_id, kind="video",
+                title=f"Scene {scene_index} AI motion result", content=prompt_text,
+                status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
+                metadata=metadata, url=generated_url,
+            )
         self._finish_job(
             job,
-            status=status,
+            status="RUNNING" if background and status == "PROCESSING" else status,
             message=str(result.get("message") or status),
             asset_ids=[asset.id],
             provider=str(result.get("provider") or video_provider().provider_id),
@@ -929,7 +954,7 @@ class CreativeStudioService:
                         f"fps={fps},format=yuv420p"
                     )
                     segment_cmd = [
-                        ffmpeg, "-y",
+                        ffmpeg, "-y", "-threads", "1", "-filter_threads", "1",
                         "-loop", "1",
                         "-framerate", str(fps),
                         "-i", str(image_path),
@@ -937,6 +962,7 @@ class CreativeStudioService:
                         "-vf", vf,
                         "-an",
                         "-c:v", "libx264",
+                        "-threads", "1",
                         "-preset", "veryfast",
                         "-crf", "22",
                         "-pix_fmt", "yuv420p",
@@ -968,7 +994,7 @@ class CreativeStudioService:
                     raise RuntimeError("scene join failed: " + detail)
 
                 final_cmd = [
-                    ffmpeg, "-y",
+                    ffmpeg, "-y", "-threads", "1", "-filter_complex_threads", "1",
                     "-i", str(joined_path),
                     "-i", str(audio_path),
                     "-i", str(logo_path),
@@ -977,6 +1003,7 @@ class CreativeStudioService:
                     "-map", "[v]",
                     "-map", "1:a:0",
                     "-c:v", "libx264",
+                    "-threads", "1",
                     "-preset", "veryfast",
                     "-crf", "21",
                     "-pix_fmt", "yuv420p",

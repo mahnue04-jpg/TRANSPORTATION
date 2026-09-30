@@ -601,6 +601,31 @@
     });
   }
 
+  async function waitForScene(projectId, jobId) {
+    for (var attempt = 0; attempt < 240; attempt += 1) {
+      await new Promise(function (resolve) { setTimeout(resolve, 5000); });
+      var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+      var job = (detail.jobs || []).find(function (row) { return row.id === jobId; });
+      if (!job) throw new Error("Scene job could not be found. Refresh the project to check its status.");
+      if (job.status === "QUEUED" || job.status === "RUNNING") {
+        if (activeProjectId === projectId) {
+          showBanner("Nova is generating the scene in the background... " + String((attempt + 1) * 5) + "s", true);
+          if (attempt % 2 === 0) await refreshAssets();
+        }
+        continue;
+      }
+      var asset = (detail.assets || []).find(function (row) {
+        return (job.result_asset_ids || []).indexOf(row.id) !== -1;
+      });
+      var provider = asset && asset.metadata && asset.metadata.provider_result;
+      if (job.status === "ERROR" || job.status === "FAILED") {
+        throw new Error(job.message || "Scene generation failed. Retry to resume the saved task.");
+      }
+      return { job: job, asset: asset, provider: provider || { status: job.status, message: job.message }, url: asset && asset.url };
+    }
+    throw new Error("Scene is still running. Refresh or click Generate Next AI Scene to reconnect to this job.");
+  }
+
   async function waitForFinalPromo(projectId, queuedAt) {
     var startedMs = Date.parse(queuedAt || "") || Date.now();
     var attempts = 0;
@@ -802,7 +827,7 @@
         storyboard: { working: "Working: Generate Storyboard...", ok: "Storyboard generated." },
         "image-prompt": { working: "Working: Generate Image Prompt...", ok: "Image prompt generated." },
         image: { working: "Working: Generating image...", ok: "Image generated and added to this project." },
-        video: { working: "Working: generating the next storyboard scene as a real AI motion clip. This may take up to 90 seconds...", ok: "Scene video generation finished." },
+        video: { working: "Starting the next scene in the background. Progress will update automatically...", ok: "Scene video generation finished." },
         voice: { working: "Working: generating voice narration...", ok: "Voice narration generated." },
         export: { working: "Working: Export Project Package...", ok: "Project package exported." }
       };
@@ -836,7 +861,9 @@
         var options = { method: "POST" };
         if (requestBody) options.body = JSON.stringify(requestBody);
         var body = await api(path, options);
-        if (selectedProjectId) activeProjectId = selectedProjectId;
+        if (action === "video" && body.status === "PROCESSING" && body.job) {
+          body = await waitForScene(selectedProjectId, body.job.id);
+        }
         renderOutput(body);
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
@@ -852,7 +879,6 @@
         }
         await refreshAssets();
         await refreshProjects();
-        if (selectedProjectId) activeProjectId = selectedProjectId;
       } catch (err) {
         showBanner(err.message || ("Action failed: " + action), false);
       } finally {
