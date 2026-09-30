@@ -685,19 +685,28 @@ class CreativeStudioService:
                 self._finish_job(job, status="ERROR", message=message, asset_ids=[asset.id], provider=video_provider().provider_id)
                 return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
 
-        result = video_provider().generate(
-            brief={
-                "project_id": project_id,
-                "title": project.title,
-                "objective": project.objective,
-                "platform": project.platform,
-                "prompt_text": prompt_text,
-                "prompt_image_url": source_image_url,
-                "resume_task_id": resume_task_id,
-                "scene_index": scene_index,
-                "scene_heading": scene.heading,
+        try:
+            result = video_provider().generate(
+                brief={
+                    "project_id": project_id,
+                    "title": project.title,
+                    "objective": project.objective,
+                    "platform": project.platform,
+                    "prompt_text": prompt_text,
+                    "prompt_image_url": source_image_url,
+                    "resume_task_id": resume_task_id,
+                    "scene_index": scene_index,
+                    "scene_heading": scene.heading,
+                }
+            )
+        except Exception as exc:
+            result = {
+                "status": "ERROR",
+                "message": f"Video provider failed safely: {type(exc).__name__}: {exc}",
+                "url": None,
+                "asset_generated": False,
+                "provider": "runway_video",
             }
-        )
 
         runway_message = str(result.get("message") or "")
         credit_exhausted = (
@@ -709,25 +718,33 @@ class CreativeStudioService:
             )
         )
         if credit_exhausted and source_image_url and not resume_task_id:
-            fallback = self._build_local_scene_motion(
-                source_image_url=source_image_url,
-                platform=project.platform,
-                duration_seconds=5,
-            )
-            if str(fallback.get("status") or "").upper() == "GENERATED":
-                fallback["brief"] = {
-                    "project_id": project_id,
-                    "title": project.title,
-                    "objective": project.objective,
-                    "platform": project.platform,
-                    "prompt_text": prompt_text,
-                    "prompt_image_url": source_image_url,
-                    "resume_task_id": None,
-                    "scene_index": scene_index,
-                    "scene_heading": scene.heading,
+            try:
+                fallback = self._build_local_scene_motion(
+                    source_image_url=source_image_url,
+                    platform=project.platform,
+                    duration_seconds=5,
+                )
+            except Exception as exc:
+                fallback = {
+                    "status": "ERROR",
+                    "message": f"Nova local motion fallback failed safely: {type(exc).__name__}: {exc}",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": "nova_ffmpeg_fallback",
                 }
-                fallback["runway_error"] = runway_message
-                result = fallback
+            fallback["brief"] = {
+                "project_id": project_id,
+                "title": project.title,
+                "objective": project.objective,
+                "platform": project.platform,
+                "prompt_text": prompt_text,
+                "prompt_image_url": source_image_url,
+                "resume_task_id": None,
+                "scene_index": scene_index,
+                "scene_heading": scene.heading,
+            }
+            fallback["runway_error"] = runway_message
+            result = fallback
 
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
