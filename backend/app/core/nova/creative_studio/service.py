@@ -862,45 +862,74 @@ class CreativeStudioService:
         scene_duration = 5
 
         all_assets = self.store.list_assets(project_id, owner_id)
-        image_paths: list[Path] = []
+
+        # Prefer the already-generated scene motion clips for final assembly.
+        # Re-rendering every storyboard still is unnecessary work on the 512 MiB
+        # web service and was the operation blocked by the memory guard.
+        scene_clip_paths: list[Path] = []
         for scene in scenes:
-            prompt_text = str(scene.visual_prompt or scene.description or "").strip()
-            if not prompt_text:
-                prompt_text = " ".join(
-                    part for part in [project.title, project.objective, project.tone] if part
-                ).strip()
-
-            image_path: Path | None = None
+            scene_clip: Path | None = None
             for candidate in reversed(all_assets):
-                if (
-                    candidate.kind == "image"
-                    and str(candidate.status or "").upper() == "GENERATED"
-                    and candidate.url
-                    and str(candidate.content or "").strip() == prompt_text
-                ):
-                    candidate_path = _resolve_creative_media_url(candidate.url)
-                    if candidate_path is not None and candidate_path.is_file():
-                        image_path = candidate_path
-                        break
+                if candidate.kind != "video" or str(candidate.status or "").upper() != "GENERATED" or not candidate.url:
+                    continue
+                metadata = candidate.metadata or {}
+                provider_result = metadata.get("provider_result") or {}
+                brief_meta = provider_result.get("brief") or {}
+                try:
+                    candidate_scene_index = int(metadata.get("scene_index") or brief_meta.get("scene_index"))
+                except (TypeError, ValueError):
+                    continue
+                if candidate_scene_index != int(scene.index):
+                    continue
+                candidate_path = _resolve_creative_media_url(candidate.url)
+                if candidate_path is not None and candidate_path.is_file():
+                    scene_clip = candidate_path
+                    break
+            if scene_clip is None:
+                scene_clip_paths = []
+                break
+            scene_clip_paths.append(scene_clip)
 
-            if image_path is None:
-                image_result = self.request_image_generation(
-                    owner_id,
-                    project_id,
-                    aspect_ratio="9:16" if vertical else "16:9",
-                    prompt=prompt_text,
-                )
-                image_url = str(image_result.get("url") or "").strip()
-                image_path = _resolve_creative_media_url(image_url)
-                if not image_url or image_path is None or not image_path.is_file():
-                    raise CreativeStudioError(
-                        "SCENE_IMAGE_FAILED",
-                        f"Nova could not create usable artwork for scene {scene.index}.",
-                        http_status=422,
+        image_paths: list[Path] = []
+        if not scene_clip_paths:
+            for scene in scenes:
+                prompt_text = str(scene.visual_prompt or scene.description or "").strip()
+                if not prompt_text:
+                    prompt_text = " ".join(
+                        part for part in [project.title, project.objective, project.tone] if part
+                    ).strip()
+    
+                image_path: Path | None = None
+                for candidate in reversed(all_assets):
+                    if (
+                        candidate.kind == "image"
+                        and str(candidate.status or "").upper() == "GENERATED"
+                        and candidate.url
+                        and str(candidate.content or "").strip() == prompt_text
+                    ):
+                        candidate_path = _resolve_creative_media_url(candidate.url)
+                        if candidate_path is not None and candidate_path.is_file():
+                            image_path = candidate_path
+                            break
+    
+                if image_path is None:
+                    image_result = self.request_image_generation(
+                        owner_id,
+                        project_id,
+                        aspect_ratio="9:16" if vertical else "16:9",
+                        prompt=prompt_text,
                     )
-                all_assets = self.store.list_assets(project_id, owner_id)
-            image_paths.append(image_path)
-
+                    image_url = str(image_result.get("url") or "").strip()
+                    image_path = _resolve_creative_media_url(image_url)
+                    if not image_url or image_path is None or not image_path.is_file():
+                        raise CreativeStudioError(
+                            "SCENE_IMAGE_FAILED",
+                            f"Nova could not create usable artwork for scene {scene.index}.",
+                            http_status=422,
+                        )
+                    all_assets = self.store.list_assets(project_id, owner_id)
+                image_paths.append(image_path)
+    
         all_assets = self.store.list_assets(project_id, owner_id)
         audio: CreativeAsset | None = None
         for candidate in reversed(all_assets):
@@ -935,6 +964,71 @@ class CreativeStudioService:
         audio_path = _resolve_creative_media_url(audio.url)
         if audio_path is None or not audio_path.is_file():
             raise CreativeStudioError("MEDIA_MISSING", "Generated voice media is unavailable.", http_status=422)
+
+        if scene_clip_paths and len(scene_clip_paths) == len(scenes):
+            output_dir, public_prefix = _creative_media_root_and_prefix()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[-1]}.mp4"
+            job = self._start_job(owner_id, project_id, "short_video_assembly")
+            try:
+                with tempfile.TemporaryDirectory(prefix="nova-final-copy-") as temp_dir:
+                    temp_root = Path(temp_dir)
+                    concat_file = temp_root / "clips.txt"
+                    concat_file.write_text(
+                        "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in scene_clip_paths) + "\n",
+                        encoding="utf-8",
+                    )
+                    joined_path = temp_root / "joined.mp4"
+                    join_cmd = [
+                        ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                        "-i", str(concat_file), "-c", "copy", str(joined_path),
+                    ]
+                    join_run = run_encoder(join_cmd, timeout=90, required_headroom=96 * 1024 * 1024)
+                    if join_run.returncode != 0 or not joined_path.is_file() or joined_path.stat().st_size < 1024:
+                        detail = (join_run.stderr or join_run.stdout or "")[-1800:]
+                        raise RuntimeError("low-memory scene join failed: " + detail)
+
+                    mux_cmd = [
+                        ffmpeg, "-y", "-i", str(joined_path), "-i", str(audio_path),
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+                        "-movflags", "+faststart", "-shortest", str(output_path),
+                    ]
+                    mux_run = run_encoder(mux_cmd, timeout=120, required_headroom=96 * 1024 * 1024)
+                    if mux_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
+                        detail = (mux_run.stderr or mux_run.stdout or "")[-1800:]
+                        raise RuntimeError("low-memory audio mux failed: " + detail)
+            except Exception as exc:
+                self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_copy")
+                raise CreativeStudioError(
+                    "FINAL_ASSEMBLY_FAILED",
+                    f"Nova low-memory final promo assembly failed: {str(exc)[-1200:]}",
+                    http_status=422,
+                ) from exc
+
+            public_url = public_prefix + "/" + output_path.name
+            asset = self._save_text_asset(
+                owner_id=owner_id,
+                project_id=project_id,
+                kind="video",
+                title="Final AMICOR Nova promo",
+                content="Final promo assembled from existing generated scene clips with Nova voice narration.",
+                status="GENERATED",
+                metadata={
+                    "final_promo": True,
+                    "render_mode": "scene_clip_concat_copy",
+                    "scene_count": len(scenes),
+                    "voice_asset_id": audio.id,
+                    "brand_overlay": "preserved_from_scene_assets",
+                },
+                url=public_url,
+            )
+            self._finish_job(
+                job, status="GENERATED",
+                message="Final AMICOR Nova promo assembled in low-memory mode.",
+                asset_ids=[asset.id], provider="nova_ffmpeg_copy",
+            )
+            return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 
         logo_path = backend_root / "static" / "branding" / "amicor-logo-full.png"
         if not logo_path.is_file():
