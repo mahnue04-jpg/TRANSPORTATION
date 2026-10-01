@@ -835,6 +835,61 @@
       showBanner(err.message, false);
     }
   });
+  function presenterPayload() {
+    return {
+      script: ($("presenter-script").value || "").trim(),
+      presenter_style: "warm professional small-business presenter"
+    };
+  }
+
+  async function runPresenterAction(kind, button) {
+    if (!activeProjectId) {
+      showBanner("Create or select a project first.", false);
+      return;
+    }
+    var payload = presenterPayload();
+    if (!payload.script) {
+      showBanner("Enter the presenter script first.", false);
+      return;
+    }
+    var endpoint = kind === "save" ? "presenter/script" :
+      (kind === "voice" ? "presenter/voice" : "presenter/preview");
+    var messages = {
+      save: ["Saving presenter script...", "Presenter script saved."],
+      voice: ["Generating the presenter voice from this exact script...", "Presenter voice generated."],
+      preview: ["Preparing talking presenter preview...", "Talking presenter preview prepared."]
+    };
+    button.disabled = true;
+    showBanner(messages[kind][0], true);
+    try {
+      var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/" + endpoint, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderOutput(body);
+      var status = body && (body.status || (body.provider && body.provider.status));
+      if (status === "CONFIG_REQUIRED") {
+        showBanner(body.message || "Talking presenter provider must be connected before lip-synced preview generation.", false);
+      } else {
+        showBanner(body.message || messages[kind][1], true);
+      }
+      await refreshAssets();
+    } catch (err) {
+      showBanner(err.message || "Presenter action failed.", false);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  ["save-presenter-script", "generate-presenter-voice", "preview-talking-presenter"].forEach(function (id) {
+    var button = $(id);
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var kind = id === "save-presenter-script" ? "save" : (id === "generate-presenter-voice" ? "voice" : "preview");
+      runPresenterAction(kind, button);
+    });
+  });
+
   document.querySelectorAll("[data-action]").forEach(function (button) {
     button.addEventListener("click", async function () {
       if (!activeProjectId) {
