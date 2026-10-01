@@ -419,7 +419,9 @@
     try {
       res = await fetch(path, Object.assign({}, options, { headers: headers }));
     } catch (err) {
-      throw new Error("Network error. Check your connection and try again.");
+      var networkError = new Error("Network error. Check your connection and try again.");
+      networkError.retryable = true;
+      throw networkError;
     }
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
@@ -427,7 +429,12 @@
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
     if (res.status === 422) throw new Error(detailText(body, "Validation failed. (422)"));
-    if (res.status >= 500) throw new Error(detailText(body, "Temporary system error. (" + res.status + ")"));
+    if (res.status >= 500) {
+      var serviceError = new Error(detailText(body, "Temporary system error. (" + res.status + ")"));
+      serviceError.status = res.status;
+      serviceError.retryable = true;
+      throw serviceError;
+    }
     if (!res.ok) {
       throw new Error(detailText(body, "Request failed. (" + res.status + ")"));
     }
@@ -602,15 +609,29 @@
   }
 
   async function waitForScene(projectId, jobId) {
+    var consecutiveFailures = 0;
     for (var attempt = 0; attempt < 240; attempt += 1) {
       await new Promise(function (resolve) { setTimeout(resolve, 5000); });
-      var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+      var detail;
+      try {
+        detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+        consecutiveFailures = 0;
+      } catch (err) {
+        if (!err.retryable) throw err;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 12) {
+          throw new Error("Could not reconnect to scene job " + jobId + ". Its result is unknown; refresh or click Generate Next AI Scene to check the saved job. Last status check: " + err.message);
+        }
+        if (activeProjectId === projectId) {
+          showBanner("Scene status temporarily unavailable. Reconnecting to saved job " + jobId + "...", true);
+        }
+        continue;
+      }
       var job = (detail.jobs || []).find(function (row) { return row.id === jobId; });
       if (!job) throw new Error("Scene job could not be found. Refresh the project to check its status.");
       if (job.status === "QUEUED" || job.status === "RUNNING") {
         if (activeProjectId === projectId) {
           showBanner("Nova is generating the scene in the background... " + String((attempt + 1) * 5) + "s", true);
-          if (attempt % 2 === 0) await refreshAssets();
         }
         continue;
       }
