@@ -17,7 +17,7 @@ Core context also converted Health ISF readiness into a fixed 48/61/72 percent b
 
 ## Verification
 
-41 focused backend tests passed: new routing/evidence tests, existing Core/Workspace/Business tests, and three existing Today discovery/error regressions. Two Node tests exercise both Ask Nova handlers and confirm trust labels, clickable source/review links, and rejection of script URLs. JavaScript syntax and whitespace checks pass. New regressions are included in backend diagnostic CI.
+41 focused backend tests passed: new routing/evidence tests, existing Core/Workspace/Business tests, and three existing Today discovery/error regressions. Two Node tests exercise both Ask Nova handlers and confirm trust labels, clickable source/review links, and rejection of script URLs. JavaScript syntax and whitespace checks pass. New regressions are included in backend diagnostic CI. The initial CI attempt failed because its production-mode environment disabled the staff seed account used by isolation tests; the test step now explicitly enables test seed accounts, matching the existing Work & Revenue CI step. Production account policy is unchanged.
 
 Broader checks also found eight pre-existing failures: five Today relevance cases expect an LLM call although current dedicated live/memory handlers return directly; a web-search mock lacks current filter keyword arguments; two old Core freeze tests expect obsolete Home API/navigation wiring. These failures were independently reproduced on unchanged main 2cda35e, and are not counted as passing validation.
 
