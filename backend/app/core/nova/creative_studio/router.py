@@ -190,6 +190,11 @@ class ExportIn(BaseModel):
     format: str = "json"
 
 
+class PresenterIn(BaseModel):
+    script: str = Field(min_length=1, max_length=1600)
+    presenter_style: str = Field(default="warm professional small-business presenter", max_length=240)
+
+
 @router.get("/guardrails")
 def creative_guardrails_endpoint(
     user: UserContext = Depends(get_current_user_context),
@@ -436,6 +441,90 @@ def generate_voice(
     _require_owner(user)
     try:
         return get_service(db).request_voice_generation(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/presenter/script")
+def save_presenter_script(
+    project_id: str,
+    payload: PresenterIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    service = get_service(db)
+    try:
+        service._project_or_404(user.user_id, project_id)
+        asset = service._save_text_asset(
+            owner_id=user.user_id,
+            project_id=project_id,
+            kind="presenter_script",
+            title="Talking presenter script",
+            content=payload.script,
+            status="GENERATED",
+            metadata={"presenter_style": payload.presenter_style, "talking_presenter": True},
+            url=None,
+        )
+        return {"status": "GENERATED", "message": "Presenter script saved for the next demo video.", "asset": asset.as_dict()}
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/presenter/voice")
+def generate_presenter_voice(
+    project_id: str,
+    payload: PresenterIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script)
+        result["presenter_script"] = payload.script
+        return result
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/presenter/preview")
+def prepare_talking_presenter_preview(
+    project_id: str,
+    payload: PresenterIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    service = get_service(db)
+    try:
+        service._project_or_404(user.user_id, project_id)
+        service._save_text_asset(
+            owner_id=user.user_id,
+            project_id=project_id,
+            kind="presenter_script",
+            title="Talking presenter preview script",
+            content=payload.script,
+            status="GENERATED",
+            metadata={"presenter_style": payload.presenter_style, "talking_presenter": True, "preview": True},
+            url=None,
+        )
+        provider = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip()
+        if not provider:
+            return {
+                "status": "CONFIG_REQUIRED",
+                "message": "Presenter script is saved. Connect a lip-sync/talking-avatar provider before Nova generates a real talking face; Nova will not fake lip sync with a still image.",
+                "script": payload.script,
+                "presenter_style": payload.presenter_style,
+            }
+        return {
+            "status": "CONFIG_REQUIRED",
+            "message": f"Talking presenter provider '{provider}' is named but no approved adapter is configured yet.",
+            "script": payload.script,
+            "presenter_style": payload.presenter_style,
+        }
     except CreativeStudioError as exc:
         _raise(exc)
         raise
