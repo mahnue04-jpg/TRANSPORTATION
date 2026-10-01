@@ -114,6 +114,14 @@ def test_marketing_pages_still_serve():
         assert "AMICOR" in response.text
 
 
+def test_operations_agent_top_account_box_shows_signup() -> None:
+    response = client.get("/nova/anonymous-agent")
+    assert response.status_code == 200
+    assert "Create account / Start free trial" in response.text
+    assert 'href="/nova/signup"' in response.text
+    assert "Sign in to existing account" in response.text
+
+
 def test_anonymous_operations_requires_work_description():
     response = client.post("/api/marketing/leads", json={
         "lead_type": "anonymous_operations",
