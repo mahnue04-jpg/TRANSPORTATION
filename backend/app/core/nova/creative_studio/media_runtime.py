@@ -44,10 +44,16 @@ def serialized_media(fn):
     return wrapped
 
 
-def run_encoder(cmd: list[str], *, timeout: int) -> subprocess.CompletedProcess:
+def run_encoder(
+    cmd: list[str],
+    *,
+    timeout: int,
+    required_headroom: int | None = None,
+) -> subprocess.CompletedProcess:
     """Bound logs and abort the encoder while memory remains for web traffic."""
     budget = memory_budget()
-    if budget and budget[1] - budget[0] < ENCODER_HEADROOM:
+    headroom = ENCODER_HEADROOM if required_headroom is None else max(SERVER_RESERVE, int(required_headroom))
+    if budget and budget[1] - budget[0] < headroom:
         message = "Nova paused video rendering: insufficient server memory headroom. No encoder was started."
         logger.warning("CREATIVE_ENCODER_MEMORY_BLOCKED memory_budget=%s", budget)
         return subprocess.CompletedProcess(cmd, 1, "", message)
