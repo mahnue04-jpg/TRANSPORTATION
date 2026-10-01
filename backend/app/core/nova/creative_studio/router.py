@@ -20,11 +20,34 @@ from app.db.session import SessionLocal, get_db
 
 logger = logging.getLogger(__name__)
 _scene_lock = threading.Lock()
+_scene_workers: set[str] = set()
+_scene_capacity = threading.Semaphore(1)
+
+
+def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: BackgroundTasks) -> None:
+    """Reconnect only to persisted tasks; never create paid work from a GET."""
+    with _scene_lock:
+        assets = {row.id: row for row in service.store.list_assets(project_id, owner_id)}
+        for job in service.store.list_jobs(project_id, owner_id):
+            if job.kind != "video" or job.status not in {"QUEUED", "RUNNING"} or job.id in _scene_workers:
+                continue
+            results = [assets[aid] for aid in job.result_asset_ids if aid in assets and assets[aid].kind == "video"]
+            completed = [row for row in results if row.status == "GENERATED" and row.url]
+            if completed:
+                service._finish_job(job, status="GENERATED", message="Recovered completed scene after server restart.", asset_ids=[row.id for row in completed])
+            elif any((row.metadata or {}).get("provider_result", {}).get("status") == "PROCESSING"
+                     and (row.metadata or {}).get("provider_result", {}).get("task_id") for row in results):
+                _scene_workers.add(job.id)
+                service._finish_job(job, status="QUEUED", message="Reconnecting to saved Runway task after server restart.", asset_ids=job.result_asset_ids)
+                tasks.add_task(_run_scene_background, owner_id, project_id, job.id)
+            else:
+                service._finish_job(job, status="ERROR", message="Scene worker was interrupted. No saved Runway task is available; check provider history before retrying. Nova has not automatically submitted another video.", asset_ids=job.result_asset_ids)
 
 
 def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
     db = None
     job = None
+    _scene_capacity.acquire()
     try:
         db = SessionLocal()
         service = get_service(db)
@@ -46,6 +69,9 @@ def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
     finally:
         if db is not None:
             db.close()
+        with _scene_lock:
+            _scene_workers.discard(job_id)
+        _scene_capacity.release()
 
 router = APIRouter(
     prefix="/api/nova/creative",
@@ -200,12 +226,16 @@ def list_projects(
 @router.get("/projects/{project_id}")
 def get_project(
     project_id: str,
+    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).get_project(user.user_id, project_id)
+        service = get_service(db)
+        service._project_or_404(user.user_id, project_id)
+        _recover_scene_jobs(service, user.user_id, project_id, background_tasks)
+        return service.get_project(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -376,11 +406,12 @@ def generate_video(
                 if existing.kind != "video" or existing.status not in {"QUEUED", "RUNNING"}:
                     continue
                 age = (datetime.now(timezone.utc) - datetime.fromisoformat(existing.updated_at).replace(tzinfo=timezone.utc)).total_seconds()
-                if age < 1200:
+                if existing.id in _scene_workers or age < 1200:
                     return {"status": "PROCESSING", "job": existing.as_dict(), "already_running": True}
                 service._finish_job(existing, status="ERROR", message="Scene job was interrupted or timed out. Retry resumes any saved Runway task.", asset_ids=existing.result_asset_ids)
             job = service._start_job(user.user_id, project_id, "video")
             service._finish_job(job, status="QUEUED", message="Scene generation queued.", asset_ids=[])
+            _scene_workers.add(job.id)
             background_tasks.add_task(_run_scene_background, user.user_id, project_id, job.id)
         return {"status": "PROCESSING", "job": job.as_dict(), "already_running": False}
     except CreativeStudioError as exc:
