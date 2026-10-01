@@ -1542,15 +1542,17 @@ def record_external_submission(
     This function records history only. It never contacts a client, sends email,
     accepts terms, signs a contract, or performs financial execution.
     """
-    _ensure()
     source_url = _safe_source_url(payload.source_url) if payload.source_url else None
-    existing = get_opportunity_by_fingerprint(
-        db,
+    fingerprint = opportunity_fingerprint(
         organization_id=organization_id,
-        user=user,
-        company_name=payload.company_name,
-        opportunity_title=payload.opportunity_title,
+        company_name=sanitize_untrusted(payload.company_name)[:220],
+        opportunity_title=sanitize_untrusted(payload.opportunity_title)[:220],
         source_url=source_url,
+    )
+    existing = (
+        _opp_query(db, organization_id, user)
+        .filter(NovaWorkOpportunity.fingerprint == fingerprint)
+        .first()
     )
     if existing is None:
         data = OpportunityCreate(
