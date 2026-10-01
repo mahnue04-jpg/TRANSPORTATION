@@ -715,6 +715,7 @@ class CreativeStudioService:
                     "prompt_text": prompt_text,
                     "prompt_image_url": source_image_url,
                     "resume_task_id": resume_task_id,
+                    "persist_task_before_poll": background,
                     "scene_index": scene_index,
                     "scene_heading": scene.heading,
                 }

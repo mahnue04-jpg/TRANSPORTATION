@@ -23,6 +23,7 @@ OWNER = SimpleNamespace(user_id="owner-a", email="owner@example.invalid")
 
 @pytest.fixture
 def setup(monkeypatch):
+    routes._scene_workers.clear()
     svc = CreativeStudioService(CreativeStudioStore())
     project = svc.create_project(OWNER.user_id, {"title": "Scene timeout proof", "project_type": "short_video", "platform": "Instagram"})
     svc.generate_storyboard(OWNER.user_id, project["id"])
@@ -96,12 +97,96 @@ def test_duplicate_click_and_refresh_reattach_to_same_job(setup):
 def test_interrupted_job_can_be_retried(setup):
     svc, project, session = setup
     first, _ = enqueue(project, session)
+    routes._scene_workers.clear()  # a restarted process loses worker ownership
     job = svc.store.jobs[first["job"]["id"]]
     job.updated_at = (datetime.now(timezone.utc) - timedelta(minutes=21)).isoformat()
     second, tasks = enqueue(project, session)
     assert second["job"]["id"] != first["job"]["id"]
     assert job.status == "ERROR"
     assert len(tasks.tasks) == 1
+
+
+def test_restart_reconnects_same_saved_task_once_without_new_artwork(setup, monkeypatch):
+    svc, project, session = setup
+    first, _ = enqueue(project, session)
+    job = svc.store.jobs[first["job"]["id"]]
+    asset = svc._save_text_asset(owner_id=OWNER.user_id, project_id=project, kind="video", title="Pending", content="", status="PROCESSING", metadata={"provider_result": {"status": "PROCESSING", "task_id": "saved-task", "brief": {"scene_index": 1}}})
+    svc._finish_job(job, status="RUNNING", message="Pending", asset_ids=[asset.id])
+    routes._scene_workers.clear()
+    tasks = BackgroundTasks()
+    detail = routes.get_project(project, tasks, OWNER, session)
+    assert detail["jobs"][0]["id"] == job.id
+    assert detail["jobs"][0]["status"] == "QUEUED"
+    duplicate = BackgroundTasks()
+    routes.get_project(project, duplicate, OWNER, session)
+    assert len(tasks.tasks) == 1 and not duplicate.tasks
+    monkeypatch.setattr(svc, "request_image_generation", lambda *a, **kw: pytest.fail("recovery recreated artwork"))
+    calls = []
+    def resume(*, brief):
+        calls.append(brief)
+        assert brief["resume_task_id"] == "saved-task"
+        return {"status": "GENERATED", "asset_generated": True, "url": "https://example.invalid/recovered.mp4", "brief": brief}
+    monkeypatch.setattr(services, "video_provider", lambda: SimpleNamespace(provider_id="mock", status=lambda: SimpleNamespace(status="AVAILABLE"), generate=resume))
+    routes._run_scene_background(OWNER.user_id, project, job.id)
+    assert len(calls) == 1 and job.status == "GENERATED"
+    assert job.id not in routes._scene_workers
+
+
+def test_restart_unknown_submission_is_reported_without_automatic_retry(setup):
+    svc, project, session = setup
+    first, _ = enqueue(project, session)
+    routes._scene_workers.clear()
+    tasks = BackgroundTasks()
+    detail = routes.get_project(project, tasks, OWNER, session)
+    job = next(row for row in detail["jobs"] if row["id"] == first["job"]["id"])
+    assert job["status"] == "ERROR" and "check provider history" in job["message"]
+    assert not tasks.tasks
+
+
+def test_restart_after_asset_commit_finishes_job_without_next_scene(setup):
+    svc, project, session = setup
+    first, _ = enqueue(project, session)
+    job = svc.store.jobs[first["job"]["id"]]
+    asset = svc._save_text_asset(owner_id=OWNER.user_id, project_id=project, kind="video", title="Done", content="", status="GENERATED", url="https://example.invalid/done.mp4")
+    job.result_asset_ids = [asset.id]
+    routes._scene_workers.clear()
+    tasks = BackgroundTasks()
+    routes.get_project(project, tasks, OWNER, session)
+    assert job.status == "GENERATED" and not tasks.tasks
+
+
+def test_runway_returns_task_id_before_polling(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    provider = providers.RunwayVideoProvider()
+    monkeypatch.setattr(provider, "status", lambda: SimpleNamespace(status="AVAILABLE"))
+    monkeypatch.setattr(provider, "_prompt_image_value", lambda value: "data:image/png;base64,AA==")
+    monkeypatch.setattr(provider, "_request_json", lambda *a: pytest.fail("task was polled before ID could be saved"))
+    created = []
+    def create(**kwargs):
+        created.append(kwargs)
+        return SimpleNamespace(id="new-task")
+    monkeypatch.setattr(providers, "RunwayML", lambda **kw: SimpleNamespace(image_to_video=SimpleNamespace(create=create)))
+    result = provider.generate(brief={"prompt_text": "Scene", "persist_task_before_poll": True})
+    assert result["task_id"] == "new-task" and result["status"] == "PROCESSING"
+    assert len(created) == 1
+
+
+def test_video_download_uses_bounded_reads_and_removes_partial_file(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_ASSET_DIR", str(tmp_path))
+    class Response:
+        calls = 0
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, size):
+            assert size == 1024 * 1024
+            self.calls += 1
+            if self.calls == 1: return b"video-data"
+            raise OSError("connection interrupted")
+    monkeypatch.setattr(providers.urllib.request, "urlopen", lambda *a, **kw: Response())
+    with pytest.raises(RuntimeError, match="could not save"):
+        providers.RunwayVideoProvider()._save_remote_video("https://example.invalid/video")
+    assert not list(tmp_path.iterdir())
 
 
 def test_worker_error_is_visible_in_project_and_retryable(setup, monkeypatch):

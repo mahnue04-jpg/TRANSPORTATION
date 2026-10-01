@@ -300,8 +300,11 @@ class RunwayVideoProvider:
         target = root / filename
         try:
             with urllib.request.urlopen(url, timeout=120) as resp:
-                target.write_bytes(resp.read())
+                with target.open("wb") as output:
+                    while chunk := resp.read(1024 * 1024):
+                        output.write(chunk)
         except Exception as exc:
+            target.unlink(missing_ok=True)
             raise RuntimeError("Runway generated video but Nova could not save the MP4 asset.") from exc
         return f"{public_prefix}/{filename}"
 
@@ -427,6 +430,16 @@ class RunwayVideoProvider:
                     "brief": brief,
                     "url": None,
                     "asset_generated": False,
+                }
+
+            # Let the background service commit the remote task ID before any
+            # polling/download. A process restart can then reconnect to it.
+            if brief.get("persist_task_before_poll"):
+                return {
+                    "status": "PROCESSING", "task_id": task_id,
+                    "message": "Runway task submitted; reconnecting to saved task.",
+                    "brief": brief, "url": None, "asset_generated": False,
+                    "provider": self.provider_id,
                 }
 
         wait_seconds = int(str(os.getenv("NOVA_CREATIVE_VIDEO_WAIT_SECONDS") or "90"))
