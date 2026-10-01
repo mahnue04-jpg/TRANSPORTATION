@@ -116,7 +116,17 @@
       })
     });
     state.conversationId = result.conversation_id || state.conversationId;
-    $("brain-output").textContent = "AI SUGGESTION\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
+    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
+    (result.sources || []).concat(result.source_href ? [{title: "Open Work & Revenue", url: result.source_href}] : []).forEach(function (source) {
+      if (!/^https?:\/\//i.test(source.url || "") && source.url !== "/nova/work") return;
+      var link = document.createElement("a");
+      link.href = source.url;
+      link.textContent = source.title || source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      $("brain-output").appendChild(document.createElement("br"));
+      $("brain-output").appendChild(link);
+    });
     if (result.search) {
       $("search-results").innerHTML = listHtml(result.search.hits, "No workspace matches.", function (hit) {
         return "<div class=\"item\"><strong>" + escapeHtml(hit.kind) + "</strong> · " +

@@ -262,10 +262,10 @@ def test_nova_home_and_workspace_navigation() -> None:
     assert 'href="/nova/communications">Communications' in WS_HTML
     assert 'href="/nova/government">Government' in WS_HTML
     assert 'href="/nova/business">Business' in WS_HTML
-    assert 'href="/workspace">Health' in WS_HTML
-    assert 'href="/app">Delivery' in WS_HTML
-    assert 'href="/nova/freight">Freight' in WS_HTML
-    assert 'href="/workspace"' in HOME_HTML
+    assert 'href="/workspace">Health' not in WS_HTML
+    assert 'href="/app">Delivery' not in WS_HTML
+    assert 'href="/nova/freight">Freight' not in WS_HTML
+    assert 'href="/workspace"' not in HOME_HTML
 
 
 def test_nova_workspace_responsive_and_safety() -> None:

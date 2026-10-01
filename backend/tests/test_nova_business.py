@@ -418,7 +418,7 @@ def test_nova_business_navigation_and_responsive() -> None:
     assert 'href="/nova/workspace">Workspace' in BIZ_HTML
     assert 'href="/nova/communications">Communications' in BIZ_HTML
     assert 'href="/nova/government">Government' in BIZ_HTML
-    assert 'href="/nova/today#ask-nova">Voice' in BIZ_HTML
+    assert 'href="/nova/voice">Voice' in BIZ_HTML
     assert 'href="/workspace">Health' not in BIZ_HTML
     assert 'href="/workspace">Tools' not in BIZ_HTML
     assert 'href="/app">Delivery' not in BIZ_HTML

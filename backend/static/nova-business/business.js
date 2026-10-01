@@ -144,6 +144,16 @@
     await refresh();
 
     $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response.");
+    (result.sources || []).concat(result.source_href ? [{title: "Open Work & Revenue", url: result.source_href}] : []).forEach(function (source) {
+      if (!/^https?:\/\//i.test(source.url || "") && source.url !== "/nova/work") return;
+      var link = document.createElement("a");
+      link.href = source.url;
+      link.textContent = source.title || source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      $("brain-output").appendChild(document.createElement("br"));
+      $("brain-output").appendChild(link);
+    });
     $("fact-label").textContent = result.fact_label || "AI SUGGESTION is not accounting or a filing.";
     showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was sent or booked.", true);
   }
