@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-import subprocess
 import tempfile
 from typing import Any
 
 from app.core.nova.creative_studio.export import export_project_package
+from app.core.nova.creative_studio.media_runtime import run_encoder, serialized_media
 from app.core.nova.creative_studio.flags import creative_guardrails
 from app.core.nova.creative_studio.generation import assemble_short_video, generate_content_pack
 from app.core.nova.creative_studio.models import (
@@ -110,12 +110,12 @@ class CreativeStudioService:
                 "-an",
                 "-c:v", "libx264",
                 "-threads", "1",
-                "-preset", "veryfast",
+                "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "ref=1",
                 "-crf", "23",
                 "-movflags", "+faststart",
                 str(output_path),
             ]
-            run = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            run = run_encoder(cmd, timeout=120)
             if run.returncode != 0 or not output_path.is_file():
                 detail = (run.stderr or run.stdout or "").strip().splitlines()
                 tail = detail[-1] if detail else "unknown FFmpeg error"
@@ -509,6 +509,7 @@ class CreativeStudioService:
         self._finish_job(job, status="GENERATED", message="Image prompt generated. No image file produced.", asset_ids=[asset.id])
         return {"job": job.as_dict(), "asset": asset.as_dict(), "aspect_ratio": aspect_ratio, "url": None}
 
+    @serialized_media
     def request_image_generation(self, owner_id: str, project_id: str, *, aspect_ratio: str = "1:1", prompt: str | None = None) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         if aspect_ratio not in IMAGE_ASPECTS:
@@ -571,6 +572,7 @@ class CreativeStudioService:
             "preserved": ["script", "voiceover", "subtitle", "caption", "hashtags", "storyboard"],
         }
 
+    @serialized_media
     def request_video_generation(self, owner_id: str, project_id: str, *, job: GenerationJob | None = None) -> dict[str, Any]:
         background = job is not None
         project = self._project_or_404(owner_id, project_id)
@@ -836,6 +838,7 @@ class CreativeStudioService:
         self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=voice_provider().provider_id)
         return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
+    @serialized_media
     def assemble_final_promo(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         scenes = self.store.list_scenes(project_id, owner_id)
@@ -964,13 +967,13 @@ class CreativeStudioService:
                         "-an",
                         "-c:v", "libx264",
                         "-threads", "1",
-                        "-preset", "veryfast",
+                        "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "ref=1",
                         "-crf", "22",
                         "-pix_fmt", "yuv420p",
                         "-movflags", "+faststart",
                         str(segment_path),
                     ]
-                    segment_run = subprocess.run(segment_cmd, capture_output=True, text=True, timeout=120)
+                    segment_run = run_encoder(segment_cmd, timeout=120)
                     if segment_run.returncode != 0 or not segment_path.is_file() or segment_path.stat().st_size < 1024:
                         detail = (segment_run.stderr or segment_run.stdout or "")[-1800:]
                         raise RuntimeError(f"scene {offset + 1} render failed: {detail}")
@@ -989,7 +992,7 @@ class CreativeStudioService:
                     "-c", "copy",
                     str(joined_path),
                 ]
-                join_run = subprocess.run(join_cmd, capture_output=True, text=True, timeout=120)
+                join_run = run_encoder(join_cmd, timeout=120)
                 if join_run.returncode != 0 or not joined_path.is_file():
                     detail = (join_run.stderr or join_run.stdout or "")[-1800:]
                     raise RuntimeError("scene join failed: " + detail)
@@ -1005,7 +1008,7 @@ class CreativeStudioService:
                     "-map", "1:a:0",
                     "-c:v", "libx264",
                     "-threads", "1",
-                    "-preset", "veryfast",
+                    "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "ref=1",
                     "-crf", "21",
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
@@ -1014,7 +1017,7 @@ class CreativeStudioService:
                     "-shortest",
                     str(output_path),
                 ]
-                final_run = subprocess.run(final_cmd, capture_output=True, text=True, timeout=180)
+                final_run = run_encoder(final_cmd, timeout=180)
                 if final_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
                     detail = (final_run.stderr or final_run.stdout or "")[-2200:]
                     raise RuntimeError("final render failed: " + detail)
