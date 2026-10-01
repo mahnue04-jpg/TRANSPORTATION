@@ -66,6 +66,12 @@ def test_nova_home_route_loads(client: TestClient) -> None:
         assert 'src="/static/nova-home/home.js"' in response.text
 
 
+def test_nova_home_signed_out_shows_create_account() -> None:
+    assert 'href="/nova/signup"' in HOME_HTML
+    assert "Create account / Start free trial" in HOME_HTML
+    assert "New to Nova?" in HOME_HTML
+
+
 def test_nova_home_signed_out_does_not_expose_protected_brain(client: TestClient) -> None:
     page = client.get("/nova")
     assert page.status_code == 200

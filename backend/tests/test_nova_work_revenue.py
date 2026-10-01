@@ -2602,3 +2602,55 @@ def test_work_revenue_links_shared_creative_studio() -> None:
     html = (ROOT / "static" / "nova-work" / "index.html").read_text(encoding="utf-8")
     assert 'href="/nova/creative"' in html
     assert "Nova Creative Image Generator" in html
+
+
+def test_external_submission_backfill_is_idempotent(client: TestClient) -> None:
+    headers = _headers(client)
+    payload = {
+        "company_name": "Backfill Automation Client",
+        "opportunity_title": "AI operations paid pilot",
+        "source": "direct_email",
+        "source_url": "https://example.com/automation-pilot",
+        "submission_channel": "gmail",
+        "submission_actor": "ASSISTANT",
+        "compensation_amount": 350,
+        "compensation_period": "project",
+        "currency": "USD",
+        "notes": "Confirmed outside submission; track in Nova Work & Revenue.",
+        "receipt": "Owner confirmed application was sent.",
+        "confirm_already_submitted": True,
+    }
+
+    first = client.post(
+        "/api/nova/work/applications/record-external-submission",
+        headers=headers,
+        json=payload,
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first_body["manual_submission_recorded"] is True
+    assert first_body["approval_state"] == "APPROVED"
+
+    opp = client.get(
+        f"/api/nova/work/opportunities/{first_body['opportunity_id']}",
+        headers=headers,
+    )
+    assert opp.status_code == 200, opp.text
+    assert opp.json()["status"] == "SUBMITTED"
+    assert opp.json()["compensation_amount"] == 350
+
+    second = client.post(
+        "/api/nova/work/applications/record-external-submission",
+        headers=headers,
+        json=payload,
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["application_id"] == first_body["application_id"]
+    assert second.json()["opportunity_id"] == first_body["opportunity_id"]
+
+    applications = client.get("/api/nova/work/applications", headers=headers)
+    matches = [
+        row for row in applications.json()
+        if row["opportunity_id"] == first_body["opportunity_id"]
+    ]
+    assert len(matches) == 1

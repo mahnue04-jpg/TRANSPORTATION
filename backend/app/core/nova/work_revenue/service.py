@@ -60,6 +60,7 @@ from app.core.nova.work_revenue.schemas import (
     CapabilityOut,
     DashboardOut,
     EngagementCreate,
+    ExternalSubmissionRecord,
     MaterialOut,
     OpportunityCreate,
     OpportunityDetailOut,
@@ -1523,6 +1524,155 @@ def record_confirmed_external_submission(
         entity_type="application",
         actor_category="OWNER",
         reason=(receipt or "")[:400] or None,
+    )
+    db.commit()
+    db.refresh(application)
+    return application
+
+
+def record_external_submission(
+    db: Session,
+    payload: ExternalSubmissionRecord,
+    *,
+    organization_id: str,
+    user: UserContext,
+) -> NovaWorkApplication:
+    """Idempotently backfill an owner-confirmed submission made outside Work & Revenue.
+
+    This function records history only. It never contacts a client, sends email,
+    accepts terms, signs a contract, or performs financial execution.
+    """
+    source_url = _safe_source_url(payload.source_url) if payload.source_url else None
+    fingerprint = opportunity_fingerprint(
+        organization_id=organization_id,
+        company_name=sanitize_untrusted(payload.company_name)[:220],
+        opportunity_title=sanitize_untrusted(payload.opportunity_title)[:220],
+        source_url=source_url,
+    )
+    existing = (
+        _opp_query(db, organization_id, user)
+        .filter(NovaWorkOpportunity.fingerprint == fingerprint)
+        .first()
+    )
+    if existing is None:
+        data = OpportunityCreate(
+            organization_id=organization_id,
+            source=payload.source or "external",
+            source_url=source_url,
+            source_type="imported",
+            company_name=payload.company_name,
+            opportunity_title=payload.opportunity_title,
+            description=payload.notes,
+            remote_status="remote",
+            engagement_type="contract",
+            compensation_type="unknown" if payload.compensation_amount is None else "known",
+            compensation_amount=payload.compensation_amount,
+            compensation_period=payload.compensation_period,
+            currency=payload.currency,
+            physical_presence_required="false",
+            notes=payload.notes,
+            estimated_value=payload.compensation_amount,
+            category="client_opportunity",
+            priority="high",
+            tags=["external_submission", "backfilled"],
+        ).model_dump()
+        data["source"] = payload.source or "external"
+        data["source_type"] = "imported"
+        existing = _create_opportunity_row(db, data, organization_id=organization_id, user=user)
+
+    application = (
+        _app_query(db, organization_id, user)
+        .filter(NovaWorkApplication.opportunity_id == existing.opportunity_id)
+        .first()
+    )
+    if application is None:
+        application = NovaWorkApplication(
+            application_id=_new_id("NWA-"),
+            opportunity_id=existing.opportunity_id,
+            organization_id=organization_id,
+            owner_user_id=user.user_id,
+            applicant_party="AMICOR",
+            approval_state="APPROVED",
+            approved_for_future_submission=True,
+            externally_submitted=False,
+            manual_submission_recorded=True,
+            follow_up_at=payload.follow_up_at,
+            notes=sanitize_untrusted(payload.notes) or None,
+            owner_notes=(
+                f"Backfilled confirmed external submission via {payload.submission_channel}; "
+                f"actor={payload.submission_actor}."
+            ),
+            decided_at=payload.submitted_at or now(),
+        )
+        db.add(application)
+        db.flush()
+        _record_history(
+            db,
+            organization_id=organization_id,
+            user=user,
+            ref_type="application",
+            ref_id=application.application_id,
+            from_status=None,
+            to_status="SUBMITTED",
+            note=f"Confirmed external submission via {payload.submission_channel}.",
+        )
+    else:
+        application.approval_state = "APPROVED"
+        application.approved_for_future_submission = True
+        application.manual_submission_recorded = True
+        application.follow_up_at = payload.follow_up_at or application.follow_up_at
+        application.notes = sanitize_untrusted(payload.notes) or application.notes
+        application.owner_notes = (
+            f"Backfilled confirmed external submission via {payload.submission_channel}; "
+            f"actor={payload.submission_actor}."
+        )
+        application.decided_at = application.decided_at or payload.submitted_at or now()
+        application.updated_at = now()
+
+    if existing.status not in {"SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER", "WON", "REJECTED", "CLOSED"}:
+        path = {
+            "DISCOVERED": ["REVIEWING", "QUALIFIED", "APPLICATION_PREPARED", "SUBMITTED"],
+            "REVIEWING": ["QUALIFIED", "APPLICATION_PREPARED", "SUBMITTED"],
+            "QUALIFIED": ["APPLICATION_PREPARED", "SUBMITTED"],
+            "OWNER_REVIEW": ["APPLICATION_PREPARED", "SUBMITTED"],
+            "APPROVED_TO_APPLY": ["APPLICATION_PREPARED", "SUBMITTED"],
+            "APPLICATION_PREPARED": ["SUBMITTED"],
+            "NOT_QUALIFIED": ["REVIEWING", "QUALIFIED", "APPLICATION_PREPARED", "SUBMITTED"],
+        }.get(existing.status, [])
+        for target in path:
+            _apply_status(
+                db,
+                existing,
+                target,
+                user,
+                f"Backfill of confirmed external submission via {payload.submission_channel}.",
+            )
+
+    existing.follow_up_at = payload.follow_up_at or existing.follow_up_at
+    if payload.compensation_amount is not None:
+        existing.compensation_amount = payload.compensation_amount
+        existing.estimated_value = payload.compensation_amount
+        existing.revenue_status = "ESTIMATED"
+    if payload.compensation_period:
+        existing.compensation_period = sanitize_untrusted(payload.compensation_period)[:40] or None
+    if payload.currency:
+        existing.currency = sanitize_untrusted(payload.currency)[:12] or None
+    existing.updated_at = now()
+
+    receipt = sanitize_untrusted(payload.receipt)[:400] if payload.receipt else None
+    _record_audit(
+        db,
+        organization_id=organization_id,
+        user=user,
+        event_type="APPLICATION_STATUS_CHANGED",
+        summary=f"Confirmed external submission recorded via {payload.submission_channel}.",
+        ref_id=application.application_id,
+        entity_type="application",
+        actor_category=payload.submission_actor,
+        previous_state=None,
+        new_state="SUBMITTED",
+        reason=receipt,
+        source=f"external:{payload.submission_channel}"[:80],
     )
     db.commit()
     db.refresh(application)

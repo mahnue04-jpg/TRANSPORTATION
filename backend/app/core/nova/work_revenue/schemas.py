@@ -438,6 +438,36 @@ class EmailSubmissionConfirm(BaseModel):
     confirm_listing_accepts_email: Literal[True]
 
 
+class ExternalSubmissionRecord(BaseModel):
+    """Owner-confirmed ledger event for an application already sent outside Work & Revenue."""
+
+    organization_id: str | None = None
+    company_name: str = Field(min_length=1, max_length=220)
+    opportunity_title: str = Field(min_length=1, max_length=220)
+    source: str = Field(default="external", min_length=1, max_length=80)
+    source_url: str | None = Field(default=None, max_length=800)
+    submission_channel: str = Field(min_length=1, max_length=80)
+    submission_actor: Literal["OWNER", "NOVA", "ASSISTANT", "OTHER"] = "OWNER"
+    submitted_at: datetime | None = None
+    follow_up_at: datetime | None = None
+    compensation_amount: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    compensation_period: str | None = Field(default=None, max_length=40)
+    currency: str | None = Field(default=None, max_length=12)
+    notes: str | None = Field(default=None, max_length=4000)
+    receipt: str | None = Field(default=None, max_length=1000)
+    confirm_already_submitted: Literal[True]
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_external_submission_source_url(cls, value: str | None) -> str | None:
+        if not value:
+            return value
+        try:
+            return validate_source_url(value)
+        except UnsafeSourceUrl as exc:
+            raise ValueError(str(exc)) from exc
+
+
 class MaterialOut(BaseModel):
     material_id: str
     application_id: str

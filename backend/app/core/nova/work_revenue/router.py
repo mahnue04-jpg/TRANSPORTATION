@@ -40,6 +40,7 @@ from app.core.nova.work_revenue.schemas import (
     EngagementCreate,
     EngagementUpdate,
     EmailSubmissionConfirm,
+    ExternalSubmissionRecord,
     InvoiceSupportCreate,
     InvoiceSupportDecision,
     MaterialRevise,
@@ -479,6 +480,29 @@ def record_manual_submission(
     org_id = _resolve_org(user, organization_id)
     try:
         row = service.record_manual_submission(db, application_id, organization_id=org_id, user=user)
+        return service.application_out(db, row)
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/applications/record-external-submission", response_model=ApplicationOut)
+def record_external_submission(
+    payload: ExternalSubmissionRecord,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Record an already-completed external application in the Work & Revenue ledger.
+
+    This endpoint is bookkeeping only. It never sends, posts, signs, or pays.
+    """
+    org_id = _resolve_org(user, payload.organization_id)
+    try:
+        row = service.record_external_submission(
+            db,
+            payload,
+            organization_id=org_id,
+            user=user,
+        )
         return service.application_out(db, row)
     except service.NovaWorkError as exc:
         _raise(exc)
