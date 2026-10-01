@@ -1580,11 +1580,10 @@ def record_external_submission(
         data["source_type"] = "imported"
         existing = _create_opportunity_row(db, data, organization_id=organization_id, user=user)
 
-    application = get_application_for_opportunity(
-        db,
-        existing.opportunity_id,
-        organization_id=organization_id,
-        user=user,
+    application = (
+        _app_query(db, organization_id, user)
+        .filter(NovaWorkApplication.opportunity_id == existing.opportunity_id)
+        .first()
     )
     if application is None:
         application = NovaWorkApplication(
