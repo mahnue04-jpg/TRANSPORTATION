@@ -721,7 +721,12 @@ def ask_workspace(
             db, workspace_id, organization_id=organization_id, user=user
         ) + "\n\n"
 
-    if action == "summarize":
+    from app.core.nova.revenue_intent import route_revenue_request
+    discovery = route_revenue_request(db, question, organization_id=organization_id, user=user) if action in {"ask", "continue"} else None
+    if discovery is not None:
+        answer = discovery.answer
+        next_actions = discovery.next_actions
+    elif action == "summarize":
         source = context_prefix or question or "Summarize this Nova Workspace."
         summary = NovaCoreService.summarize(
             db,
@@ -806,5 +811,8 @@ def ask_workspace(
         answer=answer,
         next_actions=next_actions or [],
         conversation_id=conversation_id,
+        fact_label=discovery.fact_label if discovery is not None else "AI SUGGESTION",
+        sources=discovery.sources if discovery is not None else [],
+        source_href=discovery.source_href if discovery is not None else None,
         generated_at=NovaCoreService._now(),
     )

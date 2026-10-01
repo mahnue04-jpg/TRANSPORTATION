@@ -2949,7 +2949,7 @@ def _today_live_or_memory_answer(
                 generated_at=now().isoformat(),
                 source_href="/nova/work",
                 sources=[],
-                verification_status="proposed",
+                verification_status="unavailable",
             )
         except Exception as exc:
             logger.exception("Nova Anonymous client search failed")

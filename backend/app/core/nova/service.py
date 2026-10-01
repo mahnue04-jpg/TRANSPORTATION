@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
 from app.core.nova.event_bus import nova_event_bus
 from app.core.nova.events import build_operational_events
-from app.core.nova.memory import memory_store
+from app.core.nova.memory import memory_store, DEFAULT_MEMORY_STATE
 from app.core.nova.prompts import MODE_SYSTEM_GUIDANCE, NOVA_RESPONSIBILITIES
 from app.core.nova.schemas import (
     NovaAskResponse,
@@ -72,7 +72,12 @@ class NovaCoreService:
 
     @classmethod
     def _read_memory(cls, organization_id: str) -> dict[str, Any]:
-        return memory_store.read(organization_id)
+        memory = dict(memory_store.read(organization_id))
+        # Historical seed values can survive in saved files. They are not current evidence.
+        for key in ("current_build_phase", "last_completed_milestone", "next_recommended_step", "business_setup_status", "deployment_readiness_status"):
+            if memory.get(key) == DEFAULT_MEMORY_STATE.get(key):
+                memory[key] = "Unknown — no current supporting evidence recorded"
+        return memory
 
     @classmethod
     def _record_memory_event(
@@ -115,6 +120,7 @@ class NovaCoreService:
     def _build_runtime_context(cls, context: NovaContextResponse) -> dict[str, Any]:
         continuity_summary = cls._continuity_summary(context.organization_id)
         return {
+            "evidence_rules": "Memory is saved context, not verified current status. Build completion is unmeasured. Health ISF metrics describe that module only; they do not prove legal, deployment, or business readiness. Do not label these as VERIFIED DATA or use them to block job/client discovery.",
             "platform_phase": context.platform_phase,
             "build_completion_estimate": context.build_completion_estimate,
             "system_health_summary": context.system_health_summary,
@@ -281,11 +287,7 @@ class NovaCoreService:
 
     @classmethod
     def _build_completion_estimate(cls, memory: dict[str, Any], context: dict[str, Any]) -> str:
-        readiness = context.get("enterprise_readiness", "medium")
-        base = 72 if readiness == "high" else 61 if readiness == "medium" else 48
-        if str(memory.get("deployment_readiness_status", "")).lower().startswith("production"):
-            base = min(95, base + 15)
-        return f"{base}%"
+        return "Unknown — no measured build completion data"
 
     @classmethod
     def _build_system_health_summary(cls, context: dict[str, Any]) -> str:
@@ -293,17 +295,16 @@ class NovaCoreService:
         open_workflows = int(context.get("open_workflow_count") or 0)
         rides_pending = int(context.get("rides_pending") or 0)
 
-        if alerts >= 5 or open_workflows >= 10:
-            return "Elevated risk: immediate triage recommended for alerts and workflow backlog."
-        if alerts >= 2 or rides_pending >= 8:
-            return "Operationally stable with watch items; continue proactive dispatch monitoring."
-        return "System health is stable with low operational risk and manageable dispatch load."
+        return (
+            f"Recorded Health ISF metrics: {alerts} alerts, {open_workflows} open workflows, "
+            f"{rides_pending} pending rides. These records do not verify service health or deployment readiness."
+        )
 
     @classmethod
     def _build_business_checklist_status(cls, memory: dict[str, Any]) -> str:
-        status = str(memory.get("business_setup_status") or "foundation-in-progress")
-        deploy = str(memory.get("deployment_readiness_status") or "staging-validation-pending")
-        return f"Business setup: {status}; Deployment readiness: {deploy}."
+        status = str(memory.get("business_setup_status") or "Unknown")
+        deploy = str(memory.get("deployment_readiness_status") or "Unknown")
+        return f"Recorded business setup (unverified): {status}; Recorded deployment readiness (unverified): {deploy}."
 
     @classmethod
     def get_status(cls, db: Session, organization_id: str) -> NovaStatusResponse:

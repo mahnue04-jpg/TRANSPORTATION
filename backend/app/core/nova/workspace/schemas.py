@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from app.core.nova.today.schemas import NovaTodaySourceLink
 
 
 class NovaWorkspaceProjectCreate(BaseModel):
@@ -147,6 +148,9 @@ class NovaWorkspaceBrainRequest(BaseModel):
 
 
 class NovaWorkspaceBrainOut(BaseModel):
+    sources: list[NovaTodaySourceLink] = Field(default_factory=list)
+    source_href: str | None = None
+    fact_label: str = "AI SUGGESTION"
     action: str
     answer: str
     next_actions: list[str] = Field(default_factory=list)

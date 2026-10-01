@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from app.core.nova.today.schemas import NovaTodaySourceLink
 
 ENTITY_TYPES = ("llc", "corp", "sole_prop", "partnership", "nonprofit", "other")
 PROFILE_STATUSES = ("active", "inactive", "forming", "dissolved")
@@ -506,6 +507,8 @@ class NovaBizBrainRequest(BaseModel):
 
 
 class NovaBizBrainOut(BaseModel):
+    sources: list[NovaTodaySourceLink] = Field(default_factory=list)
+    source_href: str | None = None
     action: str
     answer: str
     fact_label: str

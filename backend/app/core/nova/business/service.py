@@ -871,6 +871,14 @@ def refuse_send() -> None:
 
 
 def ask_business(db: Session, payload: NovaBizBrainRequest, *, organization_id: str, user: UserContext) -> NovaBizBrainOut:
+    from app.core.nova.revenue_intent import route_revenue_request
+    discovery = route_revenue_request(db, payload.question or "", organization_id=organization_id, user=user) if payload.action == "ask" else None
+    if discovery is not None:
+        return NovaBizBrainOut(
+            action=payload.action, answer=discovery.answer, fact_label=discovery.fact_label,
+            next_actions=discovery.next_actions, generated_at=discovery.generated_at,
+            sources=discovery.sources, source_href=discovery.source_href,
+        )
     pipe = pipeline(db, organization_id=organization_id, user=user)
     dash = dashboard(db, organization_id=organization_id, user=user)
     context = (
