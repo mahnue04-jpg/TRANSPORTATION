@@ -189,6 +189,59 @@ def test_video_download_uses_bounded_reads_and_removes_partial_file(monkeypatch,
     assert not list(tmp_path.iterdir())
 
 
+def test_encoder_refuses_to_start_without_memory_headroom(monkeypatch):
+    from app.core.nova.creative_studio import media_runtime as runtime
+    monkeypatch.setattr(runtime, "memory_budget", lambda: (300 * runtime.MIB, 512 * runtime.MIB))
+    monkeypatch.setattr(runtime.subprocess, "Popen", lambda *a, **kw: pytest.fail("encoder started without sufficient memory"))
+    result = runtime.run_encoder(["ffmpeg"], timeout=1)
+    assert result.returncode != 0 and "No encoder was started" in result.stderr
+
+
+def test_encoder_is_killed_before_memory_reserve_is_consumed(monkeypatch):
+    import sys
+    from app.core.nova.creative_studio import media_runtime as runtime
+    samples = iter([(200 * runtime.MIB, 512 * runtime.MIB), (430 * runtime.MIB, 512 * runtime.MIB)])
+    monkeypatch.setattr(runtime, "memory_budget", lambda: next(samples))
+    result = runtime.run_encoder([sys.executable, "-c", "import time; time.sleep(10)"], timeout=2)
+    assert result.returncode != 0 and "protect the server" in result.stderr
+
+
+def test_encoder_logs_are_bounded(monkeypatch):
+    import sys
+    from app.core.nova.creative_studio import media_runtime as runtime
+    monkeypatch.setattr(runtime, "memory_budget", lambda: None)
+    result = runtime.run_encoder([sys.executable, "-c", "print('x' * 100000)"], timeout=2)
+    assert result.returncode == 0 and len(result.stderr) <= 16384
+
+
+def test_media_capacity_is_shared_and_nested_calls_do_not_deadlock():
+    from concurrent.futures import ThreadPoolExecutor
+    from app.core.nova.creative_studio import media_runtime as runtime
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+    release = threading.Event()
+    @runtime.serialized_media
+    def nested(): return True
+    @runtime.serialized_media
+    def first():
+        assert nested()
+        first_entered.set()
+        assert release.wait(2)
+    @runtime.serialized_media
+    def second(): second_entered.set()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one = pool.submit(first)
+        assert first_entered.wait(1)
+        two = pool.submit(second)
+        try:
+            assert not second_entered.wait(.05)
+        finally:
+            release.set()
+        one.result(timeout=1)
+        two.result(timeout=1)
+        assert second_entered.is_set()
+
+
 def test_worker_error_is_visible_in_project_and_retryable(setup, monkeypatch):
     svc, project, session = setup
     queued, _ = enqueue(project, session)
