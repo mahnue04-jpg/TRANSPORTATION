@@ -424,14 +424,14 @@
     var headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
     var res;
     try {
-      var shared = session();
+      var shared = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
       if (shared && typeof shared.ensureReady === "function") {
         await shared.ensureReady();
       }
       if (shared && typeof shared.authFetch === "function") {
         res = await shared.authFetch(path, Object.assign({}, options, { headers: headers }));
       } else {
-        if (token()) headers.Authorization = "Bearer " + token();
+        if (typeof token === "function" && token()) headers.Authorization = "Bearer " + token();
         res = await fetch(path, Object.assign({}, options, { headers: headers }));
       }
     } catch (err) {
@@ -442,9 +442,9 @@
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
     if (res.status === 401) {
-      setToken("");
-      setSignedIn(false);
-      if ($("login-form")) $("login-form").classList.remove("hidden");
+      if (typeof setToken === "function") setToken("");
+      if (typeof setSignedIn === "function") setSignedIn(false);
+      if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
       throw new Error("Session expired. Sign in again. (401) Your active Creative Studio project is preserved.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
