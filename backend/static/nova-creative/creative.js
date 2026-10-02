@@ -531,10 +531,11 @@
             "\">Download branded PNG</button> <button type=\"button\" class=\"secondary promo-video\" data-image-url=\"" +
             escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
             "\">Create 8s branded video</button>" : "");
-      } else if (row.kind === "video" && row.url && mediaAvailable) {
+      } else if ((row.kind === "video" || row.kind === "presenter_video") && row.url && mediaAvailable) {
+        var videoLabel = row.kind === "presenter_video" ? "Download talking presenter video" : "Download AI video";
         media = "<figure class=\"generated-media\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"></video></figure><a class=\"button secondary\" href=\"" +
-          escapeHtml(row.url) + "\" download>Download AI video</a>";
+          escapeHtml(row.url) + "\" download>" + videoLabel + "</a>";
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"></audio></div><a class=\"button secondary\" href=\"" +
