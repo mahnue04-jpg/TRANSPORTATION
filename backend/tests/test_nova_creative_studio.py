@@ -856,7 +856,13 @@ def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
         {"id": "talk-1", "status": "created"},
         {"id": "talk-1", "status": "done", "result_url": "https://example.invalid/talk.mp4"},
     ])
-    monkeypatch.setattr(provider, "_request_json", lambda *args, **kwargs: next(replies))
+    requests = []
+
+    def fake_request(method, url, *, payload=None):
+        requests.append((method, url, payload))
+        return next(replies)
+
+    monkeypatch.setattr(provider, "_request_json", fake_request)
     monkeypatch.setattr(provider, "_save_remote_video", lambda url: "/media/nova-creative/presenter.mp4")
     monkeypatch.setattr(providers.time, "sleep", lambda *_: None)
     result = provider.generate(
@@ -867,6 +873,11 @@ def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
     assert result["asset_generated"] is True
     assert result["url"].endswith("presenter.mp4")
     assert result["talk_id"] == "talk-1"
+    post_payload = requests[0][2]
+    assert post_payload["script"]["provider"] == {
+        "type": "microsoft",
+        "voice_id": "en-US-JennyNeural",
+    }
 
 
 def test_did_talking_presenter_requires_live_enable(monkeypatch):
