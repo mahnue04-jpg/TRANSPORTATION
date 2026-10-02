@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
+from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider
 from app.db.session import SessionLocal, get_db
 
 logger = logging.getLogger(__name__)
@@ -511,19 +512,50 @@ def prepare_talking_presenter_preview(
             metadata={"presenter_style": payload.presenter_style, "talking_presenter": True, "preview": True},
             url=None,
         )
-        provider = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip()
-        if not provider:
+        provider_name = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip()
+        if not provider_name:
             return {
                 "status": "CONFIG_REQUIRED",
                 "message": "Presenter script is saved. Connect a lip-sync/talking-avatar provider before Nova generates a real talking face; Nova will not fake lip sync with a still image.",
                 "script": payload.script,
                 "presenter_style": payload.presenter_style,
             }
+        images = [
+            asset for asset in service.store.list_assets(project_id, user.user_id)
+            if asset.kind == "image" and asset.url and str(asset.status or "").upper() == "GENERATED"
+        ]
+        if not images:
+            return {
+                "status": "CONFIG_REQUIRED",
+                "message": "Generate or select a presenter image before creating the talking presenter preview.",
+                "script": payload.script,
+                "presenter_style": payload.presenter_style,
+            }
+        presenter_image = images[-1]
+        result = talking_presenter_provider().generate(
+            presenter_image_url=str(presenter_image.url),
+            script=payload.script,
+        )
+        status = str(result.get("status") or CONFIG_REQUIRED)
+        generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
+        asset = service._save_text_asset(
+            owner_id=user.user_id,
+            project_id=project_id,
+            kind="presenter_video",
+            title="Talking presenter preview",
+            content=payload.script,
+            status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
+            metadata={"presenter_style": payload.presenter_style, "talking_presenter": True, "preview": True, "source_image_asset_id": presenter_image.id, "provider_result": result},
+            url=generated_url,
+        )
         return {
-            "status": "CONFIG_REQUIRED",
-            "message": f"Talking presenter provider '{provider}' is named but no approved adapter is configured yet.",
+            "status": status,
+            "message": result.get("message"),
             "script": payload.script,
             "presenter_style": payload.presenter_style,
+            "provider": result,
+            "asset": asset.as_dict(),
+            "url": generated_url,
         }
     except CreativeStudioError as exc:
         _raise(exc)
