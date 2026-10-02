@@ -532,9 +532,15 @@
             escapeHtml(row.url) + "\" data-file-stem=\"" + escapeHtml((row.title || "amicor-nova").replace(/[^A-Za-z0-9_-]+/g, "-")) +
             "\">Create 8s branded video</button>" : "");
       } else if ((row.kind === "video" || row.kind === "presenter_video") && row.url && mediaAvailable) {
-        var videoLabel = row.kind === "presenter_video" ? "Download talking presenter video" : "Download AI video";
-        media = "<figure class=\"generated-media\"><video controls playsinline preload=\"metadata\" src=\"" +
-          escapeHtml(row.url) + "\"></video></figure><a class=\"button secondary\" href=\"" +
+        var isPresenterVideo = row.kind === "presenter_video";
+        var videoLabel = isPresenterVideo ? "Download talking presenter video" : "Download AI video";
+        var presenterCaptionText = isPresenterVideo ? String(row.content || "").trim() : "";
+        media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
+          escapeHtml(row.url) + "\"" +
+          (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
+          "></video>" +
+          (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
+          "</figure><a class=\"button secondary\" href=\"" +
           escapeHtml(row.url) + "\" download>" + videoLabel + "</a>";
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
@@ -547,6 +553,26 @@
         media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
+      var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
+      if (!caption) return;
+      var raw = String(video.getAttribute("data-caption-text") || "").trim();
+      var chunks = raw.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+      chunks = chunks.map(function (part) { return part.trim(); }).filter(Boolean);
+      function updatePresenterCaption() {
+        if (!chunks.length || !isFinite(video.duration) || video.duration <= 0 || video.ended) {
+          if (video.ended) caption.textContent = "";
+          return;
+        }
+        var ratio = Math.max(0, Math.min(0.9999, video.currentTime / video.duration));
+        var index = Math.min(chunks.length - 1, Math.floor(ratio * chunks.length));
+        caption.textContent = chunks[index];
+      }
+      video.addEventListener("loadedmetadata", updatePresenterCaption);
+      video.addEventListener("timeupdate", updatePresenterCaption);
+      video.addEventListener("play", updatePresenterCaption);
+      video.addEventListener("ended", function () { caption.textContent = ""; });
+    });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .branded-download"), function (button) {
       button.addEventListener("click", async function () {
         button.disabled = true;
