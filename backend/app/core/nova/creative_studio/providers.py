@@ -742,12 +742,25 @@ class DidTalkingPresenterProvider:
                 "provider": self.provider_id,
             }
 
+        tts_provider = str(
+            os.getenv("NOVA_CREATIVE_DID_TTS_PROVIDER") or "microsoft"
+        ).strip() or "microsoft"
+        voice_id = str(
+            os.getenv("NOVA_CREATIVE_DID_VOICE_ID") or "en-US-JennyNeural"
+        ).strip() or "en-US-JennyNeural"
         created = self._request_json(
             "POST",
             "https://api.d-id.com/talks",
             payload={
                 "source_url": source_url,
-                "script": {"type": "text", "input": clean_script[:4000]},
+                "script": {
+                    "type": "text",
+                    "input": clean_script[:4000],
+                    "provider": {
+                        "type": tts_provider,
+                        "voice_id": voice_id,
+                    },
+                },
             },
         )
         talk_id = str(created.get("id") or "").strip()
