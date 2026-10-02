@@ -748,6 +748,25 @@ class DidTalkingPresenterProvider:
         voice_id = str(
             os.getenv("NOVA_CREATIVE_DID_VOICE_ID") or "en-US-JennyNeural"
         ).strip() or "en-US-JennyNeural"
+        speech_rate = str(
+            os.getenv("NOVA_CREATIVE_DID_SPEECH_RATE") or "0.92"
+        ).strip() or "0.92"
+        spoken_script = clean_script[:4000]
+        use_ssml = tts_provider.lower() == "microsoft"
+        if use_ssml:
+            spoken_script = spoken_script.replace(
+                "AMICOR Nova",
+                '<sub alias="AM ih core Nova">AMICOR Nova</sub>',
+            )
+            spoken_script = spoken_script.replace(
+                "AMICOR",
+                '<sub alias="AM ih core">AMICOR</sub>',
+            )
+        provider_config: dict[str, Any] = {
+            "type": tts_provider,
+            "voice_id": voice_id,
+            "voice_config": {"rate": speech_rate},
+        }
         created = self._request_json(
             "POST",
             "https://api.d-id.com/talks",
@@ -755,11 +774,9 @@ class DidTalkingPresenterProvider:
                 "source_url": source_url,
                 "script": {
                     "type": "text",
-                    "input": clean_script[:4000],
-                    "provider": {
-                        "type": tts_provider,
-                        "voice_id": voice_id,
-                    },
+                    "ssml": use_ssml,
+                    "input": spoken_script,
+                    "provider": provider_config,
                 },
             },
         )
