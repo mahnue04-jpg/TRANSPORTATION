@@ -445,7 +445,7 @@
       setToken("");
       setSignedIn(false);
       if ($("login-form")) $("login-form").classList.remove("hidden");
-      throw new Error("Your session could not be refreshed. Sign in again once; your active Creative Studio project is preserved. (401)");
+      throw new Error("Session expired. Sign in again. (401) Your active Creative Studio project is preserved.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
