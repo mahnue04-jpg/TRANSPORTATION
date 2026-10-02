@@ -11,7 +11,15 @@
   }
 
   function $(id) { return document.getElementById(id); }
-  function token() { return localStorage.getItem(tokenKey) || ""; }
+  function session() { return window.AmiCorSession || null; }
+  function token() {
+    var shared = session();
+    if (shared && typeof shared.getAccessToken === "function") {
+      var current = shared.getAccessToken();
+      if (current) return current;
+    }
+    return localStorage.getItem(tokenKey) || "";
+  }
   function setToken(value) {
     if (value) localStorage.setItem(tokenKey, value);
     else localStorage.removeItem(tokenKey);
@@ -414,10 +422,18 @@
   async function api(path, options) {
     options = options || {};
     var headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
-    if (token()) headers.Authorization = "Bearer " + token();
     var res;
     try {
-      res = await fetch(path, Object.assign({}, options, { headers: headers }));
+      var shared = session();
+      if (shared && typeof shared.ensureReady === "function") {
+        await shared.ensureReady();
+      }
+      if (shared && typeof shared.authFetch === "function") {
+        res = await shared.authFetch(path, Object.assign({}, options, { headers: headers }));
+      } else {
+        if (token()) headers.Authorization = "Bearer " + token();
+        res = await fetch(path, Object.assign({}, options, { headers: headers }));
+      }
     } catch (err) {
       var networkError = new Error("Network error. Check your connection and try again.");
       networkError.retryable = true;
@@ -425,7 +441,12 @@
     }
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
-    if (res.status === 401) throw new Error("Session expired. Sign in again. (401)");
+    if (res.status === 401) {
+      setToken("");
+      setSignedIn(false);
+      if ($("login-form")) $("login-form").classList.remove("hidden");
+      throw new Error("Your session could not be refreshed. Sign in again once; your active Creative Studio project is preserved. (401)");
+    }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
     if (res.status === 422) throw new Error(detailText(body, "Validation failed. (422)"));
@@ -732,6 +753,8 @@
   });
   $("sign-out").addEventListener("click", function () {
     setToken("");
+    var shared = session();
+    if (shared && typeof shared.clear === "function") shared.clear("creative_studio_signout");
     setActiveProjectId(null);
     setSignedIn(false);
     showBanner("Signed out.", true);
@@ -746,8 +769,23 @@
           password: $("login-password").value
         })
       });
-      setToken(body.access_token);
-      showBanner("Signed in.", true);
+      var shared = session();
+      if (shared && typeof shared.start === "function") {
+        shared.start({
+          userId: body.user_id,
+          email: body.email || $("login-email").value.trim(),
+          name: body.name || body.display_name || $("login-email").value.trim(),
+          role: body.role || body.session_role || "staff",
+          organizationId: body.organization_id || null,
+          organizationName: body.organization_name || null,
+          accessToken: body.access_token || null,
+          refreshToken: body.refresh_token || null,
+          tokenExpiresAt: body.expires_in ? Date.now() + (Number(body.expires_in) * 1000) : null
+        });
+        if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
+      }
+      setToken(body.access_token || "");
+      showBanner("Signed in. Creative Studio session is ready.", true);
       boot();
     } catch (err) {
       showBanner(err.message, false);
