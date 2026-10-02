@@ -27,6 +27,8 @@ from app.core.nova.creative_studio.flags import (
     video_provider_live_enabled,
     voice_provider_configured,
     voice_provider_live_enabled,
+    talking_presenter_provider_configured,
+    talking_presenter_provider_live_enabled,
 )
 
 
@@ -111,6 +113,16 @@ class VoiceGenerationProvider(Protocol):
         ...
 
     def generate(self, *, script: str) -> dict[str, Any]:
+        ...
+
+
+class TalkingPresenterProvider(Protocol):
+    provider_id: str
+
+    def status(self) -> ProviderStatus:
+        ...
+
+    def generate(self, *, presenter_image_url: str, script: str) -> dict[str, Any]:
         ...
 
 
@@ -594,6 +606,209 @@ class OpenAIVoiceProvider:
         }
 
 
+
+class DidTalkingPresenterProvider:
+    provider_id = "d-id"
+
+    def _key(self) -> str:
+        return str(os.getenv("DID_API_KEY") or "").strip()
+
+    def _authorization(self) -> str:
+        key = self._key()
+        return key if key.lower().startswith("basic ") else f"Basic {key}"
+
+    def status(self) -> ProviderStatus:
+        selected = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip().lower()
+        if selected and selected not in {"d-id", "did", "d_id"}:
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                kind="talking_presenter",
+                status=CONFIG_REQUIRED,
+                message=f"Talking presenter provider '{selected}' is not supported.",
+                configured=False,
+            )
+        if not talking_presenter_provider_configured():
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                kind="talking_presenter",
+                status=CONFIG_REQUIRED,
+                message="D-ID talking presenter credential is not configured.",
+                configured=False,
+            )
+        if not talking_presenter_provider_live_enabled():
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                kind="talking_presenter",
+                status=DISABLED,
+                message="D-ID is configured but live talking-presenter generation is OFF until owner activation.",
+                configured=True,
+            )
+        return ProviderStatus(
+            provider_id=self.provider_id,
+            kind="talking_presenter",
+            status=AVAILABLE,
+            message="Nova Studio D-ID talking-presenter generation is available.",
+            configured=True,
+        )
+
+    def _request_json(self, method: str, url: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method=method,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": self._authorization(),
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            message = f"D-ID API request failed with HTTP {exc.code}."
+            try:
+                parsed = json.loads(detail)
+                provider_message = parsed.get("message") or parsed.get("error") or parsed.get("description")
+                if provider_message:
+                    message += f" {str(provider_message)[:600]}"
+            except Exception:
+                pass
+            raise RuntimeError(message) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"D-ID API connection failed: {exc.reason}") from exc
+
+    def _public_source_url(self, value: str) -> str | None:
+        raw = str(value or "").strip()
+        if raw.startswith(("https://", "http://")):
+            return raw
+        if raw.startswith("/"):
+            base = str(
+                os.getenv("AMICOR_PUBLIC_URL")
+                or os.getenv("RENDER_EXTERNAL_URL")
+                or ""
+            ).strip().rstrip("/")
+            if base.startswith(("https://", "http://")):
+                return base + raw
+        return None
+
+    def _save_remote_video(self, url: str) -> str:
+        root, public_prefix = _creative_media_root_and_prefix()
+        root.mkdir(parents=True, exist_ok=True)
+        filename = f"nova-presenter-{uuid.uuid4().hex}.mp4"
+        target = root / filename
+        try:
+            with urllib.request.urlopen(url, timeout=120) as resp:
+                with target.open("wb") as output:
+                    while chunk := resp.read(1024 * 1024):
+                        output.write(chunk)
+            if not target.is_file() or target.stat().st_size == 0:
+                raise RuntimeError("empty download")
+        except Exception as exc:
+            target.unlink(missing_ok=True)
+            raise RuntimeError("D-ID generated the presenter video but Nova could not save the MP4 asset.") from exc
+        return f"{public_prefix}/{filename}"
+
+    def generate(self, *, presenter_image_url: str, script: str) -> dict[str, Any]:
+        st = self.status()
+        if st.status != AVAILABLE:
+            return {
+                "status": st.status,
+                "message": st.message,
+                "url": None,
+                "asset_generated": False,
+                "provider": self.provider_id,
+            }
+
+        source_url = self._public_source_url(presenter_image_url)
+        clean_script = str(script or "").strip()
+        if not source_url:
+            return {
+                "status": ERROR,
+                "message": "Nova could not provide D-ID with a public presenter image URL.",
+                "url": None,
+                "asset_generated": False,
+                "provider": self.provider_id,
+            }
+        if not clean_script:
+            return {
+                "status": ERROR,
+                "message": "Talking presenter script is empty.",
+                "url": None,
+                "asset_generated": False,
+                "provider": self.provider_id,
+            }
+
+        created = self._request_json(
+            "POST",
+            "https://api.d-id.com/talks",
+            payload={
+                "source_url": source_url,
+                "script": {"type": "text", "input": clean_script[:4000]},
+            },
+        )
+        talk_id = str(created.get("id") or "").strip()
+        if not talk_id:
+            return {
+                "status": ERROR,
+                "message": "D-ID did not return a talk id.",
+                "url": None,
+                "asset_generated": False,
+                "provider": self.provider_id,
+            }
+
+        wait_seconds = int(str(os.getenv("NOVA_CREATIVE_TALKING_PRESENTER_WAIT_SECONDS") or "300"))
+        poll_seconds = float(str(os.getenv("NOVA_CREATIVE_TALKING_PRESENTER_POLL_SECONDS") or "3"))
+        deadline = time.monotonic() + max(15, min(wait_seconds, 600))
+        last: dict[str, Any] = created
+
+        while time.monotonic() < deadline:
+            state = str(last.get("status") or "").strip().lower()
+            if state == "done":
+                result_url = str(last.get("result_url") or "").strip()
+                if not result_url:
+                    return {
+                        "status": ERROR,
+                        "message": "D-ID finished the talk but returned no video URL.",
+                        "url": None,
+                        "asset_generated": False,
+                        "provider": self.provider_id,
+                        "talk_id": talk_id,
+                    }
+                saved_url = self._save_remote_video(result_url)
+                return {
+                    "status": "GENERATED",
+                    "message": "Talking presenter generated successfully.",
+                    "url": saved_url,
+                    "asset_generated": True,
+                    "provider": self.provider_id,
+                    "talk_id": talk_id,
+                }
+            if state in {"error", "failed", "rejected"}:
+                return {
+                    "status": ERROR,
+                    "message": "D-ID could not generate the talking presenter.",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": self.provider_id,
+                    "talk_id": talk_id,
+                }
+            time.sleep(max(0.1, min(poll_seconds, 10.0)))
+            last = self._request_json("GET", f"https://api.d-id.com/talks/{talk_id}")
+
+        return {
+            "status": ERROR,
+            "message": "D-ID talking presenter timed out before completion.",
+            "url": None,
+            "asset_generated": False,
+            "provider": self.provider_id,
+            "talk_id": talk_id,
+        }
+
+
 def image_provider() -> ImageGenerationProvider:
     return OpenAIImageProvider()
 
@@ -606,9 +821,17 @@ def voice_provider() -> VoiceGenerationProvider:
     return OpenAIVoiceProvider()
 
 
+def talking_presenter_provider() -> TalkingPresenterProvider:
+    selected = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "d-id").strip().lower()
+    if selected in {"d-id", "did", "d_id", ""}:
+        return DidTalkingPresenterProvider()
+    return DidTalkingPresenterProvider()
+
+
 def provider_statuses() -> list[dict[str, Any]]:
     return [
         image_provider().status().as_dict(),
         video_provider().status().as_dict(),
         voice_provider().status().as_dict(),
+        talking_presenter_provider().status().as_dict(),
     ]

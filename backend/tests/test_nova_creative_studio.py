@@ -842,3 +842,68 @@ def test_media_provider_owner_gates_are_explicit() -> None:
     assert "class OpenAIVoiceProvider" in providers
     assert "client.image_to_video.create" in providers
     assert "audio.speech.create" in providers
+
+
+def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("DID_API_KEY", "test-user:test-secret")
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    monkeypatch.setenv("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    provider = providers.DidTalkingPresenterProvider()
+    replies = iter([
+        {"id": "talk-1", "status": "created"},
+        {"id": "talk-1", "status": "done", "result_url": "https://example.invalid/talk.mp4"},
+    ])
+    monkeypatch.setattr(provider, "_request_json", lambda *args, **kwargs: next(replies))
+    monkeypatch.setattr(provider, "_save_remote_video", lambda url: "/media/nova-creative/presenter.mp4")
+    monkeypatch.setattr(providers.time, "sleep", lambda *_: None)
+    result = provider.generate(
+        presenter_image_url="https://example.invalid/presenter.png",
+        script="AMICOR Nova helps handle busywork.",
+    )
+    assert result["status"] == "GENERATED"
+    assert result["asset_generated"] is True
+    assert result["url"].endswith("presenter.mp4")
+    assert result["talk_id"] == "talk-1"
+
+
+def test_did_talking_presenter_requires_live_enable(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("DID_API_KEY", "test-user:test-secret")
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    monkeypatch.delenv("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED", raising=False)
+    status = providers.DidTalkingPresenterProvider().status()
+    assert status.status == "DISABLED"
+    assert status.configured is True
+
+
+def test_did_talking_presenter_timeout_is_safe(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("DID_API_KEY", "test-user:test-secret")
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    monkeypatch.setenv("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_TALKING_PRESENTER_WAIT_SECONDS", "15")
+    provider = providers.DidTalkingPresenterProvider()
+    monkeypatch.setattr(provider, "_request_json", lambda *args, **kwargs: {"id": "talk-2", "status": "created"})
+    ticks = iter([0.0, 20.0])
+    monkeypatch.setattr(providers.time, "monotonic", lambda: next(ticks))
+    result = provider.generate(
+        presenter_image_url="https://example.invalid/presenter.png",
+        script="Hello.",
+    )
+    assert result["status"] == "ERROR"
+    assert "timed out" in result["message"].lower()
+    assert result["asset_generated"] is False
+
+
+def test_did_authorization_is_not_exposed_in_status(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    secret = "test-user:super-secret-value"
+    monkeypatch.setenv("DID_API_KEY", secret)
+    monkeypatch.setenv("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED", "true")
+    provider = providers.DidTalkingPresenterProvider()
+    status = provider.status().as_dict()
+    assert secret not in str(status)
+    assert "super-secret-value" not in str(status)

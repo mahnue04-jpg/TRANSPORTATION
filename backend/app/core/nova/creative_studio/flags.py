@@ -53,6 +53,16 @@ def voice_provider_live_enabled() -> bool:
     return _env_true("NOVA_CREATIVE_VOICE_LIVE_ENABLED")
 
 
+def talking_presenter_provider_configured() -> bool:
+    """D-ID API credential for talking presenter generation."""
+    return bool(str(os.getenv("DID_API_KEY") or "").strip())
+
+
+def talking_presenter_provider_live_enabled() -> bool:
+    """Credentials alone never activate cost-bearing talking presenter generation."""
+    return _env_true("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED")
+
+
 def creative_guardrails() -> dict[str, bool | str]:
     return {
         "EXTERNAL_SUBMISSION_ENABLED": EXTERNAL_SUBMISSION_ENABLED,
@@ -65,6 +75,8 @@ def creative_guardrails() -> dict[str, bool | str]:
         "VIDEO_PROVIDER_LIVE_ENABLED": video_provider_live_enabled(),
         "VOICE_PROVIDER_CONFIGURED": voice_provider_configured(),
         "VOICE_PROVIDER_LIVE_ENABLED": voice_provider_live_enabled(),
+        "TALKING_PRESENTER_PROVIDER_CONFIGURED": talking_presenter_provider_configured(),
+        "TALKING_PRESENTER_PROVIDER_LIVE_ENABLED": talking_presenter_provider_live_enabled(),
         "PLANNING_MODE_AVAILABLE": True,
         "MODE": "PLANNING_SCRIPT_STORYBOARD",
     }
