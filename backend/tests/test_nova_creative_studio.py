@@ -877,7 +877,10 @@ def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
     assert post_payload["script"]["provider"] == {
         "type": "microsoft",
         "voice_id": "en-US-JennyNeural",
+        "voice_config": {"rate": "0.92"},
     }
+    assert post_payload["script"]["ssml"] is True
+    assert "AM ih core Nova" in post_payload["script"]["input"]
 
 
 def test_did_talking_presenter_requires_live_enable(monkeypatch):
