@@ -589,8 +589,10 @@
             "\">Create 8s branded video</button>" : "");
       } else if ((row.kind === "video" || row.kind === "presenter_video") && row.url && mediaAvailable) {
         var isPresenterVideo = row.kind === "presenter_video";
-        var videoLabel = isPresenterVideo ? "Download talking presenter video" : "Download AI video";
-        var presenterCaptionText = isPresenterVideo ? String(row.content || "").trim() : "";
+        var isBodyMotion = isPresenterVideo && row.metadata &&
+          (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
+        var videoLabel = isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video");
+        var presenterCaptionText = isPresenterVideo && !isBodyMotion ? String(row.content || "").trim() : "";
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"" +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
@@ -1017,9 +1019,9 @@
     return {
       script: ($("presenter-script").value || "").trim(),
       presenter_style: "warm professional small-business presenter",
-      presenter_mode: ($("presenter-mode") && $("presenter-mode").value) || "head",
+      presenter_mode: ($("presenter-mode") && $("presenter-mode").value) || "full_body",
       motion_style: ($("presenter-motion-style") && $("presenter-motion-style").value) || "calm_professional",
-      framing: ($("presenter-framing") && $("presenter-framing").value) || "close_up",
+      framing: ($("presenter-framing") && $("presenter-framing").value) || "full_frame",
       output_preset: ($("presenter-output-preset") && $("presenter-output-preset").value) || "9:16"
     };
   }
@@ -1062,6 +1064,12 @@
       button.disabled = false;
     }
   }
+
+  var presenterMode = $("presenter-mode");
+  if (presenterMode) presenterMode.addEventListener("change", function () {
+    var framing = $("presenter-framing");
+    if (framing) framing.value = { head: "close_up", half_body: "waist_up", full_body: "full_frame" }[presenterMode.value];
+  });
 
   ["save-presenter-script", "generate-presenter-voice", "preview-talking-presenter"].forEach(function (id) {
     var button = $(id);
