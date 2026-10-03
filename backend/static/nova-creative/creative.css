@@ -245,3 +245,29 @@ button.secondary { background: #2f2a24; }
 .readiness-empty {
   color: var(--muted);
 }
+
+
+.next-action-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #f7f3ea;
+}
+
+.next-action-card span {
+  flex: 1 1 220px;
+}
+
+.readiness-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.readiness-action {
+  margin-left: auto;
+  white-space: nowrap;
+}
