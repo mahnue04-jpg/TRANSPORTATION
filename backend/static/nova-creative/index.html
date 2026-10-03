@@ -56,7 +56,10 @@
         <label>Audience<input id="brand-audience" maxlength="200" /></label>
         <label>Preferred CTA<input id="brand-cta" maxlength="200" /></label>
         <label class="wide">Brand description<textarea id="brand-description" rows="3"></textarea></label>
-        <button type="submit">Save brand</button>
+        <div class="actions wide">
+          <button type="button" id="load-amicor-brand-defaults" class="secondary">Load AMICOR Nova defaults</button>
+          <button type="submit">Save brand</button>
+        </div>
       </form>
       <div id="brand-list" class="list"></div>
     </section>
@@ -74,6 +77,13 @@
             <option value="promo_video">promo_video</option>
             <option value="explainer">explainer</option>
             <option value="presentation_asset">presentation_asset</option>
+          </select>
+        </label>
+        <label>Production preset
+          <select id="production-preset">
+            <option value="vertical_short" selected>Reels / TikTok / Shorts</option>
+            <option value="social_square">Social feed square</option>
+            <option value="youtube_web">YouTube / web / demo</option>
           </select>
         </label>
         <label>Platform

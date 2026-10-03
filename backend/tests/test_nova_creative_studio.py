@@ -955,3 +955,25 @@ def test_presenter_provider_watermark_readiness_is_explicit() -> None:
     assert "NOVA_CREATIVE_DID_WATERMARK_FREE_OUTPUT" in providers
     assert "NOVA_CREATIVE_VIDEO_WATERMARK_FREE_OUTPUT" in providers
     assert '"watermark_free"' in providers
+
+
+def test_brand_defaults_and_production_presets_static_contract() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+
+    assert 'id="load-amicor-brand-defaults"' in html
+    assert 'id="production-preset"' in html
+    assert 'value="vertical_short"' in html
+    assert 'value="social_square"' in html
+    assert 'value="youtube_web"' in html
+
+    assert 'business_name: "AMICOR Nova"' in js
+    assert 'tagline: "AI help for everyday business operations"' in js
+    assert 'preferred_cta: "Start free today"' in js
+    assert "applyAmicorBrandDefaults" in js
+    assert "applyProductionPreset" in js
+    assert 'imageAspect.value = "9:16"' in js
+    assert 'imageAspect.value = "1:1"' in js
+    assert 'imageAspect.value = "16:9"' in js
+    assert 'presenterOutput.value = "9:16"' in js
+    assert 'presenterOutput.value = "16:9"' in js
