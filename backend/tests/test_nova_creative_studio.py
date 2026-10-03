@@ -977,3 +977,39 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
     assert 'imageAspect.value = "16:9"' in js
     assert 'presenterOutput.value = "9:16"' in js
     assert 'presenterOutput.value = "16:9"' in js
+
+
+def test_export_includes_social_media_production_package() -> None:
+    from app.core.nova.creative_studio.export import export_project_package
+
+    payload = {
+        "project": {"title": "Promo", "platform": "YouTube", "status": "ACTIVE"},
+        "brief": {"cta": "Start free today"},
+        "brand": {"business_name": "AMICOR Nova"},
+        "scenes": [],
+        "assets": [
+            {"id": "img1", "kind": "image", "title": "Artwork", "status": "GENERATED", "url": "/media/art.png", "metadata": {}},
+            {"id": "aud1", "kind": "audio", "title": "Voice", "status": "GENERATED", "url": "/media/voice.mp3", "metadata": {}},
+            {"id": "cap1", "kind": "caption", "title": "Caption", "status": "GENERATED", "content": "Save time. Stay in control.", "metadata": {}},
+            {"id": "tag1", "kind": "hashtags", "title": "Tags", "status": "GENERATED", "content": "#AMICOR #AI", "metadata": {}},
+            {"id": "vid1", "kind": "video", "title": "Final AMICOR Nova promo", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {"final_promo": True}},
+            {"id": "pres1", "kind": "presenter_video", "title": "Presenter", "status": "GENERATED", "url": "/media/presenter.mp4", "metadata": {"publish_ready": True, "quality_state": "PUBLISH_READY"}},
+        ],
+    }
+
+    exported = export_project_package(payload, fmt="json")
+    package = exported["package"]
+    social = package["social_media_package"]
+    checklist = package["delivery_checklist"]
+
+    assert social["production_ready"] is True
+    assert social["final_video"]["url"] == "/media/final.mp4"
+    assert social["presenter_video"]["publish_ready"] is True
+    assert social["thumbnail_or_artwork"]["url"] == "/media/art.png"
+    assert social["voice_audio"]["url"] == "/media/voice.mp3"
+    assert social["caption_copy"] == "Save time. Stay in control."
+    assert social["cta"] == "Start free today"
+    assert checklist["video_ready"] is True
+    assert checklist["presenter_ready"] is True
+    assert checklist["thumbnail_ready"] is True
+    assert checklist["voice_ready"] is True

@@ -17,6 +17,20 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
     brand = payload.get("brand") or {}
     brief = payload.get("brief") or {}
 
+    final_video = _latest_asset(
+        assets,
+        "video",
+        predicate=lambda a: bool((a.get("metadata") or {}).get("final_promo")),
+    )
+    presenter_video = _latest_asset(assets, "presenter_video")
+    image_asset = _latest_asset(assets, "image")
+    audio_asset = _latest_asset(assets, "audio")
+
+    presenter_meta = (presenter_video or {}).get("metadata") or {}
+    presenter_publish_ready = bool(presenter_meta.get("publish_ready"))
+    final_video_ready = bool(final_video and final_video.get("url"))
+    production_ready = bool(final_video_ready and (not presenter_video or presenter_publish_ready))
+
     package = {
         "export_kind": "nova_creative_studio_project_package",
         "external_publishing": False,
@@ -32,10 +46,34 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
         "scenes": scenes,
         "prompts": [a for a in assets if a.get("kind") == "image_prompt"],
         "voiceover_copy": _first_content(assets, "voiceover"),
+        "social_media_package": {
+            "production_ready": production_ready,
+            "platform": project.get("platform"),
+            "final_video": _asset_ref(final_video),
+            "presenter_video": _asset_ref(presenter_video),
+            "thumbnail_or_artwork": _asset_ref(image_asset),
+            "voice_audio": _asset_ref(audio_asset),
+            "caption_copy": _first_content(assets, "caption"),
+            "hashtags": _first_content(assets, "hashtags"),
+            "cta": brief.get("cta") or brand.get("preferred_cta") or "",
+            "quality_notes": [
+                "Final publishing remains owner-controlled.",
+                "Presenter video must be marked publish_ready when one is included.",
+                "Provider watermarks are never removed by Nova.",
+            ],
+        },
+        "delivery_checklist": {
+            "video_ready": final_video_ready,
+            "presenter_ready": bool(not presenter_video or presenter_publish_ready),
+            "caption_ready": bool(_first_content(assets, "caption")),
+            "thumbnail_ready": bool(image_asset and image_asset.get("url")),
+            "voice_ready": bool(audio_asset and audio_asset.get("url")),
+            "brand_present": bool(brand),
+        },
         "metadata": {
             "asset_count": len(assets),
             "scene_count": len(scenes),
-            "status_note": "Planning/generated text only unless a real provider completed media.",
+            "status_note": "Package may include real provider media, but external publishing remains OFF until owner action.",
         },
     }
 
@@ -55,6 +93,36 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
         "url": None,
     }
 
+
+
+def _latest_asset(
+    assets: list[dict[str, Any]],
+    kind: str,
+    *,
+    predicate=None,
+) -> dict[str, Any] | None:
+    matches = [a for a in assets if a.get("kind") == kind]
+    if predicate is not None:
+        matches = [a for a in matches if predicate(a)]
+    for asset in reversed(matches):
+        if str(asset.get("status") or "").upper() == "GENERATED":
+            return asset
+    return matches[-1] if matches else None
+
+
+def _asset_ref(asset: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not asset:
+        return None
+    metadata = asset.get("metadata") or {}
+    return {
+        "id": asset.get("id"),
+        "title": asset.get("title"),
+        "kind": asset.get("kind"),
+        "status": asset.get("status"),
+        "url": asset.get("url"),
+        "quality_state": metadata.get("quality_state"),
+        "publish_ready": metadata.get("publish_ready"),
+    }
 
 def _first_content(assets: list[dict[str, Any]], kind: str) -> str:
     for asset in assets:
@@ -86,6 +154,14 @@ def _to_markdown(package: dict[str, Any]) -> str:
         "",
         "## Voiceover",
         package.get("voiceover_copy") or "_none_",
+        "",
+        "## Production package",
+        f"- Production ready: {(package.get('social_media_package') or {}).get('production_ready')}",
+        f"- Final video: {((package.get('social_media_package') or {}).get('final_video') or {}).get('url') or '_none_'}",
+        f"- Presenter video: {((package.get('social_media_package') or {}).get('presenter_video') or {}).get('url') or '_none_'}",
+        f"- Thumbnail/artwork: {((package.get('social_media_package') or {}).get('thumbnail_or_artwork') or {}).get('url') or '_none_'}",
+        f"- Voice audio: {((package.get('social_media_package') or {}).get('voice_audio') or {}).get('url') or '_none_'}",
+        f"- CTA: {(package.get('social_media_package') or {}).get('cta') or '_none_'}",
         "",
         "## Scenes",
     ]
