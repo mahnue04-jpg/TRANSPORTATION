@@ -543,12 +543,12 @@
       (presenterMeta.publish_ready === true ? "PUBLISH_READY" : (presenterMeta.quality_state || "PREVIEW_ONLY"));
 
     var checks = [
-      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo" },
-      { label: "Presenter", ok: presenterReady, note: presenterState },
-      { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image" },
-      { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice" },
-      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption" },
-      { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand" }
+      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
+      { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
+      { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
+      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
+      { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand", action: "brand-profile", actionLabel: "Set up brand" }
     ];
 
     var allReady = checks.every(function (item) { return item.ok; });
@@ -557,12 +557,45 @@
       "<span>" + (allReady ? "Core production assets are ready. Publishing still requires owner action." :
         "Complete the missing or preview-only items before final publishing.") + "</span></div>";
 
+    var next = checks.find(function (item) { return !item.ok; });
+    if (next) {
+      header += "<div class=\"next-action-card\"><strong>Next action</strong><span>" +
+        escapeHtml(next.actionLabel) + "</span><button type=\"button\" class=\"secondary readiness-action\" data-next-action=\"" +
+        escapeHtml(next.action) + "\">Do this next</button></div>";
+    }
+
     target.innerHTML = header + checks.map(function (item) {
+      var actionButton = !item.ok ? "<button type=\"button\" class=\"secondary readiness-action\" data-next-action=\"" +
+        escapeHtml(item.action) + "\">" + escapeHtml(item.actionLabel) + "</button>" : "";
       return "<div class=\"readiness-item " + (item.ok ? "ready" : "missing") + "\">" +
         "<span class=\"readiness-dot\" aria-hidden=\"true\"></span>" +
-        "<div><strong>" + escapeHtml(item.label) + "</strong><div class=\"muted\">" +
-        escapeHtml(item.note) + "</div></div></div>";
+        "<div class=\"readiness-copy\"><strong>" + escapeHtml(item.label) + "</strong><div class=\"muted\">" +
+        escapeHtml(item.note) + "</div></div>" + actionButton + "</div>";
     }).join("");
+
+    Array.prototype.forEach.call(target.querySelectorAll(".readiness-action"), function (button) {
+      button.addEventListener("click", function () {
+        var action = button.getAttribute("data-next-action");
+        var targetButton = null;
+        if (action === "build-final-promo") targetButton = $("build-final-promo");
+        else if (action === "preview-talking-presenter") targetButton = $("preview-talking-presenter");
+        else if (action === "generate-image") targetButton = document.querySelector('[data-action="image"]');
+        else if (action === "generate-voice") targetButton = document.querySelector('[data-action="voice"]');
+        else if (action === "generate-caption") targetButton = document.querySelector('[data-action="caption"]');
+        else if (action === "brand-profile") {
+          var brandForm = $("brand-form");
+          if (brandForm && brandForm.scrollIntoView) brandForm.scrollIntoView({ behavior: "smooth", block: "center" });
+          var defaults = $("load-amicor-brand-defaults");
+          if (defaults) defaults.focus();
+          showBanner("Set up or select the AMICOR Nova brand profile, then return to production readiness.", true);
+          return;
+        }
+        if (targetButton) {
+          if (targetButton.scrollIntoView) targetButton.scrollIntoView({ behavior: "smooth", block: "center" });
+          targetButton.click();
+        }
+      });
+    });
   }
 
   async function refreshAssets() {

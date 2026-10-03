@@ -1092,3 +1092,20 @@ def test_unavailable_body_provider_does_not_generate_paid_source_image(monkeypat
     )
     assert result["status"] == "CONFIG_REQUIRED"
     assert result["publish_ready"] is False
+
+
+def test_creative_ui_readiness_panel_has_next_actions() -> None:
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+
+    assert "Next action" in js
+    assert "Do this next" in js
+    assert 'data-next-action' in js
+    assert 'build-final-promo' in js
+    assert 'preview-talking-presenter' in js
+    assert 'generate-image' in js
+    assert 'generate-voice' in js
+    assert 'generate-caption' in js
+    assert 'brand-profile' in js
+    assert '.next-action-card' in css
+    assert '.readiness-action' in css
