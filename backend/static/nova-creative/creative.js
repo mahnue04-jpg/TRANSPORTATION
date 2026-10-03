@@ -903,7 +903,11 @@
   function presenterPayload() {
     return {
       script: ($("presenter-script").value || "").trim(),
-      presenter_style: "warm professional small-business presenter"
+      presenter_style: "warm professional small-business presenter",
+      presenter_mode: ($("presenter-mode") && $("presenter-mode").value) || "head",
+      motion_style: ($("presenter-motion-style") && $("presenter-motion-style").value) || "calm_professional",
+      framing: ($("presenter-framing") && $("presenter-framing").value) || "close_up",
+      output_preset: ($("presenter-output-preset") && $("presenter-output-preset").value) || "9:16"
     };
   }
 
@@ -922,7 +926,7 @@
     var messages = {
       save: ["Saving presenter script...", "Presenter script saved."],
       voice: ["Generating the presenter voice from this exact script...", "Presenter voice generated."],
-      preview: ["Preparing talking presenter preview...", "Talking presenter preview prepared."]
+      preview: ["Preparing presenter render...", "Presenter render prepared."]
     };
     button.disabled = true;
     showBanner(messages[kind][0], true);
