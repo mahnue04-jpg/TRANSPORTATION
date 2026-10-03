@@ -818,6 +818,63 @@
       showBanner(err.message, false);
     }
   });
+  var amicorDefaults = {
+    business_name: "AMICOR Nova",
+    tagline: "AI help for everyday business operations",
+    tone: "Professional, friendly, trustworthy",
+    target_audience: "Small business owners, service businesses, local businesses, and growing teams",
+    preferred_cta: "Start free today",
+    brand_description: "AMICOR Nova helps small businesses handle documents, emails, reports, scheduling, outreach, and other day-to-day operational tasks with AI-assisted drafts you review first. Save time, stay organized, and stay in control."
+  };
+
+  function applyAmicorBrandDefaults() {
+    $("brand-name").value = amicorDefaults.business_name;
+    $("brand-tagline").value = amicorDefaults.tagline;
+    $("brand-tone").value = amicorDefaults.tone;
+    $("brand-audience").value = amicorDefaults.target_audience;
+    $("brand-cta").value = amicorDefaults.preferred_cta;
+    $("brand-description").value = amicorDefaults.brand_description;
+    showBanner("AMICOR Nova brand defaults loaded. Review them, then save the brand.", true);
+  }
+
+  var loadAmicorDefaults = $("load-amicor-brand-defaults");
+  if (loadAmicorDefaults) {
+    loadAmicorDefaults.addEventListener("click", applyAmicorBrandDefaults);
+  }
+
+  function applyProductionPreset(value) {
+    var preset = String(value || "vertical_short");
+    var platform = $("project-platform");
+    var imageAspect = $("image-aspect");
+    var presenterOutput = $("presenter-output-preset");
+    var duration = $("project-duration");
+    if (preset === "social_square") {
+      if (platform) platform.value = "Instagram";
+      if (imageAspect) imageAspect.value = "1:1";
+      if (presenterOutput) presenterOutput.value = "1:1";
+      if (duration) duration.value = "30";
+    } else if (preset === "youtube_web") {
+      if (platform) platform.value = "YouTube";
+      if (imageAspect) imageAspect.value = "16:9";
+      if (presenterOutput) presenterOutput.value = "16:9";
+      if (duration) duration.value = "60";
+    } else {
+      if (platform) platform.value = "TikTok";
+      if (imageAspect) imageAspect.value = "9:16";
+      if (presenterOutput) presenterOutput.value = "9:16";
+      if (duration) duration.value = "30";
+    }
+  }
+
+  var productionPreset = $("production-preset");
+  if (productionPreset) {
+    productionPreset.addEventListener("change", function () {
+      applyProductionPreset(productionPreset.value);
+      showBanner("Production preset applied to platform, aspect ratio, presenter output, and duration.", true);
+    });
+    applyProductionPreset(productionPreset.value);
+  }
+
   $("brand-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     try {
