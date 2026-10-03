@@ -511,12 +511,68 @@
       });
     });
   }
+  function latestAsset(assets, kind, predicate) {
+    var matches = (assets || []).filter(function (row) {
+      if (row.kind !== kind) return false;
+      return predicate ? predicate(row) : true;
+    });
+    return matches.length ? matches[matches.length - 1] : null;
+  }
+
+  function renderProductionReadiness(detail) {
+    var target = $("production-readiness");
+    if (!target) return;
+    if (!detail) {
+      target.innerHTML = "<div class=\"readiness-empty\">Select a project to check readiness.</div>";
+      return;
+    }
+
+    var assets = detail.assets || [];
+    var brand = detail.brand || null;
+    var finalVideo = latestAsset(assets, "video", function (row) {
+      return !!(row.metadata && row.metadata.final_promo);
+    });
+    var presenter = latestAsset(assets, "presenter_video");
+    var artwork = latestAsset(assets, "image");
+    var audio = latestAsset(assets, "audio");
+    var caption = latestAsset(assets, "caption");
+
+    var presenterMeta = presenter && presenter.metadata || {};
+    var presenterReady = !presenter || presenterMeta.publish_ready === true;
+    var presenterState = !presenter ? "NOT USED" :
+      (presenterMeta.publish_ready === true ? "PUBLISH_READY" : (presenterMeta.quality_state || "PREVIEW_ONLY"));
+
+    var checks = [
+      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo" },
+      { label: "Presenter", ok: presenterReady, note: presenterState },
+      { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image" },
+      { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice" },
+      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption" },
+      { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand" }
+    ];
+
+    var allReady = checks.every(function (item) { return item.ok; });
+    var header = "<div class=\"readiness-summary " + (allReady ? "ready" : "needs-work") + "\">" +
+      "<strong>" + (allReady ? "READY FOR OWNER REVIEW" : "NEEDS WORK") + "</strong>" +
+      "<span>" + (allReady ? "Core production assets are ready. Publishing still requires owner action." :
+        "Complete the missing or preview-only items before final publishing.") + "</span></div>";
+
+    target.innerHTML = header + checks.map(function (item) {
+      return "<div class=\"readiness-item " + (item.ok ? "ready" : "missing") + "\">" +
+        "<span class=\"readiness-dot\" aria-hidden=\"true\"></span>" +
+        "<div><strong>" + escapeHtml(item.label) + "</strong><div class=\"muted\">" +
+        escapeHtml(item.note) + "</div></div></div>";
+    }).join("");
+  }
+
   async function refreshAssets() {
     if (!activeProjectId) {
       $("asset-list").innerHTML = "<p class=\"hint\">Select a project.</p>";
+      renderProductionReadiness(null);
       return;
     }
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+    renderProductionReadiness(detail);
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
       var mediaAvailable = row.media_available !== false;
