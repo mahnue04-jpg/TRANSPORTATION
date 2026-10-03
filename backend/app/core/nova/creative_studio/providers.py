@@ -378,7 +378,14 @@ class RunwayVideoProvider:
             or "Professional small-business operations promo video"
         ).strip()
         platform = str(brief.get("platform") or "").strip().lower()
-        ratio = "720:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:720"
+        requested_aspect = str(brief.get("aspect_ratio") or "").strip()
+        ratio = {
+            "9:16": "720:1280",
+            "16:9": "1280:720",
+            "1:1": "1024:1024",
+        }.get(requested_aspect)
+        if ratio is None:
+            ratio = "720:1280" if platform in {"tiktok", "instagram", "youtube shorts"} else "1280:720"
         duration = int(str(os.getenv("NOVA_CREATIVE_VIDEO_DURATION_SECONDS") or "5"))
         if duration < 2 or duration > 10:
             duration = 5
@@ -496,6 +503,7 @@ class RunwayVideoProvider:
                     "duration_seconds": duration,
                     "ratio": ratio,
                     "generation_mode": "image_to_motion",
+                    "watermark_free": str(os.getenv("NOVA_CREATIVE_VIDEO_WATERMARK_FREE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"},
                 }
 
             if state in {"FAILED", "CANCELED"}:
@@ -816,6 +824,7 @@ class DidTalkingPresenterProvider:
                     "asset_generated": True,
                     "provider": self.provider_id,
                     "talk_id": talk_id,
+                    "watermark_free": str(os.getenv("NOVA_CREATIVE_DID_WATERMARK_FREE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"},
                 }
             if state in {"error", "failed", "rejected"}:
                 return {

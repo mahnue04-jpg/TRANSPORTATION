@@ -921,3 +921,37 @@ def test_did_authorization_is_not_exposed_in_status(monkeypatch):
     status = provider.status().as_dict()
     assert secret not in str(status)
     assert "super-secret-value" not in str(status)
+
+
+def test_presenter_mode_controls_and_payload_contract() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    router = (CREATIVE_PY / "router.py").read_text(encoding="utf-8")
+
+    assert 'id="presenter-mode"' in html
+    assert 'value="head"' in html
+    assert 'value="half_body"' in html
+    assert 'value="full_body"' in html
+    assert 'id="presenter-motion-style"' in html
+    assert 'id="presenter-framing"' in html
+    assert 'id="presenter-output-preset"' in html
+
+    assert 'presenter_mode:' in js
+    assert 'motion_style:' in js
+    assert 'framing:' in js
+    assert 'output_preset:' in js
+
+    assert 'payload.presenter_mode == "head"' in router
+    assert '"half_body"' in router
+    assert '"full_body"' in router
+    assert 'video_provider().generate' in router
+    assert '"quality_state"' in router
+    assert '"publish_ready"' in router
+    assert "Nova never removes provider watermarks" in router
+
+
+def test_presenter_provider_watermark_readiness_is_explicit() -> None:
+    providers = (CREATIVE_PY / "providers.py").read_text(encoding="utf-8")
+    assert "NOVA_CREATIVE_DID_WATERMARK_FREE_OUTPUT" in providers
+    assert "NOVA_CREATIVE_VIDEO_WATERMARK_FREE_OUTPUT" in providers
+    assert '"watermark_free"' in providers
