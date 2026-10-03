@@ -169,3 +169,25 @@ button.secondary { background: #2f2a24; }
 .presenter-live-caption:empty {
   display: none;
 }
+
+
+.presenter-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.presenter-settings label {
+  min-width: 0;
+}
+
+.presenter-settings select {
+  min-height: 44px;
+}
+
+.presenter-controls {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
