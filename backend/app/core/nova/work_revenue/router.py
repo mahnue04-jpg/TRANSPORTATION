@@ -21,6 +21,7 @@ from app.core.nova.work_revenue import ops
 from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue import autonomous_executor
 from app.core.nova.work_revenue import work_inputs
+from app.core.nova.agent_coordination import coordination_snapshot
 from app.core.nova.work_revenue import owner_completion
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
@@ -146,6 +147,22 @@ def work_today_summary(
     db: Session = Depends(get_db),
 ):
     return service.today_summary(db, organization_id=_resolve_org(user, organization_id), user=user)
+
+
+@router.get("/agent-coordination")
+def agent_coordination(
+    organization_id: str | None = None,
+    limit: int = 50,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner-only shared context between Work & Revenue and Operations Agent."""
+    return coordination_snapshot(
+        db,
+        organization_id=_resolve_org(user, organization_id),
+        user=user,
+        limit=limit,
+    )
 
 
 @router.get("/capabilities", response_model=list[CapabilityOut])
