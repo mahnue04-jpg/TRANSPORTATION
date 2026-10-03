@@ -503,6 +503,7 @@ class RunwayVideoProvider:
                     "duration_seconds": duration,
                     "ratio": ratio,
                     "generation_mode": "image_to_motion",
+                    "watermark_free": str(os.getenv("NOVA_CREATIVE_VIDEO_WATERMARK_FREE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"},
                 }
 
             if state in {"FAILED", "CANCELED"}:
@@ -823,6 +824,7 @@ class DidTalkingPresenterProvider:
                     "asset_generated": True,
                     "provider": self.provider_id,
                     "talk_id": talk_id,
+                    "watermark_free": str(os.getenv("NOVA_CREATIVE_DID_WATERMARK_FREE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"},
                 }
             if state in {"error", "failed", "rejected"}:
                 return {
