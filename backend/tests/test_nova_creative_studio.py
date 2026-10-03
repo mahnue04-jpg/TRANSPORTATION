@@ -1031,3 +1031,20 @@ def test_creative_ui_has_production_readiness_panel() -> None:
     assert ".readiness-grid" in css
     assert ".readiness-summary.ready" in css
     assert ".readiness-item.missing" in css
+
+
+def test_creative_ui_readiness_panel_has_next_actions() -> None:
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+
+    assert "Next action" in js
+    assert "Do this next" in js
+    assert 'data-next-action' in js
+    assert 'build-final-promo' in js
+    assert 'preview-talking-presenter' in js
+    assert 'generate-image' in js
+    assert 'generate-voice' in js
+    assert 'generate-caption' in js
+    assert 'brand-profile' in js
+    assert '.next-action-card' in css
+    assert '.readiness-action' in css
