@@ -1013,3 +1013,21 @@ def test_export_includes_social_media_production_package() -> None:
     assert checklist["presenter_ready"] is True
     assert checklist["thumbnail_ready"] is True
     assert checklist["voice_ready"] is True
+
+
+def test_creative_ui_has_production_readiness_panel() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
+
+    assert 'id="production-readiness"' in html
+    assert "Production readiness" in html
+    assert "renderProductionReadiness" in js
+    assert '"PUBLISH_READY"' in js
+    assert '"PREVIEW_ONLY"' in js
+    assert "READY FOR OWNER REVIEW" in js
+    assert "NEEDS WORK" in js
+    assert "Build Final Promo" in js
+    assert ".readiness-grid" in css
+    assert ".readiness-summary.ready" in css
+    assert ".readiness-item.missing" in css
