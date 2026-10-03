@@ -74,6 +74,7 @@ from app.core.nova.work_revenue.schemas import (
     TodaySummaryOut,
     TrackerOut,
 )
+from app.core.nova.work_revenue.owner_notifications import queue_owner_approval_notification
 from app.core.nova.work_revenue.owner_facts import FACT_SOURCE_OWNER, fact_catalog
 from app.core.nova.work_revenue.verified_profile import OWNER_INPUT_REQUIRED, profile_snapshot
 from app.helpers import now, uuid4
@@ -1068,20 +1069,20 @@ def _upsert_owner_actions(
     for action_type in action_types:
         if action_type not in OWNER_ACTION_TYPES or action_type in existing:
             continue
-        db.add(
-            NovaWorkOwnerAction(
-                action_id=_new_id("NWAO-"),
-                organization_id=row.organization_id,
-                owner_user_id=user.user_id,
-                opportunity_id=row.opportunity_id,
-                application_id=application_id,
-                action_type=action_type,
-                display_label="OWNER ACTION REQUIRED",
-                explanation=explanations.get(action_type, "Owner action is required. Nova will not bypass this control."),
-                status="OPEN",
-                category=category_for_action(action_type),
-            )
+        owner_action = NovaWorkOwnerAction(
+            action_id=_new_id("NWAO-"),
+            organization_id=row.organization_id,
+            owner_user_id=user.user_id,
+            opportunity_id=row.opportunity_id,
+            application_id=application_id,
+            action_type=action_type,
+            display_label="OWNER ACTION REQUIRED",
+            explanation=explanations.get(action_type, "Owner action is required. Nova will not bypass this control."),
+            status="OPEN",
+            category=category_for_action(action_type),
         )
+        db.add(owner_action)
+        queue_owner_approval_notification(db, owner_action, owner_email=user.email)
         safe_type = (
             "IDENTITY_STEP"
             if action_type in {"SSN", "BANK_INFORMATION", "TAX_INFORMATION"}
