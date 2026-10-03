@@ -139,9 +139,9 @@
         <div class="presenter-settings">
           <label>Presenter mode
             <select id="presenter-mode">
-              <option value="head" selected>Talking head</option>
+              <option value="head">Talking head</option>
               <option value="half_body">Half body motion</option>
-              <option value="full_body">Full body motion</option>
+              <option value="full_body" selected>Full body motion</option>
             </select>
           </label>
           <label>Motion style
@@ -153,9 +153,9 @@
           </label>
           <label>Framing
             <select id="presenter-framing">
-              <option value="close_up" selected>Close-up</option>
+              <option value="close_up">Close-up</option>
               <option value="waist_up">Waist-up</option>
-              <option value="full_frame">Full frame</option>
+              <option value="full_frame" selected>Full frame</option>
             </select>
           </label>
           <label>Output
@@ -166,7 +166,7 @@
             </select>
           </label>
         </div>
-        <p class="hint">Talking head uses D-ID lip sync. Half-body and full-body use Nova's motion-video provider so the presenter can move beyond the face. Provider watermarks are never removed; use a clean commercial provider output for final publishing.</p>
+        <p class="hint">Full body motion starts with head-to-toe framing. Review the generated clip for natural arm, hand, torso, and leg movement. Body motion previews do not include narration or lip sync yet. Talking head uses D-ID lip sync. Provider watermarks are never removed; use a clean commercial provider output for final publishing.</p>
         <label>Talking presenter script
           <textarea id="presenter-script" rows="6" maxlength="1600">What if your small business had an AI assistant that could help handle busywork and save time? Busywork piles up fast for small business owners, taking focus away from the work that matters. AMICOR Nova helps with documents, emails, reports, scheduling, and other operational tasks—with drafts you can review first. Save time. Stay in control. Try AMICOR Nova. Start free today.</textarea>
         </label>

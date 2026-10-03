@@ -944,7 +944,7 @@ def test_presenter_mode_controls_and_payload_contract() -> None:
     assert 'payload.presenter_mode == "head"' in router
     assert '"half_body"' in router
     assert '"full_body"' in router
-    assert 'video_provider().generate' in router
+    assert 'motion_provider.generate' in router
     assert '"quality_state"' in router
     assert '"publish_ready"' in router
     assert "Nova never removes provider watermarks" in router
@@ -1031,6 +1031,67 @@ def test_creative_ui_has_production_readiness_panel() -> None:
     assert ".readiness-grid" in css
     assert ".readiness-summary.ready" in css
     assert ".readiness-item.missing" in css
+
+
+@pytest.mark.parametrize("mode,expected_framing", [("half_body", "waist_up"), ("full_body", "full_frame")])
+def test_body_presenter_routes_to_motion_without_claiming_speech(monkeypatch, mode, expected_framing):
+    from types import SimpleNamespace
+    from app.auth import UserContext
+    import importlib
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Body demo", "project_type": "short_video"})
+    calls = []
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+    monkeypatch.setattr(svc, "request_image_generation", lambda *args, **kwargs: {
+        "url": "https://example.test/source.png", "asset": {"id": "image-a"},
+    })
+    def generate(*, brief):
+        calls.append(brief)
+        return {"status": "GENERATED", "asset_generated": True, "url": "https://example.test/body.mp4", "watermark_free": True}
+    monkeypatch.setattr(studio_router, "video_provider", lambda: SimpleNamespace(
+        status=lambda: SimpleNamespace(status="AVAILABLE"), generate=generate,
+    ))
+    def unexpected_head():
+        pytest.fail("Body motion must not invoke the talking-head provider")
+    monkeypatch.setattr(studio_router, "talking_presenter_provider", unexpected_head)
+    result = studio_router.prepare_talking_presenter_preview(
+        project["id"], studio_router.PresenterIn(script="Hello from Nova", presenter_mode=mode, framing="close_up"),
+        UserContext(user_id="owner-a", email="owner@example.test", role="admin"), None,
+    )
+    assert len(calls) == 1
+    assert calls[0]["prompt_image_url"] == "https://example.test/source.png"
+    assert ("head-to-toe" if mode == "full_body" else "waist-up") in calls[0]["prompt_text"]
+    assert result["framing"] == expected_framing
+    assert result["lip_sync"] is False
+    assert result["talking_presenter"] is False
+    assert result["publish_ready"] is False
+    assert result["quality_state"] == "PREVIEW_ONLY"
+    assert result["body_motion_review_required"] is True
+
+
+def test_unavailable_body_provider_does_not_generate_paid_source_image(monkeypatch):
+    from types import SimpleNamespace
+    from app.auth import UserContext
+    import importlib
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Body demo", "project_type": "short_video"})
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+    monkeypatch.setattr(studio_router, "video_provider", lambda: SimpleNamespace(
+        status=lambda: SimpleNamespace(status="CONFIG_REQUIRED", message="Configure motion provider"),
+    ))
+    def unexpected_image(*args, **kwargs):
+        pytest.fail("Unavailable motion provider must not spend on a source image")
+    monkeypatch.setattr(svc, "request_image_generation", unexpected_image)
+    result = studio_router.prepare_talking_presenter_preview(
+        project["id"], studio_router.PresenterIn(script="Hello", presenter_mode="full_body"),
+        UserContext(user_id="owner-a", email="owner@example.test", role="admin"), None,
+    )
+    assert result["status"] == "CONFIG_REQUIRED"
+    assert result["publish_ready"] is False
 
 
 def test_creative_ui_readiness_panel_has_next_actions() -> None:
