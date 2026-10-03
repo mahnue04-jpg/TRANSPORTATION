@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
-from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider
+from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider, video_provider
 from app.db.session import SessionLocal, get_db
 
 logger = logging.getLogger(__name__)
@@ -194,6 +194,10 @@ class ExportIn(BaseModel):
 class PresenterIn(BaseModel):
     script: str = Field(min_length=1, max_length=1600)
     presenter_style: str = Field(default="warm professional small-business presenter", max_length=240)
+    presenter_mode: str = Field(default="head", pattern="^(head|half_body|full_body)$")
+    motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
+    framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
+    output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
 
 
 @router.get("/guardrails")
@@ -502,6 +506,15 @@ def prepare_talking_presenter_preview(
     service = get_service(db)
     try:
         service._project_or_404(user.user_id, project_id)
+        presenter_meta = {
+            "presenter_style": payload.presenter_style,
+            "presenter_mode": payload.presenter_mode,
+            "motion_style": payload.motion_style,
+            "framing": payload.framing,
+            "output_preset": payload.output_preset,
+            "talking_presenter": True,
+            "preview": True,
+        }
         service._save_text_asset(
             owner_id=user.user_id,
             project_id=project_id,
@@ -509,50 +522,129 @@ def prepare_talking_presenter_preview(
             title="Talking presenter preview script",
             content=payload.script,
             status="GENERATED",
-            metadata={"presenter_style": payload.presenter_style, "talking_presenter": True, "preview": True},
+            metadata=presenter_meta,
             url=None,
         )
-        provider_name = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip()
-        if not provider_name:
-            return {
-                "status": "CONFIG_REQUIRED",
-                "message": "Presenter script is saved. Connect a lip-sync/talking-avatar provider before Nova generates a real talking face; Nova will not fake lip sync with a still image.",
-                "script": payload.script,
-                "presenter_style": payload.presenter_style,
-            }
-        images = [
-            asset for asset in service.store.list_assets(project_id, user.user_id)
-            if asset.kind == "image" and asset.url and str(asset.status or "").upper() == "GENERATED"
-        ]
-        if not images:
-            return {
-                "status": "CONFIG_REQUIRED",
-                "message": "Generate or select a presenter image before creating the talking presenter preview.",
-                "script": payload.script,
-                "presenter_style": payload.presenter_style,
-            }
-        presenter_image = images[-1]
-        result = talking_presenter_provider().generate(
-            presenter_image_url=str(presenter_image.url),
-            script=payload.script,
-        )
+
+        # Talking-head mode keeps the dedicated D-ID lip-sync path.
+        if payload.presenter_mode == "head":
+            provider_name = str(os.getenv("NOVA_TALKING_PRESENTER_PROVIDER") or "").strip()
+            if not provider_name:
+                return {
+                    "status": "CONFIG_REQUIRED",
+                    "message": "Presenter script is saved. Connect a lip-sync/talking-avatar provider before Nova generates a real talking face.",
+                    "script": payload.script,
+                    **presenter_meta,
+                }
+            images = [
+                asset for asset in service.store.list_assets(project_id, user.user_id)
+                if asset.kind == "image" and asset.url and str(asset.status or "").upper() == "GENERATED"
+            ]
+            if not images:
+                return {
+                    "status": "CONFIG_REQUIRED",
+                    "message": "Generate or select a clean presenter image before creating the talking presenter preview.",
+                    "script": payload.script,
+                    **presenter_meta,
+                }
+            presenter_image = images[-1]
+            result = talking_presenter_provider().generate(
+                presenter_image_url=str(presenter_image.url),
+                script=payload.script,
+            )
+            source_image_asset_id = presenter_image.id
+            title = "Talking presenter preview"
+        else:
+            # Half/full-body motion uses a newly generated clean source image and
+            # the existing motion-video provider instead of pretending D-ID head
+            # animation is full-body movement.
+            framing_text = {
+                "half_body": "waist-up presenter with both hands visible and natural arm gestures",
+                "full_body": "full-body standing presenter visible head-to-toe with room for natural body movement",
+            }[payload.presenter_mode]
+            motion_text = {
+                "calm_professional": "calm professional gestures, subtle natural movement",
+                "friendly_explainer": "friendly explanatory hand gestures and relaxed natural movement",
+                "energetic_promo": "confident energetic promotional gestures while staying professional",
+            }[payload.motion_style]
+            source_prompt = (
+                "Photorealistic business presenter, " + framing_text + ". "
+                "Professional modern small-business setting, clean lighting, realistic anatomy, natural hands, "
+                "camera-ready wardrobe, no text, no logos, no watermarks, no provider marks. "
+                "Keep the presenter centered and leave safe space for captions and an official AMICOR logo overlay later. "
+                "Aspect ratio " + payload.output_preset + "."
+            )
+            image_result = service.request_image_generation(
+                user.user_id,
+                project_id,
+                aspect_ratio=payload.output_preset,
+                prompt=source_prompt,
+            )
+            source_url = str(image_result.get("url") or "").strip()
+            if not source_url:
+                provider_info = image_result.get("provider") or {}
+                return {
+                    "status": str(provider_info.get("status") or "ERROR"),
+                    "message": provider_info.get("message") or "Nova could not generate a clean presenter source image.",
+                    "script": payload.script,
+                    **presenter_meta,
+                }
+            source_asset = image_result.get("asset") or {}
+            source_image_asset_id = source_asset.get("id")
+            motion_prompt = (
+                f"{framing_text}; {motion_text}. The presenter addresses the camera naturally. "
+                "Keep facial identity stable, preserve realistic hands and body proportions, avoid text and logos, "
+                "and do not add watermarks. This is a clean business social-media presenter shot."
+            )
+            result = video_provider().generate(
+                brief={
+                    "project_id": project_id,
+                    "title": "Nova presenter motion",
+                    "objective": payload.script[:600],
+                    "platform": "TikTok" if payload.output_preset == "9:16" else "YouTube",
+                    "aspect_ratio": payload.output_preset,
+                    "prompt_text": motion_prompt,
+                    "prompt_image_url": source_url,
+                }
+            )
+            title = "Half-body presenter motion" if payload.presenter_mode == "half_body" else "Full-body presenter motion"
+
         status = str(result.get("status") or CONFIG_REQUIRED)
         generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
+        provider_watermark_free = bool(result.get("watermark_free", False))
+        publish_ready = bool(generated_url and provider_watermark_free)
+        quality_state = "PUBLISH_READY" if publish_ready else ("PREVIEW_ONLY" if generated_url else status)
+
         asset = service._save_text_asset(
             owner_id=user.user_id,
             project_id=project_id,
             kind="presenter_video",
-            title="Talking presenter preview",
+            title=title,
             content=payload.script,
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={"presenter_style": payload.presenter_style, "talking_presenter": True, "preview": True, "source_image_asset_id": presenter_image.id, "provider_result": result},
+            metadata={
+                **presenter_meta,
+                "source_image_asset_id": source_image_asset_id,
+                "provider_result": result,
+                "quality_state": quality_state,
+                "publish_ready": publish_ready,
+                "watermark_policy": "Nova never removes provider watermarks. Use a provider output licensed and delivered watermark-free for final publishing.",
+            },
             url=generated_url,
         )
+        message = result.get("message")
+        if generated_url and not publish_ready:
+            message = (
+                f"{message or 'Presenter render generated.'} "
+                "Saved as PREVIEW_ONLY until the provider confirms a licensed watermark-free final output."
+            )
         return {
             "status": status,
-            "message": result.get("message"),
+            "message": message,
             "script": payload.script,
-            "presenter_style": payload.presenter_style,
+            **presenter_meta,
+            "quality_state": quality_state,
+            "publish_ready": publish_ready,
             "provider": result,
             "asset": asset.as_dict(),
             "url": generated_url,
