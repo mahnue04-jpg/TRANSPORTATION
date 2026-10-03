@@ -126,6 +126,37 @@
         <span class="hint">AMICOR previews use the official logo overlay.</span>
       </div>
       <div class="presenter-controls">
+        <div class="presenter-settings">
+          <label>Presenter mode
+            <select id="presenter-mode">
+              <option value="head" selected>Talking head</option>
+              <option value="half_body">Half body motion</option>
+              <option value="full_body">Full body motion</option>
+            </select>
+          </label>
+          <label>Motion style
+            <select id="presenter-motion-style">
+              <option value="calm_professional" selected>Calm professional</option>
+              <option value="friendly_explainer">Friendly explainer</option>
+              <option value="energetic_promo">Energetic promo</option>
+            </select>
+          </label>
+          <label>Framing
+            <select id="presenter-framing">
+              <option value="close_up" selected>Close-up</option>
+              <option value="waist_up">Waist-up</option>
+              <option value="full_frame">Full frame</option>
+            </select>
+          </label>
+          <label>Output
+            <select id="presenter-output-preset">
+              <option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>
+              <option value="1:1">1:1 · Social feed</option>
+              <option value="16:9">16:9 · YouTube / web / demo</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Talking head uses D-ID lip sync. Half-body and full-body use Nova's motion-video provider so the presenter can move beyond the face. Provider watermarks are never removed; use a clean commercial provider output for final publishing.</p>
         <label>Talking presenter script
           <textarea id="presenter-script" rows="6" maxlength="1600">What if your small business had an AI assistant that could help handle busywork and save time? Busywork piles up fast for small business owners, taking focus away from the work that matters. AMICOR Nova helps with documents, emails, reports, scheduling, and other operational tasks—with drafts you can review first. Save time. Stay in control. Try AMICOR Nova. Start free today.</textarea>
         </label>
