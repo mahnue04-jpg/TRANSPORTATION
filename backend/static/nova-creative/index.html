@@ -73,6 +73,7 @@
             <option value="social_post">social_post</option>
             <option value="social_image">social_image</option>
             <option value="short_video" selected>short_video</option>
+            <option value="short_drama">Short drama · two characters</option>
             <option value="ad_creative">ad_creative</option>
             <option value="promo_video">promo_video</option>
             <option value="explainer">explainer</option>
@@ -189,6 +190,26 @@
         <button type="button" data-action="export">13. Export project package</button>
       </div>
       <pre id="output" class="output" aria-live="polite"></pre>
+    </section>
+
+    <section class="card" aria-label="Short drama creator">
+      <h2>Short drama creator</h2>
+      <p class="hint">Create a Short drama project above. Save two characters and dialogue, generate each motion shot, then generate voices and render. Voices and captions are included; lip-sync and character continuity require review.</p>
+      <button type="button" id="drama-sample" class="secondary">Load “The Envelope” sample</button>
+      <label>Setting<textarea id="drama-setting" rows="3" maxlength="1000"></textarea></label>
+      <div class="grid">
+<fieldset><legend>Character 1</legend><label>Name<input id="drama-name-1" maxlength="40" value="Maya" /></label><label>Appearance<textarea id="drama-description-1" maxlength="600" rows="3"></textarea></label><label>Voice<select id="drama-voice-1"><option value="nova" selected>nova</option><option value="onyx">onyx</option><option value="alloy">alloy</option><option value="ash">ash</option><option value="ballad">ballad</option><option value="coral">coral</option><option value="echo">echo</option><option value="fable">fable</option><option value="sage">sage</option><option value="shimmer">shimmer</option></select></label></fieldset>
+<fieldset><legend>Character 2</legend><label>Name<input id="drama-name-2" maxlength="40" value="Eli" /></label><label>Appearance<textarea id="drama-description-2" maxlength="600" rows="3"></textarea></label><label>Voice<select id="drama-voice-2"><option value="nova">nova</option><option value="onyx" selected>onyx</option><option value="alloy">alloy</option><option value="ash">ash</option><option value="ballad">ballad</option><option value="coral">coral</option><option value="echo">echo</option><option value="fable">fable</option><option value="sage">sage</option><option value="shimmer">shimmer</option></select></label></fieldset>
+      </div>
+      <label>Dialogue · one Name: line per shot<textarea id="drama-dialogue" rows="8" maxlength="3500" placeholder="Eli: Someone told me to leave this at midnight.&#10;Maya: That envelope was supposed to disappear."></textarea></label>
+      <p id="drama-progress" class="hint" role="status">Select a Short drama project to begin.</p>
+      <div class="actions wrap">
+        <button type="button" id="drama-plan">1. Save cast &amp; dialogue</button>
+        <button type="button" id="drama-motion">2. Generate next motion shot</button>
+        <button type="button" id="drama-voices">3. Generate character voices</button>
+        <button type="button" id="drama-render">4. Render captioned preview</button>
+      </div>
+      <p class="hint">Saving the plan is free. Motion and voice generation use the configured providers and may consume credits. A failed motion request stays failed. The rendered video is a preview for review before publishing.</p>
     </section>
 
     <section class="card" aria-label="Project history">

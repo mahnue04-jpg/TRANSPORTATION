@@ -112,7 +112,7 @@ class VoiceGenerationProvider(Protocol):
     def status(self) -> ProviderStatus:
         ...
 
-    def generate(self, *, script: str) -> dict[str, Any]:
+    def generate(self, *, script: str, voice: str | None = None) -> dict[str, Any]:
         ...
 
 
@@ -558,7 +558,7 @@ class OpenAIVoiceProvider:
             configured=True,
         )
 
-    def generate(self, *, script: str) -> dict[str, Any]:
+    def generate(self, *, script: str, voice: str | None = None) -> dict[str, Any]:
         st = self.status()
         if st.status != AVAILABLE:
             return {
@@ -578,7 +578,9 @@ class OpenAIVoiceProvider:
                 "asset_generated": False,
             }
         model = str(os.getenv("NOVA_CREATIVE_VOICE_MODEL") or "gpt-4o-mini-tts").strip()
-        voice = str(os.getenv("NOVA_CREATIVE_VOICE_NAME") or "alloy").strip()
+        voice = str(voice or os.getenv("NOVA_CREATIVE_VOICE_NAME") or "alloy").strip()
+        if voice not in {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"}:
+            raise ValueError("Unsupported Studio voice")
         response = get_client().audio.speech.create(
             model=model,
             voice=voice,
