@@ -83,3 +83,21 @@ test('HTTP API marks gateway and network failures retryable but preserves sessio
   ctx.fetch = async () => ({status: 401, ok: false, json: async () => null});
   await assert.rejects(ctx.api('/status'), err => !err.retryable && /401/.test(err.message));
 });
+
+
+test('sign-in uses one unauthenticated request and surfaces the login error without clearing the project session', async () => {
+  const apiSource = source.slice(source.indexOf('  async function api('), source.indexOf('  function setSignedIn('));
+  const calls = [];
+  const ctx = vm.createContext({
+    window: {AmiCorSession: {ensureReady: async () => { throw new Error('login must not refresh the old session'); }, authFetch: async () => { throw new Error('login must not replay through authFetch'); }}},
+    token: () => 'old-token',
+    detailText: body => body.detail,
+    setToken: () => { throw new Error('login rejection must not clear the existing session'); },
+    setSignedIn: () => { throw new Error('login rejection is not session expiry'); },
+    fetch: async (path, options) => { calls.push({path, options}); return {status:401, ok:false, json:async () => ({detail:'Invalid email or password'})}; },
+  });
+  vm.runInContext(apiSource, ctx);
+  await assert.rejects(ctx.api('/api/auth/login', {method:'POST',body:'test credentials fixture'}), /Sign-in failed.*Invalid email or password/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+});
