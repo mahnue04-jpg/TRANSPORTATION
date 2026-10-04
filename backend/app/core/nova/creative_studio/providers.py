@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 from typing import Any, Protocol
+from openai import APITimeoutError
 
 try:
     from runwayml import RunwayML
@@ -175,12 +176,25 @@ class OpenAIImageProvider:
                 "asset_generated": False,
             }
         model = str(os.getenv("NOVA_CREATIVE_IMAGE_MODEL") or "gpt-image-2").strip()
-        result = get_client().images.generate(
-            model=model,
-            prompt=prompt,
-            size=self._size(aspect_ratio),
-            n=1,
-        )
+        # Image generation can exceed the shared 30-second chat timeout.
+        # Use one bounded attempt; automatic retries may duplicate paid work.
+        client = get_client().with_options(timeout=300.0, max_retries=0)
+        try:
+            result = client.images.generate(
+                model=model,
+                prompt=prompt,
+                size=self._size(aspect_ratio),
+                n=1,
+            )
+        except APITimeoutError:
+            return {
+                "status": "ERROR",
+                "message": "Image generation timed out after waiting up to 300 seconds. No image was saved. The provider may still have processed the request; review usage before retrying.",
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "url": None,
+                "asset_generated": False,
+            }
         rows = list(getattr(result, "data", None) or [])
         row = rows[0] if rows else None
         image_url = str(getattr(row, "url", "") or "").strip() or None
