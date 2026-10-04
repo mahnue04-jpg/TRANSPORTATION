@@ -605,7 +605,7 @@ class CreativeStudioService(ShortDramaMixin):
             self._finish_job(job, status=provider_state.status, message=provider_state.message, asset_ids=[asset.id])
             return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
 
-        # Resume an unfinished Runway task before advancing to the next scene.
+        # Resume an unfinished provider task before advancing to the next scene.
         resume_task_id = None
         resume_asset = None
         scene_index = None
@@ -617,6 +617,13 @@ class CreativeStudioService(ShortDramaMixin):
                 str(provider_result.get("status") or "").upper() == "PROCESSING"
                 and provider_result.get("task_id")
             ):
+                pending_provider = provider_result.get("provider")
+                active_provider = video_provider().provider_id
+                legacy_foreign = not pending_provider and active_provider == "fal_kling_video" and not str(provider_result["task_id"]).startswith("fal-kling25:")
+                if legacy_foreign or (pending_provider and pending_provider != active_provider):
+                    message = "An unfinished motion job belongs to another provider. Restore that provider to finish it before switching."
+                    self._finish_job(job, status="ERROR", message=message, asset_ids=[candidate.id])
+                    return {"job": job.as_dict(), "asset": candidate.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
                 resume_task_id = str(provider_result["task_id"])
                 resume_asset = candidate
                 brief_meta = provider_result.get("brief") or {}
@@ -733,7 +740,7 @@ class CreativeStudioService(ShortDramaMixin):
                 "message": f"Video provider failed safely: {type(exc).__name__}: {exc}",
                 "url": None,
                 "asset_generated": False,
-                "provider": "runway_video",
+                "provider": video_provider().provider_id,
             }
 
         runway_message = str(result.get("message") or "")

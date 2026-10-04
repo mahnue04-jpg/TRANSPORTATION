@@ -24,6 +24,7 @@ from app.ai import get_client
 from app.core.nova.creative_studio.flags import (
     image_provider_configured,
     image_provider_live_enabled,
+    selected_video_provider,
     video_provider_configured,
     video_provider_live_enabled,
     voice_provider_configured,
@@ -869,6 +870,10 @@ def image_provider() -> ImageGenerationProvider:
 
 
 def video_provider() -> VideoGenerationProvider:
+    selected = selected_video_provider()
+    if selected in {"fal", "kling", "fal_kling"}:
+        from app.core.nova.creative_studio.kling import FalKlingVideoProvider
+        return FalKlingVideoProvider()
     return RunwayVideoProvider()
 
 
