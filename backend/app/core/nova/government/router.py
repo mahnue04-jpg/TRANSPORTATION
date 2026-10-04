@@ -1,6 +1,8 @@
 """Nova Government APIs. Organization/research only. No agency submission."""
 from __future__ import annotations
 
+from app.core.nova.language import localized_call
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -328,6 +330,6 @@ def ask_government(
 ):
     org_id = _resolve_org(user, payload.organization_id)
     try:
-        return service.ask_government(db, payload, organization_id=org_id, user=user)
+        return localized_call(service.ask_government, db, payload, organization_id=org_id, user=user)
     except service.NovaGovernmentError as exc:
         _raise(exc)

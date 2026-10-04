@@ -7,6 +7,53 @@
   var lastAutoSpokenText = "";
   var autoReadTimer = null;
 
+  var languages = [
+    ["en-US", "English"], ["es-US", "Español"], ["fr-FR", "Français"],
+    ["pt-BR", "Português"], ["ar-SA", "العربية"], ["zh-CN", "中文"],
+    ["hi-IN", "हिन्दी"], ["de-DE", "Deutsch"], ["sw-KE", "Kiswahili"],
+    ["so-SO", "Soomaali"], ["hmn", "Hmoob"]
+  ];
+  function language() {
+    var saved = "";
+    try { saved = localStorage.getItem("nova_language") || ""; } catch (_) {}
+    return languages.some(function (item) { return item[0] === saved; }) ? saved : "en-US";
+  }
+  function installLanguagePicker() {
+    if (document.getElementById("nova-language")) return;
+    var anchor = document.querySelector("main");
+    if (!anchor) return;
+    var label = document.createElement("label");
+    label.textContent = "Nova reply / voice language ";
+    var select = document.createElement("select");
+    select.id = "nova-language";
+    select.setAttribute("aria-label", "Nova reply and voice language");
+    languages.forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item[0]; option.textContent = item[1]; select.appendChild(option);
+    });
+    select.value = language();
+    select.addEventListener("change", function () {
+      stopAll();
+      try { localStorage.setItem("nova_language", select.value); } catch (_) {}
+    });
+    label.appendChild(select);
+    var note = document.createElement("small");
+    note.textContent = " AI replies can use your chosen language. Voice availability depends on your browser. Saved source text and interface labels retain their original language.";
+    label.appendChild(note);
+    anchor.insertBefore(label, anchor.firstChild);
+    // Capture before module submit handlers build their request bodies.
+    document.addEventListener("submit", function (event) {
+      var form = event.target;
+      if (form.id !== "ask-form" && form.id !== "command-form") return;
+      var input = form.querySelector("#ask-input, #command-input");
+      if (!input || !input.value.trim() || language() === "en-US") return;
+      var original = input.value;
+      var selected = languages.find(function (item) { return item[0] === language(); });
+      input.value = original + "\nReply language: " + selected[1] + " (" + selected[0] + ").";
+      queueMicrotask(function () { if (input.value === original + "\nReply language: " + selected[1] + " (" + selected[0] + ").") input.value = original; });
+    }, true);
+  }
+
   function voice() {
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
       voiceEngine = window.AmiCorHumanVoice.createEngine({ browserFallbackEnabled: true });
@@ -33,7 +80,7 @@
     var value = String(text || "").trim();
     if (!value) return;
     var engine = voice();
-    if (engine && engine.speak) {
+    if (engine && engine.speak && language() === "en-US") {
       engine.speak(value, { persona: "Warm Conversational" }).catch(function () {});
       return;
     }
@@ -41,7 +88,15 @@
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(value);
-      utterance.lang = "en-US";
+      utterance.lang = language();
+      var voices = window.speechSynthesis.getVoices();
+      var match = voices.find(function (item) { return item.lang.toLowerCase().split("-")[0] === language().toLowerCase().split("-")[0]; });
+      if (!match && language() !== "en-US") {
+        var note = document.querySelector("[data-nova-voice-status]");
+        if (note) note.textContent = "No voice for the selected language is available in this browser. You can still read the reply.";
+        return;
+      }
+      if (match) utterance.voice = match;
       speakingFallback = true;
       utterance.onend = function () { speakingFallback = false; };
       window.speechSynthesis.speak(utterance);
@@ -148,7 +203,7 @@
     stopAll();
     var recognition = new SR();
     activeRecognition = recognition;
-    recognition.lang = "en-US";
+    recognition.lang = language();
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -254,6 +309,7 @@
   }
 
   function init() {
+    installLanguagePicker();
     eligibleInputs().forEach(function (pair) {
       enhanceForm(pair[0], pair[1]);
     });
@@ -270,6 +326,7 @@
   window.AmiCorNovaVoiceControls = {
     init: init,
     stop: stopAll,
-    speak: speak
+    speak: speak,
+    language: language
   };
 })();

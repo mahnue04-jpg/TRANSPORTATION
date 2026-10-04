@@ -95,7 +95,7 @@ def test_nova_today_route_loads(client: TestClient) -> None:
     assert "ACTION REQUIRES APPROVAL" in response.text
     assert "ops-shell.js" not in response.text
     assert "command-center" not in response.text
-    assert 'src="/static/nova-today/today.js"' in response.text
+    assert 'src="/static/nova-today/today.js' in response.text
 
 
 def test_nova_today_trust_labels_and_responsive() -> None:

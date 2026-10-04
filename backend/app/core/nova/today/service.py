@@ -1589,6 +1589,10 @@ _TODAY_EXTERNAL_HINTS = (
     "stock price",
 )
 _TODAY_OPERATIONAL_HINTS = (
+    "work & revenue",
+    "work and revenue",
+    "operations agent",
+    "agent coordination",
     "attention",
     "what needs",
     "needs my",
@@ -2773,7 +2777,7 @@ def _today_government_grounded_answer(
         generated_at=grounded.generated_at,
         source_href="/nova/government",
         referenced_source_ref_id=best.item_id,
-        verification_status="verified" if "VERIFIED" in str(grounded.fact_label or "").upper() else "proposed",
+        verification_status="verified" if "VERIFIED" in str(grounded.fact_label or "").upper() else "unknown",
     )
 
 
@@ -3304,6 +3308,25 @@ def ask_today(
         comms_line=comms_line,
         history_line=history_line,
     )
+    # Use the same owner gate as Work & Revenue; paid/free customers never see
+    # internal handoff data. Public Operations leads are platform-owned intake.
+    if include_supporting:
+        from fastapi import HTTPException
+        from app.core.nova.work_revenue.router import require_work_revenue_owner
+        from app.core.nova.agent_coordination import coordination_snapshot
+        try:
+            require_work_revenue_owner(user=user, db=db)
+        except HTTPException:
+            pass
+        else:
+            snapshot = coordination_snapshot(
+                db, organization_id=organization_id, user=user, limit=10,
+            )
+            context += (
+                "\n\nOWNER AGENT COORDINATION (read-only current saved records; "
+                "intake is not proof of execution; do not claim autonomous delivery):\n"
+                + str(snapshot)
+            )
     asked = NovaCoreService.ask(
         db,
         organization_id=organization_id,

@@ -243,7 +243,7 @@
     $("gov-search-talk").addEventListener("click", function () {
       if (recognition) return;
       recognition = new SpeechRecognition();
-      recognition.lang = "en-US";
+      recognition.lang = window.AmiCorNovaVoiceControls ? window.AmiCorNovaVoiceControls.language() : "en-US";
       recognition.interimResults = false;
       recognition.continuous = false;
       recognition.onstart = function () { $("gov-search-voice-status").textContent = "Listening for government search…"; };

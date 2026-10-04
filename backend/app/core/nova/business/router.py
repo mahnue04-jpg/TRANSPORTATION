@@ -1,6 +1,8 @@
 """Nova Business OS APIs. Operations organization only. No ledger or autonomous send."""
 from __future__ import annotations
 
+from app.core.nova.language import localized_call
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -406,6 +408,6 @@ def ask_business(
 ):
     org_id = _resolve_org(user, payload.organization_id)
     try:
-        return service.ask_business(db, payload, organization_id=org_id, user=user)
+        return localized_call(service.ask_business, db, payload, organization_id=org_id, user=user)
     except service.NovaBusinessError as exc:
         _raise(exc)

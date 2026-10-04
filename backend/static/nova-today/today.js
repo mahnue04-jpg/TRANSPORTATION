@@ -87,6 +87,10 @@
   }
   function speakNova(text) {
     if (!text) return;
+    if (window.AmiCorNovaVoiceControls) {
+      window.AmiCorNovaVoiceControls.speak(String(text));
+      return;
+    }
     var engine = getNovaHumanVoice();
     if (engine) {
       engine.speak(String(text), { persona: "Warm Conversational" }).catch(function () {
@@ -118,7 +122,7 @@
       return;
     }
     var recognition = new SR();
-    recognition.lang = "en-US";
+    recognition.lang = window.AmiCorNovaVoiceControls ? window.AmiCorNovaVoiceControls.language() : "en-US";
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
