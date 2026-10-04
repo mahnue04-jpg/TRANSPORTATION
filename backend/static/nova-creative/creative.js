@@ -421,17 +421,18 @@
   }
   async function api(path, options) {
     options = options || {};
+    var isLogin = path === "/api/auth/login";
     var headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
     var res;
     try {
       var shared = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
-      if (shared && typeof shared.ensureReady === "function") {
+      if (!isLogin && shared && typeof shared.ensureReady === "function") {
         await shared.ensureReady();
       }
-      if (shared && typeof shared.authFetch === "function") {
+      if (!isLogin && shared && typeof shared.authFetch === "function") {
         res = await shared.authFetch(path, Object.assign({}, options, { headers: headers }));
       } else {
-        if (typeof token === "function" && token()) headers.Authorization = "Bearer " + token();
+        if (!isLogin && typeof token === "function" && token()) headers.Authorization = "Bearer " + token();
         res = await fetch(path, Object.assign({}, options, { headers: headers }));
       }
     } catch (err) {
@@ -442,6 +443,7 @@
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
     if (res.status === 401) {
+      if (isLogin) throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
       if (typeof setToken === "function") setToken("");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
