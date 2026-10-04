@@ -8,6 +8,7 @@ import tempfile
 from typing import Any
 
 from app.core.nova.creative_studio.export import export_project_package
+from app.core.nova.creative_studio.drama import ShortDramaMixin
 from app.core.nova.creative_studio.media_runtime import run_encoder, serialized_media
 from app.core.nova.creative_studio.flags import creative_guardrails
 from app.core.nova.creative_studio.generation import assemble_short_video, generate_content_pack
@@ -49,7 +50,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class CreativeStudioService:
+class CreativeStudioService(ShortDramaMixin):
     def __init__(self, store: CreativeStudioStore | DbCreativeStudioStore | None = None):
         self.store = store or get_store()
 
@@ -173,7 +174,7 @@ class CreativeStudioService:
                 duration = int(duration)
             except (TypeError, ValueError) as exc:
                 raise CreativeStudioError("INVALID_INPUT", "duration_target must be an integer") from exc
-            if duration not in DURATIONS and project_type in {"short_video", "promo_video", "explainer"}:
+            if duration not in DURATIONS and project_type in {"short_video", "short_drama", "promo_video", "explainer"}:
                 raise CreativeStudioError("INVALID_INPUT", f"duration_target must be one of {DURATIONS}")
         safety = screen_creative_text(title, payload.get("objective"), payload.get("audience"), payload.get("tone"))
         if safety["decision"] == BLOCK:
@@ -353,6 +354,8 @@ class CreativeStudioService:
 
     def generate_script(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
+        if project.project_type == "short_drama":
+            raise CreativeStudioError("USE_DRAMA_PLANNER", "Use the Short drama cast and dialogue planner for this project.", http_status=422)
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
         topic = (brief.topic if brief else project.title)
@@ -409,6 +412,8 @@ class CreativeStudioService:
 
     def generate_storyboard(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
+        if project.project_type == "short_drama":
+            raise CreativeStudioError("USE_DRAMA_PLANNER", "Use the Short drama cast and dialogue planner for this project.", http_status=422)
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
         duration = int(project.duration_target or 30)
@@ -740,7 +745,7 @@ class CreativeStudioService:
                 or "credit balance" in runway_message.lower()
             )
         )
-        if credit_exhausted and source_image_url and not resume_task_id:
+        if credit_exhausted and source_image_url and not resume_task_id and project.project_type != "short_drama":
             try:
                 fallback = self._build_local_scene_motion(
                     source_image_url=source_image_url,
@@ -807,7 +812,9 @@ class CreativeStudioService:
         }
 
     def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None) -> dict[str, Any]:
-        self._project_or_404(owner_id, project_id)
+        project = self._project_or_404(owner_id, project_id)
+        if project.project_type == "short_drama":
+            return self.generate_drama_voices(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "voice")
         text = script or ""
         if not text:
@@ -841,6 +848,8 @@ class CreativeStudioService:
     @serialized_media
     def assemble_final_promo(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
+        if project.project_type == "short_drama":
+            return self.assemble_drama(owner_id, project_id)
         scenes = self.store.list_scenes(project_id, owner_id)
         if not scenes:
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)

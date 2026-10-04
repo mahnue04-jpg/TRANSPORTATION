@@ -527,6 +527,11 @@
       return;
     }
 
+    if (detail.project && detail.project.project_type === "short_drama") {
+      var preview = latestAsset(detail.assets || [], "video", function (row) { return row.metadata && row.metadata.short_drama; });
+      target.textContent = preview && preview.url ? "PREVIEW ONLY — dialogue and captions rendered. Review lip-sync and character continuity before publishing." : "Complete motion shots and character voices, then render in Short drama creator.";
+      return;
+    }
     var assets = detail.assets || [];
     var brand = detail.brand || null;
     var finalVideo = latestAsset(assets, "video", function (row) {
@@ -598,13 +603,106 @@
     });
   }
 
+  var dramaLoadedProject = null;
+  function fillDrama(plan) {
+    $("drama-setting").value = plan.setting || "";
+    $("drama-dialogue").value = plan.dialogue || "";
+    (plan.characters || []).forEach(function (character, index) {
+      var suffix = String(index + 1);
+      $("drama-name-" + suffix).value = character.name;
+      $("drama-description-" + suffix).value = character.description;
+      $("drama-voice-" + suffix).value = character.voice;
+    });
+  }
+  function refreshDrama(detail) {
+    var project = detail && detail.project;
+    var plan = project && project.metadata && project.metadata.short_drama;
+    var isDrama = project && project.project_type === "short_drama";
+    ["plan", "motion", "voices", "render"].forEach(function (action) { $("drama-" + action).disabled = !isDrama; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action="script"], [data-action="storyboard"], [data-action="voice"]'), function (button) { button.disabled = !!isDrama; });
+    $("build-final-promo").disabled = !!isDrama;
+    if (project && project.id !== dramaLoadedProject) {
+      if (plan) fillDrama(plan);
+      dramaLoadedProject = project.id;
+    }
+    if (!project || project.project_type !== "short_drama") {
+      $("drama-progress").textContent = "Create or select a Short drama project to begin.";
+      return;
+    }
+    var shots = (detail.scenes || []).length;
+    var motion = {}, voices = {};
+    (detail.assets || []).forEach(function (asset) {
+      if (asset.status !== "GENERATED" || !asset.url || asset.media_available === false) return;
+      var metadata = asset.metadata || {};
+      var provider = metadata.provider_result || {};
+      if (asset.kind === "video" && provider.brief && provider.brief.scene_index) motion[provider.brief.scene_index] = true;
+      if (asset.kind === "audio" && plan && metadata.drama_revision === plan.revision) voices[metadata.line_index] = true;
+    });
+    $("drama-progress").textContent = shots ? Object.keys(motion).length + "/" + shots + " motion shots · " + Object.keys(voices).length + "/" + shots + " dialogue voices. Final output needs lip-sync review." : "Save cast and dialogue to create your shots.";
+  }
+  $("drama-sample").addEventListener("click", async function () {
+    try {
+      fillDrama(await api("/api/nova/creative/drama/sample"));
+      $("project-type").value = "short_drama";
+      $("project-title").value = "The Envelope — Nova Studio";
+      showBanner("Sample loaded. Create a Short drama project, then save its cast and dialogue.", true);
+    } catch (error) { showBanner(error.message, false); }
+  });
+  ["plan", "motion", "voices", "render"].forEach(function (action) {
+    var button = $("drama-" + action);
+    button.addEventListener("click", async function () {
+      if (!activeProjectId) return showBanner("Create a Short drama project first.", false);
+      var projectId = activeProjectId;
+      button.disabled = true;
+      try {
+        var path = action === "motion" ? "generate/video" : "drama/" + action;
+        var options = { method: "POST" };
+        if (action === "plan") {
+          options.body = JSON.stringify({
+            setting: $("drama-setting").value.trim(), dialogue: $("drama-dialogue").value.trim(),
+            characters: [1, 2].map(function (i) {
+              return {name: $("drama-name-" + i).value.trim(), description: $("drama-description-" + i).value.trim(), voice: $("drama-voice-" + i).value};
+            })
+          });
+        }
+        showBanner("Short drama " + action + " in progress…", true);
+        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/" + path, options);
+        if (result.status === "PROCESSING" && result.job) {
+          var finished = false;
+          for (var attempt = 0; attempt < 180; attempt += 1) {
+            await new Promise(function (resolve) { setTimeout(resolve, 5000); });
+            var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+            var job = (detail.jobs || []).find(function (row) { return row.id === result.job.id; });
+            if (activeProjectId === projectId) refreshDrama(detail);
+            if (job && ["QUEUED", "RUNNING"].indexOf(job.status) < 0) {
+              if (job.status !== "GENERATED") throw new Error(job.message || "Drama generation failed.");
+              result = {status: job.status, message: job.message};
+              finished = true;
+              break;
+            }
+          }
+          if (!finished) throw new Error("Generation is still processing. Refresh the project to see its saved job.");
+        }
+        if (result.provider && result.provider.status && result.provider.status !== "GENERATED") {
+          throw new Error(result.provider.message || "Short drama provider could not generate media.");
+        }
+        renderOutput(result);
+        showBanner(result.message || "Short drama " + action + " complete.", true);
+        await refreshAssets();
+      } catch (error) { showBanner(error.message, false); }
+      finally { button.disabled = false; }
+    });
+  });
+
   async function refreshAssets() {
     if (!activeProjectId) {
       $("asset-list").innerHTML = "<p class=\"hint\">Select a project.</p>";
+      refreshDrama(null);
       renderProductionReadiness(null);
       return;
     }
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+    refreshDrama(detail);
     renderProductionReadiness(detail);
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
