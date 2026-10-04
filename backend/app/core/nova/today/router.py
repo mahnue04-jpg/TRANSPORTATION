@@ -1,6 +1,8 @@
 """Nova V2 Today APIs. Additive. Does not reuse Health command-center or NovaAction."""
 from __future__ import annotations
 
+from app.core.nova.language import localized_call
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -83,7 +85,7 @@ def ask_today(
                     "Upgrade to continue with full Nova access."
                 ),
             )
-        return service.ask_today(
+        return localized_call(service.ask_today,
             db,
             payload,
             organization_id=org_id,

@@ -1,6 +1,8 @@
 """Nova Communications APIs. Authenticated wrapper over existing email/calendar stores."""
 from __future__ import annotations
 
+from app.core.nova.language import localized_call
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -241,6 +243,6 @@ def ask_communications(
 ):
     org_id = _resolve_org(user, payload.organization_id)
     try:
-        return service.ask_communications(db, payload, organization_id=org_id, user=user)
+        return localized_call(service.ask_communications, db, payload, organization_id=org_id, user=user)
     except service.NovaCommunicationsError as exc:
         _raise(exc)

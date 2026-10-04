@@ -1,6 +1,8 @@
 """Nova Workspace APIs. Separate from Health /workspace and frozen Freight."""
 from __future__ import annotations
 
+from app.core.nova.language import localized_call
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -268,6 +270,6 @@ def ask_workspace(
 ):
     org_id = _resolve_org(user, payload.organization_id)
     try:
-        return service.ask_workspace(db, payload, organization_id=org_id, user=user)
+        return localized_call(service.ask_workspace, db, payload, organization_id=org_id, user=user)
     except service.NovaWorkspaceError as exc:
         _raise(exc)

@@ -423,10 +423,10 @@ def _official_gov_url(value: str | None) -> bool:
 
 
 def _visible_html_text(markup: str) -> str:
-    text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\\1>", " ", markup)
+    text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", markup)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
     text = html.unescape(text)
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _fetch_official_gov_text(url: str) -> tuple[str, str]:
@@ -470,10 +470,10 @@ def _fetch_official_gov_text(url: str) -> tuple[str, str]:
 
 
 def _source_sentence_candidates(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?])\\s+", text)
+    parts = re.split(r"(?<=[.!?])\s+", text)
     candidates: list[str] = []
     for part in parts:
-        value = re.sub(r"\\s+", " ", part).strip()
+        value = re.sub(r"\s+", " ", part).strip()
         if 35 <= len(value) <= 650:
             candidates.append(value)
     return candidates
@@ -483,15 +483,15 @@ def _deterministic_source_evidence(text: str) -> dict:
     sentences = _source_sentence_candidates(text)
     agency_name = None
     agency_patterns = [
-        r"\\bMinnesota Department of [A-Z][A-Za-z &-]{3,100}",
-        r"\\b[A-Z][A-Za-z &-]{2,80} Department of [A-Z][A-Za-z &-]{2,100}",
+        r"\bMinnesota Department of [A-Z][A-Za-z &-]{3,100}",
+        r"\b[A-Z][A-Za-z &-]{2,80} Department of [A-Z][A-Za-z &-]{2,100}",
     ]
     for pattern in agency_patterns:
         match = re.search(pattern, text)
         if match:
             agency_name = match.group(0).strip(" .,:;-")
             agency_name = re.split(
-                r"\\s+(?:helps?|provides?|offers?|administers?|oversees?|issues?|maintains?|is|has)\\b",
+                r"\s+(?:helps?|provides?|offers?|administers?|oversees?|issues?|maintains?|is|has)\b",
                 agency_name,
                 maxsplit=1,
                 flags=re.IGNORECASE,
@@ -541,6 +541,8 @@ def inspect_source(
         raise NovaGovernmentError("Only sources marked official_source can be inspected automatically", status_code=422)
     if not row.source_url:
         raise NovaGovernmentError("Official source has no URL to inspect", status_code=422)
+    if not _official_gov_url(row.source_url):
+        raise NovaGovernmentError("Source inspection only supports saved HTTPS .gov URLs", status_code=422)
     text, final_url = _fetch_official_gov_text(row.source_url)
     facts = _exact_source_extract(text)
     if facts["agency_name"]:
@@ -565,7 +567,7 @@ def inspect_source(
         "final_url": final_url,
         "facts": facts,
         "excerpt": text[:3500],
-        "warning": "SOURCE INSPECTION only. Extracted text does not by itself prove that a requirement applies to this business.",
+        "warning": "SOURCE INSPECTION only. Applicability is not inferred: extracted text does not by itself prove that a requirement applies to this business.",
     }
 
 

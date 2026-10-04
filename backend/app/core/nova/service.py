@@ -174,6 +174,7 @@ class NovaCoreService:
                 prompt = (
                     MODE_SYSTEM_GUIDANCE[mode]
                     + "\nYou are operating inside the Amicor runtime. Use only provided context."
+                    + "\nReply in the language of the actual user question or explicitly requested reply language. Preserve IDs, source URLs and amounts."
                     + "\nRespond with:\n1) direct answer\n2) short rationale\n3) 3 concrete next actions"
                     + "\nContext JSON:\n"
                     + str(runtime_context)
@@ -183,6 +184,9 @@ class NovaCoreService:
             else:
                 prompt = (
                     "Answer as Mrs. Nova Brain. The user's prompt is the primary intent.\n"
+                    "Reply in the language of the user's actual question, or the explicitly requested reply language. "
+                    "Preserve source URLs, record IDs, monetary amounts and evidence labels. "
+                    "Do not claim fluency or successful translation when uncertain.\n"
                     "Any AMICOR or Today information in the message is supporting context only if relevant.\n"
                     "Never substitute internal operational information for requested live or external "
                     "information such as weather or news.\n"

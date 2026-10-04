@@ -115,6 +115,9 @@
       lead_source:"nova_anonymous_operations",
       website:document.getElementById("website").value
     };
+    if (window.AmiCorNovaVoiceControls) {
+      payload.message += "\nPreferred reply language: " + window.AmiCorNovaVoiceControls.language();
+    }
     try{
       var response=await fetch("/api/marketing/leads",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(payload)});
       var body={}; try{body=await response.json();}catch(_){}

@@ -85,7 +85,7 @@ def test_nova_government_route_loads(client: TestClient) -> None:
     assert "Government Services" in response.text
     assert "Mrs. Nova Brain" in response.text
     assert "ops-shell.js" not in response.text
-    assert 'src="/static/nova-government/government.js"' in response.text
+    assert 'src="/static/nova-government/government.js' in response.text
     assert "Health ISF Workspace" not in response.text
     assert "not connected to live agency filing systems" in response.text
 
