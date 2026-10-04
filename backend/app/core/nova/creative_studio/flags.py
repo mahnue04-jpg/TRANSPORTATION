@@ -27,20 +27,26 @@ def image_provider_live_enabled() -> bool:
     return _env_true("NOVA_CREATIVE_IMAGE_LIVE_ENABLED")
 
 
+def selected_video_provider() -> str:
+    return str(os.getenv("NOVA_CREATIVE_VIDEO_PROVIDER") or "runway").strip().lower()
+
+
 def video_provider_configured() -> bool:
-    """Runway Dev credential for real AI video generation."""
-    return bool(
-        str(
-            os.getenv("RUNWAYML_API_SECRET")
-            or os.getenv("NOVA_CREATIVE_VIDEO_API_KEY")
-            or ""
-        ).strip()
-    )
+    """Check only the selected provider's credential without exposing it."""
+    selected = selected_video_provider()
+    if selected in {"fal", "kling", "fal_kling"}:
+        return bool(str(os.getenv("FAL_KEY") or "").strip())
+    if selected not in {"runway", "runway_video"}:
+        return False
+    return bool(str(os.getenv("RUNWAYML_API_SECRET") or os.getenv("NOVA_CREATIVE_VIDEO_API_KEY") or "").strip())
 
 
 def video_provider_live_enabled() -> bool:
-    """Credentials alone never activate cost-bearing video generation."""
-    return _env_true("NOVA_CREATIVE_VIDEO_LIVE_ENABLED")
+    """Switching providers never implicitly activates new paid generation."""
+    enabled = _env_true("NOVA_CREATIVE_VIDEO_LIVE_ENABLED")
+    if selected_video_provider() in {"fal", "kling", "fal_kling"}:
+        return enabled and _env_true("NOVA_CREATIVE_KLING_LIVE_ENABLED")
+    return enabled
 
 
 def voice_provider_configured() -> bool:
