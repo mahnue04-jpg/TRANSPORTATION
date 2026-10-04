@@ -19,3 +19,5 @@ stripe[async]
 httpx>=0.27.0
 runwayml>=5.20.1
 imageio-ffmpeg>=0.6.0
+
+Pillow>=10.4

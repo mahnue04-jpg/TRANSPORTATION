@@ -18,6 +18,7 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider, video_provider
 from app.db.session import SessionLocal, get_db
+from app.core.nova.creative_studio.drama import SAMPLE
 
 logger = logging.getLogger(__name__)
 _scene_lock = threading.Lock()
@@ -185,6 +186,82 @@ class BriefIn(BaseModel):
 class AspectIn(BaseModel):
     aspect_ratio: str = "1:1"
     prompt: str | None = None
+
+
+class DramaCharacterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=1, max_length=600)
+    voice: str = Field(min_length=1, max_length=30)
+
+
+class DramaIn(BaseModel):
+    setting: str = Field(min_length=1, max_length=1000)
+    characters: list[DramaCharacterIn] = Field(min_length=2, max_length=2)
+    dialogue: str = Field(min_length=1, max_length=3500)
+
+
+_drama_lock = threading.Lock()
+_drama_workers: set[str] = set()
+
+
+def _run_drama_background(owner_id: str, project_id: str, job_id: str, action: str):
+    db = SessionLocal()
+    try:
+        service = get_service(db)
+        job = next(row for row in service.store.list_jobs(project_id, owner_id) if row.id == job_id)
+        service._finish_job(job, status="RUNNING", message=f"Short drama {action} in progress.", asset_ids=[])
+        if action == "voices":
+            service.generate_drama_voices(owner_id, project_id, job=job)
+        else:
+            service.assemble_drama(owner_id, project_id, job=job)
+    except Exception:
+        logger.exception("Short drama worker failed: %s", job_id)
+    finally:
+        db.close()
+        with _drama_lock:
+            _drama_workers.discard(job_id)
+
+
+@router.get("/drama/sample")
+def drama_sample(user: UserContext = Depends(get_current_user_context)):
+    _require_owner(user)
+    return SAMPLE
+
+
+@router.post("/projects/{project_id}/drama/plan")
+def save_drama_plan(project_id: str, payload: DramaIn,
+                    user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    _require_owner(user)
+    try:
+        return get_service(db).save_drama_plan(user.user_id, project_id, payload.model_dump())
+    except CreativeStudioError as exc:
+        _raise(exc)
+
+
+@router.post("/projects/{project_id}/drama/{action}")
+def generate_drama(project_id: str, action: str, background_tasks: BackgroundTasks,
+                   user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    _require_owner(user)
+    if action not in {"voices", "render"}:
+        raise HTTPException(status_code=404, detail="Unknown drama action")
+    service = get_service(db)
+    try:
+        service._drama_plan(user.user_id, project_id)
+        kind = "voice" if action == "voices" else "short_video_assembly"
+        with _drama_lock:
+            for row in service.store.list_jobs(project_id, user.user_id):
+                if row.kind != kind or row.status not in {"QUEUED", "RUNNING"}:
+                    continue
+                if row.id in _drama_workers:
+                    return {"status": "PROCESSING", "job": row.as_dict(), "already_running": True}
+                service._finish_job(row, status="ERROR", message="Worker was interrupted; retry reuses completed dialogue assets.", asset_ids=row.result_asset_ids)
+            job = service._start_job(user.user_id, project_id, kind)
+            service._finish_job(job, status="QUEUED", message=f"Short drama {action} queued.", asset_ids=[])
+            _drama_workers.add(job.id)
+            background_tasks.add_task(_run_drama_background, user.user_id, project_id, job.id, action)
+        return {"status": "PROCESSING", "job": job.as_dict()}
+    except CreativeStudioError as exc:
+        _raise(exc)
 
 
 class ExportIn(BaseModel):

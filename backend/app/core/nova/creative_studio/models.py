@@ -11,6 +11,7 @@ PROJECT_TYPES = (
     "social_post",
     "social_image",
     "short_video",
+    "short_drama",
     "ad_creative",
     "promo_video",
     "explainer",
