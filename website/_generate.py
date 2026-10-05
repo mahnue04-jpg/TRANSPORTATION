@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent
 ORIGIN = "https://getamicor.com"
 
 NAV = [
+    ("/business-services/", "Services"),
     ("/products/", "Products"),
     ("/solutions/", "Solutions"),
     ("/pricing/", "Pricing"),
@@ -214,7 +215,7 @@ def page(
       <nav id="site-nav" class="nav" data-nav>
           {nav_html}
           <a class="nav-signin" href="/signin/">Sign In</a>
-          <a class="nav-cta" href="/early-access/">Get Started</a>
+          <a class="nav-cta" href="https://amicor-health-isf-py.onrender.com/nova/anonymous-agent">Try Nova</a>
       </nav>
     </div>
   </header>
@@ -230,11 +231,14 @@ def page(
         <p>&copy; <span data-year></span> AMICOR HEALTH ISF LLC</p>
       </div>
       <div class="footer-col">
-        <strong>Products</strong>
+        <strong>Services &amp; Products</strong>
         <nav class="footer-links" aria-label="Footer product links">
+          <a href="/business-services/">Business Services</a>
+          <a href="/ask-nova/">Ask Nova</a>
+          <a href="/nova-operations/">Operations Agent</a>
           <a href="/work-revenue/">Nova Work &amp; Revenue</a>
           <a href="/nova-today/">Nova Today</a>
-          <a href="/nova-create/">Nova Create</a>
+          <a href="/nova-create/">Creative Studio</a>
           <a href="/deliver/">AMICOR Delivery</a>
           <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
           <a href="/home-hub/">Home Hub</a>
@@ -290,8 +294,8 @@ PRODUCT_STATUS_TABLE = """
               <tr><td>AMICOR corporate website</td><td>LIVE</td><td>This public information site.</td></tr>
               <tr><td>AMICOR Nova Work &amp; Revenue</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Find, manage, and track work. Received revenue is owner-confirmed only. No live external submit or payment collection from this site.</td></tr>
               <tr><td>AMICOR Nova Today</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Operator command center for signed-in workspaces.</td></tr>
-              <tr><td>AMICOR Nova Create</td><td>IN DEVELOPMENT</td><td>AI-assisted drafts and work materials. Owner review required.</td></tr>
-              <tr><td>Autonomous Operations Agent</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Supervised operations software. Not autonomous production execution.</td></tr>
+              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
+              <tr><td>Nova Operations Agent</td><td>SUPERVISED RELEASE</td><td>Public demo, account trial, and scoped digital work requests.</td></tr><tr><td>Ask Nova</td><td>ACCOUNT ACCESS</td><td>Sign-in required. Tools and access depend on plan.</td></tr>
               <tr><td>AMICOR Health</td><td>IN DEVELOPMENT</td><td>Transportation technology. No current licensed-market claim.</td></tr>
               <tr><td>AMICOR Delivery</td><td>COMING SOON / IN DEVELOPMENT</td><td>Planned delivery technology only.</td></tr>
               <tr><td>Lifesaver AI Care Cloud</td><td>IN DEVELOPMENT</td><td>Health-technology initiative. Not a medical device or emergency service.</td></tr>
@@ -996,7 +1000,10 @@ add(
     </section>
     <section class="section">
       <div class="wrap grid grid-2">
-        <article class="card"><h3>Find and manage work</h3><p>Opportunity intake, work queues, and owner-review gates. <a href="/work-revenue/">Nova Work &amp; Revenue</a></p></article>
+        <article class="card"><h3>Find and manage work</h3><p>Opportunity intake, work queues, and owner-review gates. <a href="/business-services/">Business Services</a>
+          <a href="/ask-nova/">Ask Nova</a>
+          <a href="/nova-operations/">Operations Agent</a>
+          <a href="/work-revenue/">Nova Work &amp; Revenue</a></p></article>
         <article class="card"><h3>Track revenue honestly</h3><p>Expected, billed, and received stay separate. Received means owner-confirmed. <a href="/work-revenue/">Revenue tracking</a></p></article>
         <article class="card"><h3>Daily command</h3><p>A signed-in Today view for operator attention. <a href="/nova-today/">Nova Today</a></p></article>
         <article class="card"><h3>Supervised operations AI</h3><p>Observe, recommend, approve, verify, audit. <a href="/technologies/autonomous-operations-agent/">Operations Agent</a></p></article>
@@ -1200,12 +1207,15 @@ add(
 
 
 def main() -> None:
+    from _refresh import apply
+    apply(add, PAGES, PRODUCT_STATUS_TABLE)
     for item in PAGES:
         target = ROOT / str(item["filename"])
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(item["html"]), encoding="utf-8")
 
     routes = [
+        "/business-services/", "/ask-nova/", "/nova-operations/", "/samples/", "/company-profile/",
         "/",
         "/products/",
         "/solutions/",

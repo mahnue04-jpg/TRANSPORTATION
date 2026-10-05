@@ -59,3 +59,13 @@ Cloudflare Pages free tier plus the owner-purchased `getamicor.com` domain. See 
 ## Paid dependencies
 
 None in the website codebase. Domain registration is paid separately by the owner.
+
+## October 5 services refresh
+
+Generate with `python website/_generate.py`; `_refresh.py` supplies the current services and Nova pages.
+
+Public software links were observed in the live Nova app on October 5, 2026. The Operations Agent lists a seven-day no-card account trial and $49/$99/$299 starting options. Website links route into the app; no payment or authentication is implemented here. Creative Studio is described as a supervised release with media-provider and rendering limitations.
+
+Business Services, Ask Nova, Nova Operations, Samples, and Company Profile are new public routes. Sample deliverables are fictional. The profile offers HTML download and browser print/PDF. The existing legal entity name is retained until documentary verification supports a correction.
+
+Inquiry choices are validated by the existing lead endpoint. The frontend displays success only after a response confirms stored or notified delivery. Live KV storage and webhook notification require post-deploy verification.

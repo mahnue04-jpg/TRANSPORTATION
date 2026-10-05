@@ -528,3 +528,22 @@ textarea { min-height: 120px; }
   html { scroll-behavior: auto; }
   * { animation: none !important; transition: none !important; }
 }
+
+/* Services refresh: readable controls, compact sections, printable profile. */
+body { font-size: 1rem; }
+.hero { padding-top: 64px; padding-bottom: 36px; }
+.section { padding-top: 32px; padding-bottom: 32px; }
+.nav a, .btn, .chip { font-size: max(.875rem, 14px); }
+.card { min-width: 0; overflow-wrap: anywhere; }
+.hero-actions { flex-wrap: wrap; }
+.price-grid strong { display: block; font-size: 1.4rem; }
+@media print {
+  body { background: white; color: black; }
+  .site-header, .site-footer, .skip, [data-print], [download] { display: none; }
+  .hero, .section { padding: 12px 0; }
+  .wrap { width: 100%; }
+  .lede, .kicker, p, a { color: black; }
+  h1 { font-size: 30pt; }
+  h2 { font-size: 17pt; }
+  .card { break-inside: avoid; }
+}
