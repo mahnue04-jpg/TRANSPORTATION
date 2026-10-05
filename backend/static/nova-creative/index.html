@@ -126,6 +126,10 @@
     <section class="card" aria-label="Generate">
       <h2>Generate</h2>
       <div class="image-controls">
+        <label>Custom image prompt (optional)
+          <textarea id="custom-image-prompt" rows="3" maxlength="4000" placeholder="For a presenter: describe an original person, front-facing pose, wardrobe, lighting, and background."></textarea>
+        </label>
+        <p class="hint">Generate Image uses this description when provided. Leave it blank to use the project’s marketing artwork prompt.</p>
         <label>Image aspect ratio
           <select id="image-aspect">
             <option value="1:1">1:1 square</option>
