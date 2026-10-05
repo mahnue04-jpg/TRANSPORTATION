@@ -55,7 +55,7 @@ def run_encoder(
     headroom = ENCODER_HEADROOM if required_headroom is None else max(SERVER_RESERVE, int(required_headroom))
     if budget and budget[1] - budget[0] < headroom:
         message = "Nova paused video rendering: insufficient server memory headroom. No encoder was started."
-        logger.warning("CREATIVE_ENCODER_MEMORY_BLOCKED memory_budget=%s", budget)
+        logger.warning("CREATIVE_ENCODER_MEMORY_BLOCKED memory_budget=%s required_headroom_bytes=%s", budget, headroom)
         return subprocess.CompletedProcess(cmd, 1, "", message)
     started = time.monotonic()
     stopped_for_memory = False
