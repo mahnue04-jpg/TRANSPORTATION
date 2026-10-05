@@ -2,6 +2,8 @@
 from copy import deepcopy
 from types import SimpleNamespace
 import subprocess
+import math
+from array import array
 import wave
 import pytest
 from app.core.nova.creative_studio.drama import SAMPLE, parse_plan, srt_time
@@ -83,7 +85,7 @@ def test_real_ffmpeg_dialogue_order_captions_and_duration(monkeypatch, tmp_path)
     for i in [1,2]:
         audio = tmp_path/f'{i}.wav'
         with wave.open(str(audio),'w') as out:
-            out.setnchannels(1); out.setsampwidth(2); out.setframerate(24000); out.writeframes(b'\0\0'*12000*i)
+            out.setnchannels(1); out.setsampwidth(2); out.setframerate(24000); out.writeframes(array('h', (int(8000 * math.sin(2 * math.pi * 440 * n / 24000)) for n in range(12000*i))).tobytes())
         service._save_text_asset(owner_id='owner',project_id=pid,kind='audio',title='test',content='',url=str(audio),metadata={'drama_revision':plan['revision'],'line_index':i})
         service._save_text_asset(owner_id='owner',project_id=pid,kind='video',title='test',content='',url=str(clip),metadata={'provider_result':{'provider':'runway_video','brief':{'scene_index':i}}})
     result = service.assemble_drama('owner', pid)
@@ -92,7 +94,11 @@ def test_real_ffmpeg_dialogue_order_captions_and_duration(monkeypatch, tmp_path)
     assert meta['timeline'][1]['start'] == pytest.approx(0.75)
     assert meta['duration_seconds'] == pytest.approx(2.0)
     assert meta['captions_burned_in'] and not meta['lip_sync_verified'] and not meta['publish_ready']
-    assert list(tmp_path.glob('nova-drama-*.mp4'))[0].stat().st_size > 1024
+    rendered = list(tmp_path.glob('nova-drama-*.mp4'))[0]
+    assert rendered.stat().st_size > 1024
+    decoded = subprocess.run([ffmpeg, '-v', 'error', '-i', str(rendered), '-vn', '-f', 's16le', '-ac', '1', '-ar', '24000', '-'], check=True, capture_output=True).stdout
+    samples = array('h'); samples.frombytes(decoded)
+    assert max(abs(sample) for sample in samples) > 1000  # audible audio is muxed into the video
     assert '00:00:00,750 --> 00:00:02,000' in list(tmp_path.glob('*.srt'))[0].read_text()
     assert srt_time(61.025) == '00:01:01,025'
 

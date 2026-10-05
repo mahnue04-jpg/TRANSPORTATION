@@ -7,8 +7,13 @@ import tempfile
 import wave
 from app.core.nova.creative_studio.models import CreativeScene, new_id
 from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix, _resolve_creative_media_url, voice_provider
-from app.core.nova.creative_studio.media_runtime import run_encoder, serialized_media
+from app.core.nova.creative_studio.media_runtime import MIB, run_encoder, serialized_media
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
+
+# Budgets include the unchanged 96 MiB web-server reserve. Video is bounded
+# to one decoder/encoder thread and zero x264 lookahead.
+DRAMA_VIDEO_HEADROOM = 224 * MIB
+DRAMA_AUDIO_HEADROOM = 128 * MIB
 
 VOICES = {'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'}
 SAMPLE = {
@@ -80,8 +85,8 @@ def wrap_caption(text, font, width):
     return lines
 
 
-def encode(command):
-    result = run_encoder(command, timeout=180)
+def encode(command, *, required_headroom=DRAMA_VIDEO_HEADROOM):
+    result = run_encoder(command, timeout=180, required_headroom=required_headroom)
     if result.returncode:
         raise RuntimeError('Drama media render failed: ' + (result.stderr or '')[-800:])
 
@@ -190,7 +195,7 @@ class ShortDramaMixin:
                 tmp = Path(tmp)
                 for index, (clip, audio, line) in enumerate(pairs, 1):
                     wav = tmp / f'{index}.wav'
-                    encode([ffmpeg, '-y', '-i', str(_resolve_creative_media_url(audio.url)), '-ar', '24000', '-ac', '1', str(wav)])
+                    encode([ffmpeg, '-y', '-i', str(_resolve_creative_media_url(audio.url)), '-ar', '24000', '-ac', '1', str(wav)], required_headroom=DRAMA_AUDIO_HEADROOM)
                     with wave.open(str(wav)) as recording:
                         duration = recording.getnframes() / recording.getframerate() + 0.25
                     caption = f"{line['speaker']}: {line['text']}"
@@ -203,16 +208,16 @@ class ShortDramaMixin:
                     panel.save(png)
                     segment = tmp / f'{index}.mp4'
                     encode([ffmpeg, '-y', '-threads', '1', '-filter_complex_threads', '1',
-                        '-i', str(_resolve_creative_media_url(clip.url)), '-i', str(wav), '-loop', '1', '-i', str(png),
+                        '-i', str(_resolve_creative_media_url(clip.url)), '-i', str(wav), '-threads', '1', '-loop', '1', '-i', str(png),
                         '-filter_complex', f'[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=25,tpad=stop_mode=clone:stop_duration=60[v];[v][2:v]overlay=0:H-h-65,format=yuv420p[out];[1:a]apad=pad_dur=0.25[a]',
-                        '-map', '[out]', '-map', '[a]', '-t', f'{duration:.3f}', '-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast',
+                        '-map', '[out]', '-map', '[a]', '-t', f'{duration:.3f}', '-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast', '-tune', 'zerolatency',
                         '-crf', '23', '-c:a', 'aac', '-b:a', '128k', str(segment)])
                     timeline.append({'speaker': line['speaker'], 'text': line['text'], 'start': offset, 'end': offset + duration})
                     captions.append(f'{index}\n{srt_time(offset)} --> {srt_time(offset + duration)}\n{caption}\n')
                     offset += duration
                 manifest = tmp / 'segments.txt'
                 manifest.write_text(''.join(f"file '{tmp / f'{i}.mp4'}'\n" for i in range(1, len(pairs) + 1)))
-                encode([ffmpeg, '-y', '-f', 'concat', '-safe', '0', '-i', str(manifest), '-c', 'copy', '-movflags', '+faststart', str(output)])
+                encode([ffmpeg, '-y', '-f', 'concat', '-safe', '0', '-i', str(manifest), '-c', 'copy', '-movflags', '+faststart', str(output)], required_headroom=DRAMA_AUDIO_HEADROOM)
             if not output.is_file() or output.stat().st_size < 1024:
                 raise RuntimeError('Final drama video is empty.')
             subtitle = root / (stem + '.srt')
