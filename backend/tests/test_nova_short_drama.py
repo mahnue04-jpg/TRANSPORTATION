@@ -140,3 +140,20 @@ def test_drama_controls_exist_in_page():
     used=set(re.findall(r'\$\("(drama-[^"]+)"\)',script))
     assert used - {'drama-name-', 'drama-description-', 'drama-voice-', 'drama-'} <= ids
     assert {'drama-plan','drama-motion','drama-voices','drama-render'} <= ids
+
+
+def test_drama_captions_use_saved_story_instead_of_marketing_template(drama, monkeypatch):
+    import app.core.nova.creative_studio.service as module
+    service, pid = drama
+    monkeypatch.setattr(module, 'generate_content_pack', lambda **kwargs: pytest.fail('Drama must not use marketing template'))
+    result = service.generate_caption('owner', pid)
+    assert result['job']['status'] == 'GENERATED'
+    assert SAMPLE['setting'] in result['pack']['long_caption']
+    assert SAMPLE['dialogue'].splitlines()[0] in result['pack']['short_caption']
+    assert 'AI assistant' not in result['pack']['long_caption']
+    assert '#Suspense' in result['pack']['hashtags']
+    assert '#BusinessProductivity' not in result['pack']['hashtags']
+    assert 'voiceover_script' not in result['pack'] and 'image_prompt' not in result['pack']
+    assert all(asset['metadata']['short_drama'] for asset in result['assets'])
+    assert len(service.store.list_scenes(pid, 'owner')) == 6
+    with pytest.raises(CreativeStudioError): service.generate_caption('other', pid)
