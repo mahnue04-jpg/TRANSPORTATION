@@ -89,6 +89,9 @@ def srt_text(cues):
 def caption_presenter(video: Path, cues: list[dict]):
     if not cues:
         raise RuntimeError('Timed presenter captions are missing.')
+    font_dir = Path(__file__).parent / 'fonts'
+    if not (font_dir / 'DejaVuSans.ttf').is_file():
+        raise RuntimeError('Bundled presenter caption font is missing.')
     # Pad below the original frame. Never crop or cover provider watermarks.
     ass = video.with_suffix('.ass')
     lines = ['[Script Info]', 'PlayResX: 512', 'PlayResY: 640', '[V4+ Styles]',
@@ -106,8 +109,9 @@ def caption_presenter(video: Path, cues: list[dict]):
     # Our files have generated safe basenames. Work in their directory for the
     # subtitle filter; user narration is only in the escaped ASS file.
     escaped_path = str(ass).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
+    escaped_fonts = str(font_dir).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
     _encode(['-threads', '1', '-filter_threads', '1', '-i', str(video), '-vf',
-             f"scale=512:512:force_original_aspect_ratio=decrease,pad=512:640:(ow-iw)/2:0:color=0x07111f,subtitles='{escaped_path}'",
+             f"scale=512:512:force_original_aspect_ratio=decrease,pad=512:640:(ow-iw)/2:0:color=0x07111f,subtitles='{escaped_path}':fontsdir='{escaped_fonts}'",
              '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-tune', 'zerolatency',
              '-c:a', 'copy', '-movflags', '+faststart', str(output)], 192 * MIB)
     return output, srt

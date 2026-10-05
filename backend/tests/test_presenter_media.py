@@ -29,6 +29,7 @@ def test_caption_render_retains_original_frame_and_escapes_ass_commands(tmp_path
     ass=video.with_suffix('.ass').read_text()
     assert r'{\\pos(0,0)}' not in ass
     assert 'pad=512:640' in calls[0][calls[0].index('-vf')+1]
+    assert 'fontsdir=' in calls[0][calls[0].index('-vf')+1]
     assert '-c:a' in calls[0]
     assert srt.is_file()
     assert output.name.endswith('-captioned.mp4')
