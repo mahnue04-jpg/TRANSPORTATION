@@ -144,6 +144,35 @@ class ShortDramaMixin:
                 return row
         return None
 
+    def generate_drama_caption(self, owner_id, project_id):
+        project, plan = self._drama_plan(owner_id, project_id)
+        # Use the saved story, never the business-marketing content template.
+        first = plan['lines'][0]
+        hook = f"{first['speaker']}: {first['text']}"
+        cta = 'Watch the story unfold.'
+        hashtags = ['#ShortDrama', '#Suspense', '#Drama', '#NovaStudio']
+        platform_tag = {'TikTok': '#TikTok', 'Instagram': '#Reels', 'YouTube Shorts': '#Shorts'}.get(project.platform)
+        if platform_tag:
+            hashtags.append(platform_tag)
+        pack = {'title': project.title, 'hook': hook,
+            'long_caption': f"{project.title}\n\n{hook}\n\n{plan['setting']}\n\n{cta}",
+            'short_caption': f"{project.title} — {hook} {cta}",
+            'hashtags': hashtags, 'cta': cta, 'platform': project.platform,
+            'status_label': 'GENERATED', 'media_generated': False}
+        job = self._start_job(owner_id, project_id, 'caption')
+        metadata = {'short_drama': True, 'drama_revision': plan['revision']}
+        assets = [
+            self._save_text_asset(owner_id=owner_id, project_id=project_id, kind='caption',
+                title='Long caption', content=pack['long_caption'], metadata=metadata.copy()),
+            self._save_text_asset(owner_id=owner_id, project_id=project_id, kind='caption',
+                title='Short caption', content=pack['short_caption'], metadata={**metadata, 'variant': 'short'}),
+            self._save_text_asset(owner_id=owner_id, project_id=project_id, kind='hashtags',
+                title='Hashtags', content=' '.join(hashtags), metadata=metadata.copy()),
+        ]
+        self._finish_job(job, status='GENERATED', message='Short drama captions and hashtags generated.',
+            asset_ids=[asset.id for asset in assets])
+        return {'job': job.as_dict(), 'pack': pack, 'assets': [asset.as_dict() for asset in assets]}
+
     def generate_drama_voices(self, owner_id, project_id, *, job=None):
         _, plan = self._drama_plan(owner_id, project_id)
         job = job or self._start_job(owner_id, project_id, 'voice')

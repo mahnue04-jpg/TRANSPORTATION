@@ -387,6 +387,8 @@ class CreativeStudioService(ShortDramaMixin):
 
     def generate_caption(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
+        if project.project_type == "short_drama":
+            return self.generate_drama_caption(owner_id, project_id)
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
         topic = (brief.topic if brief else project.title)
