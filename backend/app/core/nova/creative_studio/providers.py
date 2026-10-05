@@ -116,7 +116,7 @@ class VoiceGenerationProvider(Protocol):
     def status(self) -> ProviderStatus:
         ...
 
-    def generate(self, *, script: str, voice: str | None = None) -> dict[str, Any]:
+    def generate(self, *, script: str, voice: str | None = None, presenter: bool = False) -> dict[str, Any]:
         ...
 
 
@@ -575,7 +575,7 @@ class OpenAIVoiceProvider:
             configured=True,
         )
 
-    def generate(self, *, script: str, voice: str | None = None) -> dict[str, Any]:
+    def generate(self, *, script: str, voice: str | None = None, presenter: bool = False) -> dict[str, Any]:
         st = self.status()
         if st.status != AVAILABLE:
             return {
@@ -598,12 +598,15 @@ class OpenAIVoiceProvider:
         voice = str(voice or os.getenv("NOVA_CREATIVE_VOICE_NAME") or "alloy").strip()
         if voice not in {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"}:
             raise ValueError("Unsupported Studio voice")
-        response = get_client().audio.speech.create(
-            model=model,
-            voice=voice,
-            input=clean[:4000],
-            response_format="mp3",
-        )
+        speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
+        if presenter and model.startswith("gpt-4o-mini-tts"):
+            speech_args['instructions'] = (
+                'Speak as a young adult woman in her early thirties, with a clear feminine voice. '
+                'Warm, confident, friendly professional delivery. Clear diction and natural pacing. '
+                'Use a bright conversational speaking tone, never whisper or use a low male register. '
+                'Read every word exactly. Pronounce AMICOR as AM ih core. Do not add any words.'
+            )
+        response = get_client().audio.speech.create(**speech_args)
         binary = getattr(response, "content", None)
         if binary is None and hasattr(response, "read"):
             binary = response.read()
@@ -622,6 +625,19 @@ class OpenAIVoiceProvider:
         root.mkdir(parents=True, exist_ok=True)
         filename = f"nova-{uuid.uuid4().hex}.mp3"
         (root / filename).write_bytes(bytes(binary))
+        presenter_result = {}
+        if presenter:
+            from app.core.nova.creative_studio.presenter_media import normalize_narration, caption_cues
+            normalized, loudness = normalize_narration(root / filename)
+            filename = normalized.name
+            with normalized.open('rb') as audio_file:
+                transcript = get_client().audio.transcriptions.create(
+                    model='whisper-1', file=audio_file, response_format='verbose_json',
+                    timestamp_granularities=['word'], language='en', prompt=clean[:4000],
+                )
+            data = transcript.model_dump() if hasattr(transcript, 'model_dump') else transcript
+            cues = caption_cues(clean, data.get('words') or [], float(data['duration']))
+            presenter_result = {'caption_cues': cues, 'loudness': loudness, 'presenter_audio_version': 1}
         return {
             "status": "GENERATED",
             "message": "Voice narration generated successfully.",
@@ -630,6 +646,7 @@ class OpenAIVoiceProvider:
             "asset_generated": True,
             "model": model,
             "voice": voice,
+            **presenter_result,
         }
 
 

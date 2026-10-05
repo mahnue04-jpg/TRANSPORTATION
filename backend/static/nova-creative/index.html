@@ -172,7 +172,11 @@
           </label>
         </div>
         <p class="hint">Full body motion starts with head-to-toe framing. Review the generated clip for natural arm, hand, torso, and leg movement. Body motion previews do not include narration or lip sync yet. Talking head uses D-ID lip sync. Provider watermarks are never removed; use a clean commercial provider output for final publishing.</p>
-        <label>Talking presenter script
+    <label>Presenter voice
+      <select id="presenter-voice"><option value="coral" selected>Genova · clear female voice</option><option value="nova">Nova · warm female voice</option><option value="shimmer">Shimmer · bright female voice</option></select>
+    </label>
+    <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
+    <label>Talking presenter script
           <textarea id="presenter-script" rows="6" maxlength="1600">What if your small business had an AI assistant that could help handle busywork and save time? Busywork piles up fast for small business owners, taking focus away from the work that matters. AMICOR Nova helps with documents, emails, reports, scheduling, and other operational tasks—with drafts you can review first. Save time. Stay in control. Try AMICOR Nova. Start free today.</textarea>
         </label>
         <p class="hint">Use this exact text for the presenter voice. AMICOR Nova is written separately so the voice pronounces the brand correctly.</p>
@@ -240,6 +244,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=custom-presenter-prompt-2"></script>
+  <script src="/static/nova-creative/creative.js?v=genova-voice-captions-20261005"></script>
 </body>
 </html>

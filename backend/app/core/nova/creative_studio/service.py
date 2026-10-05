@@ -820,7 +820,7 @@ class CreativeStudioService(ShortDramaMixin):
             "scene_count": len(scenes),
         }
 
-    def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None) -> dict[str, Any]:
+    def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None, voice: str | None = None, presenter: bool = False) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         if project.project_type == "short_drama":
             return self.generate_drama_voices(owner_id, project_id)
@@ -838,7 +838,12 @@ class CreativeStudioService(ShortDramaMixin):
                     if asset.kind == "voiceover":
                         text = asset.content
                         break
-        result = voice_provider().generate(script=text or "No voiceover script available.")
+        voice_args = {"script": text or "No voiceover script available."}
+        if voice:
+            voice_args['voice'] = voice
+        if presenter:
+            voice_args['presenter'] = True
+        result = voice_provider().generate(**voice_args)
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
