@@ -867,7 +867,7 @@ def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
     monkeypatch.setattr(providers.time, "sleep", lambda *_: None)
     result = provider.generate(
         presenter_image_url="https://example.invalid/presenter.png",
-        script="AMICOR Nova helps handle busywork.",
+        script="AMICOR Nova helps with research & reports <for review>. AMICOR prepares drafts.",
     )
     assert result["status"] == "GENERATED"
     assert result["asset_generated"] is True
@@ -881,6 +881,11 @@ def test_did_talking_presenter_provider_success(monkeypatch, tmp_path):
     }
     assert post_payload["script"]["ssml"] is True
     assert "AM ih core Nova" in post_payload["script"]["input"]
+    from xml.etree import ElementTree
+    markup = ElementTree.fromstring("<speak>" + post_payload["script"]["input"] + "</speak>")
+    assert len(markup.findall("sub")) == 2
+    assert not markup.findall(".//sub/sub")
+    assert "research & reports <for review>" in "".join(markup.itertext())
 
 
 def test_did_talking_presenter_requires_live_enable(monkeypatch):
@@ -1109,3 +1114,44 @@ def test_creative_ui_readiness_panel_has_next_actions() -> None:
     assert 'brand-profile' in js
     assert '.next-action-card' in css
     assert '.readiness-action' in css
+
+
+@pytest.mark.parametrize("matching", [True, False])
+def test_head_presenter_reuses_only_matching_narration(monkeypatch, matching):
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    from types import SimpleNamespace
+    from app.auth import UserContext
+    import importlib
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Narrated demo", "project_type": "explainer"})
+    svc._save_text_asset(owner_id="owner-a", project_id=project["id"], kind="image", title="Portrait", content="Original presenter", status="GENERATED", url="https://example.test/portrait.png", metadata={})
+    audio = svc._save_text_asset(owner_id="owner-a", project_id=project["id"], kind="audio", title="Narration", content="Current script" if matching else "Old script", status="GENERATED", url="/media/narration.mp3", metadata={})
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return {"status": "GENERATED", "url": "/media/presenter.mp4", "asset_generated": True, "watermark_free": True}
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+    monkeypatch.setattr(studio_router, "talking_presenter_provider", lambda: SimpleNamespace(generate=generate))
+    result = studio_router.prepare_talking_presenter_preview(project["id"], studio_router.PresenterIn(script="Current script", presenter_mode="head"), UserContext(user_id="owner-a", email="owner@example.test", role="admin"), None)
+    assert calls[0].get("audio_url") == (audio.url if matching else None)
+    assert result.get("source_audio_asset_id") == (audio.id if matching else None)
+    assert result["publish_ready"] is True
+
+
+def test_did_presenter_accepts_saved_studio_audio(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("DID_API_KEY", "test-user:test-secret")
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    monkeypatch.setenv("NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED", "true")
+    monkeypatch.setenv("AMICOR_PUBLIC_URL", "https://example.test")
+    provider = providers.DidTalkingPresenterProvider()
+    calls = []
+    def request(method, url, *, payload=None):
+        calls.append(payload)
+        return {"id": "talk-audio", "status": "done", "result_url": "https://example.test/final.mp4"}
+    monkeypatch.setattr(provider, "_request_json", request)
+    monkeypatch.setattr(provider, "_save_remote_video", lambda url: "/media/final.mp4")
+    result = provider.generate(presenter_image_url="/media/portrait.png", script="Current script", audio_url="/media/narration.mp3")
+    assert calls[0]["script"] == {"type": "audio", "audio_url": "https://example.test/media/narration.mp3"}
+    assert result["asset_generated"] is True
