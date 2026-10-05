@@ -19,6 +19,10 @@ QUEUE = "https://queue.fal.run/"
 TOKEN_PREFIX = "fal-kling25:"
 
 
+class _SafeKlingError(RuntimeError):
+    """Only fixed, application-owned messages may reach the UI."""
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -44,7 +48,7 @@ class FalKlingVideoProvider(RunwayVideoProvider):
     def _request_json(self, method, url, *, payload=None):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != "https" or parsed.netloc != "queue.fal.run":
-            raise RuntimeError("Invalid fal queue URL.")
+            raise _SafeKlingError("Invalid fal queue URL.")
         req = urllib.request.Request(url, method=method,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={"Authorization": f"Key {self._key()}", "Content-Type": "application/json"})
@@ -56,9 +60,9 @@ class FalKlingVideoProvider(RunwayVideoProvider):
             reasons = {401: "fal API key was rejected", 402: "fal account needs credits",
                        403: "fal access denied; check account permissions or funding",
                        422: "Kling rejected the scene input", 429: "fal is rate limiting requests"}
-            raise RuntimeError(reasons.get(exc.code, f"fal request failed (HTTP {exc.code})")) from None
+            raise _SafeKlingError(reasons.get(exc.code, f"fal request failed (HTTP {exc.code})")) from None
         except (urllib.error.URLError, TimeoutError):
-            raise RuntimeError("fal connection interrupted; do not resubmit until queue usage is checked.") from None
+            raise _SafeKlingError("fal connection interrupted; do not resubmit until queue usage is checked.") from None
 
     def _encode_task(self, response):
         task = {key: response.get(key) for key in ("request_id", "status_url", "response_url")}
@@ -68,17 +72,17 @@ class FalKlingVideoProvider(RunwayVideoProvider):
     def _validate_task(self, task):
         request_id = task.get("request_id")
         if not isinstance(request_id, str) or not request_id or len(request_id) > 200:
-            raise ValueError("Missing fal request id.")
+            raise _SafeKlingError("Missing fal request id.")
         for key in ("status_url", "response_url"):
             value = task.get(key)
             if not isinstance(value, str):
-                raise ValueError("Missing fal queue tracking URL.")
+                raise _SafeKlingError("Missing fal queue tracking URL.")
             url = urllib.parse.urlsplit(value)
             if (url.scheme != "https" or url.netloc != "queue.fal.run"
                     or not url.path.startswith("/fal-ai/kling-video/requests/")
                     or request_id not in url.path.split("/")
                     or url.query or url.fragment):
-                raise ValueError("Invalid fal queue tracking URL.")
+                raise _SafeKlingError("Invalid fal queue tracking URL.")
 
     def generate(self, *, brief):
         result = {"brief": brief, "url": None, "asset_generated": False,
@@ -92,13 +96,13 @@ class FalKlingVideoProvider(RunwayVideoProvider):
         try:
             if token:
                 if not token.startswith(TOKEN_PREFIX) or len(token) > 4000:
-                    raise ValueError("This saved task does not belong to Kling.")
+                    raise _SafeKlingError("This saved task does not belong to Kling.")
                 task = json.loads(base64.urlsafe_b64decode(token[len(TOKEN_PREFIX):]))
                 self._validate_task(task)
             else:
                 image = self._prompt_image_value(brief.get("prompt_image_url"))
                 if not image:
-                    raise ValueError("Nova could not load source artwork for Kling.")
+                    raise _SafeKlingError("Nova could not load source artwork for Kling.")
                 submitted = self._request_json("POST", QUEUE + MODEL, payload={
                     "prompt": str(brief.get("prompt_text") or brief.get("objective") or "Cinematic scene")[:2500],
                     "image_url": image, "duration": "5",
@@ -137,6 +141,10 @@ class FalKlingVideoProvider(RunwayVideoProvider):
                 time.sleep(5)
             return dict(result, status="PROCESSING", task_id=token,
                         message="Kling is generating; continue checking this saved task.")
+        except _SafeKlingError as exc:
+            reason = str(exc).rstrip(".")
+            return dict(result, status=ERROR, task_id=token or None,
+                        message=f"Kling request failed: {reason}. Check fal usage before retrying.")
         except (RuntimeError, ValueError, TypeError, KeyError):
             return dict(result, status=ERROR, task_id=token or None,
                         message="Kling request could not proceed. Check fal key, funding, input and queue usage before retrying.")

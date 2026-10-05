@@ -57,7 +57,7 @@ def test_provider_failure(kling,monkeypatch):
 
 @pytest.mark.parametrize('url',['http://queue.fal.run/fal-ai/kling-video/requests/request-123/status','https://attacker.invalid/fal-ai/kling-video/requests/request-123/status'])
 def test_validate_urls(kling,url):
-    with pytest.raises(ValueError): kling._encode_task(dict(TASK,status_url=url))
+    with pytest.raises(RuntimeError): kling._encode_task(dict(TASK,status_url=url))
 
 def test_reject_foreign_task(kling,monkeypatch):
     monkeypatch.setattr(kling,'_request_json',lambda *a,**kw:pytest.fail('no network'))
@@ -73,3 +73,28 @@ def test_scene_preserves_old_pending_provider(kling,monkeypatch):
     result=svc.request_video_generation('owner',p['id'])
     assert result['provider']['status']=='ERROR'
     assert any(a.id==pending.id and a.status=='PROCESSING' for a in svc.store.list_assets(p['id'],'owner'))
+
+@pytest.mark.parametrize('code,reason',[(401,'key was rejected'),(402,'needs credits'),(403,'access denied'),(422,'rejected the scene input'),(429,'rate limiting'),(500,'HTTP 500')])
+def test_submit_http_failure_is_safe_and_specific(kling,monkeypatch,code,reason):
+    import io
+    import urllib.error
+    from app.core.nova.creative_studio import kling as module
+    class Opener:
+        def open(self,*args,**kwargs):
+            raise urllib.error.HTTPError('https://queue.fal.run/',code,'rejected',{},io.BytesIO(b'secret-key-and-private-input'))
+    monkeypatch.setattr(module.urllib.request,'build_opener',lambda *args:Opener())
+    result=kling.generate(brief={'prompt_image_url':'data:image/png;base64,aGVsbG8='})
+    assert result['status']=='ERROR' and reason in result['message']
+    assert 'secret-key' not in result['message'] and not result['task_id']
+
+def test_unexpected_error_does_not_expose_details(kling,monkeypatch):
+    def fail(*args,**kwargs):
+        raise RuntimeError('private-token')
+    monkeypatch.setattr(kling,'_request_json',fail)
+    result=kling.generate(brief={'prompt_image_url':'data:image/png;base64,aGVsbG8='})
+    assert result['status']=='ERROR' and 'private-token' not in result['message']
+
+def test_missing_artwork_has_specific_reason(kling,monkeypatch):
+    monkeypatch.setattr(kling,'_prompt_image_value',lambda value:None)
+    result=kling.generate(brief={})
+    assert result['status']=='ERROR' and 'source artwork' in result['message']
