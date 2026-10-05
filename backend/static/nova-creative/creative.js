@@ -45,6 +45,17 @@
       img.src = src;
     });
   }
+  function assetFailureHtml(row) {
+    if (String(row.status || "").toUpperCase() !== "ERROR") return "";
+    var provider = (row.metadata || {}).provider_result || {};
+    var message = String(provider.message || "Generation failed. No provider reason was saved.");
+    // Older provider errors may contain inline artwork or authorization text.
+    message = message.replace(/data:image\/[^\s"']+/gi, "[source image]")
+      .replace(/\b(Bearer|Key)\s+[A-Za-z0-9._:\/-]+/g, "$1 [redacted]")
+      .replace(/\b(?:sk-|key_)[A-Za-z0-9_-]+/g, "[redacted]");
+    return "<p class=\"error asset-failure\"><strong>Generation failed:</strong> " +
+      escapeHtml(message.slice(0, 2000)) + "</p>";
+  }
   async function downloadBrandedImage(imageUrl, fileStem) {
     var artwork = await loadImage(imageUrl);
     var logo = await loadImage("/static/branding/amicor-logo-full.png");
@@ -741,7 +752,7 @@
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
         "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
-        media +
+        assetFailureHtml(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {

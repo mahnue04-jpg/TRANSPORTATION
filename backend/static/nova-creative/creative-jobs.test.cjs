@@ -5,6 +5,32 @@ const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/creative.js', 'utf8');
 const polling = source.slice(source.indexOf('  async function waitForScene('), source.indexOf('  async function waitForFinalPromo('));
 
+test('saved motion failures render the provider reason safely after a project reload', async () => {
+  const elements = {'asset-list': {innerHTML: ''}};
+  const ctx = vm.createContext({
+    activeProjectId: 'selected',
+    $: id => elements[id],
+    api: async () => ({assets: [
+      {title: 'Scene 1', kind: 'video', status: 'ERROR', content: 'Hotel lobby', metadata: {provider_result: {message: 'Runway error 400: insufficient credits <script>alert(1)</script> Bearer secret-token'}}},
+      {title: 'Dialogue', kind: 'audio', status: 'GENERATED', url: '/voice.mp3'},
+    ]}),
+    refreshDrama: () => {}, renderProductionReadiness: () => {},
+    document: {querySelectorAll: () => []},
+  });
+  const escape = source.slice(source.indexOf('  function escapeHtml('), source.indexOf('  function loadImage('));
+  const failure = source.slice(source.indexOf('  function assetFailureHtml('), source.indexOf('  async function downloadBrandedImage('));
+  const refresh = source.slice(source.indexOf('  async function refreshAssets('), source.indexOf('  async function waitForScene('));
+  // refreshAssets is followed by event registration; isolate its declaration.
+  const end = refresh.indexOf('\n  $("reset-project-media")');
+  vm.runInContext(escape + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
+  await ctx.refreshAssets();
+  const html = elements['asset-list'].innerHTML;
+  assert.match(html, /insufficient credits/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>|secret-token/);
+  assert.match(html, /Download voice/);
+});
+
 function context(responses) {
   const calls = [];
   const ctx = vm.createContext({
