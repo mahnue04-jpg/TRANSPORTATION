@@ -19,6 +19,8 @@ test('editable workflow chooses a data-specific next action without a network ca
 });
 test('owner approval is flagged even when the request is not urgent',()=>{
  const p=page();p.sample('documents');p.run();
+ assert.match(p.node('demo-classification').textContent,/Document & reporting/);
+ assert.match(p.node('demo-record').textContent,/prepare an outline/);
  assert.match(p.node('demo-escalation').textContent,/owner decision/);
  assert.match(p.node('demo-report').textContent,/1 owner-review flag/);
 });

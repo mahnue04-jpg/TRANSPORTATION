@@ -40,7 +40,7 @@
     var category="Operations support";
     if(/lead|estimate|prospect|follow.?up|crm/.test(text)) category="Lead & follow-up operations";
     else if(/invoice|billing|payment|expense|bookkeep/.test(text)) category="Administrative finance support";
-    else if(/customer|inquir|support|message|email|inbox/.test(text)) category="Customer-support operations";
+    else if(/customer|inquir|support\b|message|email|inbox/.test(text)) category="Customer-support operations";
     else if(/report|document|proposal|rfp/.test(text)) category="Document & reporting operations";
 
     var nextAction="prepare an operations plan for review";
