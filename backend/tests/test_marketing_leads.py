@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("AMICOR_SKIP_WMI_PLATFORM_QUERY", "1")
 
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
 
 
@@ -221,6 +223,9 @@ def test_public_business_page_positions_ask_nova_and_operations_agent():
 
 
 def test_anonymous_operations_accepts_all_public_launch_plans():
+    from app.modules.marketing.routes import _RATE_HITS
+
+    _RATE_HITS.clear()
     base = {
         "lead_type": "anonymous_operations",
         "contact_name": "Launch Client",

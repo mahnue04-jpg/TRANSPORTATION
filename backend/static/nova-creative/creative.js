@@ -1257,6 +1257,8 @@
       } else if (action === "image") {
         path += "generate/image";
         requestBody = { aspect_ratio: $("image-aspect").value || "9:16" };
+        var customImagePrompt = $("custom-image-prompt");
+        if (customImagePrompt && customImagePrompt.value.trim()) requestBody.prompt = customImagePrompt.value.trim();
       } else if (action === "video") path += "generate/video";
       else if (action === "voice") path += "generate/voice";
       else if (action === "export") {
