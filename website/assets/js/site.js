@@ -25,12 +25,19 @@
   var year = document.querySelector("[data-year]");
   if (year) year.textContent = String(new Date().getFullYear());
 
+  var printButton = document.querySelector("[data-print]");
+  if (printButton) printButton.addEventListener("click", function () { window.print(); });
+
   var params = new URLSearchParams(window.location.search);
   var product = document.getElementById("product");
   if (product && params.get("product")) product.value = params.get("product");
   var message = document.querySelector("[name=message]");
   if (message && params.get("intent") === "demo" && !message.value) {
     message.value = "I would like a product demo.";
+  }
+
+  if (message && params.get("intent") === "quote" && !message.value) {
+    message.value = "Project goal:\nDeliverables needed:\nApproximate volume:\nDeadline:\n";
   }
 
   var form = document.querySelector("[data-early-access-form]");
@@ -130,7 +137,7 @@
         submissions = [];
       }
       submissions.push(payload);
-      localStorage.setItem("amicor-early-access", JSON.stringify(submissions));
+      try { localStorage.setItem("amicor-early-access", JSON.stringify(submissions)); } catch (err) { /* Storage may be disabled. */ }
     }
 
     function finishDelivered() {
@@ -163,12 +170,15 @@
       body: JSON.stringify(payload)
     }).then(function (response) {
       if (!response.ok) throw new Error("endpoint");
+      return response.json();
+    }).then(function (result) {
+      if (!result.ok || (!result.stored && !result.notified)) throw new Error("delivery");
       finishDelivered();
     }).catch(function () {
       saveLocal();
       show(errorBox, true);
       if (errorBox) {
-        errorBox.textContent = "AMICOR did not receive this request. It was saved on this device only.";
+        errorBox.textContent = "Delivery could not be confirmed. Please email info@getamicor.com or try again.";
       }
     }).finally(function () {
       if (submit) submit.disabled = false;
