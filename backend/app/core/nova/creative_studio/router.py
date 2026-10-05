@@ -275,6 +275,8 @@ class PresenterIn(BaseModel):
     motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
+    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
+    captions: bool = False
 
 
 @router.get("/guardrails")
@@ -564,7 +566,7 @@ def generate_presenter_voice(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script)
+        result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
@@ -634,7 +636,14 @@ def prepare_talking_presenter_preview(
                 if asset.kind == "audio" and asset.url
                 and str(asset.status or "").upper() == "GENERATED"
                 and str(asset.content or "").strip() == payload.script.strip()
+                and (not payload.captions or (
+                    (asset.metadata or {}).get('provider_result', {}).get('voice') == payload.voice
+                    and (asset.metadata or {}).get('provider_result', {}).get('caption_cues')
+                    and (asset.metadata or {}).get('provider_result', {}).get('presenter_audio_version') == 1
+                ))
             ]
+            if payload.captions and not narration:
+                raise HTTPException(status_code=422, detail="Generate Presenter Voice first for this script and voice. This prepares louder narration and timed captions before rendering.")
             presenter_args = {"presenter_image_url": str(presenter_image.url), "script": payload.script}
             if narration:
                 presenter_args["audio_url"] = str(narration[-1].url)
@@ -709,6 +718,16 @@ def prepare_talking_presenter_preview(
 
         status = str(result.get("status") or CONFIG_REQUIRED)
         generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
+        if generated_url and payload.presenter_mode == 'head' and payload.captions:
+            from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+            from app.core.nova.creative_studio.presenter_media import caption_presenter
+            cues = narration[-1].metadata['provider_result']['caption_cues']
+            source_video = _resolve_creative_media_url(generated_url)
+            captioned, subtitles = caption_presenter(source_video, cues)
+            presenter_meta.update({'original_video_url': generated_url, 'captions_burned_in': True,
+                                   'caption_cues': cues, 'voice': payload.voice,
+                                   'subtitle_url': generated_url.rsplit('/', 1)[0] + '/' + subtitles.name})
+            generated_url = generated_url.rsplit('/', 1)[0] + '/' + captioned.name
         provider_watermark_free = bool(result.get("watermark_free", False))
         # Body-motion video has no narration/lip-sync adapter and still needs
         # visual review of actual head-to-toe movement before final delivery.
