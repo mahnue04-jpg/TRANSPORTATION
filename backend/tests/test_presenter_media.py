@@ -67,3 +67,20 @@ def test_presenter_provider_uses_selected_voice_and_measured_speech_captions(tmp
     assert 'young adult woman' in calls[0]['instructions']
     assert ' '.join(c['text'] for c in result['caption_cues']) == 'Hello Genova.'
     assert result['presenter_audio_version'] == 1
+
+
+def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
+    from PIL import Image
+    from app.core.nova.creative_studio import presenter_media as media
+    config=tmp_path/'empty-fontconfig.xml'
+    config.write_text('<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig></fontconfig>')
+    monkeypatch.setenv('FONTCONFIG_FILE',str(config))
+    video=tmp_path/'font-test.mp4'
+    media._encode(['-f','lavfi','-i','color=c=black:s=512x512:d=1',
+                   '-f','lavfi','-i','sine=frequency=440:duration=1','-t','1',
+                   '-c:v','libx264','-threads','1','-c:a','aac',str(video)])
+    result, _=caption_presenter(video,[{'start':0,'end':1,'text':'Hello Genova.'}])
+    frame=tmp_path/'caption.png'
+    media._encode(['-ss','0.5','-i',str(result),'-frames:v','1',str(frame)])
+    band=Image.open(frame).convert('RGB').crop((0,512,512,640))
+    assert sum(1 for p in band.getdata() if min(p)>220)>100
