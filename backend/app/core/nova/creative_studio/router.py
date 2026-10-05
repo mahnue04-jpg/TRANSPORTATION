@@ -627,10 +627,19 @@ def prepare_talking_presenter_preview(
                     **presenter_meta,
                 }
             presenter_image = images[-1]
-            result = talking_presenter_provider().generate(
-                presenter_image_url=str(presenter_image.url),
-                script=payload.script,
-            )
+            # Reuse a reviewed Studio narration only when it matches the exact
+            # current script. Changed scripts must not speak stale audio.
+            narration = [
+                asset for asset in service.store.list_assets(project_id, user.user_id)
+                if asset.kind == "audio" and asset.url
+                and str(asset.status or "").upper() == "GENERATED"
+                and str(asset.content or "").strip() == payload.script.strip()
+            ]
+            presenter_args = {"presenter_image_url": str(presenter_image.url), "script": payload.script}
+            if narration:
+                presenter_args["audio_url"] = str(narration[-1].url)
+                presenter_meta["source_audio_asset_id"] = narration[-1].id
+            result = talking_presenter_provider().generate(**presenter_args)
             source_image_asset_id = presenter_image.id
             title = "Talking presenter preview"
         else:

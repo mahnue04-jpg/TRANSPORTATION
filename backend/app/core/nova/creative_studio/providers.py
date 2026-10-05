@@ -6,12 +6,14 @@ from dataclasses import dataclass
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import time
 import urllib.error
 import urllib.request
 import uuid
 from typing import Any, Protocol
+from xml.sax.saxutils import escape as escape_xml
 from openai import APITimeoutError
 
 try:
@@ -124,7 +126,7 @@ class TalkingPresenterProvider(Protocol):
     def status(self) -> ProviderStatus:
         ...
 
-    def generate(self, *, presenter_image_url: str, script: str) -> dict[str, Any]:
+    def generate(self, *, presenter_image_url: str, script: str, audio_url: str | None = None) -> dict[str, Any]:
         ...
 
 
@@ -737,7 +739,7 @@ class DidTalkingPresenterProvider:
             raise RuntimeError("D-ID generated the presenter video but Nova could not save the MP4 asset.") from exc
         return f"{public_prefix}/{filename}"
 
-    def generate(self, *, presenter_image_url: str, script: str) -> dict[str, Any]:
+    def generate(self, *, presenter_image_url: str, script: str, audio_url: str | None = None) -> dict[str, Any]:
         st = self.status()
         if st.status != AVAILABLE:
             return {
@@ -779,31 +781,32 @@ class DidTalkingPresenterProvider:
         spoken_script = clean_script[:4000]
         use_ssml = tts_provider.lower() == "microsoft"
         if use_ssml:
-            spoken_script = spoken_script.replace(
-                "AMICOR Nova",
-                '<sub alias="AM ih core Nova">AMICOR Nova</sub>',
-            )
-            spoken_script = spoken_script.replace(
-                "AMICOR",
-                '<sub alias="AM ih core">AMICOR</sub>',
+            # Escape user text, then substitute each brand mention once. Two
+            # successive replacements nested <sub> tags and broke synthesis.
+            spoken_script = escape_xml(spoken_script)
+            spoken_script = re.sub(
+                r"\bAMICOR(?:\s+Nova)?\b",
+                lambda match: '<sub alias="AM ih core' + (' Nova' if 'Nova' in match.group(0) else '') + '">' + match.group(0) + '</sub>',
+                spoken_script,
             )
         provider_config: dict[str, Any] = {
             "type": tts_provider,
             "voice_id": voice_id,
             "voice_config": {"rate": speech_rate},
         }
+        did_script: dict[str, Any] = {
+            "type": "text", "ssml": use_ssml, "input": spoken_script,
+            "provider": provider_config,
+        }
+        if audio_url:
+            public_audio_url = self._public_source_url(audio_url)
+            if not public_audio_url:
+                return {"status": ERROR, "message": "Nova could not provide a public narration audio URL.",
+                        "url": None, "asset_generated": False, "provider": self.provider_id}
+            did_script = {"type": "audio", "audio_url": public_audio_url}
         created = self._request_json(
-            "POST",
-            "https://api.d-id.com/talks",
-            payload={
-                "source_url": source_url,
-                "script": {
-                    "type": "text",
-                    "ssml": use_ssml,
-                    "input": spoken_script,
-                    "provider": provider_config,
-                },
-            },
+            "POST", "https://api.d-id.com/talks",
+            payload={"source_url": source_url, "script": did_script},
         )
         talk_id = str(created.get("id") or "").strip()
         if not talk_id:
