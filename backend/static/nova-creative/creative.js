@@ -520,7 +520,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("#brand-list .item"), function (el) {
       el.addEventListener("click", async function () {
         activeBrandId = el.getAttribute("data-id");
-        var projectId = getActiveProjectId();
+        var projectId = activeProjectId;
         if (!projectId) {
           showBanner("Brand selected for new projects: " + activeBrandId, true);
           return;
