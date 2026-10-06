@@ -75,6 +75,8 @@ def test_presenter_voice_preserves_original_audio_when_normalization_hits_memory
     from types import SimpleNamespace
     from app.core.nova.creative_studio import providers
 
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
     monkeypatch.setenv("NOVA_CREATIVE_VOICE_ASSET_DIR", str(tmp_path))
     monkeypatch.setenv("NOVA_CREATIVE_VOICE_PUBLIC_PREFIX", "/media/nova-creative")
     monkeypatch.setattr(
