@@ -467,6 +467,15 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
 
 
 def _opportunity_payload(row: NovaWorkOpportunity) -> dict[str, Any]:
+    tags = _json_list(row.tags_json)
+    search_family = next(
+        (
+            str(tag).split(":", 1)[1].strip()
+            for tag in tags
+            if str(tag).startswith("search_family:") and ":" in str(tag)
+        ),
+        None,
+    )
     return {
         "opportunity_title": row.opportunity_title,
         "description": row.description,
@@ -481,6 +490,7 @@ def _opportunity_payload(row: NovaWorkOpportunity) -> dict[str, Any]:
         "company_name": row.company_name,
         "engagement_type": row.engagement_type,
         "remote_status": row.remote_status,
+        "search_family": search_family,
     }
 
 
