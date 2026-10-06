@@ -957,9 +957,15 @@ def test_presenter_mode_controls_and_payload_contract() -> None:
 
 def test_presenter_provider_watermark_readiness_is_explicit() -> None:
     providers = (CREATIVE_PY / "providers.py").read_text(encoding="utf-8")
+    router = (CREATIVE_PY / "router.py").read_text(encoding="utf-8")
+    service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
     assert "NOVA_CREATIVE_DID_WATERMARK_FREE_OUTPUT" in providers
     assert "NOVA_CREATIVE_VIDEO_WATERMARK_FREE_OUTPUT" in providers
     assert '"watermark_free"' in providers
+    assert "DEMO_READY_WITH_PROVIDER_WATERMARK" in router
+    assert '"demo_ready": demo_ready' in router
+    assert '"provider_watermark_preserved"' in router
+    assert 'or bool((item.metadata or {}).get("demo_ready"))' in service
 
 
 def test_brand_defaults_and_production_presets_static_contract() -> None:
