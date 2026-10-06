@@ -90,8 +90,8 @@ def test_work_page_loads(client: TestClient) -> None:
     assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
     assert "Fallback handoff opened because Nova could not submit this provider automatically." in WORK_JS
     assert "Nova did not claim it submitted the application." in WORK_JS
-    assert "Approve for future submission" in WORK_JS
-    assert "Record manual submission after I send it" in WORK_JS
+    assert "Approve & have Nova submit" in WORK_JS
+    assert "Record manual submission after I send it" not in WORK_JS
     assert "Prepare application drafts" in WORK_JS
     assert "View details" in WORK_JS
     assert "controlled test co|duty-class-prod-test|simulated\\/test fixture" in WORK_JS
