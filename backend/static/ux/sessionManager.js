@@ -223,6 +223,12 @@ const AmiCorSession = {
       userId: _identity && _identity.userId ? _identity.userId : null,
       organizationId: _identity && _identity.organizationId ? _identity.organizationId : null,
     });
+    // Best-effort bridge for saved browser profiles and direct same-origin API
+    // navigation. The server validates the Bearer token before setting a secure,
+    // HttpOnly session cookie; no password or token is exposed in the response.
+    if (_identity && _identity.accessToken && typeof this.persistBrowserSessionCookie === "function") {
+      this.persistBrowserSessionCookie().catch(function () {});
+    }
     return { sessionId: _sessionId, identity: _identity };
   },
 
@@ -494,6 +500,25 @@ const AmiCorSession = {
         });
       }
       return !!_identity.accessToken;
+    } catch (_) {
+      return false;
+    }
+  },
+
+  async persistBrowserSessionCookie() {
+    if ((!_identity || !_sessionId) && typeof this.restore === "function") {
+      this.restore();
+    }
+    if (!_identity || !_identity.accessToken) return false;
+    try {
+      const response = await fetch("/api/auth/browser-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + _identity.accessToken,
+        },
+      });
+      return response.ok;
     } catch (_) {
       return false;
     }
