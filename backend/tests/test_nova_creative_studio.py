@@ -1271,3 +1271,60 @@ def test_existing_project_can_attach_saved_brand():
     source = inspect.getsource(CreativeStudioService.attach_brand_to_project)
     assert "project.brand_profile_id = brand.id" in source
     assert '"Brand profile attached to active project."' in source
+
+
+def test_final_promo_reuses_publish_ready_presenter_without_encoder(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as studio_service
+    from app.core.nova.creative_studio.models import CreativeAsset, CreativeProject, CreativeScene
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    store = CreativeStudioStore()
+    svc = studio_service.CreativeStudioService(store)
+    owner = "owner-presenter-final"
+    project = CreativeProject(
+        id="cproj_presenter_final",
+        owner_id=owner,
+        title="Presenter final",
+        project_type="explainer",
+        platform="website",
+        objective="demo",
+        audience="business",
+        tone="professional",
+        status="storyboarded",
+    )
+    store.save_project(project)
+    store.save_scene(CreativeScene(
+        id="scene1",
+        project_id=project.id,
+        owner_id=owner,
+        index=1,
+        heading="Demo",
+        description="Demo",
+        visual_prompt="Demo scene",
+        voiceover_text="Welcome to AMICOR Nova.",
+        subtitle_text="Welcome to AMICOR Nova.",
+        duration_seconds=5.0,
+    ))
+    media = tmp_path / "presenter.mp4"
+    media.write_bytes(b"publish-ready-presenter")
+    presenter = CreativeAsset(
+        id="presenter1",
+        project_id=project.id,
+        owner_id=owner,
+        kind="presenter_video",
+        title="Genova presenter",
+        content="Welcome to AMICOR Nova.",
+        status="GENERATED",
+        url="/media/nova-creative/presenter.mp4",
+        metadata={"publish_ready": True, "subtitle_url": "/media/nova-creative/presenter.srt"},
+    )
+    store.save_asset(presenter)
+    monkeypatch.setattr(studio_service, "_resolve_creative_media_url", lambda url: media)
+    monkeypatch.setattr(studio_service, "run_encoder", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("encoder must not run")))
+
+    result = svc.assemble_final_promo(owner, project.id)
+
+    assert result["url"] == presenter.url
+    assert result["asset"]["metadata"]["final_promo"] is True
+    assert result["asset"]["metadata"]["render_mode"] == "publish_ready_presenter_passthrough"
+    assert result["asset"]["metadata"]["subtitle_url"] == "/media/nova-creative/presenter.srt"
