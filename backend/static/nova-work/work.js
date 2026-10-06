@@ -65,7 +65,12 @@
     if (response.status === 403) throw new Error("Access denied.");
     if (response.status === 404) throw new Error("Not found / unavailable.");
     if (response.status >= 500) throw new Error("Temporary system error.");
-    if (!response.ok) throw new Error(errorText(body, "Request failed."));
+    if (!response.ok) {
+      var requestError = new Error(errorText(body, "Request failed."));
+      requestError.status = response.status;
+      requestError.payload = body;
+      throw requestError;
+    }
     return body;
   }
   async function uploadWorkInput(engagementId, file) {
@@ -187,14 +192,12 @@
       bits.push(actionButton("ready", row.application_id, "Send for owner review"));
     }
     if (row.approval_state === "READY_FOR_OWNER_REVIEW") {
-      bits.push(actionButton("approve", row.application_id, "Approve for future submission"));
+      bits.push(actionButton("approve", row.application_id, "Approve & have Nova submit"));
       bits.push(actionButton("reject", row.application_id, "Reject"));
       bits.push(actionButton("needs-changes", row.application_id, "Request changes"));
     }
     if (row.approved_for_future_submission && !row.manual_submission_recorded && !row.externally_submitted) {
-      bits.push(actionButton("submit-email", row.application_id, "Submit by verified application email"));
-      bits.push(actionButton("open-handoff", row.application_id, "Open approved application handoff"));
-      bits.push(actionButton("record-manual", row.application_id, "Record manual submission after I send it"));
+      bits.push(actionButton("nova-submit", row.application_id, "Nova submit application now"));
     }
     if (!bits.length) return "";
     return "<div class=\"action-row\">" + bits.join("") + "</div>";
@@ -860,6 +863,49 @@
       await loadDetail(selectedOpportunityId);
     }
   }
+  async function novaSubmitApplication(id) {
+    setWorkActionStatus(id, "Nova is attempting the approved submission.", true);
+
+    try {
+      var emailResult = await api("/api/nova/work/applications/" + id + "/submit-email", {
+        method: "POST",
+        body: JSON.stringify({
+          confirm_send: true,
+          confirm_listing_accepts_email: true
+        })
+      });
+      if (emailResult && emailResult.externally_submitted) {
+        setWorkActionStatus(id, "SUBMITTED · Nova sent the approved application by verified application email.", true);
+        showBanner("Application submitted by Nova through the verified email channel.", true);
+        return emailResult;
+      }
+    } catch (emailError) {
+      if (emailError.status !== 409 && emailError.status !== 422) throw emailError;
+    }
+
+    var providerResult = await api("/api/nova/work/applications/" + id + "/submit", { method: "POST" });
+    if (providerResult && providerResult.externally_submitted) {
+      setWorkActionStatus(id, "SUBMITTED · Nova received a confirmed provider submission receipt.", true);
+      showBanner("Application submitted by Nova through the verified provider adapter.", true);
+      return providerResult;
+    }
+
+    var blocker = (providerResult && providerResult.reason) ||
+      "No verified live submission adapter is available for this provider yet.";
+    setWorkActionStatus(
+      id,
+      "NOVA BLOCKED · " + blocker +
+        " Owner action is only for a true external blocker such as login, MFA, CAPTCHA, signature, identity verification, or an unsupported provider adapter.",
+      false
+    );
+    showBanner(
+      "Nova could not complete this provider submission automatically. " + blocker +
+        " The owner should not be asked to fill the application unless the provider requires a human-only step.",
+      false
+    );
+    return providerResult;
+  }
+
   async function runWorkAction(action, id) {
     if (action === "prepare") {
       await api("/api/nova/work/applications", {
@@ -875,7 +921,8 @@
         method: "POST",
         body: JSON.stringify({ decision: "APPROVED" })
       });
-      showBanner("Approved for future submission only. Nova did not send an application.", true);
+      showBanner("Application approved. Nova is attempting the submission now.", true);
+      await novaSubmitApplication(id);
     } else if (action === "reject") {
       await api("/api/nova/work/applications/" + id + "/decision", {
         method: "POST",
@@ -888,32 +935,8 @@
         body: JSON.stringify({ decision: "NEEDS_CHANGES" })
       });
       showBanner("Returned for changes. Drafts remain internal.", true);
-    } else if (action === "submit-email") {
-      var emailConfirmed = window.confirm(
-        "Submit this OWNER-APPROVED application by email only if the saved listing explicitly says email applications/proposals are accepted. Nova will use the exact email found in the listing and the unchanged approved package. Continue?"
-      );
-      if (!emailConfirmed) {
-        showBanner("Email submission cancelled. Nothing was sent.");
-        return;
-      }
-      var emailResult = await api("/api/nova/work/applications/" + id + "/submit-email", {
-        method: "POST",
-        body: JSON.stringify({
-          confirm_send: true,
-          confirm_listing_accepts_email: true
-        })
-      });
-      if (emailResult && emailResult.externally_submitted) {
-        showBanner(
-          "APPLICATION SUBMITTED · verified email channel · provider " +
-          String(emailResult.provider_id || "email") +
-          " · recipient " + String(emailResult.recipient || "") +
-          " · no contract accepted · no financial action taken.",
-          true
-        );
-      } else {
-        showBanner("Email transport did not confirm submission. Nothing was marked submitted.");
-      }
+    } else if (action === "nova-submit") {
+      await novaSubmitApplication(id);
     } else if (action === "open-handoff") {
       var handoff = await api("/api/nova/work/applications/" + id + "/submit", { method: "POST" });
       var target = handoff && handoff.application_url ? String(handoff.application_url) : "";
@@ -923,7 +946,7 @@
         var opened = window.open(target, "_blank", "noopener,noreferrer");
         var detail = (handoff && handoff.reason) || "Complete the final external step on the provider site.";
         if (opened) {
-          showBanner("Approved handoff opened. " + detail + " Return here after you submit and click Record manual submission.", true);
+          showBanner("Fallback handoff opened because Nova could not submit this provider automatically. " + detail, false);
         } else {
           showBanner("Browser blocked the new tab. Open this source URL manually: " + target, false);
         }
