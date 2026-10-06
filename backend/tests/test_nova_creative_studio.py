@@ -1162,6 +1162,63 @@ def test_head_presenter_reuses_only_matching_narration(monkeypatch, matching):
     assert result["publish_ready"] is True
 
 
+
+def test_head_presenter_preserves_fresh_video_when_caption_render_hits_memory_limit(monkeypatch):
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    from types import SimpleNamespace
+    from pathlib import Path
+    from app.auth import UserContext
+    import importlib
+
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Narrated demo", "project_type": "explainer"})
+    image = svc._save_text_asset(
+        owner_id="owner-a", project_id=project["id"], kind="image", title="Genova portrait",
+        content="Genova presenter v2. Photorealistic young Black woman presenter.",
+        status="GENERATED", url="/media/genova-v2.png", metadata={},
+    )
+    audio = svc._save_text_asset(
+        owner_id="owner-a", project_id=project["id"], kind="audio", title="Narration",
+        content="Current script", status="GENERATED", url="/media/narration.mp3",
+        metadata={"provider_result": {"voice": "shimmer", "caption_cues": [{"text": "Current script", "start": 0.0, "end": 1.0}], "presenter_audio_version": 2}},
+    )
+
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+    monkeypatch.setattr(
+        studio_router,
+        "talking_presenter_provider",
+        lambda: SimpleNamespace(generate=lambda **kwargs: {
+            "status": "GENERATED",
+            "url": "/media/fresh-genova-presenter.mp4",
+            "asset_generated": True,
+            "watermark_free": True,
+        }),
+    )
+
+    from app.core.nova.creative_studio import providers as studio_providers, presenter_media
+    monkeypatch.setattr(studio_providers, "_resolve_creative_media_url", lambda url: Path("/tmp/fresh-genova-presenter.mp4"))
+    monkeypatch.setattr(
+        presenter_media,
+        "caption_presenter",
+        lambda source, cues: (_ for _ in ()).throw(RuntimeError("Nova paused video rendering: insufficient server memory headroom. No encoder was started.")),
+    )
+
+    result = studio_router.prepare_talking_presenter_preview(
+        project["id"],
+        studio_router.PresenterIn(script="Current script", presenter_mode="head", voice="shimmer", captions=True),
+        UserContext(user_id="owner-a", email="owner@example.test", role="admin"),
+        None,
+    )
+
+    assert result["url"] == "/media/fresh-genova-presenter.mp4"
+    assert result["publish_ready"] is False
+    assert result["asset"]["metadata"]["source_image_asset_id"] == image.id
+    assert result["asset"]["metadata"]["captions_burned_in"] is False
+    assert "insufficient server memory headroom" in result["asset"]["metadata"]["caption_render_error"]
+    assert result["source_audio_asset_id"] == audio.id
+
+
 def test_did_presenter_accepts_saved_studio_audio(monkeypatch):
     from app.core.nova.creative_studio import providers
     monkeypatch.setenv("DID_API_KEY", "test-user:test-secret")
