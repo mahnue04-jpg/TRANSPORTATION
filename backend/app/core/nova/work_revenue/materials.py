@@ -157,6 +157,69 @@ def _forbidden_claims() -> str:
     )
 
 
+def _primary_revenue_proposal_body(
+    opportunity: dict[str, Any],
+    *,
+    title: str,
+    company: str,
+    party: str,
+    matched_caps: str,
+    execution: str,
+    forbidden: str,
+) -> str | None:
+    """Owner-approved base positioning for designated Nova revenue lanes.
+
+    The message intentionally avoids unverifiable performance claims and keeps
+    timelines, pricing, and target fields owner/client-specific.
+    """
+    family = sanitize_untrusted(opportunity.get("search_family"))
+    if family != "lead_generation_public_data":
+        return None
+
+    target = sanitize_untrusted(
+        opportunity.get("target_source")
+        or opportunity.get("source_name")
+        or opportunity.get("source_url")
+    ) or "[TARGET WEBSITE / DIRECTORY]"
+    requested_fields = sanitize_untrusted(opportunity.get("requested_fields")) or (
+        "[EMAIL ADDRESSES / PHONE NUMBERS / CONTACT NAMES / OTHER REQUIRED FIELD]"
+    )
+    timeframe = sanitize_untrusted(opportunity.get("delivery_timeframe")) or OWNER_INPUT_REQUIRED
+
+    return (
+        "DRAFT proposal — owner must approve before external use.\n\n"
+        f"{party}\n\n"
+        f"Hi {company if company != UNKNOWN else 'there'},\n\n"
+        f"I can help extract and organize the requested data from {target} and deliver a clean, "
+        "structured dataset based on the fields you need.\n\n"
+        f"One quick question before I begin: do you need {requested_fields} included with the "
+        "standard listing information?\n\n"
+        "How I’ll handle the project:\n"
+        "1. Data extraction — collect the requested publicly available or client-authorized fields, "
+        "including pagination where applicable.\n"
+        "2. Cleaning & validation — remove duplicates, normalize formatting, and validate records "
+        "using the verification methods available for the project.\n"
+        "3. Structured delivery — provide the final dataset in CSV, Excel, Google Sheets, or JSON.\n\n"
+        "I can also prepare a free 10-record sample from the target source so you can review the "
+        "fields and formatting before committing to the full project, provided the source permits "
+        "that access and use.\n\n"
+        f"Requested delivery timeframe: {timeframe}.\n\n"
+        "If you send the target source and exact fields you need, I can prepare the owner-approved "
+        "scope and sample format.\n\n"
+        "Best,\n"
+        "Saye Monibah\n"
+        "AMICOR Nova\n\n"
+        "Internal capability match:\n"
+        f"{matched_caps}\n\n"
+        "Internal execution plan:\n"
+        f"{execution}\n\n"
+        "Safety boundary: use public or client-authorized sources only; do not bypass authentication, "
+        "CAPTCHAs, paywalls, or access controls; avoid sensitive personal data unless an appropriate "
+        "authorized compliance arrangement is in place.\n\n"
+        f"{forbidden}"
+    )
+
+
 def generate_drafts(
     opportunity: dict[str, Any],
     *,
@@ -177,6 +240,16 @@ def generate_drafts(
     execution = _execution_lines(packet)
     portfolio_positioning = _portfolio_positioning(packet)
     packet_summary = work_packet_summary(packet)
+
+    primary_revenue_proposal = _primary_revenue_proposal_body(
+        opportunity,
+        title=title,
+        company=company,
+        party=party,
+        matched_caps=matched_caps,
+        execution=execution,
+        forbidden=forbidden,
+    )
 
     drafts = [
         {
@@ -224,7 +297,7 @@ def generate_drafts(
         {
             "kind": "proposal",
             "title": f"Proposal outline for {title}",
-            "body": (
+            "body": primary_revenue_proposal or (
                 f"DRAFT proposal outline.\n\n{party}\n\n"
                 f"Scope (from untrusted posting; owner must confirm):\n{untrusted_desc}\n\n"
                 f"Capability-specific approach:\n{matched_caps}\n\n"
