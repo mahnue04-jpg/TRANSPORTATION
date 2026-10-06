@@ -952,7 +952,8 @@ def test_presenter_mode_controls_and_payload_contract() -> None:
     assert 'motion_provider.generate' in router
     assert '"quality_state"' in router
     assert '"publish_ready"' in router
-    assert "Nova never removes provider watermarks" in router
+    assert "Nova preserves provider AI disclosure watermarks" in router
+    assert "DEMO_READY_WITH_PROVIDER_WATERMARK" in router
 
 
 def test_presenter_provider_watermark_readiness_is_explicit() -> None:
