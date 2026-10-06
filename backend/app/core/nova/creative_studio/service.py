@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
+import time
 from typing import Any
 
 from app.core.nova.creative_studio.export import export_project_package
 from app.core.nova.creative_studio.drama import ShortDramaMixin
-from app.core.nova.creative_studio.media_runtime import run_encoder, serialized_media
+from app.core.nova.creative_studio.media_runtime import memory_budget, run_encoder, serialized_media
 from app.core.nova.creative_studio.flags import creative_guardrails
 from app.core.nova.creative_studio.generation import assemble_short_video, generate_content_pack
 from app.core.nova.creative_studio.models import (
@@ -1015,15 +1016,27 @@ class CreativeStudioService(ShortDramaMixin):
 
                     # Provider-generated clips can differ in codec profile, dimensions,
                     # frame rate, or time base. A concat-copy failure is therefore not
-                    # necessarily a memory failure. Normalize one clip at a time with a
-                    # single encoder thread, then concat-copy the normalized clips.
+                    # necessarily a memory failure. Let the failed encoder release its
+                    # cgroup pages before retrying, then normalize one clip at a time
+                    # using a deliberately lightweight preview profile.
                     if join_run.returncode != 0 or not joined_path.is_file() or joined_path.stat().st_size < 1024:
                         normalized_scene_clips = True
                         normalized_paths: list[Path] = []
+
+                        recovery_deadline = time.monotonic() + 10.0
+                        while time.monotonic() < recovery_deadline:
+                            budget = memory_budget()
+                            if budget is None or budget[1] - budget[0] >= 160 * 1024 * 1024:
+                                break
+                            time.sleep(0.25)
+
+                        normalize_width, normalize_height = ((540, 960) if vertical else (960, 540))
+                        normalize_fps = 20
                         vf = (
-                            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                            f"fps={fps},format=yuv420p"
+                            f"scale={normalize_width}:{normalize_height}:force_original_aspect_ratio=decrease:"
+                            f"flags=fast_bilinear,"
+                            f"pad={normalize_width}:{normalize_height}:(ow-iw)/2:(oh-ih)/2,"
+                            f"fps={normalize_fps},format=yuv420p"
                         )
                         for offset, source_path in enumerate(scene_clip_paths):
                             normalized_path = temp_root / f"normalized-{offset + 1}.mp4"
@@ -1034,10 +1047,10 @@ class CreativeStudioService(ShortDramaMixin):
                                 "-an",
                                 "-c:v", "libx264",
                                 "-threads", "1",
-                                "-preset", "veryfast",
+                                "-preset", "ultrafast",
                                 "-tune", "zerolatency",
-                                "-x264-params", "ref=1",
-                                "-crf", "23",
+                                "-x264-params", "ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0",
+                                "-crf", "25",
                                 "-pix_fmt", "yuv420p",
                                 "-movflags", "+faststart",
                                 str(normalized_path),
@@ -1045,7 +1058,7 @@ class CreativeStudioService(ShortDramaMixin):
                             normalize_run = run_encoder(
                                 normalize_cmd,
                                 timeout=120,
-                                required_headroom=96 * 1024 * 1024,
+                                required_headroom=128 * 1024 * 1024,
                             )
                             if (
                                 normalize_run.returncode != 0
