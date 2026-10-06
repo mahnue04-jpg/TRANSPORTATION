@@ -1141,7 +1141,7 @@ def test_head_presenter_reuses_only_matching_narration(monkeypatch, matching):
     payload = studio_router.PresenterIn(script="Current script", presenter_mode="head", voice="shimmer", captions=True)
     user = UserContext(user_id="owner-a", email="owner@example.test", role="admin")
     if not matching:
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(studio_router.HTTPException) as exc:
             studio_router.prepare_talking_presenter_preview(project["id"], payload, user, None)
         assert exc.value.status_code == 422
         assert "Generate Presenter Voice first" in str(exc.value.detail)
