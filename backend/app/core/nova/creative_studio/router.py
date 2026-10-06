@@ -745,16 +745,38 @@ def prepare_talking_presenter_preview(
             from app.core.nova.creative_studio.providers import _resolve_creative_media_url
             from app.core.nova.creative_studio.presenter_media import caption_presenter
             cues = narration[-1].metadata['provider_result']['caption_cues']
-            source_video = _resolve_creative_media_url(generated_url)
-            captioned, subtitles = caption_presenter(source_video, cues)
-            presenter_meta.update({'original_video_url': generated_url, 'captions_burned_in': True,
-                                   'caption_cues': cues, 'voice': payload.voice,
-                                   'subtitle_url': generated_url.rsplit('/', 1)[0] + '/' + subtitles.name})
-            generated_url = generated_url.rsplit('/', 1)[0] + '/' + captioned.name
+            original_generated_url = generated_url
+            presenter_meta.update({
+                'original_video_url': original_generated_url,
+                'caption_cues': cues,
+                'voice': payload.voice,
+            })
+            try:
+                source_video = _resolve_creative_media_url(original_generated_url)
+                if source_video is None:
+                    raise RuntimeError("Presenter media path could not be resolved for caption rendering.")
+                captioned, subtitles = caption_presenter(source_video, cues)
+                presenter_meta.update({
+                    'captions_burned_in': True,
+                    'subtitle_url': original_generated_url.rsplit('/', 1)[0] + '/' + subtitles.name,
+                })
+                generated_url = original_generated_url.rsplit('/', 1)[0] + '/' + captioned.name
+            except RuntimeError as exc:
+                # D-ID has already produced and Nova has already downloaded the
+                # new lip-synced presenter. If local FFmpeg caption rendering is
+                # blocked by memory headroom, preserve that new video instead of
+                # failing the request and leaving the UI on a stale older asset.
+                logger.warning("Presenter caption render skipped; preserving provider video: %s", exc)
+                presenter_meta.update({
+                    'captions_burned_in': False,
+                    'caption_render_error': str(exc),
+                })
+                generated_url = original_generated_url
         provider_watermark_free = bool(result.get("watermark_free", False))
         # Body-motion video has no narration/lip-sync adapter and still needs
         # visual review of actual head-to-toe movement before final delivery.
-        publish_ready = bool(generated_url and provider_watermark_free and payload.presenter_mode == "head")
+        captions_ready = (not payload.captions) or presenter_meta.get('captions_burned_in') is True
+        publish_ready = bool(generated_url and provider_watermark_free and payload.presenter_mode == "head" and captions_ready)
         quality_state = "PUBLISH_READY" if publish_ready else ("PREVIEW_ONLY" if generated_url else status)
 
         asset = service._save_text_asset(
