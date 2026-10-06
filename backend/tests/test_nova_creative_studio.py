@@ -1335,3 +1335,75 @@ def test_final_promo_reuses_publish_ready_presenter_without_encoder(monkeypatch,
     assert result["asset"]["metadata"]["final_promo"] is True
     assert result["asset"]["metadata"]["render_mode"] == "publish_ready_presenter_passthrough"
     assert result["asset"]["metadata"]["subtitle_url"] == "/media/nova-creative/presenter.srt"
+
+
+def test_final_promo_reuses_legacy_did_preview_without_encoder(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as studio_service
+    from app.core.nova.creative_studio.models import CreativeAsset, CreativeProject, CreativeScene
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    store = CreativeStudioStore()
+    svc = studio_service.CreativeStudioService(store)
+    owner = "owner-legacy-did"
+    project = CreativeProject(
+        id="cproj_legacy_did",
+        owner_id=owner,
+        title="Legacy D-ID demo",
+        project_type="explainer",
+        platform="website",
+        objective="demo",
+        audience="business",
+        tone="professional",
+        status="storyboarded",
+    )
+    store.save_project(project)
+    store.save_scene(CreativeScene(
+        id="scene1",
+        project_id=project.id,
+        owner_id=owner,
+        index=1,
+        heading="Demo",
+        description="Demo",
+        visual_prompt="Demo scene",
+        voiceover_text="Welcome to AMICOR Nova.",
+        subtitle_text="Welcome to AMICOR Nova.",
+        duration_seconds=5.0,
+    ))
+    media = tmp_path / "legacy-presenter.mp4"
+    media.write_bytes(b"legacy-did-presenter")
+    presenter = CreativeAsset(
+        id="presenter-legacy",
+        project_id=project.id,
+        owner_id=owner,
+        kind="presenter_video",
+        title="Talking presenter preview",
+        content="Welcome to AMICOR Nova.",
+        status="GENERATED",
+        url="/media/nova-creative/legacy-presenter.mp4",
+        metadata={
+            "quality_state": "PREVIEW_ONLY",
+            "publish_ready": False,
+            "presenter_mode": "head",
+            "captions_burned_in": False,
+            "captions_sidecar_ready": True,
+            "subtitle_url": "/media/nova-creative/legacy-presenter.srt",
+            "provider_result": {"provider": "d-id", "watermark_free": False},
+        },
+    )
+    store.save_asset(presenter)
+    monkeypatch.setattr(studio_service, "_resolve_creative_media_url", lambda url: media)
+    monkeypatch.setattr(
+        studio_service,
+        "run_encoder",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("encoder must not run")),
+    )
+
+    result = svc.assemble_final_promo(owner, project.id)
+
+    assert result["url"] == presenter.url
+    metadata = result["asset"]["metadata"]
+    assert metadata["final_promo"] is True
+    assert metadata["render_mode"] == "legacy_did_demo_passthrough"
+    assert metadata["demo_ready"] is True
+    assert metadata["provider_watermark_preserved"] is True
+    assert metadata["subtitle_url"] == "/media/nova-creative/legacy-presenter.srt"
