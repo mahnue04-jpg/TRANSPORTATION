@@ -91,7 +91,14 @@ def test_saved_nondefault_status_is_preserved_as_unverified(monkeypatch):
 def test_saas_customer_cannot_use_owner_search(client, monkeypatch, page):
     monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "dispatcher@amicor.local")
     monkeypatch.setattr("app.core.nova.work_revenue.router.customer_access", lambda *args, **kwargs: {"nova_saas_customer": True})
-    result = client.post(f"/api/nova/{page}/ask", headers=headers(client), json={"action": "ask", "question": "Find jobs for me"})
+    # A genuine non-owner SaaS customer remains blocked from the internal
+    # owner revenue pipeline. The configured AMICOR owner is tested separately
+    # and must retain access even when the owner's org also has a SaaS tenant.
+    result = client.post(
+        f"/api/nova/{page}/ask",
+        headers=headers(client, "staff@amicor.local"),
+        json={"action": "ask", "question": "Find jobs for me"},
+    )
     assert result.status_code == 403, result.text
 
 

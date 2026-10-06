@@ -98,6 +98,29 @@ def test_work_page_loads(client: TestClient) -> None:
     assert ".opportunity-details" in WORK_CSS
 
 
+def test_owner_access_wins_over_saas_tenant_classification(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "dispatcher@amicor.local")
+    monkeypatch.setattr(
+        "app.core.nova.work_revenue.router.customer_access",
+        lambda *args, **kwargs: {"nova_saas_customer": True},
+    )
+    response = client.get("/api/nova/work/dashboard", headers=_headers(client))
+    assert response.status_code == 200, response.text
+
+
+def test_nonowner_saas_customer_stays_blocked(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "dispatcher@amicor.local")
+    monkeypatch.setattr(
+        "app.core.nova.work_revenue.router.customer_access",
+        lambda *args, **kwargs: {"nova_saas_customer": True},
+    )
+    response = client.get(
+        "/api/nova/work/dashboard",
+        headers=_headers(client, "staff@amicor.local"),
+    )
+    assert response.status_code == 403
+
+
 def test_signed_out_blocks_apis(client: TestClient) -> None:
     assert client.get("/api/nova/work/dashboard").status_code == 401
     assert client.post("/api/nova/work/opportunities", json={"company_name": "X", "opportunity_title": "Y"}).status_code == 401
