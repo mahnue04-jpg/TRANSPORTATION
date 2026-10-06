@@ -1293,7 +1293,18 @@ def test_final_promo_reuses_publish_ready_presenter_without_encoder(monkeypatch,
         status="storyboarded",
     )
     store.save_project(project)
-    store.save_scene(CreativeScene(id="scene1", project_id=project.id, owner_id=owner, index=1, description="Demo"))
+    store.save_scene(CreativeScene(
+        id="scene1",
+        project_id=project.id,
+        owner_id=owner,
+        index=1,
+        heading="Demo",
+        description="Demo",
+        visual_prompt="Demo scene",
+        voiceover_text="Welcome to AMICOR Nova.",
+        subtitle_text="Welcome to AMICOR Nova.",
+        duration_seconds=5.0,
+    ))
     media = tmp_path / "presenter.mp4"
     media.write_bytes(b"publish-ready-presenter")
     presenter = CreativeAsset(
