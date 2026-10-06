@@ -96,6 +96,15 @@ def require_work_revenue_owner(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> UserContext:
+    email = str(user.email or "").strip().lower()
+    owner_emails = _work_revenue_owner_emails()
+
+    # Internal owner access must win over SaaS tenant classification. The owner
+    # can legitimately test/sign up for Nova SaaS products inside the same
+    # organization; that must not lock the owner out of Work & Revenue.
+    if email in owner_emails:
+        return user
+
     access = customer_access(
         db,
         organization_id=user.organization_id,
@@ -103,9 +112,7 @@ def require_work_revenue_owner(
     )
     if access.get("nova_saas_customer"):
         raise HTTPException(status_code=403, detail="Work & Revenue is owner-only.")
-    if str(user.email or "").strip().lower() not in _work_revenue_owner_emails():
-        raise HTTPException(status_code=403, detail="Work & Revenue is restricted to the AMICOR owner.")
-    return user
+    raise HTTPException(status_code=403, detail="Work & Revenue is restricted to the AMICOR owner.")
 
 
 router = APIRouter(
