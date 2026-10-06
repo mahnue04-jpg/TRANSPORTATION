@@ -628,7 +628,28 @@ def prepare_talking_presenter_preview(
                     "script": payload.script,
                     **presenter_meta,
                 }
-            presenter_image = images[-1]
+            # Genova v2 uses a reviewed Black/African American female presenter image.
+            # Do not silently reuse an older generic presenter asset (including the
+            # previous D-ID sample face) because that makes the on-screen identity
+            # inconsistent with the selected Genova profile.
+            genova_images = [
+                asset for asset in images
+                if "genova presenter v2" in str(asset.content or "").lower()
+                or (
+                    ("black woman" in str(asset.content or "").lower()
+                     or "african american woman" in str(asset.content or "").lower())
+                    and "presenter" in str(asset.content or "").lower()
+                )
+            ]
+            if not genova_images:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Generate the Genova presenter image first. The presenter must be a young "
+                        "Black/African American woman; Nova will not reuse the old generic D-ID face."
+                    ),
+                )
+            presenter_image = genova_images[-1]
             # Reuse a reviewed Studio narration only when it matches the exact
             # current script. Changed scripts must not speak stale audio.
             narration = [
@@ -639,7 +660,7 @@ def prepare_talking_presenter_preview(
                 and (not payload.captions or (
                     (asset.metadata or {}).get('provider_result', {}).get('voice') == payload.voice
                     and (asset.metadata or {}).get('provider_result', {}).get('caption_cues')
-                    and (asset.metadata or {}).get('provider_result', {}).get('presenter_audio_version') == 1
+                    and (asset.metadata or {}).get('provider_result', {}).get('presenter_audio_version') == 2
                 ))
             ]
             if payload.captions and not narration:
@@ -675,7 +696,9 @@ def prepare_talking_presenter_preview(
                 "energetic_promo": "confident energetic promotional gestures while staying professional",
             }[payload.motion_style]
             source_prompt = (
-                "Photorealistic business presenter, " + framing_text + ". "
+                "Genova presenter v2. Photorealistic young Black/African American woman, late twenties, "
+                "warm approachable expression, polished natural makeup, professional modern hairstyle, "
+                + framing_text + ". "
                 "Professional modern small-business setting, clean lighting, realistic anatomy, natural hands, "
                 "camera-ready wardrobe, no text, no logos, no watermarks, no provider marks. "
                 "Keep the presenter centered and leave safe space for captions and an official AMICOR logo overlay later. "
