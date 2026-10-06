@@ -967,7 +967,7 @@ def test_presenter_provider_watermark_readiness_is_explicit() -> None:
     assert '"demo_ready": demo_ready' in router
     assert '"provider_watermark_preserved"' in router
     assert "_presenter_demo_eligible" in service
-    assert 'bool((item.metadata or {}).get("demo_ready"))' in service
+    assert 'bool(metadata.get("demo_ready"))' in service
     assert '"legacy_did_demo_passthrough"' in service
 
 
