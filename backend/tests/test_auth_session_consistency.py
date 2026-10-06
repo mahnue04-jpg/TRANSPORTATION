@@ -212,3 +212,26 @@ def test_mobile_login_offline_driver_with_active_workload_succeeds() -> None:
             DriverStatus.AVAILABLE,
             DriverStatus.ASSIGNED,
         }
+
+
+def test_browser_session_cookie_bridge_allows_direct_authenticated_navigation() -> None:
+    client = _client()
+    headers = _login(client, "dispatcher@amicor.local")
+
+    bridged = client.post("/api/auth/browser-session", headers=headers)
+    assert bridged.status_code == 200, bridged.text
+    assert bridged.json()["session"] == "cookie"
+    assert "amicor_admin_session" in bridged.cookies
+
+    # Remove the explicit Authorization header. The protected API must now
+    # authenticate from the HttpOnly browser cookie alone.
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200, me.text
+    assert me.json()["email"] == "dispatcher@amicor.local"
+
+
+def test_browser_session_cookie_bridge_rejects_cookie_only_call() -> None:
+    client = _client()
+    response = client.post("/api/auth/browser-session")
+    assert response.status_code == 401
+    assert response.json()["detail"] in {"Authentication required", "Bearer token required"}
