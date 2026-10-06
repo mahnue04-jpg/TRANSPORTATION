@@ -629,9 +629,24 @@ class OpenAIVoiceProvider:
         presenter_result = {}
         if presenter:
             from app.core.nova.creative_studio.presenter_media import normalize_narration, caption_cues
-            normalized, loudness = normalize_narration(root / filename)
-            filename = normalized.name
-            with normalized.open('rb') as audio_file:
+            audio_path = root / filename
+            loudness = {'normalization_skipped': False}
+            try:
+                normalized, loudness = normalize_narration(audio_path)
+                audio_path = normalized
+                filename = normalized.name
+            except RuntimeError as exc:
+                # Preserve the freshly generated presenter narration when local
+                # FFmpeg normalization is blocked by Render memory headroom.
+                # The original TTS MP3 is still valid for D-ID lip sync and can
+                # be transcribed for timed caption cues.
+                if 'insufficient server memory headroom' not in str(exc).lower():
+                    raise
+                loudness = {
+                    'normalization_skipped': True,
+                    'normalization_error': str(exc),
+                }
+            with audio_path.open('rb') as audio_file:
                 transcript = get_client().audio.transcriptions.create(
                     model='whisper-1', file=audio_file, response_format='verbose_json',
                     timestamp_granularities=['word'], language='en', prompt=clean[:4000],

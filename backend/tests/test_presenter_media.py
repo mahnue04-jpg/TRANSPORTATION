@@ -70,6 +70,54 @@ def test_presenter_provider_uses_selected_voice_and_measured_speech_captions(tmp
     assert result['presenter_audio_version'] == 2
 
 
+
+def test_presenter_voice_preserves_original_audio_when_normalization_hits_memory_limit(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import providers
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_ASSET_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_PUBLIC_PREFIX", "/media/nova-creative")
+    monkeypatch.setattr(
+        providers,
+        "get_client",
+        lambda: SimpleNamespace(
+            audio=SimpleNamespace(
+                speech=SimpleNamespace(
+                    create=lambda **kwargs: SimpleNamespace(content=b"fake-mp3-bytes")
+                ),
+                transcriptions=SimpleNamespace(
+                    create=lambda **kwargs: {
+                        "duration": 1.0,
+                        "words": [{"word": "Hello", "start": 0.0, "end": 0.5}, {"word": "Genova.", "start": 0.5, "end": 1.0}],
+                    }
+                ),
+            )
+        ),
+    )
+    import app.core.nova.creative_studio.presenter_media as media
+    monkeypatch.setattr(
+        media,
+        "normalize_narration",
+        lambda path: (_ for _ in ()).throw(RuntimeError("Presenter media processing failed: Nova paused video rendering: insufficient server memory headroom. No encoder was started.")),
+    )
+
+    result = providers.OpenAIVoiceProvider().generate(
+        script="Hello Genova.",
+        voice="shimmer",
+        presenter=True,
+    )
+
+    assert result["status"] == "GENERATED"
+    assert result["url"].endswith(".mp3")
+    assert "-clear.mp3" not in result["url"]
+    assert result["loudness"]["normalization_skipped"] is True
+    assert "insufficient server memory headroom" in result["loudness"]["normalization_error"]
+    assert result["presenter_audio_version"] == 2
+    assert " ".join(cue["text"] for cue in result["caption_cues"]) == "Hello Genova."
+
+
 def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
     from PIL import Image
     from app.core.nova.creative_studio import presenter_media as media
