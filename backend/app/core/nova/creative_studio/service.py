@@ -993,23 +993,92 @@ class CreativeStudioService(ShortDramaMixin):
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / f"nova-final-{new_id('promo').split('_', 1)[-1]}.mp4"
             job = self._start_job(owner_id, project_id, "short_video_assembly")
+            normalized_scene_clips = False
             try:
                 with tempfile.TemporaryDirectory(prefix="nova-final-copy-") as temp_dir:
                     temp_root = Path(temp_dir)
+
+                    def _write_concat_file(paths: list[Path], target: Path) -> None:
+                        target.write_text(
+                            "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in paths) + "\n",
+                            encoding="utf-8",
+                        )
+
                     concat_file = temp_root / "clips.txt"
-                    concat_file.write_text(
-                        "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in scene_clip_paths) + "\n",
-                        encoding="utf-8",
-                    )
+                    _write_concat_file(scene_clip_paths, concat_file)
                     joined_path = temp_root / "joined.mp4"
                     join_cmd = [
                         ffmpeg, "-y", "-f", "concat", "-safe", "0",
                         "-i", str(concat_file), "-c", "copy", str(joined_path),
                     ]
                     join_run = run_encoder(join_cmd, timeout=90, required_headroom=96 * 1024 * 1024)
+
+                    # Provider-generated clips can differ in codec profile, dimensions,
+                    # frame rate, or time base. A concat-copy failure is therefore not
+                    # necessarily a memory failure. Normalize one clip at a time with a
+                    # single encoder thread, then concat-copy the normalized clips.
                     if join_run.returncode != 0 or not joined_path.is_file() or joined_path.stat().st_size < 1024:
-                        detail = (join_run.stderr or join_run.stdout or "")[-1800:]
-                        raise RuntimeError("low-memory scene join failed: " + detail)
+                        normalized_scene_clips = True
+                        normalized_paths: list[Path] = []
+                        vf = (
+                            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                            f"fps={fps},format=yuv420p"
+                        )
+                        for offset, source_path in enumerate(scene_clip_paths):
+                            normalized_path = temp_root / f"normalized-{offset + 1}.mp4"
+                            normalize_cmd = [
+                                ffmpeg, "-y", "-threads", "1", "-filter_threads", "1",
+                                "-i", str(source_path),
+                                "-vf", vf,
+                                "-an",
+                                "-c:v", "libx264",
+                                "-threads", "1",
+                                "-preset", "veryfast",
+                                "-tune", "zerolatency",
+                                "-x264-params", "ref=1",
+                                "-crf", "23",
+                                "-pix_fmt", "yuv420p",
+                                "-movflags", "+faststart",
+                                str(normalized_path),
+                            ]
+                            normalize_run = run_encoder(
+                                normalize_cmd,
+                                timeout=120,
+                                required_headroom=96 * 1024 * 1024,
+                            )
+                            if (
+                                normalize_run.returncode != 0
+                                or not normalized_path.is_file()
+                                or normalized_path.stat().st_size < 1024
+                            ):
+                                detail = (normalize_run.stderr or normalize_run.stdout or "")[-1800:]
+                                raise RuntimeError(
+                                    f"scene {offset + 1} normalization failed: {detail}"
+                                )
+                            normalized_paths.append(normalized_path)
+
+                        concat_file = temp_root / "normalized-clips.txt"
+                        _write_concat_file(normalized_paths, concat_file)
+                        joined_path = temp_root / "joined-normalized.mp4"
+                        normalized_join_cmd = [
+                            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                            "-i", str(concat_file), "-c", "copy", str(joined_path),
+                        ]
+                        normalized_join_run = run_encoder(
+                            normalized_join_cmd,
+                            timeout=90,
+                            required_headroom=96 * 1024 * 1024,
+                        )
+                        if (
+                            normalized_join_run.returncode != 0
+                            or not joined_path.is_file()
+                            or joined_path.stat().st_size < 1024
+                        ):
+                            detail = (
+                                normalized_join_run.stderr or normalized_join_run.stdout or ""
+                            )[-1800:]
+                            raise RuntimeError("normalized scene join failed: " + detail)
 
                     mux_cmd = [
                         ffmpeg, "-y", "-i", str(joined_path), "-i", str(audio_path),
@@ -1020,12 +1089,12 @@ class CreativeStudioService(ShortDramaMixin):
                     mux_run = run_encoder(mux_cmd, timeout=120, required_headroom=96 * 1024 * 1024)
                     if mux_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
                         detail = (mux_run.stderr or mux_run.stdout or "")[-1800:]
-                        raise RuntimeError("low-memory audio mux failed: " + detail)
+                        raise RuntimeError("audio mux failed: " + detail)
             except Exception as exc:
                 self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_copy")
                 raise CreativeStudioError(
                     "FINAL_ASSEMBLY_FAILED",
-                    f"Nova low-memory final promo assembly failed: {str(exc)[-1200:]}",
+                    f"Nova final promo assembly failed: {str(exc)[-1200:]}",
                     http_status=422,
                 ) from exc
 
@@ -1039,7 +1108,11 @@ class CreativeStudioService(ShortDramaMixin):
                 status="GENERATED",
                 metadata={
                     "final_promo": True,
-                    "render_mode": "scene_clip_concat_copy",
+                    "render_mode": (
+                        "scene_clip_normalize_then_concat"
+                        if normalized_scene_clips
+                        else "scene_clip_concat_copy"
+                    ),
                     "scene_count": len(scenes),
                     "voice_asset_id": audio.id,
                     "brand_overlay": "preserved_from_scene_assets",
@@ -1047,9 +1120,15 @@ class CreativeStudioService(ShortDramaMixin):
                 url=public_url,
             )
             self._finish_job(
-                job, status="GENERATED",
-                message="Final AMICOR Nova promo assembled in low-memory mode.",
-                asset_ids=[asset.id], provider="nova_ffmpeg_copy",
+                job,
+                status="GENERATED",
+                message=(
+                    "Final AMICOR Nova promo assembled after low-memory scene normalization."
+                    if normalized_scene_clips
+                    else "Final AMICOR Nova promo assembled in low-memory mode."
+                ),
+                asset_ids=[asset.id],
+                provider="nova_ffmpeg_copy",
             )
             return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 
