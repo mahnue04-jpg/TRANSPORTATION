@@ -197,6 +197,21 @@ class CreativeStudioService(ShortDramaMixin):
         self.store.save_project(row)
         return row.as_dict()
 
+    def attach_brand_to_project(self, owner_id: str, project_id: str, brand_id: str) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        brand = self.store.get_brand(brand_id, owner_id)
+        if brand is None:
+            raise CreativeStudioError("NOT_FOUND", "Brand profile not found", http_status=404)
+        project.brand_profile_id = brand.id
+        project.updated_at = _now()
+        saved = self.store.save_project(project)
+        return {
+            "status": "UPDATED",
+            "message": "Brand profile attached to active project.",
+            "project": saved.as_dict(),
+            "brand": brand.as_dict(),
+        }
+
     def list_projects(self, owner_id: str) -> list[dict[str, Any]]:
         return [p.as_dict() for p in self.store.list_projects(owner_id)]
 

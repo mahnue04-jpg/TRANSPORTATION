@@ -1261,3 +1261,13 @@ def test_final_promo_memory_recovery_uses_lightweight_normalization():
     assert "normalize_fps = 20" in source
     assert '"-preset", "ultrafast"' in source
     assert '"ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0"' in source
+
+
+
+def test_existing_project_can_attach_saved_brand():
+    import inspect
+    from app.core.nova.creative_studio.service import CreativeStudioService
+
+    source = inspect.getsource(CreativeStudioService.attach_brand_to_project)
+    assert "project.brand_profile_id = brand.id" in source
+    assert '"Brand profile attached to active project."' in source
