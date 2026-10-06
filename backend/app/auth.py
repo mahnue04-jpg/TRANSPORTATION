@@ -1399,6 +1399,33 @@ def admin_session_logout(response: Response):
     return {"status": "logged out", "session": "cookie"}
 
 
+@router.post("/browser-session")
+def browser_session_cookie(
+    request: Request,
+    response: Response,
+    user = Depends(get_current_user),  # type: ignore
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+):
+    """Persist an already-validated Bearer session as a secure browser cookie.
+
+    This endpoint exists for browser automation and same-origin navigation where
+    localStorage is not preserved across a saved browser profile. It never accepts
+    a password and never exposes the token in the response.
+    """
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    token = creds.credentials
+    # get_current_user already validated the token and active user above.
+    set_admin_session_cookie(response, request, token)
+    return {
+        "status": "ok",
+        "session": "cookie",
+        "user_id": user.id,
+        "email": user.email,
+        "role": resolve_session_role(user, _jwt_verify(token)),
+    }
+
+
 @router.get("/me")
 def me(
     request: Request,
