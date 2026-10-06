@@ -835,3 +835,26 @@ def test_paid_nova_surfaces_include_creative_studio() -> None:
     with SessionLocal() as db:
         body = customer_access(db, organization_id=None, user_id="internal-test")
     assert "nova_creative" in body["allowed_surfaces"]
+
+
+
+def test_internal_operator_account_is_exempt_from_customer_trial_guard(monkeypatch) -> None:
+    from app.core.nova.signup import isolation
+
+    monkeypatch.delenv("NOVA_V3_OWNER_EMAILS", raising=False)
+    owners = isolation._operator_owner_emails()
+    assert "mahnue04@gmail.com" in owners
+
+    source = Path(isolation.__file__).read_text(encoding="utf-8")
+    owner_check = source.index("if email and email in _operator_owner_emails():")
+    trial_check = source.index("if trial_expired and trial_candidate:")
+    assert owner_check < trial_check
+
+
+def test_configured_owner_email_is_exempt_from_customer_trial_guard(monkeypatch) -> None:
+    from app.core.nova.signup import isolation
+
+    monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "owner@example.com, second@example.com")
+    owners = isolation._operator_owner_emails()
+    assert "owner@example.com" in owners
+    assert "second@example.com" in owners
