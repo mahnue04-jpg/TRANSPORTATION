@@ -572,9 +572,21 @@
     var caption = latestAsset(assets, "caption");
 
     var presenterMeta = presenter && presenter.metadata || {};
-    var presenterReady = !presenter || presenterMeta.publish_ready === true;
+    var finalVideoMeta = finalVideo && finalVideo.metadata || {};
+    var presenterDemoAccepted = !!(
+      finalVideo &&
+      finalVideo.url &&
+      (
+        finalVideoMeta.render_mode === "legacy_did_demo_passthrough" ||
+        finalVideoMeta.render_mode === "publish_ready_presenter_passthrough"
+      ) &&
+      finalVideoMeta.demo_ready === true &&
+      finalVideoMeta.provider_watermark_preserved === true
+    );
+    var presenterReady = !presenter || presenterMeta.publish_ready === true || presenterDemoAccepted;
     var presenterState = !presenter ? "NOT USED" :
-      (presenterMeta.publish_ready === true ? "PUBLISH_READY" : (presenterMeta.quality_state || "PREVIEW_ONLY"));
+      (presenterMeta.publish_ready === true ? "PUBLISH_READY" :
+        (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")));
 
     var checks = [
       { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
