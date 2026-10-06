@@ -1235,3 +1235,15 @@ def test_did_presenter_accepts_saved_studio_audio(monkeypatch):
     result = provider.generate(presenter_image_url="/media/portrait.png", script="Current script", audio_url="/media/narration.mp3")
     assert calls[0]["script"] == {"type": "audio", "audio_url": "https://example.test/media/narration.mp3"}
     assert result["asset_generated"] is True
+
+
+
+def test_final_promo_has_low_memory_scene_normalization_fallback():
+    import inspect
+    from app.core.nova.creative_studio.service import CreativeStudioService
+
+    source = inspect.getsource(CreativeStudioService.assemble_final_promo)
+    assert "normalized_scene_clips = False" in source
+    assert "scene {offset + 1} normalization failed" in source
+    assert "normalized scene join failed" in source
+    assert "scene_clip_normalize_then_concat" in source
