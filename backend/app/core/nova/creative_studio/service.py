@@ -902,6 +902,53 @@ class CreativeStudioService(ShortDramaMixin):
 
         all_assets = self.store.list_assets(project_id, owner_id)
 
+        # A publish-ready talking presenter is already a complete narrated promo.
+        # Re-encoding that MP4 on the small web service only burns memory and can
+        # fail before FFmpeg starts. Promote the provider-delivered file directly
+        # to the final-promo asset instead. Timed captions may travel as a sidecar
+        # when burn-in was skipped for memory safety.
+        presenter = next(
+            (
+                item for item in reversed(all_assets)
+                if item.kind == "presenter_video"
+                and str(item.status or "").upper() == "GENERATED"
+                and item.url
+                and bool((item.metadata or {}).get("publish_ready"))
+            ),
+            None,
+        )
+        if presenter is not None:
+            presenter_path = _resolve_creative_media_url(presenter.url)
+            if presenter_path is not None and presenter_path.is_file():
+                presenter_meta = presenter.metadata or {}
+                asset = self._save_text_asset(
+                    owner_id=owner_id,
+                    project_id=project_id,
+                    kind="video",
+                    title="Final AMICOR Nova promo",
+                    content=presenter.content or "Final promo using the publish-ready Genova presenter.",
+                    status="GENERATED",
+                    metadata={
+                        "final_promo": True,
+                        "render_mode": "publish_ready_presenter_passthrough",
+                        "presenter_asset_id": presenter.id,
+                        "voice_asset_id": presenter_meta.get("voice_asset_id"),
+                        "subtitle_url": presenter_meta.get("subtitle_url"),
+                        "captions_burned_in": presenter_meta.get("captions_burned_in") is True,
+                        "brand_overlay": "preserved_from_presenter_asset",
+                    },
+                    url=presenter.url,
+                )
+                job = self._start_job(owner_id, project_id, "short_video_assembly")
+                self._finish_job(
+                    job,
+                    status="GENERATED",
+                    message="Final AMICOR Nova promo promoted from the publish-ready Genova presenter without re-encoding.",
+                    asset_ids=[asset.id],
+                    provider="nova_presenter_passthrough",
+                )
+                return {"job": job.as_dict(), "asset": asset.as_dict(), "url": presenter.url}
+
         # Prefer the already-generated scene motion clips for final assembly.
         # Re-rendering every storyboard still is unnecessary work on the 512 MiB
         # web service and was the operation blocked by the memory guard.
