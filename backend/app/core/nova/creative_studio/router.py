@@ -170,6 +170,10 @@ class BrandIn(BaseModel):
     preferred_platforms: list[str] = Field(default_factory=list)
 
 
+class AttachBrandIn(BaseModel):
+    brand_id: str = Field(min_length=1, max_length=120)
+
+
 class BriefIn(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
     project_id: str | None = None
@@ -325,6 +329,21 @@ def get_project(
         service._project_or_404(user.user_id, project_id)
         _recover_scene_jobs(service, user.user_id, project_id, background_tasks)
         return service.get_project(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/brand")
+def attach_brand_to_project(
+    project_id: str,
+    payload: AttachBrandIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).attach_brand_to_project(user.user_id, project_id, payload.brand_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
