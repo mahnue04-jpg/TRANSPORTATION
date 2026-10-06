@@ -127,7 +127,7 @@
       <h2>Generate</h2>
       <div class="image-controls">
         <label>Custom image prompt (optional)
-          <textarea id="custom-image-prompt" rows="3" maxlength="4000" placeholder="For a presenter: describe an original person, front-facing pose, wardrobe, lighting, and background."></textarea>
+          <textarea id="custom-image-prompt" rows="3" maxlength="4000">Genova presenter v2. Photorealistic head-and-shoulders portrait of a beautiful young Black/African American woman in her late twenties, warm confident expression, natural polished makeup, modern professional hairstyle, camera-facing pose, clean contemporary small-business office background, soft flattering studio lighting, realistic skin texture, no text, no logos, no watermarks, no provider marks.</textarea>
         </label>
         <p class="hint">Generate Image uses this description when provided. Leave it blank to use the project’s marketing artwork prompt.</p>
         <label>Image aspect ratio
@@ -171,9 +171,9 @@
             </select>
           </label>
         </div>
-        <p class="hint">Full body motion starts with head-to-toe framing. Review the generated clip for natural arm, hand, torso, and leg movement. Body motion previews do not include narration or lip sync yet. Talking head uses D-ID lip sync. Provider watermarks are never removed; use a clean commercial provider output for final publishing.</p>
+        <p class="hint">Genova uses a young Black/African American female presenter. Full body motion starts with head-to-toe framing. Body motion previews do not include narration or lip sync yet. Talking head uses the exact generated Presenter Voice audio for D-ID lip sync. A D-ID trial/account watermark cannot be removed by Nova; final publishing requires watermark-free output enabled by the provider account.</p>
     <label>Presenter voice
-      <select id="presenter-voice"><option value="coral" selected>Genova · clear female voice</option><option value="nova">Nova · warm female voice</option><option value="shimmer">Shimmer · bright female voice</option></select>
+      <select id="presenter-voice"><option value="shimmer" selected>Genova · youthful female voice</option><option value="coral">Coral · clear female voice</option><option value="nova">Nova · warm female voice</option></select>
     </label>
     <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
     <label>Talking presenter script
@@ -244,6 +244,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=genova-voice-captions-20261005"></script>
+  <script src="/static/nova-creative/creative.js?v=genova-black-female-v2-20261005"></script>
 </body>
 </html>

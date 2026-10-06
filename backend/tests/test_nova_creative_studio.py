@@ -1125,17 +1125,40 @@ def test_head_presenter_reuses_only_matching_narration(monkeypatch, matching):
     studio_router = importlib.import_module("app.core.nova.creative_studio.router")
     svc = _svc()
     project = svc.create_project("owner-a", {"title": "Narrated demo", "project_type": "explainer"})
-    svc._save_text_asset(owner_id="owner-a", project_id=project["id"], kind="image", title="Portrait", content="Original presenter", status="GENERATED", url="https://example.test/portrait.png", metadata={})
-    audio = svc._save_text_asset(owner_id="owner-a", project_id=project["id"], kind="audio", title="Narration", content="Current script" if matching else "Old script", status="GENERATED", url="/media/narration.mp3", metadata={})
+    svc._save_text_asset(owner_id="owner-a", project_id=project["id"], kind="image", title="Portrait", content="Genova presenter v2. Photorealistic young Black woman presenter.", status="GENERATED", url="https://example.test/portrait.png", metadata={})
+    audio = svc._save_text_asset(
+        owner_id="owner-a", project_id=project["id"], kind="audio", title="Narration",
+        content="Current script" if matching else "Old script", status="GENERATED",
+        url="/media/narration.mp3",
+        metadata={"provider_result": {"voice": "shimmer", "caption_cues": [{"text": "Current script", "start": 0.0, "end": 1.0}], "presenter_audio_version": 2}},
+    )
     calls = []
     def generate(**kwargs):
         calls.append(kwargs)
         return {"status": "GENERATED", "url": "/media/presenter.mp4", "asset_generated": True, "watermark_free": True}
     monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
     monkeypatch.setattr(studio_router, "talking_presenter_provider", lambda: SimpleNamespace(generate=generate))
-    result = studio_router.prepare_talking_presenter_preview(project["id"], studio_router.PresenterIn(script="Current script", presenter_mode="head"), UserContext(user_id="owner-a", email="owner@example.test", role="admin"), None)
-    assert calls[0].get("audio_url") == (audio.url if matching else None)
-    assert result.get("source_audio_asset_id") == (audio.id if matching else None)
+    payload = studio_router.PresenterIn(script="Current script", presenter_mode="head", voice="shimmer", captions=True)
+    user = UserContext(user_id="owner-a", email="owner@example.test", role="admin")
+    if not matching:
+        with pytest.raises(studio_router.HTTPException) as exc:
+            studio_router.prepare_talking_presenter_preview(project["id"], payload, user, None)
+        assert exc.value.status_code == 422
+        assert "Generate Presenter Voice first" in str(exc.value.detail)
+        assert calls == []
+        return
+
+    from pathlib import Path
+    from app.core.nova.creative_studio import providers as studio_providers, presenter_media
+    monkeypatch.setattr(studio_providers, "_resolve_creative_media_url", lambda url: Path("/tmp/presenter.mp4"))
+    monkeypatch.setattr(
+        presenter_media,
+        "caption_presenter",
+        lambda source, cues: (Path("/tmp/presenter-captioned.mp4"), Path("/tmp/presenter.srt")),
+    )
+    result = studio_router.prepare_talking_presenter_preview(project["id"], payload, user, None)
+    assert calls[0].get("audio_url") == audio.url
+    assert result.get("source_audio_asset_id") == audio.id
     assert result["publish_ready"] is True
 
 
