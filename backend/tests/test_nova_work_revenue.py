@@ -88,7 +88,7 @@ def test_work_page_loads(client: TestClient) -> None:
     assert "escapeHtml" in WORK_JS
     assert 'action === "open-handoff"' in WORK_JS
     assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
-    assert "Approved handoff opened." in WORK_JS
+    assert "Fallback handoff opened because Nova could not submit this provider automatically." in WORK_JS
     assert "Nova did not claim it submitted the application." in WORK_JS
     assert "Approve for future submission" in WORK_JS
     assert "Record manual submission after I send it" in WORK_JS
@@ -1491,7 +1491,7 @@ def test_phase2_dashboard_and_today_surface_new_sections() -> None:
     assert "Record manual submission after I send it" not in WORK_JS
     assert 'action === "open-handoff"' in WORK_JS
     assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
-    assert "Approved handoff opened." in WORK_JS
+    assert "Fallback handoff opened because Nova could not submit this provider automatically." in WORK_JS
     assert "Manual submission recorded after owner/operator handoff." in WORK_JS
 
 
