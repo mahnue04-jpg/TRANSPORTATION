@@ -29,6 +29,16 @@ _REMOTE_VENDOR_TERMS = (
     "vendor",
 )
 
+# Owner-designated primary revenue lanes. These are searched first and receive
+# a modest scoring boost when the discovered duties actually match Nova's
+# verified digital capabilities. The order is intentional.
+PRIMARY_REVENUE_FAMILIES: tuple[str, ...] = (
+    "lead_generation_public_data",
+    "content_media_processing",
+    "b2b_workflow_automation",
+    "api_micro_saas",
+)
+
 # Explicitly banned generic occupation searches.
 _BANNED_QUERY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bdelivery driver\b", re.I),
@@ -75,6 +85,67 @@ _STATE_RESTRICT = re.compile(
 )
 
 SEARCH_FAMILIES: dict[str, dict[str, Any]] = {
+    "lead_generation_public_data": {
+        "label": "Lead generation / permitted public-data research",
+        "capability_ids": ("business_research", "data_spreadsheet", "ai_workflow_automation", "REPORTING", "RESEARCH"),
+        "queries": (
+            "fixed price lead list building public business directories freelance",
+            "data scraping public directory contractor remote",
+            "web data extraction public records freelance project",
+            "B2B lead research list building contractor remote",
+            "public business contact research spreadsheet freelance",
+            "market data collection public sources fixed price project",
+            "data extraction cleanup verification freelance contract",
+            "real estate public records research spreadsheet contractor",
+        ),
+        "safety_notes": (
+            "Use public or client-authorized sources only.",
+            "Do not bypass authentication, CAPTCHAs, paywalls, or access controls.",
+            "Avoid sensitive personal data and honor source terms and privacy requirements.",
+        ),
+    },
+    "content_media_processing": {
+        "label": "High-speed content / media processing",
+        "capability_ids": ("content_documentation", "document_intelligence", "data_spreadsheet", "REPORTING"),
+        "queries": (
+            "podcast show notes transcription formatting fixed price freelance",
+            "video transcript cleanup summary contractor remote",
+            "content repurposing blog formatting freelance project",
+            "timestamped show notes podcast contractor",
+            "document cleanup reformatting batch freelance",
+            "audio transcript summary fixed price project",
+            "content operations turnaround contractor remote",
+        ),
+    },
+    "b2b_workflow_automation": {
+        "label": "Local B2B workflow automation",
+        "capability_ids": ("ai_workflow_automation", "document_intelligence", "administrative_operations", "data_spreadsheet", "web_software"),
+        "queries": (
+            "small business workflow automation contractor",
+            "email intake automation local business freelance",
+            "document routing automation contractor remote",
+            "CRM workflow automation small business project",
+            "property management workflow automation contractor",
+            "law firm intake automation freelance project",
+            "trade contractor office automation project",
+            "monthly operations automation retainer small business",
+        ),
+    },
+    "api_micro_saas": {
+        "label": "API / micro-SaaS implementation",
+        "capability_ids": ("web_software", "ai_workflow_automation", "document_intelligence"),
+        "queries": (
+            "custom API endpoint freelance project remote",
+            "document parser API contractor",
+            "data parser microservice freelance",
+            "webhook automation API integration fixed price",
+            "RapidAPI custom API development freelance",
+            "Make.com webhook integration contractor",
+            "Zapier API integration freelance project",
+            "text processing API microservice contractor",
+        ),
+        "verified_only": True,
+    },
     "nova_anonymous_clients": {
         "label": "Nova Anonymous client acquisition",
         "capability_ids": (
@@ -287,6 +358,10 @@ SEARCH_FAMILIES: dict[str, dict[str, Any]] = {
 
 
 _FAMILY_REQUEST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("lead_generation_public_data", re.compile(r"\b(lead generation|lead list|list building|data scraping|web scraping|data extraction|public records|public directory|market data)\b", re.I)),
+    ("content_media_processing", re.compile(r"\b(transcription|show notes|podcast|content repurposing|transcript cleanup|timestamped|media formatting|blog formatting)\b", re.I)),
+    ("b2b_workflow_automation", re.compile(r"\b(b2b automation|business automation|workflow automation|intake automation|document routing|crm automation|email automation)\b", re.I)),
+    ("api_micro_saas", re.compile(r"\b(api endpoint|micro[- ]?saas|microservice|rapidapi|webhook|api integration|document parser|data parser)\b", re.I)),
     ("nova_anonymous_clients", re.compile(r"\b(nova anonymous|amicor anonymous|anonymous operations agent|anonymous operation agent|autonomous operations agent|autonomous operation agent)\b", re.I)),
     ("bookkeeping_support", re.compile(r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|invoice prep|expense categorization|financial spreadsheet)\b", re.I)),
     ("document_writing", re.compile(r"\b(writing|writer|document|proposal|rfp|sop|content|report writing|business correspondence)\b", re.I)),
@@ -435,7 +510,10 @@ def generate_capability_first_queries(
 ) -> list[dict[str, Any]]:
     """Build targeted discovery queries from verified capabilities and families."""
     supported = _supported_capability_keys()
-    selected = families or list(SEARCH_FAMILIES.keys())
+    selected = families or [
+        *PRIMARY_REVENUE_FAMILIES,
+        *[family_id for family_id in SEARCH_FAMILIES.keys() if family_id not in PRIMARY_REVENUE_FAMILIES],
+    ]
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -498,6 +576,26 @@ def search_family_catalog() -> list[dict[str, Any]]:
 
 
 _FAMILY_TEXT_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "lead_generation_public_data": re.compile(
+        r"\b(lead list|lead generation|list building|public directory|public records|"
+        r"data scraping|web scraping|data extraction|contact research|market data collection)\b",
+        re.I,
+    ),
+    "content_media_processing": re.compile(
+        r"\b(transcription|transcript cleanup|show notes|podcast notes|timestamped notes|"
+        r"content repurposing|blog formatting|media processing|document reformatting)\b",
+        re.I,
+    ),
+    "b2b_workflow_automation": re.compile(
+        r"\b(workflow automation|intake automation|document routing|crm automation|"
+        r"email automation|business automation|operations automation|zapier|make\.com|n8n)\b",
+        re.I,
+    ),
+    "api_micro_saas": re.compile(
+        r"\b(api endpoint|api integration|microservice|micro[- ]?saas|rapidapi|"
+        r"webhook|document parser|data parser|text processing api)\b",
+        re.I,
+    ),
     "administrative_operations": re.compile(
         r"\b(administrative support|administrative operations|virtual assistant|"
         r"document preparation|project administration|scheduling support|data entry|"
@@ -572,6 +670,20 @@ def _family_text_evidence(family_id: str | None, text: str) -> bool | None:
 
 
 _FAMILY_DUTY_MATCHES: dict[str, frozenset[str]] = {
+    "lead_generation_public_data": frozenset({
+        "research", "spreadsheet_analysis", "data_organization", "reporting",
+    }),
+    "content_media_processing": frozenset({
+        "content_operations", "document_preparation", "reporting", "data_organization",
+    }),
+    "b2b_workflow_automation": frozenset({
+        "ai_assisted_analysis", "workflow_documentation", "document_preparation",
+        "data_organization", "web_software_support", "administrative_support",
+    }),
+    "api_micro_saas": frozenset({
+        "web_software_support", "ai_assisted_analysis", "data_organization",
+        "document_preparation",
+    }),
     "administrative_operations": frozenset({
         "administrative_support", "data_organization", "document_preparation",
         "workflow_documentation", "reporting", "spreadsheet_analysis",
@@ -722,6 +834,12 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     if family_duty_match is False:
         score = min(score, 35)
         band = "REJECT"
+    elif planned_family_id in PRIMARY_REVENUE_FAMILIES and family_duty_match is True:
+        # Owner-designated revenue priorities get a modest boost only after
+        # concrete duty evidence confirms the fit.
+        score = min(100, score + 10)
+        if score >= 80 and band != "INSUFFICIENT_INFORMATION":
+            band = "STRONG_FIT"
     return {
         "discovery_score": score,
         "discovery_band": band,
