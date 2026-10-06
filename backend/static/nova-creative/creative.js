@@ -518,9 +518,25 @@
         "<div class=\"muted\">" + escapeHtml(row.tagline || row.tone || "") + "</div></div>";
     }).join("") || "<p class=\"hint\">No brands yet.</p>";
     Array.prototype.forEach.call(document.querySelectorAll("#brand-list .item"), function (el) {
-      el.addEventListener("click", function () {
+      el.addEventListener("click", async function () {
         activeBrandId = el.getAttribute("data-id");
-        showBanner("Brand selected for new projects: " + activeBrandId, true);
+        var projectId = getActiveProjectId();
+        if (!projectId) {
+          showBanner("Brand selected for new projects: " + activeBrandId, true);
+          return;
+        }
+        try {
+          await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/brand", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ brand_id: activeBrandId })
+          });
+          showBanner("Brand attached to active project.", true);
+          await refreshProjects();
+          await refreshAssets();
+        } catch (err) {
+          showBanner(err.message || "Could not attach brand to active project.", false);
+        }
       });
     });
   }
