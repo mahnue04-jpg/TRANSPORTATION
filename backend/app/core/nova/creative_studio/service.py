@@ -907,16 +907,41 @@ class CreativeStudioService(ShortDramaMixin):
         # fail before FFmpeg starts. Promote the provider-delivered file directly
         # to the final-promo asset instead. Timed captions may travel as a sidecar
         # when burn-in was skipped for memory safety.
+        def _presenter_demo_eligible(item: CreativeAsset) -> bool:
+            metadata = item.metadata or {}
+            if bool(metadata.get("publish_ready")) or bool(metadata.get("demo_ready")):
+                return True
+
+            # Backward compatibility for D-ID presenters created before the
+            # disclosure-watermark demo policy shipped. Those rows can already
+            # contain the correct head-presenter video and timed captions, but
+            # their stored quality_state remains PREVIEW_ONLY. Recognize that
+            # existing media in place rather than spending another provider credit.
+            provider_result = metadata.get("provider_result") or {}
+            provider_id = str(
+                provider_result.get("provider")
+                or metadata.get("provider")
+                or ""
+            ).strip().lower()
+            presenter_mode = str(metadata.get("presenter_mode") or "").strip().lower()
+            captions_ready = (
+                metadata.get("captions_burned_in") is True
+                or bool(metadata.get("subtitle_url"))
+                or bool(metadata.get("captions_sidecar_ready"))
+            )
+            return bool(
+                provider_id in {"d-id", "did"}
+                and presenter_mode == "head"
+                and captions_ready
+            )
+
         presenter = next(
             (
                 item for item in reversed(all_assets)
                 if item.kind == "presenter_video"
                 and str(item.status or "").upper() == "GENERATED"
                 and item.url
-                and (
-                    bool((item.metadata or {}).get("publish_ready"))
-                    or bool((item.metadata or {}).get("demo_ready"))
-                )
+                and _presenter_demo_eligible(item)
             ),
             None,
         )
@@ -924,6 +949,7 @@ class CreativeStudioService(ShortDramaMixin):
             presenter_path = _resolve_creative_media_url(presenter.url)
             if presenter_path is not None and presenter_path.is_file():
                 presenter_meta = presenter.metadata or {}
+                legacy_demo_ready = not bool(presenter_meta.get("publish_ready") or presenter_meta.get("demo_ready"))
                 asset = self._save_text_asset(
                     owner_id=owner_id,
                     project_id=project_id,
@@ -933,13 +959,20 @@ class CreativeStudioService(ShortDramaMixin):
                     status="GENERATED",
                     metadata={
                         "final_promo": True,
-                        "render_mode": "publish_ready_presenter_passthrough",
+                        "render_mode": (
+                            "legacy_did_demo_passthrough"
+                            if legacy_demo_ready
+                            else "publish_ready_presenter_passthrough"
+                        ),
                         "presenter_asset_id": presenter.id,
                         "voice_asset_id": presenter_meta.get("voice_asset_id"),
                         "subtitle_url": presenter_meta.get("subtitle_url"),
                         "captions_burned_in": presenter_meta.get("captions_burned_in") is True,
-                        "demo_ready": presenter_meta.get("demo_ready") is True,
-                        "provider_watermark_preserved": presenter_meta.get("provider_watermark_preserved") is True,
+                        "demo_ready": presenter_meta.get("demo_ready") is True or legacy_demo_ready,
+                        "provider_watermark_preserved": (
+                            presenter_meta.get("provider_watermark_preserved") is True
+                            or legacy_demo_ready
+                        ),
                         "brand_overlay": "preserved_from_presenter_asset",
                     },
                     url=presenter.url,
@@ -948,7 +981,11 @@ class CreativeStudioService(ShortDramaMixin):
                 self._finish_job(
                     job,
                     status="GENERATED",
-                    message="Final AMICOR Nova promo promoted from the publish-ready Genova presenter without re-encoding.",
+                    message=(
+                        "Final AMICOR Nova promo promoted from the existing D-ID demo presenter without re-encoding."
+                        if legacy_demo_ready
+                        else "Final AMICOR Nova promo promoted from the publish-ready Genova presenter without re-encoding."
+                    ),
                     asset_ids=[asset.id],
                     provider="nova_presenter_passthrough",
                 )
