@@ -913,7 +913,10 @@ class CreativeStudioService(ShortDramaMixin):
                 if item.kind == "presenter_video"
                 and str(item.status or "").upper() == "GENERATED"
                 and item.url
-                and bool((item.metadata or {}).get("publish_ready"))
+                and (
+                    bool((item.metadata or {}).get("publish_ready"))
+                    or bool((item.metadata or {}).get("demo_ready"))
+                )
             ),
             None,
         )
@@ -935,6 +938,8 @@ class CreativeStudioService(ShortDramaMixin):
                         "voice_asset_id": presenter_meta.get("voice_asset_id"),
                         "subtitle_url": presenter_meta.get("subtitle_url"),
                         "captions_burned_in": presenter_meta.get("captions_burned_in") is True,
+                        "demo_ready": presenter_meta.get("demo_ready") is True,
+                        "provider_watermark_preserved": presenter_meta.get("provider_watermark_preserved") is True,
                         "brand_overlay": "preserved_from_presenter_asset",
                     },
                     url=presenter.url,
