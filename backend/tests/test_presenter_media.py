@@ -65,8 +65,9 @@ def test_presenter_provider_uses_selected_voice_and_measured_speech_captions(tmp
     result=providers.OpenAIVoiceProvider().generate(script='Hello Genova.',voice='coral',presenter=True)
     assert calls[0]['voice'] == 'coral'
     assert 'young adult woman' in calls[0]['instructions']
+    assert 'unmistakably feminine voice' in calls[0]['instructions']
     assert ' '.join(c['text'] for c in result['caption_cues']) == 'Hello Genova.'
-    assert result['presenter_audio_version'] == 1
+    assert result['presenter_audio_version'] == 2
 
 
 def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
