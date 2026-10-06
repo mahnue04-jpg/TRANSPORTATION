@@ -838,8 +838,13 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         # Owner-designated revenue priorities get a modest boost only after
         # concrete duty evidence confirms the fit.
         score = min(100, score + 10)
-        if score >= 80 and band != "INSUFFICIENT_INFORMATION":
-            band = "STRONG_FIT"
+        if band != "INSUFFICIENT_INFORMATION":
+            if score >= 80:
+                band = "STRONG_FIT"
+            elif score >= 60:
+                band = "OWNER_REVIEW"
+            else:
+                band = "REJECT"
     return {
         "discovery_score": score,
         "discovery_band": band,

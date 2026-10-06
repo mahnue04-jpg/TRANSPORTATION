@@ -45,3 +45,63 @@ def test_primary_lane_bonus_requires_duty_evidence() -> None:
     assert scored["planned_family_duty_match"] is True
     assert scored["discovery_score"] >= 80
     assert scored["discovery_band"] == "STRONG_FIT"
+
+
+def test_primary_lane_bonus_updates_owner_review_band() -> None:
+    job = {
+        "title": "Remote public data cleanup",
+        "description": "Research public records and organize the results in a spreadsheet.",
+        "requirements": "Research and reporting",
+        "job_type": "contract",
+        "remote_status": "remote",
+        "physical_presence_required": "false",
+        "search_family": "lead_generation_public_data",
+        "search_family_candidates": ["lead_generation_public_data"],
+    }
+    scored = score_discovery_candidate(job)
+    assert scored["planned_family_duty_match"] is True
+    assert scored["discovery_score"] >= 60
+    assert scored["discovery_band"] in {"OWNER_REVIEW", "STRONG_FIT"}
+
+
+def test_lead_generation_proposal_does_not_use_job_listing_as_target() -> None:
+    from app.core.nova.work_revenue.materials import generate_drafts
+
+    drafts = generate_drafts(
+        {
+            "opportunity_title": "Lead list build",
+            "company_name": "Example Buyer",
+            "description": "Build a public-data lead list.",
+            "search_family": "lead_generation_public_data",
+            "source_name": "Example Job Board",
+            "source_url": "https://jobs.example.com/posting/123",
+        }
+    )
+    proposal = next(item["body"] for item in drafts if item["kind"] == "proposal")
+    assert "https://jobs.example.com/posting/123" not in proposal
+    assert "Example Job Board" not in proposal
+    assert "[TARGET WEBSITE / DIRECTORY]" in proposal
+
+
+def test_search_family_survives_persisted_opportunity_payload() -> None:
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue.service import _opportunity_payload
+
+    row = SimpleNamespace(
+        opportunity_title="Lead list build",
+        description="Build public business leads.",
+        requirements="Public sources only.",
+        location="Remote",
+        skills_required="[]",
+        credentials_required="[]",
+        physical_presence_required="false",
+        compensation_type="fixed",
+        compensation_amount=500,
+        compensation_period="project",
+        company_name="Example Buyer",
+        engagement_type="contract",
+        remote_status="remote",
+        tags_json='["live_discovery","search_family:lead_generation_public_data"]',
+    )
+    payload = _opportunity_payload(row)
+    assert payload["search_family"] == "lead_generation_public_data"

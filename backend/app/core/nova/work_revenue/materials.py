@@ -176,10 +176,10 @@ def _primary_revenue_proposal_body(
     if family != "lead_generation_public_data":
         return None
 
+    # source_name/source_url identify the job listing provider/posting, not the
+    # client's requested extraction target. Only use an explicitly supplied target.
     target = sanitize_untrusted(
         opportunity.get("target_source")
-        or opportunity.get("source_name")
-        or opportunity.get("source_url")
     ) or "[TARGET WEBSITE / DIRECTORY]"
     requested_fields = sanitize_untrusted(opportunity.get("requested_fields")) or (
         "[EMAIL ADDRESSES / PHONE NUMBERS / CONTACT NAMES / OTHER REQUIRED FIELD]"
