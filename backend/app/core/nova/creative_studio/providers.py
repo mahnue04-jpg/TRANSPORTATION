@@ -601,9 +601,10 @@ class OpenAIVoiceProvider:
         speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
         if presenter and model.startswith("gpt-4o-mini-tts"):
             speech_args['instructions'] = (
-                'Speak as a young adult woman in her early thirties, with a clear feminine voice. '
-                'Warm, confident, friendly professional delivery. Clear diction and natural pacing. '
-                'Use a bright conversational speaking tone, never whisper or use a low male register. '
+                'Speak as a young adult woman in her twenties with an unmistakably feminine voice. '
+                'Use a bright, warm, confident contemporary American English delivery with natural conversational pacing. '
+                'Keep the pitch and resonance light and youthful; do not use a deep, masculine, announcer, or whispering register. '
+                'Sound polished and friendly, like a modern small-business product presenter. '
                 'Read every word exactly. Pronounce AMICOR as AM ih core. Do not add any words.'
             )
         response = get_client().audio.speech.create(**speech_args)
@@ -637,7 +638,7 @@ class OpenAIVoiceProvider:
                 )
             data = transcript.model_dump() if hasattr(transcript, 'model_dump') else transcript
             cues = caption_cues(clean, data.get('words') or [], float(data['duration']))
-            presenter_result = {'caption_cues': cues, 'loudness': loudness, 'presenter_audio_version': 1}
+            presenter_result = {'caption_cues': cues, 'loudness': loudness, 'presenter_audio_version': 2}
         return {
             "status": "GENERATED",
             "message": "Voice narration generated successfully.",
