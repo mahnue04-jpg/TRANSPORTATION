@@ -1162,7 +1162,7 @@
   function presenterPayload() {
     return {
       script: ($("presenter-script").value || "").trim(),
-      voice: ($("presenter-voice") && $("presenter-voice").value) || "coral",
+      voice: ($("presenter-voice") && $("presenter-voice").value) || "shimmer",
       captions: true,
       presenter_style: "warm professional small-business presenter",
       presenter_mode: ($("presenter-mode") && $("presenter-mode").value) || "full_body",
