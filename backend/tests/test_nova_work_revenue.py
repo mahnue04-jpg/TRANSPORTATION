@@ -1483,6 +1483,12 @@ def test_phase2_dashboard_and_today_surface_new_sections() -> None:
     assert "CONTRACTED REVENUE" in TODAY_JS
     assert "RECEIVED REVENUE" in TODAY_JS
     assert "Submit Application" not in WORK_JS
+    assert 'action === "nova-submit"' in WORK_JS
+    assert "Approve & have Nova submit" in WORK_JS
+    assert "Nova submit application now" in WORK_JS
+    assert "Submit by verified application email" not in WORK_JS
+    assert "Open approved application handoff" not in WORK_JS
+    assert "Record manual submission after I send it" not in WORK_JS
     assert 'action === "open-handoff"' in WORK_JS
     assert 'window.open(target, "_blank", "noopener,noreferrer")' in WORK_JS
     assert "Approved handoff opened." in WORK_JS
