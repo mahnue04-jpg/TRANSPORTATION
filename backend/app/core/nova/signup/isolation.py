@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.auth import decode_access_token
+from app.auth import OPERATOR_ACCOUNT_GRANTS, decode_access_token
 from app.db.session import SessionLocal
 from app.helpers import now
 
@@ -35,6 +35,20 @@ BLOCKED_PREFIXES = (
     "/admin",
 )
 ALLOWED_OVERRIDES = ("/nova/workspace",)
+
+
+
+def _operator_owner_emails() -> set[str]:
+    configured = str(__import__("os").getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
+    owners = {
+        str(grant.get("email") or "").strip().lower()
+        for grant in OPERATOR_ACCOUNT_GRANTS
+        if str(grant.get("email") or "").strip()
+    }
+    if configured:
+        owners.update(item.strip().lower() for item in configured.split(",") if item.strip())
+    return owners
+
 
 FREE_BLOCKED_PREFIXES = (
     "/api/nova/communications",
@@ -124,6 +138,14 @@ class NovaCustomerProductGuardMiddleware(BaseHTTPMiddleware):
             payload = decode_access_token(token)
         except Exception:
             return await call_next(request)  # type: ignore[misc]
+
+        # Internal AMICOR operator/owner accounts must never be treated as
+        # customer trials, even when their organization also has a Nova signup
+        # tenant record. This guard is only for external Nova SaaS customers.
+        email = str(payload.get("email") or "").strip().lower()
+        if email and email in _operator_owner_emails():
+            return await call_next(request)  # type: ignore[misc]
+
         org_id = str(payload.get("organization_id") or "").strip()
         if not org_id:
             return await call_next(request)  # type: ignore[misc]
