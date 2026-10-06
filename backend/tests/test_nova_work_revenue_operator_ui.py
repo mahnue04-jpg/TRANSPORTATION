@@ -68,7 +68,10 @@ def test_operator_ui_has_queue_and_reconciliation_only() -> None:
     assert "escapeHtml(body.disclaimer)" in WORK_JS
     lowered = WORK_JS.lower()
     assert "live apply" not in lowered
-    assert "submit application" not in WORK_JS
+    # Approved applications may expose Nova-owned submission controls, but the
+    # queue/reconciliation surfaces still must not expose payment/deployment
+    # execution controls.
+    assert "Nova submit application now" in WORK_JS
     assert "create checkout" not in lowered
     assert "payout" not in lowered
     assert "webhook" not in lowered
