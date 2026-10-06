@@ -785,16 +785,36 @@ def prepare_talking_presenter_preview(
                 # new lip-synced presenter. If local FFmpeg caption rendering is
                 # blocked by memory headroom, preserve that new video instead of
                 # failing the request and leaving the UI on a stale older asset.
+                #
+                # caption_presenter writes the SRT before starting the encoder,
+                # so website/demo playback can still expose timed captions as a
+                # sidecar even when burn-in cannot run on the 512 MiB service.
                 logger.warning("Presenter caption render skipped; preserving provider video: %s", exc)
+                sidecar_subtitle_url = None
+                try:
+                    if source_video is not None:
+                        subtitle_path = source_video.with_suffix('.srt')
+                        if subtitle_path.is_file():
+                            sidecar_subtitle_url = (
+                                original_generated_url.rsplit('/', 1)[0] + '/' + subtitle_path.name
+                            )
+                except Exception:
+                    sidecar_subtitle_url = None
                 presenter_meta.update({
                     'captions_burned_in': False,
+                    'captions_sidecar_ready': bool(sidecar_subtitle_url),
+                    'subtitle_url': sidecar_subtitle_url,
                     'caption_render_error': str(exc),
                 })
                 generated_url = original_generated_url
         provider_watermark_free = bool(result.get("watermark_free", False))
         # Body-motion video has no narration/lip-sync adapter and still needs
         # visual review of actual head-to-toe movement before final delivery.
-        captions_ready = (not payload.captions) or presenter_meta.get('captions_burned_in') is True
+        captions_ready = (
+            (not payload.captions)
+            or presenter_meta.get('captions_burned_in') is True
+            or bool(presenter_meta.get('subtitle_url'))
+        )
         publish_ready = bool(generated_url and provider_watermark_free and payload.presenter_mode == "head" and captions_ready)
         quality_state = "PUBLISH_READY" if publish_ready else ("PREVIEW_ONLY" if generated_url else status)
 
