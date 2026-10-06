@@ -1247,3 +1247,17 @@ def test_final_promo_has_low_memory_scene_normalization_fallback():
     assert "scene {offset + 1} normalization failed" in source
     assert "normalized scene join failed" in source
     assert "scene_clip_normalize_then_concat" in source
+
+
+
+def test_final_promo_memory_recovery_uses_lightweight_normalization():
+    import inspect
+    from app.core.nova.creative_studio.service import CreativeStudioService
+
+    source = inspect.getsource(CreativeStudioService.assemble_final_promo)
+    assert "recovery_deadline = time.monotonic() + 10.0" in source
+    assert "160 * 1024 * 1024" in source
+    assert "normalize_width, normalize_height = ((540, 960) if vertical else (960, 540))" in source
+    assert "normalize_fps = 20" in source
+    assert '"-preset", "ultrafast"' in source
+    assert '"ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0"' in source
