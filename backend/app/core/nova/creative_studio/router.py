@@ -275,7 +275,7 @@ class PresenterIn(BaseModel):
     motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
-    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
+    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer)$")
     captions: bool = False
 
 
