@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Marketing & Flyers</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-marketing/marketing.css" />
+</head>
+<body>
+  <header class="marketing-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Marketing &amp; Flyers</h1>
+        <p class="subhead">Share only the services Nova can reliably support today.</p>
+      </div>
+    </div>
+    <nav class="marketing-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/work">Work</a>
+      <a href="/nova/creative">Creative</a>
+      <a href="/nova/marketing" aria-current="page">Marketing</a>
+    </nav>
+  </header>
+
+  <main class="marketing-main">
+    <section class="command-card">
+      <h2>Tonight's launch board</h2>
+      <p class="hint">These offers are written around current Nova capabilities. Do not add claims about guaranteed savings, guaranteed revenue, autonomous external submissions, or client results that have not been verified.</p>
+      <div class="launch-grid">
+        <article><strong>1. Choose an offer</strong><span>Pick one of the three ready flyers below.</span></article>
+        <article><strong>2. Copy the post</strong><span>Use the matching social / marketplace copy.</span></article>
+        <article><strong>3. Share the flyer</strong><span>Post on LinkedIn, Facebook, community groups, or a freelance profile.</span></article>
+        <article><strong>4. Send leads to Nova</strong><span>Use your approved Nova contact or intake link when ready.</span></article>
+      </div>
+    </section>
+
+    <section class="flyer-grid" aria-label="Ready marketing flyers">
+      <article class="flyer" id="research-flyer">
+        <p class="eyebrow">AMICOR NOVA</p>
+        <h2>Business Operations Research</h2>
+        <p class="lead">Need organized answers instead of hours of searching?</p>
+        <ul>
+          <li>Vendor and supplier research</li>
+          <li>Business and market research</li>
+          <li>Option comparison and decision briefs</li>
+          <li>Information cleanup and organized findings</li>
+          <li>Owner-reviewed final deliverables</li>
+        </ul>
+        <p class="cta">Tell us the question. Nova helps turn the research into an organized action brief.</p>
+        <div class="flyer-actions no-print">
+          <button type="button" data-copy="research">Copy Post</button>
+          <button type="button" class="secondary" data-print="research-flyer">Print / Save Flyer</button>
+        </div>
+      </article>
+
+      <article class="flyer" id="admin-flyer">
+        <p class="eyebrow">AMICOR NOVA</p>
+        <h2>Administrative &amp; Executive Operations Support</h2>
+        <p class="lead">Turn scattered business work into a clear operating system.</p>
+        <ul>
+          <li>Document and information organization</li>
+          <li>Spreadsheet cleanup and structured tracking</li>
+          <li>Meeting notes, summaries, and action lists</li>
+          <li>Proposal, follow-up, and report drafting</li>
+          <li>Project and operations support</li>
+        </ul>
+        <p class="cta">Bring the messy work. Nova helps organize it into usable business output.</p>
+        <div class="flyer-actions no-print">
+          <button type="button" data-copy="admin">Copy Post</button>
+          <button type="button" class="secondary" data-print="admin-flyer">Print / Save Flyer</button>
+        </div>
+      </article>
+
+      <article class="flyer" id="workflow-flyer">
+        <p class="eyebrow">AMICOR NOVA</p>
+        <h2>Nova Anonymous Operations Agent</h2>
+        <p class="lead">Make company information easier to use, track, and act on.</p>
+        <ul>
+          <li>Workflow review and process organization</li>
+          <li>Knowledge-base and document structuring</li>
+          <li>Recurring report and checklist design</li>
+          <li>Research-to-action operating briefs</li>
+          <li>AI-assisted operations with owner review</li>
+        </ul>
+        <p class="cta">Nova prepares the operational work internally, then routes it through owner review before any external handoff.</p>
+        <div class="flyer-actions no-print">
+          <button type="button" data-copy="workflow">Copy Post</button>
+          <button type="button" class="secondary" data-print="workflow-flyer">Print / Save Flyer</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="command-card">
+      <h2>Where to put these tonight</h2>
+      <div class="channel-grid">
+        <article><h3>LinkedIn</h3><p>Post the flyer plus a short problem/solution description. Target founders, office managers, operations managers, property managers, clinics, law offices, and small businesses.</p></article>
+        <article><h3>Facebook &amp; community groups</h3><p>Use local business, entrepreneur, contractor, landlord, nonprofit, and professional groups where service promotion is allowed.</p></article>
+        <article><h3>Freelance marketplaces</h3><p>Use the flyer wording to build clear service packages for research, operations support, spreadsheets, document organization, and AI workflow work.</p></article>
+        <article><h3>Direct outreach</h3><p>Send one relevant offer to a business that clearly has that problem. Avoid sending all three offers at once.</p></article>
+      </div>
+    </section>
+
+    <section class="command-card">
+      <h2>Copy bank</h2>
+      <div class="copy-bank">
+        <label>Short introduction
+          <textarea id="copy-intro" readonly>AMICOR Nova provides AI-assisted Knowledge Operations support for businesses that need research, organized information, workflow support, reporting, document organization, and administrative operations help. Work is prepared with owner review before client delivery.</textarea>
+        </label>
+        <button type="button" data-copy-text="copy-intro">Copy Introduction</button>
+
+        <label>Call to action
+          <textarea id="copy-cta" readonly>Have a business task that is taking too much time? Send us the problem, the information you already have, and the result you need. We will review whether Nova can support it and define the next step.</textarea>
+        </label>
+        <button type="button" data-copy-text="copy-cta">Copy CTA</button>
+      </div>
+      <p id="copy-status" class="hint" role="status"></p>
+    </section>
+  </main>
+
+  <script src="/static/nova-marketing/marketing.js"></script>
+</body>
+</html>
