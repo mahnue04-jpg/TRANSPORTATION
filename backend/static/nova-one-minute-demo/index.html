@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AMICOR Nova — 60-Second Product Demo</title>
+  <link rel="stylesheet" href="/static/nova-one-minute-demo/demo.css" />
+</head>
+<body>
+  <header class="demo-header">
+    <div>
+      <p class="eyebrow">AMICOR NOVA</p>
+      <h1>60-Second Product Demo</h1>
+      <p class="subtitle">Coral narration · synchronized captions · live Nova product screens · full-body Genova presenter</p>
+    </div>
+    <div class="header-actions">
+      <a class="button secondary" href="/nova/creative">Creative Studio</a>
+      <a class="button secondary" href="/nova/master-demo">30-minute master stage</a>
+    </div>
+  </header>
+
+  <main class="demo-shell">
+    <section class="player-card">
+      <div class="screen-stage">
+        <iframe id="demo-frame" title="AMICOR Nova product screen" src="/nova"></iframe>
+
+        <div class="presenter-box" aria-label="Genova presenter">
+          <video id="genova-video" muted loop playsinline preload="auto"
+            src="/media/nova-creative/nova-da25e10f80924d6ca99e62a04c9eb346.mp4"></video>
+          <div class="presenter-tag">
+            <strong>Genova</strong>
+            <span>AMICOR Nova AI guide</span>
+          </div>
+        </div>
+
+        <div id="caption-bar" class="caption-bar">
+          Meet AMICOR Nova, your AI operations workspace built to help small businesses move faster while staying in control.
+        </div>
+
+        <div class="brand-badge">
+          <img src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="start-demo" class="button primary">Play 60-second demo</button>
+        <button id="pause-demo" class="button secondary" disabled>Pause</button>
+        <button id="restart-demo" class="button secondary">Restart</button>
+        <div class="time">
+          <span id="current-time">00:00</span>
+          <span>/ 01:00</span>
+        </div>
+      </div>
+
+      <div class="progress"><div id="progress-bar"></div></div>
+
+      <div class="now-showing">
+        <div>
+          <span class="label">Now showing</span>
+          <strong id="scene-title">Nova Home</strong>
+        </div>
+        <a id="open-scene" href="/nova" target="_blank" rel="noopener">Open product page</a>
+      </div>
+
+      <audio id="narration" preload="auto"
+        src="/media/nova-creative/nova-bb9d59169aef4733ba8c07d1b0d418f6.mp3"></audio>
+    </section>
+
+    <aside class="scene-list" aria-label="Demo scenes">
+      <h2>One-minute blueprint</h2>
+      <ol id="scene-list"></ol>
+      <p class="production-note">
+        This demo intentionally uses the full-body Genova motion clip as muted presenter B-roll while the Coral narration plays separately. It does not claim lip-sync.
+      </p>
+    </aside>
+  </main>
+
+  <script src="/static/nova-one-minute-demo/demo.js"></script>
+</body>
+</html>
