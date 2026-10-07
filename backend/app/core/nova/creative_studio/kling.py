@@ -148,3 +148,132 @@ class FalKlingVideoProvider(RunwayVideoProvider):
         except (RuntimeError, ValueError, TypeError, KeyError):
             return dict(result, status=ERROR, task_id=token or None,
                         message="Kling request could not proceed. Check fal key, funding, input and queue usage before retrying.")
+
+
+LIPSYNC_MODEL = "fal-ai/kling-video/lipsync/audio-to-video"
+LIPSYNC_TOKEN_PREFIX = "fal-kling-lipsync:"
+
+
+class FalKlingLipSyncProvider(FalKlingVideoProvider):
+    """Apply narration to an existing presenter clip without Render-side encoding."""
+    provider_id = "fal_kling_lipsync"
+
+    def _public_media_url(self, value):
+        raw = str(value or "").strip()
+        if raw.startswith("https://"):
+            return raw
+        if raw.startswith("/"):
+            base = str(
+                os.getenv("AMICOR_PUBLIC_URL")
+                or os.getenv("RENDER_EXTERNAL_URL")
+                or ""
+            ).strip().rstrip("/")
+            if base.startswith("https://"):
+                return base + raw
+        return None
+
+    def _encode_lipsync_task(self, response):
+        task = {key: response.get(key) for key in ("request_id", "status_url", "response_url")}
+        self._validate_task(task)
+        return LIPSYNC_TOKEN_PREFIX + base64.urlsafe_b64encode(json.dumps(task).encode()).decode()
+
+    def _decode_lipsync_task(self, token):
+        if not token.startswith(LIPSYNC_TOKEN_PREFIX) or len(token) > 4000:
+            raise _SafeKlingError("This saved task does not belong to Kling LipSync.")
+        task = json.loads(base64.urlsafe_b64decode(token[len(LIPSYNC_TOKEN_PREFIX):]))
+        self._validate_task(task)
+        return task
+
+    def generate_lipsync(self, *, video_url, audio_url, resume_task_id=None):
+        result = {
+            "url": None,
+            "asset_generated": False,
+            "provider": self.provider_id,
+            "model": LIPSYNC_MODEL,
+            "generation_mode": "audio_to_video_lipsync",
+            "watermark_free": False,
+        }
+        state = self.status()
+        if state.status != AVAILABLE:
+            return dict(result, status=state.status, message=state.message)
+
+        video = self._public_media_url(video_url)
+        audio = self._public_media_url(audio_url)
+        if not video or not audio:
+            return dict(
+                result,
+                status=ERROR,
+                message="Nova could not expose the presenter video and narration to Kling LipSync.",
+            )
+
+        token = str(resume_task_id or "").strip()
+        try:
+            if token:
+                task = self._decode_lipsync_task(token)
+            else:
+                submitted = self._request_json("POST", QUEUE + LIPSYNC_MODEL, payload={
+                    "video_url": video,
+                    "audio_url": audio,
+                })
+                token = self._encode_lipsync_task(submitted)
+                task = self._decode_lipsync_task(token)
+
+            deadline = time.monotonic() + 75
+            while time.monotonic() < deadline:
+                status = self._request_json("GET", task["status_url"])
+                provider_state = str(status.get("status") or "").upper()
+                if provider_state == "COMPLETED":
+                    if status.get("error"):
+                        return dict(
+                            result,
+                            status=ERROR,
+                            task_id=token,
+                            message="Kling LipSync generation failed. Review fal usage before retrying.",
+                        )
+                    output = self._request_json("GET", task["response_url"])
+                    url = (output.get("video") or {}).get("url")
+                    if not isinstance(url, str) or not url.startswith("https://"):
+                        return dict(
+                            result,
+                            status=ERROR,
+                            task_id=token,
+                            message="Kling LipSync completed but returned no video output.",
+                        )
+                    saved = self._save_remote_video(url)
+                    return dict(
+                        result,
+                        status="GENERATED",
+                        task_id=token,
+                        url=saved,
+                        asset_generated=True,
+                        message="Kling LipSync presenter generated and saved.",
+                    )
+                if provider_state not in {"IN_QUEUE", "IN_PROGRESS"}:
+                    return dict(
+                        result,
+                        status="PROCESSING",
+                        task_id=token,
+                        message="Kling LipSync returned an unfamiliar queue state; keep the saved task for review.",
+                    )
+                time.sleep(5)
+
+            return dict(
+                result,
+                status="PROCESSING",
+                task_id=token,
+                message="Kling LipSync is still generating; resume this saved task instead of submitting another.",
+            )
+        except _SafeKlingError as exc:
+            return dict(
+                result,
+                status=ERROR,
+                task_id=token or None,
+                message=f"Kling LipSync request failed: {str(exc).rstrip('.')}.",
+            )
+        except (RuntimeError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return dict(
+                result,
+                status=ERROR,
+                task_id=token or None,
+                message="Kling LipSync could not proceed. Keep the saved task and review fal usage before retrying.",
+            )
