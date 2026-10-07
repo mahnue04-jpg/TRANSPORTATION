@@ -743,6 +743,21 @@
       return;
     }
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+    var project = detail.project || {};
+    var production = (project.metadata && project.metadata.production_settings) || {};
+    if ($("project-title")) $("project-title").value = project.title || "";
+    if ($("project-type") && project.project_type) $("project-type").value = project.project_type;
+    if ($("project-platform") && project.platform) $("project-platform").value = project.platform;
+    if ($("project-duration") && project.duration_target) $("project-duration").value = String(project.duration_target);
+    if ($("project-audience")) $("project-audience").value = project.audience || "";
+    if ($("project-tone")) $("project-tone").value = project.tone || "";
+    if ($("project-objective")) $("project-objective").value = project.objective || "";
+    if ($("presenter-mode") && production.presenter_mode) $("presenter-mode").value = production.presenter_mode;
+    if ($("presenter-motion-style") && production.motion_style) $("presenter-motion-style").value = production.motion_style;
+    if ($("presenter-framing") && production.framing) $("presenter-framing").value = production.framing;
+    if ($("presenter-output-preset") && production.output_preset) $("presenter-output-preset").value = production.output_preset;
+    if ($("presenter-voice") && production.voice) $("presenter-voice").value = production.voice;
+    if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
@@ -1161,6 +1176,46 @@
       createBtn.disabled = false;
     }
   });
+  var saveProjectSettings = $("project-save-settings");
+  if (saveProjectSettings) {
+    saveProjectSettings.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select an active project first.", false);
+        return;
+      }
+      saveProjectSettings.disabled = true;
+      try {
+        var payload = {
+          title: ($("project-title").value || "").trim(),
+          project_type: $("project-type").value,
+          platform: $("project-platform").value,
+          duration_target: Number($("project-duration").value),
+          audience: $("project-audience").value.trim(),
+          tone: $("project-tone").value.trim(),
+          objective: $("project-objective").value.trim(),
+          presenter_mode: $("presenter-mode").value,
+          motion_style: $("presenter-motion-style").value,
+          framing: $("presenter-framing").value,
+          output_preset: $("presenter-output-preset").value,
+          voice: $("presenter-voice").value,
+          image_aspect: $("image-aspect").value,
+          captions: true
+        };
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId), {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        showBanner(body.message || "Active project settings saved.", true);
+        await refreshProjects();
+        await refreshAssets();
+      } catch (err) {
+        showBanner(err.message || "Could not save active project settings.", false);
+      } finally {
+        saveProjectSettings.disabled = false;
+      }
+    });
+  }
+
   $("brief-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     if (!activeProjectId) {
