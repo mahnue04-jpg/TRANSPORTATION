@@ -1250,6 +1250,97 @@ def test_fal_cloud_public_media_url(monkeypatch) -> None:
     assert processor._public_url("") is None
 
 
+def test_body_presenter_reuses_generated_motion_before_lipsync(monkeypatch):
+    from types import SimpleNamespace
+    from app.auth import UserContext
+    import importlib
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Body demo", "project_type": "explainer"})
+    svc._save_text_asset(
+        owner_id="owner-a",
+        project_id=project["id"],
+        kind="presenter_video",
+        title="Full-body presenter motion",
+        content="Old preview script",
+        status="GENERATED",
+        url="/media/body-motion.mp4",
+        metadata={
+            "presenter_mode": "full_body",
+            "motion_style": "friendly_explainer",
+            "output_preset": "16:9",
+            "source_image_asset_id": "image-a",
+            "provider_result": {
+                "provider": "fal_kling_video",
+                "status": "GENERATED",
+                "url": "/media/body-motion.mp4",
+                "asset_generated": True,
+            },
+        },
+    )
+
+    calls = {"image": 0, "motion": 0, "voice": 0, "lipsync": 0}
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+
+    def no_image(*args, **kwargs):
+        calls["image"] += 1
+        pytest.fail("Existing generated body motion must avoid another image generation")
+    monkeypatch.setattr(svc, "request_image_generation", no_image)
+
+    def no_motion(*, brief):
+        calls["motion"] += 1
+        pytest.fail("Existing generated body motion must avoid another motion provider job")
+    monkeypatch.setattr(studio_router, "video_provider", lambda: SimpleNamespace(
+        provider_id="fal_kling_video",
+        status=lambda: SimpleNamespace(status="AVAILABLE"),
+        generate=no_motion,
+    ))
+
+    monkeypatch.setattr(svc, "request_voice_generation", lambda *args, **kwargs: {
+        "url": "/media/coral.mp3",
+        "asset": {"id": "audio-coral"},
+    })
+
+    from app.core.nova.creative_studio import kling
+    def lipsync(self, *, video_url, audio_url, resume_task_id=None):
+        calls["lipsync"] += 1
+        assert video_url == "/media/body-motion.mp4"
+        assert audio_url == "/media/coral.mp3"
+        assert resume_task_id is None
+        return {
+            "status": "GENERATED",
+            "asset_generated": True,
+            "url": "/media/body-lipsync.mp4",
+            "provider": "fal_kling_lipsync",
+            "watermark_free": False,
+        }
+    monkeypatch.setattr(kling.FalKlingLipSyncProvider, "generate_lipsync", lipsync)
+
+    result = studio_router.prepare_talking_presenter_preview(
+        project["id"],
+        studio_router.PresenterIn(
+            script="Welcome to AMICOR Nova.",
+            presenter_mode="full_body",
+            motion_style="friendly_explainer",
+            framing="full_frame",
+            output_preset="16:9",
+            voice="coral",
+            captions=True,
+        ),
+        UserContext(user_id="owner-a", email="owner@example.test", role="admin"),
+        None,
+    )
+
+    assert calls["image"] == 0
+    assert calls["motion"] == 0
+    assert calls["lipsync"] == 1
+    assert result["url"] == "/media/body-lipsync.mp4"
+    assert result["asset"]["metadata"]["motion_video_url"] == "/media/body-motion.mp4"
+    assert result["asset"]["metadata"]["body_lipsync"] is True
+    assert result["asset"]["metadata"]["voice"] == "coral"
+
+
 def test_unavailable_body_provider_does_not_generate_paid_source_image(monkeypatch):
     from types import SimpleNamespace
     from app.auth import UserContext
