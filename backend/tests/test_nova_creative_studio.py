@@ -1042,6 +1042,9 @@ def test_creative_ui_has_production_readiness_panel() -> None:
     assert "READY FOR OWNER REVIEW" in js
     assert "NEEDS WORK" in js
     assert "Build Final Promo" in js
+    assert '"legacy_did_demo_passthrough"' in js
+    assert '"DEMO_READY_WITH_PROVIDER_WATERMARK"' in js
+    assert "presenterDemoAccepted" in js
     assert ".readiness-grid" in css
     assert ".readiness-summary.ready" in css
     assert ".readiness-item.missing" in css
