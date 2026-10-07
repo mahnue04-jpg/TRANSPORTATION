@@ -4035,6 +4035,17 @@ def serve_nova_creative() -> Response:
     return JSONResponse({"error": "Nova Creative Studio page not found"}, status_code=404)
 
 
+@app.get("/nova/master-demo")
+def serve_nova_master_demo() -> Response:
+    """Owner-review stage for the chaptered AMICOR Nova master demo."""
+    page = os.path.join(_static_dir, "nova-master-demo", "index.html")
+    if os.path.isfile(page):
+        response = FileResponse(page, media_type="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return JSONResponse({"error": "Nova master demo stage not found"}, status_code=404)
+
+
 @app.get("/nova/v3-lab")
 def serve_nova_v3_lab() -> Response:
     page = os.path.join(_static_dir, "nova-v3-lab", "index.html")
