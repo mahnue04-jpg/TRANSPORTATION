@@ -779,7 +779,7 @@
         var isBodyMotion = isPresenterVideo && row.metadata &&
           (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
         var videoLabel = isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video");
-        var presenterCaptionText = isPresenterVideo && !isBodyMotion && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
+        var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"" +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +

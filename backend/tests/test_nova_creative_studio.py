@@ -1220,6 +1220,36 @@ def test_body_presenter_resumes_processing_provider_task_without_new_spend(monke
     assert result["asset"]["metadata"]["source_image_asset_id"] == source.id
 
 
+def test_full_body_cloud_finalize_avoids_local_ffmpeg_and_uses_resumable_fal() -> None:
+    router = (CREATIVE_PY / "router.py").read_text(encoding="utf-8")
+    cloud = (CREATIVE_PY / "fal_cloud.py").read_text(encoding="utf-8")
+
+    assert '/presenter/cloud-finalize' in router
+    assert 'CloudPresenterFinalizeIn' in router
+    assert 'source_presenter_asset_id' in router
+    assert 'source_audio_asset_id' in router
+    assert 'cloud_stage": "lipsync"' in router
+    assert 'cloud_stage": "captioned"' in router
+    assert 'captions_burned_in' in router
+    assert 'voice: str = Field(default="coral"' in router
+
+    assert 'fal-ai/kling-video/lipsync/audio-to-video' in cloud
+    assert 'fal-ai/workflow-utilities/auto-subtitle' in cloud
+    assert 'fal-ai/ffmpeg-api/merge-videos' in cloud
+    assert 'resume_task_id' in cloud
+    assert 'run_encoder' not in cloud
+
+
+def test_fal_cloud_public_media_url(monkeypatch) -> None:
+    from app.core.nova.creative_studio.fal_cloud import FalCloudProcessor
+
+    monkeypatch.setenv("AMICOR_PUBLIC_URL", "https://example.test")
+    processor = FalCloudProcessor()
+    assert processor._public_url("/media/nova-creative/genova.mp4") == "https://example.test/media/nova-creative/genova.mp4"
+    assert processor._public_url("https://cdn.example.test/video.mp4") == "https://cdn.example.test/video.mp4"
+    assert processor._public_url("") is None
+
+
 def test_unavailable_body_provider_does_not_generate_paid_source_image(monkeypatch):
     from types import SimpleNamespace
     from app.auth import UserContext
