@@ -725,9 +725,10 @@ def prepare_talking_presenter_preview(
             source_image_asset_id = presenter_image.id
             title = "Talking presenter preview"
         else:
-            # Half/full-body motion uses a newly generated clean source image and
-            # the existing motion-video provider instead of pretending D-ID head
-            # animation is full-body movement.
+            # Half/full-body motion uses the motion-video provider. Resume an
+            # existing matching PROCESSING presenter task before creating any
+            # new source image or provider job. This prevents duplicate paid
+            # generations when the provider queue outlives a browser request.
             motion_provider = video_provider()
             motion_status = motion_provider.status()
             if motion_status.status != "AVAILABLE":
@@ -747,37 +748,78 @@ def prepare_talking_presenter_preview(
                 "friendly_explainer": "friendly explanatory hand gestures and relaxed natural movement",
                 "energetic_promo": "confident energetic promotional gestures while staying professional",
             }[payload.motion_style]
-            source_prompt = (
-                "Genova presenter v2. Photorealistic young Black/African American woman, late twenties, "
-                "warm approachable expression, polished natural makeup, professional modern hairstyle, "
-                + framing_text + ". "
-                "Professional modern small-business setting, clean lighting, realistic anatomy, natural hands, "
-                "camera-ready wardrobe, no text, no logos, no watermarks, no provider marks. "
-                "Keep the presenter centered and leave safe space for captions and an official AMICOR logo overlay later. "
-                "Aspect ratio " + payload.output_preset + "."
-            )
-            image_result = service.request_image_generation(
-                user.user_id,
-                project_id,
-                aspect_ratio=payload.output_preset,
-                prompt=source_prompt,
-            )
-            source_url = str(image_result.get("url") or "").strip()
-            if not source_url:
-                provider_info = image_result.get("provider") or {}
-                return {
-                    "status": str(provider_info.get("status") or "ERROR"),
-                    "message": provider_info.get("message") or "Nova could not generate a clean presenter source image.",
-                    "script": payload.script,
-                    **presenter_meta,
-                }
-            source_asset = image_result.get("asset") or {}
-            source_image_asset_id = source_asset.get("id")
             motion_prompt = (
                 f"{framing_text}; {motion_text}. The presenter addresses the camera naturally. "
                 "Keep facial identity stable, preserve realistic hands and body proportions, avoid text and logos, "
                 "and do not add watermarks. This is a clean business social-media presenter shot."
             )
+
+            resume_task_id = None
+            source_url = None
+            source_image_asset_id = None
+            active_provider = str(getattr(motion_provider, "provider_id", "") or "").strip()
+            for candidate in reversed(service.store.list_assets(project_id, user.user_id)):
+                if candidate.kind != "presenter_video":
+                    continue
+                metadata = candidate.metadata or {}
+                provider_result = metadata.get("provider_result") or {}
+                if str(candidate.status or "").upper() != "PROCESSING":
+                    continue
+                if metadata.get("presenter_mode") != payload.presenter_mode:
+                    continue
+                if metadata.get("motion_style") != payload.motion_style:
+                    continue
+                if metadata.get("output_preset") != payload.output_preset:
+                    continue
+                task_id = str(provider_result.get("task_id") or "").strip()
+                provider_id = str(provider_result.get("provider") or "").strip()
+                if not task_id or (provider_id and active_provider and provider_id != active_provider):
+                    continue
+                brief_meta = provider_result.get("brief") or {}
+                source_url = str(brief_meta.get("prompt_image_url") or "").strip() or None
+                source_image_asset_id = metadata.get("source_image_asset_id")
+                resume_task_id = task_id
+                break
+
+            if not resume_task_id:
+                source_prompt = (
+                    "Genova presenter v2. Photorealistic young Black/African American woman, late twenties, "
+                    "warm approachable expression, polished natural makeup, professional modern hairstyle, "
+                    + framing_text + ". "
+                    "Professional modern small-business setting, clean lighting, realistic anatomy, natural hands, "
+                    "camera-ready wardrobe, no text, no logos, no watermarks, no provider marks. "
+                    "Keep the presenter centered and leave safe space for captions and an official AMICOR logo overlay later. "
+                    "Aspect ratio " + payload.output_preset + "."
+                )
+                reusable_source = next((
+                    asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
+                    if asset.kind == "image"
+                    and str(asset.status or "").upper() == "GENERATED"
+                    and str(asset.content or "").strip() == source_prompt
+                    and asset.url
+                ), None)
+                if reusable_source is not None:
+                    source_url = str(reusable_source.url)
+                    source_image_asset_id = reusable_source.id
+                else:
+                    image_result = service.request_image_generation(
+                        user.user_id,
+                        project_id,
+                        aspect_ratio=payload.output_preset,
+                        prompt=source_prompt,
+                    )
+                    source_url = str(image_result.get("url") or "").strip()
+                    if not source_url:
+                        provider_info = image_result.get("provider") or {}
+                        return {
+                            "status": str(provider_info.get("status") or "ERROR"),
+                            "message": provider_info.get("message") or "Nova could not generate a clean presenter source image.",
+                            "script": payload.script,
+                            **presenter_meta,
+                        }
+                    source_asset = image_result.get("asset") or {}
+                    source_image_asset_id = source_asset.get("id")
+
             result = motion_provider.generate(
                 brief={
                     "project_id": project_id,
@@ -787,6 +829,7 @@ def prepare_talking_presenter_preview(
                     "aspect_ratio": payload.output_preset,
                     "prompt_text": motion_prompt,
                     "prompt_image_url": source_url,
+                    "resume_task_id": resume_task_id,
                 }
             )
             title = "Half-body presenter motion" if payload.presenter_mode == "half_body" else "Full-body presenter motion"

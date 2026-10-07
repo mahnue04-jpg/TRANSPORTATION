@@ -1139,6 +1139,87 @@ def test_body_presenter_routes_to_motion_without_claiming_speech(monkeypatch, mo
     assert result["body_motion_review_required"] is True
 
 
+def test_body_presenter_resumes_processing_provider_task_without_new_spend(monkeypatch):
+    from types import SimpleNamespace
+    from app.auth import UserContext
+    import importlib
+    studio_router = importlib.import_module("app.core.nova.creative_studio.router")
+
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Body demo", "project_type": "explainer"})
+    source = svc._save_text_asset(
+        owner_id="owner-a",
+        project_id=project["id"],
+        kind="image",
+        title="Genova full body",
+        content="source",
+        status="GENERATED",
+        url="/media/genova-full.png",
+        metadata={},
+    )
+    svc._save_text_asset(
+        owner_id="owner-a",
+        project_id=project["id"],
+        kind="presenter_video",
+        title="Full-body presenter motion",
+        content="Hello from Nova",
+        status="PROCESSING",
+        url=None,
+        metadata={
+            "presenter_mode": "full_body",
+            "motion_style": "friendly_explainer",
+            "output_preset": "16:9",
+            "source_image_asset_id": source.id,
+            "provider_result": {
+                "status": "PROCESSING",
+                "provider": "fal_kling_video",
+                "task_id": "fal-kling25:saved-task",
+                "brief": {"prompt_image_url": source.url},
+            },
+        },
+    )
+
+    monkeypatch.setattr(studio_router, "get_service", lambda db: svc)
+    def unexpected_image(*args, **kwargs):
+        pytest.fail("Resuming a queued presenter task must not generate another paid source image")
+    monkeypatch.setattr(svc, "request_image_generation", unexpected_image)
+
+    calls = []
+    def generate(*, brief):
+        calls.append(brief)
+        return {
+            "status": "GENERATED",
+            "asset_generated": True,
+            "url": "/media/genova-full-motion.mp4",
+            "provider": "fal_kling_video",
+            "watermark_free": False,
+        }
+    monkeypatch.setattr(studio_router, "video_provider", lambda: SimpleNamespace(
+        provider_id="fal_kling_video",
+        status=lambda: SimpleNamespace(status="AVAILABLE"),
+        generate=generate,
+    ))
+
+    result = studio_router.prepare_talking_presenter_preview(
+        project["id"],
+        studio_router.PresenterIn(
+            script="Hello from Nova",
+            presenter_mode="full_body",
+            motion_style="friendly_explainer",
+            framing="full_frame",
+            output_preset="16:9",
+        ),
+        UserContext(user_id="owner-a", email="owner@example.test", role="admin"),
+        None,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["resume_task_id"] == "fal-kling25:saved-task"
+    assert calls[0]["prompt_image_url"] == source.url
+    assert result["url"] == "/media/genova-full-motion.mp4"
+    assert result["asset"]["metadata"]["source_image_asset_id"] == source.id
+
+
 def test_unavailable_body_provider_does_not_generate_paid_source_image(monkeypatch):
     from types import SimpleNamespace
     from app.auth import UserContext
