@@ -836,6 +836,47 @@ def prepare_talking_presenter_preview(
 
         status = str(result.get("status") or CONFIG_REQUIRED)
         generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
+        body_lipsync_applied = False
+        if generated_url and payload.presenter_mode in {"half_body", "full_body"} and payload.captions:
+            narration_asset = next((
+                asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
+                if asset.kind == "audio"
+                and asset.url
+                and str(asset.status or "").upper() == "GENERATED"
+                and str(asset.content or "").strip() == payload.script.strip()
+                and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
+            ), None)
+            if narration_asset is None:
+                voice_result = service.request_voice_generation(
+                    user.user_id,
+                    project_id,
+                    script=payload.script,
+                    voice=payload.voice,
+                    presenter=True,
+                )
+                narration_url = str(voice_result.get("url") or "").strip()
+                narration_asset_id = (voice_result.get("asset") or {}).get("id")
+            else:
+                narration_url = str(narration_asset.url)
+                narration_asset_id = narration_asset.id
+
+            if narration_url:
+                from app.core.nova.creative_studio.kling import FalKlingLipSyncProvider
+                lipsync_result = FalKlingLipSyncProvider().generate_lipsync(
+                    video_url=generated_url,
+                    audio_url=narration_url,
+                )
+                if lipsync_result.get("asset_generated") and lipsync_result.get("url"):
+                    presenter_meta.update({
+                        "motion_video_url": generated_url,
+                        "source_audio_asset_id": narration_asset_id,
+                        "voice": payload.voice,
+                        "body_lipsync": True,
+                    })
+                    generated_url = str(lipsync_result["url"])
+                    result = lipsync_result
+                    status = str(result.get("status") or "GENERATED")
+                    body_lipsync_applied = True
         if generated_url and payload.presenter_mode == 'head' and payload.captions:
             from app.core.nova.creative_studio.providers import _resolve_creative_media_url
             from app.core.nova.creative_studio.presenter_media import caption_presenter
