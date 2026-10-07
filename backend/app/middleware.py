@@ -47,6 +47,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
     Injects OWASP-recommended HTTP security headers on every response.
     Does not override headers already set by the route handler.
+
+    Nova's owner-review master demo intentionally embeds a small allow-list of
+    same-origin Nova product pages. Those pages may be framed only by the same
+    origin; every other route keeps the stricter DENY policy.
     """
     _HEADERS = {
         "X-Content-Type-Options":    "nosniff",
@@ -59,13 +63,44 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
-            "connect-src 'self';"
+            "connect-src 'self'; "
+            "frame-src 'self'; "
+            "frame-ancestors 'none';"
         ),
     }
 
+    _MASTER_DEMO_FRAME_PATHS = frozenset({
+        "/nova",
+        "/nova/",
+        "/nova/today",
+        "/nova/workspace",
+        "/nova/anonymous-operations",
+        "/nova/anonymous-agent",
+        "/nova/work",
+        "/nova/communications",
+        "/nova/government",
+        "/nova/business",
+        "/nova/accounting",
+        "/nova/accounting/aging",
+        "/nova/accounting/trends",
+        "/nova/creative",
+    })
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response: # type: ignore
         response = await call_next(request) # type: ignore
-        for header, value in self._HEADERS.items():
+        headers = dict(self._HEADERS)
+        if request.url.path in self._MASTER_DEMO_FRAME_PATHS:
+            headers["X-Frame-Options"] = "SAMEORIGIN"
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-src 'self'; "
+                "frame-ancestors 'self';"
+            )
+        for header, value in headers.items():
             response.headers.setdefault(header, value) # type: ignore
         return response # type: ignore
 
