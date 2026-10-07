@@ -301,6 +301,12 @@ class PresenterIn(BaseModel):
     captions: bool = False
 
 
+class CloudPresenterFinalizeIn(BaseModel):
+    script: str = Field(min_length=1, max_length=600)
+    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
+    captions: bool = True
+
+
 @router.get("/guardrails")
 def creative_guardrails_endpoint(
     user: UserContext = Depends(get_current_user_context),
@@ -621,6 +627,178 @@ def generate_presenter_voice(
         result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
         result["presenter_script"] = payload.script
         return result
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/presenter/cloud-finalize")
+def finalize_full_body_presenter_in_cloud(
+    project_id: str,
+    payload: CloudPresenterFinalizeIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Lip-sync and caption a generated full-body presenter without local FFmpeg."""
+    _require_owner(user)
+    service = get_service(db)
+    try:
+        service._project_or_404(user.user_id, project_id)
+        assets = service.store.list_assets(project_id, user.user_id)
+
+        source = next((
+            asset for asset in reversed(assets)
+            if asset.kind == "presenter_video"
+            and str(asset.status or "").upper() == "GENERATED"
+            and asset.url
+            and (asset.metadata or {}).get("presenter_mode") == "full_body"
+            and not (asset.metadata or {}).get("cloud_stage")
+        ), None)
+        if source is None:
+            raise HTTPException(status_code=422, detail="Generate and review one full-body presenter motion clip first.")
+
+        audio = next((
+            asset for asset in reversed(assets)
+            if asset.kind == "audio"
+            and str(asset.status or "").upper() == "GENERATED"
+            and asset.url
+            and str(asset.content or "").strip() == payload.script.strip()
+            and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
+        ), None)
+        if audio is None:
+            voice_result = service.request_voice_generation(
+                user.user_id,
+                project_id,
+                script=payload.script,
+                voice=payload.voice,
+                presenter=False,
+            )
+            audio_payload = voice_result.get("asset") or {}
+            if not voice_result.get("url") or str(audio_payload.get("status") or "").upper() != "GENERATED":
+                return {
+                    "status": str((voice_result.get("provider") or {}).get("status") or "ERROR"),
+                    "message": str((voice_result.get("provider") or {}).get("message") or "Nova could not generate the presenter narration."),
+                    "stage": "voice",
+                }
+            audio = next((
+                asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
+                if asset.id == audio_payload.get("id")
+            ), None)
+            if audio is None:
+                raise HTTPException(status_code=422, detail="Presenter narration was generated but could not be reloaded.")
+
+        from app.core.nova.creative_studio.fal_cloud import FalCloudProcessor
+        processor = FalCloudProcessor()
+
+        assets = service.store.list_assets(project_id, user.user_id)
+        lip_asset = next((
+            asset for asset in reversed(assets)
+            if asset.kind == "presenter_video"
+            and (asset.metadata or {}).get("cloud_stage") == "lipsync"
+            and (asset.metadata or {}).get("source_presenter_asset_id") == source.id
+            and (asset.metadata or {}).get("source_audio_asset_id") == audio.id
+            and str(asset.status or "").upper() in {"GENERATED", "PROCESSING"}
+        ), None)
+
+        if lip_asset is None or str(lip_asset.status or "").upper() != "GENERATED":
+            resume = None
+            if lip_asset is not None:
+                resume = str((lip_asset.metadata or {}).get("provider_result", {}).get("task_id") or "").strip() or None
+            lip = processor.lip_sync(video_url=source.url, audio_url=audio.url, resume_task_id=resume)
+            lip_status = str(lip.get("status") or "ERROR").upper()
+            lip_asset = service._save_text_asset(
+                owner_id=user.user_id,
+                project_id=project_id,
+                kind="presenter_video",
+                title="Full-body Genova lip-synced presenter",
+                content=payload.script,
+                status=lip_status,
+                url=str(lip.get("url") or "").strip() or None,
+                metadata={
+                    "cloud_stage": "lipsync",
+                    "presenter_mode": "full_body",
+                    "motion_style": (source.metadata or {}).get("motion_style") or "friendly_explainer",
+                    "framing": (source.metadata or {}).get("framing") or "full_frame",
+                    "output_preset": (source.metadata or {}).get("output_preset") or "16:9",
+                    "voice": payload.voice,
+                    "source_presenter_asset_id": source.id,
+                    "source_audio_asset_id": audio.id,
+                    "provider_result": {k: v for k, v in lip.items() if k != "url"},
+                    "publish_ready": False,
+                    "quality_state": "PROCESSING" if lip_status == "PROCESSING" else ("LIPSYNC_READY" if lip_status == "GENERATED" else lip_status),
+                },
+            )
+            if lip_status != "GENERATED" or not lip_asset.url:
+                return {
+                    "status": lip_status,
+                    "stage": "lipsync",
+                    "message": str(lip.get("message") or lip_status),
+                    "asset": lip_asset.as_dict(),
+                }
+
+        if not payload.captions:
+            return {
+                "status": "GENERATED",
+                "stage": "lipsync",
+                "message": "Full-body Genova narration and lip-sync are ready.",
+                "asset": lip_asset.as_dict(),
+                "url": lip_asset.url,
+            }
+
+        assets = service.store.list_assets(project_id, user.user_id)
+        caption_asset = next((
+            asset for asset in reversed(assets)
+            if asset.kind == "presenter_video"
+            and (asset.metadata or {}).get("cloud_stage") == "captioned"
+            and (asset.metadata or {}).get("source_lipsync_asset_id") == lip_asset.id
+            and str(asset.status or "").upper() in {"GENERATED", "PROCESSING"}
+        ), None)
+
+        if caption_asset is None or str(caption_asset.status or "").upper() != "GENERATED":
+            resume = None
+            if caption_asset is not None:
+                resume = str((caption_asset.metadata or {}).get("provider_result", {}).get("task_id") or "").strip() or None
+            captioned = processor.auto_subtitle(video_url=lip_asset.url, resume_task_id=resume)
+            caption_status = str(captioned.get("status") or "ERROR").upper()
+            caption_asset = service._save_text_asset(
+                owner_id=user.user_id,
+                project_id=project_id,
+                kind="presenter_video",
+                title="Full-body Genova presenter with captions",
+                content=payload.script,
+                status=caption_status,
+                url=str(captioned.get("url") or "").strip() or None,
+                metadata={
+                    "cloud_stage": "captioned",
+                    "presenter_mode": "full_body",
+                    "motion_style": (source.metadata or {}).get("motion_style") or "friendly_explainer",
+                    "framing": (source.metadata or {}).get("framing") or "full_frame",
+                    "output_preset": (source.metadata or {}).get("output_preset") or "16:9",
+                    "voice": payload.voice,
+                    "source_presenter_asset_id": source.id,
+                    "source_audio_asset_id": audio.id,
+                    "source_lipsync_asset_id": lip_asset.id,
+                    "captions_burned_in": caption_status == "GENERATED",
+                    "provider_result": {k: v for k, v in captioned.items() if k != "url"},
+                    "publish_ready": False,
+                    "quality_state": "PROCESSING" if caption_status == "PROCESSING" else ("OWNER_REVIEW_READY" if caption_status == "GENERATED" else caption_status),
+                },
+            )
+            if caption_status != "GENERATED" or not caption_asset.url:
+                return {
+                    "status": caption_status,
+                    "stage": "captions",
+                    "message": str(captioned.get("message") or caption_status),
+                    "asset": caption_asset.as_dict(),
+                }
+
+        return {
+            "status": "GENERATED",
+            "stage": "complete",
+            "message": "Full-body Genova has Coral narration, cloud lip-sync, and burned-in captions. Ready for owner review.",
+            "asset": caption_asset.as_dict(),
+            "url": caption_asset.url,
+        }
     except CreativeStudioError as exc:
         _raise(exc)
         raise
