@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AMICOR Nova Master Demo Stage</title>
+  <link rel="stylesheet" href="/static/nova-master-demo/master-demo.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">AMICOR NOVA</p>
+      <h1>30-Minute Master Product Demo Stage</h1>
+      <p class="subhead">Full-body Genova + live Nova product screens + chapter captions. Owner-review preview only.</p>
+    </div>
+    <div class="top-actions">
+      <a class="button secondary" href="/nova/creative">Back to Creative Studio</a>
+      <button id="start-demo" class="button">Start guided demo</button>
+      <button id="pause-demo" class="button secondary">Pause</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="chapters" aria-label="Demo chapters">
+      <div class="status-card">
+        <strong>Master duration</strong>
+        <span>30:00</span>
+        <small>The existing 5-second full-body Genova clip is reused as a proof/bridge asset. It is not regenerated here.</small>
+      </div>
+      <ol id="chapter-list"></ol>
+    </aside>
+
+    <section class="stage-card">
+      <div class="stage-toolbar">
+        <div>
+          <strong id="chapter-title">Opening</strong>
+          <span id="chapter-range">00:00–01:30</span>
+        </div>
+        <div class="stage-controls">
+          <button id="prev-chapter" class="icon-button" aria-label="Previous chapter">←</button>
+          <button id="next-chapter" class="icon-button" aria-label="Next chapter">→</button>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <iframe id="product-frame" title="AMICOR Nova product demo" src="/nova" loading="eager"></iframe>
+
+        <div id="presenter-panel" class="presenter-panel">
+          <video id="presenter-video" muted playsinline preload="metadata"
+            src="/media/nova-creative/nova-e35c88123a07412a97129aaf662bb57f.mp4"></video>
+          <div class="presenter-label">
+            <strong>Genova</strong>
+            <span>AMICOR Nova AI guide</span>
+          </div>
+        </div>
+
+        <div id="caption-bar" class="caption-bar" aria-live="polite">
+          Welcome to AMICOR Nova. This master walkthrough shows the live product experience and keeps unfinished capabilities clearly separated from what is available now.
+        </div>
+      </div>
+
+      <div class="progress-wrap" aria-label="Demo progress">
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <div class="progress-meta">
+          <span id="elapsed">00:00</span>
+          <span id="remaining">30:00 remaining</span>
+        </div>
+      </div>
+
+      <div class="chapter-notes">
+        <div>
+          <h2 id="chapter-heading">Opening — What AMICOR Nova is</h2>
+          <p id="chapter-summary"></p>
+        </div>
+        <div class="chapter-links">
+          <a id="open-route" class="button secondary" href="/nova" target="_blank" rel="noopener">Open this product</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section class="production-note">
+    <strong>Production status:</strong>
+    This stage is a browser-based rehearsal/composition surface. It avoids the low-memory Render encoder path while we assemble the comprehensive master. No external publishing occurs from this page.
+  </section>
+
+  <script src="/static/nova-master-demo/master-demo.js"></script>
+</body>
+</html>
