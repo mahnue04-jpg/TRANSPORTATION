@@ -158,6 +158,24 @@ class ProjectIn(BaseModel):
     brand_profile_id: str | None = None
 
 
+class ProjectUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    project_type: str | None = None
+    platform: str | None = None
+    objective: str | None = None
+    audience: str | None = None
+    tone: str | None = None
+    duration_target: int | None = None
+    brand_profile_id: str | None = None
+    presenter_mode: str | None = Field(default=None, pattern="^(head|half_body|full_body)$")
+    motion_style: str | None = Field(default=None, pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
+    framing: str | None = Field(default=None, pattern="^(close_up|waist_up|full_frame)$")
+    output_preset: str | None = Field(default=None, pattern="^(9:16|1:1|16:9)$")
+    voice: str | None = Field(default=None, pattern="^(coral|nova|shimmer)$")
+    image_aspect: str | None = Field(default=None, pattern="^(1:1|4:5|9:16|16:9)$")
+    captions: bool | None = None
+
+
 class BrandIn(BaseModel):
     business_name: str = Field(min_length=1, max_length=200)
     logo_reference: str = ""
@@ -301,6 +319,21 @@ def create_project(
     _require_owner(user)
     try:
         return get_service(db).create_project(user.user_id, payload.model_dump())
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.patch("/projects/{project_id}")
+def update_project(
+    project_id: str,
+    payload: ProjectUpdateIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).update_project(user.user_id, project_id, payload.model_dump(exclude_unset=True))
     except CreativeStudioError as exc:
         _raise(exc)
         raise

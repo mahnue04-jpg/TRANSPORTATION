@@ -75,6 +75,54 @@ def test_project_creation_and_persistence():
     assert detail["project"]["title"] == "Launch teaser"
 
 
+def test_project_production_settings_can_be_updated_and_persisted():
+    svc = _svc()
+    created = svc.create_project(
+        "owner-a",
+        {
+            "title": "Master demo",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+        },
+    )
+
+    updated = svc.update_project(
+        "owner-a",
+        created["id"],
+        {
+            "project_type": "explainer",
+            "platform": "YouTube",
+            "duration_target": 60,
+            "presenter_mode": "full_body",
+            "motion_style": "friendly_explainer",
+            "framing": "full_frame",
+            "output_preset": "16:9",
+            "voice": "coral",
+            "image_aspect": "16:9",
+            "captions": True,
+        },
+    )
+
+    project = updated["project"]
+    assert project["project_type"] == "explainer"
+    assert project["platform"] == "YouTube"
+    assert project["duration_target"] == 60
+    production = project["metadata"]["production_settings"]
+    assert production == {
+        "presenter_mode": "full_body",
+        "motion_style": "friendly_explainer",
+        "framing": "full_frame",
+        "output_preset": "16:9",
+        "voice": "coral",
+        "image_aspect": "16:9",
+        "captions": True,
+    }
+
+    detail = svc.get_project("owner-a", created["id"])
+    assert detail["project"]["metadata"]["production_settings"]["voice"] == "coral"
+
+
 def test_script_caption_storyboard_and_image_prompt_contracts():
     svc = _svc()
     project = svc.create_project(
@@ -977,6 +1025,9 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
 
     assert 'id="load-amicor-brand-defaults"' in html
     assert 'id="production-preset"' in html
+    assert 'id="project-save-settings"' in html
+    assert 'method: "PATCH"' in js
+    assert "production_settings" in js
     assert 'value="vertical_short"' in html
     assert 'value="social_square"' in html
     assert 'value="youtube_web"' in html

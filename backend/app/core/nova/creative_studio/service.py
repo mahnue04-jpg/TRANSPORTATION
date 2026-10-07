@@ -197,6 +197,61 @@ class CreativeStudioService(ShortDramaMixin):
         self.store.save_project(row)
         return row.as_dict()
 
+    def update_project(self, owner_id: str, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._project_or_404(owner_id, project_id)
+        updates = dict(payload or {})
+
+        if "project_type" in updates and updates["project_type"] is not None:
+            project_type = str(updates["project_type"]).strip()
+            if project_type not in PROJECT_TYPES:
+                raise CreativeStudioError("UNSUPPORTED_PROJECT_TYPE", f"Unsupported project_type: {project_type}")
+            row.project_type = project_type
+
+        if "platform" in updates and updates["platform"] is not None:
+            platform = str(updates["platform"]).strip()
+            if platform not in PLATFORMS:
+                raise CreativeStudioError("INVALID_INPUT", f"Unsupported platform: {platform}")
+            row.platform = platform
+
+        if "duration_target" in updates and updates["duration_target"] is not None:
+            try:
+                duration = int(updates["duration_target"])
+            except (TypeError, ValueError) as exc:
+                raise CreativeStudioError("INVALID_INPUT", "duration_target must be an integer") from exc
+            if duration not in DURATIONS and row.project_type in {"short_video", "short_drama", "promo_video", "explainer"}:
+                raise CreativeStudioError("INVALID_INPUT", f"duration_target must be one of {DURATIONS}")
+            row.duration_target = duration
+
+        for field in ("title", "objective", "audience", "tone", "brand_profile_id"):
+            if field in updates and updates[field] is not None:
+                value = updates[field]
+                setattr(row, field, str(value).strip() if isinstance(value, str) else value)
+
+        production_keys = {
+            "presenter_mode",
+            "motion_style",
+            "framing",
+            "output_preset",
+            "voice",
+            "image_aspect",
+            "captions",
+        }
+        metadata = dict(row.metadata or {})
+        production = dict(metadata.get("production_settings") or {})
+        for key in production_keys:
+            if key in updates and updates[key] is not None:
+                production[key] = updates[key]
+        if production:
+            metadata["production_settings"] = production
+        row.metadata = metadata
+        row.updated_at = _now()
+        saved = self.store.save_project(row)
+        return {
+            "status": "UPDATED",
+            "message": "Creative Studio project settings updated.",
+            "project": saved.as_dict(),
+        }
+
     def attach_brand_to_project(self, owner_id: str, project_id: str, brand_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         brand = self.store.get_brand(brand_id, owner_id)
