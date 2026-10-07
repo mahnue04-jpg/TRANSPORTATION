@@ -4046,6 +4046,17 @@ def serve_nova_master_demo() -> Response:
     return JSONResponse({"error": "Nova master demo stage not found"}, status_code=404)
 
 
+@app.get("/nova/one-minute-demo")
+def serve_nova_one_minute_demo() -> Response:
+    """Serve the synchronized 60-second AMICOR Nova product demo."""
+    page = os.path.join(_static_dir, "nova-one-minute-demo", "index.html")
+    if os.path.isfile(page):
+        response = FileResponse(page, media_type="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return JSONResponse({"error": "Nova one-minute demo not found"}, status_code=404)
+
+
 @app.get("/nova/v3-lab")
 def serve_nova_v3_lab() -> Response:
     page = os.path.join(_static_dir, "nova-v3-lab", "index.html")
