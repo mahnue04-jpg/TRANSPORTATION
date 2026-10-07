@@ -935,8 +935,11 @@ def prepare_talking_presenter_preview(
             resume_task_id = None
             source_url = None
             source_image_asset_id = None
+            result = None
             active_provider = str(getattr(motion_provider, "provider_id", "") or "").strip()
-            for candidate in reversed(service.store.list_assets(project_id, user.user_id)):
+            assets = service.store.list_assets(project_id, user.user_id)
+
+            for candidate in reversed(assets):
                 if candidate.kind != "presenter_video":
                     continue
                 metadata = candidate.metadata or {}
@@ -960,6 +963,32 @@ def prepare_talking_presenter_preview(
                 break
 
             if not resume_task_id:
+                reusable_motion = next((
+                    candidate for candidate in reversed(assets)
+                    if candidate.kind == "presenter_video"
+                    and str(candidate.status or "").upper() == "GENERATED"
+                    and candidate.url
+                    and (candidate.metadata or {}).get("presenter_mode") == payload.presenter_mode
+                    and (candidate.metadata or {}).get("motion_style") == payload.motion_style
+                    and (candidate.metadata or {}).get("output_preset") == payload.output_preset
+                    and not (candidate.metadata or {}).get("body_lipsync")
+                    and str(((candidate.metadata or {}).get("provider_result") or {}).get("provider") or "") == active_provider
+                ), None)
+                if reusable_motion is not None:
+                    reusable_meta = reusable_motion.metadata or {}
+                    reusable_provider = reusable_meta.get("provider_result") or {}
+                    source_image_asset_id = reusable_meta.get("source_image_asset_id")
+                    result = {
+                        **reusable_provider,
+                        "status": "GENERATED",
+                        "url": str(reusable_motion.url),
+                        "asset_generated": True,
+                        "provider": active_provider,
+                        "message": "Reused existing presenter motion for narration/lip-sync.",
+                        "reused_existing_motion": True,
+                    }
+
+            if result is None and not resume_task_id:
                 source_prompt = (
                     "Genova presenter v2. Photorealistic young Black/African American woman, late twenties, "
                     "warm approachable expression, polished natural makeup, professional modern hairstyle, "
@@ -970,7 +999,7 @@ def prepare_talking_presenter_preview(
                     "Aspect ratio " + payload.output_preset + "."
                 )
                 reusable_source = next((
-                    asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
+                    asset for asset in reversed(assets)
                     if asset.kind == "image"
                     and str(asset.status or "").upper() == "GENERATED"
                     and str(asset.content or "").strip() == source_prompt
@@ -998,18 +1027,19 @@ def prepare_talking_presenter_preview(
                     source_asset = image_result.get("asset") or {}
                     source_image_asset_id = source_asset.get("id")
 
-            result = motion_provider.generate(
-                brief={
-                    "project_id": project_id,
-                    "title": "Nova presenter motion",
-                    "objective": payload.script[:600],
-                    "platform": "TikTok" if payload.output_preset == "9:16" else "YouTube",
-                    "aspect_ratio": payload.output_preset,
-                    "prompt_text": motion_prompt,
-                    "prompt_image_url": source_url,
-                    "resume_task_id": resume_task_id,
-                }
-            )
+            if result is None:
+                result = motion_provider.generate(
+                    brief={
+                        "project_id": project_id,
+                        "title": "Nova presenter motion",
+                        "objective": payload.script[:600],
+                        "platform": "TikTok" if payload.output_preset == "9:16" else "YouTube",
+                        "aspect_ratio": payload.output_preset,
+                        "prompt_text": motion_prompt,
+                        "prompt_image_url": source_url,
+                        "resume_task_id": resume_task_id,
+                    }
+                )
             title = "Half-body presenter motion" if payload.presenter_mode == "half_body" else "Full-body presenter motion"
 
         status = str(result.get("status") or CONFIG_REQUIRED)
@@ -1040,21 +1070,49 @@ def prepare_talking_presenter_preview(
 
             if narration_url:
                 from app.core.nova.creative_studio.kling import FalKlingLipSyncProvider
+                base_motion_url = generated_url
+                lipsync_resume_task_id = None
+                for candidate in reversed(service.store.list_assets(project_id, user.user_id)):
+                    if candidate.kind != "presenter_video":
+                        continue
+                    metadata = candidate.metadata or {}
+                    provider_result = metadata.get("provider_result") or {}
+                    if str(candidate.status or "").upper() != "PROCESSING":
+                        continue
+                    if str(candidate.content or "").strip() != payload.script.strip():
+                        continue
+                    if metadata.get("presenter_mode") != payload.presenter_mode:
+                        continue
+                    if metadata.get("motion_style") != payload.motion_style:
+                        continue
+                    if metadata.get("output_preset") != payload.output_preset:
+                        continue
+                    if str(provider_result.get("provider") or "") != "fal_kling_lipsync":
+                        continue
+                    task_id = str(provider_result.get("task_id") or "").strip()
+                    if task_id:
+                        lipsync_resume_task_id = task_id
+                        break
+
                 lipsync_result = FalKlingLipSyncProvider().generate_lipsync(
-                    video_url=generated_url,
+                    video_url=base_motion_url,
                     audio_url=narration_url,
+                    resume_task_id=lipsync_resume_task_id,
                 )
+                presenter_meta.update({
+                    "motion_video_url": base_motion_url,
+                    "source_audio_asset_id": narration_asset_id,
+                    "voice": payload.voice,
+                })
+                result = lipsync_result
+                status = str(lipsync_result.get("status") or CONFIG_REQUIRED)
                 if lipsync_result.get("asset_generated") and lipsync_result.get("url"):
-                    presenter_meta.update({
-                        "motion_video_url": generated_url,
-                        "source_audio_asset_id": narration_asset_id,
-                        "voice": payload.voice,
-                        "body_lipsync": True,
-                    })
+                    presenter_meta["body_lipsync"] = True
                     generated_url = str(lipsync_result["url"])
-                    result = lipsync_result
-                    status = str(result.get("status") or "GENERATED")
                     body_lipsync_applied = True
+                elif status == "PROCESSING":
+                    presenter_meta["body_lipsync"] = False
+                    generated_url = None
         if generated_url and payload.presenter_mode == 'head' and payload.captions:
             from app.core.nova.creative_studio.providers import _resolve_creative_media_url
             from app.core.nova.creative_studio.presenter_media import caption_presenter
@@ -1155,7 +1213,11 @@ def prepare_talking_presenter_preview(
             message = (
                 f"{message or 'Presenter render generated.'} " +
                 (
-                    "Saved as PREVIEW_ONLY: review actual body movement; narration and lip-sync are not generated by this motion path. "
+                    (
+                        "Saved as PREVIEW_ONLY: full-body motion and narration/lip-sync are generated; review the result before delivery. "
+                        if body_lipsync_applied
+                        else "Saved as PREVIEW_ONLY: review actual body movement; narration/lip-sync is still pending or unavailable. "
+                    )
                     if payload.presenter_mode != "head"
                     else (
                         "Saved as DEMO_READY_WITH_PROVIDER_WATERMARK. Nova will preserve the D-ID AI disclosure watermark for website/demo playback. "
