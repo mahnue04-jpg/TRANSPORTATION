@@ -1,7 +1,7 @@
 """Offline tests; no paid generation."""
 import pytest
 from app.core.nova.creative_studio import providers, flags, service as services
-from app.core.nova.creative_studio.kling import FalKlingVideoProvider, MODEL
+from app.core.nova.creative_studio.kling import FalKlingVideoProvider, FalKlingLipSyncProvider, MODEL, LIPSYNC_MODEL
 from app.core.nova.creative_studio.service import CreativeStudioService
 from app.core.nova.creative_studio.store import CreativeStudioStore
 TASK = {'request_id':'request-123','status_url':'https://queue.fal.run/fal-ai/kling-video/requests/request-123/status','response_url':'https://queue.fal.run/fal-ai/kling-video/requests/request-123'}
@@ -98,3 +98,27 @@ def test_missing_artwork_has_specific_reason(kling,monkeypatch):
     monkeypatch.setattr(kling,'_prompt_image_value',lambda value:None)
     result=kling.generate(brief={})
     assert result['status']=='ERROR' and 'source artwork' in result['message']
+
+
+def test_lipsync_submits_once_and_resumes_without_duplicate(monkeypatch):
+    for key,value in {'NOVA_CREATIVE_VIDEO_PROVIDER':'kling','FAL_KEY':'test-only','NOVA_CREATIVE_VIDEO_LIVE_ENABLED':'true','NOVA_CREATIVE_KLING_LIVE_ENABLED':'true','AMICOR_PUBLIC_URL':'https://example.test'}.items():
+        monkeypatch.setenv(key,value)
+    provider=FalKlingLipSyncProvider()
+    calls=[]
+    lipsync_task={'request_id':'request-456','status_url':'https://queue.fal.run/fal-ai/kling-video/requests/request-456/status','response_url':'https://queue.fal.run/fal-ai/kling-video/requests/request-456'}
+    def request(method,url,*,payload=None):
+        calls.append((method,url,payload))
+        if method=='POST':
+            return lipsync_task
+        if url.endswith('/status'):
+            return {'status':'COMPLETED'}
+        return {'video':{'url':'https://fal.media/lipsynced.mp4'}}
+    monkeypatch.setattr(provider,'_request_json',request)
+    monkeypatch.setattr(provider,'_save_remote_video',lambda url:'/media/nova-creative/lipsynced.mp4')
+    first=provider.generate_lipsync(video_url='/media/nova-creative/body.mp4',audio_url='/media/nova-creative/voice.mp3')
+    assert first['status']=='GENERATED'
+    assert first['url']=='/media/nova-creative/lipsynced.mp4'
+    assert first['model']==LIPSYNC_MODEL
+    assert calls[0][1].endswith(LIPSYNC_MODEL)
+    assert calls[0][2]=={'video_url':'https://example.test/media/nova-creative/body.mp4','audio_url':'https://example.test/media/nova-creative/voice.mp3'}
+    assert len([row for row in calls if row[0]=='POST'])==1
