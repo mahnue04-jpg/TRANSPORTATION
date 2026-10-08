@@ -15,6 +15,8 @@
   var shareBtn = document.getElementById("share-demo");
   var copyBtn = document.getElementById("copy-demo-link");
   var shareStatus = document.getElementById("share-status");
+  var recordBtn = document.getElementById("record-demo");
+  var recordStatus = document.getElementById("record-status");
 
   var cues = [
     { start: 0.00, end: 4.58, text: "Meet AMICOR Nova, your AI operations workspace built" },
@@ -158,6 +160,92 @@
   }
 
   if (copyBtn) copyBtn.addEventListener("click", copyDemoLink);
+  if (recordBtn) recordBtn.addEventListener("click", async function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder) {
+      if (recordStatus) recordStatus.textContent = "This browser cannot record the demo. Open this page in Chrome or Edge on a computer.";
+      return;
+    }
+    recordBtn.disabled = true;
+    if (recordStatus) recordStatus.textContent = "Choose this browser tab and enable tab audio. Recording will stop automatically after the 60-second demo.";
+    var displayStream;
+    var audioContext;
+    var destination;
+    var recorder;
+    var chunks = [];
+    try {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+        surfaceSwitching: "exclude"
+      });
+
+      var combined = new MediaStream();
+      displayStream.getVideoTracks().forEach(function (track) { combined.addTrack(track); });
+
+      var audioTracks = displayStream.getAudioTracks();
+      if (audioTracks.length) {
+        audioTracks.forEach(function (track) { combined.addTrack(track); });
+      } else {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        destination = audioContext.createMediaStreamDestination();
+        try {
+          var source = audioContext.createMediaElementSource(audio);
+          source.connect(destination);
+          source.connect(audioContext.destination);
+          destination.stream.getAudioTracks().forEach(function (track) { combined.addTrack(track); });
+        } catch (err) {}
+      }
+
+      var types = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm"
+      ];
+      var mimeType = "";
+      for (var i = 0; i < types.length; i++) {
+        if (MediaRecorder.isTypeSupported(types[i])) { mimeType = types[i]; break; }
+      }
+      recorder = new MediaRecorder(combined, mimeType ? { mimeType: mimeType, videoBitsPerSecond: 8000000 } : undefined);
+      recorder.ondataavailable = function (event) {
+        if (event.data && event.data.size) chunks.push(event.data);
+      };
+      recorder.onstop = function () {
+        var blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "AMICOR-Nova-60-second-master-demo.webm";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+        if (recordStatus) recordStatus.textContent = "Recording complete. The 60-second master demo video was downloaded.";
+        recordBtn.disabled = false;
+        if (audioContext) audioContext.close().catch(function () {});
+      };
+      displayStream.getVideoTracks()[0].addEventListener("ended", function () {
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+      });
+
+      restart();
+      await new Promise(function (resolve) { setTimeout(resolve, 250); });
+      recorder.start(1000);
+      if (recordStatus) recordStatus.textContent = "Recording the full 60-second AMICOR Nova demo...";
+      var stopAfterDemo = function () {
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+        if (displayStream) displayStream.getTracks().forEach(function (track) { track.stop(); });
+        audio.removeEventListener("ended", stopAfterDemo);
+      };
+      audio.addEventListener("ended", stopAfterDemo);
+    } catch (err) {
+      if (displayStream) displayStream.getTracks().forEach(function (track) { track.stop(); });
+      if (recordStatus) recordStatus.textContent = "Recording was cancelled or blocked. Try again in Chrome or Edge and choose this browser tab with tab audio enabled.";
+      recordBtn.disabled = false;
+    }
+  });
+
   if (shareBtn) shareBtn.addEventListener("click", async function () {
     var payload = {
       title: "AMICOR Nova — 60-Second Product Demo",
