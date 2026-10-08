@@ -266,9 +266,12 @@
     }).sort(function (a, b) {
       return sceneIndexFromAsset(a) - sceneIndexFromAsset(b);
     });
+    var artwork = assets.filter(function (row) {
+      return row.kind === "image" && row.url && String(row.status || "").toUpperCase() === "GENERATED";
+    });
 
-    if (!clips.length) {
-      throw new Error("Generate at least one AI scene before building the final promo.");
+    if (!clips.length && !artwork.length) {
+      throw new Error("Generate at least one AI scene or image before building the final promo.");
     }
 
     var audioAssets = assets.filter(function (row) {
@@ -276,11 +279,12 @@
     });
     var voiceAsset = audioAssets.length ? audioAssets[audioAssets.length - 1] : null;
 
-    var firstVideo = await loadVideo(clips[0].url);
+    var firstVideo = clips.length ? await loadVideo(clips[0].url) : null;
+    var firstImage = !clips.length ? await loadImage(artwork[0].url) : null;
     var logo = await loadImage("/static/branding/amicor-logo-full.png");
     var canvas = document.createElement("canvas");
-    canvas.width = firstVideo.videoWidth || 720;
-    canvas.height = firstVideo.videoHeight || 1280;
+    canvas.width = firstVideo ? (firstVideo.videoWidth || 1280) : (firstImage.naturalWidth || firstImage.width || 1280);
+    canvas.height = firstVideo ? (firstVideo.videoHeight || 720) : (firstImage.naturalHeight || firstImage.height || 720);
     var ctx = canvas.getContext("2d");
     var fps = 30;
     var canvasStream = canvas.captureStream(fps);
@@ -336,6 +340,15 @@
       ctx.drawImage(logo, margin, margin, targetWidth, targetHeight);
     }
 
+    function drawCover(image) {
+      var iw = image.naturalWidth || image.width;
+      var ih = image.naturalHeight || image.height;
+      var scale = Math.max(canvas.width / iw, canvas.height / ih);
+      var w = iw * scale;
+      var h = ih * scale;
+      ctx.drawImage(image, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    }
+
     async function playClip(row, existingVideo) {
       var video = existingVideo || await loadVideo(row.url);
       video.currentTime = 0;
@@ -354,14 +367,39 @@
       video.pause();
     }
 
+    async function playArtwork(row, existingImage, durationMs) {
+      var image = existingImage || await loadImage(row.url);
+      var started = performance.now();
+      await new Promise(function (resolve) {
+        function draw(now) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          drawCover(image);
+          drawLogo();
+          if ((now - started) >= durationMs) resolve();
+          else requestAnimationFrame(draw);
+        }
+        requestAnimationFrame(draw);
+      });
+    }
+
     recorder.start(250);
     if (audioElement) {
       audioElement.currentTime = 0;
       await audioElement.play();
     }
 
-    for (var clipIndex = 0; clipIndex < clips.length; clipIndex += 1) {
-      await playClip(clips[clipIndex], clipIndex === 0 ? firstVideo : null);
+    if (clips.length) {
+      for (var clipIndex = 0; clipIndex < clips.length; clipIndex += 1) {
+        await playClip(clips[clipIndex], clipIndex === 0 ? firstVideo : null);
+      }
+    } else {
+      var targetMs = audioElement && isFinite(audioElement.duration) && audioElement.duration > 0
+        ? Math.max(3000, (audioElement.duration * 1000) / artwork.length)
+        : 5000;
+      for (var artIndex = 0; artIndex < artwork.length; artIndex += 1) {
+        await playArtwork(artwork[artIndex], artIndex === 0 ? firstImage : null, targetMs);
+        if (audioElement && audioElement.ended) break;
+      }
     }
 
     if (audioElement && !audioElement.ended) {
@@ -386,7 +424,9 @@
       blob: blob,
       fileName: "amicor-nova-final-promo.webm",
       clipCount: clips.length,
-      hasVoice: Boolean(voiceAsset)
+      artworkCount: artwork.length,
+      hasVoice: Boolean(voiceAsset),
+      renderMode: clips.length ? "browser_scene_clips" : "browser_artwork_slideshow"
     };
   }
 
@@ -402,7 +442,10 @@
     title.textContent = "Final AMICOR Nova promo";
     var meta = document.createElement("div");
     meta.className = "muted";
-    meta.textContent = result.clipCount + " AI scene clip(s)" + (result.hasVoice ? " · Nova voice included" : " · no voice track");
+    var visualCount = result.clipCount || result.artworkCount || 0;
+    var visualLabel = result.clipCount ? " AI scene clip(s)" : " artwork scene(s)";
+    meta.textContent = visualCount + visualLabel + (result.hasVoice ? " · Nova voice included" : " · no voice track") +
+      (result.renderMode === "browser_artwork_slideshow" ? " · browser-safe render" : "");
 
     var video = document.createElement("video");
     video.controls = true;
@@ -1128,7 +1171,30 @@
           assetList.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       } catch (err) {
-        showBanner(err.message || "Final promo assembly failed.", false);
+        var message = String((err && err.message) || "");
+        var memoryBlocked = message.toLowerCase().indexOf("insufficient server memory headroom") >= 0 ||
+          message.toLowerCase().indexOf("no encoder was started") >= 0;
+        if (!memoryBlocked) {
+          showBanner(message || "Final promo assembly failed.", false);
+        } else {
+          showBanner("Render server memory is tight, so Nova is switching to the browser-safe final promo builder...", true);
+          try {
+            var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selectedProjectId));
+            var localResult = await buildFinalPromo(detail);
+            var downloadLink = showFinalPromoDownload(localResult);
+            if (downloadLink && downloadLink.scrollIntoView) {
+              downloadLink.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            showBanner(
+              "Final promo built safely in this browser with " +
+              String(localResult.clipCount || localResult.artworkCount || 0) +
+              " visual asset(s)" + (localResult.hasVoice ? " and Nova voice. Download it below." : ". Download it below."),
+              true
+            );
+          } catch (fallbackErr) {
+            showBanner(fallbackErr.message || "Browser-safe final promo build also failed.", false);
+          }
+        }
       } finally {
         finalPromoButton.disabled = false;
       }
