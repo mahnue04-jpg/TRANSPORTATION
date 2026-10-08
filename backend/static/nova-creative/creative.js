@@ -583,14 +583,32 @@
       finalVideoMeta.demo_ready === true &&
       finalVideoMeta.provider_watermark_preserved === true
     );
-    var presenterReady = !presenter || presenterMeta.publish_ready === true || presenterDemoAccepted;
+    var bodyLipSyncReady = !!(
+      presenter &&
+      presenter.url &&
+      String(presenter.status || "").toUpperCase() === "GENERATED" &&
+      presenterMeta.presenter_mode === "full_body" &&
+      presenterMeta.body_lipsync === true
+    );
+    var bodyCaptionedReady = !!(
+      presenter &&
+      presenter.url &&
+      String(presenter.status || "").toUpperCase() === "GENERATED" &&
+      presenterMeta.presenter_mode === "full_body" &&
+      presenterMeta.captions_burned_in === true
+    );
+    var presenterReady = !presenter || presenterMeta.publish_ready === true || presenterDemoAccepted || bodyLipSyncReady || bodyCaptionedReady;
     var presenterState = !presenter ? "NOT USED" :
       (presenterMeta.publish_ready === true ? "PUBLISH_READY" :
-        (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")));
+        (bodyCaptionedReady ? "FULL_BODY_CAPTIONED_READY" :
+          (bodyLipSyncReady ? "FULL_BODY_LIPSYNC_READY" :
+            (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")))));
+    var presenterCaptionsReady = !bodyLipSyncReady || bodyCaptionedReady;
 
     var checks = [
-      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
+      { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
+      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
       { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
       { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
@@ -620,9 +638,36 @@
     }).join("");
 
     Array.prototype.forEach.call(target.querySelectorAll(".readiness-action"), function (button) {
-      button.addEventListener("click", function () {
+      button.addEventListener("click", async function () {
         var action = button.getAttribute("data-next-action");
         var targetButton = null;
+        if (action === "finalize-presenter-captions") {
+          if (!presenter || !presenter.content) {
+            showBanner("The latest full-body presenter script is unavailable. Regenerate the presenter preview first.", false);
+            return;
+          }
+          button.disabled = true;
+          showBanner("Finalizing full-body Genova captions in the cloud...", true);
+          try {
+            var finalized = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/presenter/cloud-finalize", {
+              method: "POST",
+              body: JSON.stringify({
+                script: String(presenter.content || "").trim(),
+                voice: presenterMeta.voice || "coral",
+                captions: true
+              })
+            });
+            renderOutput(finalized);
+            var done = finalized && finalized.status === "GENERATED" && finalized.stage === "complete";
+            showBanner(finalized.message || (done ? "Full-body presenter captions are ready." : "Presenter caption finalization is still processing."), done);
+            await refreshAssets();
+          } catch (err) {
+            showBanner(err.message || "Could not finalize full-body presenter captions.", false);
+          } finally {
+            button.disabled = false;
+          }
+          return;
+        }
         if (action === "build-final-promo") targetButton = $("build-final-promo");
         else if (action === "preview-talking-presenter") targetButton = $("preview-talking-presenter");
         else if (action === "generate-image") targetButton = document.querySelector('[data-action="image"]');

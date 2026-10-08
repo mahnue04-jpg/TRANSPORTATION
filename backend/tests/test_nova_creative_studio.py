@@ -1096,6 +1096,15 @@ def test_creative_ui_has_production_readiness_panel() -> None:
     assert '"legacy_did_demo_passthrough"' in js
     assert '"DEMO_READY_WITH_PROVIDER_WATERMARK"' in js
     assert "presenterDemoAccepted" in js
+    assert "bodyLipSyncReady" in js
+    assert "FULL_BODY_LIPSYNC_READY" in js
+    assert "Presenter captions" in js
+    assert "finalize-presenter-captions" in js
+    assert "/presenter/cloud-finalize" in js
+    assert "FULL_BODY_LIPSYNC_READY" in js
+    assert "FULL_BODY_CAPTIONED_READY" in js
+    assert "finalize-presenter-captions" in js
+    assert "/presenter/cloud-finalize" in js
     assert ".readiness-grid" in css
     assert ".readiness-summary.ready" in css
     assert ".readiness-item.missing" in css
