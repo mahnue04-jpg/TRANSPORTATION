@@ -9,6 +9,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  qualification-regression:
+    runs-on: ubuntu-latest
+    env:
+      TESTING: "true"
+      DATABASE_URL: sqlite:///./test_nova_qualification_ci.db
+      AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
+      HEALTH_ISF_STRIPE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Run Nova qualification regressions independently
+        run: >-
+          python -m pytest -q
+          tests/test_nova_qualification_claim_scope.py
+          tests/test_nova_capability_first_discovery.py
+          tests/test_nova_live_opportunity_qualification.py
+          tests/test_nova_multi_source_discovery.py
+          tests/test_nova_work_revenue_live_discovery_flag_bridge.py
+
   backend-diagnostic:
     runs-on: ubuntu-latest
     services:
