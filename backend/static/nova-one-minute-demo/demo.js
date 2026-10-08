@@ -86,7 +86,7 @@
     if (index === activeScene) return;
     activeScene = index;
     var scene = scenes[index];
-    frame.src = scene.route;
+    frame.src = scene.route + (scene.route.indexOf("?") >= 0 ? "&" : "?") + "nova_demo_embed=1";
     sceneTitle.textContent = scene.title;
     openScene.href = scene.route;
     renderSceneList();
