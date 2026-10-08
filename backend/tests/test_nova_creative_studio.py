@@ -1674,3 +1674,128 @@ def test_final_promo_reuses_legacy_did_preview_without_encoder(monkeypatch, tmp_
     assert metadata["demo_ready"] is True
     assert metadata["provider_watermark_preserved"] is True
     assert metadata["subtitle_url"] == "/media/nova-creative/legacy-presenter.srt"
+    assert metadata["publish_ready"] is False
+
+
+def test_preview_only_or_watermark_is_not_publish_ready_in_export() -> None:
+    from app.core.nova.creative_studio.export import export_project_package, presenter_publish_ready
+
+    assert presenter_publish_ready({"publish_ready": True, "quality_state": "PREVIEW_ONLY"}) is False
+    assert presenter_publish_ready({"publish_ready": True, "provider_result": {"watermark_free": False}}) is False
+    assert presenter_publish_ready({"publish_ready": True, "quality_state": "PUBLISH_READY"}) is True
+
+    payload = {
+        "project": {"title": "Demo", "platform": "website", "status": "ACTIVE"},
+        "brief": {},
+        "brand": {},
+        "scenes": [],
+        "assets": [
+            {"id": "vid1", "kind": "video", "title": "Final", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {"final_promo": True, "publish_ready": False}},
+            {"id": "pres1", "kind": "presenter_video", "title": "Presenter", "status": "GENERATED", "url": "/media/presenter.mp4", "metadata": {"publish_ready": True, "quality_state": "PREVIEW_ONLY", "subtitle_url": "/media/presenter.srt"}},
+        ],
+    }
+    social = export_project_package(payload, fmt="json")["package"]["social_media_package"]
+    assert social["production_ready"] is False
+    assert social["presenter_video"]["publish_ready"] is False
+    assert social["presenter_video"]["subtitle_url"] == "/media/presenter.srt"
+
+
+@pytest.mark.parametrize("mode", ["half_body", "full_body"])
+def test_thirty_second_demo_reuses_captioned_presenter_without_encoder(monkeypatch, tmp_path, mode):
+    from app.core.nova.creative_studio import service as studio_service
+    from app.core.nova.creative_studio.models import CreativeAsset, CreativeProject, CreativeScene
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    store = CreativeStudioStore()
+    svc = studio_service.CreativeStudioService(store)
+    owner = f"owner-{mode}"
+    project = CreativeProject(
+        id=f"cproj_{mode}",
+        owner_id=owner,
+        title="30 second demo",
+        project_type="explainer",
+        platform="website",
+        objective="demo",
+        audience="business",
+        tone="professional",
+        duration_target=30,
+        status="storyboarded",
+    )
+    store.save_project(project)
+    store.save_scene(CreativeScene(
+        id="scene1",
+        project_id=project.id,
+        owner_id=owner,
+        index=1,
+        heading="Demo",
+        description="Demo",
+        visual_prompt="Demo scene",
+        voiceover_text="Welcome to AMICOR Nova.",
+        subtitle_text="Welcome to AMICOR Nova.",
+        duration_seconds=5.0,
+    ))
+    media = tmp_path / f"{mode}.mp4"
+    media.write_bytes(b"existing-presenter")
+    presenter = CreativeAsset(
+        id=f"presenter-{mode}",
+        project_id=project.id,
+        owner_id=owner,
+        kind="presenter_video",
+        title="Genova presenter",
+        content="Welcome to AMICOR Nova.",
+        status="GENERATED",
+        url=f"/media/nova-creative/{mode}.mp4",
+        metadata={
+            "presenter_mode": mode,
+            "publish_ready": True,
+            "quality_state": "PREVIEW_ONLY",
+            "captions_burned_in": True,
+            "subtitle_url": f"/media/nova-creative/{mode}.srt",
+            "provider_result": {"watermark_free": False},
+        },
+    )
+    store.save_asset(presenter)
+    monkeypatch.setattr(studio_service, "_resolve_creative_media_url", lambda url: media)
+    monkeypatch.setattr(
+        studio_service,
+        "run_encoder",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("encoder must not run")),
+    )
+
+    result = svc.assemble_final_promo(owner, project.id)
+    metadata = result["asset"]["metadata"]
+    assert result["url"] == presenter.url
+    assert metadata["render_mode"] == "presenter_mp4_passthrough"
+    assert metadata["publish_ready"] is False
+    assert metadata["quality_state"] == "PREVIEW_ONLY"
+    assert metadata["demo_ready"] is True
+    assert metadata["provider_watermark_preserved"] is True
+    assert metadata["subtitle_url"].endswith(".srt")
+
+
+def test_presenter_voice_defaults_to_female_selection() -> None:
+    from app.core.nova.creative_studio.providers import resolve_studio_voice
+
+    assert resolve_studio_voice(None, presenter=True) == "shimmer"
+    assert resolve_studio_voice("alloy", presenter=True) == "shimmer"
+    assert resolve_studio_voice("coral", presenter=True) == "coral"
+    assert resolve_studio_voice("nova", presenter=True) == "nova"
+    assert resolve_studio_voice("shimmer", presenter=True) == "shimmer"
+    with pytest.raises(ValueError):
+        resolve_studio_voice("baritone", presenter=False)
+
+
+def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    assert "presenterMarkedPublishReady" in js
+    assert "PREVIEW_ONLY" in js
+    assert "insufficient server memory headroom" in js
+    assert "memory-notice" in js
+    assert 'kind=\\"subtitles\\"' in js
+    assert "Download captions" in js
+    assert 'value="half_body"' in html
+    assert 'value="full_body"' in html
+    assert 'value="shimmer" selected' in html
+    assert 'value="coral"' in html
+    assert 'value="nova"' in html

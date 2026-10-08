@@ -27,9 +27,9 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
     audio_asset = _latest_asset(assets, "audio")
 
     presenter_meta = (presenter_video or {}).get("metadata") or {}
-    presenter_publish_ready = bool(presenter_meta.get("publish_ready"))
+    presenter_is_publish_ready = presenter_publish_ready(presenter_meta)
     final_video_ready = bool(final_video and final_video.get("url"))
-    production_ready = bool(final_video_ready and (not presenter_video or presenter_publish_ready))
+    production_ready = bool(final_video_ready and (not presenter_video or presenter_is_publish_ready))
 
     package = {
         "export_kind": "nova_creative_studio_project_package",
@@ -64,7 +64,7 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
         },
         "delivery_checklist": {
             "video_ready": final_video_ready,
-            "presenter_ready": bool(not presenter_video or presenter_publish_ready),
+            "presenter_ready": bool(not presenter_video or presenter_is_publish_ready),
             "caption_ready": bool(_first_content(assets, "caption")),
             "thumbnail_ready": bool(image_asset and image_asset.get("url")),
             "voice_ready": bool(audio_asset and audio_asset.get("url")),
@@ -95,6 +95,25 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
 
 
 
+def presenter_publish_ready(metadata: dict[str, Any] | None) -> bool:
+    """PREVIEW_ONLY and watermarked provider output are never publish-ready."""
+    meta = metadata or {}
+    if meta.get("publish_ready") is not True:
+        return False
+    if str(meta.get("quality_state") or "").strip().upper() == "PREVIEW_ONLY":
+        return False
+    if meta.get("provider_watermark_preserved") is True:
+        return False
+    provider_result = meta.get("provider_result") or {}
+    if not isinstance(provider_result, dict):
+        provider_result = {}
+    if provider_result.get("watermark_free") is False:
+        return False
+    if str(provider_result.get("quality_state") or "").strip().upper() == "PREVIEW_ONLY":
+        return False
+    return True
+
+
 def _latest_asset(
     assets: list[dict[str, Any]],
     kind: str,
@@ -121,7 +140,8 @@ def _asset_ref(asset: dict[str, Any] | None) -> dict[str, Any] | None:
         "status": asset.get("status"),
         "url": asset.get("url"),
         "quality_state": metadata.get("quality_state"),
-        "publish_ready": metadata.get("publish_ready"),
+        "publish_ready": presenter_publish_ready(metadata),
+        "subtitle_url": metadata.get("subtitle_url"),
     }
 
 def _first_content(assets: list[dict[str, Any]], kind: str) -> str:

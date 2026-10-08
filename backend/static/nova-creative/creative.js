@@ -45,6 +45,24 @@
       img.src = src;
     });
   }
+  function presenterMarkedPublishReady(meta) {
+    meta = meta || {};
+    if (meta.publish_ready !== true) return false;
+    if (String(meta.quality_state || "").toUpperCase() === "PREVIEW_ONLY") return false;
+    if (meta.provider_watermark_preserved === true) return false;
+    var provider = meta.provider_result || {};
+    if (provider.watermark_free === false) return false;
+    if (String(provider.quality_state || "").toUpperCase() === "PREVIEW_ONLY") return false;
+    return true;
+  }
+  function memoryHeadroomNotice(row) {
+    var meta = (row && row.metadata) || {};
+    var provider = meta.provider_result || {};
+    var loudness = provider.loudness || {};
+    var text = String(meta.caption_render_error || loudness.normalization_error || "");
+    if (text.toLowerCase().indexOf("insufficient server memory headroom") === -1) return "";
+    return "<p class=\"hint memory-notice\">Nova paused extra video processing because server memory was tight. Your existing presenter video is still available to preview and download.</p>";
+  }
   function assetFailureHtml(row) {
     if (String(row.status || "").toUpperCase() !== "ERROR") return "";
     var provider = (row.metadata || {}).provider_result || {};
@@ -597,9 +615,9 @@
       presenterMeta.presenter_mode === "full_body" &&
       presenterMeta.captions_burned_in === true
     );
-    var presenterReady = !presenter || presenterMeta.publish_ready === true || presenterDemoAccepted || bodyLipSyncReady || bodyCaptionedReady;
+    var presenterReady = !presenter || presenterMarkedPublishReady(presenterMeta) || presenterDemoAccepted || bodyLipSyncReady || bodyCaptionedReady;
     var presenterState = !presenter ? "NOT USED" :
-      (presenterMeta.publish_ready === true ? "PUBLISH_READY" :
+      (presenterMarkedPublishReady(presenterMeta) ? "PUBLISH_READY" :
         (bodyCaptionedReady ? "FULL_BODY_CAPTIONED_READY" :
           (bodyLipSyncReady ? "FULL_BODY_LIPSYNC_READY" :
             (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")))));
@@ -825,13 +843,17 @@
           (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
         var videoLabel = isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video");
         var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
+        var subtitleUrl = row.metadata && row.metadata.subtitle_url ? String(row.metadata.subtitle_url) : "";
+        var subtitleTrack = subtitleUrl ? "<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" +
+          escapeHtml(subtitleUrl) + "\" default>" : "";
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"" +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
-          "></video>" +
+          ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
           "</figure><a class=\"button secondary\" href=\"" +
-          escapeHtml(row.url) + "\" download>" + videoLabel + "</a>";
+          escapeHtml(row.url) + "\" download>" + videoLabel + "</a>" +
+          (subtitleUrl ? " <a class=\"button secondary\" href=\"" + escapeHtml(subtitleUrl) + "\" download>Download captions</a>" : "");
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"></audio></div><a class=\"button secondary\" href=\"" +
@@ -840,7 +862,7 @@
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
         "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
-        assetFailureHtml(row) + media +
+        assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {

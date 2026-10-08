@@ -26,7 +26,7 @@ def test_caption_render_retains_original_frame_and_escapes_ass_commands(tmp_path
     monkeypatch.setattr(media, '_encode', lambda args, *rest: calls.append(args))
     video = tmp_path / 'nova-example.mp4'
     output, srt = caption_presenter(video, [{'start':0,'end':1,'text':r'Review {\\pos(0,0)} everything.'}])
-    ass=video.with_suffix('.ass').read_text()
+    ass=video.with_suffix('.ass').read_text(encoding="utf-8")
     assert r'{\\pos(0,0)}' not in ass
     assert 'pad=512:640' in calls[0][calls[0].index('-vf')+1]
     assert 'fontsdir=' in calls[0][calls[0].index('-vf')+1]

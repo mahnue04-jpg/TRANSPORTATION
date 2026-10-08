@@ -8,7 +8,7 @@ import tempfile
 import time
 from typing import Any
 
-from app.core.nova.creative_studio.export import export_project_package
+from app.core.nova.creative_studio.export import export_project_package, presenter_publish_ready
 from app.core.nova.creative_studio.drama import ShortDramaMixin
 from app.core.nova.creative_studio.media_runtime import memory_budget, run_encoder, serialized_media
 from app.core.nova.creative_studio.flags import creative_guardrails
@@ -940,16 +940,6 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
 
         backend_root = Path(__file__).resolve().parents[4]
-        try:
-            import imageio_ffmpeg
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception as exc:
-            raise CreativeStudioError(
-                "FFMPEG_UNAVAILABLE",
-                f"Nova final-video media engine is unavailable: {exc}",
-                http_status=422,
-            ) from exc
-
         vertical = str(project.platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
         width, height = (720, 1280) if vertical else (1280, 720)
         fps = 25
@@ -962,9 +952,24 @@ class CreativeStudioService(ShortDramaMixin):
         # fail before FFmpeg starts. Promote the provider-delivered file directly
         # to the final-promo asset instead. Timed captions may travel as a sidecar
         # when burn-in was skipped for memory safety.
+        def _captions_ready(metadata: dict[str, Any]) -> bool:
+            return bool(
+                metadata.get("captions_burned_in") is True
+                or metadata.get("subtitle_url")
+                or metadata.get("captions_sidecar_ready")
+            )
+
         def _presenter_demo_eligible(item: CreativeAsset) -> bool:
             metadata = item.metadata or {}
-            if bool(metadata.get("publish_ready")) or bool(metadata.get("demo_ready")):
+            if presenter_publish_ready(metadata) or bool(metadata.get("demo_ready")):
+                return True
+
+            # A 30-second demo must reuse a presenter MP4 that already has
+            # captions. Re-encoding that file on the 512 MiB service is what
+            # runs out of memory. Preview and watermarked files stay eligible
+            # for playback, but presenter_publish_ready() keeps them unpublished.
+            presenter_mode = str(metadata.get("presenter_mode") or "").strip().lower()
+            if presenter_mode in {"head", "half_body", "full_body"} and _captions_ready(metadata):
                 return True
 
             # Backward compatibility for D-ID presenters created before the
@@ -978,16 +983,10 @@ class CreativeStudioService(ShortDramaMixin):
                 or metadata.get("provider")
                 or ""
             ).strip().lower()
-            presenter_mode = str(metadata.get("presenter_mode") or "").strip().lower()
-            captions_ready = (
-                metadata.get("captions_burned_in") is True
-                or bool(metadata.get("subtitle_url"))
-                or bool(metadata.get("captions_sidecar_ready"))
-            )
             return bool(
                 provider_id in {"d-id", "did"}
                 and presenter_mode == "head"
-                and captions_ready
+                and _captions_ready(metadata)
             )
 
         presenter = next(
@@ -1004,30 +1003,55 @@ class CreativeStudioService(ShortDramaMixin):
             presenter_path = _resolve_creative_media_url(presenter.url)
             if presenter_path is not None and presenter_path.is_file():
                 presenter_meta = presenter.metadata or {}
-                legacy_demo_ready = not bool(presenter_meta.get("publish_ready") or presenter_meta.get("demo_ready"))
+                provider_result = presenter_meta.get("provider_result") or {}
+                provider_id = str(
+                    provider_result.get("provider") or presenter_meta.get("provider") or ""
+                ).strip().lower()
+                presenter_mode = str(presenter_meta.get("presenter_mode") or "").strip().lower()
+                clean_publish = presenter_publish_ready(presenter_meta)
+                legacy_demo_ready = bool(
+                    not clean_publish
+                    and not presenter_meta.get("demo_ready")
+                    and provider_id in {"d-id", "did"}
+                    and presenter_mode == "head"
+                    and _captions_ready(presenter_meta)
+                )
+                watermarked = bool(
+                    not clean_publish
+                    and (
+                        legacy_demo_ready
+                        or presenter_meta.get("provider_watermark_preserved") is True
+                        or str(presenter_meta.get("quality_state") or "").upper() == "PREVIEW_ONLY"
+                        or provider_result.get("watermark_free") is False
+                    )
+                )
+                if clean_publish:
+                    render_mode = "publish_ready_presenter_passthrough"
+                    promo_message = "Final AMICOR Nova promo promoted from the publish-ready Genova presenter without re-encoding."
+                elif legacy_demo_ready:
+                    render_mode = "legacy_did_demo_passthrough"
+                    promo_message = "Final AMICOR Nova promo promoted from the existing D-ID demo presenter without re-encoding."
+                else:
+                    render_mode = "presenter_mp4_passthrough"
+                    promo_message = "Final AMICOR Nova promo reused the existing presenter video without re-encoding."
                 asset = self._save_text_asset(
                     owner_id=owner_id,
                     project_id=project_id,
                     kind="video",
                     title="Final AMICOR Nova promo",
-                    content=presenter.content or "Final promo using the publish-ready Genova presenter.",
+                    content=presenter.content or "Final promo using the existing Genova presenter.",
                     status="GENERATED",
                     metadata={
                         "final_promo": True,
-                        "render_mode": (
-                            "legacy_did_demo_passthrough"
-                            if legacy_demo_ready
-                            else "publish_ready_presenter_passthrough"
-                        ),
+                        "render_mode": render_mode,
                         "presenter_asset_id": presenter.id,
                         "voice_asset_id": presenter_meta.get("voice_asset_id"),
                         "subtitle_url": presenter_meta.get("subtitle_url"),
                         "captions_burned_in": presenter_meta.get("captions_burned_in") is True,
-                        "demo_ready": presenter_meta.get("demo_ready") is True or legacy_demo_ready,
-                        "provider_watermark_preserved": (
-                            presenter_meta.get("provider_watermark_preserved") is True
-                            or legacy_demo_ready
-                        ),
+                        "publish_ready": clean_publish,
+                        "demo_ready": not clean_publish,
+                        "provider_watermark_preserved": watermarked,
+                        "quality_state": "PUBLISH_READY" if clean_publish else "PREVIEW_ONLY",
                         "brand_overlay": "preserved_from_presenter_asset",
                     },
                     url=presenter.url,
@@ -1036,15 +1060,22 @@ class CreativeStudioService(ShortDramaMixin):
                 self._finish_job(
                     job,
                     status="GENERATED",
-                    message=(
-                        "Final AMICOR Nova promo promoted from the existing D-ID demo presenter without re-encoding."
-                        if legacy_demo_ready
-                        else "Final AMICOR Nova promo promoted from the publish-ready Genova presenter without re-encoding."
-                    ),
+                    message=promo_message,
                     asset_ids=[asset.id],
                     provider="nova_presenter_passthrough",
                 )
                 return {"job": job.as_dict(), "asset": asset.as_dict(), "url": presenter.url}
+
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception as exc:
+            raise CreativeStudioError(
+                "FFMPEG_UNAVAILABLE",
+                "Nova paused video rendering: the media engine is unavailable, and no finished presenter video could be reused. "
+                + str(exc),
+                http_status=422,
+            ) from exc
 
         # Prefer the already-generated scene motion clips for final assembly.
         # Re-rendering every storyboard still is unnecessary work on the 512 MiB
