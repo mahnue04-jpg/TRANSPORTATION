@@ -673,3 +673,59 @@ def test_direct_certification_search_is_not_rewritten() -> None:
     assert scored["certification_or_license_blocked"] is False
     assert scored["remote_digital_blockers"] == []
 
+
+def test_owner_1099_query_does_not_route_content_operations_to_writing() -> None:
+    families = resolve_requested_families(_OWNER_1099_QUERY)
+    assert "document_writing" not in families
+    assert "administrative_operations" in families
+    assert "research_analysis" in families
+    assert "data_spreadsheet" in families
+    assert "ai_automation" in families
+
+
+def test_owner_1099_search_drops_copywriter_manager_and_ai_trainer() -> None:
+    copywriter = _listed_job(
+        "Freelance Copywriter",
+        "Freelance project-based SEO copywriting. The ideal candidate has experience writing content.",
+        search_family="document_writing",
+        geography="Worldwide",
+        job_type="freelance",
+    )
+    manager = _listed_job(
+        "Project Manager",
+        "Lead client projects and coordinate a research team. Worldwide remote.",
+        search_family="research_analysis",
+        geography="Worldwide",
+    )
+    trainer = _listed_job(
+        "AI Trainer Image QA Evaluator",
+        "English-speaking Image Quality Evaluators based in South Korea. Freelance project.",
+        geography="Remote",
+        search_family="ai_automation",
+    )
+    product_lead = _listed_job(
+        "Technical Product Lead AI Finance App",
+        "Lead the AI finance product from Seoul.",
+        geography="Seoul",
+        search_family="ai_automation",
+    )
+    assistant = _listed_job(
+        "Remote Virtual Assistant",
+        "Remote 1099 contractor for inbox, calendar, data entry, and CRM updates. No certification required.",
+        search_family="administrative_operations",
+    )
+    ranked = qualify_and_rank_live_jobs(
+        _OWNER_1099_QUERY,
+        [copywriter, manager, trainer, product_lead, assistant],
+    )
+    by_title = {row["title"]: row for row in ranked}
+    assert by_title["Freelance Copywriter"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "work_lane_mismatch" in by_title["Freelance Copywriter"]["live_qualification"]["blockers"]
+    assert by_title["Project Manager"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert by_title["AI Trainer Image QA Evaluator"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "non_us_location_required" in by_title["AI Trainer Image QA Evaluator"]["live_qualification"]["blockers"]
+    assert by_title["Technical Product Lead AI Finance App"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert by_title["Remote Virtual Assistant"]["live_qualification"]["qualification_status"] != "NOT_QUALIFIED"
+    assert by_title["Remote Virtual Assistant"]["live_qualification"]["external_submission"] is False
+    assert by_title["Remote Virtual Assistant"]["live_qualification"]["financial_execution"] is False
+
