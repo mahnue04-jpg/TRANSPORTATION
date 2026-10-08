@@ -37,6 +37,23 @@ from app.core.nova.creative_studio.flags import (
 
 
 
+FEMALE_PRESENTER_VOICES = {"coral", "nova", "shimmer"}
+STUDIO_VOICES = {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"}
+
+
+def resolve_studio_voice(voice: str | None, *, presenter: bool) -> str:
+    """Presenter narration stays on a female voice. Other Studio speech may use the configured voice."""
+    selected = str(voice or "").strip()
+    if presenter:
+        if selected not in FEMALE_PRESENTER_VOICES:
+            return "shimmer"
+        return selected
+    selected = selected or str(os.getenv("NOVA_CREATIVE_VOICE_NAME") or "alloy").strip()
+    if selected not in STUDIO_VOICES:
+        raise ValueError("Unsupported Studio voice")
+    return selected
+
+
 def _creative_media_root_and_prefix() -> tuple[Path, str]:
     configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
     if configured:
@@ -595,9 +612,7 @@ class OpenAIVoiceProvider:
                 "asset_generated": False,
             }
         model = str(os.getenv("NOVA_CREATIVE_VOICE_MODEL") or "gpt-4o-mini-tts").strip()
-        voice = str(voice or os.getenv("NOVA_CREATIVE_VOICE_NAME") or "alloy").strip()
-        if voice not in {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"}:
-            raise ValueError("Unsupported Studio voice")
+        voice = resolve_studio_voice(voice, presenter=presenter)
         speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
         if presenter and model.startswith("gpt-4o-mini-tts"):
             speech_args['instructions'] = (
