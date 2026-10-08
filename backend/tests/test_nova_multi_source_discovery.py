@@ -1205,3 +1205,53 @@ def test_owner_1099_search_drops_cert_fee_and_experience_listings() -> None:
     assert _query_relevant(digital, query) is True
     assert _query_relevant(certified, "PMP certification required") is True
 
+
+def test_owner_1099_search_keeps_non_ai_lanes_and_drops_software_roles() -> None:
+    query = (
+        "Remote 1099 contractor work for AI operations, administrative support, "
+        "project coordination, research, data entry, CRM, reporting, content operations, "
+        "virtual assistance, automation support, and digital business operations. "
+        "Prioritize jobs Nova can perform remotely without professional licenses, "
+        "certifications, upfront fees, or fabricated experience."
+    )
+    assistant = {
+        "provider_id": "remotive",
+        "title": "Remote Virtual Assistant",
+        "description": (
+            "Remote 1099 contractor for inbox, calendar, data entry, and CRM updates. "
+            "No certification required."
+        ),
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    research = {
+        "provider_id": "remotive",
+        "title": "Remote Research Contractor",
+        "description": "Freelance research and weekly reporting for a US client. 1099 contract.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    engineer = {
+        "provider_id": "remotive",
+        "title": "Remote Software Engineer",
+        "description": "Build backend services and APIs. Contract role. Reporting to the CTO.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    employee = {
+        "provider_id": "remotive",
+        "title": "Remote Virtual Assistant",
+        "description": "Join our team as a full-time employee with salary and benefits.",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "full_time",
+    }
+    assert _query_relevant(assistant, query) is True
+    assert _query_relevant(research, query) is True
+    assert _query_relevant(engineer, query) is False
+    assert _query_relevant(employee, query) is False
+    assert _query_relevant(assistant, "AI operations contractor remote") is False
+

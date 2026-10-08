@@ -1615,6 +1615,8 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # a provider result slot. A direct trade query is not rewritten.
     from app.core.nova.work_revenue.capability_first_discovery import (
         blocks_physical_role_for_digital_search,
+        is_multi_lane_remote_digital_query,
+        matches_remote_digital_work_lane,
         remote_digital_performability_blockers,
         upfront_fee_required,
     )
@@ -1639,6 +1641,22 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         and remote_status != "remote"
     ):
         return False
+
+    # A brief that names several digital lanes keeps a listing when its title
+    # matches any one lane. It does not require every result to mention AI.
+    if is_multi_lane_remote_digital_query(query_text):
+        if _ADMIN_TECH_TITLE_REJECT.search(title):
+            return False
+        if _ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT.search(title):
+            return False
+        if not matches_remote_digital_work_lane(row):
+            return False
+        if _VENDOR_INTENT_QUERY.search(query_text):
+            if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
+                return False
+        if upfront_fee_required(row):
+            return False
+        return True
 
     # Capability-family searches need a positive duty signal, not merely a
     # provider keyword hit. Bookkeeping is especially noisy on broad remote-job

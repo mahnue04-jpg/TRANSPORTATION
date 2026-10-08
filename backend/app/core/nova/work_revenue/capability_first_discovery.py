@@ -206,6 +206,62 @@ def digital_contractor_rank_signal(text: str) -> bool:
     return bool(_CONTRACT_STYLE.search(text or "") and _DIGITAL_DOMAIN.search(text or ""))
 
 
+# Distinct work lanes in the owner's remote 1099 brief. A query that names
+# two or more lanes is a union search: a listing may match any one lane.
+_DIGITAL_QUERY_LANES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("ai", re.compile(r"\b(ai|artificial intelligence|automation|workflow automation|ai operations)\b", re.I)),
+    ("admin", re.compile(r"\b(administrative support|admin support|virtual assistant|virtual assistance|data entry)\b", re.I)),
+    ("research", re.compile(r"\bresearch\b", re.I)),
+    ("reporting", re.compile(r"\breporting\b", re.I)),
+    ("crm", re.compile(r"\bcrm\b", re.I)),
+    ("content", re.compile(r"\bcontent operations\b", re.I)),
+    ("coordination", re.compile(r"\bproject coordination\b", re.I)),
+    ("digital_ops", re.compile(r"\bdigital business operations\b", re.I)),
+)
+_LISTING_LANE_TITLE = re.compile(
+    r"\b("
+    r"virtual assistant|virtual assistance|"
+    r"administrative (?:assistant|support|coordinator|specialist)|"
+    r"admin(?:istrative)? assistant|"
+    r"data entry|"
+    r"research (?:assistant|contractor|support|specialist|analyst)|"
+    r"business research|"
+    r"reporting (?:assistant|specialist|coordinator|support)|"
+    r"crm|"
+    r"content operations|"
+    r"project coordinat\w*|"
+    r"automation|"
+    r"ai|artificial intelligence|"
+    r"digital business operations|"
+    r"business operations (?:assistant|support|coordinator)"
+    r")\b",
+    re.I,
+)
+
+
+def digital_query_lanes(query: str | None) -> set[str]:
+    """Work lanes named in a search, such as admin, research, or AI."""
+    text = str(query or "")
+    return {name for name, pattern in _DIGITAL_QUERY_LANES if pattern.search(text)}
+
+
+def is_multi_lane_remote_digital_query(query: str | None) -> bool:
+    """True when one remote digital search asks for two or more work lanes.
+
+    A pure AI search stays on the AI duty gate. This brief is a union of
+    AI, admin, research, CRM, and the other named lanes.
+    """
+    if not is_remote_digital_search_intent(query):
+        return False
+    return len(digital_query_lanes(query)) >= 2
+
+
+def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
+    """Title names a digital lane from the remote contractor brief."""
+    title = str(job.get("title") or job.get("opportunity_title") or "")
+    return bool(_LISTING_LANE_TITLE.search(title))
+
+
 # Certifications and minimum-years claims Nova must not invent. Preferred or
 # negated wording is ignored. Title text is included by the caller.
 _CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
