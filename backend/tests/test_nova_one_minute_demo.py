@@ -48,3 +48,15 @@ def test_one_minute_demo_supports_full_recording_export() -> None:
     assert "MediaRecorder" in js
     assert "AMICOR-Nova-60-second-master-demo.webm" in js
     assert 'audio.addEventListener("ended", stopAfterDemo)' in js
+
+
+def test_one_minute_demo_mutes_embedded_nova_voice() -> None:
+    html = (ROOT / "static" / "nova-one-minute-demo" / "index.html").read_text(encoding="utf-8")
+    demo_js = (ROOT / "static" / "nova-one-minute-demo" / "demo.js").read_text(encoding="utf-8")
+    voice_js = (ROOT / "static" / "ux" / "novaVoiceControls.js").read_text(encoding="utf-8")
+
+    assert 'src="/nova?nova_demo_embed=1"' in html
+    assert '"nova_demo_embed=1"' in demo_js
+    assert 'params.get("nova_demo_embed") === "1"' in voice_js
+    assert 'data-nova-demo-voice-muted' in voice_js
+    assert 'if (demoEmbed)' in voice_js
