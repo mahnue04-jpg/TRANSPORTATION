@@ -225,6 +225,99 @@ def test_v3_guardrails_endpoint_includes_safe_diagnostics(client, monkeypatch: p
     assert "password" not in blob
 
 
+def test_lifecycle_follows_discovery_flag_while_submit_stays_handoff(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Discovery status follows the runtime flag. Submit never becomes an external action."""
+    _clear_discovery_env(monkeypatch)
+    monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "false")
+    headers = _headers(client)
+
+    off = client.get("/api/nova/work/lifecycle", headers=headers)
+    assert off.status_code == 200, off.text
+    off_body = off.json()
+    assert off_body["live_discovery_enabled"] is False
+    assert off_body["external_submission_enabled"] is False
+    assert off_body["financial_actions_enabled"] is False
+    assert off_body["approved_equals_submitted"] is False
+
+    monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "true")
+    on = client.get("/api/nova/work/lifecycle", headers=headers)
+    assert on.status_code == 200, on.text
+    on_body = on.json()
+    assert on_body["live_discovery_enabled"] is True
+    assert on_body["external_submission_enabled"] is False
+    assert on_body["financial_actions_enabled"] is False
+    assert on_body["approved_equals_submitted"] is False
+
+    guards = client.get("/api/nova/work/guardrails", headers=headers)
+    assert guards.status_code == 200, guards.text
+    guard_body = guards.json()
+    assert guard_body["LIVE_DISCOVERY_ENABLED"] is True
+    assert guard_body["EXTERNAL_SUBMISSION_ENABLED"] is False
+    assert guard_body["FINANCIAL_ACTIONS_ENABLED"] is False
+    assert guard_body["live_execution_implemented"] is False
+
+    created = client.post(
+        "/api/nova/work/opportunities",
+        headers=headers,
+        json={
+            "company_name": "Example Operations Co",
+            "opportunity_title": "Remote administrative support contractor",
+            "description": "Prepare email drafts, organize CRM notes, and summarize reports. Fully remote.",
+            "location": "Remote",
+            "remote_status": "remote",
+            "engagement_type": "contract",
+            "compensation_type": "hourly",
+            "compensation_amount": 40,
+            "compensation_period": "hour",
+            "currency": "USD",
+            "requirements": "Email writing, CRM, reporting.",
+            "skills_required": ["email", "crm", "reporting"],
+            "credentials_required": [],
+            "physical_presence_required": "false",
+            "source": "remotive",
+            "source_type": "approved_api",
+            "source_url": "https://remotive.com/remote-jobs/nova-repair-lifecycle",
+        },
+    )
+    assert created.status_code == 200, created.text
+    opportunity_id = created.json()["opportunity_id"]
+    qualified = client.post(f"/api/nova/work/opportunities/{opportunity_id}/qualify", headers=headers)
+    assert qualified.status_code == 200, qualified.text
+    app_resp = client.post(
+        "/api/nova/work/applications",
+        headers=headers,
+        json={"opportunity_id": opportunity_id, "applicant_party": "AMICOR"},
+    )
+    assert app_resp.status_code == 200, app_resp.text
+    application_id = app_resp.json()["application_id"]
+    ready = client.post(f"/api/nova/work/applications/{application_id}/ready-for-review", headers=headers)
+    assert ready.status_code == 200, ready.text
+    decision = client.post(
+        f"/api/nova/work/applications/{application_id}/decision",
+        headers=headers,
+        json={"decision": "APPROVED"},
+    )
+    assert decision.status_code == 200, decision.text
+    submit = client.post(f"/api/nova/work/applications/{application_id}/submit", headers=headers)
+    assert submit.status_code == 200, submit.text
+    handoff = submit.json()
+    assert handoff["status"] == "HUMAN_ACTION_REQUIRED"
+    assert handoff["external_action_taken"] is False
+    assert handoff["externally_submitted"] is False
+    assert handoff["approval_consumed"] is False
+    assert handoff["financial_execution"] is False
+    assert handoff["provider_id"] == "remotive"
+    stored = client.get(f"/api/nova/work/applications/{application_id}", headers=headers)
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["externally_submitted"] is False
+    still_on = client.get("/api/nova/work/lifecycle", headers=headers).json()
+    assert still_on["live_discovery_enabled"] is True
+    assert still_on["external_submission_enabled"] is False
+    assert still_on["financial_actions_enabled"] is False
+
+
 def test_unauthenticated_today_summary_requires_auth(client, monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_discovery_env(monkeypatch)
     monkeypatch.setenv("NOVA_V3_LIVE_DISCOVERY_ENABLED", "true")
