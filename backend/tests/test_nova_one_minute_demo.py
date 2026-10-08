@@ -38,3 +38,13 @@ def test_one_minute_demo_route_and_creative_link_are_wired():
     assert '@app.get("/nova/one-minute-demo")' in main
     assert "nova-one-minute-demo" in main
     assert 'href="/nova/one-minute-demo"' in creative
+
+
+def test_one_minute_demo_supports_full_recording_export() -> None:
+    html = (ROOT / "static" / "nova-one-minute-demo" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-one-minute-demo" / "demo.js").read_text(encoding="utf-8")
+    assert 'id="record-demo"' in html
+    assert "navigator.mediaDevices.getDisplayMedia" in js
+    assert "MediaRecorder" in js
+    assert "AMICOR-Nova-60-second-master-demo.webm" in js
+    assert 'audio.addEventListener("ended", stopAfterDemo)' in js
