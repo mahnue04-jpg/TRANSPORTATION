@@ -798,6 +798,21 @@
     });
   });
 
+  function assetTypeLabel(row) {
+    var meta = (row && row.metadata) || {};
+    if (String(row.status || "").toUpperCase() === "ERROR") return "Failed attempt";
+    if (row.kind === "presenter_video") {
+      if (meta.presenter_mode === "full_body") return "Full-body presenter";
+      if (meta.presenter_mode === "half_body") return "Half-body presenter";
+      return "Headshot presenter";
+    }
+    if (row.kind === "video" && meta.final_promo) return "Final demo video";
+    if (row.kind === "video") return "Scene video";
+    if (row.kind === "audio") return "Voice audio";
+    if (row.kind === "image") return "Image";
+    return row.kind || "Asset";
+  }
+
   async function refreshAssets() {
     if (!activeProjectId) {
       $("asset-list").innerHTML = "<p class=\"hint\">Select a project.</p>";
@@ -861,7 +876,7 @@
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
-        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
+        "<div class=\"muted\">" + escapeHtml(assetTypeLabel(row)) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
         assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
@@ -920,26 +935,26 @@
   if (resetMedia) {
     resetMedia.addEventListener("click", async function () {
       if (!activeProjectId) {
-        showBanner("Select the project you want to reset first.", false);
+        showBanner("Select the project whose old videos you want to clear first.", false);
         return;
       }
-      if (!window.confirm("Reset all generated media for the active project? Script, captions, storyboard, and brief will be preserved.")) {
+      if (!window.confirm("Clear old videos and generated media from this project? Presenter clips, scene videos, images, and voice files will be removed. Script, captions, storyboard, and brief will be preserved.")) {
         return;
       }
       resetMedia.disabled = true;
-      showBanner("Working: removing old media clutter from the active project...", true);
+      showBanner("Working: clearing old videos and generated media from this project...", true);
       try {
         var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/reset-media", {
           method: "POST"
         });
         showBanner(
-          "Media reset complete. Removed " + String(result.deleted_asset_records || 0) +
-          " old media record(s). Script, captions, storyboard, and brief were preserved.",
+          "Cleanup complete. Removed " + String(result.deleted_asset_records || 0) +
+          " old video/media record(s). Script, captions, storyboard, and brief were preserved.",
           true
         );
         await refreshAssets();
       } catch (err) {
-        showBanner(err.message || "Could not reset active project media.", false);
+        showBanner(err.message || "Could not clear old videos from this project.", false);
       } finally {
         resetMedia.disabled = false;
       }

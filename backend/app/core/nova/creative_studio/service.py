@@ -626,7 +626,7 @@ class CreativeStudioService(ShortDramaMixin):
 
     def reset_project_media(self, owner_id: str, project_id: str) -> dict[str, Any]:
         self._project_or_404(owner_id, project_id)
-        removable_kinds = {"image_prompt", "image", "video", "audio"}
+        removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}
         rows = self.store.delete_assets_by_kinds(project_id, owner_id, removable_kinds)
 
         removed_files = 0

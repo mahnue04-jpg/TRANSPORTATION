@@ -31,6 +31,12 @@
     <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, owner-enabled image generation, provider-backed true text-to-video and voice generation, plus a separate local branded image-animation fallback. Cost-bearing media providers remain owner-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
     <div id="banner" class="banner hidden"></div>
 
+    <section class="card" aria-label="Approved 60-second AMICOR Nova demo">
+      <h2>Approved 60-second full-body AMICOR Nova demo</h2>
+      <p class="hint">Full-body Genova · Coral female narration · synchronized captions · live Nova product screens.</p>
+      <div class="actions"><a class="button" href="/nova/one-minute-demo">Open the 60-second full-body demo</a></div>
+    </section>
+
     <section class="card" aria-label="Sign in">
       <p id="session-meta" class="hint">Sign in to use Creative Studio.</p>
       <div class="actions">
@@ -84,9 +90,9 @@
         </label>
         <label>Production preset
           <select id="production-preset">
-            <option value="vertical_short" selected>Reels / TikTok / Shorts</option>
+            <option value="vertical_short">Reels / TikTok / Shorts</option>
             <option value="social_square">Social feed square</option>
-            <option value="youtube_web">YouTube / web / demo</option>
+            <option value="youtube_web" selected>YouTube / web / demo</option>
           </select>
         </label>
         <label>Platform
@@ -104,8 +110,8 @@
         <label>Duration
           <select id="project-duration">
             <option value="15">15</option>
-            <option value="30" selected>30</option>
-            <option value="60">60</option>
+            <option value="30">30</option>
+            <option value="60" selected>60</option>
           </select>
         </label>
         <label>Audience<input id="project-audience" maxlength="200" /></label>
@@ -132,15 +138,15 @@
       <h2>Generate</h2>
       <div class="image-controls">
         <label>Custom image prompt (optional)
-          <textarea id="custom-image-prompt" rows="3" maxlength="4000">Genova presenter v2. Photorealistic head-and-shoulders portrait of a beautiful young Black/African American woman in her late twenties, warm confident expression, natural polished makeup, modern professional hairstyle, camera-facing pose, clean contemporary small-business office background, soft flattering studio lighting, realistic skin texture, no text, no logos, no watermarks, no provider marks.</textarea>
+          <textarea id="custom-image-prompt" rows="3" maxlength="4000">Genova presenter v3. Photorealistic full-body, head-to-toe view of a professional young Black/African American woman in her late twenties, standing naturally in a polished contemporary business setting, confident welcoming expression, professional outfit and shoes fully visible, natural hand gestures suitable for explaining products, camera-facing three-quarter stance, realistic skin texture, soft studio lighting, enough clear space beside her for product-screen overlays, no text, no logos, no watermarks, no provider marks.</textarea>
         </label>
         <p class="hint">Generate Image uses this description when provided. Leave it blank to use the project’s marketing artwork prompt.</p>
         <label>Image aspect ratio
           <select id="image-aspect">
             <option value="1:1">1:1 square</option>
             <option value="4:5">4:5 portrait</option>
-            <option value="9:16" selected>9:16 vertical</option>
-            <option value="16:9">16:9 landscape</option>
+            <option value="9:16">9:16 vertical</option>
+            <option value="16:9" selected>16:9 landscape</option>
           </select>
         </label>
         <span class="hint">AMICOR previews use the official logo overlay.</span>
@@ -149,9 +155,9 @@
         <div class="presenter-settings">
           <label>Presenter mode
             <select id="presenter-mode">
-              <option value="head" selected>Talking head</option>
+              <option value="head">Talking head</option>
               <option value="half_body">Half body motion</option>
-              <option value="full_body">Full body motion</option>
+              <option value="full_body" selected>Full body motion</option>
             </select>
           </label>
           <label>Motion style
@@ -170,19 +176,19 @@
           </label>
           <label>Output
             <select id="presenter-output-preset">
-              <option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>
+              <option value="9:16">9:16 · Reels / TikTok / Shorts</option>
               <option value="1:1">1:1 · Social feed</option>
-              <option value="16:9">16:9 · YouTube / web / demo</option>
+              <option value="16:9" selected>16:9 · YouTube / web / demo</option>
             </select>
           </label>
         </div>
         <p class="hint">Genova uses a young Black/African American female presenter. Full body motion starts with head-to-toe framing. Body motion previews do not include narration or lip sync yet. Talking head uses the exact generated Presenter Voice audio for D-ID lip sync. A D-ID trial/account watermark cannot be removed by Nova; final publishing requires watermark-free output enabled by the provider account.</p>
     <label>Presenter voice
-      <select id="presenter-voice"><option value="shimmer" selected>Genova · youthful female voice</option><option value="coral">Coral · clear female voice</option><option value="nova">Nova · warm female voice</option></select>
+      <select id="presenter-voice"><option value="shimmer">Genova · youthful female voice</option><option value="coral" selected>Coral · clear female voice</option><option value="nova">Nova · warm female voice</option></select>
     </label>
     <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
     <label>Talking presenter script
-          <textarea id="presenter-script" rows="6" maxlength="1600">What if your small business had an AI assistant that could help handle busywork and save time? Busywork piles up fast for small business owners, taking focus away from the work that matters. AMICOR Nova helps with documents, emails, reports, scheduling, and other operational tasks—with drafts you can review first. Save time. Stay in control. Try AMICOR Nova. Start free today.</textarea>
+          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace built to help small businesses move faster while staying in control. Nova Today brings priorities, approvals, and the AI assistant into one command center. Workspace keeps ongoing work organized so you can continue where you left off. The Operations Agent turns business requests into clear next steps, drafts, and owner-reviewed execution. Work and Revenue helps surface opportunities, prepare applications, and track the path from lead to paid work. Government, Business, Communications, and Accounting bring research, operations, follow-up, and financial visibility into the same ecosystem. Creative Studio helps create scripts, images, voice, presenter media, and marketing assets. AMICOR Nova gives you practical AI help across the workday, while you keep the final say. Start with AMICOR Nova today.</textarea>
         </label>
         <p class="hint">Use this exact text for the presenter voice. AMICOR Nova is written separately so the voice pronounces the brand correctly.</p>
         <div class="actions wrap">
@@ -241,7 +247,7 @@
     <section class="card" aria-label="Assets">
       <h2>13. Asset list</h2>
       <div class="actions">
-        <button type="button" id="reset-project-media" class="secondary">Reset active project media</button>
+        <button type="button" id="reset-project-media" class="secondary">Clear old videos from this project</button>
         <button type="button" id="clear-failed-video-assets" class="secondary">Clear failed video attempts</button>
       </div>
       <div id="asset-list" class="list"></div>

@@ -1026,6 +1026,17 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
     assert 'id="load-amicor-brand-defaults"' in html
     assert 'id="production-preset"' in html
     assert 'id="project-save-settings"' in html
+    assert 'href="/nova/one-minute-demo">Open the 60-second full-body demo</a>' in html
+    assert '<option value="60" selected>60</option>' in html
+    assert '<option value="full_body" selected>Full body motion</option>' in html
+    assert '<option value="16:9" selected>16:9 · YouTube / web / demo</option>' in html
+    assert '<option value="coral" selected>Coral · clear female voice</option>' in html
+    assert "Photorealistic full-body, head-to-toe view" in html
+    assert "Meet AMICOR Nova, your AI operations workspace" in html
+    assert "Clear old videos from this project" in html
+    assert "assetTypeLabel" in js
+    assert "Full-body presenter" in js
+    assert "Final demo video" in js
     assert 'method: "PATCH"' in js
     assert "production_settings" in js
     assert 'value="vertical_short"' in html
@@ -1799,3 +1810,9 @@ def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
     assert 'value="shimmer" selected' in html
     assert 'value="coral"' in html
     assert 'value="nova"' in html
+
+
+def test_project_media_reset_includes_presenter_video() -> None:
+    service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
+    assert '"presenter_video"' in service
+    assert 'removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}' in service
