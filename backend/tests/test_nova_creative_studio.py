@@ -1785,6 +1785,59 @@ def test_presenter_voice_defaults_to_female_selection() -> None:
         resolve_studio_voice("baritone", presenter=False)
 
 
+def test_sixty_second_full_body_demo_is_the_studio_default() -> None:
+    html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert 'value="60" selected' in html
+    assert 'value="full_body" selected' in html
+    assert 'value="full_frame" selected' in html
+    assert 'value="16:9" selected>16:9 · YouTube / web / demo' in html
+    assert 'value="youtube_web" selected' in html
+    assert 'value="coral" selected' in html
+    assert 'href="/nova/one-minute-demo">Open the 60-second full-body demo' in html
+    assert "APPROVED OWNER DEMO" in html
+    assert "head-to-toe" in html
+    assert "Meet AMICOR Nova, your AI operations workspace" in html
+    assert "Clear old videos from this project" in html
+    assert "Old videos cleared." in js
+    assert "Full-body presenter" in js
+    assert "Final demo video" in js
+    assert "Headshot presenter" in js
+
+
+def test_reset_clears_old_presenter_videos_and_keeps_script() -> None:
+    svc = _svc()
+    project = svc.create_project("owner-a", {"title": "Demo cleanup", "project_type": "explainer"})
+    project_id = project["id"]
+    svc._save_text_asset(
+        owner_id="owner-a", project_id=project_id, kind="script", title="Script",
+        content="Meet AMICOR Nova.", status="GENERATED", metadata={}, url=None,
+    )
+    svc._save_text_asset(
+        owner_id="owner-a", project_id=project_id, kind="caption", title="Caption",
+        content="Start with AMICOR Nova today.", status="GENERATED", metadata={}, url=None,
+    )
+    svc._save_text_asset(
+        owner_id="owner-a", project_id=project_id, kind="storyboard", title="Storyboard",
+        content="Blueprint", status="GENERATED", metadata={}, url=None,
+    )
+    svc._save_text_asset(
+        owner_id="owner-a", project_id=project_id, kind="presenter_video", title="Old headshot",
+        content="old", status="GENERATED", metadata={"presenter_mode": "head"}, url="/media/old-head.mp4",
+    )
+    svc._save_text_asset(
+        owner_id="owner-a", project_id=project_id, kind="video", title="Old scene",
+        content="old scene", status="ERROR", metadata={}, url="/media/failed.mp4",
+    )
+    result = svc.reset_project_media("owner-a", project_id)
+    kinds = {asset.kind for asset in svc.store.list_assets(project_id, "owner-a")}
+    assert result["deleted_asset_records"] == 2
+    assert "presenter_video" not in kinds
+    assert "video" not in kinds
+    assert {"script", "caption", "storyboard"} <= kinds
+    assert "script" in result["preserved"]
+
+
 def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
@@ -1796,6 +1849,6 @@ def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
     assert "Download captions" in js
     assert 'value="half_body"' in html
     assert 'value="full_body"' in html
-    assert 'value="shimmer" selected' in html
+    assert 'value="coral" selected' in html
     assert 'value="coral"' in html
     assert 'value="nova"' in html

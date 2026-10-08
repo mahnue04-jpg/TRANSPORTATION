@@ -27,6 +27,9 @@ def test_one_minute_demo_static_contract():
     assert "video.play()" in js
     assert "caption.textContent = cue.text" in js
     assert "presenter-box" in css
+    assert "object-fit: contain" in css
+    assert "object-position: center center" in css
+    assert "min(38%, 460px)" in css
 
 
 def test_one_minute_demo_route_and_creative_link_are_wired():

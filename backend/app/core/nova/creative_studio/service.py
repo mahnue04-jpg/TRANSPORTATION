@@ -626,8 +626,12 @@ class CreativeStudioService(ShortDramaMixin):
 
     def reset_project_media(self, owner_id: str, project_id: str) -> dict[str, Any]:
         self._project_or_404(owner_id, project_id)
-        removable_kinds = {"image_prompt", "image", "video", "audio"}
+        removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}
         rows = self.store.delete_assets_by_kinds(project_id, owner_id, removable_kinds)
+        protected_demo_files = {
+            "nova-da25e10f80924d6ca99e62a04c9eb346.mp4",
+            "nova-bb9d59169aef4733ba8c07d1b0d418f6.mp3",
+        }
 
         removed_files = 0
         for asset in rows:
@@ -635,6 +639,8 @@ class CreativeStudioService(ShortDramaMixin):
                 continue
             path = _resolve_creative_media_url(asset.url)
             if path is None or not path.is_file():
+                continue
+            if path.name in protected_demo_files:
                 continue
             try:
                 path.unlink()

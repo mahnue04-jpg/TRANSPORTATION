@@ -823,6 +823,19 @@
     if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
+    function assetRoleLabel(row) {
+      var meta = (row && row.metadata) || {};
+      var status = String(row.status || "").toUpperCase();
+      if (status === "ERROR" || status === "FAILED") return "Failed attempt";
+      if (row.kind === "presenter_video" && meta.presenter_mode === "full_body") return "Full-body presenter";
+      if (row.kind === "presenter_video" && meta.presenter_mode === "half_body") return "Half-body presenter";
+      if (row.kind === "presenter_video" && meta.presenter_mode === "head") return "Headshot presenter";
+      if (row.kind === "presenter_video") return "Presenter video";
+      if (row.kind === "video" && meta.final_promo) return "Final demo video";
+      if (row.kind === "video") return "Scene video";
+      if (row.kind === "audio") return "Voice audio";
+      return row.kind || "Asset";
+    }
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
       var mediaAvailable = row.media_available !== false;
@@ -861,7 +874,7 @@
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
-        "<div class=\"muted\">" + escapeHtml(row.kind) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
+        "<div class=\"muted\">" + escapeHtml(assetRoleLabel(row)) + (row.url ? (mediaAvailable ? " · media ready" : " · media missing — regenerate") : " · no media URL") + "</div>" +
         assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
@@ -923,18 +936,18 @@
         showBanner("Select the project you want to reset first.", false);
         return;
       }
-      if (!window.confirm("Reset all generated media for the active project? Script, captions, storyboard, and brief will be preserved.")) {
+      if (!window.confirm("Clear old videos and generated media from the active project? Script, captions, storyboard, and brief stay.")) {
         return;
       }
       resetMedia.disabled = true;
-      showBanner("Working: removing old media clutter from the active project...", true);
+      showBanner("Working: clearing old videos from the active project...", true);
       try {
         var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/reset-media", {
           method: "POST"
         });
         showBanner(
-          "Media reset complete. Removed " + String(result.deleted_asset_records || 0) +
-          " old media record(s). Script, captions, storyboard, and brief were preserved.",
+          "Old videos cleared. Removed " + String(result.deleted_asset_records || 0) +
+          " media record(s). Script, captions, storyboard, and brief were kept.",
           true
         );
         await refreshAssets();
@@ -1312,13 +1325,13 @@
   function presenterPayload() {
     return {
       script: ($("presenter-script").value || "").trim(),
-      voice: ($("presenter-voice") && $("presenter-voice").value) || "shimmer",
+      voice: ($("presenter-voice") && $("presenter-voice").value) || "coral",
       captions: true,
       presenter_style: "warm professional small-business presenter",
       presenter_mode: ($("presenter-mode") && $("presenter-mode").value) || "full_body",
       motion_style: ($("presenter-motion-style") && $("presenter-motion-style").value) || "calm_professional",
       framing: ($("presenter-framing") && $("presenter-framing").value) || "full_frame",
-      output_preset: ($("presenter-output-preset") && $("presenter-output-preset").value) || "9:16"
+      output_preset: ($("presenter-output-preset") && $("presenter-output-preset").value) || "16:9"
     };
   }
 

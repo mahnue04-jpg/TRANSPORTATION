@@ -18,6 +18,18 @@ body {
 .studio-header, .studio-main { max-width: 980px; margin: 0 auto; padding: 1rem 1.25rem; }
 .studio-nav { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
 .studio-nav a { color: var(--accent); text-decoration: none; }
+.approved-demo-card { border-color: var(--accent); }
+.approved-demo-card h2 { margin: 0.2rem 0 0.4rem; }
+a.demo-open {
+  display: inline-flex;
+  margin-top: 0.6rem;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 750;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+}
 .card {
   background: var(--card);
   border: 1px solid var(--line);

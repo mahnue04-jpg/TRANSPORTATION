@@ -291,18 +291,18 @@ class ExportIn(BaseModel):
 
 
 class PresenterIn(BaseModel):
-    script: str = Field(min_length=1, max_length=1600)
+    script: str = Field(min_length=1, max_length=2400)
     presenter_style: str = Field(default="warm professional small-business presenter", max_length=240)
-    presenter_mode: str = Field(default="head", pattern="^(head|half_body|full_body)$")
+    presenter_mode: str = Field(default="full_body", pattern="^(head|half_body|full_body)$")
     motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
-    framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
-    output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
-    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer)$")
+    framing: str = Field(default="full_frame", pattern="^(close_up|waist_up|full_frame)$")
+    output_preset: str = Field(default="16:9", pattern="^(9:16|1:1|16:9)$")
+    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
     captions: bool = False
 
 
 class CloudPresenterFinalizeIn(BaseModel):
-    script: str = Field(min_length=1, max_length=600)
+    script: str = Field(min_length=1, max_length=2400)
     voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
     captions: bool = True
 
