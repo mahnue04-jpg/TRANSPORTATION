@@ -12,6 +12,9 @@
   var startBtn = document.getElementById("start-demo");
   var pauseBtn = document.getElementById("pause-demo");
   var restartBtn = document.getElementById("restart-demo");
+  var shareBtn = document.getElementById("share-demo");
+  var copyBtn = document.getElementById("copy-demo-link");
+  var shareStatus = document.getElementById("share-status");
 
   var cues = [
     { start: 0.00, end: 4.58, text: "Meet AMICOR Nova, your AI operations workspace built" },
@@ -139,6 +142,37 @@
   startBtn.addEventListener("click", play);
   pauseBtn.addEventListener("click", pause);
   restartBtn.addEventListener("click", restart);
+
+  function canonicalDemoUrl() {
+    return window.location.origin + "/nova/one-minute-demo";
+  }
+
+  async function copyDemoLink() {
+    var url = canonicalDemoUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      if (shareStatus) shareStatus.textContent = "Demo link copied. Use it in proposals, applications, email, TikTok, Instagram, LinkedIn, and client outreach.";
+    } catch (err) {
+      if (shareStatus) shareStatus.textContent = url;
+    }
+  }
+
+  if (copyBtn) copyBtn.addEventListener("click", copyDemoLink);
+  if (shareBtn) shareBtn.addEventListener("click", async function () {
+    var payload = {
+      title: "AMICOR Nova — 60-Second Product Demo",
+      text: "See AMICOR Nova in 60 seconds: AI operations, Work & Revenue, Government, Creative Studio, and more.",
+      url: canonicalDemoUrl()
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(payload);
+        if (shareStatus) shareStatus.textContent = "Demo share opened.";
+        return;
+      } catch (err) {}
+    }
+    await copyDemoLink();
+  });
 
   applyScene(0);
   renderSceneList();
