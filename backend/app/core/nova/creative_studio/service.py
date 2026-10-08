@@ -650,6 +650,53 @@ class CreativeStudioService(ShortDramaMixin):
             "preserved": ["script", "voiceover", "subtitle", "caption", "hashtags", "storyboard"],
         }
 
+    def clear_legacy_preview_videos(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        self._project_or_404(owner_id, project_id)
+        assets = self.store.list_assets(project_id, owner_id)
+        remove_ids: set[str] = set()
+
+        for asset in assets:
+            if asset.kind not in {"presenter_video", "video"}:
+                continue
+            meta = asset.metadata or {}
+            provider = meta.get("provider_result") or {}
+            presenter_mode = str(meta.get("presenter_mode") or "").strip().lower()
+            quality_state = str(meta.get("quality_state") or "").strip().upper()
+            duration = provider.get("duration_seconds")
+            try:
+                duration_seconds = float(duration) if duration is not None else None
+            except (TypeError, ValueError):
+                duration_seconds = None
+
+            is_old_headshot = asset.kind == "presenter_video" and presenter_mode in {"", "head", "headshot"}
+            is_preview_only = quality_state in {"PREVIEW_ONLY", "DEMO_READY_WITH_PROVIDER_WATERMARK"}
+            is_short_generated_clip = duration_seconds is not None and duration_seconds <= 8.5
+            is_failed_or_processing = str(asset.status or "").upper() in {"ERROR", "FAILED", "PROCESSING"}
+
+            if is_old_headshot or is_preview_only or is_short_generated_clip or is_failed_or_processing:
+                remove_ids.add(asset.id)
+
+        rows = self.store.delete_assets_by_ids(project_id, owner_id, remove_ids)
+        removed_files = 0
+        for asset in rows:
+            if not asset.url:
+                continue
+            path = _resolve_creative_media_url(asset.url)
+            if path is None or not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed_files += 1
+            except OSError:
+                pass
+
+        return {
+            "project_id": project_id,
+            "status": "LEGACY_PREVIEWS_CLEANED",
+            "deleted_asset_records": len(rows),
+            "deleted_media_files": removed_files,
+        }
+
     @serialized_media
     def request_video_generation(self, owner_id: str, project_id: str, *, job: GenerationJob | None = None) -> dict[str, Any]:
         background = job is not None

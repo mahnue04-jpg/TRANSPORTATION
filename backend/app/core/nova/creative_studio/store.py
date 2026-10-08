@@ -121,6 +121,16 @@ class CreativeStudioStore:
             self.assets.pop(row.id, None)
         return rows
 
+    def delete_assets_by_ids(self, project_id: str, owner_id: str, asset_ids: set[str]) -> list[CreativeAsset]:
+        rows = [
+            a
+            for a in self.assets.values()
+            if a.project_id == project_id and a.owner_id == owner_id and a.id in asset_ids
+        ]
+        for row in rows:
+            self.assets.pop(row.id, None)
+        return rows
+
     def save_scene(self, row: CreativeScene) -> CreativeScene:
         self.scenes[row.id] = row
         return row
@@ -285,6 +295,24 @@ class DbCreativeStudioStore:
                 NovaCreativeAsset.project_id == project_id,
                 NovaCreativeAsset.owner_id == owner_id,
                 NovaCreativeAsset.kind.in_(sorted(kinds)),
+            )
+            .all()
+        )
+        payload = [self._asset_from_orm(row) for row in rows]
+        for row in rows:
+            self.db.delete(row)
+        self.db.commit()
+        return payload
+
+    def delete_assets_by_ids(self, project_id: str, owner_id: str, asset_ids: set[str]) -> list[CreativeAsset]:
+        if not asset_ids:
+            return []
+        rows = (
+            self.db.query(NovaCreativeAsset)
+            .filter(
+                NovaCreativeAsset.project_id == project_id,
+                NovaCreativeAsset.owner_id == owner_id,
+                NovaCreativeAsset.id.in_(sorted(asset_ids)),
             )
             .all()
         )

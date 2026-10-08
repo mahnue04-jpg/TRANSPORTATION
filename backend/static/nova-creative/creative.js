@@ -512,6 +512,7 @@
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");
     var rows = body.projects || [];
+    projectRowsCache = rows.slice();
     if (activeProjectId && !rows.some(function (row) { return row.id === activeProjectId; })) {
       setActiveProjectId(null);
     }
@@ -718,11 +719,15 @@
       $("drama-voice-" + suffix).value = character.voice;
     });
   }
+  var projectRowsCache = [];
   function refreshDrama(detail) {
     var project = detail && detail.project;
     var plan = project && project.metadata && project.metadata.short_drama;
     var isDrama = project && project.project_type === "short_drama";
-    ["plan", "motion", "voices", "render"].forEach(function (action) { $("drama-" + action).disabled = !isDrama; });
+    ["plan", "motion", "voices", "render"].forEach(function (action) {
+      var button = $("drama-" + action);
+      if (button) button.disabled = false;
+    });
     Array.prototype.forEach.call(document.querySelectorAll('[data-action="script"], [data-action="storyboard"], [data-action="voice"]'), function (button) { button.disabled = !!isDrama; });
     $("build-final-promo").disabled = !!isDrama;
     if (project && project.id !== dramaLoadedProject) {
@@ -755,7 +760,22 @@
   ["plan", "motion", "voices", "render"].forEach(function (action) {
     var button = $("drama-" + action);
     button.addEventListener("click", async function () {
-      if (!activeProjectId) return showBanner("Create a Short drama project first.", false);
+      var activeRow = projectRowsCache.find(function (row) { return row.id === activeProjectId; }) || null;
+      if (!activeRow || activeRow.project_type !== "short_drama") {
+        var dramaProject = projectRowsCache.find(function (row) { return row.project_type === "short_drama"; });
+        if (!dramaProject) {
+          $("project-type").value = "short_drama";
+          $("project-title").value = $("project-title").value.trim() || "Nova Short Drama";
+          showBanner("No Short drama project exists yet. I selected Short drama above; click Create project, then use this button again.", false);
+          var createButton = $("project-create-btn");
+          if (createButton && createButton.scrollIntoView) createButton.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+        setActiveProjectId(dramaProject.id);
+        await refreshProjects();
+        await refreshAssets();
+        showBanner("Switched to Short drama project: " + dramaProject.title + ".", true);
+      }
       var projectId = activeProjectId;
       button.disabled = true;
       try {
@@ -931,6 +951,36 @@
       });
     });
   }
+  var clearLegacyPreviews = $("clear-legacy-preview-videos");
+  if (clearLegacyPreviews) {
+    clearLegacyPreviews.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select the project whose old presenter previews you want to clean first.", false);
+        return;
+      }
+      if (!window.confirm("Remove old headshot presenter previews, short preview clips, failed/processing preview records, and provider-watermarked preview-only videos from this project? Current scripts, captions, storyboard, and brand settings are preserved.")) {
+        return;
+      }
+      clearLegacyPreviews.disabled = true;
+      showBanner("Working: removing old headshot and short preview videos from this project...", true);
+      try {
+        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/clear-legacy-previews", {
+          method: "POST"
+        });
+        showBanner(
+          "Cleanup complete. Removed " + String(result.deleted_asset_records || 0) +
+          " old preview video record(s).",
+          true
+        );
+        await refreshAssets();
+      } catch (err) {
+        showBanner(err.message || "Could not remove the old preview videos.", false);
+      } finally {
+        clearLegacyPreviews.disabled = false;
+      }
+    });
+  }
+
   var resetMedia = $("reset-project-media");
   if (resetMedia) {
     resetMedia.addEventListener("click", async function () {
