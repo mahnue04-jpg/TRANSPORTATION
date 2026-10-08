@@ -208,17 +208,22 @@ def digital_contractor_rank_signal(text: str) -> bool:
 
 # Certifications and minimum-years claims Nova must not invent. Preferred or
 # negated wording is ignored. Title text is included by the caller.
+# Keep requirement verbs attached to the credential noun. Arbitrary proximity
+# windows can consume a negation or attach an unrelated skill's requirement.
+_CREDENTIAL = (
+    r"(?:a |an )?(?:(?:professional|active|valid|current)\s+)*"
+    r"(?:certifications?|certificates?|licen[cs]es?|"
+    r"(?:pmp|capm|cpa|comptia|cissp|shrm(?:-cp|-scp)?|six sigma)"
+    r"(?:\s+(?:certifications?|certificates?|licen[cs]es?|certified))?)"
+)
+_CREDENTIAL_LIST = rf"{_CREDENTIAL}(?:\s*(?:,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+){_CREDENTIAL})*"
 _CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
-    r"(?:"
-    r"\b(?:professional |active |valid |current )?(?:certification|certificate)s?\s+(?:is |are )?required\b"
-    r"|\b(?:must|required to)\s+(?:be |hold |have |possess )(?:a |an )?(?:valid |active |current )?(?:professional )?(?:certification|certificate|license)\b"
-    r"|\bmust be certified\b"
-    r"|\b(?:pmp|capm|cpa|comptia|cissp|shrm(?:-cp|-scp)?|six sigma)\b.{0,40}\b(?:required|must)\b"
-    r"|\b(?:required|must(?: hold| have| possess)?)\b.{0,48}\b(?:pmp|capm|cpa|comptia|cissp|certification|certificate)\b"
-    r"|\blicen[cs]e required\b"
-    r"|\bprofessional licen[cs]e required\b"
-    r"|\bactive licen[cs]e required\b"
-    r")",
+    rf"(?:\b{_CREDENTIAL_LIST}\s*:?\s+(?:(?:is|are)\s+)?(?:not\s+)?(?:required|mandatory|a must)\b"
+    rf"|\b{_CREDENTIAL_LIST}\s+must\s+be\s+(?:active|valid|current)\b"
+    rf"|\b(?:must\s+(?:hold|have|possess|be)|required to\s+(?:hold|have|possess|be))\s+{_CREDENTIAL}\b"
+    rf"|\b(?:required|mandatory)\s*:?\s+{_CREDENTIAL}\b"
+    rf"|\brequires?\s+{_CREDENTIAL}\b"
+    r"|\bmust be certified\b)",
     re.I,
 )
 _EXPERIENCE_HISTORY_REQUIRED = re.compile(
@@ -228,6 +233,7 @@ _EXPERIENCE_HISTORY_REQUIRED = re.compile(
     r"|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s+years?(?:'s)?(?: of)? (?:professional |relevant |related )?(?:experience|exp)\b"
     r"|\byears of (?:professional |relevant |related )?experience required\b"
     r"|\b(?:must have|must possess|requires?)\s+(?:at least\s+)?\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
+    r"|\b\d{1,2}\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\s+(?:(?:is|are)\s+)?(?:not\s+)?(?:required|mandatory)\b"
     r")",
     re.I,
 )
@@ -236,13 +242,25 @@ _EXPERIENCE_HISTORY_REQUIRED = re.compile(
 def _required_claim(pattern: re.Pattern[str], text: str) -> bool:
     """True when a requirement is stated and not negated or marked preferred."""
     for match in pattern.finditer(text or ""):
-        prefix = text[max(0, match.start() - 48):match.start()]
-        suffix = text[match.end():match.end() + 48]
+        # Sentence/list boundaries prevent one qualification's optional wording
+        # from excusing a separate mandatory qualification.
+        prefix = re.split(r"[.;\n]", text[:match.start()])[-1]
+        suffix = re.split(r"[.;\n]", text[match.end():])[0]
+        if re.search(r"\bnot\s+(?:required|mandatory)\b", match.group(), re.I):
+            continue
         if re.search(r"\b(?:no|not|without|non-|never)(?:\s+(?:a|an|any|the))?\s*$", prefix, re.I):
             continue
-        if re.search(r"^\s*(?:is |are )?(?:not required|optional|preferred|a plus|nice to have)\b", suffix, re.I):
+        if re.search(r"^\s*(?:is |are )?(?:not required|not mandatory)\b", suffix, re.I):
             continue
-        if re.search(r"\b(?:preferred|optional|nice to have|a plus)\s*$", prefix, re.I):
+        # Explicit mandatory wording wins over a contradictory preference
+        # label; bare years counts under that label remain non-blocking.
+        if re.search(r"\b(?:must|required|mandatory|requires?)\b", match.group(), re.I) or re.search(
+            r"^\s*(?:(?:is|are)\s+)?(?:required|mandatory)\b", suffix, re.I
+        ):
+            return True
+        if re.search(r"^\s*(?:is |are )?(?:optional|preferred|a plus|nice to have)\b", suffix, re.I):
+            continue
+        if re.search(r"\b(?:preferred|optional|nice to have|a plus)\s*[:\-–—]?\s*$", prefix, re.I):
             continue
         return True
     return False
