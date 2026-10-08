@@ -936,8 +936,18 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 qual["owner_review_reason"] = (
                     "Actual duties do not match the requested capability family."
                 )
+            if discovery.get("physical_licensed_onsite_blocked"):
+                qual.setdefault("blockers", []).append("physical_licensed_or_onsite_role")
+                qual.setdefault("reasons", []).append(
+                    "Role requires physical, licensed, or mandatory on-site work outside remote digital contractor scope."
+                )
+                qual["owner_review_reason"] = (
+                    "Role requires physical, licensed, or mandatory on-site work outside remote digital contractor scope."
+                )
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
+        if discovery.get("digital_contractor_rank_boost"):
+            bonus += 20
         row["relevance_score"] = base + bonus
         row["discovery_score"] = discovery["discovery_score"]
         row["discovery_band"] = discovery["discovery_band"]

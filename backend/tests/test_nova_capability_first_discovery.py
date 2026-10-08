@@ -14,6 +14,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     capability_first_search_queries,
     generate_capability_first_queries,
     is_banned_query,
+    is_remote_digital_search_intent,
     score_discovery_candidate,
     search_family_catalog,
     resolve_requested_family,
@@ -416,4 +417,122 @@ def test_compound_owner_search_covers_all_requested_families() -> None:
     assert "research_analysis" in covered
     assert "ai_automation" in covered
     assert "document_writing" in covered
+
+
+_DIGITAL_CONTRACTOR_QUERY = "remote research data reporting freelance contract"
+
+
+def _wastewater_operator_job() -> dict:
+    return {
+        "provider_id": "mn_osp",
+        "provider_identifier": "mcf-togo-wastewater",
+        "title": "MN DOC/MCF-Togo Class D Wastewater Operator",
+        "company_name": "Minnesota Department of Corrections",
+        "description": "Solicitation for facility services. Response due via Supplier Portal.",
+        "source_url": "https://osp.admin.mn.gov/PT-auto",
+        "geography": "Minnesota vendor opportunity",
+        "remote_status": "unknown",
+        "job_type": "contract",
+        "source_attribution": "Minnesota OSP",
+    }
+
+
+def _remote_digital_contractor_job() -> dict:
+    return {
+        "provider_id": "remotive",
+        "provider_identifier": "va-remote-1",
+        "title": "Remote Virtual Assistant",
+        "company_name": "Northwind Digital",
+        "description": (
+            "Remote 1099 freelance independent contractor for AI operations, admin support, "
+            "research, CRM data organization, weekly reporting, project coordination, "
+            "content operations, automation support, data cleanup, and virtual assistance. "
+            "Vendor / B2B project-based work. AI tools allowed. No membership fee. No on-site work."
+        ),
+        "source_url": "https://remotive.com/remote-jobs/virtual-assistant-contractor",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "compensation_text": "$45/hr",
+        "source_attribution": "Remotive",
+    }
+
+
+def test_direct_physical_trade_query_is_not_digital_intent() -> None:
+    assert is_remote_digital_search_intent("Class D Wastewater Operator") is False
+    assert is_remote_digital_search_intent("truck driver CDL") is False
+    assert is_remote_digital_search_intent(_DIGITAL_CONTRACTOR_QUERY) is True
+
+
+def test_wastewater_operator_is_rejected_for_remote_digital_search() -> None:
+    scored = score_discovery_candidate(
+        _wastewater_operator_job(),
+        query=_DIGITAL_CONTRACTOR_QUERY,
+    )
+    assert scored["physical_licensed_onsite_blocked"] is True
+    assert scored["discovery_band"] == "REJECT"
+    assert scored["discovery_score"] <= 15
+    assert scored["title_used_for_decision"] is False
+    assert scored["digital_contractor_rank_boost"] is False
+
+
+def test_remote_digital_contractor_ranks_above_wastewater_operator() -> None:
+    digital = score_discovery_candidate(
+        _remote_digital_contractor_job(),
+        query=_DIGITAL_CONTRACTOR_QUERY,
+    )
+    wastewater = score_discovery_candidate(
+        _wastewater_operator_job(),
+        query=_DIGITAL_CONTRACTOR_QUERY,
+    )
+    assert digital["physical_licensed_onsite_blocked"] is False
+    assert digital["digital_contractor_rank_boost"] is True
+    assert digital["discovery_band"] != "REJECT"
+    assert digital["discovery_score"] > wastewater["discovery_score"]
+    assert digital["title_used_for_decision"] is False
+
+    ranked = qualify_and_rank_live_jobs(
+        _DIGITAL_CONTRACTOR_QUERY,
+        [_wastewater_operator_job(), _remote_digital_contractor_job()],
+    )
+    by_title = {row["title"]: row for row in ranked}
+    bad = by_title["MN DOC/MCF-Togo Class D Wastewater Operator"]
+    good = by_title["Remote Virtual Assistant"]
+    assert bad["discovery_band"] == "REJECT"
+    assert bad["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert bad["live_qualification"]["auto_prepare_allowed"] is False
+    assert "physical_licensed_or_onsite_role" in bad["live_qualification"]["blockers"]
+    assert bad["live_qualification"]["external_submission"] is False
+    assert bad["live_qualification"]["financial_execution"] is False
+    assert good["qualification_status"] != "NOT_QUALIFIED"
+    assert good["discovery_band"] != "REJECT"
+    assert good["relevance_score"] > bad["relevance_score"]
+    assert good["live_qualification"]["external_submission"] is False
+    assert good["live_qualification"]["financial_execution"] is False
+
+
+def test_physical_licensed_onsite_roles_are_blocked_for_digital_intent() -> None:
+    cases = [
+        ("CDL Delivery Driver", "Commercial driver's license required. Local driving route."),
+        ("Registered Nurse", "Active nursing license and in-person patient care."),
+        ("Licensed Attorney", "Bar admission and law license required for court appearances."),
+        ("Professional Engineer", "PE license and engineering license required on the job site."),
+        ("Warehouse Associate", "Warehouse labor, forklift, and manual labor each shift."),
+        ("On-site Security Officer", "Security clearance required. Must be on-site."),
+        ("Journeyman Electrician", "Construction crew. Licensed electrician. Fully on-site."),
+    ]
+    for title, description in cases:
+        scored = score_discovery_candidate(
+            {
+                "title": title,
+                "description": description,
+                "job_type": "contract",
+                "remote_status": "unknown",
+                "company_name": "Example Agency",
+                "source_url": "https://example.com/jobs/physical",
+            },
+            query=_DIGITAL_CONTRACTOR_QUERY,
+        )
+        assert scored["discovery_band"] == "REJECT", title
+        assert scored["physical_licensed_onsite_blocked"] is True, title
 
