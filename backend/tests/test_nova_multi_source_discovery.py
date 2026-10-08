@@ -1145,3 +1145,63 @@ def test_remote_digital_search_drops_wastewater_operator_and_keeps_contractor() 
     # A direct trade search is not rewritten into the digital filter.
     assert _query_relevant(wastewater, "Class D Wastewater Operator") is True
 
+
+def test_owner_1099_search_drops_cert_fee_and_experience_listings() -> None:
+    query = (
+        "Remote 1099 contractor work for AI operations, administrative support, "
+        "project coordination, research, data entry, CRM, reporting, content operations, "
+        "virtual assistance, automation support, and digital business operations. "
+        "Prioritize jobs Nova can perform remotely without professional licenses, "
+        "certifications, upfront fees, or fabricated experience."
+    )
+    certified = {
+        "provider_id": "remotive",
+        "title": "Remote Project Coordinator",
+        "company_name": "Example Buyer",
+        "description": "Remote contract. PMP certification required.",
+        "source_url": "https://remotive.com/remote-jobs/pmp",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    fee = {
+        "provider_id": "remotive",
+        "title": "Remote Data Entry Contractor",
+        "company_name": "Example Buyer",
+        "description": "Remote 1099 data entry. Application fee required. Pay to apply.",
+        "source_url": "https://remotive.com/remote-jobs/fee",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    seasoned = {
+        "provider_id": "remotive",
+        "title": "Senior CRM Specialist",
+        "company_name": "Example Buyer",
+        "description": "Remote CRM reporting. Minimum 7 years of experience required.",
+        "source_url": "https://remotive.com/remote-jobs/senior-crm",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    digital = {
+        "provider_id": "remotive",
+        "title": "Remote Virtual Assistant",
+        "company_name": "Northwind Digital",
+        "description": (
+            "Remote 1099 freelance contractor for AI operations, administrative support, "
+            "research, CRM, reporting, content operations, and virtual assistance. "
+            "No certification required. No upfront fee."
+        ),
+        "source_url": "https://remotive.com/remote-jobs/virtual-assistant-contractor",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "compensation_text": "$45/hr",
+    }
+    assert _query_relevant(certified, query) is False
+    assert _query_relevant(fee, query) is False
+    assert _query_relevant(seasoned, query) is False
+    assert _query_relevant(digital, query) is True
+    assert _query_relevant(certified, "PMP certification required") is True
+

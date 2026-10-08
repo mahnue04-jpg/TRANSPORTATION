@@ -89,7 +89,7 @@ _DIGITAL_DOMAIN = re.compile(
     r"administrative support|admin support|virtual assistant|virtual assistance|"
     r"project coordination|content operations|crm|customer relationship|"
     r"research|reporting|data entry|data cleanup|data work|spreadsheet|"
-    r"bookkeeping support|bookkeeping"
+    r"bookkeeping support|bookkeeping|digital business operations"
     r")\b",
     re.I,
 )
@@ -204,6 +204,89 @@ def blocks_physical_role_for_digital_search(job: dict[str, Any], query: str | No
 def digital_contractor_rank_signal(text: str) -> bool:
     """Remote/1099/freelance/contract digital work Nova should rank first."""
     return bool(_CONTRACT_STYLE.search(text or "") and _DIGITAL_DOMAIN.search(text or ""))
+
+
+# Certifications and minimum-years claims Nova must not invent. Preferred or
+# negated wording is ignored. Title text is included by the caller.
+_CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
+    r"(?:"
+    r"\b(?:professional |active |valid |current )?(?:certification|certificate)s?\s+(?:is |are )?required\b"
+    r"|\b(?:must|required to)\s+(?:be |hold |have |possess )(?:a |an )?(?:valid |active |current )?(?:professional )?(?:certification|certificate|license)\b"
+    r"|\bmust be certified\b"
+    r"|\b(?:pmp|capm|cpa|comptia|cissp|shrm(?:-cp|-scp)?|six sigma)\b.{0,40}\b(?:required|must)\b"
+    r"|\b(?:required|must(?: hold| have| possess)?)\b.{0,48}\b(?:pmp|capm|cpa|comptia|cissp|certification|certificate)\b"
+    r"|\blicen[cs]e required\b"
+    r"|\bprofessional licen[cs]e required\b"
+    r"|\bactive licen[cs]e required\b"
+    r")",
+    re.I,
+)
+_EXPERIENCE_HISTORY_REQUIRED = re.compile(
+    r"(?:"
+    r"\b(?:at least|minimum(?: of)?|min\.?)\s+\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
+    r"|\b\d{1,2}\s*\+\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
+    r"|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s+years?(?:'s)?(?: of)? (?:professional |relevant |related )?(?:experience|exp)\b"
+    r"|\byears of (?:professional |relevant |related )?experience required\b"
+    r"|\b(?:must have|must possess|requires?)\s+(?:at least\s+)?\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
+    r")",
+    re.I,
+)
+
+
+def _required_claim(pattern: re.Pattern[str], text: str) -> bool:
+    """True when a requirement is stated and not negated or marked preferred."""
+    for match in pattern.finditer(text or ""):
+        prefix = text[max(0, match.start() - 48):match.start()]
+        suffix = text[match.end():match.end() + 48]
+        if re.search(r"\b(?:no|not|without|non-|never)(?:\s+(?:a|an|any|the))?\s*$", prefix, re.I):
+            continue
+        if re.search(r"^\s*(?:is |are )?(?:not required|optional|preferred|a plus|nice to have)\b", suffix, re.I):
+            continue
+        if re.search(r"\b(?:preferred|optional|nice to have|a plus)\s*$", prefix, re.I):
+            continue
+        return True
+    return False
+
+
+def certification_or_license_required(job: dict[str, Any]) -> bool:
+    """Professional license or certification the verified profile does not hold."""
+    return _required_claim(_CERTIFICATION_OR_LICENSE_REQUIRED, _listing_text(job))
+
+
+def unverified_experience_required(job: dict[str, Any]) -> bool:
+    """Minimum years of experience Nova would have to fabricate."""
+    return _required_claim(_EXPERIENCE_HISTORY_REQUIRED, _listing_text(job))
+
+
+def upfront_fee_required(job: dict[str, Any]) -> bool:
+    """Payment to apply, membership, or other upfront access fee."""
+    from app.core.nova.v3.live_qualification import FEE_YES, _detect_fee
+
+    text = " ".join(
+        (
+            _listing_text(job),
+            str(job.get("compensation_text") or ""),
+        )
+    ).lower()
+    return _detect_fee(text) == FEE_YES
+
+
+def remote_digital_performability_blockers(job: dict[str, Any], query: str | None) -> list[str]:
+    """Reasons a remote digital search cannot treat this listing as performable.
+
+    Physical/licensed/on-site roles stay on the existing gate. These extra
+    reasons apply only when the owner asked for remote digital contractor work.
+    """
+    if not is_remote_digital_search_intent(query):
+        return []
+    reasons: list[str] = []
+    if certification_or_license_required(job):
+        reasons.append("certification_or_license_required")
+    if unverified_experience_required(job):
+        reasons.append("unverified_experience_required")
+    if upfront_fee_required(job):
+        reasons.append("upfront_fee_required")
+    return reasons
 _STATE_RESTRICT = re.compile(
     r"\b("
     r"must (?:reside|live) in|residents? only|only (?:candidates|applicants) in|"
@@ -983,8 +1066,9 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     # Title text may disqualify a hard physical/licensed/on-site role. It still
     # does not grant a positive capability match (title_used_for_decision stays false).
     physical_blocked = blocks_physical_role_for_digital_search(job, query)
+    performability_blockers = remote_digital_performability_blockers(job, query)
     digital_rank_boost = False
-    if physical_blocked:
+    if physical_blocked or performability_blockers:
         score = min(score, 15)
         band = "REJECT"
     elif band not in {"INSUFFICIENT_INFORMATION", "REJECT"} and digital_contractor_rank_signal(text):
@@ -1019,6 +1103,10 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "owner_review_needed": duty["owner_review_needed"] or band == "OWNER_REVIEW",
         "state_restriction_detected": state_restricted,
         "physical_licensed_onsite_blocked": physical_blocked,
+        "remote_digital_blockers": performability_blockers,
+        "certification_or_license_blocked": "certification_or_license_required" in performability_blockers,
+        "unverified_experience_blocked": "unverified_experience_required" in performability_blockers,
+        "upfront_fee_blocked": "upfront_fee_required" in performability_blockers,
         "digital_contractor_rank_boost": digital_rank_boost,
         "search_family": planned_family_id or (family or {}).get("family_id"),
         "search_family_label": str(job.get("search_family_label") or "").strip()

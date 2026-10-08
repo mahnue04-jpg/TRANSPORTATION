@@ -944,6 +944,24 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 qual["owner_review_reason"] = (
                     "Role requires physical, licensed, or mandatory on-site work outside remote digital contractor scope."
                 )
+            _PERFORMABILITY_COPY = {
+                "certification_or_license_required": (
+                    "Role requires a professional license or certification Nova does not hold."
+                ),
+                "unverified_experience_required": (
+                    "Role requires a years-of-experience history Nova must not fabricate."
+                ),
+                "upfront_fee_required": (
+                    "Role requires an upfront fee or payment to apply."
+                ),
+            }
+            for code in discovery.get("remote_digital_blockers") or []:
+                if code not in _PERFORMABILITY_COPY:
+                    continue
+                qual.setdefault("blockers", []).append(code)
+                qual.setdefault("reasons", []).append(_PERFORMABILITY_COPY[code])
+                if not discovery.get("physical_licensed_onsite_blocked"):
+                    qual["owner_review_reason"] = _PERFORMABILITY_COPY[code]
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
         if discovery.get("digital_contractor_rank_boost"):

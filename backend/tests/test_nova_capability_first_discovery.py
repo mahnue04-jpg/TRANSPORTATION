@@ -536,3 +536,140 @@ def test_physical_licensed_onsite_roles_are_blocked_for_digital_intent() -> None
         assert scored["discovery_band"] == "REJECT", title
         assert scored["physical_licensed_onsite_blocked"] is True, title
 
+
+_OWNER_1099_QUERY = (
+    "Remote 1099 contractor work for AI operations, administrative support, "
+    "project coordination, research, data entry, CRM, reporting, content operations, "
+    "virtual assistance, automation support, and digital business operations. "
+    "Prioritize jobs Nova can perform remotely without professional licenses, "
+    "certifications, upfront fees, or fabricated experience."
+)
+
+
+def _listed_job(title: str, description: str, **extra) -> dict:
+    job = {
+        "provider_id": "remotive",
+        "provider_identifier": title.lower().replace(" ", "-"),
+        "title": title,
+        "company_name": "Example Buyer",
+        "description": description,
+        "source_url": "https://remotive.com/remote-jobs/example",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "compensation_text": "$40/hr",
+    }
+    job.update(extra)
+    return job
+
+
+def test_owner_1099_query_is_remote_digital_intent() -> None:
+    assert is_remote_digital_search_intent(_OWNER_1099_QUERY) is True
+    assert len(_OWNER_1099_QUERY) > 220
+
+
+def test_owner_1099_search_rejects_license_cert_fee_and_experience_history() -> None:
+    wastewater = score_discovery_candidate(_wastewater_operator_job(), query=_OWNER_1099_QUERY)
+    certified = score_discovery_candidate(
+        _listed_job(
+            "Remote Project Coordinator",
+            "Remote contract project coordination. PMP certification required. Must hold an active certification.",
+        ),
+        query=_OWNER_1099_QUERY,
+    )
+    paid_access = score_discovery_candidate(
+        _listed_job(
+            "Remote Data Entry Contractor",
+            "Remote 1099 data entry and CRM cleanup. Application fee required. Pay to apply before tasks are visible.",
+        ),
+        query=_OWNER_1099_QUERY,
+    )
+    seasoned = score_discovery_candidate(
+        _listed_job(
+            "Senior CRM Specialist",
+            "Remote CRM reporting and data entry. Minimum 7 years of experience required.",
+        ),
+        query=_OWNER_1099_QUERY,
+    )
+    preferred = score_discovery_candidate(
+        _listed_job(
+            "Remote Operations Assistant",
+            "Remote 1099 contractor for administrative support, CRM, reporting, and virtual assistance. "
+            "Experience with spreadsheets preferred. No certification required. No upfront fee. No on-site work.",
+        ),
+        query=_OWNER_1099_QUERY,
+    )
+
+    assert wastewater["discovery_band"] == "REJECT"
+    assert wastewater["physical_licensed_onsite_blocked"] is True
+    assert certified["discovery_band"] == "REJECT"
+    assert certified["certification_or_license_blocked"] is True
+    assert certified["digital_contractor_rank_boost"] is False
+    assert paid_access["discovery_band"] == "REJECT"
+    assert paid_access["upfront_fee_blocked"] is True
+    assert seasoned["discovery_band"] == "REJECT"
+    assert seasoned["unverified_experience_blocked"] is True
+    assert preferred["certification_or_license_blocked"] is False
+    assert preferred["upfront_fee_blocked"] is False
+    assert preferred["unverified_experience_blocked"] is False
+    assert preferred["discovery_band"] != "REJECT"
+    assert preferred["digital_contractor_rank_boost"] is True
+    assert preferred["discovery_score"] > max(
+        wastewater["discovery_score"],
+        certified["discovery_score"],
+        paid_access["discovery_score"],
+        seasoned["discovery_score"],
+    )
+
+    ranked = qualify_and_rank_live_jobs(
+        _OWNER_1099_QUERY,
+        [
+            _wastewater_operator_job(),
+            _listed_job(
+                "Remote Project Coordinator",
+                "Remote contract project coordination. PMP certification required. Must hold an active certification.",
+            ),
+            _listed_job(
+                "Remote Data Entry Contractor",
+                "Remote 1099 data entry and CRM cleanup. Application fee required. Pay to apply before tasks are visible.",
+            ),
+            _listed_job(
+                "Senior CRM Specialist",
+                "Remote CRM reporting and data entry. Minimum 7 years of experience required.",
+            ),
+            _remote_digital_contractor_job(),
+        ],
+    )
+    by_title = {row["title"]: row for row in ranked}
+    good = by_title["Remote Virtual Assistant"]
+    assert good["discovery_band"] != "REJECT"
+    assert good["qualification_status"] != "NOT_QUALIFIED"
+    assert good["live_qualification"]["external_submission"] is False
+    assert good["live_qualification"]["financial_execution"] is False
+    for title, blocker in (
+        ("MN DOC/MCF-Togo Class D Wastewater Operator", "physical_licensed_or_onsite_role"),
+        ("Remote Project Coordinator", "certification_or_license_required"),
+        ("Remote Data Entry Contractor", "upfront_fee_required"),
+        ("Senior CRM Specialist", "unverified_experience_required"),
+    ):
+        row = by_title[title]
+        assert row["discovery_band"] == "REJECT", title
+        assert row["live_qualification"]["qualification_status"] == "NOT_QUALIFIED", title
+        assert row["live_qualification"]["auto_prepare_allowed"] is False, title
+        assert blocker in row["live_qualification"]["blockers"], title
+        assert row["live_qualification"]["external_submission"] is False
+        assert row["live_qualification"]["financial_execution"] is False
+        assert good["relevance_score"] > row["relevance_score"]
+
+
+def test_direct_certification_search_is_not_rewritten() -> None:
+    job = _listed_job(
+        "PMP Project Manager",
+        "PMP certification required for this on-site project management role.",
+        remote_status="on-site",
+    )
+    assert is_remote_digital_search_intent("PMP certification required") is False
+    scored = score_discovery_candidate(job, query="PMP certification required")
+    assert scored["certification_or_license_blocked"] is False
+    assert scored["remote_digital_blockers"] == []
+
