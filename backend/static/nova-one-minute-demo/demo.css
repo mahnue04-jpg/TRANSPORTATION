@@ -71,3 +71,5 @@ h1 { margin: 0; font-size: 30px; }
   .demo-shell { grid-template-columns: 1fr; padding: 18px; }
   .presenter-box { right: 10px; bottom: 72px; width: 38%; height: 70%; }
 }
+
+.hidden { display: none !important; }
