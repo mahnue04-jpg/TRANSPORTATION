@@ -60,3 +60,15 @@ def test_one_minute_demo_mutes_embedded_nova_voice() -> None:
     assert 'params.get("nova_demo_embed") === "1"' in voice_js
     assert 'data-nova-demo-voice-muted' in voice_js
     assert 'if (demoEmbed)' in voice_js
+
+
+def test_one_minute_demo_has_public_website_cta_and_search_metadata() -> None:
+    html = (ROOT / "static" / "nova-one-minute-demo" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "static" / "nova-one-minute-demo" / "demo.js").read_text(encoding="utf-8")
+    assert "https://getamicor.com" in html
+    assert "Visit getamicor.com" in html
+    assert 'id="demo-end-cta"' in html
+    assert '<meta name="description"' in html
+    assert '<link rel="canonical"' in html
+    assert '"@type":"VideoObject"' in html
+    assert 'endCta.classList.toggle("hidden", t < 56.5)' in js
