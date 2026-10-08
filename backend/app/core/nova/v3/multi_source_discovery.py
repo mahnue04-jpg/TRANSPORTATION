@@ -659,9 +659,19 @@ class JobicyLiveProvider:
                 "remote", "contract", "contractor", "freelance", "vendor", "project",
                 "business", "support", "services", "service", "work", "united",
                 "states", "usa", "company", "role", "jobs", "job",
+                "for", "and", "the", "with", "without", "from", "into", "that",
+                "this", "nova", "can", "perform", "remotely", "professional",
+                "licenses", "certifications", "upfront", "fees", "fabricated",
+                "experience", "prioritize",
             }
         ]
-        return " ".join(tokens[:6]).strip()
+        tag = " ".join(tokens[:6]).strip()
+        # Jobicy rejects tags longer than 50 characters.
+        if len(tag) > 50:
+            tag = tag[:50].rsplit(" ", 1)[0].strip()
+        if len(tag) < 3:
+            return ""
+        return tag
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
         capped = max(1, min(25, int(limit)))

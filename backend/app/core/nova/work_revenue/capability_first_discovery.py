@@ -223,6 +223,7 @@ _LISTING_LANE_TITLE = re.compile(
     r"virtual assistant|virtual assistance|"
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|"
+    r"operations assistant|"
     r"data entry|"
     r"research (?:assistant|contractor|support|specialist|analyst)|"
     r"business research|"
@@ -231,10 +232,38 @@ _LISTING_LANE_TITLE = re.compile(
     r"content operations|"
     r"project coordinat\w*|"
     r"automation|"
-    r"ai|artificial intelligence|"
+    r"ai operations|ai workflow|ai assistant|ai support|"
+    r"artificial intelligence operations|"
     r"digital business operations|"
     r"business operations (?:assistant|support|coordinator)"
     r")\b",
+    re.I,
+)
+# Management titles are not the contractor lanes in the remote 1099 brief.
+_LEADERSHIP_TITLE = re.compile(
+    r"\b("
+    r"project manager|product manager|product lead|technical lead|"
+    r"general manager|engineering manager|"
+    r"director|head of|vice president|\bvp\b|\bchief\b"
+    r")\b",
+    re.I,
+)
+_NON_US_PLACE = re.compile(
+    r"\b("
+    r"south korea|seoul|north korea|india|chennai|germany|deutschland|france|"
+    r"brazil|philippines|nigeria|singapore|japan|tokyo|china|beijing|dubai|"
+    r"saudi arabia|riyadh|pakistan|bangladesh|vietnam|indonesia|poland|"
+    r"ukraine|egypt|taiwan|united kingdom|\buk\b|london|toronto|australia|sydney"
+    r")\b",
+    re.I,
+)
+_US_OR_WORLD_PLACE = re.compile(
+    r"\b(united states|u\.s\.a?\.?|\busa\b|worldwide|anywhere)\b",
+    re.I,
+)
+_FOREIGN_LOCATION_REQUIREMENT = re.compile(
+    r"\b(?:based|located|reside|residing|living|must be|candidates?|applicants?)\s+"
+    r"(?:in|from|within)\s+$",
     re.I,
 )
 
@@ -257,9 +286,35 @@ def is_multi_lane_remote_digital_query(query: str | None) -> bool:
 
 
 def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
-    """Title names a digital lane from the remote contractor brief."""
+    """Title names a digital lane from the remote contractor brief.
+
+    Bare "AI" is not a lane. AI trainer, product lead, and other management
+    titles stay out even when the title also contains a lane word.
+    """
     title = str(job.get("title") or job.get("opportunity_title") or "")
+    if _LEADERSHIP_TITLE.search(title):
+        return False
     return bool(_LISTING_LANE_TITLE.search(title))
+
+
+def non_us_location_required(job: dict[str, Any]) -> bool:
+    """True when the listing requires the worker to be outside the United States.
+
+    A company mention of another country is not enough. Geography that also
+    allows the United States or worldwide stays eligible.
+    """
+    geography = str(job.get("geography") or "")
+    if _NON_US_PLACE.search(geography) and not _US_OR_WORLD_PLACE.search(geography):
+        return True
+    blob = " ".join(
+        str(job.get(key) or "")
+        for key in ("title", "opportunity_title", "description", "requirements")
+    )
+    for match in _NON_US_PLACE.finditer(blob):
+        prefix = blob[max(0, match.start() - 48):match.start()]
+        if _FOREIGN_LOCATION_REQUIREMENT.search(prefix):
+            return True
+    return False
 
 
 # Certifications and minimum-years claims Nova must not invent. Preferred or
@@ -360,6 +415,8 @@ def remote_digital_performability_blockers(job: dict[str, Any], query: str | Non
         reasons.append("unverified_experience_required")
     if upfront_fee_required(job):
         reasons.append("upfront_fee_required")
+    if non_us_location_required(job):
+        reasons.append("non_us_location_required")
     return reasons
 _STATE_RESTRICT = re.compile(
     r"\b("
@@ -655,7 +712,7 @@ _FAMILY_REQUEST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("api_micro_saas", re.compile(r"\b(api endpoint|micro[- ]?saas|microservice|rapidapi|webhook|api integration|document parser|data parser)\b", re.I)),
     ("nova_anonymous_clients", re.compile(r"\b(nova anonymous|amicor anonymous|anonymous operations agent|anonymous operation agent|autonomous operations agent|autonomous operation agent)\b", re.I)),
     ("bookkeeping_support", re.compile(r"\b(bookkeep(?:ing)?|accounts? payable|accounts? receivable|reconciliation|invoice prep|expense categorization|financial spreadsheet)\b", re.I)),
-    ("document_writing", re.compile(r"\b(writing|writer|document|proposal|rfp|sop|content|report writing|business correspondence)\b", re.I)),
+    ("document_writing", re.compile(r"\b(writing|writer|document|proposal|rfp|sop|content writing|content writer|report writing|business correspondence)\b", re.I)),
     ("research_analysis", re.compile(r"\b(research|market research|competitor research|lead research|supplier research|analysis research)\b", re.I)),
     ("data_spreadsheet", re.compile(r"\b(spreadsheet|excel|csv|data cleanup|data entry|data analysis|reporting|inventory data)\b", re.I)),
     ("ai_automation", re.compile(r"\b(ai|artificial intelligence|automation|prompt|workflow automation|ai analysis|ai operations)\b", re.I)),
@@ -1141,8 +1198,12 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     # does not grant a positive capability match (title_used_for_decision stays false).
     physical_blocked = blocks_physical_role_for_digital_search(job, query)
     performability_blockers = remote_digital_performability_blockers(job, query)
+    lane_mismatch = bool(
+        is_multi_lane_remote_digital_query(query)
+        and not matches_remote_digital_work_lane(job)
+    )
     digital_rank_boost = False
-    if physical_blocked or performability_blockers:
+    if physical_blocked or performability_blockers or lane_mismatch:
         score = min(score, 15)
         band = "REJECT"
     elif band not in {"INSUFFICIENT_INFORMATION", "REJECT"} and digital_contractor_rank_signal(text):
@@ -1178,6 +1239,7 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "state_restriction_detected": state_restricted,
         "physical_licensed_onsite_blocked": physical_blocked,
         "remote_digital_blockers": performability_blockers,
+        "remote_digital_lane_mismatch": lane_mismatch,
         "certification_or_license_blocked": "certification_or_license_required" in performability_blockers,
         "unverified_experience_blocked": "unverified_experience_required" in performability_blockers,
         "upfront_fee_blocked": "upfront_fee_required" in performability_blockers,

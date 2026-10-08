@@ -1068,6 +1068,15 @@ def test_jobicy_query_tag_removes_generic_work_terms() -> None:
     assert "vendor" not in tag
     assert "workflow" in tag
     assert "automation" in tag
+    owner_tag = JobicyLiveProvider._query_tag(
+        "Remote 1099 contractor work for AI operations, administrative support, "
+        "project coordination, research, data entry, CRM, reporting, content operations, "
+        "virtual assistance, automation support, and digital business operations. "
+        "Prioritize jobs Nova can perform remotely without professional licenses, "
+        "certifications, upfront fees, or fabricated experience."
+    )
+    assert 3 <= len(owner_tag) <= 50
+    assert "for" not in owner_tag.split()
 
 def test_public_rfp_admin_search_accepts_body_capability_match() -> None:
     row = normalize_opportunity(
@@ -1254,4 +1263,40 @@ def test_owner_1099_search_keeps_non_ai_lanes_and_drops_software_roles() -> None
     assert _query_relevant(engineer, query) is False
     assert _query_relevant(employee, query) is False
     assert _query_relevant(assistant, "AI operations contractor remote") is False
+    trainer = {
+        "provider_id": "remoteok",
+        "title": "AI Trainer Image QA Evaluator",
+        "description": "English-speaking Image Quality Evaluators based in South Korea.",
+        "geography": "Remote",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    product_lead = {
+        "provider_id": "remoteok",
+        "title": "Technical Product Lead AI Finance App",
+        "description": "Lead the AI finance product.",
+        "geography": "Seoul",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    copywriter = {
+        "provider_id": "remotive",
+        "title": "Freelance Copywriter",
+        "description": "Freelance SEO copywriting for client websites.",
+        "geography": "Worldwide",
+        "remote_status": "remote",
+        "job_type": "freelance",
+    }
+    manager = {
+        "provider_id": "remoteok",
+        "title": "Project Manager",
+        "description": "Manage client research projects worldwide.",
+        "geography": "Worldwide",
+        "remote_status": "remote",
+        "job_type": "contract",
+    }
+    assert _query_relevant(trainer, query) is False
+    assert _query_relevant(product_lead, query) is False
+    assert _query_relevant(copywriter, query) is False
+    assert _query_relevant(manager, query) is False
 

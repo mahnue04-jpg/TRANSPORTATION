@@ -954,7 +954,18 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "upfront_fee_required": (
                     "Role requires an upfront fee or payment to apply."
                 ),
+                "non_us_location_required": (
+                    "Role requires the worker to be outside the United States."
+                ),
             }
+            if discovery.get("remote_digital_lane_mismatch"):
+                qual.setdefault("blockers", []).append("work_lane_mismatch")
+                qual.setdefault("reasons", []).append(
+                    "Title is outside the requested remote contractor lanes."
+                )
+                qual["owner_review_reason"] = (
+                    "Title is outside the requested remote contractor lanes."
+                )
             for code in discovery.get("remote_digital_blockers") or []:
                 if code not in _PERFORMABILITY_COPY:
                     continue
