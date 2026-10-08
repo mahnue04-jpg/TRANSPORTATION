@@ -14,6 +14,7 @@ from app.core.nova.work_revenue.verified_profile import (
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 MAX_UNTRUSTED = 2500
+MASTER_DEMO_URL = "https://amicor-health-isf-py.onrender.com/nova/one-minute-demo"
 
 
 def sanitize_untrusted(text: str | None) -> str:
@@ -260,7 +261,7 @@ def generate_drafts(
                 f"Products present in this system: "
                 f"{', '.join(profile_snapshot()['verified']['products_in_repository'])}.\n\n"
                 f"Matched capabilities for this opportunity:\n{matched_caps}\n\n"\
-                f"Broader authorized support registry:\n{caps}\n\n{unknown}\n\n{forbidden}"
+                f"Broader authorized support registry:\n{caps}\n\nProduct demo: {MASTER_DEMO_URL}\n\n{unknown}\n\n{forbidden}"
             ),
         },
         {
@@ -275,7 +276,7 @@ def generate_drafts(
                 f"CAPABILITY MATCH\n{matched_caps}\n\n"
                 f"EXECUTION POSITIONING\n{packet_summary}\n\n"
                 f"{unknown}\n\n"
-                f"Do not list fabricated employers, degrees, or dates.\n\n{untrusted_desc}"
+                f"Product demo / capability proof: {MASTER_DEMO_URL}\n\nDo not list fabricated employers, degrees, or dates.\n\n{untrusted_desc}"
             ),
         },
         {
@@ -290,6 +291,7 @@ def generate_drafts(
                 f"{matched_caps}\n\n"
                 f"{packet_summary}\n"
                 f"Nova is not a human applicant and will not pretend to be one.\n\n"
+                f"Product demo / capability proof: {MASTER_DEMO_URL}\n\n"
                 f"{OWNER_INPUT_REQUIRED}: owner-specific motivation, availability, and rate.\n\n"
                 f"{forbidden}\n\n{untrusted_desc}"
             ),
@@ -302,6 +304,7 @@ def generate_drafts(
                 f"Scope (from untrusted posting; owner must confirm):\n{untrusted_desc}\n\n"
                 f"Capability-specific approach:\n{matched_caps}\n\n"
                 f"Internal execution plan:\n{execution}\n\n"
+                f"Product demo / capability proof: {MASTER_DEMO_URL}\n\n"
                 f"Pricing: {OWNER_INPUT_REQUIRED}. Timeline: {OWNER_INPUT_REQUIRED}.\n\n"
                 f"{forbidden}"
             ),
@@ -326,10 +329,11 @@ def generate_drafts(
                 f"DRAFT work-sample outline for {title}.\n\n"
                 f"1. Restate the requested work using only the untrusted posting, labeled as such.\n"
                 f"2. Map tasks to the matched capabilities:\n{matched_caps}\n"
-                f"3. Build a new demonstration around the requested deliverable type.\n"
-                f"4. {portfolio_positioning}\n"
-                f"5. Mark human-required steps {OWNER_INPUT_REQUIRED}.\n"
-                f"6. Do not invent prior client deliverables.\n\n{untrusted_desc}"
+                f"3. Product demo / capability proof: {MASTER_DEMO_URL}\n"
+                f"4. Build a new demonstration around the requested deliverable type when the listing needs a role-specific sample.\n"
+                f"5. {portfolio_positioning}\n"
+                f"6. Mark human-required steps {OWNER_INPUT_REQUIRED}.\n"
+                f"7. Do not invent prior client deliverables.\n\n{untrusted_desc}"
             ),
         },
         {
