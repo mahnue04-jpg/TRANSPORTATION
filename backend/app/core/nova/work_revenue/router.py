@@ -14,7 +14,7 @@ from app.core.nova.service import NovaCoreService
 from app.core.nova.signup.service import customer_access
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue import submission
-from app.core.nova.work_revenue.flags import engine_guardrails
+from app.core.nova.work_revenue.flags import engine_guardrails, live_discovery_enabled
 from app.core.nova.work_revenue.config import capabilities_surface
 from app.core.nova.work_revenue.lifecycle import LIFECYCLE_STAGES
 from app.core.nova.work_revenue import ops
@@ -827,7 +827,7 @@ def work_lifecycle(user: UserContext = Depends(get_current_user_context)):
         "stages": list(LIFECYCLE_STAGES),
         "approved_equals_submitted": False,
         "external_submission_enabled": False,
-        "live_discovery_enabled": False,
+        "live_discovery_enabled": live_discovery_enabled(),
         "financial_actions_enabled": False,
     }
 
