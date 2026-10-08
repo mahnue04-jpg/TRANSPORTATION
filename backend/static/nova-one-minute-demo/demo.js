@@ -17,6 +17,7 @@
   var shareStatus = document.getElementById("share-status");
   var recordBtn = document.getElementById("record-demo");
   var recordStatus = document.getElementById("record-status");
+  var endCta = document.getElementById("demo-end-cta");
 
   var cues = [
     { start: 0.00, end: 4.58, text: "Meet AMICOR Nova, your AI operations workspace built" },
@@ -94,6 +95,7 @@
 
   function update() {
     var t = audio.currentTime || 0;
+    if (endCta) endCta.classList.toggle("hidden", t < 56.5);
     var duration = audio.duration && isFinite(audio.duration) ? audio.duration : 60;
     currentTime.textContent = fmt(t);
     progress.style.width = Math.min(100, (t / duration) * 100) + "%";
