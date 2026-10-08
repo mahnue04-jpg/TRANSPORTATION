@@ -70,6 +70,140 @@ _PREFERRED_SIGNALS = re.compile(
     r")\b",
     re.I,
 )
+
+# Remote digital / AI / administrative contractor searches. A query that is
+# itself a physical trade search is not this intent.
+_DIGITAL_SEARCH_INTENT = re.compile(
+    r"\b("
+    r"remote|freelance|1099|contractor|independent contractor|project[- ]based|"
+    r"virtual assistant|virtual assistance|administrative|admin support|"
+    r"ai operations|ai workflow|automation support|workflow automation|"
+    r"content operations|project coordination|crm|reporting|research|"
+    r"data work|data entry|data cleanup|spreadsheet|bookkeeping"
+    r")\b",
+    re.I,
+)
+_DIGITAL_DOMAIN = re.compile(
+    r"\b("
+    r"ai operations|ai workflow|workflow automation|automation support|"
+    r"administrative support|admin support|virtual assistant|virtual assistance|"
+    r"project coordination|content operations|crm|customer relationship|"
+    r"research|reporting|data entry|data cleanup|data work|spreadsheet|"
+    r"bookkeeping support|bookkeeping"
+    r")\b",
+    re.I,
+)
+_CONTRACT_STYLE = re.compile(
+    r"\b(remote|1099|freelance|freelancer|contractor|independent contractor|project[- ]based|contract)\b",
+    re.I,
+)
+# Hard mismatches for a remote digital contractor search. Title text is included
+# by the caller. This does not grant a positive capability match from a title.
+_PHYSICAL_LICENSED_ONSITE_ROLE = re.compile(
+    r"("
+    r"\bwastewater\b|\bwater treatment operator\b|\butility operator\b|"
+    r"\bclass\s*[abcd]\b.{0,48}\boperator\b|"
+    r"\boperator\b.{0,48}\blicen[cs]e\b|\blicen[cs]ed operator\b|\boperator licen[cs]e\b|"
+    r"\bcdl\b|\bcommercial driver(?:'s)? licen[cs]e\b|"
+    r"\btruck driver\b|\bdelivery driver\b|\broute driver\b|\bbus driver\b|"
+    r"\bforklift\b|"
+    r"\bwarehouse\s+(?:associate|worker|clerk|laborer|technician)\b|"
+    r"\bmanual labor\b|\bphysical labor\b|\bheavy lifting\b|"
+    r"\bconstruction\s+(?:worker|laborer|labor|crew|site|trade)\b|\bjourneyman\b|"
+    r"\broof(?:ing|er)?\b|\broof replacement\b|\bfacility maintenance\b|"
+    r"\belectrician\b|\bplumber\b|\bpipefitter\b|\bwelder\b|\bcarpenter\b|"
+    r"\bhvac\s+technician\b|\bmillwright\b|"
+    r"\bnursing licen[cs]e\b|\bregistered nurse\b|\brn licen[cs]e\b|\blpn\b|\bcna\b|"
+    r"\bmedical licen[cs]e\b|\bphysician\b|\bsurgeon\b|"
+    r"\bbar admission\b|\blicensed attorney\b|\battorney licen[cs]e\b|\blaw licen[cs]e\b|"
+    r"\bengineering licen[cs]e\b|\bpe licen[cs]e\b|\bprofessional engineer licen[cs]e\b|"
+    r"\bsecurity clearance\b|"
+    r"\bon-?site only\b|\bmust be on-?site\b|\bmandatory on-?site\b|"
+    r"\bin-person only\b|\bphysical presence required\b|\bfully on-?site\b"
+    r")",
+    re.I,
+)
+_ONSITE_REMOTE_STATUS = frozenset({
+    "on-site",
+    "onsite",
+    "on site",
+    "in-person",
+    "in person",
+    "on-premise",
+    "on premise",
+})
+
+
+def _listing_text(job: dict[str, Any]) -> str:
+    return " ".join(
+        str(job.get(key) or "")
+        for key in (
+            "title",
+            "opportunity_title",
+            "description",
+            "requirements",
+            "skills",
+            "skills_required",
+            "credentials",
+            "credentials_required",
+            "remote_status",
+            "place_of_performance",
+            "geography",
+            "job_type",
+        )
+    )
+
+
+def _match_not_negated(pattern: re.Pattern[str], text: str) -> bool:
+    for match in pattern.finditer(text or ""):
+        prefix = text[max(0, match.start() - 20):match.start()]
+        if re.search(r"\b(?:no|not|without|non-)\s*$", prefix, re.I):
+            continue
+        return True
+    return False
+
+
+def is_remote_digital_search_intent(query: str | None) -> bool:
+    """True for remote digital, AI, or administrative contractor searches.
+
+    An explicit physical-trade query is left alone so a direct wastewater or
+    CDL search is not rewritten into a digital filter.
+    """
+    text = str(query or "").strip()
+    if not text:
+        return False
+    if _match_not_negated(_PHYSICAL_LICENSED_ONSITE_ROLE, text) and not _DIGITAL_DOMAIN.search(text):
+        return False
+    if _DIGITAL_DOMAIN.search(text) or _DIGITAL_SEARCH_INTENT.search(text):
+        return True
+    return False
+
+
+def is_physical_licensed_or_onsite_role(job: dict[str, Any]) -> bool:
+    """Physical trades, operator/professional licenses, or mandatory on-site work."""
+    remote = str(job.get("remote_status") or "").strip().lower().replace("_", " ")
+    remote = remote.replace("-", " ")
+    normalized = " ".join(remote.split())
+    if normalized in _ONSITE_REMOTE_STATUS or normalized.replace(" ", "-") in _ONSITE_REMOTE_STATUS:
+        return True
+    if normalized in {"on site", "in person"}:
+        return True
+    return _match_not_negated(_PHYSICAL_LICENSED_ONSITE_ROLE, _listing_text(job))
+
+
+def blocks_physical_role_for_digital_search(job: dict[str, Any], query: str | None) -> bool:
+    """Drop physical/licensed/on-site roles from a remote digital contractor search."""
+    if not is_physical_licensed_or_onsite_role(job):
+        return False
+    if is_remote_digital_search_intent(query):
+        return True
+    family_id = str(job.get("search_family") or "").strip()
+    return bool(family_id and family_id in SEARCH_FAMILIES)
+
+
+def digital_contractor_rank_signal(text: str) -> bool:
+    """Remote/1099/freelance/contract digital work Nova should rank first."""
+    return bool(_CONTRACT_STYLE.search(text or "") and _DIGITAL_DOMAIN.search(text or ""))
 _STATE_RESTRICT = re.compile(
     r"\b("
     r"must (?:reside|live) in|residents? only|only (?:candidates|applicants) in|"
@@ -845,6 +979,23 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
                 band = "OWNER_REVIEW"
             else:
                 band = "REJECT"
+
+    # Title text may disqualify a hard physical/licensed/on-site role. It still
+    # does not grant a positive capability match (title_used_for_decision stays false).
+    physical_blocked = blocks_physical_role_for_digital_search(job, query)
+    digital_rank_boost = False
+    if physical_blocked:
+        score = min(score, 15)
+        band = "REJECT"
+    elif band not in {"INSUFFICIENT_INFORMATION", "REJECT"} and digital_contractor_rank_signal(text):
+        digital_rank_boost = True
+        score = min(100, score + 18)
+        if score >= 80:
+            band = "STRONG_FIT"
+        elif score >= 60:
+            band = "OWNER_REVIEW"
+        else:
+            band = "REJECT"
     return {
         "discovery_score": score,
         "discovery_band": band,
@@ -867,6 +1018,8 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "deliverables_nova_can_produce": duty["deliverables_nova_can_produce"],
         "owner_review_needed": duty["owner_review_needed"] or band == "OWNER_REVIEW",
         "state_restriction_detected": state_restricted,
+        "physical_licensed_onsite_blocked": physical_blocked,
+        "digital_contractor_rank_boost": digital_rank_boost,
         "search_family": planned_family_id or (family or {}).get("family_id"),
         "search_family_label": str(job.get("search_family_label") or "").strip()
         or (planned_family or {}).get("label")

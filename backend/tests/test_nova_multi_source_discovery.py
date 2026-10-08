@@ -1113,3 +1113,35 @@ def test_public_rfp_admin_search_still_rejects_unrelated_rfp() -> None:
     )
     assert _query_relevant(row, "remote administrative operations contractor") is False
 
+
+def test_remote_digital_search_drops_wastewater_operator_and_keeps_contractor() -> None:
+    query = "remote research data reporting freelance contract"
+    wastewater = {
+        "provider_id": "mn_osp",
+        "title": "MN DOC/MCF-Togo Class D Wastewater Operator",
+        "company_name": "Minnesota Department of Corrections",
+        "description": "Solicitation for facility services. Response due via Supplier Portal.",
+        "source_url": "https://osp.admin.mn.gov/PT-auto",
+        "geography": "Minnesota vendor opportunity",
+        "remote_status": "unknown",
+        "job_type": "contract",
+    }
+    digital = {
+        "provider_id": "remotive",
+        "title": "Remote Virtual Assistant",
+        "company_name": "Northwind Digital",
+        "description": (
+            "Remote 1099 freelance contractor for AI operations, research, CRM, "
+            "weekly reporting, project coordination, and virtual assistance."
+        ),
+        "source_url": "https://remotive.com/remote-jobs/virtual-assistant-contractor",
+        "geography": "United States",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "compensation_text": "$45/hr",
+    }
+    assert _query_relevant(wastewater, query) is False
+    assert _query_relevant(digital, query) is True
+    # A direct trade search is not rewritten into the digital filter.
+    assert _query_relevant(wastewater, "Class D Wastewater Operator") is True
+

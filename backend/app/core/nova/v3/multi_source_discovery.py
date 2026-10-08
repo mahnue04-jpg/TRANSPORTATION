@@ -1615,6 +1615,16 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     query_text = str(query or "")
     combined = " ".join([title, description, geography, job_type])
 
+    # Remote digital / AI / administrative contractor searches drop physical
+    # trades, operator licenses, and mandatory on-site roles before they consume
+    # a provider result slot. A direct trade query is not rewritten.
+    from app.core.nova.work_revenue.capability_first_discovery import (
+        blocks_physical_role_for_digital_search,
+    )
+
+    if blocks_physical_role_for_digital_search(row, query_text):
+        return False
+
     # User-requested U.S./remote discovery must not surface an explicitly
     # foreign-only listing merely because the listing itself also says "remote".
     if _US_REMOTE_QUERY.search(query_text):
