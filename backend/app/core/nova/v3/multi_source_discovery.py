@@ -1495,11 +1495,6 @@ _ADMIN_EMPLOYEE_SIGNALS = re.compile(
     r"join our team|permanent position|staff position)\b",
     re.I,
 )
-_ADMIN_PAID_ACCESS_SIGNALS = re.compile(
-    r"\b(upfront fee|membership fee|paid membership|subscription required|"
-    r"pay to apply|application fee|pay to access|payment required)\b",
-    re.I,
-)
 _ADMIN_NON_US_GEO = re.compile(
     r"\b(europe|european union|germany|deutschland|uk only|united kingdom only|"
     r"canada only|australia only|india only|emea|apac only)\b",
@@ -1620,9 +1615,13 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # a provider result slot. A direct trade query is not rewritten.
     from app.core.nova.work_revenue.capability_first_discovery import (
         blocks_physical_role_for_digital_search,
+        remote_digital_performability_blockers,
+        upfront_fee_required,
     )
 
     if blocks_physical_role_for_digital_search(row, query_text):
+        return False
+    if remote_digital_performability_blockers(row, query_text):
         return False
 
     # User-requested U.S./remote discovery must not surface an explicitly
@@ -1694,7 +1693,8 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         return False
 
     # Never surface pay-to-apply / paid-access admin opportunities.
-    if _ADMIN_PAID_ACCESS_SIGNALS.search(combined):
+    # "No upfront fee" is a negative statement and must stay eligible.
+    if upfront_fee_required(row):
         return False
 
     # Prefer U.S.-remote/nationwide work. Worldwide is allowed, but explicit
