@@ -1,6 +1,8 @@
 "use strict";
 
 (function () {
+  var params = new URLSearchParams(window.location.search || "");
+  var demoEmbed = params.get("nova_demo_embed") === "1";
   var activeRecognition = null;
   var voiceEngine = null;
   var speakingFallback = false;
@@ -254,6 +256,13 @@
   }
 
   function init() {
+    if (demoEmbed) {
+      if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+      }
+      document.documentElement.setAttribute("data-nova-demo-voice-muted", "1");
+      return;
+    }
     eligibleInputs().forEach(function (pair) {
       enhanceForm(pair[0], pair[1]);
     });
