@@ -146,3 +146,12 @@ button, .button {
 @media (min-width: 1600px) {
   .ws-header, .ws-main { width: min(1440px, calc(100% - 64px)); }
 }
+
+select { width: 100%; max-width: 440px; padding: 11px 12px; color: var(--nova-text); background: #081422; border: 1px solid var(--nova-line); border-radius: 10px; font: inherit; }
+input[type=checkbox] { width: auto; }
+.language-card label { display: block; margin-bottom: 8px; }
+#workspace-audio { width: 100%; margin-block: 12px; }
+[dir=rtl] .ws-main, [dir=rtl] .ws-header { text-align: right; }
+[dir=rtl] input[type=email], [dir=rtl] input[type=password] { direction: ltr; text-align: left; }
+#brain-output, .item .muted { unicode-bidi: plaintext; }
+#project-list button, #transfer-preview { overflow-wrap: anywhere; }

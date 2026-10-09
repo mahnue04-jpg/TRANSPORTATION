@@ -1,6 +1,9 @@
 import base64
 import os
 import re
+import logging
+from html import escape
+from typing import Literal
 from typing import Optional, Tuple
 
 import requests
@@ -81,6 +84,7 @@ class VoiceSpeakRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=8000)
     mode: str = Field(default="Warm Conversational", max_length=64)
     preferred_provider: Optional[str] = Field(default=None, max_length=64)
+    language: Literal["en", "so", "ar", "fr", "es"] = "en"
 
 
 class VoiceSpeakResponse(BaseModel):
@@ -153,7 +157,7 @@ def _azure_available() -> bool:
     return bool(os.getenv("AZURE_SPEECH_KEY")) and bool(os.getenv("AZURE_SPEECH_REGION"))
 
 
-def _synthesize_openai(text: str) -> Tuple[bytes, str]:
+def _synthesize_openai(text: str, language: str = "en") -> Tuple[bytes, str]:
     if not _openai_available():
         raise SynthesisError("openai unavailable")
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=OPENAI_TTS_TIMEOUT_SECONDS)  # type: ignore
@@ -172,7 +176,7 @@ def _synthesize_openai(text: str) -> Tuple[bytes, str]:
             # gpt-4o-mini-tts / gpt-4o-tts support a free-text instructions field
             # that dramatically improves naturalness; ignore for tts-1/tts-1-hd.
             if OPENAI_TTS_MODEL.startswith("gpt-4o") and OPENAI_TTS_INSTRUCTIONS:
-                create_kwargs["instructions"] = OPENAI_TTS_INSTRUCTIONS
+                create_kwargs["instructions"] = OPENAI_TTS_INSTRUCTIONS + " Read the input faithfully in " + {"en": "English", "so": "Somali", "ar": "Arabic", "fr": "French", "es": "Spanish"}[language] + ". Do not translate it."
             resp = client.audio.speech.create(**create_kwargs)  # type: ignore
             if isinstance(resp, bytes):
                 return resp, "audio/mpeg"
@@ -182,7 +186,8 @@ def _synthesize_openai(text: str) -> Tuple[bytes, str]:
                     return data, "audio/mpeg"
             if hasattr(resp, "content") and resp.content:
                 return resp.content, "audio/mpeg"
-        except Exception:
+        except Exception as exc:
+            logging.getLogger(__name__).warning("voice_synthesis_failed provider=openai type=%s status=%s", type(exc).__name__, getattr(exc, "status_code", None))
             continue
     raise SynthesisError("openai returned empty audio")
 
@@ -214,17 +219,21 @@ def _synthesize_elevenlabs(text: str) -> Tuple[bytes, str]:
     return r.content, "audio/mpeg"
 
 
-def _synthesize_azure(text: str) -> Tuple[bytes, str]:
+def _synthesize_azure(text: str, language: str = "en") -> Tuple[bytes, str]:
     if not _azure_available():
         raise SynthesisError("azure unavailable")
     key = os.getenv("AZURE_SPEECH_KEY", "")
     region = os.getenv("AZURE_SPEECH_REGION", "")
     url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+    locales = {"en": ("en-US", AZURE_SPEECH_VOICE), "so": ("so-SO", "so-SO-UbaxNeural"),
+        "ar": ("ar-SA", "ar-SA-ZariyahNeural"), "fr": ("fr-FR", "fr-FR-DeniseNeural"),
+        "es": ("es-ES", "es-ES-ElviraNeural")}
+    locale, voice_name = locales[language]
     ssml = (
-        "<speak version='1.0' xml:lang='en-US'>"
-        f"<voice xml:lang='en-US' name='{AZURE_SPEECH_VOICE}'>"
+        f"<speak version='1.0' xml:lang='{locale}'>"
+        f"<voice xml:lang='{locale}' name='{escape(voice_name, quote=True)}'>"
         f"<prosody rate='{AZURE_SPEECH_RATE}' pitch='{AZURE_SPEECH_PITCH}'>"
-        f"{text}"
+        f"{escape(text)}"
         "</prosody></voice></speak>"
     )
     r = requests.post(
@@ -273,14 +282,19 @@ def voice_speak(request: VoiceSpeakRequest) -> VoiceSpeakResponse:
     text = _sanitize_for_voice(request.text)
     chain = _provider_chain(request.preferred_provider)
 
+    if request.language == "so":
+        # Prefer a locale-specific Somali voice when Azure is configured.
+        chain = ["azure_neural_voice"] + [p for p in chain if p != "azure_neural_voice"]
     for provider in chain:
         try:
             if provider == "openai_realtime_voice":
-                data, mime = _synthesize_openai(text)
+                data, mime = _synthesize_openai(text, request.language)
             elif provider == "elevenlabs_conversational":
+                if request.language != "en":
+                    continue
                 data, mime = _synthesize_elevenlabs(text)
             elif provider == "azure_neural_voice":
-                data, mime = _synthesize_azure(text)
+                data, mime = _synthesize_azure(text, request.language)
             else:
                 continue
             return VoiceSpeakResponse(provider=provider, mime_type=mime, audio_b64=base64.b64encode(data).decode("ascii"))

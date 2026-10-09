@@ -11,7 +11,7 @@ for (const page of ['workspace', 'business']) {
     const element = () => ({textContent: '', value: 'Find jobs', children: [], setAttribute() {}, appendChild(child) {this.children.push(child);}, classList: {remove() {}}});
     const ctx = vm.createContext({
       $: id => {if (!elements.has(id)) elements.set(id, element()); return elements.get(id);},
-      state: {}, brainBusy: false, language: () => 'en', token: () => 'test', showBanner: () => {}, refresh: async () => {},
+      state: {}, brainBusy: false, language: () => 'en', t: value => value, window: {}, token: () => 'test', showBanner: () => {}, refresh: async () => {},
       api: async () => ({answer: 'One result ready for review.', fact_label: 'VERIFIED DATA', source_href: '/nova/work', sources: [{title: 'Buyer request', url: 'https://example.com/request'}, {title: 'Unsafe', url: 'javascript:alert(1)'}]}),
       document: {createElement: tag => ({tag}), querySelectorAll: () => []},
     });

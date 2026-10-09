@@ -220,7 +220,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: state.controller.signal,
-        body: JSON.stringify({ text: chunk, mode: personaName, preferred_provider: "openai_realtime_voice" }),
+        body: JSON.stringify({ text: chunk, language: String(typeof config.getLanguage === "function" ? config.getLanguage() : "en").split("-")[0], mode: personaName, preferred_provider: "openai_realtime_voice" }),
       });
       if (!res.ok) {
         throw new Error("voice_provider_unavailable");

@@ -36,8 +36,8 @@ test('project selection, action requests, reopened history and searchable result
   const fetch = async (url, options = {}) => {
     requests.push({ url, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
     let data = {};
-    if (url.endsWith('/dashboard')) data = { assistant_history: [{ role: 'assistant', content: 'Saved draft', conversation_id: 'C' }] };
-    else if (url.endsWith('/transfers')) data = [];
+    if (url.endsWith('/dashboard')) data = { active_projects: Object.values(projects), assistant_history: [{ role: 'assistant', content: 'Saved draft', conversation_id: 'C' }] };
+    else if (url.endsWith('/transfers')) data = options.method === 'POST' ? {transfer_id: 'T', status: 'pending', title: 'Timesheets', recipient_email: 'issa@example.com', conversation_count: 0, file_text_count: 0} : [];
     else if (url.endsWith('/transcribe')) data = { text: 'Waxaan rabaa liiska tababarka.' };
     else if (url.includes('/projects/')) data = projects[url.split('/').pop()];
     else if (url.includes('/conversations/')) data = { conversation_id: 'C', workspace_id: 'B', messages: [{ role: 'assistant', content: 'Saved timesheet draft' }] };
@@ -97,4 +97,16 @@ test('project selection, action requests, reopened history and searchable result
   assert.equal(tracksStopped, true);
   assert.equal(requests.filter(r => r.url.endsWith('/ask')).length, asksBeforeRecording);
   assert.match(element('recording-status').textContent, /Review or correct/);
+  element('transfer-project').value = 'B';
+  element('transfer-project').handlers.change();
+  element('transfer-email').value = 'issa@example.com';
+  await element('transfer-form').handlers.submit({preventDefault() {}});
+  const offer = requests.filter(r => r.url.endsWith('/transfers') && r.body).at(-1).body;
+  assert.equal(offer.workspace_id, 'B');
+  assert.equal(offer.recipient_email, 'issa@example.com');
+  element('answer-language').value = 'ar';
+  element('answer-language').handlers.change();
+  element('ask-input').value = 'قائمة التدريب';
+  await element('ask-form').handlers.submit({preventDefault() {}});
+  assert.equal(requests.filter(r => r.url.endsWith('/ask')).at(-1).body.answer_language, 'ar');
 });

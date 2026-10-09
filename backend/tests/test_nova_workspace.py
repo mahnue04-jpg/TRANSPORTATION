@@ -61,7 +61,7 @@ def test_nova_workspace_route_loads(client: TestClient) -> None:
     assert "Nova Workspace" in response.text
     assert "Mrs. Nova Brain" in response.text
     assert "ops-shell.js" not in response.text
-    assert 'src="/static/nova-workspace/workspace.js"' in response.text
+    assert 'src="/static/nova-workspace/workspace.js?v=20261009.2"' in response.text
     assert "Health ISF Workspace" not in response.text
 
 

@@ -696,7 +696,10 @@ def _answer_workspace_task(question: str, context: str, answer_language: str = "
 
     language_instruction = {
         "en": "Answer in English. Understand requests written in either English or Somali.",
-        "so": "Answer in Somali (Af-Soomaali). Understand English or Somali input.",
+        "so": "Answer in Somali (Af-Soomaali). Understand multilingual input.",
+        "ar": "Answer in Arabic. Understand multilingual input.",
+        "fr": "Answer in French. Understand multilingual input.",
+        "es": "Answer in Spanish. Understand multilingual input.",
         "bilingual": "Answer in both English and Somali (Af-Soomaali), with clearly labeled matching sections.",
     }[answer_language]
     prompt = (
@@ -724,6 +727,12 @@ def _answer_workspace_task(question: str, context: str, answer_language: str = "
     except Exception:
         pass
     return "Nova could not generate this draft right now. Your saved project is unchanged. Please retry the request."
+
+
+def _localized_result(messages: dict[str, str], language: str) -> str:
+    if language == "bilingual":
+        return "English: " + messages["en"] + "\n\nAf-Soomaali: " + messages["so"]
+    return messages[language]
 
 
 def ask_workspace(
@@ -756,7 +765,13 @@ def ask_workspace(
         search = NovaWorkspaceSearchOut(query=question or "Files", result_count=len(hits), hits=hits[:40])
         return NovaWorkspaceBrainOut(
             action=action,
-            answer=f"Found {len(hits)} saved files." if hits else "No matching saved files. Upload a file to this workspace first.",
+            answer=_localized_result({
+                "en": f"Found {len(hits)} saved files." if hits else "No matching saved files. Upload a file to this workspace first.",
+                "so": f"Waxaa la helay {len(hits)} fayl oo kaydsan." if hits else "Fayl lama helin. Marka hore soo geli fayl.",
+                "ar": f"تم العثور على {len(hits)} ملفات محفوظة." if hits else "لا توجد ملفات مطابقة. ارفع ملفًا أولًا.",
+                "fr": f"{len(hits)} fichiers trouvés." if hits else "Aucun fichier trouvé. Ajoutez d’abord un fichier.",
+                "es": f"Se encontraron {len(hits)} archivos." if hits else "No hay archivos coincidentes. Suba un archivo primero.",
+            }, payload.answer_language),
             search=search,
             generated_at=NovaCoreService._now(),
         )
@@ -768,7 +783,13 @@ def ask_workspace(
                   if question else NovaWorkspaceSearchOut(query="Prior work", result_count=len(hits), hits=hits[:40]))
         return NovaWorkspaceBrainOut(
             action=action,
-            answer=f"Mrs. Nova Brain searched prior Nova Workspace work for “{search.query}”.",
+            answer=_localized_result({
+                "en": f"Mrs. Nova Brain searched prior Nova Workspace work for “{search.query}”.",
+                "so": f"Nova waxay raadisay shaqadii hore: “{search.query}”.",
+                "ar": f"بحثت Nova في العمل السابق عن «{search.query}».",
+                "fr": f"Nova a recherché les travaux précédents : « {search.query} ».",
+                "es": f"Nova buscó trabajo anterior: «{search.query}».",
+            }, payload.answer_language),
             search=search,
             generated_at=NovaCoreService._now(),
         )
