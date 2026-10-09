@@ -535,6 +535,27 @@
     }
     return body;
   }
+
+  async function uploadBrowserFinalPromo(projectId, result) {
+    var form = new FormData();
+    form.append("file", result.blob, result.fileName || "amicor-nova-final-promo.webm");
+    var path = "/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/assets/browser-final-promo";
+    var shared = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
+    var res;
+    if (shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+    if (shared && typeof shared.authFetch === "function") {
+      res = await shared.authFetch(path, { method: "POST", body: form });
+    } else {
+      var headers = {};
+      if (token()) headers.Authorization = "Bearer " + token();
+      res = await fetch(path, { method: "POST", body: form, headers: headers });
+    }
+    var body = null;
+    try { body = await res.json(); } catch (err) { body = null; }
+    if (!res.ok) throw new Error(detailText(body, "Could not save the browser-built final promo. (" + res.status + ")"));
+    return body;
+  }
+
   function setSignedIn(on) {
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
@@ -1182,15 +1203,24 @@
             var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selectedProjectId));
             var localResult = await buildFinalPromo(detail);
             var downloadLink = showFinalPromoDownload(localResult);
+            var savedResult = null;
+            try {
+              savedResult = await uploadBrowserFinalPromo(selectedProjectId, localResult);
+            } catch (saveErr) {
+              showBanner("Final promo was built, but Nova could not save it to the project yet. Use the Download final promo link below. " + (saveErr.message || ""), false);
+            }
+            if (savedResult) await refreshAssets();
             if (downloadLink && downloadLink.scrollIntoView) {
               downloadLink.scrollIntoView({ behavior: "smooth", block: "center" });
             }
-            showBanner(
-              "Final promo built safely in this browser with " +
-              String(localResult.clipCount || localResult.artworkCount || 0) +
-              " visual asset(s)" + (localResult.hasVoice ? " and Nova voice. Download it below." : ". Download it below."),
-              true
-            );
+            if (savedResult) {
+              showBanner(
+                "Final promo built safely in this browser and saved to the project with " +
+                String(localResult.clipCount || localResult.artworkCount || 0) +
+                " visual asset(s)" + (localResult.hasVoice ? " and Nova voice." : "."),
+                true
+              );
+            }
           } catch (fallbackErr) {
             showBanner(fallbackErr.message || "Browser-safe final promo build also failed.", false);
           }

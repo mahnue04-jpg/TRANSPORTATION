@@ -51,6 +51,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _repair_guided_demo_copy(text: str) -> str:
+    """Repair legacy generated copy that accidentally spoke the UI label 'website guided demo'."""
+    value = str(text or "").strip()
+    if "website guided demo" not in value.lower():
+        return value
+    return (
+        "Meet AMICOR Nova, your AI operations workspace for everyday business work. "
+        "Busywork piles up fast for small business owners, and it steals focus from the work that matters. "
+        "Nova helps organize requests, follow-ups, documents, and next steps, with drafts you can review first. "
+        "Owner control stays with you while Nova prepares the work. "
+        "Visit getamicor.com to explore AMICOR Nova."
+    )
+
+
 class CreativeStudioService(ShortDramaMixin):
     def __init__(self, store: CreativeStudioStore | DbCreativeStudioStore | None = None):
         self.store = store or get_store()
@@ -956,6 +970,7 @@ class CreativeStudioService(ShortDramaMixin):
                     if asset.kind == "voiceover":
                         text = asset.content
                         break
+        text = _repair_guided_demo_copy(text)
         voice_args = {"script": text or "No voiceover script available."}
         if voice:
             voice_args['voice'] = voice
@@ -1200,6 +1215,8 @@ class CreativeStudioService(ShortDramaMixin):
             if candidate_path is None or candidate_path.is_file():
                 audio = candidate
                 break
+        if audio is not None and "website guided demo" in str(audio.content or "").lower():
+            audio = None
         if audio is None:
             voice_result = self.request_voice_generation(owner_id, project_id)
             audio_url = str(voice_result.get("url") or "").strip()
@@ -1500,6 +1517,58 @@ class CreativeStudioService(ShortDramaMixin):
             provider="nova_ffmpeg_compat",
         )
         return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
+
+
+    def persist_browser_final_promo(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        data: bytes,
+        filename: str = "amicor-nova-final-promo.webm",
+        content_type: str = "video/webm",
+    ) -> dict[str, Any]:
+        self._project_or_404(owner_id, project_id)
+        if not data:
+            raise CreativeStudioError("EMPTY_UPLOAD", "The browser final promo file was empty.", http_status=422)
+        if len(data) > 150 * 1024 * 1024:
+            raise CreativeStudioError("UPLOAD_TOO_LARGE", "The browser final promo is larger than 150 MB.", http_status=422)
+
+        suffix = Path(filename or "").suffix.lower()
+        if suffix not in {".webm", ".mp4"}:
+            suffix = ".mp4" if str(content_type or "").lower() == "video/mp4" else ".webm"
+
+        output_dir, public_prefix = _creative_media_root_and_prefix()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"nova-browser-final-{new_id('promo').split('_', 1)[-1]}{suffix}"
+        output_path.write_bytes(data)
+
+        asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="video",
+            title="Final AMICOR Nova promo",
+            content="Final promo assembled safely in the owner's browser from generated Creative Studio assets.",
+            status="GENERATED",
+            metadata={
+                "final_promo": True,
+                "render_mode": "browser_safe_upload",
+                "publish_ready": False,
+                "owner_review_required": True,
+                "content_type": content_type,
+                "file_size_bytes": len(data),
+            },
+            url=public_prefix + "/" + output_path.name,
+        )
+        job = self._start_job(owner_id, project_id, "short_video_assembly")
+        self._finish_job(
+            job,
+            status="GENERATED",
+            message="Browser-safe final AMICOR Nova promo saved successfully.",
+            asset_ids=[asset.id],
+            provider="nova_browser_mediarecorder",
+        )
+        return {"asset": asset.as_dict(), "url": asset.url, "status": "GENERATED"}
 
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
