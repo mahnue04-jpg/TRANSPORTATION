@@ -285,6 +285,56 @@ def is_multi_lane_remote_digital_query(query: str | None) -> bool:
     return len(digital_query_lanes(query)) >= 2
 
 
+# One explicit lane must match its own title family. A research description
+# inside a copywriter or project-manager listing is not research work.
+_SINGLE_LANE_TITLES: dict[str, re.Pattern[str]] = {
+    "admin": re.compile(
+        r"\b("
+        r"virtual assistant|virtual assistance|"
+        r"administrative (?:assistant|support|coordinator|specialist)|"
+        r"admin(?:istrative)? assistant|"
+        r"operations assistant|operations support|"
+        r"office assistant|business operations support"
+        r")\b",
+        re.I,
+    ),
+    "research": re.compile(
+        r"\b("
+        r"research (?:assistant|contractor|support|specialist|analyst)|"
+        r"business research|market research|internet research|competitor research"
+        r")\b",
+        re.I,
+    ),
+    "crm": re.compile(
+        r"\b("
+        r"crm|"
+        r"customer (?:operations|data|support)|"
+        r"data operations"
+        r")\b",
+        re.I,
+    ),
+}
+
+
+def single_lane_title_match(job: dict[str, Any], query: str | None) -> bool | None:
+    """Whether a one-lane search title belongs to that lane.
+
+    None means the query is not a single admin, research, or CRM lane.
+    """
+    if not is_remote_digital_search_intent(query):
+        return None
+    lanes = digital_query_lanes(query)
+    if len(lanes) != 1:
+        return None
+    pattern = _SINGLE_LANE_TITLES.get(next(iter(lanes)))
+    if pattern is None:
+        return None
+    title = str(job.get("title") or job.get("opportunity_title") or "")
+    if _LEADERSHIP_TITLE.search(title):
+        return False
+    return bool(pattern.search(title))
+
+
 def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
     """Title names a digital lane from the remote contractor brief.
 
@@ -1198,14 +1248,24 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     # does not grant a positive capability match (title_used_for_decision stays false).
     physical_blocked = blocks_physical_role_for_digital_search(job, query)
     performability_blockers = remote_digital_performability_blockers(job, query)
+    lane_decision = single_lane_title_match(job, query)
     lane_mismatch = bool(
-        is_multi_lane_remote_digital_query(query)
-        and not matches_remote_digital_work_lane(job)
+        (is_multi_lane_remote_digital_query(query) and not matches_remote_digital_work_lane(job))
+        or lane_decision is False
     )
     digital_rank_boost = False
     if physical_blocked or performability_blockers or lane_mismatch:
         score = min(score, 15)
         band = "REJECT"
+    elif (
+        lane_decision is True
+        and band == "REJECT"
+        and family_duty_match is False
+    ):
+        # The title is the requested lane. A narrow family-text miss should not
+        # hide an admin, research, or CRM role the owner asked for.
+        band = "OWNER_REVIEW"
+        score = max(score, 60)
     elif band not in {"INSUFFICIENT_INFORMATION", "REJECT"} and digital_contractor_rank_signal(text):
         digital_rank_boost = True
         score = min(100, score + 18)
