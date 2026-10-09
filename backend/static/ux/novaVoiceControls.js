@@ -8,6 +8,7 @@
   var speakingFallback = false;
   var lastAutoSpokenText = "";
   var autoReadTimer = null;
+  function t(message) { return window.NovaWorkspaceLanguage ? window.NovaWorkspaceLanguage.t(message) : message; }
   function selectedLanguage() { return document.documentElement.getAttribute("data-nova-language") || "en-US"; }
   function unavailableVoice() {
     var notice = document.getElementById("language-help");
@@ -26,6 +27,7 @@
       try { activeRecognition.abort(); } catch (_) {}
       activeRecognition = null;
     }
+    if (window.NovaWorkspaceSpeech) window.NovaWorkspaceSpeech.stop();
     var engine = voice();
     if (engine && engine.stop) {
       try { engine.stop("universal-stop"); } catch (_) {}
@@ -39,6 +41,7 @@
   function speak(text) {
     var value = String(text || "").trim();
     if (!value) return;
+    if (window.NovaWorkspaceSpeech) { window.NovaWorkspaceSpeech.speak(value); return; }
     var engine = voice();
     if (engine && engine.speak) {
       engine.speak(value, { persona: "Warm Conversational" }).then(function (ok) { if (ok === false) unavailableVoice(); }).catch(unavailableVoice);
@@ -89,8 +92,10 @@
     button.type = "button";
     button.className = "secondary";
     button.setAttribute("data-nova-read-result", "1");
-    button.setAttribute("aria-label", "Read Nova answer aloud");
-    button.textContent = "🎙 Read aloud";
+    button.setAttribute("data-nova-label", "Read Nova answer aloud");
+    button.setAttribute("aria-label", t("Read Nova answer aloud"));
+    button.setAttribute("data-nova-i18n", "🎙 Read aloud");
+    button.textContent = t("🎙 Read aloud");
     button.addEventListener("click", function () {
       lastAutoSpokenText = "";
       readBrainOutput("manual");
@@ -100,8 +105,10 @@
     stopButton.type = "button";
     stopButton.className = "secondary";
     stopButton.setAttribute("data-nova-read-stop", "1");
-    stopButton.setAttribute("aria-label", "Stop Nova reading");
-    stopButton.textContent = "⏹ Stop";
+    stopButton.setAttribute("data-nova-label", "Stop Nova reading");
+    stopButton.setAttribute("aria-label", t("Stop Nova reading"));
+    stopButton.setAttribute("data-nova-i18n", "⏹ Stop");
+    stopButton.textContent = t("⏹ Stop");
     stopButton.addEventListener("click", function () {
       stopAll();
     });
@@ -115,7 +122,7 @@
 
   function setStatus(host, message) {
     var el = host.querySelector("[data-nova-voice-status]");
-    if (el) el.textContent = message;
+    if (el) el.textContent = t(message);
   }
 
   function submitForm(form) {
@@ -196,26 +203,33 @@
     var talk = document.createElement("button");
     talk.type = "button";
     talk.className = "secondary";
-    talk.textContent = "🎤 Talk";
-    talk.setAttribute("aria-label", "Talk to Nova");
+    talk.setAttribute("data-nova-i18n", "🎤 Talk");
+    talk.textContent = t("🎤 Talk");
+    talk.setAttribute("data-nova-label", "Talk to Nova");
+    talk.setAttribute("aria-label", t("Talk to Nova"));
 
     var start = document.createElement("button");
     start.type = "button";
     start.className = "secondary";
-    start.textContent = "▶ Start Nova";
-    start.setAttribute("aria-label", "Start Nova with this request");
+    start.setAttribute("data-nova-i18n", "▶ Start Nova");
+    start.textContent = t("▶ Start Nova");
+    start.setAttribute("data-nova-label", "Start Nova with this request");
+    start.setAttribute("aria-label", t("Start Nova with this request"));
 
     var stop = document.createElement("button");
     stop.type = "button";
     stop.className = "secondary";
-    stop.textContent = "⏹ Stop";
-    stop.setAttribute("aria-label", "Stop Nova voice");
+    stop.setAttribute("data-nova-i18n", "⏹ Stop");
+    stop.textContent = t("⏹ Stop");
+    stop.setAttribute("data-nova-label", "Stop Nova voice");
+    stop.setAttribute("aria-label", t("Stop Nova voice"));
 
     var status = document.createElement("span");
     status.className = "hint";
     status.setAttribute("data-nova-voice-status", "1");
     status.setAttribute("aria-live", "polite");
-    status.textContent = "Voice ready.";
+    status.setAttribute("data-nova-i18n", "Voice ready.");
+    status.textContent = t("Voice ready.");
 
     host.appendChild(talk);
     host.appendChild(start);
@@ -230,7 +244,8 @@
     }
 
     talk.addEventListener("click", function () {
-      startListening(input, form, host);
+      if (window.NovaWorkspaceSpeech && form.id === "ask-form") document.getElementById("record-somali").click();
+      else startListening(input, form, host);
     });
     start.addEventListener("click", function () {
       if (!String(input.value || "").trim()) {
@@ -244,7 +259,7 @@
         return;
       }
       stopAll();
-      speakNextChange(form);
+      if (!window.NovaWorkspaceSpeech) speakNextChange(form);
       setStatus(host, "Running…");
       submitForm(form);
     });
@@ -276,7 +291,7 @@
     eligibleInputs().forEach(function (pair) {
       enhanceForm(pair[0], pair[1]);
     });
-    installBrainAutoRead();
+    if (!window.NovaWorkspaceSpeech) installBrainAutoRead();
     installReadResultButton();
   }
 
