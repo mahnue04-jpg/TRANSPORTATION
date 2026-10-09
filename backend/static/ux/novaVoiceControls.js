@@ -8,10 +8,15 @@
   var speakingFallback = false;
   var lastAutoSpokenText = "";
   var autoReadTimer = null;
+  function selectedLanguage() { return document.documentElement.getAttribute("data-nova-language") || "en-US"; }
+  function unavailableVoice() {
+    var notice = document.getElementById("language-help");
+    if (notice) notice.textContent = "Voice output is unavailable for this request. You can continue using Somali text or choose English audio.";
+  }
 
   function voice() {
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
-      voiceEngine = window.AmiCorHumanVoice.createEngine({ browserFallbackEnabled: true });
+      voiceEngine = window.AmiCorHumanVoice.createEngine({ browserFallbackEnabled: true, getLanguage: selectedLanguage });
     }
     return voiceEngine;
   }
@@ -36,14 +41,19 @@
     if (!value) return;
     var engine = voice();
     if (engine && engine.speak) {
-      engine.speak(value, { persona: "Warm Conversational" }).catch(function () {});
+      engine.speak(value, { persona: "Warm Conversational" }).then(function (ok) { if (ok === false) unavailableVoice(); }).catch(unavailableVoice);
       return;
     }
     if (!window.speechSynthesis) return;
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(value);
-      utterance.lang = "en-US";
+      utterance.lang = selectedLanguage();
+      if (/^so/i.test(utterance.lang)) {
+        var somali = window.speechSynthesis.getVoices().find(function (item) { return /^so(?:-|$)/i.test(item.lang); });
+        if (!somali) { unavailableVoice(); return; }
+        utterance.voice = somali;
+      }
       speakingFallback = true;
       utterance.onend = function () { speakingFallback = false; };
       window.speechSynthesis.speak(utterance);
@@ -150,7 +160,7 @@
     stopAll();
     var recognition = new SR();
     activeRecognition = recognition;
-    recognition.lang = "en-US";
+    recognition.lang = selectedLanguage();
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -164,7 +174,7 @@
     };
     recognition.onerror = function (event) {
       var code = event && event.error ? event.error : "unavailable";
-      setStatus(host, "Microphone error: " + code + ".");
+      setStatus(host, "Microphone error: " + code + ". You can type your request in English or Somali instead.");
     };
     recognition.onend = function () {
       if (activeRecognition === recognition) activeRecognition = null;
