@@ -690,12 +690,20 @@ def _project_context(db: Session, workspace_id: str, *, organization_id: str, us
     )
 
 
-def _answer_workspace_task(question: str, context: str) -> str:
+def _answer_workspace_task(question: str, context: str, answer_language: str = "en") -> str:
     """Draft customer work without importing internal platform health/readiness."""
     from app.ai import ask_openai
 
+    language_instruction = {
+        "en": "Answer in English. Understand requests written in either English or Somali.",
+        "so": "Answer in Somali (Af-Soomaali). Understand English or Somali input.",
+        "bilingual": "Answer in both English and Somali (Af-Soomaali), with clearly labeled matching sections.",
+    }[answer_language]
     prompt = (
         "You are Mrs. Nova Brain, a customer's workspace assistant.\n"
+        + language_instruction + " Preserve names, dates, amounts and service codes. "
+        "Translate faithfully; mark uncertain terms for review. Never rewrite original saved records when translating.\n"
+        +
         "Complete the user's requested task and return the actual deliverable. For blank "
         "templates, checklists, trackers, reports or drafts, produce them now with clearly "
         "marked placeholders for unknown facts. Missing agency rules do not block blank drafts.\n"
@@ -795,7 +803,7 @@ def ask_workspace(
         }
         if action == "ask" and len(question) < 3:
             raise NovaWorkspaceError("Ask Mrs. Nova Brain at least 3 characters", status_code=422)
-        answer = _answer_workspace_task(question or defaults.get(action, "Help with this workspace."), context_prefix)
+        answer = _answer_workspace_task(question or defaults.get(action, "Help with this workspace."), context_prefix, payload.answer_language)
         next_actions = []
 
     if conversation_id:
