@@ -174,13 +174,15 @@
         }
         try {
           const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-          const englishVoices = voices.filter((v) => /^en(?:-|$)/i.test(String(v && v.lang || "")));
+          const language = config.getLanguage ? config.getLanguage() : "en-US";
+          const englishVoices = voices.filter((v) => String(v && v.lang || "").split('-')[0].toLowerCase() === language.split('-')[0].toLowerCase());
+          if (!englishVoices.length && !/^en(?:-|$)/i.test(language)) { resolve(false); return; }
           const preferred = englishVoices.find((v) => /aria|jenny|guy|google|natural|neural|samantha|daniel/i.test(String(v && v.name || "")))
             || englishVoices[0]
             || null;
           const utter = new SpeechSynthesisUtterance(text);
           utter.voice = preferred;
-          utter.lang = preferred && preferred.lang ? preferred.lang : "en-US";
+          utter.lang = preferred && preferred.lang ? preferred.lang : language;
           utter.rate = Math.max(0.88, Math.min(1.03, Number(persona.rate || 1)));
           utter.pitch = Math.max(0.92, Math.min(1.06, Number(persona.pitch || 1)));
           utter.onend = () => resolve(true);
@@ -242,6 +244,7 @@
       onState({ speaking: true, reason: "speak-start", persona: personaName });
 
       const cleaned = sanitizeForSpeech(rawText);
+      let failed = false;
       state.resumeText = cleaned;
       const chunks = chunkTextForSpeech(cleaned, persona);
       state.queue = chunks;
@@ -283,6 +286,7 @@
           });
           const ok = await fallbackBrowserSpeak(chunk, persona);
           if (!ok) {
+            failed = true;
             onDebug({ type: "voice-fallback-browser-failed", index: i });
             break;
           }
@@ -296,7 +300,7 @@
       const interrupted = state.interrupted;
       state.speaking = false;
       onState({ speaking: false, reason: interrupted ? "interrupted" : "speak-complete", persona: personaName });
-      return !interrupted;
+      return !interrupted && !failed;
     }
 
     async function resume() {
