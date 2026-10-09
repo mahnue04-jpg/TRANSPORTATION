@@ -120,3 +120,21 @@ class NovaWorkspaceActivity(Base):
     ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkspaceTransfer(Base):
+    __tablename__ = "nova_workspace_transfers"
+
+    transfer_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    source_organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sender_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    accepted_organization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    destination_workspace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
