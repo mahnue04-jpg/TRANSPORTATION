@@ -1,7 +1,7 @@
 """Nova Workspace APIs. Separate from Health /workspace and frozen Freight."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
@@ -21,6 +21,7 @@ from app.core.nova.workspace.schemas import (
     NovaWorkspaceProjectOut,
     NovaWorkspaceProjectUpdate,
     NovaWorkspaceSearchOut,
+    NovaWorkspaceTransferCreate,
 )
 from app.db.session import get_db
 
@@ -29,6 +30,33 @@ router = APIRouter(
     tags=["nova-workspace"],
     dependencies=[Depends(require_nova_access)],
 )
+
+
+@router.post("/transcribe")
+def transcribe_speech(audio: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context)):
+    """Return original Somali speech as reviewable text, without saving the recording."""
+    from app.ai import get_client
+    allowed = {"audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}
+    content_type = (audio.content_type or "").split(";")[0]
+    if content_type not in allowed:
+        raise HTTPException(415, "Unsupported audio format. Try typing your request.")
+    try:
+        data = audio.file.read(10_000_001)
+    finally:
+        audio.file.close()
+    if not data or len(data) > 10_000_000:
+        raise HTTPException(413, "Recording must contain audio and be under 10 MB.")
+    try:
+        result = get_client().audio.transcriptions.create(model="gpt-4o-transcribe",
+            file=("speech." + allowed[content_type], data, content_type), language="so",
+            prompt="Transcribe the Somali speech in its original Somali language. Do not translate it into English.")
+    except Exception as exc:
+        raise HTTPException(503, "Somali transcription is unavailable. Please type your request or try again.") from exc
+    text = str(result.text or "").strip()
+    if not text or len(text) > 4000:
+        raise HTTPException(422, "No usable short transcript returned. Try a shorter recording or type your request.")
+    return {"text": text, "language": "so", "review_required": True}
 
 
 def _resolve_org(user: UserContext, requested: str | None) -> str:
@@ -44,6 +72,44 @@ def _raise(exc: Exception) -> None:
     if isinstance(exc, service.NovaWorkspaceError):
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     raise exc
+
+
+@router.post("/transfers")
+def prepare_transfer(payload: NovaWorkspaceTransferCreate,
+    user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    from . import transfers
+    try:
+        return transfers.prepare(db, payload.workspace_id, payload.recipient_email,
+            payload.include_conversations, payload.include_file_text,
+            organization_id=_resolve_org(user, None), user=user)
+    except service.NovaWorkspaceError as exc:
+        _raise(exc)
+
+
+@router.get("/transfers")
+def incoming_transfers(user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    from . import transfers
+    return transfers.incoming(db, user=user)
+
+
+@router.post("/transfers/{transfer_id}/accept")
+def accept_transfer(transfer_id: str,
+    user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    from . import transfers
+    try:
+        return transfers.accept(db, transfer_id, organization_id=_resolve_org(user, None), user=user)
+    except service.NovaWorkspaceError as exc:
+        _raise(exc)
+
+
+@router.post("/transfers/{transfer_id}/cancel")
+def cancel_transfer(transfer_id: str,
+    user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    from . import transfers
+    try:
+        return transfers.cancel(db, transfer_id, organization_id=_resolve_org(user, None), user=user)
+    except service.NovaWorkspaceError as exc:
+        _raise(exc)
 
 
 @router.get("/dashboard", response_model=NovaWorkspaceDashboardOut)
