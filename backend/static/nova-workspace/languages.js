@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   var rows = [
+    ["No projects in this signed-in account. Create a project below, or sign in to the account that owns your projects.","Akoonkan mashruuc kuma jiro. Hoos ka samee mashruuc, ama gal akoonka mashruucyada leh.","لا توجد مشاريع في هذا الحساب. أنشئ مشروعًا أدناه أو سجّل الدخول إلى الحساب الذي يملك مشاريعك.","Aucun projet dans ce compte. Créez un projet ci-dessous ou connectez-vous au compte propriétaire.","No hay proyectos en esta cuenta. Cree uno abajo o inicie sesión en la cuenta propietaria."],
     ['Screen language','Luqadda shaashadda','لغة الشاشة','Langue de l’écran','Idioma de pantalla'],
     ['Nova Workspace','Goobta shaqada Nova','مساحة عمل Nova','Espace de travail Nova','Espacio de trabajo Nova'],
     ['Nova Home','Bogga hore Nova','الرئيسية Nova','Accueil Nova','Inicio Nova'],

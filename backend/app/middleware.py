@@ -100,6 +100,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-src 'self'; "
                 "frame-ancestors 'self';"
             )
+        # Generated Workspace speech uses a local Blob URL, never a remote media host.
+        if request.url.path.rstrip("/") == "/nova/workspace":
+            headers["Content-Security-Policy"] += " media-src 'self' blob:;"
         for header, value in headers.items():
             response.headers.setdefault(header, value) # type: ignore
         return response # type: ignore

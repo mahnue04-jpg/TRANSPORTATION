@@ -101,7 +101,9 @@
       $("selected-project").textContent = t("Selected project: {title}", {title: selected.title});
       $("ask-input").placeholder = t("Ask Nova to work on {title}", {title: selected.title});
     }
-    $("transfer-project-help").textContent = t("No file is required. Create a project first if this account has none.");
+    $("transfer-project-help").textContent = projects.length ? t("No file is required. Create a project first if this account has none.") : t("No projects in this signed-in account. Create a project below, or sign in to the account that owns your projects.");
+    $("transfer-project").disabled = !projects.length;
+    $("transfer-create-project").classList.toggle("hidden", !!projects.length);
     $("project-list").innerHTML = listHtml(data.active_projects, t("No active projects yet."), function (row) {
       return "<div class=\"item\"><button class=\"linkish\" data-open-project=\"" + escapeHtml(row.workspace_id) + "\">" +
         escapeHtml(row.title) + "</button><div class=\"muted\">" + escapeHtml(row.workspace_id) + " · " +
@@ -206,6 +208,7 @@
       $("recording-status").textContent = t("Recording is unavailable in this browser. Type your request in Ask Nova."); return;
     }
     $("record-somali").disabled = true;
+    $("recording-status").setAttribute("aria-busy", "true");
     try {
       recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recorder = new MediaRecorder(recordingStream);
@@ -213,7 +216,7 @@
       var startingText = $("ask-input").value;
       var recordedLanguage = speechLanguage();
       recorder.ondataavailable = function (event) { if (event.data.size) chunks.push(event.data); };
-      recorder.onerror = function () { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Recording failed. Try typing your request."); };
+      recorder.onerror = function () { $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Recording failed. Try typing your request."); };
       recorder.onstop = async function () {
         releaseMicrophone();
         $("recording-status").textContent = t("Transcribing speech…");
@@ -228,13 +231,17 @@
           $("ask-input").focus();
           $("recording-status").textContent = t("Transcript ready. Review or correct the words, then press Ask Nova.");
         } catch (err) { $("recording-status").textContent = err.message; }
-        finally { $("record-somali").disabled = false; }
+        finally {
+          $("record-somali").disabled = false;
+          $("recording-status").setAttribute("aria-busy", "false");
+          recorder = null;
+        }
       };
       recorder.start();
       $("finish-somali").disabled = false;
       $("recording-status").textContent = t("Recording. Press Finish when you are done.");
       recordingTimer = setTimeout(function () { if (recorder.state === "recording") recorder.stop(); }, 60000);
-    } catch (_) { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Microphone could not start. Allow microphone access, or type your request."); }
+    } catch (_) { $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Microphone could not start. Allow microphone access, or type your request."); }
   });
   $("finish-somali").addEventListener("click", function () { if (recorder && recorder.state === "recording") recorder.stop(); });
   window.addEventListener("pagehide", function () { if (recorder) recorder.onstop = null; releaseMicrophone(); });
@@ -256,6 +263,10 @@
     $("answer-language").value = window.NovaWorkspaceLanguage.current();
     updateAnswerLanguage();
   }
+  $("transfer-create-project").addEventListener("click", function () {
+    $("project-form").scrollIntoView({behavior: "smooth", block: "center"});
+    $("project-title").focus();
+  });
   $("transfer-project").addEventListener("change", function () {
     var selected = projects.find(function (row) { return row.workspace_id === $("transfer-project").value; });
     selectProject(selected || null, false);
