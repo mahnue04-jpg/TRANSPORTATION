@@ -139,7 +139,7 @@ class NovaWorkspaceDashboardOut(BaseModel):
 
 
 class NovaWorkspaceBrainRequest(BaseModel):
-    answer_language: Literal["en", "so", "bilingual"] = "en"
+    answer_language: Literal["en", "so", "ar", "fr", "es", "bilingual"] = "en"
     action: Literal[
         "ask",
         "continue",
