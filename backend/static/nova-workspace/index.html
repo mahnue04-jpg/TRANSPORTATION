@@ -37,7 +37,8 @@
     <div id="banner" class="banner hidden"></div>
     <section class="brain-card" aria-label="AMICOR Nova demo"><h2>AMICOR Nova master demo</h2><p class="hint">Use the 60-second demo as the standard product overview for prospects, partners, applications, and outreach.</p><div class="command-actions"><a class="button" href="/nova/one-minute-demo">Watch 60-second demo</a></div></section>
 
-    <section class="command-card" aria-label="Workspace search and Mrs. Nova Brain">
+    <section id="workspace-command" class="command-card" aria-label="Workspace search and Mrs. Nova Brain">
+      <p id="selected-project" role="status">All workspace projects · Select a project below to work on it.</p>
       <form id="workspace-search-form">
         <label class="sr-only" for="workspace-search">Search Nova Workspace</label>
         <input id="workspace-search" type="search" placeholder="Search projects, files, and prior Nova work" />
@@ -45,7 +46,7 @@
       </form>
       <form id="ask-form" class="ask-row">
         <label class="sr-only" for="ask-input">Ask Mrs. Nova Brain</label>
-        <input id="ask-input" type="text" placeholder="Ask Mrs. Nova Brain about this workspace" />
+        <textarea id="ask-input" rows="4" maxlength="4000" placeholder="Ask Mrs. Nova Brain about this workspace"></textarea>
         <button type="submit">Ask Nova</button>
       </form>
       <div class="command-actions">
@@ -112,18 +113,18 @@
       </article>
       <article class="card">
         <h2>Saved / recent searches</h2>
-        <div id="recent-searches">No searches yet.</div>
+        <div id="recent-searches">Search above to save a search here.</div>
       </article>
       <article class="card">
         <h2>Assistant history</h2>
-        <p class="hint">Existing /api/history for this signed-in user. Not Health or Freight records.</p>
+        <p class="hint">Saved Nova Workspace messages you can reopen.</p>
         <div id="assistant-history">No assistant history loaded.</div>
       </article>
     </section>
 
     <section class="card" id="search-results-card">
       <h2>Workspace search results</h2>
-      <div id="search-results">Search Nova-owned workspace content only.</div>
+      <div id="search-results">Enter a search above to find your saved projects, files, and conversations.</div>
     </section>
   </main>
 
