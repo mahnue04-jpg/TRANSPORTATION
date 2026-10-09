@@ -308,3 +308,74 @@ def test_nova_workspace_does_not_mutate_frozen_products(client: TestClient) -> N
     assert freight.status_code == 200
     assert "New Freight Request" in freight.text or "Freight / Logistics" in freight.text
     assert not any("workspace.js" in path.name for path in FREIGHT_DIR.glob("*"))
+
+
+def test_customer_draft_uses_workspace_context_and_history(client, monkeypatch):
+    from app.core.nova.service import NovaCoreService
+    captured = []
+    def draft(prompt):
+        captured.append(prompt)
+        return 'Onboarding checklist\nItem | Due date | Completion date | Reviewer | Status\nNeeds Issa confirmation'
+    monkeypatch.setattr('app.ai.ask_openai', draft)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Customer drafting must not read Health ISF readiness')
+    monkeypatch.setattr(NovaCoreService, 'get_context', forbidden)
+    headers = _headers(client)
+    other = _headers(client, 'staff@amicor.local')
+    project = client.post('/api/nova/workspace/projects', headers=headers, json={
+        'title': 'Easy Care onboarding', 'description': 'Office associate reviews; unknown rules need Issa confirmation',
+    }).json()
+    response = client.post('/api/nova/workspace/ask', headers=headers, json={
+        'workspace_id': project['workspace_id'], 'question': 'Produce a blank onboarding checklist now',
+    })
+    assert response.status_code == 200, response.text
+    answer = response.json()
+    assert 'Item | Due date' in answer['answer']
+    assert 'Office associate reviews' in captured[-1]
+    assert 'health_isf_summary' not in captured[-1]
+    cid = answer['conversation_id']
+    history = client.get('/api/nova/workspace/dashboard', headers=headers).json()['assistant_history']
+    assert any(row['conversation_id'] == cid and 'Onboarding checklist' in row['content'] for row in history)
+    other_history = client.get('/api/nova/workspace/dashboard', headers=other).json()['assistant_history']
+    assert all(row['conversation_id'] != cid for row in other_history)
+    for action in ('continue', 'summarize', 'explain_changed', 'next_action'):
+        response = client.post('/api/nova/workspace/ask', headers=headers, json={
+            'action': action, 'workspace_id': project['workspace_id'], 'conversation_id': cid,
+        })
+        assert response.status_code == 200, response.text
+        assert 'Onboarding checklist' in captured[-1]
+    second = client.post('/api/nova/workspace/projects', headers=headers, json={'title': 'Another project'}).json()
+    switched = client.post('/api/nova/workspace/ask', headers=headers, json={
+        'workspace_id': second['workspace_id'], 'conversation_id': cid, 'question': 'Draft a task list',
+    }).json()
+    assert switched['conversation_id'] != cid
+    assert 'Office associate reviews' not in captured[-1]
+
+
+def test_find_files_and_prior_work_use_saved_records(client, monkeypatch):
+    monkeypatch.setattr('app.ai.ask_openai', lambda prompt: 'Saved checklist marker')
+    headers = _headers(client)
+    project = client.post('/api/nova/workspace/projects', headers=headers, json={'title': 'Record retrieval'}).json()
+    wid = project['workspace_id']
+    saved = client.post('/api/nova/workspace/files', headers=headers, json={
+        'workspace_id': wid, 'filename': 'roster.txt', 'excerpt': 'Roster evidence marker',
+    }).json()
+    found = client.post('/api/nova/workspace/ask', headers=headers, json={'action': 'find_file', 'workspace_id': wid}).json()
+    assert any(row['id'] == saved['file_id'] for row in found['search']['hits'])
+    asked = client.post('/api/nova/workspace/ask', headers=headers, json={
+        'workspace_id': wid, 'question': 'Read the roster excerpt and draft a summary',
+    }).json()
+    prior = client.post('/api/nova/workspace/ask', headers=headers, json={'action': 'search_prior', 'workspace_id': wid}).json()
+    assert any(row['id'] == asked['conversation_id'] for row in prior['search']['hits'])
+    searched = client.get('/api/nova/workspace/search', headers=headers, params={'q': 'Roster evidence marker'}).json()
+    assert any(row['id'] == saved['file_id'] for row in searched['hits'])
+
+
+def test_workspace_generation_failure_is_honest(client, monkeypatch):
+    def unavailable(prompt):
+        raise RuntimeError('Provider unavailable')
+    monkeypatch.setattr('app.ai.ask_openai', unavailable)
+    response = client.post('/api/nova/workspace/ask', headers=_headers(client), json={'question': 'Create a blank tracker'})
+    assert response.status_code == 200
+    assert 'could not generate' in response.json()['answer']
+    assert 'readiness' not in response.json()['answer']
