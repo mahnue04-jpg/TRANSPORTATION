@@ -3,6 +3,11 @@
 (function () {
   var state = { projectId: null, conversationId: null };
   var brainBusy = false;
+  var preparedTransferId = null;
+  var recorder = null;
+  var recordingStream = null;
+  var recordingTimer = null;
+  function language() { return $("answer-language").value || "en"; }
 
   function selectProject(project, focus) {
     state.projectId = project ? project.workspace_id : null;
@@ -116,6 +121,12 @@
     setSignedIn(true);
     var data = await api("/api/nova/workspace/dashboard");
     renderDashboard(data);
+    var transfers = await api("/api/nova/workspace/transfers");
+    $("incoming-transfers").innerHTML = listHtml(transfers, "No pending project copies for this account.", function (row) {
+      return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong> from " + escapeHtml(row.sender_email) +
+        "<p>Instructions + " + row.conversation_count + " conversations + " + row.file_text_count + " file texts. Expires " + escapeHtml(row.expires_at) + "</p>" +
+        "<button data-accept-transfer=\"" + escapeHtml(row.transfer_id) + "\">Accept and copy this project</button></div>";
+    });
     if (!preserveBrain) $("brain-output").textContent = "Mrs. Nova Brain is connected to this Nova Workspace.";
   }
   async function runBrain(action, question) {
@@ -134,6 +145,7 @@
       method: "POST",
       body: JSON.stringify({
         action: action,
+        answer_language: language(),
         question: question !== undefined ? question : (action === "ask" ? $("ask-input").value.trim() : null),
         workspace_id: state.projectId,
         conversation_id: state.conversationId
@@ -165,6 +177,76 @@
 
   if (session() && session().restore) session().restore();
   refresh().catch(function (err) { showBanner(err.message); });
+  function releaseMicrophone() {
+    if (recordingStream) recordingStream.getTracks().forEach(function (track) { track.stop(); });
+    recordingStream = null;
+    clearTimeout(recordingTimer);
+    $("finish-somali").disabled = true;
+  }
+  $("record-somali").addEventListener("click", async function () {
+    if (!token()) { showBanner("Sign in before recording speech."); return; }
+    if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $("recording-status").textContent = "Recording is unavailable in this browser. You can type Somali in Ask Nova."; return;
+    }
+    $("record-somali").disabled = true;
+    try {
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(recordingStream);
+      var chunks = [];
+      var startingText = $("ask-input").value;
+      recorder.ondataavailable = function (event) { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = function () { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = "Recording failed. Try typing Somali."; };
+      recorder.onstop = async function () {
+        releaseMicrophone();
+        $("recording-status").textContent = "Transcribing Somali…";
+        try {
+          var form = new FormData();
+          form.append("audio", new Blob(chunks, { type: recorder.mimeType }), "speech");
+          var result = await api("/api/nova/workspace/transcribe", { method: "POST", body: form });
+          $("ask-input").value = $("ask-input").value === startingText ? result.text : $("ask-input").value + "\n" + result.text;
+          $("answer-language").value = "so";
+          $("answer-language").dispatchEvent(new Event("change"));
+          $("ask-input").focus();
+          $("recording-status").textContent = "Somali transcript is ready. Review or correct the words, then press Ask Nova. / Hubi qoraalka, kadib guji Ask Nova.";
+        } catch (err) { $("recording-status").textContent = err.message + " You can type Somali instead."; }
+        finally { $("record-somali").disabled = false; }
+      };
+      recorder.start();
+      $("finish-somali").disabled = false;
+      $("recording-status").textContent = "Recording Somali. Press Finish when you are done. / Ku hadal Af-Soomaali.";
+      recordingTimer = setTimeout(function () { if (recorder.state === "recording") recorder.stop(); }, 60000);
+    } catch (_) { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = "Microphone could not start. Allow microphone access, or type Somali."; }
+  });
+  $("finish-somali").addEventListener("click", function () { if (recorder && recorder.state === "recording") recorder.stop(); });
+  window.addEventListener("pagehide", function () { if (recorder) recorder.onstop = null; releaseMicrophone(); });
+  $("answer-language").addEventListener("change", function () {
+    document.documentElement.setAttribute("data-nova-language", language() === "en" ? "en-US" : "so-SO");
+    $("ask-input").setAttribute("lang", language() === "en" ? "en" : "so");
+  });
+  $("transfer-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    if (!state.projectId) { showBanner("Select the project you want to copy first."); return; }
+    try {
+      var result = await api("/api/nova/workspace/transfers", { method: "POST", body: JSON.stringify({
+        workspace_id: state.projectId, recipient_email: $("transfer-email").value.trim(),
+        include_conversations: $("transfer-conversations").checked,
+        include_file_text: $("transfer-files").checked
+      }) });
+      $("transfer-preview").textContent = result.title + " → " + result.recipient_email + ": " + result.status +
+        ". Instructions, " + result.conversation_count + " conversations and " + result.file_text_count + " file texts. Recipient signs in and accepts under Incoming project copies. No email was sent.";
+      preparedTransferId = result.transfer_id;
+      $("cancel-transfer").classList.toggle("hidden", result.status !== "pending");
+      showBanner("Project copy prepared for recipient acceptance.", true);
+    } catch (err) { showBanner(err.message); }
+  });
+  $("cancel-transfer").addEventListener("click", async function () {
+    if (!preparedTransferId) return;
+    try {
+      await api("/api/nova/workspace/transfers/" + encodeURIComponent(preparedTransferId) + "/cancel", { method: "POST" });
+      $("transfer-preview").textContent = "Transfer canceled. The recipient cannot accept it.";
+      $("cancel-transfer").classList.add("hidden");
+    } catch (err) { showBanner(err.message); }
+  });
 
   $("workspace-search-form").addEventListener("submit", async function (event) {
     event.preventDefault();
@@ -234,11 +316,23 @@
     } catch (err) { showBanner(err.message); }
   });
   document.addEventListener("click", async function (event) {
+    var transferBtn = event.target.closest("[data-accept-transfer]");
     var searchBtn = event.target.closest("[data-repeat-search]");
     var projectBtn = event.target.closest("[data-open-project]");
     var convoBtn = event.target.closest("[data-open-convo]");
     var fileBtn = event.target.closest("[data-open-file]");
     try {
+      if (transferBtn) {
+        transferBtn.disabled = true;
+        try {
+          var accepted = await api("/api/nova/workspace/transfers/" + encodeURIComponent(transferBtn.getAttribute("data-accept-transfer")) + "/accept", { method: "POST" });
+          var copied = await api("/api/nova/workspace/projects/" + encodeURIComponent(accepted.destination_workspace_id));
+          selectProject(copied, true);
+          $("brain-output").textContent = "USER-SAVED INFORMATION\n\n" + copied.title + "\n\n" + (copied.description || "");
+          await refresh(true);
+          showBanner("Accepted project copy. You can now work on it in Ask Nova.", true);
+        } finally { transferBtn.disabled = false; }
+      }
       if (searchBtn) {
         $("workspace-search").value = searchBtn.getAttribute("data-repeat-search");
         $("workspace-search-form").requestSubmit();
