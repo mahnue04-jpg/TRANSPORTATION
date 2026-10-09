@@ -57,3 +57,30 @@ async def test_non_demo_routes_keep_deny_framing():
 
     assert response.headers["X-Frame-Options"] == "DENY"
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+@pytest.mark.parametrize('path', ['/nova/workspace', '/nova/workspace/'])
+@pytest.mark.asyncio
+async def test_workspace_generated_audio_allowed_without_remote_media_or_script_sources(path):
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        return SimpleNamespace(headers={})
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
+    policy = response.headers['Content-Security-Policy']
+    assert "media-src 'self' blob:;" in policy
+    assert "script-src 'self' 'unsafe-inline';" in policy
+    assert "connect-src 'self';" in policy
+    assert 'https:' not in policy
+
+
+@pytest.mark.asyncio
+async def test_generated_audio_permission_does_not_expand_other_routes():
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        return SimpleNamespace(headers={})
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path='/dispatch')), call_next)
+    assert 'blob:' not in response.headers['Content-Security-Policy']

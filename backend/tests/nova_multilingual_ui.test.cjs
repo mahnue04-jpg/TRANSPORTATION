@@ -61,11 +61,11 @@ function speechContext(fetch) {
     AbortController, Blob, Uint8Array, atob,
     URL: {createObjectURL: () => 'blob:audio', revokeObjectURL: () => {revoked=true;}},
     fetch: async (url, options) => {request={url,options}; return fetch();},
-    document: {getElementById: id => id === 'workspace-audio' ? audio : id === 'answer-language' ? {value:'ar'} : {set textContent(v){message=v;}}},
+    document: {querySelectorAll:()=>[], getElementById: id => id === 'workspace-audio' ? audio : id === 'answer-language' ? {value:'ar'} : {set textContent(v){message=v;}}},
     window: {addEventListener() {}, NovaWorkspaceLanguage:{t: x=>x}, AmiCorSession: {getAuthHeaders:()=>({Authorization:'Bearer test'})}}
   };
   vm.runInNewContext(fs.readFileSync(root + 'speech.js','utf8'),context);
-  return {api:context.window.NovaWorkspaceSpeech, snapshot:()=>({source,revoked,shown,message,request})};
+  return {audio, api:context.window.NovaWorkspaceSpeech, snapshot:()=>({source,revoked,shown,message,request})};
 }
 
 test('Arabic audio request preserves native Play when browser blocks autoplay', async () => {
@@ -99,3 +99,12 @@ test('failed speech service keeps text and reports unavailability', async () => 
   assert.equal(state.snapshot().shown,false);
   assert.match(state.snapshot().message,/Your text remains available/);
 });
+
+ test('a decoder failure removes the unusable player and clears its audio URL', async () => {
+  const state = speechContext(async () => ({ok:true,json:async()=>({audio_b64:'SUQz',mime_type:'audio/mpeg'})}));
+  await state.api.speak('مرحبا');
+  state.audio.onerror();
+  assert.equal(state.snapshot().shown,false);
+  assert.equal(state.snapshot().revoked,true);
+  assert.match(state.snapshot().message,/Speech is unavailable/);
+ });

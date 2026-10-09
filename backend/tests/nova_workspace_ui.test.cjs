@@ -12,7 +12,7 @@ test('project selection, action requests, reopened history and searchable result
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(type, fn) { this.handlers[type] = fn; },
       dispatchEvent(event) { if (this.handlers[event.type]) this.handlers[event.type](event); },
-      setAttribute() {}, appendChild() {},
+      setAttribute(k, v) { this[k] = v; }, appendChild() {},
       scrollIntoView() { this.scrolled = true; },
       focus() { this.focused = true; },
     });
@@ -97,6 +97,10 @@ test('project selection, action requests, reopened history and searchable result
   assert.equal(tracksStopped, true);
   assert.equal(requests.filter(r => r.url.endsWith('/ask')).length, asksBeforeRecording);
   assert.match(element('recording-status').textContent, /Review or correct/);
+  assert.equal(element('recording-status')['aria-busy'], 'false');
+  assert.equal(element('finish-somali').disabled, true);
+  assert.equal(element('record-somali').disabled, false);
+  assert.match(element('transfer-project').innerHTML, /Onboarding/);
   element('transfer-project').value = 'B';
   element('transfer-project').handlers.change();
   element('transfer-email').value = 'issa@example.com';
