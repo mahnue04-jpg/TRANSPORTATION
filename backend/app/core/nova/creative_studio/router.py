@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1251,6 +1251,28 @@ def prepare_talking_presenter_preview(
             "asset": asset.as_dict(),
             "url": generated_url,
         }
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assets/browser-final-promo")
+async def save_browser_final_promo(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        payload = await file.read()
+        return get_service(db).persist_browser_final_promo(
+            user.user_id,
+            project_id,
+            data=payload,
+            filename=file.filename or "amicor-nova-final-promo.webm",
+            content_type=file.content_type or "video/webm",
+        )
     except CreativeStudioError as exc:
         _raise(exc)
         raise
