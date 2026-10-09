@@ -7,6 +7,13 @@ from pydantic import BaseModel, Field
 from app.core.nova.today.schemas import NovaTodaySourceLink
 
 
+class NovaWorkspaceTransferCreate(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=32)
+    recipient_email: str = Field(max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    include_conversations: bool = False
+    include_file_text: bool = False
+
+
 class NovaWorkspaceProjectCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)
     description: str | None = Field(default=None, max_length=4000)
@@ -132,6 +139,7 @@ class NovaWorkspaceDashboardOut(BaseModel):
 
 
 class NovaWorkspaceBrainRequest(BaseModel):
+    answer_language: Literal["en", "so", "bilingual"] = "en"
     action: Literal[
         "ask",
         "continue",

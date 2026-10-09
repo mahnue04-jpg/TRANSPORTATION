@@ -11,6 +11,7 @@ test('project selection, action requests, reopened history and searchable result
       value: '', textContent: '', innerHTML: '', handlers: {},
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(type, fn) { this.handlers[type] = fn; },
+      dispatchEvent(event) { if (this.handlers[event.type]) this.handlers[event.type](event); },
       setAttribute() {}, appendChild() {},
       scrollIntoView() { this.scrolled = true; },
       focus() { this.focused = true; },
@@ -26,23 +27,34 @@ test('project selection, action requests, reopened history and searchable result
   const requests = [];
   const projects = { A: { workspace_id: 'A', title: 'Onboarding', description: 'Training tracker' }, B: { workspace_id: 'B', title: 'Timesheets' } };
   const document = {
+    documentElement: { setAttribute() {} },
     getElementById: element,
     querySelectorAll: () => actions,
     addEventListener(type, fn) { if (type === 'click') click = fn; },
     createElement: () => element('created'),
   };
   const fetch = async (url, options = {}) => {
-    requests.push({ url, body: options.body && JSON.parse(options.body) });
+    requests.push({ url, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
     let data = {};
     if (url.endsWith('/dashboard')) data = { assistant_history: [{ role: 'assistant', content: 'Saved draft', conversation_id: 'C' }] };
+    else if (url.endsWith('/transfers')) data = [];
+    else if (url.endsWith('/transcribe')) data = { text: 'Waxaan rabaa liiska tababarka.' };
     else if (url.includes('/projects/')) data = projects[url.split('/').pop()];
     else if (url.includes('/conversations/')) data = { conversation_id: 'C', workspace_id: 'B', messages: [{ role: 'assistant', content: 'Saved timesheet draft' }] };
     else if (url.includes('/search?')) data = { hits: [{ kind: 'project', id: 'A', title: 'Onboarding', snippet: 'Tracker' }] };
     else if (url.endsWith('/ask')) data = { conversation_id: 'NEW', answer: 'Actual draft' };
     return { ok: true, status: 200, json: async () => data };
   };
+  let tracksStopped = false;
+  class Recorder {
+    constructor() { this.mimeType = 'audio/webm'; }
+    start() { this.state = 'recording'; }
+    stop() { this.state = 'inactive'; this.ondataavailable({data: new Blob(['audio'])}); this.onstop(); }
+  }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../static/nova-workspace/workspace.js'), 'utf8'), {
-    document, fetch, FormData: class {}, window: { AmiCorSession: { getAccessToken: () => 'test', restore() {} } },
+    document, fetch, Blob, Event, setTimeout, clearTimeout, MediaRecorder: Recorder,
+    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { tracksStopped = true; } }] }) } },
+    FormData: class { append() {} }, window: { MediaRecorder: Recorder, addEventListener() {}, AmiCorSession: { getAccessToken: () => 'test', restore() {} } },
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   await settle();
@@ -61,11 +73,13 @@ test('project selection, action requests, reopened history and searchable result
   await open('data-open-convo', 'C');
   assert.equal(element('selected-project').textContent, 'Selected project: Timesheets');
   element('ask-input').value = 'Revise this draft';
+  element('answer-language').value = 'bilingual';
   await element('ask-form').handlers.submit({ preventDefault() {} });
   const request = requests.filter(r => r.url.endsWith('/ask')).at(-1).body;
   assert.equal(request.workspace_id, 'B');
   assert.equal(request.conversation_id, 'C');
   assert.equal(request.question, 'Revise this draft');
+  assert.equal(request.answer_language, 'bilingual');
   assert.match(element('assistant-history').innerHTML, /data-open-convo="C"/);
   element('workspace-search').value = 'training';
   await element('workspace-search-form').handlers.submit({ preventDefault() {} });
@@ -74,4 +88,13 @@ test('project selection, action requests, reopened history and searchable result
   await open('data-open-project', 'A');
   await actions[0].handlers.click();
   assert.equal(requests.filter(r => r.url.endsWith('/ask')).at(-1).body.conversation_id, null);
+  const asksBeforeRecording = requests.filter(r => r.url.endsWith('/ask')).length;
+  await element('record-somali').handlers.click();
+  element('finish-somali').handlers.click();
+  await settle();
+  assert.equal(element('ask-input').value, 'Waxaan rabaa liiska tababarka.');
+  assert.equal(element('answer-language').value, 'so');
+  assert.equal(tracksStopped, true);
+  assert.equal(requests.filter(r => r.url.endsWith('/ask')).length, asksBeforeRecording);
+  assert.match(element('recording-status').textContent, /Review or correct/);
 });

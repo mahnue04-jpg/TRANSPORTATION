@@ -49,6 +49,11 @@
         <textarea id="ask-input" rows="4" maxlength="4000" placeholder="Ask Mrs. Nova Brain about this workspace"></textarea>
         <button type="submit">Ask Nova</button>
       </form>
+      <label for="answer-language">Answer language / Luqadda jawaabta</label>
+      <select id="answer-language"><option value="en">English</option><option value="so">Af-Soomaali</option><option value="bilingual">English + Af-Soomaali</option></select>
+      <p class="hint" id="language-help">Type in English or Somali. For translation, paste text and ask Nova to translate it. Somali voice depends on the browser and voice provider; review the transcript before submitting.</p>
+      <div class="command-actions"><button id="record-somali" type="button" class="secondary">Record Somali speech</button><button id="finish-somali" type="button" class="secondary" disabled>Finish and show Somali text</button></div>
+      <p id="recording-status" class="hint" role="status">Record up to 60 seconds, then review the Somali text in Ask Nova before submitting. Recording uses Nova's speech service; audio is not saved in your Workspace.</p>
       <div class="command-actions">
         <button type="button" data-brain="continue" class="secondary">Continue work</button>
         <button type="button" data-brain="summarize" class="secondary">Summarize project</button>
@@ -75,6 +80,20 @@
       <p id="trust-labels" class="hint">Trust labels: VERIFIED DATA · USER-SAVED INFORMATION · AI SUGGESTION</p>
     </section>
 
+    <section class="card" aria-label="Project transfers">
+      <h2>Transfer a project</h2>
+      <p class="hint">Select your testing project above, then prepare a copy for the recipient to accept after signing in. Your original and their existing projects stay intact. Login, billing, connected accounts and original uploaded files are not copied.</p>
+      <form id="transfer-form">
+        <label>Recipient account email<input id="transfer-email" type="email" required maxlength="320" /></label>
+        <label><input id="transfer-conversations" type="checkbox" /> Include saved conversations and drafts</label>
+        <label><input id="transfer-files" type="checkbox" /> Include saved file text (not original files)</label>
+        <button type="submit">Prepare selected project transfer</button>
+      </form>
+      <p id="transfer-preview" role="status">Project instructions are included. Choose optional content before preparing the copy.</p>
+      <button id="cancel-transfer" class="secondary hidden" type="button">Cancel prepared transfer</button>
+      <h3>Incoming project copies</h3>
+      <div id="incoming-transfers">Sign in to see copies offered to your email.</div>
+    </section>
     <section class="grid-2">
       <article class="card">
         <h2>Create new workspace / project</h2>
@@ -129,8 +148,8 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/ux/humanVoiceEngine.js?v=20260926.1"></script>
+  <script src="/static/ux/humanVoiceEngine.js?v=20261009.1"></script>
   <script src="/static/nova-workspace/workspace.js"></script>
-  <script src="/static/ux/novaVoiceControls.js?v=20260926.3"></script>
+  <script src="/static/ux/novaVoiceControls.js?v=20261009.1"></script>
 </body>
 </html>

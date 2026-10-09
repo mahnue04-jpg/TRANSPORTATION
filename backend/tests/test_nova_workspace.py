@@ -70,6 +70,9 @@ def test_nova_workspace_signed_out_blocks_apis(client: TestClient) -> None:
     assert page.status_code == 200
     assert "Sign in to use Nova Workspace." in page.text
     assert client.get("/api/nova/workspace/dashboard").status_code == 401
+    assert client.get("/api/nova/workspace/transfers").status_code == 401
+    assert client.post("/api/nova/workspace/transfers/x/accept").status_code == 401
+    assert client.post("/api/nova/workspace/transcribe", files={"audio": ("speech.webm", b"audio", "audio/webm")}).status_code == 401
     assert client.post(
         "/api/nova/workspace/projects",
         json={"title": "Should not persist"},
