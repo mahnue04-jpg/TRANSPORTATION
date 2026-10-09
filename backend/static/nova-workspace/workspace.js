@@ -7,14 +7,18 @@
   var recorder = null;
   var recordingStream = null;
   var recordingTimer = null;
+  function t(key, values) { key = String(key || ""); return window.NovaWorkspaceLanguage ? window.NovaWorkspaceLanguage.t(key, values) : key.replace(/\{(\w+)\}/g, function (_, name) { return values && values[name] !== undefined ? values[name] : "{" + name + "}"; }); }
+  var projects = [];
+  function speechLanguage() { return language() === "bilingual" ? "so" : language(); }
   function language() { return $("answer-language").value || "en"; }
 
   function selectProject(project, focus) {
     state.projectId = project ? project.workspace_id : null;
     state.conversationId = null;
-    $("selected-project").textContent = project ? "Selected project: " + project.title : "All workspace projects";
+    $("selected-project").textContent = project ? t("Selected project: {title}", {title: project.title}) : t("All workspace projects");
+    $("transfer-project").value = state.projectId || "";
     $("ask-input").value = "";
-    $("ask-input").placeholder = project ? "Ask Nova to work on " + project.title : "Ask Mrs. Nova Brain about this workspace";
+    $("ask-input").placeholder = project ? t("Ask Nova to work on {title}", {title: project.title}) : t("Ask Mrs. Nova Brain about this workspace");
     if (focus) {
       $("workspace-command").scrollIntoView({ behavior: "smooth", block: "start" });
       $("ask-input").focus({ preventScroll: true });
@@ -54,7 +58,7 @@
   function renderSearchHit(hit) {
     var attribute = { project: "data-open-project", conversation: "data-open-convo", file: "data-open-file" }[hit.kind];
     var title = attribute ? "<button class=\"linkish\" " + attribute + "=\"" + escapeHtml(hit.id) + "\">" + escapeHtml(hit.title) + "</button>" : escapeHtml(hit.title);
-    return "<div class=\"item\"><strong>" + escapeHtml(hit.kind) + "</strong> · " + title + "<div class=\"muted\">" + escapeHtml(hit.snippet) + "</div></div>";
+    return "<div class=\"item\"><strong>" + escapeHtml(t(hit.kind)) + "</strong> · " + title + "<div class=\"muted\">" + escapeHtml(hit.snippet) + "</div></div>";
   }
   async function api(path, options) {
     var headers = {};
@@ -66,15 +70,16 @@
     try {
       response = await fetch(path, Object.assign({}, opts, { headers: headers }));
     } catch (_) {
-      throw new Error("Network error. Saved work was not changed.");
+      throw new Error(t("Network error. Saved work was not changed."));
     }
     var body = null;
     try { body = await response.json(); } catch (_) {}
-    if (response.status === 401) throw new Error("Session expired. Sign in again.");
-    if (response.status === 403) throw new Error("Access denied.");
-    if (response.status === 404) throw new Error("Not found / unavailable.");
-    if (response.status >= 500) throw new Error("Temporary system error.");
-    if (!response.ok) throw new Error(errorText(body, "Request failed."));
+    if (response.status === 401) throw new Error(t("Session expired. Sign in again."));
+    if (response.status === 403) throw new Error(t("Access denied."));
+    if (response.status === 404) throw new Error(t("Not found / unavailable."));
+    if (response.status === 503 && path === "/api/nova/workspace/transcribe") throw new Error(t("Speech transcription is unavailable. Please type your request or try again."));
+    if (response.status >= 500) throw new Error(t("Temporary system error."));
+    if (!response.ok) throw new Error(errorText(body, t("Request failed.")));
     return body;
   }
   function setSignedIn(on) {
@@ -82,64 +87,75 @@
     $("login-form").classList.add("hidden");
     var ident = identity();
     $("session-meta").textContent = on
-      ? ((ident && (ident.name || ident.email)) || "Signed in") + " · Mrs. Nova Brain"
-      : "Sign in to use Nova Workspace.";
+      ? ((ident && (ident.name || ident.email)) || t("Signed in")) + " · Mrs. Nova Brain"
+      : t("Sign in to use Nova Workspace.");
   }
   function renderDashboard(data) {
-    $("project-list").innerHTML = listHtml(data.active_projects, "No active projects yet.", function (row) {
+    projects = data.active_projects || [];
+    $("transfer-project").innerHTML = "<option value=\"\">" + escapeHtml(t("Choose a project")) + "</option>" + projects.map(function (row) {
+      return "<option value=\"" + escapeHtml(row.workspace_id) + "\">" + escapeHtml(row.title) + "</option>";
+    }).join("");
+    $("transfer-project").value = state.projectId || "";
+    var selected = projects.find(function (row) { return row.workspace_id === state.projectId; });
+    if (selected) {
+      $("selected-project").textContent = t("Selected project: {title}", {title: selected.title});
+      $("ask-input").placeholder = t("Ask Nova to work on {title}", {title: selected.title});
+    }
+    $("transfer-project-help").textContent = t("No file is required. Create a project first if this account has none.");
+    $("project-list").innerHTML = listHtml(data.active_projects, t("No active projects yet."), function (row) {
       return "<div class=\"item\"><button class=\"linkish\" data-open-project=\"" + escapeHtml(row.workspace_id) + "\">" +
         escapeHtml(row.title) + "</button><div class=\"muted\">" + escapeHtml(row.workspace_id) + " · " +
-        escapeHtml(row.status) + "</div></div>";
+        escapeHtml(t(row.status)) + "</div></div>";
     });
-    $("recent-work").innerHTML = listHtml(data.recent_work, "No recent work yet.", function (row) {
+    $("recent-work").innerHTML = listHtml(data.recent_work, t("No recent work yet."), function (row) {
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong><div class=\"muted\">" +
-        escapeHtml(row.kind) + "</div></div>";
+        escapeHtml(t(row.kind)) + "</div></div>";
     });
-    $("recent-conversations").innerHTML = listHtml(data.recent_conversations, "No conversations yet.", function (row) {
+    $("recent-conversations").innerHTML = listHtml(data.recent_conversations, t("No conversations yet."), function (row) {
       return "<div class=\"item\"><button class=\"linkish\" data-open-convo=\"" + escapeHtml(row.conversation_id) + "\">" +
-        escapeHtml(row.title) + "</button><div class=\"muted\">" + escapeHtml(row.preview || "Continue this thread") + "</div></div>";
+        escapeHtml(row.title) + "</button><div class=\"muted\">" + escapeHtml(row.preview || t("Continue this thread")) + "</div></div>";
     });
-    $("recent-files").innerHTML = listHtml(data.recent_files, "No files yet.", function (row) {
+    $("recent-files").innerHTML = listHtml(data.recent_files, t("No files yet."), function (row) {
       return "<div class=\"item\"><button class=\"linkish\" data-open-file=\"" + escapeHtml(row.file_id) + "\">" +
         escapeHtml(row.filename) + "</button><div class=\"muted\">" +
-        escapeHtml(row.content_type || "file") + " · " + escapeHtml(row.created_at) + "</div></div>";
+        escapeHtml(row.content_type || t("file")) + " · " + escapeHtml(row.created_at) + "</div></div>";
     });
-    $("recent-searches").innerHTML = listHtml(data.saved_searches, "Search above to save a search here.", function (row) {
-      return "<div class=\"item\"><button class=\"linkish\" data-repeat-search=\"" + escapeHtml(row.query) + "\">" + escapeHtml(row.query) + "</button><div class=\"muted\">" + row.result_count + " results</div></div>";
+    $("recent-searches").innerHTML = listHtml(data.saved_searches, t("Search above to save a search here."), function (row) {
+      return "<div class=\"item\"><button class=\"linkish\" data-repeat-search=\"" + escapeHtml(row.query) + "\">" + escapeHtml(row.query) + "</button><div class=\"muted\">" + row.result_count + " " + t("results") + "</div></div>";
     });
-    $("assistant-history").innerHTML = listHtml(data.assistant_history, "Ask Nova to start your saved Workspace history.", function (row) {
-      return "<div class=\"item\"><button class=\"linkish\" data-open-convo=\"" + escapeHtml(row.conversation_id) + "\">" + escapeHtml(row.role) + " · Reopen conversation</button><div class=\"muted\">" +
+    $("assistant-history").innerHTML = listHtml(data.assistant_history, t("Ask Nova to start your saved Workspace history."), function (row) {
+      return "<div class=\"item\"><button class=\"linkish\" data-open-convo=\"" + escapeHtml(row.conversation_id) + "\">" + escapeHtml(t(row.role)) + " · " + t("Reopen conversation") + "</button><div class=\"muted\">" +
         escapeHtml((row.content || "").slice(0, 180)) + "</div></div>";
     });
   }
   async function refresh(preserveBrain) {
     if (!token()) {
       setSignedIn(false);
-      $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
+      $("brain-output").textContent = t("Mrs. Nova Brain is ready when you are signed in.");
       return;
     }
     setSignedIn(true);
     var data = await api("/api/nova/workspace/dashboard");
     renderDashboard(data);
     var transfers = await api("/api/nova/workspace/transfers");
-    $("incoming-transfers").innerHTML = listHtml(transfers, "No pending project copies for this account.", function (row) {
-      return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong> from " + escapeHtml(row.sender_email) +
-        "<p>Instructions + " + row.conversation_count + " conversations + " + row.file_text_count + " file texts. Expires " + escapeHtml(row.expires_at) + "</p>" +
-        "<button data-accept-transfer=\"" + escapeHtml(row.transfer_id) + "\">Accept and copy this project</button></div>";
+    $("incoming-transfers").innerHTML = listHtml(transfers, t("No pending project copies for this account."), function (row) {
+      return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong> · " + escapeHtml(row.sender_email) +
+        "<p>" + escapeHtml(t("Instructions + {conversations} conversations + {files} file texts. Expires {date}", {conversations: row.conversation_count, files: row.file_text_count, date: row.expires_at})) + "</p>" +
+        "<button data-accept-transfer=\"" + escapeHtml(row.transfer_id) + "\">" + t("Accept and copy this project") + "</button></div>";
     });
-    if (!preserveBrain) $("brain-output").textContent = "Mrs. Nova Brain is connected to this Nova Workspace.";
+    if (!preserveBrain) $("brain-output").textContent = t("Mrs. Nova Brain is connected to this Nova Workspace.");
   }
   async function runBrain(action, question) {
     if (brainBusy) return;
     if (!token()) {
-      showBanner("Sign in to ask Mrs. Nova Brain.");
+      showBanner(t("Sign in to ask Mrs. Nova Brain."));
       $("login-form").classList.remove("hidden");
       return;
     }
     brainBusy = true;
     $("brain-output").setAttribute("aria-busy", "true");
     document.querySelectorAll("[data-brain], #ask-form button[type=submit]").forEach(function (button) { button.disabled = true; });
-    showBanner("Nova is working on your request…", true);
+    showBanner(t("Nova is working on your request…"), true);
     try {
     var result = await api("/api/nova/workspace/ask", {
       method: "POST",
@@ -152,7 +168,7 @@
       })
     });
     state.conversationId = result.conversation_id || state.conversationId;
-    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
+    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || t("No response from Mrs. Nova Brain."));
     (result.sources || []).concat(result.source_href ? [{title: "Open Work & Revenue", url: result.source_href}] : []).forEach(function (source) {
       if (!/^https?:\/\//i.test(source.url || "") && source.url !== "/nova/work") return;
       var link = document.createElement("a");
@@ -164,9 +180,10 @@
       $("brain-output").appendChild(link);
     });
     if (result.search) {
-      $("search-results").innerHTML = listHtml(result.search.hits, "No workspace matches.", renderSearchHit);
+      $("search-results").innerHTML = listHtml(result.search.hits, t("No workspace matches."), renderSearchHit);
     }
-    showBanner("Nova response is ready. Review the result below.", true);
+    showBanner(t("Nova response is ready. Review the result below."), true);
+    if (window.NovaWorkspaceSpeech) window.NovaWorkspaceSpeech.speak(result.answer || "");
     await refresh(true);
     } finally {
       brainBusy = false;
@@ -184,9 +201,9 @@
     $("finish-somali").disabled = true;
   }
   $("record-somali").addEventListener("click", async function () {
-    if (!token()) { showBanner("Sign in before recording speech."); return; }
+    if (!token()) { showBanner(t("Sign in before recording speech.")); return; }
     if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      $("recording-status").textContent = "Recording is unavailable in this browser. You can type Somali in Ask Nova."; return;
+      $("recording-status").textContent = t("Recording is unavailable in this browser. Type your request in Ask Nova."); return;
     }
     $("record-somali").disabled = true;
     try {
@@ -194,56 +211,76 @@
       recorder = new MediaRecorder(recordingStream);
       var chunks = [];
       var startingText = $("ask-input").value;
+      var recordedLanguage = speechLanguage();
       recorder.ondataavailable = function (event) { if (event.data.size) chunks.push(event.data); };
-      recorder.onerror = function () { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = "Recording failed. Try typing Somali."; };
+      recorder.onerror = function () { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Recording failed. Try typing your request."); };
       recorder.onstop = async function () {
         releaseMicrophone();
-        $("recording-status").textContent = "Transcribing Somali…";
+        $("recording-status").textContent = t("Transcribing speech…");
         try {
           var form = new FormData();
-          form.append("audio", new Blob(chunks, { type: recorder.mimeType }), "speech");
+          form.append("audio", new Blob(chunks, { type: recorder.mimeType || "audio/webm" }), "speech");
+          form.append("language", recordedLanguage);
           var result = await api("/api/nova/workspace/transcribe", { method: "POST", body: form });
           $("ask-input").value = $("ask-input").value === startingText ? result.text : $("ask-input").value + "\n" + result.text;
-          $("answer-language").value = "so";
+          $("answer-language").value = recordedLanguage;
           $("answer-language").dispatchEvent(new Event("change"));
           $("ask-input").focus();
-          $("recording-status").textContent = "Somali transcript is ready. Review or correct the words, then press Ask Nova. / Hubi qoraalka, kadib guji Ask Nova.";
-        } catch (err) { $("recording-status").textContent = err.message + " You can type Somali instead."; }
+          $("recording-status").textContent = t("Transcript ready. Review or correct the words, then press Ask Nova.");
+        } catch (err) { $("recording-status").textContent = err.message; }
         finally { $("record-somali").disabled = false; }
       };
       recorder.start();
       $("finish-somali").disabled = false;
-      $("recording-status").textContent = "Recording Somali. Press Finish when you are done. / Ku hadal Af-Soomaali.";
+      $("recording-status").textContent = t("Recording. Press Finish when you are done.");
       recordingTimer = setTimeout(function () { if (recorder.state === "recording") recorder.stop(); }, 60000);
-    } catch (_) { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = "Microphone could not start. Allow microphone access, or type Somali."; }
+    } catch (_) { releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Microphone could not start. Allow microphone access, or type your request."); }
   });
   $("finish-somali").addEventListener("click", function () { if (recorder && recorder.state === "recording") recorder.stop(); });
   window.addEventListener("pagehide", function () { if (recorder) recorder.onstop = null; releaseMicrophone(); });
-  $("answer-language").addEventListener("change", function () {
-    document.documentElement.setAttribute("data-nova-language", language() === "en" ? "en-US" : "so-SO");
-    $("ask-input").setAttribute("lang", language() === "en" ? "en" : "so");
+  function updateAnswerLanguage() {
+    var locales = {en: "en-US", so: "so-SO", ar: "ar-SA", fr: "fr-FR", es: "es-ES"};
+    document.documentElement.setAttribute("data-nova-language", locales[speechLanguage()] || "en-US");
+    $("ask-input").setAttribute("lang", speechLanguage());
+    $("ask-input").setAttribute("dir", speechLanguage() === "ar" ? "rtl" : "ltr");
+    if (window.NovaWorkspaceSpeech) window.NovaWorkspaceSpeech.stop();
+  }
+  $("answer-language").addEventListener("change", updateAnswerLanguage);
+  $("screen-language").addEventListener("change", function () {
+    window.NovaWorkspaceLanguage.setLanguage($("screen-language").value);
+    $("answer-language").value = $("screen-language").value;
+    updateAnswerLanguage();
+    refresh(true).catch(function (err) { showBanner(err.message); });
+  });
+  if (window.NovaWorkspaceLanguage) {
+    $("answer-language").value = window.NovaWorkspaceLanguage.current();
+    updateAnswerLanguage();
+  }
+  $("transfer-project").addEventListener("change", function () {
+    var selected = projects.find(function (row) { return row.workspace_id === $("transfer-project").value; });
+    selectProject(selected || null, false);
   });
   $("transfer-form").addEventListener("submit", async function (event) {
     event.preventDefault();
-    if (!state.projectId) { showBanner("Select the project you want to copy first."); return; }
+    if (!state.projectId) { showBanner(t("Select the project you want to copy first.")); return; }
     try {
       var result = await api("/api/nova/workspace/transfers", { method: "POST", body: JSON.stringify({
         workspace_id: state.projectId, recipient_email: $("transfer-email").value.trim(),
         include_conversations: $("transfer-conversations").checked,
         include_file_text: $("transfer-files").checked
       }) });
-      $("transfer-preview").textContent = result.title + " → " + result.recipient_email + ": " + result.status +
-        ". Instructions, " + result.conversation_count + " conversations and " + result.file_text_count + " file texts. Recipient signs in and accepts under Incoming project copies. No email was sent.";
+      $("transfer-preview").textContent = result.title + " → " + result.recipient_email + ": " + t(result.status) + ". " +
+        t("Instructions + {conversations} conversations + {files} file texts. Recipient signs in and accepts under Incoming project copies. No email was sent.", {conversations: result.conversation_count, files: result.file_text_count});
       preparedTransferId = result.transfer_id;
-      $("cancel-transfer").classList.toggle("hidden", result.status !== "pending");
-      showBanner("Project copy prepared for recipient acceptance.", true);
+      $("cancel-transfer").classList.toggle("hidden", result.status !== t("pending"));
+      showBanner(t("Project copy prepared for recipient acceptance."), true);
     } catch (err) { showBanner(err.message); }
   });
   $("cancel-transfer").addEventListener("click", async function () {
     if (!preparedTransferId) return;
     try {
       await api("/api/nova/workspace/transfers/" + encodeURIComponent(preparedTransferId) + "/cancel", { method: "POST" });
-      $("transfer-preview").textContent = "Transfer canceled. The recipient cannot accept it.";
+      $("transfer-preview").textContent = t("Transfer canceled. The recipient cannot accept it.");
       $("cancel-transfer").classList.add("hidden");
     } catch (err) { showBanner(err.message); }
   });
@@ -252,13 +289,13 @@
     event.preventDefault();
     var query = $("workspace-search").value.trim();
     if (query.length < 2) {
-      showBanner("Enter at least 2 characters to search Nova Workspace.");
+      showBanner(t("Enter at least 2 characters to search Nova Workspace."));
       return;
     }
     try {
       var data = await api("/api/nova/workspace/search?q=" + encodeURIComponent(query));
-      $("search-results").innerHTML = listHtml(data.hits, "No workspace matches.", renderSearchHit);
-      showBanner("Searched Nova-owned workspace content only.", true);
+      $("search-results").innerHTML = listHtml(data.hits, t("No workspace matches."), renderSearchHit);
+      showBanner(t("Searched Nova-owned workspace content only."), true);
       await refresh(true);
       $("search-results-card").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) { showBanner(err.message); }
@@ -285,7 +322,7 @@
       selectProject(created, true);
       $("project-title").value = "";
       $("project-description").value = "";
-      showBanner("Created Nova Workspace project " + created.workspace_id + ".", true);
+      showBanner(t("Created project {id}.", {id: created.workspace_id}), true);
       await refresh(true);
     } catch (err) { showBanner(err.message); }
   });
@@ -293,12 +330,12 @@
     event.preventDefault();
     var file = $("file-input").files[0];
     if (!file) {
-      showBanner("Choose a file to upload with the existing /api/upload capability.");
+      showBanner(t("Choose a file to upload with the existing /api/upload capability."));
       return;
     }
     try {
       var form = new FormData();
-      form.append("file", file);
+      form.append(t("file"), file);
       var uploaded = await api("/api/upload", { method: "POST", body: form });
       var associated = await api("/api/nova/workspace/files", {
         method: "POST",
@@ -310,7 +347,7 @@
           workspace_id: state.projectId || null
         })
       });
-      showBanner("Added " + associated.filename + " to Nova Workspace.", true);
+      showBanner(t("Added {title} to Nova Workspace.", {title: associated.filename}), true);
       $("file-input").value = "";
       await refresh(true);
     } catch (err) { showBanner(err.message); }
@@ -330,7 +367,7 @@
           selectProject(copied, true);
           $("brain-output").textContent = "USER-SAVED INFORMATION\n\n" + copied.title + "\n\n" + (copied.description || "");
           await refresh(true);
-          showBanner("Accepted project copy. You can now work on it in Ask Nova.", true);
+          showBanner(t("Accepted project copy. You can now work on it in Ask Nova."), true);
         } finally { transferBtn.disabled = false; }
       }
       if (searchBtn) {
@@ -340,15 +377,15 @@
       if (projectBtn) {
         var project = await api("/api/nova/workspace/projects/" + encodeURIComponent(projectBtn.getAttribute("data-open-project")));
         selectProject(project, true);
-        $("brain-output").textContent = "USER-SAVED INFORMATION\n\n" + project.title + "\n\n" + (project.description || "No description saved.");
-        showBanner("Selected " + project.title + ". Enter your request in Ask Nova.", true);
+        $("brain-output").textContent = "USER-SAVED INFORMATION\n\n" + project.title + "\n\n" + (project.description || t("No description saved."));
+        showBanner(t("Selected {title}. Enter your request in Ask Nova.", {title: project.title}), true);
       }
       if (fileBtn) {
         var fileId = fileBtn.getAttribute("data-open-file");
         var fileRow = await api("/api/nova/workspace/files/" + encodeURIComponent(fileId));
         $("brain-output").textContent = "FILE: " + (fileRow.filename || fileId) + "\n\n" +
-          (fileRow.excerpt || "No readable text was extracted from this file.");
-        showBanner("Opened saved Workspace file " + fileId + ".", true);
+          (fileRow.excerpt || t("No readable text was extracted from this file."));
+        showBanner(t("Opened saved file {id}.", {id: fileId}), true);
       }
       if (convoBtn) {
         var convo = await api("/api/nova/workspace/conversations/" + encodeURIComponent(convoBtn.getAttribute("data-open-convo")));
@@ -358,8 +395,8 @@
         state.conversationId = openedId;
         $("brain-output").textContent = (convo.messages || []).map(function (row) {
           return row.role + ": " + row.content;
-        }).join("\n") || "Continue this Mrs. Nova Brain thread.";
-        showBanner("Continuing conversation " + state.conversationId + ".", true);
+        }).join("\n") || t("Continue this Mrs. Nova Brain thread.");
+        showBanner(t("Continuing conversation {id}.", {id: state.conversationId}), true);
       }
     } catch (err) { showBanner(err.message); }
   });
@@ -375,7 +412,7 @@
     });
     var payload = await response.json();
     if (!response.ok) {
-      showBanner(errorText(payload, "Sign-in failed"));
+      showBanner(errorText(payload, t("Sign-in failed")));
       return;
     }
     if (session() && session().start) {
@@ -392,7 +429,7 @@
       });
     }
     await refresh();
-    showBanner("Signed in. Nova Workspace is available.", true);
+    showBanner(t("Signed in. Nova Workspace is available."), true);
   });
   $("sign-out").addEventListener("click", async function () {
     if (session() && session().logout) await session().logout();
