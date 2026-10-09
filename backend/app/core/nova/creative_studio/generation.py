@@ -122,9 +122,13 @@ def _audience_phrase(audience: str) -> str:
 
 
 def _benefit_seed(topic: str) -> str:
-    """Pull a short benefit phrase from a long topic without pasting the whole sentence."""
+    """Pull a short, natural benefit phrase from a long topic without pasting UI labels."""
     topic = str(topic or "").strip()
     low = topic.lower()
+    if "website guided demo" in low or "guided demo" in low:
+        if "operations" in low or "nova" in low:
+            return "organize everyday business work and follow-ups"
+        return "walk through the workflow clearly"
     # Common "How X helps Y do Z" shape.
     m = re.search(
         r"helps?\s+.+?\s+(save time|get work done|automate|stay in control|move faster|[^.?!]+)",
