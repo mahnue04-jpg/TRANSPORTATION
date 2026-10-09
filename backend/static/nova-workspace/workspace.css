@@ -82,6 +82,12 @@ html, body {
 .dashboard { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 16px; }
 .command-actions { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 12px; }
 .ask-row { grid-template-columns: 1fr auto; margin-top: 12px; }
+#ask-input { min-height: 110px; resize: vertical; font: inherit; line-height: 1.5; }
+.ask-row button { align-self: start; }
+#workspace-command { scroll-margin-top: 16px; }
+#selected-project { font-weight: 700; overflow-wrap: anywhere; }
+button:disabled { opacity: .6; cursor: wait; }
+.card, .command-card, .brain-card { min-width: 0; }
 .login-grid { grid-template-columns: 1fr 1fr auto; }
 
 input, textarea {
