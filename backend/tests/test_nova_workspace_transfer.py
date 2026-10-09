@@ -101,7 +101,10 @@ def test_recorded_somali_returns_original_text_and_provider_failure(monkeypatch)
     result = transcribe_speech(audio(), actor('receiver', 'B'))
     assert result['text'] == 'Waxaan rabaa liiska tababarka.'
     assert result['review_required'] is True
-    assert captured[0]['language'] == 'so'
+    assert 'language' not in captured[0]
+    assert 'Somali' in captured[0]['prompt']
+    transcribe_speech(audio(), actor('receiver', 'B'), language='ar')
+    assert captured[-1]['language'] == 'ar'
     assert captured[0]['model'] == 'gpt-4o-transcribe'
     with pytest.raises(HTTPException) as invalid:
         transcribe_speech(audio('text/plain'), actor('receiver', 'B'))
