@@ -1,8 +1,10 @@
 """Nova Workspace APIs. Separate from Health /workspace and frozen Freight."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
 from sqlalchemy.orm import Session
+import logging
+from typing import Literal
 
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
@@ -34,8 +36,9 @@ router = APIRouter(
 
 @router.post("/transcribe")
 def transcribe_speech(audio: UploadFile = File(...),
-    user: UserContext = Depends(get_current_user_context)):
-    """Return original Somali speech as reviewable text, without saving the recording."""
+    user: UserContext = Depends(get_current_user_context),
+    language: Literal["en", "so", "ar", "fr", "es"] = Form("so")):
+    """Return original multilingual speech as reviewable text, without saving the recording."""
     from app.ai import get_client
     allowed = {"audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}
     content_type = (audio.content_type or "").split(";")[0]
@@ -47,16 +50,26 @@ def transcribe_speech(audio: UploadFile = File(...),
         audio.file.close()
     if not data or len(data) > 10_000_000:
         raise HTTPException(413, "Recording must contain audio and be under 10 MB.")
+    # Somali is not a supported explicit language hint for this model. Allow
+    # detection and request original Somali text rather than sending a rejected code.
+    language = language if isinstance(language, str) else "so"
+    names = {"en": "English", "so": "Somali", "ar": "Arabic", "fr": "French", "es": "Spanish"}
+    kwargs = dict(model="gpt-4o-transcribe",
+        file=("speech." + allowed[content_type], data, content_type),
+        prompt=f"Transcribe the {names[language]} speech in its original language. Do not translate it into English.")
+    if language != "so":
+        kwargs["language"] = language
     try:
-        result = get_client().audio.transcriptions.create(model="gpt-4o-transcribe",
-            file=("speech." + allowed[content_type], data, content_type), language="so",
-            prompt="Transcribe the Somali speech in its original Somali language. Do not translate it into English.")
+        result = get_client().audio.transcriptions.create(**kwargs)
     except Exception as exc:
-        raise HTTPException(503, "Somali transcription is unavailable. Please type your request or try again.") from exc
+        # Never log recordings, transcripts, request bodies or provider error text.
+        logging.getLogger(__name__).warning("workspace_transcription_failed type=%s status=%s",
+            type(exc).__name__, getattr(exc, "status_code", None))
+        raise HTTPException(503, "Speech transcription is unavailable. Please type your request or try again.") from exc
     text = str(result.text or "").strip()
     if not text or len(text) > 4000:
         raise HTTPException(422, "No usable short transcript returned. Try a shorter recording or type your request.")
-    return {"text": text, "language": "so", "review_required": True}
+    return {"text": text, "language": language, "review_required": True}
 
 
 def _resolve_org(user: UserContext, requested: str | None) -> str:
