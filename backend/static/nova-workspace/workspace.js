@@ -2,6 +2,19 @@
 
 (function () {
   var state = { projectId: null, conversationId: null };
+  var brainBusy = false;
+
+  function selectProject(project, focus) {
+    state.projectId = project ? project.workspace_id : null;
+    state.conversationId = null;
+    $("selected-project").textContent = project ? "Selected project: " + project.title : "All workspace projects";
+    $("ask-input").value = "";
+    $("ask-input").placeholder = project ? "Ask Nova to work on " + project.title : "Ask Mrs. Nova Brain about this workspace";
+    if (focus) {
+      $("workspace-command").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("ask-input").focus({ preventScroll: true });
+    }
+  }
 
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
@@ -32,6 +45,11 @@
   function listHtml(items, empty, render) {
     if (!items || !items.length) return empty;
     return items.map(render).join("");
+  }
+  function renderSearchHit(hit) {
+    var attribute = { project: "data-open-project", conversation: "data-open-convo", file: "data-open-file" }[hit.kind];
+    var title = attribute ? "<button class=\"linkish\" " + attribute + "=\"" + escapeHtml(hit.id) + "\">" + escapeHtml(hit.title) + "</button>" : escapeHtml(hit.title);
+    return "<div class=\"item\"><strong>" + escapeHtml(hit.kind) + "</strong> · " + title + "<div class=\"muted\">" + escapeHtml(hit.snippet) + "</div></div>";
   }
   async function api(path, options) {
     var headers = {};
@@ -81,11 +99,11 @@
         escapeHtml(row.filename) + "</button><div class=\"muted\">" +
         escapeHtml(row.content_type || "file") + " · " + escapeHtml(row.created_at) + "</div></div>";
     });
-    $("recent-searches").innerHTML = listHtml(data.saved_searches, "No searches yet.", function (row) {
-      return "<div class=\"item\">" + escapeHtml(row.query) + "<div class=\"muted\">" + row.result_count + " results</div></div>";
+    $("recent-searches").innerHTML = listHtml(data.saved_searches, "Search above to save a search here.", function (row) {
+      return "<div class=\"item\"><button class=\"linkish\" data-repeat-search=\"" + escapeHtml(row.query) + "\">" + escapeHtml(row.query) + "</button><div class=\"muted\">" + row.result_count + " results</div></div>";
     });
-    $("assistant-history").innerHTML = listHtml(data.assistant_history, "No assistant history loaded.", function (row) {
-      return "<div class=\"item\"><strong>" + escapeHtml(row.role) + "</strong><div class=\"muted\">" +
+    $("assistant-history").innerHTML = listHtml(data.assistant_history, "Ask Nova to start your saved Workspace history.", function (row) {
+      return "<div class=\"item\"><button class=\"linkish\" data-open-convo=\"" + escapeHtml(row.conversation_id) + "\">" + escapeHtml(row.role) + " · Reopen conversation</button><div class=\"muted\">" +
         escapeHtml((row.content || "").slice(0, 180)) + "</div></div>";
     });
   }
@@ -101,16 +119,22 @@
     if (!preserveBrain) $("brain-output").textContent = "Mrs. Nova Brain is connected to this Nova Workspace.";
   }
   async function runBrain(action, question) {
+    if (brainBusy) return;
     if (!token()) {
       showBanner("Sign in to ask Mrs. Nova Brain.");
       $("login-form").classList.remove("hidden");
       return;
     }
+    brainBusy = true;
+    $("brain-output").setAttribute("aria-busy", "true");
+    document.querySelectorAll("[data-brain], #ask-form button[type=submit]").forEach(function (button) { button.disabled = true; });
+    showBanner("Nova is working on your request…", true);
+    try {
     var result = await api("/api/nova/workspace/ask", {
       method: "POST",
       body: JSON.stringify({
         action: action,
-        question: question || $("ask-input").value.trim(),
+        question: question !== undefined ? question : (action === "ask" ? $("ask-input").value.trim() : null),
         workspace_id: state.projectId,
         conversation_id: state.conversationId
       })
@@ -128,13 +152,15 @@
       $("brain-output").appendChild(link);
     });
     if (result.search) {
-      $("search-results").innerHTML = listHtml(result.search.hits, "No workspace matches.", function (hit) {
-        return "<div class=\"item\"><strong>" + escapeHtml(hit.kind) + "</strong> · " +
-          escapeHtml(hit.title) + "<div class=\"muted\">" + escapeHtml(hit.snippet) + "</div></div>";
-      });
+      $("search-results").innerHTML = listHtml(result.search.hits, "No workspace matches.", renderSearchHit);
     }
-    showBanner("Mrs. Nova Brain used existing Nova intelligence APIs.", true);
+    showBanner("Nova response is ready. Review the result below.", true);
     await refresh(true);
+    } finally {
+      brainBusy = false;
+      $("brain-output").setAttribute("aria-busy", "false");
+      document.querySelectorAll("[data-brain], #ask-form button[type=submit]").forEach(function (button) { button.disabled = false; });
+    }
   }
 
   if (session() && session().restore) session().restore();
@@ -149,12 +175,10 @@
     }
     try {
       var data = await api("/api/nova/workspace/search?q=" + encodeURIComponent(query));
-      $("search-results").innerHTML = listHtml(data.hits, "No workspace matches.", function (hit) {
-        return "<div class=\"item\"><strong>" + escapeHtml(hit.kind) + "</strong> · " +
-          escapeHtml(hit.title) + "<div class=\"muted\">" + escapeHtml(hit.snippet) + "</div></div>";
-      });
+      $("search-results").innerHTML = listHtml(data.hits, "No workspace matches.", renderSearchHit);
       showBanner("Searched Nova-owned workspace content only.", true);
-      await refresh();
+      await refresh(true);
+      $("search-results-card").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) { showBanner(err.message); }
   });
   $("ask-form").addEventListener("submit", async function (event) {
@@ -176,11 +200,11 @@
           description: $("project-description").value.trim()
         })
       });
-      state.projectId = created.workspace_id;
+      selectProject(created, true);
       $("project-title").value = "";
       $("project-description").value = "";
       showBanner("Created Nova Workspace project " + created.workspace_id + ".", true);
-      await refresh();
+      await refresh(true);
     } catch (err) { showBanner(err.message); }
   });
   $("file-form").addEventListener("submit", async function (event) {
@@ -206,18 +230,24 @@
       });
       showBanner("Added " + associated.filename + " to Nova Workspace.", true);
       $("file-input").value = "";
-      await refresh();
+      await refresh(true);
     } catch (err) { showBanner(err.message); }
   });
   document.addEventListener("click", async function (event) {
+    var searchBtn = event.target.closest("[data-repeat-search]");
     var projectBtn = event.target.closest("[data-open-project]");
     var convoBtn = event.target.closest("[data-open-convo]");
     var fileBtn = event.target.closest("[data-open-file]");
     try {
+      if (searchBtn) {
+        $("workspace-search").value = searchBtn.getAttribute("data-repeat-search");
+        $("workspace-search-form").requestSubmit();
+      }
       if (projectBtn) {
-        state.projectId = projectBtn.getAttribute("data-open-project");
-        await api("/api/nova/workspace/projects/" + encodeURIComponent(state.projectId));
-        showBanner("Opened project " + state.projectId + ".", true);
+        var project = await api("/api/nova/workspace/projects/" + encodeURIComponent(projectBtn.getAttribute("data-open-project")));
+        selectProject(project, true);
+        $("brain-output").textContent = "USER-SAVED INFORMATION\n\n" + project.title + "\n\n" + (project.description || "No description saved.");
+        showBanner("Selected " + project.title + ". Enter your request in Ask Nova.", true);
       }
       if (fileBtn) {
         var fileId = fileBtn.getAttribute("data-open-file");
@@ -227,8 +257,11 @@
         showBanner("Opened saved Workspace file " + fileId + ".", true);
       }
       if (convoBtn) {
-        state.conversationId = convoBtn.getAttribute("data-open-convo");
-        var convo = await api("/api/nova/workspace/conversations/" + encodeURIComponent(state.conversationId));
+        var convo = await api("/api/nova/workspace/conversations/" + encodeURIComponent(convoBtn.getAttribute("data-open-convo")));
+        var openedId = convo.conversation_id;
+        var linkedProject = convo.workspace_id ? await api("/api/nova/workspace/projects/" + encodeURIComponent(convo.workspace_id)) : null;
+        selectProject(linkedProject, true);
+        state.conversationId = openedId;
         $("brain-output").textContent = (convo.messages || []).map(function (row) {
           return row.role + ": " + row.content;
         }).join("\n") || "Continue this Mrs. Nova Brain thread.";
