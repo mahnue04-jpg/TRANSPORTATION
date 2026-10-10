@@ -20,7 +20,12 @@ def test_authenticated_casting_reads_are_tenant_scoped():
     from app.core.nova.creative_studio.casting_db_reads import read_casting_application_for_nova_user
     from app.core.nova.creative_studio.casting_access import CastingAccessDenied
 
-    engine = sa.create_engine(URL)
+    # Use a dedicated schema so minimalist migration fixtures cannot shadow Nova users.
+    admin_engine = sa.create_engine(URL)
+    with admin_engine.begin() as admin:
+        admin.exec_driver_sql("DROP SCHEMA IF EXISTS casting_read_ci CASCADE")
+        admin.exec_driver_sql("CREATE SCHEMA casting_read_ci")
+    engine = sa.create_engine(URL, connect_args={"options": "-csearch_path=casting_read_ci"})
     tables = [User.__table__, NovaCastingOrganization.__table__,
               NovaCastingMembership.__table__, NovaCastingCampaign.__table__,
               NovaCastingApplication.__table__]
@@ -79,3 +84,6 @@ def test_authenticated_casting_reads_are_tenant_scoped():
             db.close()
             transaction.rollback()
     engine.dispose()
+    with admin_engine.begin() as admin:
+        admin.exec_driver_sql("DROP SCHEMA casting_read_ci CASCADE")
+    admin_engine.dispose()
