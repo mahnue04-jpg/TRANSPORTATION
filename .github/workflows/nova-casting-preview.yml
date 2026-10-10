@@ -25,3 +25,30 @@ jobs:
         run: python -m pip install --disable-pip-version-check pytest==8.3.5
       - name: Verify casting preview safeguards
         run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py
+      - name: Check casting browser JavaScript syntax
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class InlineScripts(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.inside = False
+                  self.scripts = []
+              def handle_starttag(self, tag, attrs):
+                  if tag == "script" and not dict(attrs).get("src"):
+                      self.inside = True
+              def handle_endtag(self, tag):
+                  if tag == "script":
+                      self.inside = False
+              def handle_data(self, data):
+                  if self.inside:
+                      self.scripts.append(data)
+
+          parsed = InlineScripts()
+          parsed.feed(Path("backend/static/nova-creative/casting-preview.html").read_text(encoding="utf-8"))
+          assert parsed.scripts, "Audition preview script not found"
+          Path("/tmp/nova-casting-preview.js").write_text("\n".join(parsed.scripts), encoding="utf-8")
+          PY
+          node --check /tmp/nova-casting-preview.js
