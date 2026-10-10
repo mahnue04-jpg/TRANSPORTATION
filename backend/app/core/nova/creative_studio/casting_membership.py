@@ -13,15 +13,18 @@ from .casting_policy import CastingActor
 def verified_casting_member(
     *, session_user_id: str,
     organization_id: str,
+    session_tenant_id: str,
     lookup: Callable[[str, str], Mapping[str, object] | None],
 ) -> CastingActor | None:
     """Reject missing, inactive, mismatched, or unverified membership evidence."""
-    if not session_user_id or not organization_id:
+    if not session_user_id or not organization_id or not session_tenant_id:
         return None
     record = lookup(session_user_id, organization_id)
     if not record:
         return None
     if record.get("user_id") != session_user_id or record.get("organization_id") != organization_id:
+        return None
+    if record.get("nova_tenant_id") != session_tenant_id:
         return None
     if record.get("active") is not True or record.get("organization_verified") is not True:
         return None
