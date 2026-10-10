@@ -85,6 +85,7 @@ class NovaCastingOrganization(Base):
         CheckConstraint("verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')", name="ck_nova_casting_org_verification"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    nova_tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     verification_status: Mapped[str] = mapped_column(String(12), nullable=False, default="PENDING")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
