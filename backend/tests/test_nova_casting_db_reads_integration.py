@@ -79,6 +79,11 @@ def test_authenticated_casting_reads_are_tenant_scoped():
                     organization_id="some-other-organization", application_id="application-a")
             with pytest.raises(CastingAccessDenied):
                 read("tenant-b")
+            # Deny access when the requested application does not exist.
+            with pytest.raises(CastingAccessDenied):
+                read_casting_application_for_nova_user(
+                    db=db, user_id="casting-reviewer", tenant_id="tenant-a",
+                    organization_id="casting-org-a", application_id="missing-application")
             reviewer = db.get(User, "casting-reviewer")
             reviewer.is_active = False
             db.flush()
