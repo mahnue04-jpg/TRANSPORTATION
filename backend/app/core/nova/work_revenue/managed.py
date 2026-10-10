@@ -46,6 +46,7 @@ from app.core.nova.work_revenue.models import (
     NovaWorkTask,
     NovaWorkWeeklyReport,
 )
+from app.core.nova.work_revenue.owner_notifications import queue_owner_approval_notification
 from app.core.nova.work_revenue.owner_facts import (
     FACT_SOURCE_OWNER,
     FACT_SOURCE_OWNER_APPROVED,
@@ -1387,6 +1388,7 @@ def create_owner_action(
         category=category,
     )
     db.add(row)
+    queue_owner_approval_notification(db, row, owner_email=user.email)
     _record_audit(
         db,
         organization_id=organization_id,
