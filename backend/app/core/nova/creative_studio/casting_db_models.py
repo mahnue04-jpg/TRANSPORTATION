@@ -5,7 +5,7 @@ No actual applicant intake, video storage, or public endpoints are enabled.
 """
 from __future__ import annotations
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -15,6 +15,7 @@ class NovaCastingCampaign(Base):
     __tablename__ = "nova_casting_campaigns"
     __table_args__ = (
         Index("ix_nova_casting_campaign_owner", "owner_id", "created_at"),
+        UniqueConstraint("owner_id", "id", name="uq_nova_casting_campaign_owner_id"),
         CheckConstraint("category IN ('reality', 'beauty', 'film')", name="ck_nova_casting_category"),
         CheckConstraint("status IN ('DRAFT', 'CLOSED')", name="ck_nova_casting_campaign_status"),
     )
@@ -31,6 +32,8 @@ class NovaCastingApplication(Base):
     __table_args__ = (
         UniqueConstraint("campaign_id", "applicant_id", name="uq_nova_casting_campaign_applicant"),
         Index("ix_nova_casting_application_owner", "owner_id", "campaign_id"),
+        UniqueConstraint("owner_id", "id", name="uq_nova_casting_application_owner_id"),
+        ForeignKeyConstraint(["owner_id", "campaign_id"], ["nova_casting_campaigns.owner_id", "nova_casting_campaigns.id"], name="fk_nova_casting_application_campaign_owner"),
         CheckConstraint("status IN ('DRAFT', 'SUBMITTED', 'WITHDRAWN')", name="ck_nova_casting_application_status"),
     )
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
@@ -47,6 +50,7 @@ class NovaCastingReview(Base):
     __table_args__ = (
         UniqueConstraint("application_id", "reviewer_id", name="uq_nova_casting_application_reviewer"),
         Index("ix_nova_casting_review_owner", "owner_id", "application_id"),
+        ForeignKeyConstraint(["owner_id", "application_id"], ["nova_casting_applications.owner_id", "nova_casting_applications.id"], name="fk_nova_casting_review_application_owner"),
         CheckConstraint("score IS NULL OR (score >= 1 AND score <= 5)", name="ck_nova_casting_review_score"),
         CheckConstraint("stage IN ('New', 'In review', 'Callback', 'Closed')", name="ck_nova_casting_review_stage"),
     )
@@ -65,6 +69,7 @@ class NovaCastingMedia(Base):
     __tablename__ = "nova_casting_media"
     __table_args__ = (
         Index("ix_nova_casting_media_owner_application", "owner_id", "application_id"),
+        ForeignKeyConstraint(["owner_id", "application_id"], ["nova_casting_applications.owner_id", "nova_casting_applications.id"], name="fk_nova_casting_media_application_owner"),
         CheckConstraint("status IN ('PENDING', 'QUARANTINED', 'CLEAN', 'REJECTED')", name="ck_nova_casting_media_status"),
         CheckConstraint("byte_size > 0", name="ck_nova_casting_media_size"),
     )
