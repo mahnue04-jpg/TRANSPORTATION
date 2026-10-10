@@ -19,7 +19,10 @@ def verified_casting_member(
     """Reject missing, inactive, mismatched, or unverified membership evidence."""
     if not session_user_id or not organization_id or not session_tenant_id:
         return None
-    record = lookup(session_user_id, organization_id)
+    try:
+        record = lookup(session_user_id, organization_id)
+    except (LookupError, ConnectionError, TimeoutError):
+        return None
     if not record:
         return None
     if record.get("user_id") != session_user_id or record.get("organization_id") != organization_id:
