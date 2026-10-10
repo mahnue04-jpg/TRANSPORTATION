@@ -64,6 +64,7 @@ def test_two_revisions_tenant_integrity_and_reverse_rollback():
             names = set(sa.inspect(conn).get_table_names())
             assert "platform_users" in names
             assert not any(name.startswith("nova_casting_") for name in names)
+            conn.exec_driver_sql("DROP TABLE platform_users")
         finally:
             org_migration.op, content_migration.op = originals
     engine.dispose()
