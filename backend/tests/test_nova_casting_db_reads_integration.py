@@ -71,6 +71,12 @@ def test_authenticated_casting_reads_are_tenant_scoped():
             with pytest.raises(CastingAccessDenied):
                 read()
             reviewer.is_active = True
+            reviewer.organization_id = "tenant-b"
+            db.flush()
+            with pytest.raises(CastingAccessDenied):
+                read()
+            reviewer.organization_id = "tenant-a"
+            db.flush()
             db.get(NovaCastingMembership, "member-a").active = False
             db.flush()
             with pytest.raises(CastingAccessDenied):
