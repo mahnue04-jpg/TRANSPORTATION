@@ -58,3 +58,21 @@ class NovaCastingReview(Base):
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingMedia(Base):
+    """Private media metadata; actual files must live in encrypted private storage."""
+    __tablename__ = "nova_casting_media"
+    __table_args__ = (
+        Index("ix_nova_casting_media_owner_application", "owner_id", "application_id"),
+        CheckConstraint("status IN ('PENDING', 'QUARANTINED', 'CLEAN', 'REJECTED')", name="ck_nova_casting_media_status"),
+        CheckConstraint("byte_size > 0", name="ck_nova_casting_media_size"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_applications.id"), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
