@@ -24,3 +24,11 @@ def test_application_route_placeholder_is_disabled_even_for_authenticated_users(
     assert 'user: UserContext = Depends(get_current_user_context)' in source
     assert 'status_code=503' in source
     assert 'Casting application access is not enabled' in source
+
+
+def test_router_has_db_read_wiring_but_immutable_off_switch():
+    src = ROUTER.read_text(encoding="utf-8")
+    assert 'CASTING_READ_ENABLED = False' in src
+    assert 'db: Session = Depends(get_db)' in src
+    assert 'read_casting_application_for_nova_user(' in src
+    assert 'except CastingAccessDenied:' in src
