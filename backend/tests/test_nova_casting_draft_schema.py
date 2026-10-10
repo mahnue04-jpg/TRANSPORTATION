@@ -57,3 +57,9 @@ def test_casting_memberships_are_explicit_and_inactive():
     schema = SCHEMA.read_text(encoding="utf-8")
     assert "NovaCastingMembership" not in schema
     assert "NovaCastingOrganization" not in schema
+
+
+def test_applicants_and_reviewers_reference_existing_nova_users():
+    models = MODELS.read_text(encoding="utf-8")
+    assert 'applicant_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id")' in models
+    assert 'reviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id")' in models
