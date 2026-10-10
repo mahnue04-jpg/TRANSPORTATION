@@ -59,3 +59,14 @@ def test_missing_identifiers_fail_closed_without_exceptions():
         with pytest.raises(access.CastingAccessDenied):
             access.read_application(actor=actor, application=complete, campaign=incomplete_campaign)
         assert not access.submit_application(actor=actor, application=complete, campaign=incomplete_campaign, consent_recorded=True)
+
+
+def test_application_read_requires_all_public_projection_fields():
+    policy, access = modules()
+    actor = policy.CastingActor("user1", None, policy.CastingRole.APPLICANT)
+    app = {"id": "a1", "campaign_id": "c1", "owner_id": "org1", "applicant_id": "user1", "status": "DRAFT", "created_at": "now"}
+    campaign = {"id": "c1", "owner_id": "org1"}
+    for field in ("created_at", "status"):
+        missing = {k: v for k, v in app.items() if k != field}
+        with pytest.raises(access.CastingAccessDenied):
+            access.read_application(actor=actor, application=missing, campaign=campaign)
