@@ -15,3 +15,13 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
     if not user.user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
     return {"enabled": False, "applications_enabled": False, "media_uploads_enabled": False}
+
+
+@router.get("/organizations/{organization_id}/applications/{application_id}")
+def casting_application_read_draft(
+    organization_id: str,
+    application_id: str,
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Deliberately unavailable until migrations and membership DB are enabled."""
+    raise HTTPException(status_code=503, detail="Casting application access is not enabled")
