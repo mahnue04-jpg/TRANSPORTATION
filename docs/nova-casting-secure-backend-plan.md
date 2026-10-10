@@ -44,3 +44,16 @@ Status: PROPOSED / NOT IMPLEMENTED. This document belongs to the existing AMICOR
 - Demo to independent event organizers before building costly integrations.
 - Zeus is a potential customer, not an integration already provided or a confirmed partner.
 - Keep PR #308 in draft until design, implementation, tests, and owner review are complete.
+
+## Implementation checkpoint — 2026-10-10
+
+The isolated Casting Preview Checks, Jekyll site CI and full Render backend diagnostic all passed at commit `02496cd53f599aa357ae95a487df213f9b7397cd`. The Creative Studio voice-default and media-clear tests were aligned with the existing UI, and the isolated Creative Studio / Workspace JavaScript test harnesses were corrected. This confirms regression test health, **not** live casting readiness.
+
+### Next build order (do not skip gates)
+1. **Trusted membership source:** identify or implement persistent organization memberships; Nova JWT role labels alone must not grant casting organizer/reviewer authority. Test inactive, cross-tenant, and forged membership cases.
+2. **Schema migration:** review draft casting models against PostgreSQL migrations, tenant foreign keys, consent evidence and immutable audit events; do not activate schema automatically.
+3. **Authenticated draft-only API:** first endpoint may read an organizer-owned unpublished campaign in staging, using existing Nova session verification, server-validated membership and allowlisted response projection. Return 401/403 to unauthorized callers. No public POST or intake.
+4. **Signed media pipeline:** private quarantine, signature scan, malware check, consent/age gates, retention controls and download authorization. No public media URLs.
+5. **End-to-end launch gate:** staging auth, tenant isolation, state transitions, audit persistence, rollback, browser tests and independent owner approval.
+
+**Explicit non-goals today:** registering routes in `app.main`, enabling upload endpoints, collecting identifiable applicant data, automatically contacting productions, merging PR #308 or deploying to Render.
