@@ -24,4 +24,4 @@ jobs:
       - name: Install standalone test runner
         run: python -m pip install --disable-pip-version-check pytest==8.3.5
       - name: Verify casting preview safeguards
-        run: python -m pytest -q backend/tests/test_nova_casting_preview.py
+        run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py
