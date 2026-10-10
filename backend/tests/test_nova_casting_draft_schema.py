@@ -40,3 +40,16 @@ def test_private_casting_models_not_created_by_existing_schema_ensure():
     schema = SCHEMA.read_text(encoding="utf-8")
     for name in ("NovaCastingCampaign", "NovaCastingApplication", "NovaCastingReview", "NovaCastingMedia"):
         assert name not in schema
+
+
+def test_casting_memberships_are_explicit_and_inactive():
+    models = MODELS.read_text(encoding="utf-8")
+    assert 'class NovaCastingOrganization(Base):' in models
+    assert 'class NovaCastingMembership(Base):' in models
+    assert 'default="PENDING"' in models
+    assert 'default=False' in models
+    assert 'uq_nova_casting_org_user' in models
+    assert 'ck_nova_casting_membership_role' in models
+    schema = SCHEMA.read_text(encoding="utf-8")
+    assert "NovaCastingMembership" not in schema
+    assert "NovaCastingOrganization" not in schema
