@@ -3,6 +3,7 @@
 This is a lightweight structural check, not a substitute for PostgreSQL staging.
 """
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,15 @@ from alembic.operations import Operations
 MIGRATION = Path(__file__).resolve().parents[1] / "migrations/versions/20261010_casting_org_draft.py"
 
 
-def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades():
-    engine = sa.create_engine("sqlite:///:memory:")
+@pytest.mark.parametrize("url", ["sqlite:///:memory:", pytest.param(
+    os.getenv("CASTING_TEST_POSTGRES_URL", ""),
+    marks=pytest.mark.skipif(not os.getenv("CASTING_TEST_POSTGRES_URL"), reason="PostgreSQL CI service not configured"),
+)])
+def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades(url):
+    engine = sa.create_engine(url)
     with engine.begin() as conn:
-        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+        if conn.dialect.name == "sqlite":
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
         conn.exec_driver_sql("CREATE TABLE platform_users (id VARCHAR(36) PRIMARY KEY)")
         conn.exec_driver_sql("INSERT INTO platform_users (id) VALUES ('user1')")
         spec = importlib.util.spec_from_file_location("_casting_migration_under_test", MIGRATION)
