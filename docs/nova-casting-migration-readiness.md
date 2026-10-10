@@ -18,3 +18,9 @@ Verified against repository configuration on 2026-10-10.
 6. Retain disabled casting routes, inactive memberships, draft campaigns and no public uploads through migration rollout.
 
 This document does not create tables, run Alembic or change the live database.
+
+## 2026-10-10 staging update
+
+Three explicit revisions now exist: organization/membership, campaign content, and consent/audit. Each `upgrade()` and `downgrade()` returns immediately when `AMICOR_ENVIRONMENT`, `ENVIRONMENT`, or `APP_ENV` is `production` or `prod`, so a production `alembic upgrade heads` stamps the revision and does not create `nova_casting_` tables. Disposable tests call the same functions with a non-production environment and roll the tables back.
+
+`backend/migrations/env.py` still does not import `casting_db_models`, and `include_object` still does not autogenerate `nova_casting_` tables. Startup `create_all` also drops those table names before it reaches the database. Do not point `CASTING_TEST_POSTGRES_URL` at a shared staging or production database.

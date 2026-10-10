@@ -56,7 +56,7 @@ The isolated Casting Preview Checks, Jekyll site CI and full Render backend diag
 4. **Signed media pipeline:** private quarantine, signature scan, malware check, consent/age gates, retention controls and download authorization. No public media URLs.
 5. **End-to-end launch gate:** staging auth, tenant isolation, state transitions, audit persistence, rollback, browser tests and independent owner approval.
 
-**Explicit non-goals today:** registering routes in `app.main`, enabling upload endpoints, collecting identifiable applicant data, automatically contacting productions, merging PR #308 or deploying to Render.
+The read routes are now registered from `app.main` and stay unavailable unless `NOVA_CASTING_STAGING_READS` is set outside production. Upload endpoints, identifiable applicant collection, external contact, merging PR #308, and Render deployment remain unauthorized. See `docs/nova-casting-staging-checklist.md`.
 
 ## Database migration review checklist — before any activation
 
