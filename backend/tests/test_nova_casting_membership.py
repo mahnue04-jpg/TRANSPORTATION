@@ -36,3 +36,14 @@ def test_membership_requires_server_verified_active_organization():
     assert member.verified_casting_member(
         session_user_id="user1", organization_id="org1", session_tenant_id="tenant1", lookup=lambda user, org: None,
     ) is None
+
+
+def test_membership_lookup_outage_denies_casting_access():
+    member = load()
+    for error in (LookupError, ConnectionError, TimeoutError):
+        def unavailable(user, org, error=error):
+            raise error("membership store unavailable")
+        assert member.verified_casting_member(
+            session_user_id="user1", organization_id="org1",
+            session_tenant_id="tenant1", lookup=unavailable,
+        ) is None
