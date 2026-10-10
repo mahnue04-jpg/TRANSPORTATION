@@ -19,7 +19,7 @@ class NovaCastingCampaign(Base):
         CheckConstraint("status IN ('DRAFT', 'CLOSED')", name="ck_nova_casting_campaign_status"),
     )
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="DRAFT")
