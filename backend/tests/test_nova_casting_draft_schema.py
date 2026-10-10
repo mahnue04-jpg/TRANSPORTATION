@@ -63,3 +63,8 @@ def test_applicants_and_reviewers_reference_existing_nova_users():
     models = MODELS.read_text(encoding="utf-8")
     assert 'applicant_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id")' in models
     assert 'reviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id")' in models
+
+
+def test_campaign_owner_references_casting_organization():
+    models = MODELS.read_text(encoding="utf-8")
+    assert 'owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)' in models
