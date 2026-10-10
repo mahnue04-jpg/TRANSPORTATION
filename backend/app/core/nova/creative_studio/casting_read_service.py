@@ -35,13 +35,19 @@ def read_organizer_application(
     )
     if actor is None:
         raise CastingAccessDenied("Application unavailable")
-    application = application_lookup(application_id)
+    try:
+        application = application_lookup(application_id)
+    except (LookupError, ConnectionError, TimeoutError) as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
     if not application or application.get("owner_id") != casting_organization_id:
         raise CastingAccessDenied("Application unavailable")
     campaign_id = application.get("campaign_id")
     if not isinstance(campaign_id, str) or not campaign_id:
         raise CastingAccessDenied("Application unavailable")
-    campaign = campaign_lookup(campaign_id)
+    try:
+        campaign = campaign_lookup(campaign_id)
+    except (LookupError, ConnectionError, TimeoutError) as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
     if not campaign or campaign.get("owner_id") != casting_organization_id:
         raise CastingAccessDenied("Application unavailable")
     return read_application(actor=actor, application=dict(application), campaign=dict(campaign))
