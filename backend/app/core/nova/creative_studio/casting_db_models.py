@@ -71,7 +71,7 @@ class NovaCastingMedia(Base):
         Index("ix_nova_casting_media_owner_application", "owner_id", "application_id"),
         ForeignKeyConstraint(["owner_id", "application_id"], ["nova_casting_applications.owner_id", "nova_casting_applications.id"], name="fk_nova_casting_media_application_owner"),
         CheckConstraint("status IN ('PENDING', 'QUARANTINED', 'CLEAN', 'REJECTED')", name="ck_nova_casting_media_status"),
-        CheckConstraint("byte_size > 0", name="ck_nova_casting_media_size"),
+        CheckConstraint("byte_size > 0 AND byte_size <= 262144000", name="ck_nova_casting_media_size"),
     )
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
