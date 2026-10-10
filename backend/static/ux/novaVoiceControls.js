@@ -4,6 +4,8 @@
   var params = new URLSearchParams(window.location.search || "");
   var demoEmbed = params.get("nova_demo_embed") === "1";
   var activeRecognition = null;
+  var listeningRequested = false;
+  var restartTimer = null;
   var voiceEngine = null;
   var speakingFallback = false;
   var lastAutoSpokenText = "";
@@ -23,6 +25,8 @@
   }
 
   function stopAll() {
+    listeningRequested = false;
+    window.clearTimeout(restartTimer);
     if (activeRecognition) {
       try { activeRecognition.abort(); } catch (_) {}
       activeRecognition = null;
@@ -169,26 +173,39 @@
     activeRecognition = recognition;
     recognition.lang = selectedLanguage();
     recognition.interimResults = false;
-    recognition.continuous = false;
+    recognition.continuous = true;
+    listeningRequested = true;
     recognition.maxAlternatives = 1;
     setStatus(host, "Listening… speak now.");
     recognition.onresult = function (event) {
-      var transcript = event.results && event.results[0] && event.results[0][0]
-        ? event.results[0][0].transcript
-        : "";
-      input.value = transcript || "";
-      setStatus(host, transcript ? "Heard: " + transcript : "Nothing heard. Try again.");
+      var words = [];
+      for (var i = event.resultIndex || 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal && event.results[i][0]) words.push(event.results[i][0].transcript);
+      }
+      if (words.length) input.value = (input.value ? input.value + " " : "") + words.join(" ");
+      setStatus(host, "Listening through pauses. Press Stop when done, review the text, then Ask Nova.");
     };
     recognition.onerror = function (event) {
       var code = event && event.error ? event.error : "unavailable";
-      setStatus(host, "Microphone error: " + code + ". You can type your request in English or Somali instead.");
+      if (code === "no-speech") return;
+      listeningRequested = false;
+      setStatus(host, "Microphone error: " + code + ". Your text remains available.");
     };
     recognition.onend = function () {
-      if (activeRecognition === recognition) activeRecognition = null;
-      if (input.value.trim()) setStatus(host, "Ready. Press Start Nova to run it.");
+      if (activeRecognition !== recognition) return;
+      if (listeningRequested) {
+        restartTimer = window.setTimeout(function () {
+          if (!listeningRequested || activeRecognition !== recognition) return;
+          try { recognition.start(); }
+          catch (_) { listeningRequested = false; activeRecognition = null; setStatus(host, "Microphone stopped. Your text remains available."); }
+        }, 250);
+      } else {
+        activeRecognition = null;
+        setStatus(host, "Review your words, then press Ask Nova.");
+      }
     };
     try { recognition.start(); }
-    catch (_) { setStatus(host, "Microphone could not start. Check browser permission."); }
+    catch (_) { listeningRequested = false; activeRecognition = null; setStatus(host, "Microphone could not start. Check browser permission."); }
   }
 
   function enhanceForm(form, input) {
@@ -248,6 +265,7 @@
       else startListening(input, form, host);
     });
     start.addEventListener("click", function () {
+      if (window.NovaWorkspaceRecording && window.NovaWorkspaceRecording.isBusy()) { setStatus(host, "Finish recording and review your words before asking Nova."); return; }
       if (!String(input.value || "").trim()) {
         var target = resultTarget(form);
         if (target && String(target.textContent || "").trim()) {
@@ -264,6 +282,7 @@
       submitForm(form);
     });
     stop.addEventListener("click", function () {
+      if (window.NovaWorkspaceRecording) window.NovaWorkspaceRecording.finish();
       stopAll();
       setStatus(host, "Stopped.");
     });

@@ -46,14 +46,16 @@ test('project selection, action requests, reopened history and searchable result
     return { ok: true, status: 200, json: async () => data };
   };
   let tracksStopped = false;
+  let microphoneConstraints;
+  let recordingTimers = 0;
   class Recorder {
     constructor() { this.mimeType = 'audio/webm'; }
     start() { this.state = 'recording'; }
     stop() { this.state = 'inactive'; this.ondataavailable({data: new Blob(['audio'])}); this.onstop(); }
   }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../static/nova-workspace/workspace.js'), 'utf8'), {
-    document, fetch, Blob, Event, setTimeout, clearTimeout, MediaRecorder: Recorder,
-    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { tracksStopped = true; } }] }) } },
+    document, fetch, Blob, Event, setTimeout(fn, ms) { if (ms === 60000) recordingTimers++; return setTimeout(fn, ms); }, clearTimeout, MediaRecorder: Recorder,
+    navigator: { mediaDevices: { getUserMedia: async (constraints) => { microphoneConstraints = constraints; return { getTracks: () => [{ stop() { tracksStopped = true; } }] }; } } },
     FormData: class { append() {} }, window: { MediaRecorder: Recorder, addEventListener() {}, AmiCorSession: { getAccessToken: () => 'test', restore() {} } },
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -90,6 +92,10 @@ test('project selection, action requests, reopened history and searchable result
   assert.equal(requests.filter(r => r.url.endsWith('/ask')).at(-1).body.conversation_id, null);
   const asksBeforeRecording = requests.filter(r => r.url.endsWith('/ask')).length;
   await element('record-somali').handlers.click();
+  assert.equal(recordingTimers, 0);
+  assert.equal(microphoneConstraints.audio.noiseSuppression, true);
+  await element('ask-form').handlers.submit({preventDefault() {}});
+  assert.equal(requests.filter(r => r.url.endsWith('/ask')).length, asksBeforeRecording);
   element('finish-somali').handlers.click();
   await settle();
   assert.equal(element('ask-input').value, 'Waxaan rabaa liiska tababarka.');
@@ -100,6 +106,11 @@ test('project selection, action requests, reopened history and searchable result
   assert.equal(element('recording-status')['aria-busy'], 'false');
   assert.equal(element('finish-somali').disabled, true);
   assert.equal(element('record-somali').disabled, false);
+  element('ask-input').value = 'Keep my earlier words';
+  await element('record-somali').handlers.click();
+  element('finish-somali').handlers.click();
+  await settle();
+  assert.match(element('ask-input').value, /^Keep my earlier words\nWaxaan/);
   assert.match(element('transfer-project').innerHTML, /Onboarding/);
   element('transfer-project').value = 'B';
   element('transfer-project').handlers.change();
