@@ -24,8 +24,8 @@ def test_two_revisions_tenant_integrity_and_reverse_rollback():
     org_migration = load("20261010_casting_org_draft")
     content_migration = load("20261010_casting_content_draft")
     with engine.begin() as conn:
-        conn.exec_driver_sql("CREATE TABLE platform_users (id VARCHAR(36) PRIMARY KEY)")
-        conn.exec_driver_sql("INSERT INTO platform_users (id) VALUES ('applicant'), ('reviewer')")
+        conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS platform_users (id VARCHAR(36) PRIMARY KEY)")
+        conn.exec_driver_sql("INSERT INTO platform_users (id) VALUES ('applicant'), ('reviewer') ON CONFLICT (id) DO NOTHING")
         operations = Operations(MigrationContext.configure(conn))
         originals = [m.op for m in (org_migration, content_migration)]
         try:
