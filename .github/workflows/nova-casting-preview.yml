@@ -100,3 +100,40 @@ jobs:
           Path("/tmp/nova-casting-preview.js").write_text("\n".join(parsed.scripts), encoding="utf-8")
           PY
           node --check /tmp/nova-casting-preview.js
+
+  casting-db-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: casting_test
+          POSTGRES_PASSWORD: casting_test
+          POSTGRES_DB: casting_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U casting_test -d casting_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test
+      CASTING_TEST_POSTGRES_URL: postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+      HEALTH_ISF_STRIPE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
+      - name: Verify isolated casting PostgreSQL reads
+        run: python -m pytest -q tests/test_nova_casting_db_reads_integration.py
