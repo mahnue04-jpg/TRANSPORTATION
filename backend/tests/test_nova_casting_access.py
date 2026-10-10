@@ -42,3 +42,20 @@ def test_submission_remains_disabled_even_with_consent():
     app = {"id": "a1", "campaign_id": "c1", "owner_id": "org1", "applicant_id": "user1", "status": "DRAFT"}
     campaign = {"id": "c1", "owner_id": "org1"}
     assert not access.submit_application(actor=applicant, application=app, campaign=campaign, consent_recorded=True)
+
+
+def test_missing_identifiers_fail_closed_without_exceptions():
+    policy, access = modules()
+    actor = policy.CastingActor("user1", None, policy.CastingRole.APPLICANT)
+    complete = {"id": "a1", "campaign_id": "c1", "owner_id": "org1", "applicant_id": "user1", "status": "DRAFT", "created_at": "now"}
+    campaign = {"id": "c1", "owner_id": "org1"}
+    for key in ("id", "campaign_id", "applicant_id"):
+        incomplete = {k: v for k, v in complete.items() if k != key}
+        with pytest.raises(access.CastingAccessDenied):
+            access.read_application(actor=actor, application=incomplete, campaign=campaign)
+        assert not access.submit_application(actor=actor, application=incomplete, campaign=campaign, consent_recorded=True)
+    for key in ("id", "owner_id"):
+        incomplete_campaign = {k: v for k, v in campaign.items() if k != key}
+        with pytest.raises(access.CastingAccessDenied):
+            access.read_application(actor=actor, application=complete, campaign=incomplete_campaign)
+        assert not access.submit_application(actor=actor, application=complete, campaign=incomplete_campaign, consent_recorded=True)
