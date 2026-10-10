@@ -134,6 +134,16 @@ def create(payload: CreateMeeting, response: Response, user: UserContext = Depen
     return dict(_out(row), invite_path=f"/nova/synapse#room={row.meeting_id}&invite={invite}")
 
 
+@router.post("/meetings/{mid}/invitation", dependencies=owner_access)
+def invitation(mid: str, response: Response, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    row = _owned(db, mid, user)
+    invite = secrets.token_urlsafe(32)
+    row.invite_hash = hashlib.sha256(invite.encode()).hexdigest()
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return dict(_out(row), invite_path=f"/nova/synapse#room={row.meeting_id}&invite={invite}")
+
+
 @router.post("/meetings/{mid}/host", dependencies=owner_access)
 def host(mid: str, response: Response, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
     row = _owned(db, mid, user)

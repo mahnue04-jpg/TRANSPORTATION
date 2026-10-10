@@ -124,3 +124,20 @@ def test_synapse_page_and_host_api_require_authentication(monkeypatch):
     assert client.post('/api/nova/synapse/meetings',json={'title':'Private'}).status_code == 401
     assert client.post('/api/nova/synapse/meetings/unknown/host').status_code == 401
     assert client.post('/api/nova/synapse/meetings/unknown/end').status_code == 401
+
+
+def test_resumed_host_can_rotate_invitation_without_extending_expiry(db, provider):
+    owner = user()
+    created = synapse.create(synapse.CreateMeeting(title='Team'),Response(),owner,db)
+    mid = created['meeting_id']
+    old = created['invite_path'].split('invite=')[1]
+    with pytest.raises(HTTPException):
+        synapse.invitation(mid,Response(),user('other'),db)
+    renewed = synapse.invitation(mid,Response(),owner,db)
+    new = renewed['invite_path'].split('invite=')[1]
+    assert old != new
+    assert renewed['expires_at'] == created['expires_at']
+    with pytest.raises(HTTPException) as err:
+        synapse.join(mid,synapse.GuestJoin(invite=old,name='Visitor'),Response(),db)
+    assert err.value.status_code == 404
+    assert synapse.join(mid,synapse.GuestJoin(invite=new,name='Visitor'),Response(),db)['host'] is False
