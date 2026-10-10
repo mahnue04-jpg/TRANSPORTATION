@@ -40,3 +40,16 @@ def test_casting_preview_never_claims_real_submission_or_partnership():
     assert 'type="file"' not in html
     assert "localStorage" not in html
     assert "sessionStorage" not in html
+
+
+def test_organizer_review_stages_are_in_memory_only():
+    html = PREVIEW.read_text(encoding="utf-8")
+    for expected in (
+        'id="review-status"', 'id="review-note"',
+        'id="save-review"', 'function openReview(',
+        'Demo review updated in memory only; not saved or sent.',
+        'Object.keys(reviews).forEach',
+    ):
+        assert expected in html
+    assert "localStorage" not in html
+    assert "fetch(" not in html
