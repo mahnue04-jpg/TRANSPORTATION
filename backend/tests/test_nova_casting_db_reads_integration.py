@@ -39,15 +39,19 @@ def test_authenticated_casting_reads_are_tenant_scoped():
                      is_active=True, is_verified=True),
                 NovaCastingOrganization(id="casting-org-a", nova_tenant_id="tenant-a",
                     name="Test company", verification_status="VERIFIED", created_at="now"),
+            ])
+            db.flush()  # Parent users and organization must exist before child rows.
+            db.add_all([
                 NovaCastingMembership(id="member-a", nova_tenant_id="tenant-a",
                     organization_id="casting-org-a", user_id="casting-reviewer",
                     casting_role="reviewer", active=True, created_at="now"),
                 NovaCastingCampaign(id="campaign-a", owner_id="casting-org-a",
                     title="Demo", category="film", status="DRAFT", created_at="now"),
-                NovaCastingApplication(id="application-a", owner_id="casting-org-a",
-                    campaign_id="campaign-a", applicant_id="casting-applicant",
-                    status="DRAFT", created_at="now"),
             ])
+            db.flush()
+            db.add(NovaCastingApplication(id="application-a", owner_id="casting-org-a",
+                campaign_id="campaign-a", applicant_id="casting-applicant",
+                status="DRAFT", created_at="now"))
             db.flush()
             def read(tenant="tenant-a"):
                 return read_casting_application_for_nova_user(
