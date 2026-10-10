@@ -82,6 +82,7 @@ class NovaCastingOrganization(Base):
     """Draft casting organization verification; not a replacement for Nova auth."""
     __tablename__ = "nova_casting_organizations"
     __table_args__ = (
+        UniqueConstraint("nova_tenant_id", "id", name="uq_nova_casting_org_tenant_id"),
         CheckConstraint("verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')", name="ck_nova_casting_org_verification"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
