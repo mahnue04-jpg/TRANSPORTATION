@@ -103,7 +103,7 @@ jobs:
 
       - name: Test casting authenticated database reads in disposable PostgreSQL
         env:
-          CASTING_TEST_POSTGRES_URL: postgresql://amicor:amicor@127.0.0.1:5432/amicor
+          CASTING_TEST_POSTGRES_URL: postgresql+psycopg2://amicor:amicor@127.0.0.1:5432/amicor
         run: pytest tests/test_nova_casting_db_reads_integration.py -q
 
       - name: Run Creative Studio scene timeout and rendering regression
