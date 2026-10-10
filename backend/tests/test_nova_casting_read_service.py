@@ -40,3 +40,23 @@ def test_verified_organizer_can_read_but_other_tenant_cannot():
         service.read_organizer_application(**{**params, "application_lookup": lambda _: {**app, "owner_id": "org2"}})
     with pytest.raises(access.CastingAccessDenied):
         service.read_organizer_application(**{**params, "membership_lookup": lambda u, o: None})
+
+
+def test_storage_lookup_failures_deny_access():
+    service, access = load()
+    membership = dict(user_id="reviewer", organization_id="org1", nova_tenant_id="tenant1",
+                      active=True, organization_verified=True, casting_role="reviewer")
+    app = dict(id="app1", owner_id="org1", applicant_id="applicant", campaign_id="camp1",
+               status="SUBMITTED", created_at="today")
+    params = dict(session_user_id="reviewer", session_tenant_id="tenant1",
+                  casting_organization_id="org1", application_id="app1",
+                  membership_lookup=lambda u, o: membership,
+                  application_lookup=lambda _: app,
+                  campaign_lookup=lambda _: dict(id="camp1", owner_id="org1"))
+    for error in (LookupError, ConnectionError, TimeoutError):
+        def fail(_):
+            raise error("database unavailable")
+        with pytest.raises(access.CastingAccessDenied):
+            service.read_organizer_application(**{**params, "application_lookup": fail})
+        with pytest.raises(access.CastingAccessDenied):
+            service.read_organizer_application(**{**params, "campaign_lookup": fail})
