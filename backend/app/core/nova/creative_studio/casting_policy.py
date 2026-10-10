@@ -55,3 +55,23 @@ def may_manage_campaign(actor: CastingActor, *, organization_id: str) -> bool:
         and bool(actor.organization_id)
         and actor.organization_id == organization_id
     )
+
+
+def may_upload_audition(actor: CastingActor, *, applicant_id: str) -> bool:
+    """Permit only the authenticated applicant to request a private upload."""
+    return (
+        bool(actor.user_id)
+        and actor.role is CastingRole.APPLICANT
+        and bool(applicant_id)
+        and actor.user_id == applicant_id
+    )
+
+
+def may_view_audition_media(
+    actor: CastingActor, *, applicant_id: str, organization_id: str, scan_status: str
+) -> bool:
+    """Quarantined or unscanned media must not be distributed to reviewers."""
+    return (
+        scan_status == "CLEAN"
+        and may_view_application(actor, applicant_id=applicant_id, organization_id=organization_id)
+    )
