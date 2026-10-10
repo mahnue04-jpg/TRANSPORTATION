@@ -70,3 +70,9 @@ def test_organizer_review_filter_exists():
     assert 'value="All">All candidates' in html
     assert 'value="Callback">Callback requested' in html
     assert 'getElementById("candidate-filter").addEventListener("change",render)' in html
+
+
+def test_shortlist_count_is_not_reduced_by_stage_filter():
+    html = PREVIEW.read_text(encoding="utf-8")
+    assert 'const count=data.people.filter((_,i)=>Boolean(selected[key+"-"+i])).length;' in html
+    assert 'fictional candidates shortlisted (all stages).' in html
