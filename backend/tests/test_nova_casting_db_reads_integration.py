@@ -63,6 +63,15 @@ def test_authenticated_casting_reads_are_tenant_scoped():
                     db=db, user_id="casting-reviewer", tenant_id=tenant,
                     organization_id="casting-org-a", application_id="application-a")
             assert read()["id"] == "application-a"
+            # Even a valid reviewer must never receive a private storage locator.
+            assert "storage_key" not in read()
+            membership = db.get(NovaCastingMembership, "member-a")
+            membership.casting_role = "admin"
+            db.flush()
+            with pytest.raises(CastingAccessDenied):
+                read()
+            membership.casting_role = "reviewer"
+            db.flush()
             with pytest.raises(CastingAccessDenied):
                 read_casting_application_for_nova_user(
                     db=db, user_id="casting-reviewer", tenant_id="tenant-a",
