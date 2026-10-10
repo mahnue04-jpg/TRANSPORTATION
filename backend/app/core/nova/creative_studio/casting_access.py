@@ -15,7 +15,11 @@ class CastingAccessDenied(PermissionError):
 
 
 def read_application(*, actor: CastingActor | None, application: dict, campaign: dict) -> dict:
-    if actor is None or application.get("campaign_id") != campaign.get("id"):
+    if (actor is None or not application.get("id") or not application.get("applicant_id")
+            or not application.get("campaign_id") or not campaign.get("id")
+            or not campaign.get("owner_id")):
+        raise CastingAccessDenied("Application unavailable")
+    if application["campaign_id"] != campaign["id"]:
         raise CastingAccessDenied("Application unavailable")
     if application.get("owner_id") != campaign.get("owner_id"):
         raise CastingAccessDenied("Application unavailable")
@@ -27,7 +31,11 @@ def read_application(*, actor: CastingActor | None, application: dict, campaign:
 
 
 def submit_application(*, actor: CastingActor | None, application: dict, campaign: dict, consent_recorded: bool) -> bool:
-    if actor is None or application.get("campaign_id") != campaign.get("id"):
+    if (actor is None or not application.get("id") or not application.get("applicant_id")
+            or not application.get("campaign_id") or not campaign.get("id")
+            or not campaign.get("owner_id")):
+        return False
+    if application["campaign_id"] != campaign["id"]:
         return False
     if application.get("owner_id") != campaign.get("owner_id"):
         return False
