@@ -51,6 +51,7 @@ def test_casting_memberships_are_explicit_and_inactive():
     assert 'uq_nova_casting_org_tenant_id' in models
     assert 'default=False' in models
     assert 'uq_nova_casting_org_user' in models
+    assert 'ix_nova_casting_membership_active_org' in models
     assert 'ForeignKey("platform_users.id")' in models
     assert 'ck_nova_casting_membership_role' in models
     schema = SCHEMA.read_text(encoding="utf-8")
