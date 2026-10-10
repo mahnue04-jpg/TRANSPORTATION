@@ -24,3 +24,19 @@ def test_media_metadata_is_private_and_quarantined_by_default():
     assert 'default="PENDING"' in models
     assert "ck_nova_casting_media_status" in models
     assert "storage_key" in models
+
+
+def test_casting_has_no_live_registration_or_upload_routes():
+    main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+    creative_router = ROUTER.read_text(encoding="utf-8")
+    assert "/api/nova/casting/" not in main
+    assert "/api/nova/casting/" not in creative_router
+    assert "casting_media_access" not in main
+    assert "casting_access" not in main
+    assert "casting_upload_rules" not in creative_router
+
+
+def test_private_casting_models_not_created_by_existing_schema_ensure():
+    schema = SCHEMA.read_text(encoding="utf-8")
+    for name in ("NovaCastingCampaign", "NovaCastingApplication", "NovaCastingReview", "NovaCastingMedia"):
+        assert name not in schema
