@@ -76,3 +76,31 @@ class NovaCastingMedia(Base):
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingOrganization(Base):
+    """Draft casting organization verification; not a replacement for Nova auth."""
+    __tablename__ = "nova_casting_organizations"
+    __table_args__ = (
+        CheckConstraint("verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')", name="ck_nova_casting_org_verification"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(12), nullable=False, default="PENDING")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingMembership(Base):
+    """Explicit, revocable casting role, not inferred from platform admin role."""
+    __tablename__ = "nova_casting_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_nova_casting_org_user"),
+        Index("ix_nova_casting_membership_user", "user_id", "organization_id"),
+        CheckConstraint("casting_role IN ('organizer', 'reviewer')", name="ck_nova_casting_membership_role"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    casting_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
