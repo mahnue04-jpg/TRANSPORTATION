@@ -62,3 +62,11 @@ def test_optional_score_and_callback_are_demo_only():
     assert 'type="datetime-local"' in html
     assert "fetch(" not in html
     assert "localStorage" not in html
+
+
+def test_organizer_review_filter_exists():
+    html = PREVIEW.read_text(encoding="utf-8")
+    assert 'id="candidate-filter"' in html
+    assert 'value="All">All candidates' in html
+    assert 'value="Callback">Callback requested' in html
+    assert 'getElementById("candidate-filter").addEventListener("change",render)' in html
