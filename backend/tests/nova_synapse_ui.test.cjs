@@ -7,7 +7,7 @@ const source=fs.readFileSync(path.join(__dirname,'../static/nova-synapse/synapse
 function setup(configured,guest=false){
  const nodes=new Map(),requests=[],connections=[];
  const element=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,style:{},children:[],handlers:{},appendChild(x){this.children.push(x);},replaceChildren(){this.children=[];},setAttribute(k,v){this[k]=v;},removeAttribute(k){delete this[k];},addEventListener(k,fn){this.handlers[k]=fn;},scrollIntoView(){}});return nodes.get(id);};
- class Room{constructor(){this.handlers={};this.remoteParticipants=new Map();this.localParticipant={isMicrophoneEnabled:false,isCameraEnabled:false,isScreenShareEnabled:false};}on(k,fn){this.handlers[k]=fn;}async connect(url,token){connections.push({url,token});}async disconnect(){}}
+ class Room{constructor(){this.state='connected';this.handlers={};this.remoteParticipants=new Map();this.localParticipant={isMicrophoneEnabled:false,isCameraEnabled:false,isScreenShareEnabled:false,async setMicrophoneEnabled(value){this.isMicrophoneEnabled=value;},async setCameraEnabled(value){this.isCameraEnabled=value;}};}on(k,fn){this.handlers[k]=fn;}async connect(url,token){connections.push({url,token});}async disconnect(){}}
  const document={documentElement:{},querySelectorAll(){return [];},getElementById:element,createElement:()=>element('new')};
  const fetch=async(url,opts)=>{
    requests.push({url,opts});
@@ -43,4 +43,16 @@ test('resuming another meeting hides the previous invite and allows a correct ne
  assert.match(s.element('invite-link').value,/room=B/);
  assert.equal(s.element('invitation-controls').hidden,false);
  assert.match(s.element('invite-expiry').textContent,/Invitation expires/);
+});
+
+test('media status follows toggles and remains correct after switching language',async()=>{
+ const s=setup(true,true);await settle();s.element('name').value='Visitor';
+ await s.element('guest-form').handlers.submit({preventDefault(){}});
+ assert.match(s.element('room-status').textContent,/Microphone off.*Camera off/);
+ await s.element('mic').handlers.click();await s.element('camera').handlers.click();
+ assert.match(s.element('room-status').textContent,/Microphone on.*Camera on/);
+ s.element('language').value='ar';s.element('language').handlers.change();
+ assert.match(s.element('room-status').textContent,/الميكروفون مفتوح.*الكاميرا مفتوحة/);
+ assert.equal(s.element('rename-form').hidden,true);
+ assert.equal(s.element('share').hidden,true);
 });
