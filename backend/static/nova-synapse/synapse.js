@@ -8,6 +8,12 @@
     fr: {workspace:'Espace de travail',communications:'Communications',eyebrow:'VOTRE ÉQUIPE. UN SEUL ESPACE.',headline:'Rencontrez-vous ici. Travaillez ensemble.',description:'Une conversation, un écran partagé, une prochaine étape. Retrouvez votre équipe dans AMICOR Synapse.',ready:'Préparez votre réunion',preview:'L’aperçu de la caméra reste sur cet appareil.',testcamera:'Aperçu de la caméra',privacy:'Caméra et microphone désactivés à l’arrivée. AMICOR n’enregistre ni les réunions ni le chat.',meetingtitle:'Titre de la réunion',create:'Créer une réunion',signin:'Connectez-vous à Nova pour organiser une réunion',yourname:'Votre nom affiché',join:'Rejoindre',invitation:'Cette invitation donne accès à la réunion. Partagez-la uniquement avec les participants prévus.',room:'Votre espace de réunion',live:'Connecté',emptytitle:'Un lieu pour échanger.',empty:'Créez une réunion ou ouvrez une invitation.',mic:'Microphone désactivé',micon:'Microphone activé',camera:'Caméra désactivée',cameraon:'Caméra activée',share:'Partager l’écran',sharing:'Arrêter le partage',audio:'Activer le son',leave:'Quitter',link:'Invitation à la réunion',copy:'Copier le lien',expiry:'L’invitation expire dans 8 heures. Gardez ce lien privé.',lock:'Verrouiller les nouvelles invitations',unlock:'Déverrouiller les invitations',end:'Terminer pour tous',chat:'Chat de la réunion',message:'Message',send:'Envoyer',chatprivacy:'Le chat reste dans cet appel. Copiez vos notes dans votre espace de travail pour les conserver.',footer:'Connectez votre équipe. Poursuivez votre travail.',return:'Retour à l’espace de travail →',unavailable:'Service vidéo non connecté. Appels indisponibles.',available:'Service vidéo configuré',copied:'Invitation copiée.',left:'Vous avez quitté la réunion.',ended:'Réunion terminée pour tous.',busy:'Connexion…',cameraerror:'Impossible de lancer la caméra. Vérifiez l’autorisation du navigateur.',failed:'Impossible de terminer la demande. Réessayez.',sound:'Cliquez sur Activer le son pour écouter.',joined:'Vous êtes connecté. Caméra et microphone désactivés.',locknote:'Nouvelles invitations verrouillées. Les accès déjà délivrés peuvent rester valables pendant 5 minutes.',unlocked:'Nouvelles invitations ouvertes.',reconnecting:'Reconnexion…',disconnected:'Déconnecté. Rejoignez à nouveau.'},
     es: {workspace:'Espacio de trabajo',communications:'Comunicaciones',eyebrow:'TU EQUIPO. UN SOLO ESPACIO.',headline:'Reúnanse aquí. Trabajen juntos.',description:'Una conversación, una pantalla compartida, un siguiente paso. Reúne a tu equipo en AMICOR Synapse.',ready:'Prepara tu reunión',preview:'La vista previa de la cámara permanece en este dispositivo.',testcamera:'Vista previa de cámara',privacy:'Cámara y micrófono apagados al entrar. AMICOR no graba reuniones ni chat.',meetingtitle:'Título de reunión',create:'Crear reunión',signin:'Inicia sesión en Nova para organizar una reunión',yourname:'Tu nombre visible',join:'Unirse',invitation:'Esta invitación permite entrar. Compártela solo con los participantes previstos.',room:'Tu espacio de reunión',live:'Conectado',emptytitle:'Un lugar para conectar.',empty:'Crea una reunión o abre una invitación.',mic:'Micrófono apagado',micon:'Micrófono encendido',camera:'Cámara apagada',cameraon:'Cámara encendida',share:'Compartir pantalla',sharing:'Dejar de compartir',audio:'Activar sonido',leave:'Salir',link:'Invitación de reunión',copy:'Copiar enlace',expiry:'La invitación caduca en 8 horas. Mantén este enlace privado.',lock:'Bloquear nuevas invitaciones',unlock:'Desbloquear invitaciones',end:'Terminar para todos',chat:'Chat de reunión',message:'Mensaje',send:'Enviar',chatprivacy:'El chat permanece en esta llamada. Copia las notas al espacio de trabajo para guardarlas.',footer:'Conecta a tu equipo. Continúa tu trabajo.',return:'Volver al espacio de trabajo →',unavailable:'El servicio de vídeo aún no está conectado. Llamadas no disponibles.',available:'Servicio de vídeo configurado',copied:'Invitación copiada.',left:'Saliste de la reunión.',ended:'Reunión terminada para todos.',busy:'Conectando…',cameraerror:'No se pudo iniciar la cámara. Revisa el permiso del navegador.',failed:'No se pudo completar la solicitud. Inténtalo de nuevo.',sound:'Pulsa Activar sonido para escuchar.',joined:'Conectado. Cámara y micrófono apagados.',locknote:'Nuevas invitaciones bloqueadas. El acceso anterior puede seguir vigente hasta 5 minutos.',unlocked:'Nuevas invitaciones abiertas.',reconnecting:'Reconectando…',disconnected:'Desconectado. Vuelve a unirte.'}
   };
+  phrases.en.people = 'Participants'; phrases.en.newinvite = 'New invitation link'; phrases.en.expires = 'Invitation expires';
+  phrases.so.people = 'Ka qaybgalayaasha'; phrases.so.newinvite = 'Xiriiriye martiqaad cusub'; phrases.so.expires = 'Martiqaadku wuxuu dhacayaa';
+  phrases.ar.people = 'المشاركون'; phrases.ar.newinvite = 'رابط دعوة جديد'; phrases.ar.expires = 'تنتهي الدعوة';
+  phrases.fr.people = 'Participants'; phrases.fr.newinvite = 'Nouveau lien d’invitation'; phrases.fr.expires = 'Expiration de l’invitation';
+  phrases.es.people = 'Participantes'; phrases.es.newinvite = 'Nuevo enlace de invitación'; phrases.es.expires = 'La invitación caduca';
+  var invitedMeeting = null;
   var lang = 'en', configured = false, room = null, meeting = null, previewStream = null, connecting = false;
   try { lang = localStorage.getItem('amicor_synapse_language') || 'en'; } catch (_) {}
   if (!phrases[lang]) lang = 'en';
@@ -17,7 +23,8 @@
     document.querySelectorAll('[data-i]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i')); });
     $('language').value = lang;
     $('connection').textContent = t(configured ? 'available' : 'unavailable');
-    if (room) controlLabels();
+    if (room) { controlLabels(); participants(); }
+    if (meeting) invitationExpiry();
   }
   $('language').addEventListener('change', function () { lang = $('language').value; try { localStorage.setItem('amicor_synapse_language', lang); } catch (_) {} translate(); });
   function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
@@ -27,7 +34,7 @@
     if (!guest && token()) headers.Authorization = 'Bearer ' + token();
     var response = await fetch('/api/nova/synapse' + path, {method:method || 'GET',headers:headers,body:data ? JSON.stringify(data) : undefined,cache:'no-store'});
     var result = await response.json();
-    if (!response.ok) throw new Error(response.status === 503 ? t('unavailable') : (result.detail || t('failed')));
+    if (!response.ok) throw new Error(response.status === 503 && !configured ? t('unavailable') : (result.detail || t('failed')));
     return result;
   }
   var invite = new URLSearchParams(location.hash.slice(1));
@@ -38,8 +45,23 @@
   $('preview-button').addEventListener('click', async function () {
     try { if (previewStream) { stopPreview(); return; } previewStream = await navigator.mediaDevices.getUserMedia({video:true,audio:false}); $('preview').srcObject = previewStream; $('preview').style.display = 'block'; $('preview-placeholder').hidden = true; } catch (_) { notice(t('cameraerror')); }
   });
-  function controls(active) { ['call-controls','chat-panel','live-badge'].forEach(function (id) { $(id).hidden = !active; }); $('host-controls').hidden = !(active && meeting && meeting.host); }
+  function controls(active) { ['call-controls','chat-panel','live-badge','participants'].forEach(function (id) { $(id).hidden = !active; }); $('host-controls').hidden = !(active && meeting && meeting.host); }
   function controlLabels() { [['mic',room.localParticipant.isMicrophoneEnabled ? 'micon':'mic'],['camera',room.localParticipant.isCameraEnabled ? 'cameraon':'camera'],['share',room.localParticipant.isScreenShareEnabled ? 'sharing':'share'],['lock',meeting.locked ? 'unlock':'lock']].forEach(function (pair) { $(pair[0]).setAttribute('data-i',pair[1]); $(pair[0]).textContent = t(pair[1]); }); }
+  function participants() {
+    if (!room) return;
+    var names = [room.localParticipant.name || 'Host'];
+    room.remoteParticipants.forEach(function (person) { names.push(person.name || 'Participant'); });
+    $('participants').textContent = t('people') + ' (' + names.length + '): ' + names.join(', ');
+  }
+  function invitationExpiry() {
+    if (meeting && meeting.expires_at) $('invite-expiry').textContent = t('expires') + ': ' + new Date(meeting.expires_at).toLocaleString(lang) + '. ' + t('invitation');
+  }
+  function showInvitation(created) {
+    invitedMeeting = created.meeting_id;
+    $('invite-link').value = location.origin + created.invite_path;
+    $('invitation-controls').hidden = false;
+    $('invite-expiry').textContent = t('expires') + ': ' + new Date(created.expires_at).toLocaleString(lang) + '. ' + t('invitation');
+  }
   function addChat(name, text) { var li = document.createElement('li'); li.textContent = name + ': ' + text; $('chat-log').appendChild(li); while ($('chat-log').children.length > 100) $('chat-log').firstChild.remove(); li.scrollIntoView({block:'nearest'}); }
   function tile(track, participant) {
     var el = track.attach(); el.autoplay = true;
@@ -55,9 +77,12 @@
     if (room) await room.disconnect();
     var current = new LivekitClient.Room({adaptiveStream:true,dynacast:true,audioCaptureDefaults:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     room = current; meeting = result;
+    if (invitedMeeting !== result.meeting_id) { $('invitation-controls').hidden = true; $('invite-link').value = ''; }
     $('stage').replaceChildren(); $('chat-log').replaceChildren();
     current.on(LivekitClient.RoomEvent.TrackSubscribed, function (track, publication, participant) { tile(track, participant); });
     current.on(LivekitClient.RoomEvent.TrackUnsubscribed, removeTrack);
+    current.on(LivekitClient.RoomEvent.ParticipantConnected, participants);
+    current.on(LivekitClient.RoomEvent.ParticipantDisconnected, participants);
     current.on(LivekitClient.RoomEvent.LocalTrackPublished, function (publication) { if (publication.track) tile(publication.track,current.localParticipant); controlLabels(); });
     current.on(LivekitClient.RoomEvent.LocalTrackUnpublished, function (publication) { if (publication.track) removeTrack(publication.track); controlLabels(); });
     current.on(LivekitClient.RoomEvent.DataReceived, function (data, participant) { if (!participant || data.byteLength > 12000) return; try { var msg = JSON.parse(new TextDecoder().decode(data)); if (typeof msg.text === 'string') addChat(participant.name || 'Participant',msg.text.slice(0,2000)); } catch (_) {} });
@@ -65,7 +90,7 @@
     current.on(LivekitClient.RoomEvent.Reconnecting, function () { $('room-status').textContent = t('reconnecting'); });
     current.on(LivekitClient.RoomEvent.Reconnected, function () { $('room-status').textContent = t('joined'); });
     current.on(LivekitClient.RoomEvent.Disconnected, function () { if (room !== current) return; controls(false); $('stage').replaceChildren(); $('room-status').textContent = t('disconnected'); });
-    try { await current.connect(result.server_url,result.participant_token); $('meeting-title').textContent = result.title; $('meeting-title').removeAttribute('data-i'); controls(true); controlLabels(); $('room-status').textContent = t('joined'); notice(''); }
+    try { await current.connect(result.server_url,result.participant_token); $('meeting-title').textContent = result.title; $('meeting-title').removeAttribute('data-i'); controls(true); controlLabels(); participants(); invitationExpiry(); $('room-status').textContent = t('joined'); notice(''); }
     catch (_) { await current.disconnect(); room = null; controls(false); notice(t('failed')); }
     finally { connecting = false; }
   }
@@ -77,9 +102,10 @@
   async function host(id) { var result = await api('/meetings/' + encodeURIComponent(id) + '/host','POST'); await connect(result); }
   $('create-form').addEventListener('submit', async function (event) {
     event.preventDefault(); $('create').disabled = true;
-    try { var created = await api('/meetings','POST',{title:$('title').value.trim()}); $('invite-link').value = location.origin + created.invite_path; $('invitation-controls').hidden = false; await refreshMeetings(); await host(created.meeting_id); } catch (err) { notice(err.message); } finally { $('create').disabled = !configured || !token(); }
+    try { var created = await api('/meetings','POST',{title:$('title').value.trim()}); showInvitation(created); await refreshMeetings(); await host(created.meeting_id); } catch (err) { notice(err.message); } finally { $('create').disabled = !configured || !token(); }
   });
   $('guest-form').addEventListener('submit', async function (event) { event.preventDefault(); $('guest-join').disabled = true; try { await connect(await api('/meetings/'+encodeURIComponent(invite.get('room'))+'/join','POST',{invite:invite.get('invite'),name:$('name').value.trim()},true)); } catch (err) { notice(err.message); } finally { $('guest-join').disabled = !configured; } });
+  $('renew-invite').addEventListener('click', async function () { if (!meeting || !meeting.host) return; $('renew-invite').disabled = true; try { showInvitation(await api('/meetings/'+meeting.meeting_id+'/invitation','POST')); } catch (err) { notice(err.message); } finally { $('renew-invite').disabled = false; } });
   $('copy').addEventListener('click', async function () { try { await navigator.clipboard.writeText($('invite-link').value); notice(t('copied')); } catch (_) { $('invite-link').select(); } });
   [['mic','setMicrophoneEnabled','isMicrophoneEnabled'],['camera','setCameraEnabled','isCameraEnabled'],['share','setScreenShareEnabled','isScreenShareEnabled']].forEach(function (item) { $(item[0]).addEventListener('click', async function () { if (!room) return; $(item[0]).disabled = true; try { await room.localParticipant[item[1]](!room.localParticipant[item[2]]); controlLabels(); } catch (_) { notice(t('failed')); } finally { $(item[0]).disabled = false; } }); });
   $('audio').addEventListener('click', async function () { if (room) { try { await room.startAudio(); notice(''); } catch (_) { notice(t('sound')); } } });
