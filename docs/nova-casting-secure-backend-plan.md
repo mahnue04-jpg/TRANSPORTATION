@@ -57,3 +57,16 @@ The isolated Casting Preview Checks, Jekyll site CI and full Render backend diag
 5. **End-to-end launch gate:** staging auth, tenant isolation, state transitions, audit persistence, rollback, browser tests and independent owner approval.
 
 **Explicit non-goals today:** registering routes in `app.main`, enabling upload endpoints, collecting identifiable applicant data, automatically contacting productions, merging PR #308 or deploying to Render.
+
+## Database migration review checklist — before any activation
+
+**Current state:** `casting_db_models.py` defines draft models only; it is intentionally absent from application startup and `schema_ensure.py`. No DDL should run as part of this PR without explicit release approval.
+
+1. **Map to existing identities:** Verify the canonical Nova user and organization tables and their actual primary-key types. Add real foreign keys for casting organization ownership and membership user IDs only after checking compatibility. Do not treat `UserContext.role` as casting membership.
+2. **Constrain tenant relationships:** Add database-level composite tenant-safe references or verified trigger constraints for campaign → application → media/review records. Separate `organization_id` from user identity; current `owner_id` draft fields require schema review.
+3. **Choose migrations:** Use the repository's approved migrations mechanism, migration versioning, and reversible scripts. Never import the draft models into `Base.metadata.create_all` or schema startup routines as a shortcut.
+4. **Default deny:** New organizations start `PENDING`; memberships start inactive; campaigns start `DRAFT`; media starts `PENDING`. No default administrator bypass.
+5. **Audit and consent:** Include immutable consent event/version and audit-event tables; specify who verified the organization, verification timestamp, revocation actor, and retention timelines.
+6. **Safe rollout:** Run migration and rollback against a disposable PostgreSQL instance and staging database, assert zero application-facing routes, verify existing tenant records remain unchanged, and obtain owner signoff before enabling any production schema change.
+
+**Exit criteria:** schema reviewer approval, reproducible forward/rollback migrations, cross-tenant and no-access regression tests, and green full backend/Creative Studio CI.
