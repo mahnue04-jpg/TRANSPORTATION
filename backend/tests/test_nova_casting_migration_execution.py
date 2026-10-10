@@ -1,7 +1,4 @@
-"""Execute draft casting migration up/down against disposable in-memory SQLite.
-
-This is a lightweight structural check, not a substitute for PostgreSQL staging.
-"""
+"""Exercise draft casting migration and tenant isolation on disposable databases."""
 import importlib.util
 import os
 from pathlib import Path
@@ -24,7 +21,7 @@ def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades(url):
         if conn.dialect.name == "sqlite":
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
         conn.exec_driver_sql("CREATE TABLE platform_users (id VARCHAR(36) PRIMARY KEY)")
-        conn.exec_driver_sql("INSERT INTO platform_users (id) VALUES ('user1')")
+        conn.exec_driver_sql("INSERT INTO platform_users (id) VALUES ('user1'), ('user2')")
         spec = importlib.util.spec_from_file_location("_casting_migration_under_test", MIGRATION)
         migration = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(migration)
@@ -45,7 +42,7 @@ def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades(url):
             with pytest.raises(sa.exc.IntegrityError):
                 with conn.begin_nested():
                     conn.execute(membership.insert().values(id="member2", nova_tenant_id="tenant2",
-                        organization_id="org1", user_id="user1", casting_role="reviewer", created_at="today"))
+                        organization_id="org1", user_id="user2", casting_role="reviewer", created_at="today"))
             migration.downgrade()
             tables = sa.inspect(conn).get_table_names()
             assert "nova_casting_memberships" not in tables
