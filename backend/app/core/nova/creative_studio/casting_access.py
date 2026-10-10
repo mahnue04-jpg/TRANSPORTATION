@@ -16,7 +16,8 @@ class CastingAccessDenied(PermissionError):
 
 def read_application(*, actor: CastingActor | None, application: dict, campaign: dict) -> dict:
     if (actor is None or not application.get("id") or not application.get("applicant_id")
-            or not application.get("campaign_id") or not campaign.get("id")
+            or not application.get("campaign_id") or not application.get("status")
+            or not application.get("created_at") or not campaign.get("id")
             or not campaign.get("owner_id")):
         raise CastingAccessDenied("Application unavailable")
     if application["campaign_id"] != campaign["id"]:
