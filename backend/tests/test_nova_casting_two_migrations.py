@@ -39,6 +39,7 @@ def test_two_revisions_tenant_integrity_and_reverse_rollback():
             campaign = meta.tables["nova_casting_campaigns"]
             application = meta.tables["nova_casting_applications"]
             media = meta.tables["nova_casting_media"]
+            review = meta.tables["nova_casting_reviews"]
             conn.execute(org.insert(), [
                 dict(id="org1", nova_tenant_id="tenant1", name="One", created_at="now"),
                 dict(id="org2", nova_tenant_id="tenant2", name="Two", created_at="now"),
@@ -52,6 +53,12 @@ def test_two_revisions_tenant_integrity_and_reverse_rollback():
             with pytest.raises(sa.exc.IntegrityError):
                 with conn.begin_nested():
                     conn.execute(media.insert().values(id="bad-media", owner_id="org2", application_id="app1", storage_key="private", mime_type="video/mp4", byte_size=100, created_at="now"))
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    conn.execute(review.insert().values(id="bad-review", owner_id="org2", application_id="app1", reviewer_id="reviewer", updated_at="now"))
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    conn.execute(media.insert().values(id="oversize", owner_id="org1", application_id="app1", storage_key="private", mime_type="video/mp4", byte_size=262144001, created_at="now"))
             content_migration.downgrade()
             org_migration.downgrade()
             names = set(sa.inspect(conn).get_table_names())
