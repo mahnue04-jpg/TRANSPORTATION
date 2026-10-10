@@ -48,6 +48,7 @@ def test_casting_memberships_are_explicit_and_inactive():
     assert 'class NovaCastingMembership(Base):' in models
     assert 'default="PENDING"' in models
     assert 'nova_tenant_id: Mapped[str]' in models
+    assert 'uq_nova_casting_org_tenant_id' in models
     assert 'default=False' in models
     assert 'uq_nova_casting_org_user' in models
     assert 'ForeignKey("platform_users.id")' in models
