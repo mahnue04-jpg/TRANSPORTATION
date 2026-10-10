@@ -100,7 +100,7 @@ class NovaCastingMembership(Base):
     )
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
     organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
-    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
     casting_role: Mapped[str] = mapped_column(String(16), nullable=False)
     active: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
