@@ -53,3 +53,12 @@ def test_organizer_review_stages_are_in_memory_only():
         assert expected in html
     assert "localStorage" not in html
     assert "fetch(" not in html
+
+
+def test_optional_score_and_callback_are_demo_only():
+    html = PREVIEW.read_text(encoding="utf-8")
+    for expected in ('id="review-score"', 'id="callback-time"', 'no invitation sent', 'score:', 'callback:'):
+        assert expected in html
+    assert 'type="datetime-local"' in html
+    assert "fetch(" not in html
+    assert "localStorage" not in html
