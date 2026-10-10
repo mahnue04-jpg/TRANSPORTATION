@@ -78,3 +78,9 @@ def test_cross_organization_cascade_is_blocked_by_composite_keys():
                        "fk_nova_casting_media_application_owner"):
         assert constraint in models
     assert "ForeignKeyConstraint" in models
+
+
+def test_membership_tenant_matches_casting_organization():
+    models = MODELS.read_text(encoding="utf-8")
+    assert "fk_nova_casting_member_tenant_org" in models
+    assert 'ForeignKeyConstraint(["nova_tenant_id", "organization_id"]' in models
