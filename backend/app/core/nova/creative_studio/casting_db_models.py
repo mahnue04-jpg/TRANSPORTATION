@@ -5,7 +5,7 @@ No actual applicant intake, video storage, or public endpoints are enabled.
 """
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -105,5 +105,5 @@ class NovaCastingMembership(Base):
     organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
     casting_role: Mapped[str] = mapped_column(String(16), nullable=False)
-    active: Mapped[bool] = mapped_column(nullable=False, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
