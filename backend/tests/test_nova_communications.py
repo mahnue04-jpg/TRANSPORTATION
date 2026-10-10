@@ -193,7 +193,7 @@ def test_nova_communications_navigation_and_responsive() -> None:
     assert 'href="/nova/workspace">Workspace' in COMMS_HTML
     assert 'href="/nova/government">Government' in COMMS_HTML
     assert 'href="/nova/business">Business' in COMMS_HTML
-    assert 'href="/nova/today#ask-nova">Voice' in COMMS_HTML
+    assert 'href="/nova/voice">Voice' in COMMS_HTML
     assert 'href="/workspace">Tools' not in COMMS_HTML
     assert 'href="/workspace">Health' not in COMMS_HTML
     assert 'href="/app">Delivery' not in COMMS_HTML

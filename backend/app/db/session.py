@@ -78,6 +78,7 @@ def init_platform_db() -> None:
     Customer-payment ledger tables are Alembic-only and are never created here.
     """
     from app.db import models  # noqa: F401 — registers models with Base.metadata
+    from app.core.nova.synapse import models as nova_synapse_models  # noqa: F401
     from app.core.nova.workspace import models as nova_workspace_models  # noqa: F401
     from app.core.nova.communications import models as nova_communications_models  # noqa: F401
     from app.core.nova.government import models as nova_government_models  # noqa: F401

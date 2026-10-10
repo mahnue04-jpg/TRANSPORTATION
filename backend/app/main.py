@@ -77,6 +77,7 @@ from app import validation as validation_module   # type: ignore
 from app import logging_utils                     # type: ignore
 from app.core.nova import router as nova_router, actions_router as nova_actions_router  # type: ignore
 from app.core.nova.freight.router import router as nova_freight_router  # type: ignore
+from app.core.nova.synapse.router import router as nova_synapse_router
 from app.core.nova.workspace.router import router as nova_workspace_router  # type: ignore
 from app.core.nova.communications.router import router as nova_communications_router  # type: ignore
 from app.core.nova.government.router import router as nova_government_router  # type: ignore
@@ -480,6 +481,7 @@ app.include_router(governance_router)
 app.include_router(assistant_execution_router)
 app.include_router(nova_freight_router)
 app.include_router(nova_workspace_router)
+app.include_router(nova_synapse_router)
 app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
 app.include_router(nova_business_router)
@@ -3993,6 +3995,11 @@ def serve_nova_workspace() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova Workspace page not found"}, status_code=404)
+
+
+@app.get("/nova/synapse")
+def serve_nova_synapse() -> Response:
+    return FileResponse(os.path.join(_static_dir, "nova-synapse", "index.html"), media_type="text/html")
 
 
 @app.get("/nova/communications")

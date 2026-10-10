@@ -6,7 +6,7 @@
   var preparedTransferId = null;
   var recorder = null;
   var recordingStream = null;
-  var recordingTimer = null;
+  var recordingBusy = false;
   function t(key, values) { key = String(key || ""); return window.NovaWorkspaceLanguage ? window.NovaWorkspaceLanguage.t(key, values) : key.replace(/\{(\w+)\}/g, function (_, name) { return values && values[name] !== undefined ? values[name] : "{" + name + "}"; }); }
   var projects = [];
   function speechLanguage() { return language() === "bilingual" ? "so" : language(); }
@@ -148,6 +148,7 @@
     if (!preserveBrain) $("brain-output").textContent = t("Mrs. Nova Brain is connected to this Nova Workspace.");
   }
   async function runBrain(action, question) {
+    if (recordingBusy) { showBanner(t("Finish recording and review the transcript before asking Nova.")); return; }
     if (brainBusy) return;
     if (!token()) {
       showBanner(t("Sign in to ask Mrs. Nova Brain."));
@@ -199,7 +200,7 @@
   function releaseMicrophone() {
     if (recordingStream) recordingStream.getTracks().forEach(function (track) { track.stop(); });
     recordingStream = null;
-    clearTimeout(recordingTimer);
+
     $("finish-somali").disabled = true;
   }
   $("record-somali").addEventListener("click", async function () {
@@ -207,16 +208,22 @@
     if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       $("recording-status").textContent = t("Recording is unavailable in this browser. Type your request in Ask Nova."); return;
     }
+    recordingBusy = true;
+    if (window.NovaWorkspaceSpeech) window.NovaWorkspaceSpeech.stop();
     $("record-somali").disabled = true;
     $("recording-status").setAttribute("aria-busy", "true");
     try {
-      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       recorder = new MediaRecorder(recordingStream);
       var chunks = [];
-      var startingText = $("ask-input").value;
+      var bytes = 0;
+      var sizeLimitReached = false;
       var recordedLanguage = speechLanguage();
-      recorder.ondataavailable = function (event) { if (event.data.size) chunks.push(event.data); };
-      recorder.onerror = function () { $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Recording failed. Try typing your request."); };
+      recorder.ondataavailable = function (event) {
+        if (event.data.size) { chunks.push(event.data); bytes += event.data.size; }
+        if (bytes >= 9000000 && recorder.state === "recording") { sizeLimitReached = true; recorder.stop(); }
+      };
+      recorder.onerror = function () { recordingBusy = false; $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Recording failed. Try typing your request."); };
       recorder.onstop = async function () {
         releaseMicrophone();
         $("recording-status").textContent = t("Transcribing speech…");
@@ -225,24 +232,28 @@
           form.append("audio", new Blob(chunks, { type: recorder.mimeType || "audio/webm" }), "speech");
           form.append("language", recordedLanguage);
           var result = await api("/api/nova/workspace/transcribe", { method: "POST", body: form });
-          $("ask-input").value = $("ask-input").value === startingText ? result.text : $("ask-input").value + "\n" + result.text;
+          var currentText = $("ask-input").value;
+          $("ask-input").value = currentText ? currentText + "\n" + result.text : result.text;
           $("answer-language").value = recordedLanguage;
           $("answer-language").dispatchEvent(new Event("change"));
           $("ask-input").focus();
-          $("recording-status").textContent = t("Transcript ready. Review or correct the words, then press Ask Nova.");
+          $("recording-status").textContent = (sizeLimitReached ? t("Recording size limit reached. Your words were transcribed. ") : "") + t("Transcript ready. Review or correct the words, then press Ask Nova.");
         } catch (err) { $("recording-status").textContent = err.message; }
         finally {
           $("record-somali").disabled = false;
           $("recording-status").setAttribute("aria-busy", "false");
           recorder = null;
+          recordingBusy = false;
         }
       };
-      recorder.start();
+      recorder.start(1000);
       $("finish-somali").disabled = false;
       $("recording-status").textContent = t("Recording. Press Finish when you are done.");
-      recordingTimer = setTimeout(function () { if (recorder.state === "recording") recorder.stop(); }, 60000);
-    } catch (_) { $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Microphone could not start. Allow microphone access, or type your request."); }
+      // Silence and pauses never finish or submit a request. Finish is explicit.
+      // The byte limit protects the existing 10 MB transcription endpoint.
+    } catch (_) { recordingBusy = false; $("recording-status").setAttribute("aria-busy", "false"); releaseMicrophone(); $("record-somali").disabled = false; $("recording-status").textContent = t("Microphone could not start. Allow microphone access, or type your request."); }
   });
+  window.NovaWorkspaceRecording = { isBusy: function () { return recordingBusy; }, finish: function () { if (recorder && recorder.state === "recording") recorder.stop(); } };
   $("finish-somali").addEventListener("click", function () { if (recorder && recorder.state === "recording") recorder.stop(); });
   window.addEventListener("pagehide", function () { if (recorder) recorder.onstop = null; releaseMicrophone(); });
   function updateAnswerLanguage() {

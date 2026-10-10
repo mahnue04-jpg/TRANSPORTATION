@@ -103,6 +103,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Generated Workspace speech uses a local Blob URL, never a remote media host.
         if request.url.path.rstrip("/") == "/nova/workspace":
             headers["Content-Security-Policy"] += " media-src 'self' blob:;"
+        if request.url.path.rstrip("/") == "/nova/synapse":
+            from app.core.nova.synapse.router import provider_origin
+            origin = provider_origin()
+            connections = "" if not origin else " " + origin + " " + origin.replace("wss://", "https://", 1)
+            headers["Permissions-Policy"] = "camera=(self), microphone=(self), display-capture=(self), geolocation=()"
+            headers["Referrer-Policy"] = "no-referrer"
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; connect-src 'self'" + connections + "; "
+                "media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none';")
         for header, value in headers.items():
             response.headers.setdefault(header, value) # type: ignore
         return response # type: ignore
