@@ -106,16 +106,14 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/workspace" data-destination="workspace"' in HOME_HTML
     assert 'href="#web-search" data-destination="search"' in HOME_HTML
     assert 'href="/nova/workspace#files" data-destination="files"' in HOME_HTML
-    assert 'href="/nova/workspace" data-destination="voice"' in HOME_HTML
-    assert 'href="/nova/workspace" data-destination="tools"' in HOME_HTML
-    assert 'href="/workspace" data-destination="health"' in HOME_HTML
-    assert 'href="/app" data-destination="delivery"' in HOME_HTML
-    assert 'href="/nova/freight" data-destination="freight"' in HOME_HTML
+    assert 'href="/nova/voice" data-destination="voice"' in HOME_HTML
+    assert 'href="/nova/synapse" data-destination="synapse"' in HOME_HTML
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML
-    assert 'href="/nova/payments/readiness" data-destination="payments-readiness"' in HOME_HTML
-    assert HOME_HTML.count('data-internal-product="true"') >= 4
+    for destination in ("health", "delivery", "freight", "payments-readiness", "tools"):
+        assert f'data-destination="{destination}"' not in HOME_HTML
+    assert HOME_HTML.count('data-paid-nova="true"') >= 4
     assert 'data-destination="marketplace"' not in HOME_HTML
     assert "Marketplace purchases are not included in an AMICOR Nova subscription." not in HOME_HTML
     assert "/api/nova/signup/me/access" in HOME_JS
@@ -131,7 +129,7 @@ def test_nova_home_today_tile_is_additive_and_safe() -> None:
     assert "Open Today" in HOME_HTML
     assert "today-attention-count" in HOME_HTML
     assert HOME_HTML.count('data-destination="workspace"') == 1
-    assert HOME_HTML.count('href="/app" data-destination="delivery"') == 1
+    assert HOME_HTML.count('data-destination="synapse"') == 1
     assert "/api/nova/today/dashboard" in HOME_JS
     assert "refreshTodayCount" in HOME_JS
     count_fn = HOME_JS.split("async function refreshTodayCount")[1].split("async function refreshBrain")[0]
@@ -236,9 +234,19 @@ def test_nova_home_does_not_host_under_delivery() -> None:
     assert "ops-shell" not in HOME_HTML
     assert "nova-home" not in OPS_HTML
     assert "nova-home" not in OPS_JS
-    assert 'href="/app"' in HOME_HTML
-    assert 'href="/workspace"' in HOME_HTML
-    assert 'href="/nova/freight"' in HOME_HTML
+    assert 'href="/app"' not in HOME_HTML
+    assert 'href="/workspace"' not in HOME_HTML
+    assert 'href="/nova/freight"' not in HOME_HTML
+    assert 'href="/nova/workspace"' in HOME_HTML
+
+
+def test_nova_home_voice_and_synapse_destinations_load(client: TestClient) -> None:
+    voice = client.get("/nova/voice")
+    synapse = client.get("/nova/synapse")
+    assert voice.status_code == 200
+    assert synapse.status_code == 200
+    assert "AMICOR Synapse" in synapse.text
+    assert "Create meeting" in synapse.text
 
 
 def test_nova_home_exposes_shared_creative_studio() -> None:
