@@ -97,6 +97,7 @@ class NovaCastingMembership(Base):
     __tablename__ = "nova_casting_memberships"
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id", name="uq_nova_casting_org_user"),
+        Index("ix_nova_casting_membership_active_org", "organization_id", "active"),
         Index("ix_nova_casting_membership_user", "user_id", "organization_id"),
         CheckConstraint("casting_role IN ('organizer', 'reviewer')", name="ck_nova_casting_membership_role"),
     )
