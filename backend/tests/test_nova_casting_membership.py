@@ -22,17 +22,17 @@ def load():
 
 def test_membership_requires_server_verified_active_organization():
     member = load()
-    record = dict(user_id="user1", organization_id="org1", active=True,
+    record = dict(user_id="user1", organization_id="org1", nova_tenant_id="tenant1", active=True,
                   organization_verified=True, casting_role="organizer")
-    assert member.verified_casting_member(session_user_id="user1", organization_id="org1",
+    assert member.verified_casting_member(session_user_id="user1", organization_id="org1", session_tenant_id="tenant1",
                                           lookup=lambda user, org: record)
     for override in ({"user_id": "other"}, {"organization_id": "other"},
                      {"active": False}, {"organization_verified": False},
-                     {"casting_role": "admin"}):
+                     {"casting_role": "admin"}, {"nova_tenant_id": "tenant2"}):
         assert member.verified_casting_member(
-            session_user_id="user1", organization_id="org1",
+            session_user_id="user1", organization_id="org1", session_tenant_id="tenant1",
             lookup=lambda user, org, override=override: {**record, **override},
         ) is None
     assert member.verified_casting_member(
-        session_user_id="user1", organization_id="org1", lookup=lambda user, org: None,
+        session_user_id="user1", organization_id="org1", session_tenant_id="tenant1", lookup=lambda user, org: None,
     ) is None
