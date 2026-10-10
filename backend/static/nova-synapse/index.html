@@ -16,9 +16,10 @@
 <div id="call-controls" class="controls" hidden><button id="mic" class="secondary" data-i="mic">Microphone off</button><button id="camera" class="secondary" data-i="camera">Camera off</button><button id="share" class="secondary" data-i="share">Share screen</button><button id="audio" class="secondary" data-i="audio">Enable sound</button><button id="leave" class="danger" data-i="leave">Leave</button></div>
 <div id="invitation-controls" hidden><label for="invite-link" data-i="link">Meeting invitation</label><div class="link-row"><input id="invite-link" readonly><button id="copy" class="secondary" data-i="copy">Copy link</button></div><p class="hint" id="invite-expiry"></p></div>
 <div id="host-controls" class="controls" hidden><button id="renew-invite" class="secondary" data-i="newinvite">New invitation link</button><button id="lock" class="secondary" data-i="lock">Lock new invitations</button><button id="end" class="danger" data-i="end">End for everyone</button></div>
+<form id="rename-form" hidden><label for="rename-title" data-i="meetingtitle">Meeting title</label><div class="link-row"><input id="rename-title" required maxlength="180"><button id="rename" type="submit" class="secondary" data-i="rename">Save meeting name</button></div></form>
 <p id="room-status" class="hint" role="status"></p>
 <details id="chat-panel" hidden open><summary data-i="chat">Meeting chat</summary><ol id="chat-log" aria-live="polite"></ol><form id="chat-form"><label class="sr-only" for="chat-input" data-i="message">Message</label><input id="chat-input" maxlength="2000" required><button type="submit" data-i="send">Send</button></form><p class="hint" data-i="chatprivacy">Chat stays in this call. Copy notes into your Workspace if you want to keep them.</p></details>
 </section></div>
 <footer><span>AMICOR SYNAPSE</span><p data-i="footer">Connect your people. Continue your work.</p><a href="/nova/workspace" data-i="return">Return to Workspace →</a></footer>
-</main><script src="/static/ux/sessionManager.js"></script><script src="/static/nova-synapse/livekit-client.umd.min.js"></script><script src="/static/nova-synapse/synapse.js?v=20261010.2"></script>
+</main><script src="/static/ux/sessionManager.js"></script><script src="/static/nova-synapse/livekit-client.umd.min.js"></script><script src="/static/nova-synapse/synapse.js?v=20261010.3"></script>
 </body></html>

@@ -141,3 +141,22 @@ def test_resumed_host_can_rotate_invitation_without_extending_expiry(db, provide
         synapse.join(mid,synapse.GuestJoin(invite=old,name='Visitor'),Response(),db)
     assert err.value.status_code == 404
     assert synapse.join(mid,synapse.GuestJoin(invite=new,name='Visitor'),Response(),db)['host'] is False
+
+
+def test_only_owner_can_rename_without_changing_invitation(db, provider):
+    owner = user()
+    created = synapse.create(synapse.CreateMeeting(title='AMICOR Synapse Test'), Response(), owner, db)
+    mid = created['meeting_id']
+    invite = created['invite_path'].split('invite=')[1]
+    with pytest.raises(HTTPException) as err:
+        synapse.rename(mid, synapse.CreateMeeting(title='Changed'), user('other'), db)
+    assert err.value.status_code == 404
+    with pytest.raises(HTTPException):
+        synapse.rename(mid, synapse.CreateMeeting(title='Changed'), user('owner', 'another-org'), db)
+    with pytest.raises(HTTPException) as err:
+        synapse.rename(mid, synapse.CreateMeeting(title='   '), owner, db)
+    assert err.value.status_code == 422
+    renamed = synapse.rename(mid, synapse.CreateMeeting(title='Easy Care · Team meeting'), owner, db)
+    assert renamed['title'] == 'Easy Care · Team meeting'
+    assert renamed['expires_at'] == created['expires_at']
+    assert synapse.join(mid, synapse.GuestJoin(invite=invite, name='Visitor'), Response(), db)['title'] == renamed['title']

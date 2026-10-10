@@ -172,6 +172,17 @@ def lock(mid: str, payload: LockMeeting, user: UserContext = Depends(get_current
     return _out(row)
 
 
+@router.patch("/meetings/{mid}/title", dependencies=owner_access)
+def rename(mid: str, payload: CreateMeeting, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    row = _owned(db, mid, user)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(422, "Enter a meeting title.")
+    row.title = title
+    db.commit()
+    return _out(row)
+
+
 @router.post("/meetings/{mid}/end", dependencies=owner_access)
 def end(mid: str, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)):
     row = _owned(db, mid, user)

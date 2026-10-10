@@ -13,6 +13,9 @@
   phrases.ar.people = 'المشاركون'; phrases.ar.newinvite = 'رابط دعوة جديد'; phrases.ar.expires = 'تنتهي الدعوة';
   phrases.fr.people = 'Participants'; phrases.fr.newinvite = 'Nouveau lien d’invitation'; phrases.fr.expires = 'Expiration de l’invitation';
   phrases.es.people = 'Participantes'; phrases.es.newinvite = 'Nuevo enlace de invitación'; phrases.es.expires = 'La invitación caduca';
+  phrases.en.rename = 'Save meeting name'; phrases.so.rename = 'Kaydi magaca kulanka'; phrases.ar.rename = 'حفظ اسم الاجتماع'; phrases.fr.rename = 'Enregistrer le nom'; phrases.es.rename = 'Guardar nombre';
+  phrases.en.renamed = 'Meeting name saved.'; phrases.so.renamed = 'Magaca kulanka waa la kaydiyey.'; phrases.ar.renamed = 'تم حفظ اسم الاجتماع.'; phrases.fr.renamed = 'Nom de réunion enregistré.'; phrases.es.renamed = 'Nombre de reunión guardado.';
+  phrases.en.joined = 'You are connected.'; phrases.so.joined = 'Waad ku xiran tahay.'; phrases.ar.joined = 'أنت متصل.'; phrases.fr.joined = 'Vous êtes connecté.'; phrases.es.joined = 'Estás conectado.';
   var invitedMeeting = null;
   var lang = 'en', configured = false, room = null, meeting = null, previewStream = null, connecting = false;
   try { lang = localStorage.getItem('amicor_synapse_language') || 'en'; } catch (_) {}
@@ -45,8 +48,8 @@
   $('preview-button').addEventListener('click', async function () {
     try { if (previewStream) { stopPreview(); return; } previewStream = await navigator.mediaDevices.getUserMedia({video:true,audio:false}); $('preview').srcObject = previewStream; $('preview').style.display = 'block'; $('preview-placeholder').hidden = true; } catch (_) { notice(t('cameraerror')); }
   });
-  function controls(active) { ['call-controls','chat-panel','live-badge','participants'].forEach(function (id) { $(id).hidden = !active; }); $('host-controls').hidden = !(active && meeting && meeting.host); }
-  function controlLabels() { [['mic',room.localParticipant.isMicrophoneEnabled ? 'micon':'mic'],['camera',room.localParticipant.isCameraEnabled ? 'cameraon':'camera'],['share',room.localParticipant.isScreenShareEnabled ? 'sharing':'share'],['lock',meeting.locked ? 'unlock':'lock']].forEach(function (pair) { $(pair[0]).setAttribute('data-i',pair[1]); $(pair[0]).textContent = t(pair[1]); }); }
+  function controls(active) { ['call-controls','chat-panel','live-badge','participants'].forEach(function (id) { $(id).hidden = !active; }); $('host-controls').hidden = !(active && meeting && meeting.host); $('rename-form').hidden = !(active && meeting && meeting.host); $('share').hidden = !(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function'); }
+  function controlLabels() { [['mic',room.localParticipant.isMicrophoneEnabled ? 'micon':'mic'],['camera',room.localParticipant.isCameraEnabled ? 'cameraon':'camera'],['share',room.localParticipant.isScreenShareEnabled ? 'sharing':'share'],['lock',meeting.locked ? 'unlock':'lock']].forEach(function (pair) { $(pair[0]).setAttribute('data-i',pair[1]); $(pair[0]).textContent = t(pair[1]); }); if (room.state === 'connected') $('room-status').textContent = t('joined') + ' ' + t(room.localParticipant.isMicrophoneEnabled ? 'micon' : 'mic') + ' · ' + t(room.localParticipant.isCameraEnabled ? 'cameraon' : 'camera'); }
   function participants() {
     if (!room) return;
     var names = [room.localParticipant.name || 'Host'];
@@ -88,9 +91,11 @@
     current.on(LivekitClient.RoomEvent.DataReceived, function (data, participant) { if (!participant || data.byteLength > 12000) return; try { var msg = JSON.parse(new TextDecoder().decode(data)); if (typeof msg.text === 'string') addChat(participant.name || 'Participant',msg.text.slice(0,2000)); } catch (_) {} });
     current.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, function () { if (!current.canPlaybackAudio) notice(t('sound')); });
     current.on(LivekitClient.RoomEvent.Reconnecting, function () { $('room-status').textContent = t('reconnecting'); });
-    current.on(LivekitClient.RoomEvent.Reconnected, function () { $('room-status').textContent = t('joined'); });
+    current.on(LivekitClient.RoomEvent.Reconnected, controlLabels);
+    current.on(LivekitClient.RoomEvent.TrackMuted, controlLabels);
+    current.on(LivekitClient.RoomEvent.TrackUnmuted, controlLabels);
     current.on(LivekitClient.RoomEvent.Disconnected, function () { if (room !== current) return; controls(false); $('stage').replaceChildren(); $('room-status').textContent = t('disconnected'); });
-    try { await current.connect(result.server_url,result.participant_token); $('meeting-title').textContent = result.title; $('meeting-title').removeAttribute('data-i'); controls(true); controlLabels(); participants(); invitationExpiry(); $('room-status').textContent = t('joined'); notice(''); }
+    try { await current.connect(result.server_url,result.participant_token); $('meeting-title').textContent = result.title; $('meeting-title').removeAttribute('data-i'); $('rename-title').value = result.title; controls(true); controlLabels(); participants(); invitationExpiry(); notice(''); }
     catch (_) { await current.disconnect(); room = null; controls(false); notice(t('failed')); }
     finally { connecting = false; }
   }
@@ -106,6 +111,11 @@
   });
   $('guest-form').addEventListener('submit', async function (event) { event.preventDefault(); $('guest-join').disabled = true; try { await connect(await api('/meetings/'+encodeURIComponent(invite.get('room'))+'/join','POST',{invite:invite.get('invite'),name:$('name').value.trim()},true)); } catch (err) { notice(err.message); } finally { $('guest-join').disabled = !configured; } });
   $('renew-invite').addEventListener('click', async function () { if (!meeting || !meeting.host) return; $('renew-invite').disabled = true; try { showInvitation(await api('/meetings/'+meeting.meeting_id+'/invitation','POST')); } catch (err) { notice(err.message); } finally { $('renew-invite').disabled = false; } });
+  $('rename-form').addEventListener('submit', async function (event) {
+    event.preventDefault(); if (!meeting || !meeting.host) return;
+    $('rename').disabled = true;
+    try { var updated = await api('/meetings/' + meeting.meeting_id + '/title','PATCH',{title:$('rename-title').value.trim()}); meeting.title = updated.title; $('meeting-title').textContent = updated.title; await refreshMeetings(); notice(t('renamed')); } catch (err) { notice(err.message); } finally { $('rename').disabled = false; }
+  });
   $('copy').addEventListener('click', async function () { try { await navigator.clipboard.writeText($('invite-link').value); notice(t('copied')); } catch (_) { $('invite-link').select(); } });
   [['mic','setMicrophoneEnabled','isMicrophoneEnabled'],['camera','setCameraEnabled','isCameraEnabled'],['share','setScreenShareEnabled','isScreenShareEnabled']].forEach(function (item) { $(item[0]).addEventListener('click', async function () { if (!room) return; $(item[0]).disabled = true; try { await room.localParticipant[item[1]](!room.localParticipant[item[2]]); controlLabels(); } catch (_) { notice(t('failed')); } finally { $(item[0]).disabled = false; } }); });
   $('audio').addEventListener('click', async function () { if (room) { try { await room.startAudio(); notice(''); } catch (_) { notice(t('sound')); } } });
