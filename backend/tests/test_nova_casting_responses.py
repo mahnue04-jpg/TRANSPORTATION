@@ -21,3 +21,9 @@ def test_allowlisted_application_and_media_responses():
         for forbidden in ("storage_key", "signed_url", "owner_id", "applicant_id", "consent_version"):
             assert forbidden not in result
     assert module.media_status_view(data)["status"] == "DRAFT"
+    campaign = module.campaign_public_view({
+        **data, "title": "Draft", "category": "film", "minimum_age": 18,
+    })
+    assert campaign["minimum_age"] == 18
+    assert "owner_id" not in campaign
+    assert "storage_key" not in campaign

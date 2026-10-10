@@ -57,12 +57,15 @@ def run_deferred_platform_startup(*, runtime_environment: str) -> None:
         from app.modules.health_isf import governance_registry as governance_registry_module  # noqa: F401
         from app.modules.health_isf import operational_timeline as operational_timeline_module  # noqa: F401
 
-        from app.db.session import Base, SessionLocal, engine  # type: ignore
+        from app.db.session import Base, SessionLocal, engine, omit_casting_tables  # type: ignore
 
         # Payment ledger is Alembic-owned; still ensure tables exist when a prior
         # release stamped past the payment revision without applying DDL.
+        # Casting tables are excluded even if their models were imported.
         payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
-        tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
+        tables = omit_casting_tables(
+            table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only
+        )
         Base.metadata.create_all(bind=engine, tables=tables)
         logger.info("Deferred Health ISF tables verified.")
         try:

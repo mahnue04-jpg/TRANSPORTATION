@@ -59,6 +59,12 @@ def test_two_revisions_tenant_integrity_and_reverse_rollback():
             with pytest.raises(sa.exc.IntegrityError):
                 with conn.begin_nested():
                     conn.execute(media.insert().values(id="oversize", owner_id="org1", application_id="app1", storage_key="private", mime_type="video/mp4", byte_size=262144001, created_at="now"))
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    conn.execute(media.insert().values(id="bad-mime", owner_id="org1", application_id="app1", storage_key="private", mime_type="text/plain", byte_size=100, created_at="now"))
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    conn.execute(campaign.insert().values(id="underage", owner_id="org1", title="No", category="film", minimum_age=17, created_at="now"))
             content_migration.downgrade()
             org_migration.downgrade()
             names = set(sa.inspect(conn).get_table_names())

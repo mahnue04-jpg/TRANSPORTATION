@@ -52,3 +52,24 @@ def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades(url):
         finally:
             migration.op = original_op
     engine.dispose()
+
+
+def test_production_environment_does_not_create_casting_tables(monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    monkeypatch.setenv("NOVA_CASTING_STAGING_READS", "true")
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        spec = importlib.util.spec_from_file_location("_casting_migration_production_lock", MIGRATION)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        operations = Operations(MigrationContext.configure(conn))
+        original_op = migration.op
+        migration.op = operations
+        try:
+            migration.upgrade()
+            migration.downgrade()
+            assert "nova_casting_organizations" not in sa.inspect(conn).get_table_names()
+            assert "nova_casting_memberships" not in sa.inspect(conn).get_table_names()
+        finally:
+            migration.op = original_op
+    engine.dispose()

@@ -12,6 +12,8 @@ from typing import Any
 
 from .casting_access import CastingAccessDenied, read_application
 from .casting_membership import verified_casting_member
+from .casting_policy import may_view_campaign
+from .casting_responses import campaign_public_view
 
 
 def read_organizer_application(
@@ -51,3 +53,35 @@ def read_organizer_application(
     if not campaign or campaign.get("owner_id") != casting_organization_id:
         raise CastingAccessDenied("Application unavailable")
     return read_application(actor=actor, application=dict(application), campaign=dict(campaign))
+
+
+def read_organizer_campaign(
+    *,
+    session_user_id: str,
+    session_tenant_id: str,
+    casting_organization_id: str,
+    campaign_id: str,
+    membership_lookup: Callable[[str, str], Mapping[str, object] | None],
+    campaign_lookup: Callable[[str], Mapping[str, Any] | None],
+) -> dict[str, Any]:
+    """Read one unpublished campaign for a verified member of that casting organization."""
+    if not all((session_user_id, session_tenant_id, casting_organization_id, campaign_id)):
+        raise CastingAccessDenied("Campaign unavailable")
+    actor = verified_casting_member(
+        session_user_id=session_user_id,
+        session_tenant_id=session_tenant_id,
+        organization_id=casting_organization_id,
+        lookup=membership_lookup,
+    )
+    if actor is None or not may_view_campaign(actor, organization_id=casting_organization_id):
+        raise CastingAccessDenied("Campaign unavailable")
+    try:
+        campaign = campaign_lookup(campaign_id)
+    except (LookupError, ConnectionError, TimeoutError) as exc:
+        raise CastingAccessDenied("Campaign unavailable") from exc
+    if not campaign or campaign.get("owner_id") != casting_organization_id or campaign.get("id") != campaign_id:
+        raise CastingAccessDenied("Campaign unavailable")
+    try:
+        return campaign_public_view(dict(campaign))
+    except KeyError as exc:
+        raise CastingAccessDenied("Campaign unavailable") from exc

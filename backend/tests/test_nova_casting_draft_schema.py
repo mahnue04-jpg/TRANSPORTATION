@@ -30,11 +30,15 @@ def test_media_metadata_is_private_and_quarantined_by_default():
 def test_casting_has_no_live_registration_or_upload_routes():
     main = (ROOT / "app/main.py").read_text(encoding="utf-8")
     creative_router = ROUTER.read_text(encoding="utf-8")
-    assert "/api/nova/casting/" not in main
+    casting_router = (ROOT / "app/core/nova/creative_studio/casting_router_draft.py").read_text(encoding="utf-8")
+    assert "include_router(nova_casting_router)" in main
+    assert "casting_db_models" not in main
     assert "/api/nova/casting/" not in creative_router
     assert "casting_media_access" not in main
     assert "casting_access" not in main
     assert "casting_upload_rules" not in creative_router
+    assert "@router.post" not in casting_router
+    assert "UploadFile" not in casting_router
 
 
 def test_private_casting_models_not_created_by_existing_schema_ensure():
@@ -50,7 +54,7 @@ def test_casting_memberships_are_explicit_and_inactive():
     assert 'default="PENDING"' in models
     assert 'nova_tenant_id: Mapped[str]' in models
     assert 'uq_nova_casting_org_tenant_id' in models
-    assert 'mapped_column(Boolean, nullable=False, default=False)' in models
+    assert 'mapped_column(Boolean, nullable=False, default=False, server_default=false())' in models
     assert 'uq_nova_casting_org_user' in models
     assert 'ix_nova_casting_membership_active_org' in models
     assert 'ForeignKey("platform_users.id")' in models

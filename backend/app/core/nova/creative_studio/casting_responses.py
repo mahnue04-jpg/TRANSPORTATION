@@ -19,6 +19,16 @@ def organizer_application_view(record: Mapping[str, Any]) -> dict[str, Any]:
     return {name: record[name] for name in fields}
 
 
+def campaign_public_view(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Unpublished campaign fields only. No owner, applicant, or media locator."""
+    fields = ("id", "title", "category", "status", "created_at", "minimum_age")
+    if any(name not in record or record[name] in (None, "") for name in fields if name != "minimum_age"):
+        raise KeyError("incomplete campaign")
+    if "minimum_age" not in record or isinstance(record["minimum_age"], bool) or not isinstance(record["minimum_age"], int):
+        raise KeyError("minimum_age")
+    return {name: record[name] for name in fields}
+
+
 def media_status_view(record: Mapping[str, Any]) -> dict[str, Any]:
     """Never reveal private object keys or unscanned media download URLs."""
     fields = ("id", "application_id", "status", "mime_type", "byte_size")

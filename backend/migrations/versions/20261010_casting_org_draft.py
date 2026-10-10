@@ -14,7 +14,18 @@ branch_labels = None
 depends_on = None
 
 
+def _production_schema_locked() -> bool:
+    """Match casting_flags.casting_production_locked without importing the app."""
+    import os
+    for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
+        if os.getenv(name, "").strip().lower() in {"production", "prod"}:
+            return True
+    return False
+
+
 def upgrade():
+    if _production_schema_locked():
+        return
     op.create_table(
         "nova_casting_organizations",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -48,6 +59,8 @@ def upgrade():
 
 
 def downgrade():
+    if _production_schema_locked():
+        return
     op.drop_index("ix_nova_casting_membership_user", table_name="nova_casting_memberships")
     op.drop_index("ix_nova_casting_membership_active_org", table_name="nova_casting_memberships")
     op.drop_table("nova_casting_memberships")

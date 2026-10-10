@@ -37,6 +37,11 @@ def may_view_application(actor: CastingActor, *, applicant_id: str, organization
     )
 
 
+def may_view_campaign(actor: CastingActor, *, organization_id: str) -> bool:
+    """Verified organizers and reviewers may read their own organization's campaigns."""
+    return may_review_application(actor, organization_id=organization_id)
+
+
 def may_review_application(actor: CastingActor, *, organization_id: str) -> bool:
     return (
         bool(actor.user_id)

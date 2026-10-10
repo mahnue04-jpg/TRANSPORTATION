@@ -69,3 +69,16 @@ def test_audition_media_quarantine_and_tenant_isolation():
     assert not p.may_view_audition_media(reviewer, applicant_id="talent-a", organization_id="org-b", scan_status="CLEAN")
     assert p.may_view_audition_media(reviewer, applicant_id="talent-a", organization_id="org-a", scan_status="CLEAN")
     assert p.may_view_audition_media(applicant, applicant_id="talent-a", organization_id="org-a", scan_status="CLEAN")
+
+
+def test_campaign_reads_require_verified_membership():
+    p = _policy()
+    applicant = p.CastingActor("user-a", None, p.CastingRole.APPLICANT)
+    reviewer = p.CastingActor("reviewer", "org-one", p.CastingRole.REVIEWER, True)
+    outsider = p.CastingActor("reviewer", "org-two", p.CastingRole.REVIEWER, True)
+    unverified = p.CastingActor("owner", "org-one", p.CastingRole.ORGANIZER, False)
+    assert not p.may_view_campaign(applicant, organization_id="org-one")
+    assert p.may_view_campaign(reviewer, organization_id="org-one")
+    assert not p.may_view_campaign(outsider, organization_id="org-one")
+    assert not p.may_view_campaign(unverified, organization_id="org-one")
+    assert not p.may_manage_campaign(reviewer, organization_id="org-one")

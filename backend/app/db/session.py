@@ -63,6 +63,45 @@ class Base(DeclarativeBase):
     pass
 
 
+def omit_casting_tables(tables):
+    """Draft Nova Casting tables stay out of startup create_all.
+
+    Disposable tests may create them with Table.create on an isolated engine.
+    Production schema changes stay on the explicit Alembic revisions.
+    """
+    return [
+        table for table in tables
+        if not str(getattr(table, "name", "")).startswith("nova_casting_")
+    ]
+
+
+def _install_casting_create_all_guard() -> None:
+    """Strip casting tables from every metadata.create_all, including explicit lists.
+
+    Health ISF and deferred startup call create_all for the whole metadata.
+    Importing the draft models must not create those tables on the live database.
+    """
+    metadata = Base.metadata
+    if getattr(metadata, "_amicor_casting_create_all_guarded", False):
+        return
+    original = metadata.create_all
+
+    def create_all(bind=None, tables=None, checkfirst=True, **kwargs):
+        selected = metadata.sorted_tables if tables is None else tables
+        return original(
+            bind=bind,
+            tables=omit_casting_tables(selected),
+            checkfirst=checkfirst,
+            **kwargs,
+        )
+
+    metadata.create_all = create_all  # type: ignore[method-assign]
+    metadata._amicor_casting_create_all_guarded = True
+
+
+_install_casting_create_all_guard()
+
+
 def get_db():
     """FastAPI dependency: yields a scoped database session."""
     db = SessionLocal()
@@ -76,6 +115,7 @@ def init_platform_db() -> None:
     """Create SQLAlchemy-managed tables (idempotent, safe to run on startup).
 
     Customer-payment ledger tables are Alembic-only and are never created here.
+    Draft Nova Casting tables are also omitted; Alembic applies them only outside production.
     """
     from app.db import models  # noqa: F401 — registers models with Base.metadata
     from app.core.nova.synapse import models as nova_synapse_models  # noqa: F401
@@ -87,7 +127,9 @@ def init_platform_db() -> None:
     from app.core.nova.autonomy import models as nova_autonomy_models  # noqa: F401
     os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
-    tables = [table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only]
+    tables = omit_casting_tables(
+        table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only
+    )
     Base.metadata.create_all(bind=engine, tables=tables)
     from app.core.nova.freight.schema_ensure import ensure_nova_freight_schema
     from app.core.nova.today.schema_ensure import ensure_nova_today_schema
