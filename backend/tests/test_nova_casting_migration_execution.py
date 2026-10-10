@@ -48,6 +48,7 @@ def test_draft_migration_upgrade_rejects_cross_tenant_and_downgrades(url):
             assert "nova_casting_memberships" not in tables
             assert "nova_casting_organizations" not in tables
             assert "platform_users" in tables
+            conn.exec_driver_sql("DROP TABLE platform_users")
         finally:
             migration.op = original_op
     engine.dispose()
