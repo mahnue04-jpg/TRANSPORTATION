@@ -13,7 +13,7 @@ def load():
     package = types.ModuleType(prefix)
     package.__path__ = [str(FOLDER)]
     sys.modules[prefix] = package
-    for name in ("casting_policy", "casting_workflow_policy", "casting_responses", "casting_access", "casting_media_access"):
+    for name in ("casting_policy", "casting_workflow_policy", "casting_responses", "casting_access", "casting_upload_rules", "casting_media_access"):
         spec = importlib.util.spec_from_file_location(f"{prefix}.{name}", FOLDER / f"{name}.py")
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
@@ -42,3 +42,14 @@ def test_media_requires_clean_status_matching_application_and_organization():
     outsider = policy.CastingActor("outsider", "org2", policy.CastingRole.REVIEWER, True)
     with pytest.raises(access.CastingAccessDenied):
         access.read_media_metadata(actor=outsider, application=app, campaign=campaign, media=media)
+
+
+def test_media_rejects_unsupported_type_or_size():
+    policy, access = load()
+    actor = policy.CastingActor("reviewer", "org1", policy.CastingRole.REVIEWER, True)
+    app = {"id": "app1", "applicant_id": "talent1", "campaign_id": "camp1", "owner_id": "org1"}
+    campaign = {"id": "camp1", "owner_id": "org1"}
+    media = {"id": "media1", "application_id": "app1", "owner_id": "org1", "status": "CLEAN", "mime_type": "video/mp4", "byte_size": 1024}
+    for changed in ({"mime_type": "text/html"}, {"byte_size": 0}, {"byte_size": True}, {"byte_size": 999999999}):
+        with pytest.raises(access.CastingAccessDenied):
+            access.read_media_metadata(actor=actor, application=app, campaign=campaign, media={**media, **changed})
