@@ -70,6 +70,11 @@ def test_authenticated_casting_reads_are_tenant_scoped():
             db.flush()
             with pytest.raises(CastingAccessDenied):
                 read()
+            db.get(NovaCastingMembership, "member-a").active = True
+            db.get(NovaCastingOrganization, "casting-org-a").verification_status = "REJECTED"
+            db.flush()
+            with pytest.raises(CastingAccessDenied):
+                read()
         finally:
             db.close()
             transaction.rollback()
