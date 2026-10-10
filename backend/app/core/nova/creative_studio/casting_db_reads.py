@@ -6,6 +6,7 @@ Never accept membership fields from client requests.
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
+from app.db.models import User as NovaUser
 
 from .casting_db_models import (
     NovaCastingApplication, NovaCastingCampaign, NovaCastingMembership,
@@ -18,6 +19,16 @@ def read_casting_application_for_nova_user(
     *, db: Session, user_id: str, tenant_id: str, organization_id: str,
     application_id: str,
 ) -> dict:
+    # A revoked or moved Nova account must not retain casting access.
+    account = db.query(NovaUser).filter(
+        NovaUser.id == user_id,
+        NovaUser.is_active.is_(True),
+        NovaUser.organization_id == tenant_id,
+    ).first()
+    if account is None:
+        from .casting_access import CastingAccessDenied
+        raise CastingAccessDenied("Application unavailable")
+
     def membership_lookup(member_user_id: str, member_org_id: str):
         row = (
             db.query(NovaCastingMembership, NovaCastingOrganization)
