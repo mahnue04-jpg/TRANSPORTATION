@@ -102,12 +102,14 @@ class NovaCastingMembership(Base):
     __tablename__ = "nova_casting_memberships"
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id", name="uq_nova_casting_org_user"),
+        ForeignKeyConstraint(["nova_tenant_id", "organization_id"], ["nova_casting_organizations.nova_tenant_id", "nova_casting_organizations.id"], name="fk_nova_casting_member_tenant_org"),
         Index("ix_nova_casting_membership_active_org", "organization_id", "active"),
         Index("ix_nova_casting_membership_user", "user_id", "organization_id"),
         CheckConstraint("casting_role IN ('organizer', 'reviewer')", name="ck_nova_casting_membership_role"),
     )
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    nova_tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
     casting_role: Mapped[str] = mapped_column(String(16), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
