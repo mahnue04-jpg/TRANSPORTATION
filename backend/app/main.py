@@ -93,6 +93,7 @@ from app.core.nova.signup.router import router as nova_signup_router  # type: ig
 from app.core.nova.billing.router import router as nova_billing_router  # type: ignore
 from app.core.nova.marketplace.router import router as nova_marketplace_router  # type: ignore
 from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
+from app.core.nova.connected_apps.router import router as nova_connected_apps_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -495,6 +496,7 @@ app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
 app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
+app.include_router(nova_connected_apps_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
