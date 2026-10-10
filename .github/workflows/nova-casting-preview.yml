@@ -13,6 +13,8 @@ on:
       - "backend/tests/test_nova_casting_responses.py"
       - "backend/tests/test_nova_casting_identity.py"
       - "backend/tests/test_nova_casting_access.py"
+      - "backend/tests/test_nova_casting_media_access.py"
+      - "backend/app/core/nova/creative_studio/casting_media_access.py"
       - "backend/app/core/nova/creative_studio/casting_access.py"
       - "backend/app/core/nova/creative_studio/casting_identity.py"
       - "backend/app/core/nova/creative_studio/casting_responses.py"
@@ -38,7 +40,7 @@ jobs:
       - name: Install standalone test runner
         run: python -m pip install --disable-pip-version-check pytest==8.3.5
       - name: Verify casting preview safeguards
-        run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py backend/tests/test_nova_casting_draft_schema.py backend/tests/test_nova_casting_policy.py backend/tests/test_nova_casting_upload_rules.py backend/tests/test_nova_casting_workflow_policy.py backend/tests/test_nova_casting_responses.py backend/tests/test_nova_casting_identity.py backend/tests/test_nova_casting_access.py
+        run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py backend/tests/test_nova_casting_draft_schema.py backend/tests/test_nova_casting_policy.py backend/tests/test_nova_casting_upload_rules.py backend/tests/test_nova_casting_workflow_policy.py backend/tests/test_nova_casting_responses.py backend/tests/test_nova_casting_identity.py backend/tests/test_nova_casting_access.py backend/tests/test_nova_casting_media_access.py
       - name: Check casting browser JavaScript syntax
         run: |
           python - <<'PY'
