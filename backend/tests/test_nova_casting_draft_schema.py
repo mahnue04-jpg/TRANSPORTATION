@@ -23,6 +23,7 @@ def test_media_metadata_is_private_and_quarantined_by_default():
     assert 'ForeignKey("nova_casting_applications.id")' in models
     assert 'default="PENDING"' in models
     assert "ck_nova_casting_media_status" in models
+    assert "byte_size > 0 AND byte_size <= 262144000" in models
     assert "storage_key" in models
 
 
