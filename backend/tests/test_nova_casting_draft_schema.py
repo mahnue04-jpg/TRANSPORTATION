@@ -68,3 +68,13 @@ def test_applicants_and_reviewers_reference_existing_nova_users():
 def test_campaign_owner_references_casting_organization():
     models = MODELS.read_text(encoding="utf-8")
     assert 'owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)' in models
+
+
+def test_cross_organization_cascade_is_blocked_by_composite_keys():
+    models = MODELS.read_text(encoding="utf-8")
+    for constraint in ("uq_nova_casting_campaign_owner_id", "uq_nova_casting_application_owner_id",
+                       "fk_nova_casting_application_campaign_owner",
+                       "fk_nova_casting_review_application_owner",
+                       "fk_nova_casting_media_application_owner"):
+        assert constraint in models
+    assert "ForeignKeyConstraint" in models
