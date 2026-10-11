@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "include": [
+    "/api/*",
+    "/start",
+    "/start/*",
+    "/guides/research-memo-setup",
+    "/guides/research-memo-setup/*"
+  ],
+  "exclude": []
+}

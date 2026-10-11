@@ -43,6 +43,22 @@
   var form = document.querySelector("[data-early-access-form]");
   if (!form) return;
 
+  var planStatus = document.querySelector("[data-plan-status]");
+  document.querySelectorAll("[data-plan-choice]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var label = button.getAttribute("data-plan-choice") || "";
+      form.setAttribute("data-selected-plan", label);
+      document.querySelectorAll("[data-plan-choice]").forEach(function (other) {
+        other.setAttribute("aria-pressed", other === button ? "true" : "false");
+      });
+      if (planStatus) planStatus.textContent = "Selected: " + label;
+      var productField = form.elements.product;
+      if (productField) productField.value = "Nova Operations Agent";
+      var formTop = document.getElementById("start-form");
+      if (formTop && formTop.scrollIntoView) formTop.scrollIntoView({ block: "start" });
+    });
+  });
+
   var success = document.querySelector("[data-form-success]");
   var errorBox = document.querySelector("[data-form-error]");
   var submit = form.querySelector("[type=submit]");
@@ -81,6 +97,7 @@
     event.preventDefault();
     show(success, false);
     show(errorBox, false);
+    if (errorBox) errorBox.textContent = "";
     var data = Object.fromEntries(new FormData(form).entries());
     var ok = true;
 
@@ -115,9 +132,15 @@
       setFieldError(consent, "");
     }
 
+    if (form.hasAttribute("data-start-funnel") && !form.getAttribute("data-selected-plan")) {
+      ok = false;
+      show(errorBox, true);
+      if (errorBox) errorBox.textContent = "Choose a starting option before submitting.";
+    }
+
     if (!ok) {
       show(errorBox, true);
-      if (errorBox) errorBox.textContent = "Please correct the highlighted fields.";
+      if (errorBox && !errorBox.textContent) errorBox.textContent = "Please correct the highlighted fields.";
       return;
     }
 
@@ -134,6 +157,13 @@
       consent: true,
       source: "amicor-public-website-w8"
     };
+    if (form.hasAttribute("data-start-funnel")) {
+      payload.product = "Nova Operations Agent";
+    }
+    var selectedPlan = form.getAttribute("data-selected-plan") || "";
+    if (selectedPlan) {
+      payload.message = "Starting option: " + selectedPlan + "\n\n" + payload.message;
+    }
 
     function saveLocal() {
       var submissions = [];
@@ -161,6 +191,7 @@
       if (result && result.duplicate) text += " This matches a request already on file.";
       text += " Email delivery was not confirmed.";
       success.textContent = text;
+      if (success.scrollIntoView) success.scrollIntoView({ block: "center" });
       success.focus();
     }
 

@@ -17,6 +17,17 @@ wrangler pages deploy . --project-name amicor-public
 
 Do not put secrets in this repo. If you later add optional lead notification, set `LEAD_WEBHOOK_URL` only in the Pages dashboard as a secret. Email Routing steps are in `EMAIL.md` and are owner-only.
 
+## First-customer pages while the flag is false
+
+`assets/js/site-config.js` sets `firstCustomerFunnel: false`. `scripts/build-production.mjs` reads that flag. A production build omits `/start/` and `/guides/research-memo-setup/`. A `noindex` tag does not remove the pages.
+
+```powershell
+cd website
+node --experimental-default-type=module scripts/build-production.mjs .production-build
+```
+
+Pages functions return 404 for those direct URLs while `FIRST_CUSTOMER_FUNNEL_PUBLISHED` is false. Setting `FIRST_CUSTOMER_FUNNEL=true` alone does not publish them. `AMICOR_FUNNEL_PREVIEW=local` is only an explicit local Wrangler bypass. Local preview of this source tree still serves the pages. Do not deploy this change from here. The live Pages project still has an empty build command, so this build is not what getamicor.com is serving.
+
 ## Exact owner step (required before a real preview URL exists)
 
 Sign in to the AMICOR Cloudflare account (or create a free account), then either:

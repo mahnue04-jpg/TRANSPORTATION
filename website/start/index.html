@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AMICOR first-customer preview</title>
+  <meta name="description" content="Development preview of AMICOR Nova starting options. No checkout and no public marketing.">
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="../assets/logo.svg">
+  <link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body class="theme-corporate">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="/">
+        <img src="../assets/logo.svg" alt="AMICOR" width="36" height="36">
+        <span class="brand-copy">AMICOR<small>Nova</small></span>
+      </a>
+      <button class="menu-btn" type="button" data-menu-button aria-expanded="false" aria-controls="site-nav">Menu</button>
+      <nav id="site-nav" class="nav" data-nav>
+        <a href="/business-services/">Services</a>
+        <a href="/pricing/">Pricing</a>
+        <a href="/contact/">Contact</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">Development preview</p>
+        <h1>Choose a starting option.</h1>
+        <p class="notice">Public navigation and outbound marketing are off. This page does not take payment. Affiliate enrollment is pending, so there are no commission links.</p>
+        <p class="lede">These are the Nova Operations Agent starting options listed on getamicor.com/pricing/ as of October 5, 2026. Review the current terms in the Nova app before any purchase. Complex projects are quoted separately.</p>
+        <div class="grid grid-3">
+          <article class="card">
+            <h2>Explore &amp; scope</h2>
+            <p><strong>$0</strong></p>
+            <p>Explore the public demo and request a scope check. The Nova app also offers a seven-day account trial with no card required.</p>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Explore &amp; scope ($0)" aria-pressed="false">Select Explore &amp; scope</button>
+          </article>
+          <article class="card">
+            <h2>Starter Task</h2>
+            <p><strong>$49 one-time</strong></p>
+            <p>A supported starter task, with scope reviewed before work begins.</p>
+            <button class="btn btn-primary" type="button" data-plan-choice="Starter Task ($49 one-time)" aria-pressed="false">Select Starter Task</button>
+          </article>
+          <article class="card">
+            <h2>Launch Operations</h2>
+            <p><strong>$99/month</strong></p>
+            <p>Recurring supported digital operations. Confirm the scope and plan details in the Nova app.</p>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Launch Operations ($99/month)" aria-pressed="false">Select Launch Operations</button>
+          </article>
+          <article class="card">
+            <h2>Business Operations</h2>
+            <p><strong>$299/month</strong></p>
+            <p>Business operations support within an agreed scope. Complex projects are quoted separately.</p>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Business Operations ($299/month)" aria-pressed="false">Select Business Operations</button>
+          </article>
+        </div>
+        <p data-plan-status role="status">No starting option selected.</p>
+        <p><a href="/guides/research-memo-setup/">Read the research-memo guide</a>. That guide is also a development preview.</p>
+      </div>
+    </section>
+    <section class="section" id="start-form">
+      <div class="wrap">
+        <h2>Request this starting option</h2>
+        <p>Submitting saves the request and shows a reference ID. It does not start work, charge a card, or confirm email.</p>
+        <form class="panel" data-early-access-form data-start-funnel novalidate>
+          <div class="hp" aria-hidden="true">
+            <input name="middle_name_confirm" tabindex="-1" autocomplete="off" aria-hidden="true">
+          </div>
+          <label>Name <input name="name" autocomplete="name" required></label>
+          <label>Company <input name="company" autocomplete="organization" required></label>
+          <label>Email <input name="email" type="email" autocomplete="email" required></label>
+          <label>Phone <span class="optional">(optional)</span> <input name="phone" type="tel" autocomplete="tel"></label>
+          <label>Industry <input name="industry" required></label>
+          <label>Company size
+            <select name="companySize" required>
+              <option value="">Select</option>
+              <option>1-10</option>
+              <option>11-50</option>
+              <option>51-200</option>
+              <option>201-1000</option>
+              <option>1000+</option>
+            </select>
+          </label>
+          <label>Inquiry
+            <select name="product" id="product" required>
+              <option selected>Nova Operations Agent</option>
+            </select>
+          </label>
+          <label>Message <textarea name="message" rows="5" required placeholder="Describe the result, deadline, and inputs."></textarea></label>
+          <label class="consent">
+            <input name="consent" type="checkbox" value="yes" required>
+            <span>I understand this is not a purchase, I have read the <a href="/privacy/">Privacy Policy</a>, I will not submit medical records or other sensitive health information, and I consent to AMICOR storing this business inquiry.</span>
+          </label>
+          <p class="form-error" data-form-error role="alert"></p>
+          <p class="form-success" data-form-success tabindex="-1" aria-live="polite">AMICOR saved your request.</p>
+          <button class="btn btn-primary" type="submit">Submit request</button>
+        </form>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div class="wrap footer-grid">
+      <div class="footer-col">
+        <strong>AMICOR</strong>
+        <p>Development preview. Not a public offer and not linked from the main navigation.</p>
+        <p><a href="mailto:info@getamicor.com">info@getamicor.com</a></p>
+      </div>
+    </div>
+  </footer>
+  <script src="../assets/js/site-config.js"></script>
+  <script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -38,6 +38,7 @@ uvicorn_stderr.log
 
 # Build/test artifacts
 artifacts/
+website/.production-build/
 project_snapshots/
 *.tmp
 *.temp
