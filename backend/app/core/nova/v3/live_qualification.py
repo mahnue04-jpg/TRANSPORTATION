@@ -919,6 +919,10 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "vendor_contract_compatibility": discovery.get("vendor_contract_compatibility"),
                 "state_restriction_detected": discovery.get("state_restriction_detected"),
                 "nationwide_remote_allowed": True,
+                "language_support": discovery.get("language_support"),
+                "tested_language_codes": list(discovery.get("tested_language_codes") or []),
+                "native_fluency_claimed": False,
+                "ai_translation_is_native_fluency": False,
             }
         )
         # A rejected discovery candidate must never remain owner-visible as a
@@ -957,6 +961,22 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "non_us_location_required": (
                     "Role requires the worker to be outside the United States."
                 ),
+                "native_fluency_required": (
+                    "Role requires native fluency. AI translation is not native fluency and cannot satisfy it."
+                ),
+                "residency_required": (
+                    "Role requires residency or a place of residence the verified profile does not meet."
+                ),
+                "citizenship_required": (
+                    "Role requires citizenship the verified profile does not meet."
+                ),
+                "permit_required": (
+                    "Role requires a work, residence, or business permit the verified profile does not hold."
+                ),
+                "untested_language_required": (
+                    "Role requires a language Nova has not tested. Tested text languages are "
+                    "English, Somali, Arabic, French, and Spanish. That support is AI-assisted, not native fluency."
+                ),
             }
             if discovery.get("remote_digital_lane_mismatch"):
                 qual.setdefault("blockers", []).append("work_lane_mismatch")
@@ -980,6 +1000,10 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
         row["relevance_score"] = base + bonus
         row["discovery_score"] = discovery["discovery_score"]
         row["discovery_band"] = discovery["discovery_band"]
+        row["language_support"] = discovery.get("language_support")
+        row["tested_language_codes"] = list(discovery.get("tested_language_codes") or [])
+        row["native_fluency_claimed"] = False
+        row["ai_translation_is_native_fluency"] = False
         row["search_family"] = discovery.get("search_family")
         row["search_family_label"] = discovery.get("search_family_label")
         row["why_searched"] = discovery.get("why_searched")

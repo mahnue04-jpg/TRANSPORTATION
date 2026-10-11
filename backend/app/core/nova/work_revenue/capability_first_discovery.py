@@ -75,7 +75,7 @@ _PREFERRED_SIGNALS = re.compile(
 # itself a physical trade search is not this intent.
 _DIGITAL_SEARCH_INTENT = re.compile(
     r"\b("
-    r"remote|freelance|1099|contractor|independent contractor|project[- ]based|"
+    r"remote|worldwide|international|\bb2b\b|freelance|1099|contractor|independent contractor|project[- ]based|"
     r"virtual assistant|virtual assistance|administrative|admin support|"
     r"ai operations|ai workflow|automation support|workflow automation|"
     r"content operations|project coordination|crm|reporting|research|"
@@ -347,15 +347,25 @@ def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
     return bool(_LISTING_LANE_TITLE.search(title))
 
 
-def non_us_location_required(job: dict[str, Any]) -> bool:
-    """True when the listing requires the worker to be outside the United States.
-
-    A company mention of another country is not enough. Geography that also
-    allows the United States or worldwide stays eligible.
-    """
-    geography = str(job.get("geography") or "")
-    if _NON_US_PLACE.search(geography) and not _US_OR_WORLD_PLACE.search(geography):
+def _role_is_remote(job: dict[str, Any]) -> bool:
+    """True when the listing is remote work rather than a place the worker must occupy."""
+    remote = str(job.get("remote_status") or "").strip().lower().replace("_", " ").replace("-", " ")
+    if "remote" in remote or remote in {"worldwide", "anywhere", "global", "work from home", "wfh"}:
         return True
+    return bool(re.search(
+        r"\b(?:fully remote|remote|worldwide|work from anywhere|work from home)\b",
+        _listing_text(job),
+        re.I,
+    ))
+
+
+def non_us_location_required(job: dict[str, Any]) -> bool:
+    """True when the worker must be outside the United States.
+
+    A remote listing may name a client country. That is not a residency
+    requirement. Explicit based, located, or reside language still is.
+    Geography that also allows the United States or worldwide stays eligible.
+    """
     blob = " ".join(
         str(job.get(key) or "")
         for key in ("title", "opportunity_title", "description", "requirements")
@@ -364,6 +374,11 @@ def non_us_location_required(job: dict[str, Any]) -> bool:
         prefix = blob[max(0, match.start() - 48):match.start()]
         if _FOREIGN_LOCATION_REQUIREMENT.search(prefix):
             return True
+    geography = str(job.get("geography") or "")
+    if _NON_US_PLACE.search(geography) and not _US_OR_WORLD_PLACE.search(geography):
+        if _role_is_remote(job):
+            return False
+        return True
     return False
 
 
@@ -384,7 +399,9 @@ _CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
     rf"|\b(?:must\s+(?:hold|have|possess|be)|required to\s+(?:hold|have|possess|be))\s+{_CREDENTIAL}\b"
     rf"|\b(?:required|mandatory)\s*:?\s+{_CREDENTIAL}\b"
     rf"|\brequires?\s+{_CREDENTIAL}\b"
-    r"|\bmust be certified\b)",
+    r"|\bmust be certified\b"
+    r"|\bmust be licensed\b"
+    r"|\blicensing\s+(?:is\s+)?(?:required|mandatory)\b)",
     re.I,
 )
 _EXPERIENCE_HISTORY_REQUIRED = re.compile(
@@ -467,6 +484,13 @@ def remote_digital_performability_blockers(job: dict[str, Any], query: str | Non
         reasons.append("upfront_fee_required")
     if non_us_location_required(job):
         reasons.append("non_us_location_required")
+    from app.core.nova.work_revenue.international_match import international_blockers
+
+    for code in international_blockers(job):
+        if code not in reasons:
+            reasons.append(code)
+    if "non_us_location_required" in reasons and "residency_required" not in reasons:
+        reasons.append("residency_required")
     return reasons
 _STATE_RESTRICT = re.compile(
     r"\b("
@@ -1248,6 +1272,9 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     # does not grant a positive capability match (title_used_for_decision stays false).
     physical_blocked = blocks_physical_role_for_digital_search(job, query)
     performability_blockers = remote_digital_performability_blockers(job, query)
+    from app.core.nova.work_revenue.international_match import assess_international_match
+
+    international = assess_international_match(job)
     lane_decision = single_lane_title_match(job, query)
     lane_mismatch = bool(
         (is_multi_lane_remote_digital_query(query) and not matches_remote_digital_work_lane(job))
@@ -1303,6 +1330,15 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "certification_or_license_blocked": "certification_or_license_required" in performability_blockers,
         "unverified_experience_blocked": "unverified_experience_required" in performability_blockers,
         "upfront_fee_blocked": "upfront_fee_required" in performability_blockers,
+        "native_fluency_blocked": "native_fluency_required" in performability_blockers,
+        "residency_blocked": "residency_required" in performability_blockers,
+        "citizenship_blocked": "citizenship_required" in performability_blockers,
+        "permit_blocked": "permit_required" in performability_blockers,
+        "untested_language_blocked": "untested_language_required" in performability_blockers,
+        "language_support": international["language_support"],
+        "tested_language_codes": international["tested_language_codes"],
+        "native_fluency_claimed": False,
+        "ai_translation_is_native_fluency": False,
         "digital_contractor_rank_boost": digital_rank_boost,
         "search_family": planned_family_id or (family or {}).get("family_id"),
         "search_family_label": str(job.get("search_family_label") or "").strip()

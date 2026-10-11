@@ -15,6 +15,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     generate_capability_first_queries,
     is_banned_query,
     is_remote_digital_search_intent,
+    non_us_location_required,
     score_discovery_candidate,
     search_family_catalog,
     resolve_requested_family,
@@ -22,6 +23,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     targeted_queries_for_request,
 )
 from app.core.nova.work_revenue.flags import EXTERNAL_SUBMISSION_ENABLED, FINANCIAL_ACTIONS_ENABLED
+from app.core.nova.work_revenue.international_match import TESTED_WORK_LANGUAGES
 
 
 def test_banned_generic_queries_are_not_generated() -> None:
@@ -849,8 +851,179 @@ def test_single_lane_searches_keep_their_own_title_family() -> None:
     assert paid_crm["upfront_fee_blocked"] is True
     assert abroad["discovery_band"] == "REJECT"
     assert "non_us_location_required" in abroad["remote_digital_blockers"]
+    assert "residency_required" in abroad["remote_digital_blockers"]
     assert onsite["discovery_band"] == "REJECT"
     assert onsite["physical_licensed_onsite_blocked"] is True
     assert seasoned["discovery_band"] == "REJECT"
     assert seasoned["unverified_experience_blocked"] is True
+
+
+_WORLDWIDE_B2B_QUERY = (
+    "Worldwide remote B2B contractor for customer operations, CRM, and administrative support"
+)
+
+
+def test_tested_work_languages_are_the_workspace_set() -> None:
+    assert list(TESTED_WORK_LANGUAGES) == ["en", "so", "ar", "fr", "es"]
+
+
+def test_worldwide_remote_b2b_matches_tested_languages_without_native_claim() -> None:
+    job = _listed_job(
+        "Remote Operations Assistant",
+        "Worldwide remote B2B contractor for administrative support and CRM updates. "
+        "French and Arabic customer email. Work from anywhere. No residency requirement. "
+        "No certification required. No upfront fee. No on-site work.",
+        geography="France",
+        search_family="administrative_operations",
+    )
+    assert non_us_location_required(job) is False
+    scored = score_discovery_candidate(job, query=_WORLDWIDE_B2B_QUERY)
+    assert scored["discovery_band"] != "REJECT"
+    assert scored["language_support"] == "ai_assisted_translation"
+    assert scored["tested_language_codes"] == ["ar", "fr"]
+    assert scored["native_fluency_claimed"] is False
+    assert scored["ai_translation_is_native_fluency"] is False
+    assert "native_fluency_required" not in scored["remote_digital_blockers"]
+    assert "residency_required" not in scored["remote_digital_blockers"]
+    assert "untested_language_required" not in scored["remote_digital_blockers"]
+
+    ranked = qualify_and_rank_live_jobs(_WORLDWIDE_B2B_QUERY, [job])
+    qual = ranked[0]["live_qualification"]
+    assert qual["qualification_status"] != "NOT_QUALIFIED"
+    assert qual["language_support"] == "ai_assisted_translation"
+    assert qual["native_fluency_claimed"] is False
+    assert qual["ai_translation_is_native_fluency"] is False
+    assert qual["external_submission"] is False
+    assert qual["financial_execution"] is False
+
+
+def _blockers_for(ranked: list[dict], snippet: str) -> list[str]:
+    row = next(item for item in ranked if snippet in item["description"])
+    assert row["discovery_band"] == "REJECT", snippet
+    assert row["live_qualification"]["qualification_status"] == "NOT_QUALIFIED", snippet
+    assert row["live_qualification"]["native_fluency_claimed"] is False
+    assert row["live_qualification"]["ai_translation_is_native_fluency"] is False
+    assert row["live_qualification"]["external_submission"] is False
+    assert row["live_qualification"]["financial_execution"] is False
+    return row["live_qualification"]["blockers"]
+
+
+def test_worldwide_match_hard_blocks_unmet_constraints() -> None:
+    native = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B CRM support. Native French speaker required. Work from anywhere.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="native-french",
+    )
+    mena = _listed_job(
+        "Remote Operations Assistant",
+        "Remote Arabic customer email. MENA residency required. Must reside in the UAE.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="mena-residency",
+    )
+    german = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support. German fluency required.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="german-fluency",
+    )
+    either = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support. French or German required.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="french-or-german",
+    )
+    permit = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B CRM support. Work permit for Germany required. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="germany-permit",
+    )
+    licensed = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support. Must be licensed.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="must-be-licensed",
+    )
+    citizen = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support. US citizenship required.",
+        geography="United States",
+        search_family="administrative_operations",
+        provider_identifier="us-citizenship",
+    )
+    preferred = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support and CRM. Spanish preferred. "
+        "No native speaker requirement. No residency requirement. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="spanish-preferred",
+    )
+    ranked = qualify_and_rank_live_jobs(
+        _WORLDWIDE_B2B_QUERY,
+        [native, mena, german, either, permit, licensed, citizen, preferred],
+    )
+
+    native_blockers = _blockers_for(ranked, "Native French speaker required")
+    assert "native_fluency_required" in native_blockers
+    native_reasons = next(
+        item["live_qualification"]["reasons"]
+        for item in ranked
+        if "Native French speaker required" in item["description"]
+    )
+    assert any("AI translation is not native fluency" in reason for reason in native_reasons)
+
+    mena_blockers = _blockers_for(ranked, "MENA residency required")
+    assert "residency_required" in mena_blockers
+    assert "untested_language_required" not in mena_blockers
+
+    assert "untested_language_required" in _blockers_for(ranked, "German fluency required")
+    assert "permit_required" in _blockers_for(ranked, "Work permit for Germany required")
+    assert "certification_or_license_required" in _blockers_for(ranked, "Must be licensed")
+    assert "citizenship_required" in _blockers_for(ranked, "US citizenship required")
+
+    french_or_german = next(item for item in ranked if item["provider_identifier"] == "french-or-german")
+    assert french_or_german["discovery_band"] != "REJECT"
+    assert french_or_german["tested_language_codes"] == ["fr"]
+    assert french_or_german["native_fluency_claimed"] is False
+    assert french_or_german["language_support"] == "ai_assisted_translation"
+
+    spanish = next(item for item in ranked if item["provider_identifier"] == "spanish-preferred")
+    assert spanish["discovery_band"] != "REJECT"
+    assert "native_fluency_required" not in spanish["live_qualification"].get("blockers", [])
+    assert spanish["native_fluency_claimed"] is False
+
+    fee = score_discovery_candidate(
+        _listed_job(
+            "Remote Operations Assistant",
+            "Remote B2B CRM support. Application fee required. Pay to apply.",
+            search_family="administrative_operations",
+        ),
+        query=_WORLDWIDE_B2B_QUERY,
+    )
+    assert fee["discovery_band"] == "REJECT"
+    assert fee["upfront_fee_blocked"] is True
+
+    company = score_discovery_candidate(
+        _listed_job(
+            "Remote Operations Assistant",
+            "Remote B2B administrative support for a German company. English customer email. "
+            "Visa sponsorship available. No residency requirement. No upfront fee.",
+            search_family="administrative_operations",
+        ),
+        query=_WORLDWIDE_B2B_QUERY,
+    )
+    assert company["discovery_band"] != "REJECT"
+    assert "untested_language_required" not in company["remote_digital_blockers"]
+    assert "permit_required" not in company["remote_digital_blockers"]
+    assert company["tested_language_codes"] == ["en"]
+    assert company["language_support"] == "ai_assisted_translation"
+    assert company["native_fluency_claimed"] is False
 
