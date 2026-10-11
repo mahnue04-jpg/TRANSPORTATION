@@ -49,6 +49,22 @@ def test_funnel_uses_published_prices_and_stays_unlisted() -> None:
         assert 'href="/start/"' not in html
 
 
+def test_funnel_flag_is_a_publish_gate() -> None:
+    build = (ROOT / "scripts" / "build-production.mjs").read_text(encoding="utf-8")
+    gate = (ROOT / "functions" / "_funnel-gate.js").read_text(encoding="utf-8")
+    routes = (ROOT / "_routes.json").read_text(encoding="utf-8")
+    assert "firstCustomerFunnel: false" in CONFIG
+    assert "readFunnelPublished" in build
+    assert "guides/research-memo-setup" in build
+    assert "FIRST_CUSTOMER_FUNNEL_PUBLISHED = false" in gate
+    assert 'AMICOR_FUNNEL_PREVIEW' in gate
+    assert '"/api/*"' in routes
+    assert '"/start"' in routes
+    assert '"/start/*"' in routes
+    assert "research-memo-setup" in routes
+    assert 'content="noindex,nofollow"' in START
+
+
 def test_funnel_posts_through_corrected_lead_capture() -> None:
     assert 'formEndpoint: "/api/leads"' in CONFIG
     assert "firstCustomerFunnel: false" in CONFIG
@@ -78,6 +94,7 @@ def test_guide_is_original_and_enrollment_pending() -> None:
 def main() -> None:
     tests = [
         test_funnel_uses_published_prices_and_stays_unlisted,
+        test_funnel_flag_is_a_publish_gate,
         test_funnel_posts_through_corrected_lead_capture,
         test_guide_is_original_and_enrollment_pending,
     ]
