@@ -69,6 +69,7 @@
         <label>Minimum age<input id="campaign-age" type="number" min="18" value="18" required /></label>
         <div class="actions wide">
           <button type="submit" id="create-campaign">Create draft campaign</button>
+          <button type="button" id="update-campaign" class="secondary">Save campaign edits</button>
           <button type="button" id="load-campaigns" class="secondary">Load campaigns</button>
           <button type="button" id="load-applications" class="secondary">Load applications</button>
           <button type="button" id="load-audit" class="secondary">Load audit</button>
@@ -247,6 +248,26 @@
           });
           $("application-campaign").value = created.id || "";
           show("Draft campaign " + created.id + " saved. It was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("update-campaign").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var campaignId = $("application-campaign").value.trim();
+          if (!campaignId) {
+            show("Create a draft campaign first. Nothing was submitted.", false);
+            return;
+          }
+          var updated = await api(base() + "/campaigns/" + encodeURIComponent(campaignId), {
+            method: "PATCH",
+            body: JSON.stringify({
+              title: $("campaign-title").value.trim(),
+              category: $("campaign-category").value,
+              minimum_age: Number($("campaign-age").value),
+              status: "DRAFT"
+            })
+          });
+          show("Draft campaign " + updated.id + " updated. It was not published.", true);
         } catch (err) { /* banner already set */ }
       });
       $("load-campaigns").addEventListener("click", async function () {
