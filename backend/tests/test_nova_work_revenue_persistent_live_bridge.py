@@ -21,6 +21,7 @@ from app.core.nova.v3.live_qualification import (
 from app.core.nova.v3.work_revenue_bridge import persist_live_job, persist_ranked_jobs, reset_live_discovery_opportunities
 from app.core.nova.work_revenue import flags as wr_flags
 from app.core.nova.work_revenue import service as work_service
+from app.core.nova.work_revenue.capability_first_discovery import resolve_requested_families
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.core.nova.work_revenue.schemas import OpportunityCreate
 from app.core.nova.work_revenue.service import _today_source_counts
@@ -36,6 +37,23 @@ def client() -> TestClient:
     seed_default_users()
     ensure_work_revenue_schema(engine)
     return TestClient(app)
+
+
+@pytest.fixture
+def db_session():
+    """Session on the Work & Revenue engine.
+
+    The shared `db` fixture is an empty in-memory database. Live reset archives
+    approved-api rows through the application engine, so this test has to use
+    that session after the work schema exists.
+    """
+    ensure_work_revenue_schema(engine)
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
 
 
 @pytest.fixture(autouse=True)
@@ -559,11 +577,12 @@ def test_prepare_deduplicates_across_search_plan_and_hides_rejected_results(
     monkeypatch.setattr(v3_router, "qualify_and_rank_live_jobs", fake_rank)
 
     headers = _headers(client)
+    query = "remote administrative support, spreadsheet analysis, research, AI operations, bookkeeping support"
     response = client.post(
         "/api/nova/v3/live/jobs/prepare",
         headers=headers,
         json={
-            "query": "remote administrative support, spreadsheet analysis, research, AI operations, bookkeeping support",
+            "query": query,
             "limit": 10,
             "save_limit": 5,
             "prepare_limit": 1,
@@ -572,7 +591,21 @@ def test_prepare_deduplicates_across_search_plan_and_hides_rejected_results(
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert len(body["search_plan"]) == 5
+    requested = resolve_requested_families(query)
+    assert requested == [
+        "bookkeeping_support",
+        "research_analysis",
+        "data_spreadsheet",
+        "ai_automation",
+        "administrative_operations",
+    ]
+    # The prepare route budgets one query per requested family plus two
+    # variants (floor 5, cap 10). A fixed plan of five dropped later families.
+    plan = body["search_plan"]
+    assert len(plan) == min(10, max(5, len(requested) + 2))
+    assert len(plan) == 7
+    assert [row["search_family"] for row in plan[: len(requested)]] == requested
+    assert {row["search_family"] for row in plan} == set(requested)
     assert len(captured["jobs"]) == 2
     assert body["ranked_count"] == 1
     assert len(body["ranked_jobs"]) == 1
