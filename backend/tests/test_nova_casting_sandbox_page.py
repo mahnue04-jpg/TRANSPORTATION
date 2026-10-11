@@ -24,6 +24,8 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "/content" in sandbox
     assert "URL.createObjectURL" in sandbox
     assert "sandbox_private_media_enabled" in sandbox
+    assert "Structural scan only. Antivirus is not ready." in sandbox
+    assert 'aria-live="polite"' in sandbox
     assert "No relationship or integration with Zeus" in sandbox
     assert "Nothing was submitted" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):

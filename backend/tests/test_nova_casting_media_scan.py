@@ -1,8 +1,10 @@
 """Structural scan and private file placement. No public URL is created."""
 import importlib.util
+import os
 import stat
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -54,8 +56,44 @@ def test_structural_scan_accepts_allowed_video_and_rejects_hostile_bytes(monkeyp
     assert scan.scan_video_bytes(MP4, "video/mp4").reason == "Invalid video size"
 
 
-def test_clamscan_failure_is_not_treated_as_clean(monkeypatch):
+def _fresh_signatures(tmp_path, monkeypatch, age_seconds=0):
+    database = tmp_path / "clamav"
+    database.mkdir(exist_ok=True)
+    signature = database / "main.cvd"
+    signature.write_bytes(b"synthetic-signature")
+    stamp = time.time() - age_seconds
+    os.utime(signature, (stamp, stamp))
+    monkeypatch.setenv("NOVA_CASTING_CLAMAV_DB", str(database))
+    monkeypatch.setenv("NOVA_CASTING_SCANNER", "clamav")
+    return signature
+
+
+def test_structural_mode_is_not_labeled_antivirus(monkeypatch):
     scan = load_scan()
+    monkeypatch.delenv("NOVA_CASTING_SCANNER", raising=False)
+    monkeypatch.setattr(scan.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/clamscan")
+    called = {"count": 0}
+
+    def explode(*_args, **_kwargs):
+        called["count"] += 1
+        raise AssertionError("structural mode must not run clamscan")
+
+    monkeypatch.setattr(scan.subprocess, "run", explode)
+    result = scan.scan_video_bytes(MP4, "video/mp4")
+    capability = scan.scanner_capability()
+    assert result.clean is True
+    assert result.engine == "structural"
+    assert result.reason == "Structural scan accepted"
+    assert "antivirus" not in result.reason.lower()
+    assert capability.mode == "structural"
+    assert capability.antivirus_ready is False
+    assert capability.reason == "Structural scan only. Antivirus is not ready."
+    assert called["count"] == 0
+
+
+def test_clamscan_failure_is_not_treated_as_clean(monkeypatch, tmp_path):
+    scan = load_scan()
+    _fresh_signatures(tmp_path, monkeypatch)
     monkeypatch.setattr(scan.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/clamscan")
 
     def reject(*_args, **_kwargs):
@@ -65,6 +103,7 @@ def test_clamscan_failure_is_not_treated_as_clean(monkeypatch):
     blocked = scan.scan_video_bytes(MP4, "video/mp4")
     assert blocked.clean is False
     assert blocked.engine == "clamscan"
+    assert scan.scanner_capability().antivirus_ready is True
 
     def explode(*_args, **_kwargs):
         raise subprocess.TimeoutExpired(cmd="clamscan", timeout=30)
@@ -79,6 +118,39 @@ def test_clamscan_failure_is_not_treated_as_clean(monkeypatch):
     accepted = scan.scan_video_bytes(MP4, "video/mp4")
     assert accepted.clean is True
     assert accepted.engine == "clamscan"
+    assert accepted.reason == "Antivirus scan accepted"
+
+
+def test_missing_or_stale_antivirus_fails_closed(monkeypatch, tmp_path):
+    scan = load_scan()
+    _fresh_signatures(tmp_path, monkeypatch)
+    monkeypatch.setattr(scan.shutil, "which", lambda *_args, **_kwargs: None)
+    missing = scan.scan_video_bytes(MP4, "video/mp4")
+    assert missing.clean is False
+    assert missing.engine == "clamscan"
+    assert scan.scanner_capability().reason == "Antivirus scanner is missing."
+
+    monkeypatch.setattr(scan.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/clamscan")
+    _fresh_signatures(tmp_path, monkeypatch, age_seconds=8 * 24 * 60 * 60)
+    called = {"count": 0}
+
+    def accept(*_args, **_kwargs):
+        called["count"] += 1
+        return subprocess.CompletedProcess(args=["clamscan"], returncode=0)
+
+    monkeypatch.setattr(scan.subprocess, "run", accept)
+    stale = scan.scan_video_bytes(MP4, "video/mp4")
+    assert stale.clean is False
+    assert stale.reason == "Rejected by security scan"
+    assert scan.scanner_capability().antivirus_ready is False
+    assert scan.scanner_capability().reason == "Antivirus signatures are stale."
+    assert called["count"] == 0
+
+    monkeypatch.setenv("NOVA_CASTING_SCANNER", "paid-vendor")
+    unknown = scan.scan_video_bytes(MP4, "video/mp4")
+    assert unknown.clean is False
+    assert scan.scanner_capability().antivirus_ready is False
+    assert scan.scanner_capability().reason == "Scanner configuration is not recognized."
 
 
 def test_private_files_stay_outside_public_hosting(tmp_path, monkeypatch):

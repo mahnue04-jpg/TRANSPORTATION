@@ -45,7 +45,7 @@ Local UI check, only with the flag and an allowlisted environment set on a dispo
 
 ## Known gaps
 
-- The disposable scanner checks file structure and known hostile markers. It runs `clamscan` when that program is installed and fails closed if the scanner errors. A structural pass without a maintained virus database is not a production malware product.
+- Scanner readiness is explicit. The default mode is structural-only and `antivirus_ready` stays false. `NOVA_CASTING_SCANNER=clamav` requires `clamscan` and signature files newer than seven days. A missing scanner, missing or stale signatures, an unknown scanner name, a timeout, or a scanner error rejects the file and does not store it. A structural pass is not antivirus.
 - Sandbox writes do not create casting organizations or memberships. Those rows must already exist in the disposable database.
 - Campaigns cannot be published. No email or SMS is sent. Public intake stays off.
 - This is not launch-ready. Zeus is not a partner and is not connected. Do not deploy without owner approval.

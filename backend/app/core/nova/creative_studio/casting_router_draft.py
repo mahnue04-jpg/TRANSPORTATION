@@ -57,6 +57,9 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
     """Authenticated diagnostic. Intake and uploads stay off even when reads are staged."""
     if not user.user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
+    from .casting_media_scan import scanner_capability
+
+    capability = scanner_capability()
     return {
         "enabled": False,
         "applications_enabled": False,
@@ -64,6 +67,9 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
         "staging_reads_enabled": casting_staging_reads_enabled(),
         "sandbox_writes_enabled": casting_sandbox_writes_enabled(),
         "sandbox_private_media_enabled": casting_sandbox_writes_enabled(),
+        "scanner_mode": capability.mode,
+        "antivirus_ready": capability.antivirus_ready,
+        "scanner_detail": capability.reason,
     }
 
 

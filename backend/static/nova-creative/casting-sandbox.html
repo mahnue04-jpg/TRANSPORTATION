@@ -9,6 +9,9 @@
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
   <style>
     #playback { display: block; width: 100%; max-height: 240px; margin-top: 12px; background: #111; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid #1f4b3a; outline-offset: 2px;
+    }
     @media (max-width: 640px) {
       .studio-nav { flex-direction: column; align-items: flex-start; }
       .actions { flex-direction: column; }
@@ -32,8 +35,9 @@
   </header>
   <main class="studio-main">
     <p class="disclaimer">Disposable test workflow for an authenticated Nova account. Not a public audition portal. No relationship or integration with Zeus. Campaigns stay unpublished, callbacks are recorded only, and no invitation is sent.</p>
-    <div id="banner" class="banner hidden" role="status"></div>
-    <p id="status" class="hint">Loading sandbox readiness.</p>
+    <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
+    <p id="status" class="hint" aria-live="polite">Loading sandbox readiness.</p>
+    <p id="scanner-readiness" class="hint" aria-live="polite">Scanner readiness has not been checked.</p>
 
     <section class="card" aria-label="Sign in">
       <p id="session-meta" class="hint">Sign in with the existing Nova account used by Creative Studio.</p>
@@ -192,6 +196,9 @@
           && readiness.media_uploads_enabled === false
           && readiness.enabled === false;
         privateMedia = writesEnabled && readiness.sandbox_private_media_enabled === true;
+        $("scanner-readiness").textContent = readiness.antivirus_ready === true && readiness.scanner_mode === "antivirus"
+          ? "Antivirus signatures are current."
+          : "Structural scan only. Antivirus is not ready.";
         if (!writesEnabled) {
           show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
           return false;
@@ -401,7 +408,10 @@
             }
             playbackUrl = URL.createObjectURL(await mediaResponse.blob());
             $("playback").src = playbackUrl;
-            show("Private video scanned with " + (saved.scan_engine || "scanner") + ". Playback stays on this page.", true);
+            var structural = saved.scan_engine !== "clamscan";
+            show(structural
+              ? "Structural scan only. Antivirus is not ready. Playback stays on this page."
+              : "Antivirus scan accepted. Playback stays on this page.", true);
             return;
           }
           show("Video was not accepted for playback (" + saved.status + ").", false);
