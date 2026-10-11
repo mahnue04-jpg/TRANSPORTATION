@@ -42,3 +42,17 @@ def test_withdrawal_and_callback_are_role_and_tenant_scoped():
     assert not flow.may_schedule_callback(reviewer, organization_id="org-b", application_state=flow.ApplicationState.SUBMITTED)
     assert not flow.may_schedule_callback(reviewer, organization_id="org-a", application_state=flow.ApplicationState.WITHDRAWN)
     assert not flow.may_schedule_callback(applicant, organization_id="org-a", application_state=flow.ApplicationState.SUBMITTED)
+
+
+def test_sandbox_submit_requires_consent_and_refuses_a_public_campaign():
+    policy, flow = _load()
+    actor = policy.CastingActor("applicant-a", None, policy.CastingRole.APPLICANT)
+    kwargs = dict(
+        applicant_id="applicant-a", organization_id="org-a",
+        current=flow.ApplicationState.DRAFT, target=flow.ApplicationState.SUBMITTED,
+    )
+    assert flow.may_transition_application(actor, **kwargs, consent_recorded=True, sandbox_intake=True)
+    assert not flow.may_transition_application(actor, **kwargs, sandbox_intake=True)
+    assert not flow.may_transition_application(
+        actor, **kwargs, consent_recorded=True, campaign_open=True, sandbox_intake=True,
+    )

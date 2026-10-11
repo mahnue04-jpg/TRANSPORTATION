@@ -25,14 +25,21 @@ def may_transition_application(
     target: ApplicationState,
     consent_recorded: bool = False,
     campaign_open: bool = False,
+    sandbox_intake: bool = False,
 ) -> bool:
-    """Fail closed: applicants submit/withdraw; reviewers cannot alter submission state."""
+    """Fail closed: applicants submit/withdraw; reviewers cannot alter submission state.
+
+    Public submission still requires an open campaign. Disposable sandbox intake
+    may submit only when consent is recorded and the campaign is not public.
+    """
     if not actor.user_id or current == target:
         return False
     if actor.role is not CastingRole.APPLICANT or actor.user_id != applicant_id:
         return False
     if current is ApplicationState.DRAFT and target is ApplicationState.SUBMITTED:
-        return consent_recorded and campaign_open
+        if sandbox_intake:
+            return bool(consent_recorded) and not campaign_open
+        return bool(consent_recorded) and bool(campaign_open)
     if current is ApplicationState.SUBMITTED and target is ApplicationState.WITHDRAWN:
         return True
     return False

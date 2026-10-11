@@ -42,6 +42,10 @@ def test_submission_remains_disabled_even_with_consent():
     app = {"id": "a1", "campaign_id": "c1", "owner_id": "org1", "applicant_id": "user1", "status": "DRAFT"}
     campaign = {"id": "c1", "owner_id": "org1"}
     assert not access.submit_application(actor=applicant, application=app, campaign=campaign, consent_recorded=True)
+    assert access.submit_application(
+        actor=applicant, application=app, campaign=campaign,
+        consent_recorded=True, sandbox_intake=True,
+    )
 
 
 def test_missing_identifiers_fail_closed_without_exceptions():

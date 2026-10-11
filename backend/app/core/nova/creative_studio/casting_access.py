@@ -14,6 +14,10 @@ class CastingAccessDenied(PermissionError):
     pass
 
 
+class CastingRequestRejected(ValueError):
+    """Typed client input failed. Callers must not echo storage keys or SQL text."""
+
+
 def read_application(*, actor: CastingActor | None, application: dict, campaign: dict) -> dict:
     if (actor is None or not application.get("id") or not application.get("applicant_id")
             or not application.get("campaign_id") or not application.get("status")
@@ -31,7 +35,10 @@ def read_application(*, actor: CastingActor | None, application: dict, campaign:
     return organizer_application_view(application)
 
 
-def submit_application(*, actor: CastingActor | None, application: dict, campaign: dict, consent_recorded: bool) -> bool:
+def submit_application(
+    *, actor: CastingActor | None, application: dict, campaign: dict,
+    consent_recorded: bool, sandbox_intake: bool = False,
+) -> bool:
     if (actor is None or not application.get("id") or not application.get("applicant_id")
             or not application.get("campaign_id") or not campaign.get("id")
             or not campaign.get("owner_id")):
@@ -51,5 +58,6 @@ def submit_application(*, actor: CastingActor | None, application: dict, campaig
         current=state,
         target=ApplicationState.SUBMITTED,
         consent_recorded=consent_recorded,
-        campaign_open=False,  # Fail closed: campaign activation is not yet supported.
+        campaign_open=False,  # Public campaign activation is not supported.
+        sandbox_intake=sandbox_intake,
     )
