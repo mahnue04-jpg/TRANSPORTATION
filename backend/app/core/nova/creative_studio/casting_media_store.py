@@ -11,6 +11,51 @@ import tempfile
 from pathlib import Path
 
 _KEY = re.compile(r"^[a-f0-9]{32}$")
+_TX_KEY = "nova_casting_private_media_tx"
+
+
+class PrivateMediaTransaction:
+    """Files written in a request are removed if the database commit fails.
+
+    Files released by withdrawal are removed only after the commit succeeds.
+    The transaction lives on the SQLAlchemy session so it survives FastAPI's
+    thread handoff.
+    """
+
+    def __init__(self) -> None:
+        self.rollback_keys: list[str] = []
+        self.commit_keys: list[str] = []
+
+
+def media_transaction(db) -> PrivateMediaTransaction:
+    info = getattr(db, "info", None)
+    if not isinstance(info, dict):
+        return PrivateMediaTransaction()
+    current = info.get(_TX_KEY)
+    if isinstance(current, PrivateMediaTransaction):
+        return current
+    current = PrivateMediaTransaction()
+    info[_TX_KEY] = current
+    return current
+
+
+def note_private_file_written(db, storage_key: str) -> None:
+    if isinstance(storage_key, str) and _KEY.fullmatch(storage_key):
+        media_transaction(db).rollback_keys.append(storage_key)
+
+
+def note_private_file_release(db, storage_key: str) -> None:
+    if isinstance(storage_key, str) and _KEY.fullmatch(storage_key):
+        media_transaction(db).commit_keys.append(storage_key)
+
+
+def finish_private_media_transaction(db, *, committed: bool) -> None:
+    info = getattr(db, "info", None)
+    transaction = info.get(_TX_KEY) if isinstance(info, dict) else None
+    if not isinstance(transaction, PrivateMediaTransaction):
+        return
+    for storage_key in (transaction.commit_keys if committed else transaction.rollback_keys):
+        delete_private_file(storage_key)
 
 
 def _public_roots() -> list[Path]:
@@ -76,3 +121,16 @@ def delete_private_file(storage_key: str) -> None:
     path = (root / storage_key).resolve()
     if path.parent == root and path.is_file():
         path.unlink()
+
+
+def delete_unreferenced_private_files(referenced_keys: set[str]) -> int:
+    """Remove private files that no CLEAN row still names. The directory is exclusive."""
+    root = private_media_root()
+    removed = 0
+    for path in list(root.iterdir()):
+        if not path.is_file():
+            continue
+        if not _KEY.fullmatch(path.name) or path.name not in referenced_keys:
+            path.unlink()
+            removed += 1
+    return removed

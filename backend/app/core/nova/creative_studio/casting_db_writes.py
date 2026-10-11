@@ -369,6 +369,18 @@ def withdraw_test_application(
     if not allowed:
         raise CastingAccessDenied("Application unavailable")
     application.status = ApplicationState.WITHDRAWN.value
+    from .casting_media_store import note_private_file_release as _note_release
+    try:
+        media_rows = db.query(NovaCastingMedia).filter(
+            NovaCastingMedia.application_id == application.id,
+            NovaCastingMedia.owner_id == organization_id,
+        ).all()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+    for media in media_rows:
+        _note_release(db, media.storage_key)
+        media.storage_key = "rejected"
+        media.status = "REJECTED"
     _flush(db)
     _audit(
         db, actor_id=user_id, organization_id=organization_id,
@@ -627,7 +639,7 @@ def store_scanned_audition(
     if application.status == ApplicationState.WITHDRAWN.value:
         raise CastingAccessDenied("Media unavailable")
     from .casting_media_scan import scan_video_bytes
-    from .casting_media_store import delete_private_file, write_private_file
+    from .casting_media_store import delete_private_file, note_private_file_written, write_private_file
 
     scanned = scan_video_bytes(data, declared_mime)
     media_id = _new_id()
@@ -654,6 +666,7 @@ def store_scanned_audition(
         view["scan_engine"] = scanned.engine
         return view
     storage_key = write_private_file(media_id, bytes(data))
+    note_private_file_written(db, storage_key)
     row = NovaCastingMedia(
         id=media_id, owner_id=organization_id, application_id=application.id,
         storage_key=storage_key, mime_type=declared_mime, byte_size=len(data),
@@ -746,6 +759,18 @@ def open_private_playback(
     if payload is None or len(payload) != media.byte_size:
         raise CastingAccessDenied("Media unavailable")
     return payload, media.mime_type
+
+
+def cleanup_orphaned_private_files(*, db: Session) -> int:
+    """Delete private files that no CLEAN media row still references."""
+    _guard()
+    from .casting_media_store import delete_unreferenced_private_files
+    try:
+        rows = db.query(NovaCastingMedia.storage_key).filter(NovaCastingMedia.status == "CLEAN").all()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Media unavailable") from exc
+    referenced = {row[0] for row in rows if isinstance(row[0], str)}
+    return delete_unreferenced_private_files(referenced)
 
 
 def list_audit_events(

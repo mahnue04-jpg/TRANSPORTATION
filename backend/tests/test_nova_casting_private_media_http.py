@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
@@ -171,7 +172,7 @@ def test_scanned_video_plays_only_for_an_authorized_caller(monkeypatch, tmp_path
 
     uploaded = call(
         f"{base}/applications/{application_id}/media/file",
-        files={"file": ("audition.mp4", MP4, "video/mp4")},
+        files={"file": ("../../secret.mp4", MP4, "video/mp4")},
         data={"mime_type": "video/mp4"},
     )
     assert uploaded.status_code == 200, uploaded.text
@@ -201,6 +202,35 @@ def test_scanned_video_plays_only_for_an_authorized_caller(monkeypatch, tmp_path
     assert organizer_play.content == MP4
     holder["user"] = _user("stranger")
     assert client.get(f"{base}/applications/{application_id}/media/{media_id}/content").status_code == 404
+    holder["user"] = _user("applicant")
+    partial = client.get(
+        f"{base}/applications/{application_id}/media/{media_id}/content",
+        headers={"Range": "bytes=0-3"},
+    )
+    assert partial.status_code == 206
+    assert partial.content == MP4[:4]
+    assert partial.headers["content-range"] == f"bytes 0-3/{len(MP4)}"
+    assert partial.headers["accept-ranges"] == "bytes"
+    assert partial.headers["cache-control"] == "private, no-store"
+    missing_range = client.get(
+        f"{base}/applications/{application_id}/media/{media_id}/content",
+        headers={"Range": "bytes=80-90"},
+    )
+    assert missing_range.status_code == 416
+    other_org = client.get(
+        f"/api/nova/casting/organizations/other-org/applications/{application_id}/media/{media_id}/content",
+    )
+    assert other_org.status_code == 404
+    assert other_org.content != MP4
+    direct = Session()
+    direct.get(User, "applicant").is_active = False
+    direct.commit()
+    direct.close()
+    assert client.get(f"{base}/applications/{application_id}/media/{media_id}/content").status_code == 404
+    direct = Session()
+    direct.get(User, "applicant").is_active = True
+    direct.commit()
+    direct.close()
     blocked = call(
         f"{base}/applications/{application_id}/media/file",
         user="organizer",
@@ -220,6 +250,41 @@ def test_scanned_video_plays_only_for_an_authorized_caller(monkeypatch, tmp_path
     assert str(tmp_path) not in audit.text
     assert "storage_key" not in audit.text
 
+    from sqlalchemy.orm import Session as OrmSession
+    direct = Session()
+    clean_before = direct.query(casting_db_models.NovaCastingMedia).filter(
+        casting_db_models.NovaCastingMedia.application_id == application_id,
+        casting_db_models.NovaCastingMedia.status == "CLEAN",
+    ).count()
+    direct.close()
+    original_commit = OrmSession.commit
+    calls = {"n": 0}
+
+    def fail_commit(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError("commit", {}, Exception("secret-sql"))
+        return original_commit(self, *args, **kwargs)
+
+    OrmSession.commit = fail_commit
+    try:
+        with pytest.raises(Exception) as failed_commit:
+            call(
+                f"{base}/applications/{application_id}/media/file",
+                files={"file": ("rollback.mp4", MP4, "video/mp4")},
+                data={"mime_type": "video/mp4"},
+            )
+    finally:
+        OrmSession.commit = original_commit
+    assert "ftypisom" not in str(failed_commit.value)
+    assert len(list(tmp_path.iterdir())) == 1
+    direct = Session()
+    assert direct.query(casting_db_models.NovaCastingMedia).filter(
+        casting_db_models.NovaCastingMedia.application_id == application_id,
+        casting_db_models.NovaCastingMedia.status == "CLEAN",
+    ).count() == clean_before
+    direct.close()
+
     assert call(f"{base}/applications/{application_id}/withdraw").status_code == 200
     after = call(
         f"{base}/applications/{application_id}/media/file",
@@ -227,4 +292,14 @@ def test_scanned_video_plays_only_for_an_authorized_caller(monkeypatch, tmp_path
         data={"mime_type": "video/mp4"},
     )
     assert after.status_code == 404
-    assert len(list(tmp_path.iterdir())) == 1
+    assert list(tmp_path.iterdir()) == []
+    direct = Session()
+    released = direct.get(casting_db_models.NovaCastingMedia, media_id)
+    assert released.status == "REJECTED"
+    assert released.storage_key == "rejected"
+    extra = tmp_path / ("b" * 32)
+    extra.write_bytes(b"orphan")
+    from app.core.nova.creative_studio.casting_db_writes import cleanup_orphaned_private_files
+    assert cleanup_orphaned_private_files(db=direct) == 1
+    direct.close()
+    assert not extra.exists()

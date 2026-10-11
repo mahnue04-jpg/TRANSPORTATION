@@ -162,16 +162,23 @@ def casting_sandbox_session():
         raise HTTPException(status_code=503, detail=CASTING_SANDBOX_DISABLED_DETAIL)
     from sqlalchemy.exc import SQLAlchemyError
     from app.db.session import SessionLocal
+    from .casting_media_store import finish_private_media_transaction, media_transaction
     db = SessionLocal()
+    media_transaction(db)
+    committed = False
     try:
-        yield db
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Application unavailable")
-    except Exception:
-        db.rollback()
-        raise
+        try:
+            yield db
+            db.commit()
+            committed = True
+        except SQLAlchemyError:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="Application unavailable")
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            finish_private_media_transaction(db, committed=committed)
     finally:
         db.close()
 
@@ -218,6 +225,52 @@ def _call(action):
 def _writes():
     from . import casting_db_writes
     return casting_db_writes
+
+
+async def _read_bounded_upload(field) -> bytes:
+    """Read at most one byte past the video cap. The client filename is ignored."""
+    from .casting_upload_rules import MAX_VIDEO_BYTES
+
+    chunks: list[bytes] = []
+    total = 0
+    limit = MAX_VIDEO_BYTES + 1
+    while total < limit:
+        chunk = await field.read(1024 * 1024)
+        if not chunk:
+            break
+        if not isinstance(chunk, bytes):
+            raise HTTPException(status_code=422, detail="Request rejected")
+        chunks.append(chunk)
+        total += len(chunk)
+    if total > MAX_VIDEO_BYTES or total == 0:
+        raise HTTPException(status_code=422, detail="Invalid video size")
+    return b"".join(chunks)
+
+
+def _single_byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    if header is None or not str(header).strip():
+        return None
+    text = str(header).strip().lower()
+    if not text.startswith("bytes=") or "," in text or size < 1:
+        raise HTTPException(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    start_text, separator, end_text = text[6:].partition("-")
+    if not separator:
+        raise HTTPException(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    try:
+        if start_text == "":
+            length = int(end_text)
+            if length < 1:
+                raise ValueError
+            start = max(size - length, 0)
+            end = size - 1
+        else:
+            start = int(start_text)
+            end = size - 1 if end_text == "" else int(end_text)
+    except ValueError:
+        raise HTTPException(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    if start < 0 or start >= size or end < start:
+        raise HTTPException(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    return start, min(end, size - 1)
 
 
 @sandbox_router.post("/organizations/{organization_id}/campaigns", response_model=CampaignRead)
@@ -483,11 +536,9 @@ async def upload_private_media(
     if field is None or not hasattr(field, "read"):
         raise HTTPException(status_code=422, detail="Request rejected")
     declared = str(form.get("mime_type") or getattr(field, "content_type", "") or "")
-    data = await field.read()
+    data = await _read_bounded_upload(field)
     if hasattr(field, "close"):
         await field.close()
-    if not isinstance(data, bytes):
-        raise HTTPException(status_code=422, detail="Request rejected")
     result = _call(lambda: _writes().store_scanned_audition(
         db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
         application_id=application_id, declared_mime=declared, data=data,
@@ -505,6 +556,7 @@ def play_private_media(
     organization_id: str,
     application_id: str,
     media_id: str,
+    request: Request,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(casting_sandbox_session),
 ):
@@ -515,15 +567,18 @@ def play_private_media(
         db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
         application_id=application_id, media_id=media_id,
     ))
-    return Response(
-        content=payload,
-        media_type=mime_type,
-        headers={
-            "Cache-Control": "private, no-store",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": "inline",
-        },
-    )
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+        "Accept-Ranges": "bytes",
+    }
+    byte_range = _single_byte_range(request.headers.get("range"), len(payload))
+    if byte_range is None:
+        return Response(content=payload, media_type=mime_type, headers=headers)
+    start, end = byte_range
+    headers["Content-Range"] = f"bytes {start}-{end}/{len(payload)}"
+    return Response(content=payload[start:end + 1], status_code=206, media_type=mime_type, headers=headers)
 
 
 @sandbox_router.get(
