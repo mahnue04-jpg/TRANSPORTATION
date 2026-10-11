@@ -1,4 +1,4 @@
-"""Sandbox write routes stay behind the production-locked flag and accept no uploads."""
+"""Sandbox write routes stay behind the production-locked flag."""
 import ast
 from pathlib import Path
 
@@ -14,6 +14,10 @@ def test_sandbox_posts_exist_only_behind_the_flag():
     assert "@router.post" not in draft
     assert "UploadFile" not in source
     assert "boto3" not in source
+    assert "/media/file" in source
+    assert "/content" in source
+    assert "private, no-store" in source
+    assert "X-Content-Type-Options" in source
     assert "include_router(sandbox_router)" in draft
     assert "casting_db_models" not in draft
     tree = ast.parse(source)

@@ -18,7 +18,12 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "/api/nova/casting/readiness" in sandbox
     assert "sandbox_writes_enabled" in sandbox
     assert "amicor_nova_creative_token" in sandbox
-    assert 'type="file"' not in sandbox
+    assert 'type="file"' not in preview
+    assert 'id="media-file" type="file"' in sandbox
+    assert "/media/file" in sandbox
+    assert "/content" in sandbox
+    assert "URL.createObjectURL" in sandbox
+    assert "sandbox_private_media_enabled" in sandbox
     assert "No relationship or integration with Zeus" in sandbox
     assert "Nothing was submitted" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):

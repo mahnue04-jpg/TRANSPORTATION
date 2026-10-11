@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
   <style>
+    #playback { display: block; width: 100%; max-height: 240px; margin-top: 12px; background: #111; }
     @media (max-width: 640px) {
       .studio-nav { flex-direction: column; align-items: flex-start; }
       .actions { flex-direction: column; }
@@ -120,13 +121,24 @@
           <button type="submit" id="save-media">Record quarantined metadata</button>
         </div>
       </form>
-      <p class="hint">Metadata only. No video file is uploaded and playback stays unavailable.</p>
+      <form id="upload-form" class="grid">
+        <label class="wide">Audition video
+          <input id="media-file" type="file" accept="video/mp4,video/quicktime,video/webm" />
+        </label>
+        <div class="actions wide">
+          <button type="submit" id="upload-media">Upload private video</button>
+        </div>
+      </form>
+      <video id="playback" controls playsinline></video>
+      <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
     </section>
   </main>
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
       var writesEnabled = false;
+      var privateMedia = false;
+      var playbackUrl = "";
       var applicationId = "";
       function $(id) { return document.getElementById(id); }
       function token() {
@@ -179,6 +191,7 @@
           && readiness.applications_enabled === false
           && readiness.media_uploads_enabled === false
           && readiness.enabled === false;
+        privateMedia = writesEnabled && readiness.sandbox_private_media_enabled === true;
         if (!writesEnabled) {
           show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
           return false;
@@ -328,6 +341,12 @@
           $("application-status").textContent = "Status: " + saved.status;
         } catch (err) { /* banner already set */ }
       });
+      function clearPlayback() {
+        if (playbackUrl) URL.revokeObjectURL(playbackUrl);
+        playbackUrl = "";
+        $("playback").removeAttribute("src");
+        $("playback").load();
+      }
       $("media-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
@@ -339,9 +358,56 @@
               byte_size: Number($("media-size").value)
             })
           });
+          clearPlayback();
           show("Metadata " + saved.status + ". Playback " + saved.playback + ".", true);
         } catch (err) { /* banner already set */ }
       });
+      $("upload-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox()) || !privateMedia || !applicationId) {
+            show("Private video upload is off. Nothing was submitted.", false);
+            return;
+          }
+          var input = $("media-file");
+          if (!input.files || !input.files[0]) {
+            show("Choose a video file. Nothing was submitted.", false);
+            return;
+          }
+          var payload = new FormData();
+          payload.append("file", input.files[0]);
+          payload.append("mime_type", input.files[0].type || $("media-mime").value);
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          $("status").textContent = "Loading";
+          var response = await fetch(base() + "/applications/" + encodeURIComponent(applicationId) + "/media/file", {
+            method: "POST",
+            headers: headers,
+            body: payload
+          });
+          var saved = await response.json();
+          if (!response.ok) {
+            show(saved.detail || "Request failed", false);
+            return;
+          }
+          clearPlayback();
+          if (saved.status === "CLEAN" && saved.playback === "private") {
+            var mediaResponse = await fetch(base() + "/applications/" + encodeURIComponent(applicationId) + "/media/" + encodeURIComponent(saved.id) + "/content", {
+              headers: headers
+            });
+            if (!mediaResponse.ok) {
+              show("Playback unavailable.", false);
+              return;
+            }
+            playbackUrl = URL.createObjectURL(await mediaResponse.blob());
+            $("playback").src = playbackUrl;
+            show("Private video scanned with " + (saved.scan_engine || "scanner") + ". Playback stays on this page.", true);
+            return;
+          }
+          show("Video was not accepted for playback (" + saved.status + ").", false);
+        } catch (err) { /* banner already set */ }
+      });
+      $("sign-out").addEventListener("click", clearPlayback);
       if (token()) refreshReadiness().catch(function () {});
       else $("status").textContent = "Sign in to check sandbox readiness.";
     }());

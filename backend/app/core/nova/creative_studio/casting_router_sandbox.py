@@ -1,9 +1,11 @@
 """Disposable Nova Casting workflows. Registered under the existing casting router.
 
-Production and misconfigured environments cannot open a session. Public intake,
-file uploads, and external delivery stay off.
+Production and misconfigured environments cannot open a session. Public intake
+and external delivery stay off. Private video bytes are scanned and played only
+for an authenticated sandbox caller, with no signed URL.
 """
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.orm import Session
 
@@ -29,6 +31,7 @@ _SAFE_DETAILS = frozenset({
     "Request rejected",
     "Invalid intake",
     "Invalid campaign",
+    "Rejected by security scan",
 })
 
 
@@ -135,6 +138,7 @@ class MediaRead(BaseModel):
     mime_type: str
     byte_size: int
     playback: str
+    scan_engine: str = ""
 
 
 class AuditRead(BaseModel):
@@ -460,6 +464,68 @@ def register_media(
     return result
 
 
+@sandbox_router.post(
+    "/organizations/{organization_id}/applications/{application_id}/media/file",
+    response_model=MediaRead,
+)
+async def upload_private_media(
+    organization_id: str,
+    application_id: str,
+    request: Request,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(casting_sandbox_session),
+):
+    if not casting_sandbox_writes_enabled():
+        raise HTTPException(status_code=503, detail=CASTING_SANDBOX_DISABLED_DETAIL)
+    user_id, tenant_id = _session_identity(user)
+    form = await request.form()
+    field = form.get("file")
+    if field is None or not hasattr(field, "read"):
+        raise HTTPException(status_code=422, detail="Request rejected")
+    declared = str(form.get("mime_type") or getattr(field, "content_type", "") or "")
+    data = await field.read()
+    if hasattr(field, "close"):
+        await field.close()
+    if not isinstance(data, bytes):
+        raise HTTPException(status_code=422, detail="Request rejected")
+    result = _call(lambda: _writes().store_scanned_audition(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        application_id=application_id, declared_mime=declared, data=data,
+    ))
+    result["playback"] = "private" if result.get("status") == "CLEAN" else "unavailable"
+    result.pop("storage_key", None)
+    result.pop("signed_url", None)
+    return result
+
+
+@sandbox_router.get(
+    "/organizations/{organization_id}/applications/{application_id}/media/{media_id}/content",
+)
+def play_private_media(
+    organization_id: str,
+    application_id: str,
+    media_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(casting_sandbox_session),
+):
+    if not casting_sandbox_writes_enabled():
+        raise HTTPException(status_code=503, detail=CASTING_SANDBOX_DISABLED_DETAIL)
+    user_id, tenant_id = _session_identity(user)
+    payload, mime_type = _call(lambda: _writes().open_private_playback(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        application_id=application_id, media_id=media_id,
+    ))
+    return Response(
+        content=payload,
+        media_type=mime_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
 @sandbox_router.get(
     "/organizations/{organization_id}/applications/{application_id}/media/{media_id}",
     response_model=MediaRead,
@@ -478,7 +544,10 @@ def read_media(
         db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
         application_id=application_id, media_id=media_id,
     ))
-    result["playback"] = "unavailable"
+    ready = _call(lambda: _writes().private_playback_ready(
+        db=db, organization_id=organization_id, application_id=application_id, media_id=media_id,
+    ))
+    result["playback"] = "private" if ready else "unavailable"
     result.pop("storage_key", None)
     result.pop("signed_url", None)
     return result

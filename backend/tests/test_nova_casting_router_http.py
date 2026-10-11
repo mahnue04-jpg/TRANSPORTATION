@@ -74,6 +74,7 @@ def test_disabled_flag_returns_503_without_opening_a_casting_session(monkeypatch
     assert body["enabled"] is False
     assert body["applications_enabled"] is False
     assert body["media_uploads_enabled"] is False
+    assert body["sandbox_private_media_enabled"] is False
     assert body["staging_reads_enabled"] is False
     assert body["sandbox_writes_enabled"] is False
     assert client.post(APPLICATION).status_code == 405
@@ -161,6 +162,7 @@ def test_enabled_reads_use_the_session_identity_and_hide_storage_keys(monkeypatc
     assert readiness["enabled"] is False
     assert readiness["applications_enabled"] is False
     assert readiness["media_uploads_enabled"] is False
+    assert readiness["sandbox_private_media_enabled"] is True
 
 
 def test_access_denial_is_not_found(monkeypatch):

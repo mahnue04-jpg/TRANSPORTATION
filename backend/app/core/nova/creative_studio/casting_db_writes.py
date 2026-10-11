@@ -1,7 +1,8 @@
 """Disposable sandbox writes for Nova Casting.
 
 Imported only after the production-locked flag passes. Campaigns stay unpublished.
-No email, SMS, signed URL, or file bytes are accepted or sent.
+No email, SMS, or signed URL is sent. Video bytes are accepted only inside this
+disposable sandbox, and only after a security scan stores them outside public hosting.
 """
 from __future__ import annotations
 
@@ -606,6 +607,74 @@ def register_media_metadata(
     })
 
 
+def _media_actor(db: Session, user_id: str, tenant_id: str, organization_id: str, application: NovaCastingApplication):
+    if application.applicant_id == user_id:
+        return applicant_from_verified_session(session_user_id=user_id)
+    return _member(db, user_id, tenant_id, organization_id)
+
+
+def store_scanned_audition(
+    *, db: Session, user_id: str, tenant_id: str, organization_id: str,
+    application_id: str, declared_mime: str, data: bytes,
+) -> dict:
+    """Scan bytes before they can be played. Rejected files are not stored."""
+    _guard()
+    _account(db, user_id, tenant_id)
+    application = _application_row(db, organization_id, application_id)
+    actor = applicant_from_verified_session(session_user_id=user_id)
+    if actor is None or not may_upload_audition(actor, applicant_id=application.applicant_id):
+        raise CastingAccessDenied("Media unavailable")
+    if application.status == ApplicationState.WITHDRAWN.value:
+        raise CastingAccessDenied("Media unavailable")
+    from .casting_media_scan import scan_video_bytes
+    from .casting_media_store import delete_private_file, write_private_file
+
+    scanned = scan_video_bytes(data, declared_mime)
+    media_id = _new_id()
+    if not scanned.clean:
+        if scanned.reason != "Rejected by security scan":
+            raise CastingRequestRejected(scanned.reason)
+        if declared_mime not in ALLOWED_MIME_TYPES or not isinstance(data, (bytes, bytearray)):
+            raise CastingRequestRejected(scanned.reason)
+        payload = bytes(data)
+        if not payload or len(payload) > MAX_VIDEO_BYTES:
+            raise CastingRequestRejected("Invalid video size")
+        row = NovaCastingMedia(
+            id=media_id, owner_id=organization_id, application_id=application.id,
+            storage_key="rejected", mime_type=declared_mime, byte_size=len(payload),
+            status="REJECTED", created_at=_now(),
+        )
+        db.add(row)
+        _flush(db)
+        _audit(db, actor_id=user_id, organization_id=organization_id, action="media.quarantined", object_id=row.id)
+        view = media_status_view({
+            "id": row.id, "application_id": row.application_id, "status": row.status,
+            "mime_type": row.mime_type, "byte_size": row.byte_size,
+        })
+        view["scan_engine"] = scanned.engine
+        return view
+    storage_key = write_private_file(media_id, bytes(data))
+    row = NovaCastingMedia(
+        id=media_id, owner_id=organization_id, application_id=application.id,
+        storage_key=storage_key, mime_type=declared_mime, byte_size=len(data),
+        status="CLEAN", created_at=_now(),
+    )
+    try:
+        db.add(row)
+        _flush(db)
+        _audit(db, actor_id=user_id, organization_id=organization_id, action="media.quarantined", object_id=row.id)
+        _audit(db, actor_id=user_id, organization_id=organization_id, action="media.approved", object_id=row.id)
+    except Exception:
+        delete_private_file(storage_key)
+        raise
+    view = media_status_view({
+        "id": row.id, "application_id": row.application_id, "status": row.status,
+        "mime_type": row.mime_type, "byte_size": row.byte_size,
+    })
+    view["scan_engine"] = scanned.engine
+    return view
+
+
 def read_media_for_user(
     *, db: Session, user_id: str, tenant_id: str, organization_id: str,
     application_id: str, media_id: str,
@@ -625,10 +694,7 @@ def read_media_for_user(
         raise CastingAccessDenied("Media unavailable") from exc
     if media is None:
         raise CastingAccessDenied("Media unavailable")
-    if application.applicant_id == user_id:
-        actor = applicant_from_verified_session(session_user_id=user_id)
-    else:
-        actor = _member(db, user_id, tenant_id, organization_id)
+    actor = _media_actor(db, user_id, tenant_id, organization_id, application)
     return read_media_metadata(
         actor=actor,
         application=_application_dict(application),
@@ -638,6 +704,48 @@ def read_media_for_user(
             "status": media.status, "mime_type": media.mime_type, "byte_size": media.byte_size,
         },
     )
+
+
+def private_playback_ready(
+    *, db: Session, organization_id: str, application_id: str, media_id: str,
+) -> bool:
+    try:
+        media = db.query(NovaCastingMedia).filter(
+            NovaCastingMedia.id == media_id,
+            NovaCastingMedia.application_id == application_id,
+            NovaCastingMedia.owner_id == organization_id,
+            NovaCastingMedia.status == "CLEAN",
+        ).one_or_none()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Media unavailable") from exc
+    if media is None:
+        return False
+    from .casting_media_store import private_file_exists
+    return private_file_exists(media.storage_key)
+
+
+def open_private_playback(
+    *, db: Session, user_id: str, tenant_id: str, organization_id: str,
+    application_id: str, media_id: str,
+) -> tuple[bytes, str]:
+    """Return scanned bytes only after authorization. No storage key is included."""
+    read_media_for_user(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        application_id=application_id, media_id=media_id,
+    )
+    try:
+        media = db.query(NovaCastingMedia).filter(
+            NovaCastingMedia.id == media_id,
+            NovaCastingMedia.application_id == application_id,
+            NovaCastingMedia.owner_id == organization_id,
+        ).one()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Media unavailable") from exc
+    from .casting_media_store import read_private_file
+    payload = read_private_file(media.storage_key)
+    if payload is None or len(payload) != media.byte_size:
+        raise CastingAccessDenied("Media unavailable")
+    return payload, media.mime_type
 
 
 def list_audit_events(

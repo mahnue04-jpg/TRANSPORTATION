@@ -63,6 +63,7 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
         "media_uploads_enabled": False,
         "staging_reads_enabled": casting_staging_reads_enabled(),
         "sandbox_writes_enabled": casting_sandbox_writes_enabled(),
+        "sandbox_private_media_enabled": casting_sandbox_writes_enabled(),
     }
 
 
