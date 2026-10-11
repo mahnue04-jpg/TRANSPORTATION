@@ -67,11 +67,12 @@ const server = createServer(async (req, res) => {
 
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const { port } = server.address();
-const browser = await chromium.launch({
-  channel: "chrome",
+const launchOptions = {
   headless: true,
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
-});
+};
+if (process.env.PLAYWRIGHT_CHANNEL) launchOptions.channel = process.env.PLAYWRIGHT_CHANNEL;
+const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage({
   viewport: { width: 390, height: 844 },
   isMobile: true,
