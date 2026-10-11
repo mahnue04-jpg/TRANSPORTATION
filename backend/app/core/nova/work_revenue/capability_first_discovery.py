@@ -366,14 +366,22 @@ def non_us_location_required(job: dict[str, Any]) -> bool:
     requirement. Explicit based, located, or reside language still is.
     Geography that also allows the United States or worldwide stays eligible.
     """
+    from app.core.nova.work_revenue.international_match import (
+        is_client_location_span,
+        verified_residency_meets_listing,
+    )
+
     blob = " ".join(
         str(job.get(key) or "")
         for key in ("title", "opportunity_title", "description", "requirements")
     )
     for match in _NON_US_PLACE.finditer(blob):
+        if is_client_location_span(blob, match.start(), match.end()):
+            continue
         prefix = blob[max(0, match.start() - 48):match.start()]
         if _FOREIGN_LOCATION_REQUIREMENT.search(prefix):
-            return True
+            if not verified_residency_meets_listing(job):
+                return True
     geography = str(job.get("geography") or "")
     if _NON_US_PLACE.search(geography) and not _US_OR_WORLD_PLACE.search(geography):
         if _role_is_remote(job):
@@ -1336,8 +1344,10 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
         "permit_blocked": "permit_required" in performability_blockers,
         "untested_language_blocked": "untested_language_required" in performability_blockers,
         "language_support": international["language_support"],
+        "language_support_label": international["language_support_label"],
         "tested_language_codes": international["tested_language_codes"],
         "native_fluency_claimed": False,
+        "native_speaker_capability": False,
         "ai_translation_is_native_fluency": False,
         "digital_contractor_rank_boost": digital_rank_boost,
         "search_family": planned_family_id or (family or {}).get("family_id"),

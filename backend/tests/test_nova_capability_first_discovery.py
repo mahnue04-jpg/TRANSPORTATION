@@ -880,6 +880,9 @@ def test_worldwide_remote_b2b_matches_tested_languages_without_native_claim() ->
     scored = score_discovery_candidate(job, query=_WORLDWIDE_B2B_QUERY)
     assert scored["discovery_band"] != "REJECT"
     assert scored["language_support"] == "ai_assisted_translation"
+    assert scored["language_support_label"] == "AI-assisted translation"
+    assert scored["native_speaker_capability"] is False
+    assert "native speaker" not in scored["language_support_label"].lower()
     assert scored["tested_language_codes"] == ["ar", "fr"]
     assert scored["native_fluency_claimed"] is False
     assert scored["ai_translation_is_native_fluency"] is False
@@ -891,6 +894,8 @@ def test_worldwide_remote_b2b_matches_tested_languages_without_native_claim() ->
     qual = ranked[0]["live_qualification"]
     assert qual["qualification_status"] != "NOT_QUALIFIED"
     assert qual["language_support"] == "ai_assisted_translation"
+    assert qual["language_support_label"] == "AI-assisted translation"
+    assert qual["native_speaker_capability"] is False
     assert qual["native_fluency_claimed"] is False
     assert qual["ai_translation_is_native_fluency"] is False
     assert qual["external_submission"] is False
@@ -979,6 +984,10 @@ def test_worldwide_match_hard_blocks_unmet_constraints() -> None:
         if "Native French speaker required" in item["description"]
     )
     assert any("AI translation is not native fluency" in reason for reason in native_reasons)
+    native_row = next(item for item in ranked if "Native French speaker required" in item["description"])
+    assert native_row["language_support_label"] == ""
+    assert native_row["native_speaker_capability"] is False
+    assert native_row["native_fluency_claimed"] is False
 
     mena_blockers = _blockers_for(ranked, "MENA residency required")
     assert "residency_required" in mena_blockers
@@ -994,6 +1003,8 @@ def test_worldwide_match_hard_blocks_unmet_constraints() -> None:
     assert french_or_german["tested_language_codes"] == ["fr"]
     assert french_or_german["native_fluency_claimed"] is False
     assert french_or_german["language_support"] == "ai_assisted_translation"
+    assert french_or_german["language_support_label"] == "AI-assisted translation"
+    assert french_or_german["native_speaker_capability"] is False
 
     spanish = next(item for item in ranked if item["provider_identifier"] == "spanish-preferred")
     assert spanish["discovery_band"] != "REJECT"
@@ -1025,5 +1036,156 @@ def test_worldwide_match_hard_blocks_unmet_constraints() -> None:
     assert "permit_required" not in company["remote_digital_blockers"]
     assert company["tested_language_codes"] == ["en"]
     assert company["language_support"] == "ai_assisted_translation"
+    assert company["language_support_label"] == "AI-assisted translation"
+    assert company["native_speaker_capability"] is False
     assert company["native_fluency_claimed"] is False
+
+
+def test_live_rank_matches_country_eligibility_and_keeps_lane_controls(monkeypatch) -> None:
+    from app.core.nova.work_revenue.verified_profile import VERIFIED_FACTS
+
+    monkeypatch.setitem(VERIFIED_FACTS, "residency", "United States")
+    monkeypatch.setitem(VERIFIED_FACTS, "citizenship", "United States")
+    monkeypatch.setitem(VERIFIED_FACTS, "work_permits", ["United States"])
+
+    uae = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support. Must reside in the UAE. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="uae-only",
+    )
+    arabic_mena = _listed_job(
+        "Remote Operations Assistant",
+        "Remote Arabic customer email. MENA residency required. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="arabic-mena",
+    )
+    several_countries = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support and CRM. "
+        "Must reside in the United States, Canada, or the United Kingdom. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="us-ca-uk",
+    )
+    preference = _listed_job(
+        "Remote Operations Assistant",
+        "Worldwide remote B2B contractor for administrative support and CRM updates. "
+        "Remote Arabic customer email. Location preference: United Arab Emirates. "
+        "Prefer candidates based in the UAE. No residency requirement. "
+        "No certification required. No upfront fee. No on-site work.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="uae-preference",
+    )
+    client_country = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B administrative support for a company based in Germany. "
+        "Customers located in Dubai. English customer email. "
+        "Visa sponsorship available. No residency requirement. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="client-country",
+    )
+    german_permit = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B CRM support. Work permit for Germany required. No upfront fee.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="german-permit",
+    )
+    paid = _listed_job(
+        "Remote Operations Assistant",
+        "Remote B2B CRM support. Application fee required. Pay to apply.",
+        geography="Worldwide",
+        search_family="administrative_operations",
+        provider_identifier="paid-apply",
+    )
+    ranked = qualify_and_rank_live_jobs(
+        _WORLDWIDE_B2B_QUERY,
+        [uae, arabic_mena, several_countries, preference, client_country, german_permit, paid],
+    )
+    by_id = {row["provider_identifier"]: row for row in ranked}
+
+    uae_row = by_id["uae-only"]
+    assert uae_row["discovery_band"] == "REJECT"
+    assert uae_row["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "residency_required" in uae_row["live_qualification"]["blockers"]
+
+    mena_row = by_id["arabic-mena"]
+    assert mena_row["discovery_band"] == "REJECT"
+    assert "residency_required" in mena_row["live_qualification"]["blockers"]
+    assert "untested_language_required" not in mena_row["live_qualification"]["blockers"]
+    assert mena_row["language_support_label"] == "AI-assisted translation"
+    assert mena_row["native_fluency_claimed"] is False
+    assert mena_row["native_speaker_capability"] is False
+
+    allowed = by_id["us-ca-uk"]
+    assert allowed["discovery_band"] != "REJECT"
+    assert "residency_required" not in allowed["live_qualification"].get("blockers", [])
+
+    preferred_row = by_id["uae-preference"]
+    assert preferred_row["discovery_band"] != "REJECT"
+    assert "residency_required" not in preferred_row["live_qualification"].get("blockers", [])
+    assert preferred_row["language_support_label"] == "AI-assisted translation"
+
+    client = by_id["client-country"]
+    assert client["discovery_band"] != "REJECT"
+    assert "residency_required" not in client["live_qualification"].get("blockers", [])
+    assert "permit_required" not in client["live_qualification"].get("blockers", [])
+    assert non_us_location_required(client_country) is False
+
+    assert "permit_required" in by_id["german-permit"]["live_qualification"]["blockers"]
+    assert by_id["paid-apply"]["discovery_band"] == "REJECT"
+    assert "upfront_fee_required" in by_id["paid-apply"]["live_qualification"]["blockers"]
+
+    assistant = _listed_job(
+        "Virtual Assistant",
+        "Remote virtual assistant for inbox, calendar, and administrative support.",
+        search_family="administrative_operations",
+    )
+    research = _listed_job(
+        "Research Assistant",
+        "Remote 1099 research assistant for internet research and competitor research.",
+        search_family="research_analysis",
+    )
+    copywriter = _listed_job(
+        "Freelance Copywriter",
+        "Skilled freelance copywriters with strong research ability and experience writing SEO content.",
+        search_family="research_analysis",
+    )
+    crm = _listed_job(
+        "CRM Support Specialist",
+        "Remote CRM support and customer data operations for a US client.",
+        search_family="administrative_operations",
+    )
+    data_entry = _listed_job(
+        "Data Entry Administrator",
+        "Update records in the company database. Contractor or vendor status is not stated. Compensation is not listed.",
+        search_family="administrative_operations",
+    )
+    lane_rows = {
+        "admin": qualify_and_rank_live_jobs(_ADMIN_LANE_QUERY, [assistant])[0],
+        "research": qualify_and_rank_live_jobs(_RESEARCH_LANE_QUERY, [research, copywriter]),
+        "crm": qualify_and_rank_live_jobs(_CRM_LANE_QUERY, [crm, data_entry]),
+    }
+    assert lane_rows["admin"]["discovery_band"] != "REJECT"
+    assert lane_rows["admin"]["live_qualification"]["qualification_status"] != "NOT_QUALIFIED"
+    research_by_title = {row["title"]: row for row in lane_rows["research"]}
+    assert research_by_title["Research Assistant"]["discovery_band"] != "REJECT"
+    assert research_by_title["Freelance Copywriter"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    crm_by_title = {row["title"]: row for row in lane_rows["crm"]}
+    assert crm_by_title["CRM Support Specialist"]["discovery_band"] != "REJECT"
+    assert crm_by_title["Data Entry Administrator"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    for row in (
+        lane_rows["admin"],
+        research_by_title["Research Assistant"],
+        crm_by_title["CRM Support Specialist"],
+    ):
+        assert row["live_qualification"]["external_submission"] is False
+        assert row["live_qualification"]["financial_execution"] is False
+        assert row["native_fluency_claimed"] is False
+        assert row["native_speaker_capability"] is False
 

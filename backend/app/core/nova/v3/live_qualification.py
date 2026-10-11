@@ -920,8 +920,10 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "state_restriction_detected": discovery.get("state_restriction_detected"),
                 "nationwide_remote_allowed": True,
                 "language_support": discovery.get("language_support"),
+                "language_support_label": discovery.get("language_support_label") or "",
                 "tested_language_codes": list(discovery.get("tested_language_codes") or []),
                 "native_fluency_claimed": False,
+                "native_speaker_capability": False,
                 "ai_translation_is_native_fluency": False,
             }
         )
@@ -1001,8 +1003,10 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
         row["discovery_score"] = discovery["discovery_score"]
         row["discovery_band"] = discovery["discovery_band"]
         row["language_support"] = discovery.get("language_support")
+        row["language_support_label"] = discovery.get("language_support_label") or ""
         row["tested_language_codes"] = list(discovery.get("tested_language_codes") or [])
         row["native_fluency_claimed"] = False
+        row["native_speaker_capability"] = False
         row["ai_translation_is_native_fluency"] = False
         row["search_family"] = discovery.get("search_family")
         row["search_family_label"] = discovery.get("search_family_label")
