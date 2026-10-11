@@ -100,7 +100,10 @@ try {
   assert.match(firstText, /AMICOR saved your request/);
   assert.match(firstText, /Reference AMQ-[0-9A-F]{8}/);
   assert.match(firstText, /Email delivery was not confirmed/);
+  assert.doesNotMatch(firstText, /notification email was sent/);
   assert.doesNotMatch(firstText, /was sent to AMICOR/);
+  assert.equal(await message.inputValue(), "");
+  assert.doesNotMatch(await message.getAttribute("placeholder") || "", /Deliverables needed/);
   const reference = firstText.match(/AMQ-[0-9A-F]{8}/)[0];
   await page.screenshot({ path: "/opt/cursor/artifacts/quote-form-mobile.png", fullPage: true });
 

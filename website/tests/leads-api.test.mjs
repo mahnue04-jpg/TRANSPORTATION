@@ -5,9 +5,12 @@ class MemoryKv {
   constructor() {
     this.items = new Map();
     this.failPut = false;
+    this.failDedupePut = false;
+    this.failLeadGet = false;
   }
 
   async get(key) {
+    if (this.failLeadGet && String(key).startsWith("lead:")) throw new Error("kv read down");
     const row = this.items.get(key);
     if (!row) return null;
     if (row.expiresAt && Date.now() > row.expiresAt) {
@@ -19,6 +22,7 @@ class MemoryKv {
 
   async put(key, value, options = {}) {
     if (this.failPut) throw new Error("kv down");
+    if (this.failDedupePut && String(key).startsWith("dedupe:")) throw new Error("dedupe down");
     const ttl = Number(options.expirationTtl || 0);
     this.items.set(key, {
       value,
@@ -148,6 +152,63 @@ test("returns the same reference for a duplicate and does not write another lead
   assert.equal(second.body.referenceId, first.body.referenceId);
   assert.equal(second.body.emailNotification.reason, "duplicate");
   assert.equal(store.leadCount(), 1);
+});
+
+test("keeps the saved reference when only the duplicate index write fails", async () => {
+  const store = new MemoryKv();
+  store.failDedupePut = true;
+  const result = await post({ AMICOR_LEADS: store }, quote());
+  assert.equal(result.status, 202);
+  assert.equal(result.body.stored, true);
+  assert.equal(result.body.dedupeIndexed, false);
+  assert.match(result.body.referenceId, /^AMQ-[0-9A-F]{8}$/);
+  assert.equal(result.body.emailNotification.sent, false);
+  const saved = JSON.parse(await store.get(`lead:${result.body.referenceId}`));
+  assert.equal(saved.email, "jordan@northstar.example");
+  assert.equal(store.leadCount(), 1);
+});
+
+test("does not claim a duplicate when the indexed lead record is gone", async () => {
+  const store = new MemoryKv();
+  const first = await post({ AMICOR_LEADS: store }, quote());
+  store.items.delete(`lead:${first.body.referenceId}`);
+  const second = await post({ AMICOR_LEADS: store }, quote());
+  assert.equal(second.status, 202);
+  assert.equal(second.body.stored, true);
+  assert.equal(second.body.duplicate, false);
+  assert.notEqual(second.body.referenceId, first.body.referenceId);
+  assert.equal(store.leadCount(), 1);
+  assert.ok(await store.get(`lead:${second.body.referenceId}`));
+});
+
+test("does not confirm when the reference lookup cannot read KV", async () => {
+  const store = new MemoryKv();
+  store.failLeadGet = true;
+  let webhookCalls = 0;
+  const result = await post({ AMICOR_LEADS: store, LEAD_WEBHOOK_URL: "https://notify.example/lead" }, quote(), {
+    fetchImpl: async () => {
+      webhookCalls += 1;
+      return new Response("ok", { status: 200 });
+    },
+  });
+  assert.equal(result.status, 500);
+  assert.equal(result.body.stored, false);
+  assert.equal(result.body.error, "not_saved");
+  assert.equal(webhookCalls, 0);
+  assert.equal(store.leadCount(), 0);
+});
+
+test("webhook acceptance does not confirm email", async () => {
+  const store = new MemoryKv();
+  const result = await post({ AMICOR_LEADS: store, LEAD_WEBHOOK_URL: "https://notify.example/lead" }, quote(), {
+    fetchImpl: async () => new Response("ok", { status: 200 }),
+  });
+  assert.equal(result.status, 202);
+  assert.equal(result.body.stored, true);
+  assert.equal(result.body.notified, false);
+  assert.equal(result.body.emailNotification.attempted, true);
+  assert.equal(result.body.emailNotification.sent, false);
+  assert.equal(result.body.emailNotification.reason, "webhook_accepted");
 });
 
 test("does not confirm from a webhook when KV is missing", async () => {

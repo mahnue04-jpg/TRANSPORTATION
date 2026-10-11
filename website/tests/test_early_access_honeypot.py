@@ -129,6 +129,7 @@ def test_site_js_uses_new_honeypot_and_preserves_submit_path() -> None:
     assert "JSON.stringify(payload)" in JS
     assert "AMICOR saved your request." in JS
     assert "Email delivery was not confirmed." in JS
+    assert "A notification email was sent." not in JS
     assert "result.referenceId" in JS
     assert "result.stored" in JS
     assert "Request could not be sent." in JS

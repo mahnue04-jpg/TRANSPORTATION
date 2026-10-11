@@ -16,7 +16,7 @@ formEndpoint: "/api/leads"
 2. `POST /api/leads` writes the inquiry to KV when validation passes.
 3. A success message is shown only after KV persistence returns a reference ID.
 4. If KV is unavailable or the write fails, the page says AMICOR did not confirm that the request was saved and keeps a local fallback. A webhook alone is not confirmation.
-5. Optional webhook notification, if later configured in the Pages dashboard, is best-effort. Webhook failure must not fail the form after KV write succeeds, and the page must not claim email delivery unless the webhook returned HTTP 2xx.
+5. Optional webhook notification, if later configured in the Pages dashboard, is best-effort. Webhook failure must not fail the form after the lead record is written. A webhook HTTP 2xx is not email delivery, and the page does not say a notification email was sent.
 
 Email Routing for info@getamicor.com is **ACTIVE and VERIFIED**. It is a separate channel and is not required for form storage. See `EMAIL.md`.
 
@@ -67,7 +67,7 @@ Do not send medical records, diagnoses, insurance IDs, or other sensitive health
 | 400 | Validation failed, including a message that is only the quote prompts |
 | 405 | Not POST |
 | 429 | Rate limited (about 5 requests / hour / IP) |
-| 500 | KV write failed. Nothing was confirmed. |
+| 500 | The lead record was not written, or KV could not be read before writing. A failed duplicate-index write after the lead record exists still returns 202. |
 | 503 | KV is not configured. A webhook alone cannot confirm the request. |
 
 Success body:
@@ -79,11 +79,12 @@ Success body:
   "referenceId": "AMQ-1A2B3C4D",
   "duplicate": false,
   "notified": false,
+  "dedupeIndexed": true,
   "emailNotification": { "attempted": false, "sent": false, "reason": "not_configured" }
 }
 ```
 
-`emailNotification.sent` is true only when the optional webhook returned HTTP 2xx. The form shows the reference ID after `stored` is true and does not claim email delivery otherwise.
+`emailNotification.sent` stays false. This function does not send mail. `notified` stays false for the same reason. When a webhook is configured, `emailNotification.attempted` is true and `reason` is `webhook_accepted` or `webhook_failed`. The form shows the reference ID after `stored` is true and always says email delivery was not confirmed.
 
 ### Sample error
 

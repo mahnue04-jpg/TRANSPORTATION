@@ -163,60 +163,79 @@ export async function handleLead(request, env, deps = {}) {
     });
   }
 
+  function notSaved() {
+    return json(500, {
+      ok: false,
+      stored: false,
+      error: "not_saved",
+      notified: false,
+      emailNotification: emailNotification(false, false, "not_attempted"),
+    });
+  }
+
   const dedupeKey = `dedupe:${await fingerprint(payload.email, payload.product, payload.message)}`;
+  let existingRaw;
   try {
-    const existingRaw = await store.get(dedupeKey);
-    if (existingRaw) {
-      const existing = JSON.parse(existingRaw);
-      if (existing && existing.referenceId) {
+    existingRaw = await store.get(dedupeKey);
+  } catch (err) {
+    return notSaved();
+  }
+  if (existingRaw) {
+    let existing = null;
+    try {
+      existing = JSON.parse(existingRaw);
+    } catch (err) {
+      existing = null;
+    }
+    const priorId = existing && existing.referenceId;
+    if (priorId) {
+      let priorLead;
+      try {
+        priorLead = await store.get(`lead:${priorId}`);
+      } catch (err) {
+        return notSaved();
+      }
+      if (priorLead) {
         return json(200, {
           ok: true,
           stored: true,
-          referenceId: existing.referenceId,
+          referenceId: priorId,
           duplicate: true,
           notified: false,
+          dedupeIndexed: true,
           emailNotification: emailNotification(false, false, "duplicate"),
         });
       }
     }
-  } catch (err) {
-    return json(500, {
-      ok: false,
-      stored: false,
-      error: "not_saved",
-      emailNotification: emailNotification(false, false, "not_attempted"),
-    });
   }
 
   let referenceId = "";
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidate = makeReference(randomUUID);
-    const taken = await store.get(`lead:${candidate}`);
-    if (!taken) {
-      referenceId = candidate;
-      break;
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = makeReference(randomUUID);
+      const taken = await store.get(`lead:${candidate}`);
+      if (!taken) {
+        referenceId = candidate;
+        break;
+      }
     }
+  } catch (err) {
+    return notSaved();
   }
-  if (!referenceId) {
-    return json(500, {
-      ok: false,
-      stored: false,
-      error: "not_saved",
-      emailNotification: emailNotification(false, false, "not_attempted"),
-    });
-  }
+  if (!referenceId) return notSaved();
 
   const record = { ...payload, referenceId };
   try {
     await store.put(`lead:${referenceId}`, JSON.stringify(record));
+  } catch (err) {
+    return notSaved();
+  }
+
+  let dedupeIndexed = true;
+  try {
     await store.put(dedupeKey, JSON.stringify({ referenceId }), { expirationTtl: DEDUPE_TTL_SEC });
   } catch (err) {
-    return json(500, {
-      ok: false,
-      stored: false,
-      error: "not_saved",
-      emailNotification: emailNotification(false, false, "not_attempted"),
-    });
+    dedupeIndexed = false;
   }
 
   const webhook = (env.LEAD_WEBHOOK_URL || "").trim();
@@ -234,7 +253,7 @@ export async function handleLead(request, env, deps = {}) {
         body: JSON.stringify(record),
       });
       if (forwarded.ok) {
-        notification = emailNotification(true, true, "sent");
+        notification = emailNotification(true, false, "webhook_accepted");
       }
     } catch (err) {
       notification = emailNotification(true, false, "webhook_failed");
@@ -246,7 +265,8 @@ export async function handleLead(request, env, deps = {}) {
     stored: true,
     referenceId,
     duplicate: false,
-    notified: notification.sent,
+    notified: false,
+    dedupeIndexed,
     emailNotification: notification,
   });
 }

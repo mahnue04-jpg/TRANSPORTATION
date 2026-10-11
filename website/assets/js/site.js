@@ -149,14 +149,17 @@
     function finishSaved(result) {
       form.reset();
       if (product && params.get("product")) product.value = params.get("product");
+      if (message && params.get("intent") === "quote") {
+        message.value = "";
+        message.placeholder = "Project goal, deliverables, volume, and deadline.";
+      }
       show(success, true);
       if (!success) return;
       var ref = String((result && result.referenceId) || "");
       var text = "AMICOR saved your request.";
       if (ref) text += " Reference " + ref + ".";
       if (result && result.duplicate) text += " This matches a request already on file.";
-      var email = (result && result.emailNotification) || {};
-      text += email.sent ? " A notification email was sent." : " Email delivery was not confirmed.";
+      text += " Email delivery was not confirmed.";
       success.textContent = text;
       success.focus();
     }
