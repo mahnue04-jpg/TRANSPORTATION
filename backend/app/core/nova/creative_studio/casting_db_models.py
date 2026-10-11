@@ -1,0 +1,164 @@
+"""Draft-only persistence schema for Nova Casting in existing Creative Studio.
+
+Not imported by application startup or schema ensure. Staging reads import it only
+after the production-locked flag passes. No applicant intake or video storage is enabled.
+"""
+from __future__ import annotations
+
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, false
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.session import Base
+
+
+class NovaCastingCampaign(Base):
+    __tablename__ = "nova_casting_campaigns"
+    __table_args__ = (
+        Index("ix_nova_casting_campaign_owner", "owner_id", "created_at"),
+        UniqueConstraint("owner_id", "id", name="uq_nova_casting_campaign_owner_id"),
+        CheckConstraint("category IN ('reality', 'beauty', 'film')", name="ck_nova_casting_category"),
+        CheckConstraint("status IN ('DRAFT', 'CLOSED')", name="ck_nova_casting_campaign_status"),
+        CheckConstraint("minimum_age >= 18", name="ck_nova_casting_campaign_minimum_age"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    minimum_age: Mapped[int] = mapped_column(Integer, nullable=False, default=18, server_default="18")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingApplication(Base):
+    __tablename__ = "nova_casting_applications"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "applicant_id", name="uq_nova_casting_campaign_applicant"),
+        Index("ix_nova_casting_application_owner", "owner_id", "campaign_id"),
+        UniqueConstraint("owner_id", "id", name="uq_nova_casting_application_owner_id"),
+        ForeignKeyConstraint(["owner_id", "campaign_id"], ["nova_casting_campaigns.owner_id", "nova_casting_campaigns.id"], name="fk_nova_casting_application_campaign_owner"),
+        CheckConstraint("status IN ('DRAFT', 'SUBMITTED', 'WITHDRAWN')", name="ck_nova_casting_application_status"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    campaign_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_campaigns.id"), nullable=False)
+    applicant_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    consent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingReview(Base):
+    __tablename__ = "nova_casting_reviews"
+    __table_args__ = (
+        UniqueConstraint("application_id", "reviewer_id", name="uq_nova_casting_application_reviewer"),
+        Index("ix_nova_casting_review_owner", "owner_id", "application_id"),
+        ForeignKeyConstraint(["owner_id", "application_id"], ["nova_casting_applications.owner_id", "nova_casting_applications.id"], name="fk_nova_casting_review_application_owner"),
+        CheckConstraint("score IS NULL OR (score >= 1 AND score <= 5)", name="ck_nova_casting_review_score"),
+        CheckConstraint("stage IN ('New', 'In review', 'Callback', 'Closed')", name="ck_nova_casting_review_stage"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_applications.id"), nullable=False)
+    reviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="New", server_default="New")
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingMedia(Base):
+    """Private media metadata; actual files must live in encrypted private storage."""
+    __tablename__ = "nova_casting_media"
+    __table_args__ = (
+        Index("ix_nova_casting_media_owner_application", "owner_id", "application_id"),
+        ForeignKeyConstraint(["owner_id", "application_id"], ["nova_casting_applications.owner_id", "nova_casting_applications.id"], name="fk_nova_casting_media_application_owner"),
+        CheckConstraint("status IN ('PENDING', 'QUARANTINED', 'CLEAN', 'REJECTED')", name="ck_nova_casting_media_status"),
+        CheckConstraint("byte_size > 0 AND byte_size <= 262144000", name="ck_nova_casting_media_size"),
+        CheckConstraint("mime_type IN ('video/mp4', 'video/quicktime', 'video/webm')", name="ck_nova_casting_media_mime"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_applications.id"), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING", server_default="PENDING")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingOrganization(Base):
+    """Draft casting organization verification; not a replacement for Nova auth."""
+    __tablename__ = "nova_casting_organizations"
+    __table_args__ = (
+        UniqueConstraint("nova_tenant_id", "id", name="uq_nova_casting_org_tenant_id"),
+        CheckConstraint("verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')", name="ck_nova_casting_org_verification"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    nova_tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(12), nullable=False, default="PENDING", server_default="PENDING")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingMembership(Base):
+    """Explicit, revocable casting role, not inferred from platform admin role."""
+    __tablename__ = "nova_casting_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_nova_casting_org_user"),
+        ForeignKeyConstraint(["nova_tenant_id", "organization_id"], ["nova_casting_organizations.nova_tenant_id", "nova_casting_organizations.id"], name="fk_nova_casting_member_tenant_org"),
+        Index("ix_nova_casting_membership_active_org", "organization_id", "active"),
+        Index("ix_nova_casting_membership_user", "user_id", "organization_id"),
+        CheckConstraint("casting_role IN ('organizer', 'reviewer')", name="ck_nova_casting_membership_role"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    nova_tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    casting_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingConsentEvent(Base):
+    """Immutable consent evidence. No names, contact details, dates of birth, or media keys."""
+
+    __tablename__ = "nova_casting_consent_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["owner_id", "application_id"],
+            ["nova_casting_applications.owner_id", "nova_casting_applications.id"],
+            name="fk_nova_casting_consent_application_owner",
+        ),
+        Index("ix_nova_casting_consent_application", "owner_id", "application_id"),
+        CheckConstraint("minimum_age_attested >= 18", name="ck_nova_casting_consent_minimum_age"),
+        CheckConstraint("accepted = true", name="ck_nova_casting_consent_accepted"),
+        CheckConstraint("length(consent_version) > 0", name="ck_nova_casting_consent_version"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    applicant_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    consent_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    minimum_age_attested: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingAuditEvent(Base):
+    """Append-only audit skeleton. No notes, emails, videos, or storage keys."""
+
+    __tablename__ = "nova_casting_audit_events"
+    __table_args__ = (
+        Index("ix_nova_casting_audit_organization", "organization_id", "occurred_at"),
+        CheckConstraint(
+            "action IN ('campaign.created', 'application.submitted', 'application.withdrawn', "
+            "'review.updated', 'callback.proposed', 'media.quarantined', 'media.approved')",
+            name="ck_nova_casting_audit_action",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    occurred_at: Mapped[str] = mapped_column(String(64), nullable=False)

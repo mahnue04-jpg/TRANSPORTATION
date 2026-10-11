@@ -1033,7 +1033,8 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
     assert '<option value="coral" selected>Coral · clear female voice</option>' in html
     assert "Photorealistic full-body, head-to-toe view" in html
     assert "Meet AMICOR Nova, your AI operations workspace" in html
-    assert "Clear old videos from this project" in html
+    assert 'id="reset-project-media"' in html
+    assert "Clear all generated media from this project" in html
     assert "assetTypeLabel" in js
     assert "Full-body presenter" in js
     assert "Final demo video" in js
@@ -1807,7 +1808,8 @@ def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
     assert "Download captions" in js
     assert 'value="half_body"' in html
     assert 'value="full_body"' in html
-    assert 'value="shimmer" selected' in html
+    assert '<option value="shimmer">Genova · youthful female voice</option>' in html
+    assert 'value="coral" selected' in html
     assert 'value="coral"' in html
     assert 'value="nova"' in html
 
