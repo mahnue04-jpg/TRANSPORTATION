@@ -39,6 +39,7 @@ jobs:
           tests/test_nova_qualification_claim_scope.py
           tests/test_nova_capability_first_discovery.py
           tests/test_nova_international_match.py
+          tests/test_nova_work_eligibility_explanations.py
           tests/test_nova_live_opportunity_qualification.py
           tests/test_nova_multi_source_discovery.py
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
@@ -134,6 +135,7 @@ jobs:
             tests/test_nova_live_opportunity_qualification.py \
             tests/test_nova_capability_first_discovery.py \
             tests/test_nova_international_match.py \
+            tests/test_nova_work_eligibility_explanations.py \
             tests/test_nova_multi_source_discovery.py \
             tests/test_nova_sam_gov_discovery.py \
             tests/test_nova_capability_catalog.py \

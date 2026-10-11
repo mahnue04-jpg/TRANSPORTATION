@@ -609,6 +609,385 @@ def untested_language_required(text: str) -> bool:
     return False
 
 
+_PLACE_DISPLAY = {
+    "MENA": "MENA",
+    "EU": "European Union",
+    "AE": "United Arab Emirates",
+    "GB": "United Kingdom",
+    "US": "United States",
+    "KR": "South Korea",
+    "SA": "Saudi Arabia",
+    "CA": "Canada",
+    "DE": "Germany",
+    "FR": "France",
+    "IN": "India",
+    "CN": "China",
+    "JP": "Japan",
+    "AU": "Australia",
+    "BR": "Brazil",
+    "PH": "Philippines",
+    "NG": "Nigeria",
+    "SG": "Singapore",
+    "PK": "Pakistan",
+    "BD": "Bangladesh",
+    "VN": "Vietnam",
+    "ID": "Indonesia",
+    "PL": "Poland",
+    "UA": "Ukraine",
+    "EG": "Egypt",
+    "TW": "Taiwan",
+    "ES": "Spain",
+    "IT": "Italy",
+    "PT": "Portugal",
+    "NL": "Netherlands",
+    "IE": "Ireland",
+    "QA": "Qatar",
+    "KW": "Kuwait",
+    "BH": "Bahrain",
+    "OM": "Oman",
+    "JO": "Jordan",
+    "LB": "Lebanon",
+    "MA": "Morocco",
+    "MX": "Mexico",
+}
+_LANGUAGE_DISPLAY = {
+    "en": "English",
+    "so": "Somali",
+    "ar": "Arabic",
+    "fr": "French",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "zh": "Chinese",
+    "de": "German",
+    "hi": "Hindi",
+    "ja": "Japanese",
+    "it": "Italian",
+    "ru": "Russian",
+    "el": "Greek",
+    "ko": "Korean",
+    "tr": "Turkish",
+}
+_PERMIT_DISPLAY = {
+    "work": "work permit",
+    "work_authorization": "work authorization",
+    "visa": "visa",
+    "residence": "residence permit",
+    "business": "business permit",
+}
+_BLOCKER_KIND = {
+    "residency_required": "residency",
+    "citizenship_required": "citizenship",
+    "permit_required": "permit",
+    "untested_language_required": "language",
+    "native_fluency_required": "native_fluency",
+}
+_NATIVE_EXPLANATION = (
+    "Mandatory native fluency. AI-assisted translation does not satisfy native fluency, "
+    "and no fluency is claimed."
+)
+
+
+def _place_name(code: str) -> str:
+    return _PLACE_DISPLAY.get(code, code)
+
+
+def _join_or(parts: list[str]) -> str:
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} or {parts[1]}"
+    return ", ".join(parts[:-1]) + f", or {parts[-1]}"
+
+
+def _rule(
+    kind: str,
+    *,
+    mandatory: bool,
+    decision: str,
+    subjects: list[str],
+    text: str,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "mandatory": mandatory,
+        "decision": decision,
+        "subjects": subjects,
+        "text": text,
+    }
+
+
+def _unreadable_rule(kind: str, heading: str) -> dict[str, Any]:
+    if kind == "permit":
+        detail = "the required country or permit type could not be read"
+    else:
+        detail = "the required country or region could not be read"
+    return _rule(
+        kind,
+        mandatory=True,
+        decision="fail_closed",
+        subjects=[],
+        text=f"Mandatory {heading}: {detail}, so this fails closed.",
+    )
+
+
+def _mandatory_place_rules(text: str, facts: Any | None) -> list[dict[str, Any]]:
+    loaded = _load_facts(facts)
+    rules: list[dict[str, Any]] = []
+    families = (
+        ("residency", _residency_needs, "residency", "residency"),
+        ("citizenship", _citizenship_needs, "citizenship", "citizenship"),
+        ("permit", _permit_needs, "permit", "permit"),
+    )
+    for kind, needs_fn, verified_family, heading in families:
+        verified = _verified_records(loaded, verified_family)
+        for need in needs_fn(text):
+            if not need:
+                rules.append(_unreadable_rule(kind, heading))
+                continue
+            kinds = {item_kind for _, item_kind in need}
+            if kind == "permit" and len(kinds) == 1:
+                heading_text = _PERMIT_DISPLAY.get(next(iter(kinds)), "permit")
+                subjects = [_place_name(place) for place, _item_kind in sorted(need)]
+            elif kind == "permit":
+                heading_text = "permit"
+                subjects = [
+                    f"{_place_name(place)} {_PERMIT_DISPLAY.get(item_kind, item_kind)}"
+                    for place, item_kind in sorted(need)
+                ]
+            else:
+                heading_text = heading
+                subjects = [_place_name(place) for place, _item_kind in sorted(need)]
+            shown = _join_or(subjects)
+            if _need_met(need, verified):
+                rules.append(_rule(
+                    kind,
+                    mandatory=True,
+                    decision="met",
+                    subjects=subjects,
+                    text=(
+                        f"Mandatory {heading_text}: {shown}. "
+                        "The verified profile meets this requirement."
+                    ),
+                ))
+            else:
+                rules.append(_rule(
+                    kind,
+                    mandatory=True,
+                    decision="fail_closed",
+                    subjects=subjects,
+                    text=(
+                        f"Mandatory {heading_text}: {shown}. "
+                        "The verified profile does not meet this requirement, so this fails closed."
+                    ),
+                ))
+    return rules
+
+
+def _preferred_language_codes(sentence: str) -> list[str]:
+    """Languages named as a preference, including 'Spanish preferred'."""
+    found = list(_codes_in(sentence))
+    for match in _LANGUAGE_TOKEN.finditer(sentence or ""):
+        code = _language_code(match.group(1))
+        if not code or code in found:
+            continue
+        prefix = sentence[max(0, match.start() - 24):match.start()]
+        suffix = sentence[match.end():match.end() + 24]
+        if re.search(r"\b(?:preferred|optional)\s+$", prefix, re.I) or re.search(
+            r"^\s+(?:preferred|optional)\b",
+            suffix,
+            re.I,
+        ):
+            found.append(code)
+    return found
+
+
+def _language_rules(text: str, blockers: list[str]) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    if "native_fluency_required" in blockers:
+        rules.append(_rule(
+            "native_fluency",
+            mandatory=True,
+            decision="fail_closed",
+            subjects=[],
+            text=_NATIVE_EXPLANATION,
+        ))
+    else:
+        for group in mandatory_language_groups(text):
+            ordered = _codes_in_order(group)
+            names = [_LANGUAGE_DISPLAY.get(code, code) for code in ordered]
+            shown = _join_or(names)
+            tested = [code for code in ordered if code in TESTED_WORK_LANGUAGES]
+            if not tested:
+                rules.append(_rule(
+                    "language",
+                    mandatory=True,
+                    decision="fail_closed",
+                    subjects=names,
+                    text=(
+                        f"Mandatory language: {shown}. This language is not tested, "
+                        "so this fails closed. No fluency is claimed."
+                    ),
+                ))
+                continue
+            tested_names = _join_or([_LANGUAGE_DISPLAY.get(code, code) for code in tested])
+            if set(tested) == set(group):
+                sentence = (
+                    f"Mandatory language: {shown}. Labeled {AI_ASSISTED_TRANSLATION_LABEL}. "
+                    "This is not native fluency."
+                )
+            else:
+                verb = "are" if len(tested) > 1 else "is"
+                sentence = (
+                    f"Mandatory language: {shown}. {tested_names} {verb} covered as "
+                    f"{AI_ASSISTED_TRANSLATION_LABEL}. This is not native fluency."
+                )
+            rules.append(_rule(
+                "language",
+                mandatory=True,
+                decision="met",
+                subjects=names,
+                text=sentence,
+            ))
+    for sentence in re.split(r"[.;\n]", text or ""):
+        if not sentence.strip() or not _sentence_optional(sentence):
+            continue
+        codes = _preferred_language_codes(sentence)
+        if not codes:
+            continue
+        names = [_LANGUAGE_DISPLAY.get(code, code) for code in codes]
+        rules.append(_rule(
+            "language",
+            mandatory=False,
+            decision="preferred",
+            subjects=names,
+            text=f"Preferred language: {_join_or(names)}. A preference is not a blocker.",
+        ))
+    return rules
+
+
+def _preferred_country_rules(text: str) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for sentence in re.split(r"[.;\n]", text or ""):
+        if not sentence.strip() or not _eligibility_sentence_optional(sentence):
+            continue
+        places = [_place_name(code) for code in _places_in(sentence, drop_client=True)]
+        shown = _join_or(places) if places else "a place that was not named"
+        if _RESIDENCY_TOPIC.search(sentence) or re.search(r"\blocation preference\b", sentence, re.I):
+            rules.append(_rule(
+                "residency",
+                mandatory=False,
+                decision="preferred",
+                subjects=places,
+                text=f"Preferred residency: {shown}. A preference is not a blocker.",
+            ))
+        if re.search(r"\bcitizenship\b", sentence, re.I):
+            rules.append(_rule(
+                "citizenship",
+                mandatory=False,
+                decision="preferred",
+                subjects=places,
+                text=f"Preferred citizenship: {shown}. A preference is not a blocker.",
+            ))
+        permit_kind = _permit_kind(sentence)
+        if permit_kind:
+            label = _PERMIT_DISPLAY.get(permit_kind, "permit")
+            subjects = [f"{place} {label}" for place in places] if places else [label]
+            rules.append(_rule(
+                "permit",
+                mandatory=False,
+                decision="preferred",
+                subjects=subjects,
+                text=f"Preferred {label}: {shown}. A preference is not a blocker.",
+            ))
+    return rules
+
+
+def _dedupe_rules(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for rule in rules:
+        text = str(rule.get("text") or "")
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(rule)
+    return unique
+
+
+def build_owner_eligibility_view(
+    text: str,
+    facts: Any | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    """Owner-facing sentences for the decision international_blockers already made."""
+    rules = _dedupe_rules(
+        _mandatory_place_rules(text, facts)
+        + _language_rules(text, blockers)
+        + _preferred_country_rules(text)
+    )
+    decision = "fail_closed" if any(rule["decision"] == "fail_closed" for rule in rules) else "clear"
+    return {
+        "eligibility_rules": rules,
+        "eligibility_explanations": [str(rule["text"]) for rule in rules],
+        "eligibility_decision": decision,
+    }
+
+
+def explanation_for_blocker(rules: list[dict[str, Any]], code: str) -> str:
+    kind = _BLOCKER_KIND.get(code)
+    if not kind:
+        return ""
+    texts = [
+        str(rule.get("text") or "")
+        for rule in rules
+        if rule.get("kind") == kind and rule.get("decision") == "fail_closed" and rule.get("mandatory")
+    ]
+    return " ".join(text for text in texts if text)
+
+
+def attach_owner_eligibility(opportunity: dict[str, Any], qual: dict[str, Any]) -> dict[str, Any]:
+    """Copy the owner-facing view onto a qualification without inventing fluency."""
+    view = assess_international_match(opportunity)
+    merged = dict(qual)
+    merged["language_support"] = view["language_support"]
+    merged["language_support_label"] = view["language_support_label"]
+    merged["tested_language_codes"] = list(view["tested_language_codes"])
+    merged["eligibility_explanations"] = list(view["eligibility_explanations"])
+    merged["eligibility_rules"] = list(view["eligibility_rules"])
+    merged["eligibility_decision"] = view["eligibility_decision"]
+    merged["native_fluency_claimed"] = False
+    merged["native_speaker_capability"] = False
+    merged["ai_translation_is_native_fluency"] = False
+    if view["eligibility_decision"] != "fail_closed":
+        return merged
+    merged["auto_prepare_allowed"] = False
+    texts = [
+        str(rule["text"])
+        for rule in view["eligibility_rules"]
+        if rule.get("decision") == "fail_closed"
+    ]
+    reasons = [str(item) for item in (merged.get("reasons") or []) if str(item) not in texts]
+    merged["reasons"] = texts + reasons
+    merged["reason_codes"] = list(merged["reasons"])
+    if texts:
+        merged["owner_review_reason"] = texts[0]
+        merged["blocking_reason"] = texts[0]
+    if merged.get("outcome") in {"NOVA_CAN_PERFORM", "NOVA_WITH_OWNER_REVIEW"}:
+        merged["outcome"] = "NOT_SUITABLE"
+        merged["lifecycle_outcome"] = "NOT_SUPPORTED"
+        merged["decision"] = "NOT_SUITABLE"
+    evaluations = dict(merged.get("evaluations") or {})
+    if any(
+        rule.get("kind") in {"residency", "citizenship", "permit"} and rule.get("decision") == "fail_closed"
+        for rule in view["eligibility_rules"]
+    ):
+        evaluations["location_eligibility"] = "NO"
+        merged["evaluations"] = evaluations
+    return merged
+
+
 def international_blockers(job: dict[str, Any], facts: Any | None = None) -> list[str]:
     """Hard blocks for constraints the verified profile does not meet.
 
@@ -646,6 +1025,7 @@ def assess_international_match(job: dict[str, Any], facts: Any | None = None) ->
     else:
         support = "not_required"
     label = AI_ASSISTED_TRANSLATION_LABEL if support == "ai_assisted_translation" else ""
+    view = build_owner_eligibility_view(text, facts, blockers)
     return {
         "tested_language_codes": tested,
         "tested_languages": [
@@ -663,5 +1043,8 @@ def assess_international_match(job: dict[str, Any], facts: Any | None = None) ->
         "native_speaker_capability": False,
         "ai_translation_is_native_fluency": False,
         "eligibility": assess_country_eligibility(text, facts),
+        "eligibility_explanations": view["eligibility_explanations"],
+        "eligibility_rules": view["eligibility_rules"],
+        "eligibility_decision": view["eligibility_decision"],
         "blockers": blockers,
     }

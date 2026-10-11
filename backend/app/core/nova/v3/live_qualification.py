@@ -922,6 +922,9 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "language_support": discovery.get("language_support"),
                 "language_support_label": discovery.get("language_support_label") or "",
                 "tested_language_codes": list(discovery.get("tested_language_codes") or []),
+                "eligibility_explanations": list(discovery.get("eligibility_explanations") or []),
+                "eligibility_rules": list(discovery.get("eligibility_rules") or []),
+                "eligibility_decision": discovery.get("eligibility_decision") or "clear",
                 "native_fluency_claimed": False,
                 "native_speaker_capability": False,
                 "ai_translation_is_native_fluency": False,
@@ -988,13 +991,22 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 qual["owner_review_reason"] = (
                     "Title is outside the requested remote contractor lanes."
                 )
+            from app.core.nova.work_revenue.international_match import explanation_for_blocker
+
             for code in discovery.get("remote_digital_blockers") or []:
                 if code not in _PERFORMABILITY_COPY:
                     continue
+                specific = explanation_for_blocker(discovery.get("eligibility_rules") or [], code)
+                if code == "native_fluency_required":
+                    shown = _PERFORMABILITY_COPY[code]
+                else:
+                    shown = specific or _PERFORMABILITY_COPY[code]
                 qual.setdefault("blockers", []).append(code)
-                qual.setdefault("reasons", []).append(_PERFORMABILITY_COPY[code])
+                qual.setdefault("reasons", []).append(shown)
+                if specific and specific != shown:
+                    qual["reasons"].append(specific)
                 if not discovery.get("physical_licensed_onsite_blocked"):
-                    qual["owner_review_reason"] = _PERFORMABILITY_COPY[code]
+                    qual["owner_review_reason"] = shown
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
         if discovery.get("digital_contractor_rank_boost"):
@@ -1005,6 +1017,9 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
         row["language_support"] = discovery.get("language_support")
         row["language_support_label"] = discovery.get("language_support_label") or ""
         row["tested_language_codes"] = list(discovery.get("tested_language_codes") or [])
+        row["eligibility_explanations"] = list(discovery.get("eligibility_explanations") or [])
+        row["eligibility_rules"] = list(discovery.get("eligibility_rules") or [])
+        row["eligibility_decision"] = discovery.get("eligibility_decision") or "clear"
         row["native_fluency_claimed"] = False
         row["native_speaker_capability"] = False
         row["ai_translation_is_native_fluency"] = False
