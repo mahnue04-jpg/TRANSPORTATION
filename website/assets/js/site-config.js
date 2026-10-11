@@ -2,5 +2,7 @@
 window.AMICOR_SITE = {
   siteOrigin: "https://getamicor.com",
   formEndpoint: "/api/leads",
-  publicContactEmail: "info@getamicor.com"
+  publicContactEmail: "info@getamicor.com",
+  firstCustomerFunnel: false,
+  affiliateEnrollment: "pending"
 };
