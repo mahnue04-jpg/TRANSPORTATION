@@ -33,11 +33,15 @@ def _fake_db():
 
 
 def test_importing_the_router_does_not_import_casting_models():
-    sys.modules.pop("app.core.nova.creative_studio.casting_db_models", None)
+    models_name = "app.core.nova.creative_studio.casting_db_models"
+    existing = sys.modules.get(models_name)
+    sys.modules.pop(models_name, None)
     sys.modules.pop("app.core.nova.creative_studio.casting_router_draft", None)
     import app.core.nova.creative_studio.casting_router_draft as loaded
     assert loaded.router is not None
-    assert "app.core.nova.creative_studio.casting_db_models" not in sys.modules
+    assert models_name not in sys.modules
+    if existing is not None:
+        sys.modules[models_name] = existing
 
 
 def test_anonymous_callers_are_rejected(monkeypatch):
@@ -71,7 +75,13 @@ def test_disabled_flag_returns_503_without_opening_a_casting_session(monkeypatch
     assert body["applications_enabled"] is False
     assert body["media_uploads_enabled"] is False
     assert body["staging_reads_enabled"] is False
+    assert body["sandbox_writes_enabled"] is False
     assert client.post(APPLICATION).status_code == 405
+    blocked = client.post(
+        "/api/nova/casting/organizations/org-1/campaigns",
+        json={"title": "Draft", "category": "film", "minimum_age": 18, "status": "DRAFT"},
+    )
+    assert blocked.status_code == 503
 
 
 def test_production_lock_ignores_the_staging_flag(monkeypatch):
@@ -147,7 +157,9 @@ def test_enabled_reads_use_the_session_identity_and_hide_storage_keys(monkeypatc
     assert "owner_id" not in campaign.json()
     readiness = client.get("/api/nova/casting/readiness").json()
     assert readiness["staging_reads_enabled"] is True
+    assert readiness["sandbox_writes_enabled"] is True
     assert readiness["enabled"] is False
+    assert readiness["applications_enabled"] is False
     assert readiness["media_uploads_enabled"] is False
 
 

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Casting sandbox</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+  <style>
+    @media (max-width: 640px) {
+      .studio-nav { flex-direction: column; align-items: flex-start; }
+      .actions { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="studio-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Casting sandbox</h1>
+      </div>
+    </div>
+    <nav class="studio-nav" aria-label="Nova destinations">
+      <a href="/nova/creative">Creative</a>
+      <a href="/static/nova-creative/casting-preview.html">Fictional preview</a>
+      <a href="/static/nova-creative/casting-sandbox.html" aria-current="page">Casting sandbox</a>
+    </nav>
+  </header>
+  <main class="studio-main">
+    <p class="disclaimer">Disposable test workflow for an authenticated Nova account. Not a public audition portal. No relationship or integration with Zeus. Campaigns stay unpublished, callbacks are recorded only, and no invitation is sent.</p>
+    <div id="banner" class="banner hidden" role="status"></div>
+    <p id="status" class="hint">Loading sandbox readiness.</p>
+
+    <section class="card" aria-label="Sign in">
+      <p id="session-meta" class="hint">Sign in with the existing Nova account used by Creative Studio.</p>
+      <form id="login-form" class="grid">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="sign-in">Sign in</button>
+          <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Organization">
+      <label>Casting organization id<input id="organization-id" maxlength="36" autocomplete="off" /></label>
+    </section>
+
+    <section class="card" aria-label="Organizer workspace">
+      <h2>Organizer workspace</h2>
+      <form id="campaign-form" class="grid">
+        <label>Title<input id="campaign-title" maxlength="200" required /></label>
+        <label>Category
+          <select id="campaign-category">
+            <option value="film">film</option>
+            <option value="reality">reality</option>
+            <option value="beauty">beauty</option>
+          </select>
+        </label>
+        <label>Minimum age<input id="campaign-age" type="number" min="18" value="18" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="create-campaign">Create draft campaign</button>
+          <button type="button" id="load-campaigns" class="secondary">Load campaigns</button>
+          <button type="button" id="load-applications" class="secondary">Load applications</button>
+          <button type="button" id="load-audit" class="secondary">Load audit</button>
+        </div>
+      </form>
+      <div id="campaigns" class="list"></div>
+      <div id="applications" class="list"></div>
+      <form id="review-form" class="grid">
+        <label>Application id<input id="review-application" maxlength="48" /></label>
+        <label>Stage
+          <select id="review-stage">
+            <option>New</option>
+            <option>In review</option>
+            <option>Callback</option>
+            <option>Closed</option>
+          </select>
+        </label>
+        <label>Score<input id="review-score" type="number" min="1" max="5" /></label>
+        <label class="wide">Note<textarea id="review-note" rows="2" maxlength="2000"></textarea></label>
+        <div class="actions wide">
+          <button type="submit" id="save-review">Save review</button>
+          <button type="button" id="shortlist" class="secondary">Shortlist</button>
+          <button type="button" id="callback" class="secondary">Callback</button>
+        </div>
+      </form>
+      <p class="hint">Callback stores a human decision. No invitation is sent.</p>
+    </section>
+
+    <section class="card" aria-label="Applicant flow">
+      <h2>Applicant flow</h2>
+      <form id="application-form" class="grid">
+        <label>Campaign id<input id="application-campaign" maxlength="48" required /></label>
+        <label>Age in years<input id="application-age" type="number" min="18" required /></label>
+        <label>Consent version<input id="consent-version" maxlength="32" value="sandbox-v1" required /></label>
+        <label class="wide"><input id="consent-accepted" type="checkbox" /> I am at least 18 and consent to this disposable test application.</label>
+        <div class="actions wide">
+          <button type="submit" id="save-application">Save test application</button>
+          <button type="button" id="submit-application" class="secondary">Submit</button>
+          <button type="button" id="withdraw-application" class="secondary">Withdraw</button>
+          <button type="button" id="load-status" class="secondary">Refresh status</button>
+        </div>
+      </form>
+      <p id="application-status" class="hint">No test application yet.</p>
+      <form id="media-form" class="grid">
+        <label>MIME type
+          <select id="media-mime">
+            <option>video/mp4</option>
+            <option>video/quicktime</option>
+            <option>video/webm</option>
+          </select>
+        </label>
+        <label>Declared byte size<input id="media-size" type="number" min="1" value="2048" /></label>
+        <div class="actions wide">
+          <button type="submit" id="save-media">Record quarantined metadata</button>
+        </div>
+      </form>
+      <p class="hint">Metadata only. No video file is uploaded and playback stays unavailable.</p>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var tokenKey = "amicor_nova_creative_token";
+      var writesEnabled = false;
+      var applicationId = "";
+      function $(id) { return document.getElementById(id); }
+      function token() {
+        var shared = window.AmiCorSession || null;
+        if (shared && typeof shared.getAccessToken === "function") {
+          var current = shared.getAccessToken();
+          if (current) return current;
+        }
+        return localStorage.getItem(tokenKey) || "";
+      }
+      function setToken(value) {
+        if (value) localStorage.setItem(tokenKey, value);
+        else localStorage.removeItem(tokenKey);
+      }
+      function show(message, ok) {
+        var el = $("banner");
+        el.textContent = message;
+        el.classList.remove("hidden");
+        el.classList.toggle("error", !ok);
+        $("status").textContent = ok ? "Ready" : "Request error";
+      }
+      function org() { return $("organization-id").value.trim(); }
+      function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
+      async function api(path, options) {
+        $("status").textContent = "Loading";
+        var headers = { "Content-Type": "application/json" };
+        if (token()) headers.Authorization = "Bearer " + token();
+        var response = await fetch(path, Object.assign({ headers: headers }, options || {}));
+        var text = await response.text();
+        var body = {};
+        if (text) {
+          try { body = JSON.parse(text); } catch (err) { body = {}; }
+        }
+        if (!response.ok) {
+          var detail = body && body.detail ? body.detail : "Request failed";
+          show(String(detail), false);
+          throw new Error(String(detail));
+        }
+        $("status").textContent = "Ready";
+        return body;
+      }
+      async function refreshReadiness() {
+        if (!token()) {
+          writesEnabled = false;
+          $("status").textContent = "Sign in to check sandbox readiness.";
+          return false;
+        }
+        var readiness = await api("/api/nova/casting/readiness");
+        writesEnabled = readiness.sandbox_writes_enabled === true
+          && readiness.applications_enabled === false
+          && readiness.media_uploads_enabled === false
+          && readiness.enabled === false;
+        if (!writesEnabled) {
+          show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
+          return false;
+        }
+        show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
+        return true;
+      }
+      async function requireSandbox() {
+        if (!org()) {
+          show("Enter the casting organization id.", false);
+          return false;
+        }
+        return refreshReadiness();
+      }
+      $("login-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          var body = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({
+              email: $("login-email").value.trim(),
+              password: $("login-password").value
+            })
+          });
+          setToken(body.access_token || "");
+          await refreshReadiness();
+        } catch (err) { /* banner already set */ }
+      });
+      $("sign-out").addEventListener("click", function () {
+        setToken("");
+        writesEnabled = false;
+        show("Signed out. Nothing was submitted.", true);
+      });
+      $("campaign-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var created = await api(base() + "/campaigns", {
+            method: "POST",
+            body: JSON.stringify({
+              title: $("campaign-title").value.trim(),
+              category: $("campaign-category").value,
+              minimum_age: Number($("campaign-age").value),
+              status: "DRAFT"
+            })
+          });
+          $("application-campaign").value = created.id || "";
+          show("Draft campaign " + created.id + " saved. It was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-campaigns").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/campaigns?limit=20&offset=0");
+          $("campaigns").textContent = JSON.stringify(page.items || [], null, 2);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-applications").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/applications?limit=20&offset=0");
+          $("applications").textContent = JSON.stringify(page.items || [], null, 2);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-audit").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/audit?limit=50&offset=0");
+          $("applications").textContent = JSON.stringify(page.items || [], null, 2);
+        } catch (err) { /* banner already set */ }
+      });
+      async function reviewCall(path, payload) {
+        if (!(await requireSandbox())) return;
+        var id = $("review-application").value.trim();
+        if (!id) { show("Enter an application id.", false); return; }
+        var result = await api(base() + "/applications/" + encodeURIComponent(id) + path, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        show("Recorded " + (result.stage || "update") + ". No invitation was sent.", true);
+      }
+      $("review-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var id = $("review-application").value.trim();
+          var score = $("review-score").value.trim();
+          var result = await api(base() + "/applications/" + encodeURIComponent(id) + "/review", {
+            method: "PUT",
+            body: JSON.stringify({
+              stage: $("review-stage").value,
+              score: score ? Number(score) : null,
+              note: $("review-note").value
+            })
+          });
+          show("Review saved at stage " + result.stage + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("shortlist").addEventListener("click", async function () {
+        try { await reviewCall("/shortlist", { shortlisted: true }); } catch (err) { /* banner already set */ }
+      });
+      $("callback").addEventListener("click", async function () {
+        try { await reviewCall("/callback", { proposed: true }); } catch (err) { /* banner already set */ }
+      });
+      $("application-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          if (!$("consent-accepted").checked) {
+            show("Consent required. Nothing was submitted.", false);
+            return;
+          }
+          var saved = await api(base() + "/campaigns/" + encodeURIComponent($("application-campaign").value.trim()) + "/applications", {
+            method: "POST",
+            body: JSON.stringify({
+              consent_accepted: true,
+              consent_version: $("consent-version").value.trim(),
+              age_years: Number($("application-age").value)
+            })
+          });
+          applicationId = saved.id;
+          $("review-application").value = saved.id;
+          $("application-status").textContent = "Status: " + saved.status;
+          show("Test application saved as " + saved.status + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("submit-application").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/submit", { method: "POST" });
+          $("application-status").textContent = "Status: " + saved.status;
+          show("Test application submitted. The campaign was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("withdraw-application").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/withdraw", { method: "POST" });
+          $("application-status").textContent = "Status: " + saved.status;
+          show("Application withdrawn.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-status").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId));
+          $("application-status").textContent = "Status: " + saved.status;
+        } catch (err) { /* banner already set */ }
+      });
+      $("media-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/media", {
+            method: "POST",
+            body: JSON.stringify({
+              mime_type: $("media-mime").value,
+              byte_size: Number($("media-size").value)
+            })
+          });
+          show("Metadata " + saved.status + ". Playback " + saved.playback + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      if (token()) refreshReadiness().catch(function () {});
+      else $("status").textContent = "Sign in to check sandbox readiness.";
+    }());
+  </script>
+</body>
+</html>

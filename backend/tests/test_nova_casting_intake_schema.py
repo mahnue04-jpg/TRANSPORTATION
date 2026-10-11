@@ -40,6 +40,23 @@ def test_application_intake_requires_adult_consent_and_private_video_metadata():
     assert schema.validate_draft_application_intake(scored).reason == "Unsupported field"
 
 
+def test_sandbox_application_accepts_consent_without_a_video_file():
+    schema = load()
+    decision = schema.validate_sandbox_application(
+        {"consent_accepted": True, "consent_version": "sandbox-v1", "age_years": 21},
+        minimum_age=18,
+    )
+    assert decision.accepted
+    assert not schema.validate_sandbox_application(
+        {"consent_accepted": False, "consent_version": "sandbox-v1", "age_years": 21},
+    ).accepted
+    assert not schema.validate_sandbox_application(
+        {"consent_accepted": True, "consent_version": "sandbox-v1", "age_years": 17},
+    ).accepted
+    scored = {"consent_accepted": True, "consent_version": "sandbox-v1", "age_years": 21, "facial_score": 1}
+    assert schema.validate_sandbox_application(scored).reason == "Unsupported field"
+
+
 def test_campaign_spec_cannot_publish_or_lower_the_age_floor():
     schema = load()
     decision = schema.validate_draft_campaign(

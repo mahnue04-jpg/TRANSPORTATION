@@ -51,6 +51,28 @@ def validate_draft_application_intake(payload: Mapping[str, object]) -> IntakeDe
     return IntakeDecision(True, "Draft metadata accepted; no upload was stored")
 
 
+_SANDBOX_APPLICATION_FIELDS = frozenset({"consent_accepted", "consent_version", "age_years"})
+
+
+def validate_sandbox_application(payload: Mapping[str, object], *, minimum_age: int = MINIMUM_CASTING_AGE) -> IntakeDecision:
+    """Consent and age for a disposable test application. No file bytes or contact fields."""
+    if not isinstance(payload, Mapping):
+        return _reject("Invalid intake")
+    if set(payload) - _SANDBOX_APPLICATION_FIELDS:
+        return _reject("Unsupported field")
+    if payload.get("consent_accepted") is not True:
+        return _reject("Consent required")
+    version = payload.get("consent_version")
+    if not isinstance(version, str) or not version.strip() or len(version) > 32:
+        return _reject("Consent version required")
+    if isinstance(minimum_age, bool) or not isinstance(minimum_age, int) or minimum_age < MINIMUM_CASTING_AGE:
+        return _reject("Minimum age must be at least 18")
+    age = payload.get("age_years")
+    if isinstance(age, bool) or not isinstance(age, int) or age < minimum_age:
+        return _reject("Applicant does not meet the minimum age")
+    return IntakeDecision(True, "Sandbox application accepted; nothing was published")
+
+
 def validate_draft_campaign(payload: Mapping[str, object]) -> IntakeDecision:
     """Validate an unpublished campaign spec. Publishing is not represented."""
     if not isinstance(payload, Mapping):

@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext, get_current_user_context
 
 from .casting_access import CastingAccessDenied
-from .casting_flags import casting_staging_reads_enabled
+from .casting_flags import casting_sandbox_writes_enabled, casting_staging_reads_enabled
+from .casting_router_sandbox import sandbox_router
 
 router = APIRouter(prefix="/api/nova/casting", tags=["Nova Casting (inactive)"])
 CASTING_READS_DISABLED_DETAIL = "Casting application access is not enabled"
@@ -61,7 +62,11 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
         "applications_enabled": False,
         "media_uploads_enabled": False,
         "staging_reads_enabled": casting_staging_reads_enabled(),
+        "sandbox_writes_enabled": casting_sandbox_writes_enabled(),
     }
+
+
+router.include_router(sandbox_router)
 
 
 @router.get(
