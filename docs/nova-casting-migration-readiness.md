@@ -23,4 +23,6 @@ This document does not create tables, run Alembic or change the live database.
 
 Three explicit revisions now exist: organization/membership, campaign content, and consent/audit. Each `upgrade()` and `downgrade()` returns immediately when `AMICOR_ENVIRONMENT`, `ENVIRONMENT`, or `APP_ENV` is `production` or `prod`, so a production `alembic upgrade heads` stamps the revision and does not create `nova_casting_` tables. Disposable tests call the same functions with a non-production environment and roll the tables back.
 
+`20261011_casting_schema_repair` is a later forward-only revision. Outside production it creates any missing `nova_casting_` tables left behind by that stamp. In production it still performs no DDL. Downgrade does not drop the tables.
+
 `backend/migrations/env.py` still does not import `casting_db_models`, and `include_object` still does not autogenerate `nova_casting_` tables. Startup `create_all` also drops those table names before it reaches the database. Do not point `CASTING_TEST_POSTGRES_URL` at a shared staging or production database.
