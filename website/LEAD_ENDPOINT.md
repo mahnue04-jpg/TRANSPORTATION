@@ -14,9 +14,9 @@ formEndpoint: "/api/leads"
 
 1. The browser validates required fields, email format, and consent.
 2. `POST /api/leads` writes the inquiry to KV when validation passes.
-3. A success message is shown only after the function returns 2xx.
-4. If KV is unavailable, the page says AMICOR did not receive the request and saves a local fallback.
-5. Optional webhook notification, if later configured in the Pages dashboard, is best-effort. Webhook failure must not fail the form after KV write succeeds.
+3. A success message is shown only after KV persistence returns a reference ID.
+4. If KV is unavailable or the write fails, the page says AMICOR did not confirm that the request was saved and keeps a local fallback. A webhook alone is not confirmation.
+5. Optional webhook notification, if later configured in the Pages dashboard, is best-effort. Webhook failure must not fail the form after KV write succeeds, and the page must not claim email delivery unless the webhook returned HTTP 2xx.
 
 Email Routing for info@getamicor.com is **ACTIVE and VERIFIED**. It is a separate channel and is not required for form storage. See `EMAIL.md`.
 
@@ -61,16 +61,29 @@ Do not send medical records, diagnoses, insurance IDs, or other sensitive health
 
 | Status | Meaning |
 |---|---|
-| 202 | Accepted. KV stored the lead and/or an optional webhook accepted a copy |
-| 204 | Honeypot trip; pretend success |
-| 400 | Validation failed |
+| 202 | Saved. KV stored a new lead and returned `referenceId`. Email may still be unconfirmed. |
+| 200 | Duplicate of a saved lead in the last 24 hours. Returns the original `referenceId`. |
+| 204 | Honeypot trip. Nothing is stored. |
+| 400 | Validation failed, including a message that is only the quote prompts |
 | 405 | Not POST |
 | 429 | Rate limited (about 5 requests / hour / IP) |
-| 502 | Nothing was stored and optional webhook delivery also failed |
-| 503 | Neither KV nor a webhook is configured |
+| 500 | KV write failed. Nothing was confirmed. |
+| 503 | KV is not configured. A webhook alone cannot confirm the request. |
 
-Success body: `{ "ok": true, "stored": true, "notified": false }`  
-`notified` is true only when the optional webhook returned HTTP 2xx. Form UI treats any 2xx as success.
+Success body:
+
+```json
+{
+  "ok": true,
+  "stored": true,
+  "referenceId": "AMQ-1A2B3C4D",
+  "duplicate": false,
+  "notified": false,
+  "emailNotification": { "attempted": false, "sent": false, "reason": "not_configured" }
+}
+```
+
+`emailNotification.sent` is true only when the optional webhook returned HTTP 2xx. The form shows the reference ID after `stored` is true and does not claim email delivery otherwise.
 
 ### Sample error
 
@@ -87,7 +100,8 @@ Success body: `{ "ok": true, "stored": true, "notified": false }`
 - Reject unknown products
 - Ignore / no-op honeypot field `middle_name_confirm`
 - No secret values in the function source
-- KV write is enough for 202
+- KV write is required for 202. The response includes `referenceId`.
+- The same email, product, and message within 24 hours returns the existing reference ID and does not write a second lead.
 - Optional destination URL and bearer token come from Pages environment variables only:
   - `LEAD_WEBHOOK_URL`
   - `LEAD_WEBHOOK_TOKEN` (optional)
@@ -102,7 +116,7 @@ Only after the owner has a private HTTPS endpoint they control (not a CRM purcha
 4. Do not put either value in this repo, in `_generate.py`, or in `site-config.js`.
 5. If the endpoint is on another HTTPS host, add that host to `connect-src` only if the **browser** must call it. The Pages Function calls the webhook server-side, so `connect-src` usually stays unchanged.
 6. Redeploy is not required for Pages secrets if the function already reads `env.LEAD_WEBHOOK_URL`. Confirm after saving.
-7. Test that a valid form submit still returns 202 when the webhook is down. KV remains the source of truth.
+7. Test that a valid form submit still returns 202 with a reference ID when the webhook is down. KV remains the source of truth. Email stays unconfirmed.
 
 Until a webhook secret exists, the owner reviews leads with:
 

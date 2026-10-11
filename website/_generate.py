@@ -762,7 +762,7 @@ add(
         <h1>Tell us what you want to explore.</h1>
         <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. A success message appears only after AMICOR’s lead store accepts the request. Do not submit medical records or other sensitive health information.</p>
         <p class="form-error" data-form-error role="alert"></p>
-        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Thank you. Your request was sent to AMICOR.</p>
+        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">AMICOR saved your request.</p>
         <form class="panel" data-early-access-form novalidate>
           <div class="hp" aria-hidden="true">
             <input name="middle_name_confirm" tabindex="-1" autocomplete="off" aria-hidden="true">

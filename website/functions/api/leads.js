@@ -24,6 +24,9 @@ const LIMITS = {
   message: 2000,
 };
 
+const QUOTE_PROMPT = "Project goal: Deliverables needed: Approximate volume: Deadline:";
+const DEDUPE_TTL_SEC = 24 * 60 * 60;
+
 function json(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -42,6 +45,10 @@ function plain(value, max) {
     .slice(0, max);
 }
 
+function collapsed(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
 function tooLong(value, max) {
   return String(value || "").length > max;
 }
@@ -50,10 +57,14 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-async function rateLimited(request) {
+function emailNotification(attempted, sent, reason) {
+  return { attempted: !!attempted, sent: !!sent, reason };
+}
+
+async function rateLimited(request, cache) {
+  if (!cache) return false;
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const key = new Request(`https://amicor-lead-rate.invalid/${encodeURIComponent(ip)}`);
-  const cache = caches.default;
   const hit = await cache.match(key);
   if (!hit) {
     await cache.put(key, new Response("1", { headers: { "Cache-Control": "max-age=3600" } }));
@@ -65,24 +76,37 @@ async function rateLimited(request) {
   return false;
 }
 
-export async function onRequest(context) {
-  const { request, env } = context;
+async function fingerprint(email, product, message) {
+  const bytes = new TextEncoder().encode([email, product, message].join("\n"));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, "0")).join("");
+}
+
+function makeReference(randomUUID) {
+  return `AMQ-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+}
+
+export async function handleLead(request, env, deps = {}) {
+  const cache = deps.cache || (typeof caches !== "undefined" ? caches.default : null);
+  const fetchImpl = deps.fetchImpl || fetch;
+  const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { Allow: "POST, OPTIONS" } });
   }
   if (request.method !== "POST") {
-    return json(405, { ok: false, error: "method_not_allowed" });
+    return json(405, { ok: false, stored: false, error: "method_not_allowed" });
   }
 
-  if (await rateLimited(request)) {
-    return json(429, { ok: false, error: "rate_limited" });
+  if (await rateLimited(request, cache)) {
+    return json(429, { ok: false, stored: false, error: "rate_limited" });
   }
 
   let raw;
   try {
     raw = await request.json();
   } catch (err) {
-    return json(400, { ok: false, error: "invalid_json" });
+    return json(400, { ok: false, stored: false, error: "invalid_json" });
   }
 
   if (
@@ -90,12 +114,12 @@ export async function onRequest(context) {
     plain(raw.company_website, 200) ||
     plain(raw.website, 200)
   ) {
-    return json(204, { ok: true });
+    return json(204, { ok: true, stored: false });
   }
 
   for (const field of Object.keys(LIMITS)) {
     if (tooLong(raw[field], LIMITS[field])) {
-      return json(400, { ok: false, error: "field_too_long" });
+      return json(400, { ok: false, stored: false, error: "field_too_long" });
     }
   }
 
@@ -114,54 +138,119 @@ export async function onRequest(context) {
   };
 
   if (!payload.name || !payload.company || !payload.industry || !payload.companySize || !payload.message) {
-    return json(400, { ok: false, error: "missing_fields" });
+    return json(400, { ok: false, stored: false, error: "missing_fields" });
+  }
+  if (collapsed(payload.message) === QUOTE_PROMPT) {
+    return json(400, { ok: false, stored: false, error: "message_incomplete" });
   }
   if (!validEmail(payload.email)) {
-    return json(400, { ok: false, error: "invalid_email" });
+    return json(400, { ok: false, stored: false, error: "invalid_email" });
   }
   if (!PRODUCTS.has(payload.product)) {
-    return json(400, { ok: false, error: "invalid_product" });
+    return json(400, { ok: false, stored: false, error: "invalid_product" });
   }
   if (!payload.consent) {
-    return json(400, { ok: false, error: "consent_required" });
+    return json(400, { ok: false, stored: false, error: "consent_required" });
   }
 
   const store = env.AMICOR_LEADS;
-  const webhook = (env.LEAD_WEBHOOK_URL || "").trim();
-  if (!store && !webhook) {
+  if (!store) {
     return json(503, {
       ok: false,
+      stored: false,
       error: "lead_delivery_disabled",
+      emailNotification: emailNotification(false, false, "not_configured"),
     });
   }
 
-  let stored = false;
-  if (store) {
-    const id = crypto.randomUUID();
-    await store.put(`lead:${payload.receivedAt}:${id}`, JSON.stringify(payload));
-    stored = true;
+  const dedupeKey = `dedupe:${await fingerprint(payload.email, payload.product, payload.message)}`;
+  try {
+    const existingRaw = await store.get(dedupeKey);
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw);
+      if (existing && existing.referenceId) {
+        return json(200, {
+          ok: true,
+          stored: true,
+          referenceId: existing.referenceId,
+          duplicate: true,
+          notified: false,
+          emailNotification: emailNotification(false, false, "duplicate"),
+        });
+      }
+    }
+  } catch (err) {
+    return json(500, {
+      ok: false,
+      stored: false,
+      error: "not_saved",
+      emailNotification: emailNotification(false, false, "not_attempted"),
+    });
   }
 
-  let notified = false;
+  let referenceId = "";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = makeReference(randomUUID);
+    const taken = await store.get(`lead:${candidate}`);
+    if (!taken) {
+      referenceId = candidate;
+      break;
+    }
+  }
+  if (!referenceId) {
+    return json(500, {
+      ok: false,
+      stored: false,
+      error: "not_saved",
+      emailNotification: emailNotification(false, false, "not_attempted"),
+    });
+  }
+
+  const record = { ...payload, referenceId };
+  try {
+    await store.put(`lead:${referenceId}`, JSON.stringify(record));
+    await store.put(dedupeKey, JSON.stringify({ referenceId }), { expirationTtl: DEDUPE_TTL_SEC });
+  } catch (err) {
+    return json(500, {
+      ok: false,
+      stored: false,
+      error: "not_saved",
+      emailNotification: emailNotification(false, false, "not_attempted"),
+    });
+  }
+
+  const webhook = (env.LEAD_WEBHOOK_URL || "").trim();
+  let notification = emailNotification(false, false, "not_configured");
   if (webhook) {
+    notification = emailNotification(true, false, "webhook_failed");
     try {
       const headers = { "Content-Type": "application/json" };
       if (env.LEAD_WEBHOOK_TOKEN) {
         headers.Authorization = `Bearer ${env.LEAD_WEBHOOK_TOKEN}`;
       }
-      const forwarded = await fetch(webhook, {
+      const forwarded = await fetchImpl(webhook, {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(record),
       });
-      notified = forwarded.ok;
+      if (forwarded.ok) {
+        notification = emailNotification(true, true, "sent");
+      }
     } catch (err) {
-      notified = false;
+      notification = emailNotification(true, false, "webhook_failed");
     }
   }
 
-  if (stored || notified) {
-    return json(202, { ok: true, stored, notified });
-  }
-  return json(502, { ok: false, error: "delivery_failed" });
+  return json(202, {
+    ok: true,
+    stored: true,
+    referenceId,
+    duplicate: false,
+    notified: notification.sent,
+    emailNotification: notification,
+  });
+}
+
+export async function onRequest(context) {
+  return handleLead(context.request, context.env);
 }

@@ -37,7 +37,7 @@
   }
 
   if (message && params.get("intent") === "quote" && !message.value) {
-    message.value = "Project goal:\nDeliverables needed:\nApproximate volume:\nDeadline:\n";
+    message.placeholder = "Project goal:\nDeliverables needed:\nApproximate volume:\nDeadline:";
   }
 
   var form = document.querySelector("[data-early-access-form]");
@@ -73,6 +73,10 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
+  function promptOnly(value) {
+    return String(value || "").replace(/\s+/g, " ").trim() === "Project goal: Deliverables needed: Approximate volume: Deadline:";
+  }
+
   form.addEventListener("submit", function (event) {
     event.preventDefault();
     show(success, false);
@@ -90,8 +94,10 @@
       var input = form.elements[name];
       if (!input) return;
       var value = String(data[name] || "").trim();
-      if (!value) {
-        setFieldError(input, "This field is required.");
+      if (!value || (name === "message" && promptOnly(value))) {
+        setFieldError(input, name === "message" && promptOnly(value)
+          ? "Replace the prompts with your project details."
+          : "This field is required.");
         ok = false;
       } else if (name === "email" && !validEmail(value)) {
         setFieldError(input, "Enter a valid email address.");
@@ -140,14 +146,19 @@
       try { localStorage.setItem("amicor-early-access", JSON.stringify(submissions)); } catch (err) { /* Storage may be disabled. */ }
     }
 
-    function finishDelivered() {
+    function finishSaved(result) {
       form.reset();
       if (product && params.get("product")) product.value = params.get("product");
       show(success, true);
-      if (success) {
-        success.textContent = "Thank you. Your request was sent to AMICOR.";
-        success.focus();
-      }
+      if (!success) return;
+      var ref = String((result && result.referenceId) || "");
+      var text = "AMICOR saved your request.";
+      if (ref) text += " Reference " + ref + ".";
+      if (result && result.duplicate) text += " This matches a request already on file.";
+      var email = (result && result.emailNotification) || {};
+      text += email.sent ? " A notification email was sent." : " Email delivery was not confirmed.";
+      success.textContent = text;
+      success.focus();
     }
 
     var endpoint = (config.formEndpoint || "").trim();
@@ -169,16 +180,23 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     }).then(function (response) {
-      if (!response.ok) throw new Error("endpoint");
-      return response.json();
+      return response.json().catch(function () { return {}; }).then(function (result) {
+        if (!response.ok || !result.ok || !result.stored || !result.referenceId) {
+          var error = new Error("not_saved");
+          error.code = result.error || "not_saved";
+          throw error;
+        }
+        return result;
+      });
     }).then(function (result) {
-      if (!result.ok || (!result.stored && !result.notified)) throw new Error("delivery");
-      finishDelivered();
-    }).catch(function () {
+      finishSaved(result);
+    }).catch(function (err) {
       saveLocal();
       show(errorBox, true);
       if (errorBox) {
-        errorBox.textContent = "Delivery could not be confirmed. Please email info@getamicor.com or try again.";
+        errorBox.textContent = err && err.code === "message_incomplete"
+          ? "Please replace the quote prompts with the project details."
+          : "AMICOR did not confirm that this request was saved. Please email info@getamicor.com or try again.";
       }
     }).finally(function () {
       if (submit) submit.disabled = false;
