@@ -32,7 +32,35 @@ _SAFE_DETAILS = frozenset({
     "Invalid intake",
     "Invalid campaign",
     "Rejected by security scan",
+    "Invalid organization name",
 })
+
+
+class OrganizationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: str
+
+
+class OrganizationRead(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    verification_status: str
+    casting_role: str
+
+
+class MembershipBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    user_id: str
+    casting_role: str
+
+
+class MembershipRead(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    organization_id: str
+    user_id: str
+    casting_role: str
+    active: bool
 
 
 class CampaignBody(BaseModel):
@@ -271,6 +299,40 @@ def _single_byte_range(header: str | None, size: int) -> tuple[int, int] | None:
     if start < 0 or start >= size or end < start:
         raise HTTPException(status_code=416, headers={"Content-Range": f"bytes */{size}"})
     return start, min(end, size - 1)
+
+
+@sandbox_router.post("/sandbox/organization", response_model=OrganizationRead)
+def create_sandbox_organization(
+    payload: dict = Body(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(casting_sandbox_session),
+):
+    if not casting_sandbox_writes_enabled():
+        raise HTTPException(status_code=503, detail=CASTING_SANDBOX_DISABLED_DETAIL)
+    user_id, tenant_id = _session_identity(user)
+    body = _parse(OrganizationBody, payload)
+    return _call(lambda: _writes().ensure_sandbox_organization(
+        db=db, user_id=user_id, tenant_id=tenant_id, payload=body,
+    ))
+
+
+@sandbox_router.post(
+    "/organizations/{organization_id}/members",
+    response_model=MembershipRead,
+)
+def grant_reviewer(
+    organization_id: str,
+    payload: dict = Body(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(casting_sandbox_session),
+):
+    if not casting_sandbox_writes_enabled():
+        raise HTTPException(status_code=503, detail=CASTING_SANDBOX_DISABLED_DETAIL)
+    user_id, tenant_id = _session_identity(user)
+    body = _parse(MembershipBody, payload)
+    return _call(lambda: _writes().grant_sandbox_reviewer(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id, payload=body,
+    ))
 
 
 @sandbox_router.post("/organizations/{organization_id}/campaigns", response_model=CampaignRead)

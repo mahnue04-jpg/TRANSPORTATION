@@ -52,7 +52,14 @@
     </section>
 
     <section class="card" aria-label="Organization">
-      <label>Casting organization id<input id="organization-id" maxlength="36" autocomplete="off" /></label>
+      <form id="organization-form" class="grid">
+        <label>Organization name<input id="organization-name" maxlength="80" value="Disposable studio" required /></label>
+        <label>Casting organization id<input id="organization-id" maxlength="36" autocomplete="off" /></label>
+        <div class="actions wide">
+          <button type="submit" id="create-organization">Create sandbox organization</button>
+        </div>
+      </form>
+      <p class="hint">This creates a disposable organization for the signed-in account. It does not publish a campaign.</p>
     </section>
 
     <section class="card" aria-label="Organizer workspace">
@@ -109,6 +116,7 @@
           <button type="submit" id="save-application">Save test application</button>
           <button type="button" id="submit-application" class="secondary">Submit</button>
           <button type="button" id="withdraw-application" class="secondary">Withdraw</button>
+          <button type="button" id="resume-application" class="secondary">Resume saved application</button>
           <button type="button" id="load-status" class="secondary">Refresh status</button>
         </div>
       </form>
@@ -145,6 +153,15 @@
       var privateMedia = false;
       var playbackUrl = "";
       var applicationId = "";
+      var resumeKey = "nova_casting_sandbox_application";
+      function rememberApplication() {
+        if (!applicationId) return;
+        sessionStorage.setItem(resumeKey, JSON.stringify({
+          organizationId: org(),
+          applicationId: applicationId,
+          campaignId: $("application-campaign").value.trim()
+        }));
+      }
       function $(id) { return document.getElementById(id); }
       function token() {
         var shared = window.AmiCorSession || null;
@@ -232,6 +249,18 @@
         setToken("");
         writesEnabled = false;
         show("Signed out. Nothing was submitted.", true);
+      });
+      $("organization-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await refreshReadiness())) return;
+          var created = await api("/api/nova/casting/sandbox/organization", {
+            method: "POST",
+            body: JSON.stringify({ name: $("organization-name").value.trim() })
+          });
+          $("organization-id").value = created.id || "";
+          show("Sandbox organization ready for this account. It is not published.", true);
+        } catch (err) { /* banner already set */ }
       });
       $("campaign-form").addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -343,6 +372,7 @@
           applicationId = saved.id;
           $("review-application").value = saved.id;
           $("application-status").textContent = "Status: " + saved.status;
+          rememberApplication();
           show("Test application saved as " + saved.status + ".", true);
         } catch (err) { /* banner already set */ }
       });
@@ -359,7 +389,26 @@
           if (!(await requireSandbox()) || !applicationId) return;
           var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/withdraw", { method: "POST" });
           $("application-status").textContent = "Status: " + saved.status;
-          show("Application withdrawn.", true);
+          clearPlayback();
+          show("Application withdrawn. Private video was removed.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("resume-application").addEventListener("click", async function () {
+        try {
+          var raw = sessionStorage.getItem(resumeKey) || "";
+          var savedLocal = raw ? JSON.parse(raw) : null;
+          if (!savedLocal || !savedLocal.applicationId) {
+            show("No saved application to resume.", false);
+            return;
+          }
+          if (savedLocal.organizationId) $("organization-id").value = savedLocal.organizationId;
+          if (savedLocal.campaignId) $("application-campaign").value = savedLocal.campaignId;
+          applicationId = savedLocal.applicationId;
+          $("review-application").value = applicationId;
+          if (!(await requireSandbox())) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId));
+          $("application-status").textContent = "Status: " + saved.status;
+          show("Saved application resumed. Nothing was published.", true);
         } catch (err) { /* banner already set */ }
       });
       $("load-status").addEventListener("click", async function () {

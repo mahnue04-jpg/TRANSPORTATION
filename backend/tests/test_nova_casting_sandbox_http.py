@@ -41,9 +41,11 @@ def test_disabled_and_production_sandbox_posts_do_not_open_a_session(monkeypatch
     for key in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
         monkeypatch.setenv(key, "disposable")
     assert client.post(f"/api/nova/casting/organizations/{ORG}/campaigns", json=body).status_code == 503
+    assert client.post("/api/nova/casting/sandbox/organization", json={"name": "North Studio"}).status_code == 503
     monkeypatch.setenv("NOVA_CASTING_STAGING_READS", "true")
     monkeypatch.setenv("APP_ENV", "production")
     assert client.post(f"/api/nova/casting/organizations/{ORG}/campaigns", json=body).status_code == 503
+    assert client.post("/api/nova/casting/sandbox/organization", json={"name": "North Studio"}).status_code == 503
 
 
 def test_sql_lookup_failures_do_not_leak_database_text(monkeypatch):
@@ -311,4 +313,124 @@ def test_postgres_sandbox_journey_is_human_controlled_and_tenant_scoped(monkeypa
     admin = sa.create_engine(URL)
     with admin.begin() as conn:
         conn.exec_driver_sql("DROP SCHEMA IF EXISTS casting_sandbox_ci CASCADE")
+    admin.dispose()
+
+
+@pytest.mark.skipif(not URL, reason="Disposable PostgreSQL unavailable")
+def test_sandbox_organization_setup_stays_inside_the_caller_tenant(monkeypatch):
+    _enable(monkeypatch)
+    from app.db.session import Base
+    from app.db.models import User
+    from app.core.nova.creative_studio import casting_db_models
+
+    admin = sa.create_engine(URL)
+    with admin.begin() as conn:
+        conn.exec_driver_sql("DROP SCHEMA IF EXISTS casting_setup_ci CASCADE")
+        conn.exec_driver_sql("CREATE SCHEMA casting_setup_ci")
+    admin.dispose()
+    engine = sa.create_engine(URL, connect_args={"options": "-csearch_path=casting_setup_ci"})
+    wanted = {
+        User.__table__.name,
+        casting_db_models.NovaCastingOrganization.__table__.name,
+        casting_db_models.NovaCastingMembership.__table__.name,
+        casting_db_models.NovaCastingCampaign.__table__.name,
+        casting_db_models.NovaCastingApplication.__table__.name,
+        casting_db_models.NovaCastingConsentEvent.__table__.name,
+        casting_db_models.NovaCastingAuditEvent.__table__.name,
+    }
+    for table in Base.metadata.sorted_tables:
+        if table.name in wanted:
+            table.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr("app.db.session.SessionLocal", Session)
+    seed = Session()
+    seed.add_all([
+        User(id="organizer", email="organizer@example.invalid", hashed_password="not-a-login",
+             role="staff", organization_id="tenant-a", is_active=True, is_verified=True),
+        User(id="applicant", email="applicant@example.invalid", hashed_password="not-a-login",
+             role="staff", organization_id="tenant-a", is_active=True, is_verified=True),
+        User(id="reviewer", email="reviewer@example.invalid", hashed_password="not-a-login",
+             role="staff", organization_id="tenant-a", is_active=True, is_verified=True),
+        User(id="outsider", email="outsider@example.invalid", hashed_password="not-a-login",
+             role="staff", organization_id="tenant-b", is_active=True, is_verified=True),
+    ])
+    seed.commit()
+    seed.close()
+    holder = {"user": _user("organizer")}
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_current_user_context] = lambda: holder["user"]
+    client = TestClient(app)
+
+    def call(path, user="organizer", tenant="tenant-a", **kwargs):
+        holder["user"] = _user(user, tenant)
+        return client.request(kwargs.pop("method", "POST"), path, **kwargs)
+
+    created = call("/api/nova/casting/sandbox/organization", json={"name": "North Studio"})
+    assert created.status_code == 200, created.text
+    north = created.json()
+    assert north["casting_role"] == "organizer"
+    assert north["verification_status"] == "VERIFIED"
+    assert "tenant" not in north
+    again = call("/api/nova/casting/sandbox/organization", json={"name": "North Studio"})
+    assert again.json()["id"] == north["id"]
+    rejected = call("/api/nova/casting/sandbox/organization", json={"name": "North Studio", "tenant_id": "tenant-b"})
+    assert rejected.status_code == 422
+    south = call("/api/nova/casting/sandbox/organization", user="applicant", json={"name": "South Studio"})
+    assert south.status_code == 200, south.text
+    assert south.json()["id"] != north["id"]
+    denied = call(f"/api/nova/casting/organizations/{south.json()['id']}/campaigns", method="GET")
+    assert denied.status_code == 404
+    other = call(f"/api/nova/casting/organizations/{north['id']}/campaigns", user="applicant", method="GET")
+    assert other.status_code == 404
+    campaign = call(
+        f"/api/nova/casting/organizations/{north['id']}/campaigns",
+        json={"title": "North draft", "category": "film", "minimum_age": 18, "status": "DRAFT"},
+    )
+    assert campaign.status_code == 200, campaign.text
+    campaign_id = campaign.json()["id"]
+    crossed = call(
+        f"/api/nova/casting/organizations/{south.json()['id']}/campaigns/{campaign_id}",
+        user="applicant",
+        method="PATCH",
+        json={"title": "Stolen", "category": "film", "minimum_age": 18, "status": "DRAFT"},
+    )
+    assert crossed.status_code == 404
+    saved = call(
+        f"/api/nova/casting/organizations/{north['id']}/campaigns/{campaign_id}/applications",
+        user="applicant",
+        json={"consent_accepted": True, "consent_version": "sandbox-v1", "age_years": 24},
+    )
+    assert saved.status_code == 200, saved.text
+    application_id = saved.json()["id"]
+    wrong_org = client.get(
+        f"/api/nova/casting/organizations/{south.json()['id']}/applications/{application_id}",
+    )
+    assert wrong_org.status_code == 404
+    self_grant = call(
+        f"/api/nova/casting/organizations/{north['id']}/members",
+        json={"user_id": "organizer", "casting_role": "reviewer"},
+    )
+    assert self_grant.status_code == 422
+    promoted = call(
+        f"/api/nova/casting/organizations/{north['id']}/members",
+        json={"user_id": "reviewer", "casting_role": "organizer"},
+    )
+    assert promoted.status_code == 422
+    outsider = call(
+        f"/api/nova/casting/organizations/{north['id']}/members",
+        json={"user_id": "outsider", "casting_role": "reviewer"},
+    )
+    assert outsider.status_code == 404
+    granted = call(
+        f"/api/nova/casting/organizations/{north['id']}/members",
+        json={"user_id": "reviewer", "casting_role": "reviewer"},
+    )
+    assert granted.status_code == 200, granted.text
+    assert granted.json()["casting_role"] == "reviewer"
+    assert granted.json()["active"] is True
+    engine.dispose()
+    admin = sa.create_engine(URL)
+    with admin.begin() as conn:
+        conn.exec_driver_sql("DROP SCHEMA IF EXISTS casting_setup_ci CASCADE")
     admin.dispose()

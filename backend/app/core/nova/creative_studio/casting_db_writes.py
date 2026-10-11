@@ -6,6 +6,7 @@ disposable sandbox, and only after a security scan stores them outside public ho
 """
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -21,6 +22,7 @@ from .casting_db_models import (
     NovaCastingCampaign,
     NovaCastingConsentEvent,
     NovaCastingMedia,
+    NovaCastingMembership,
     NovaCastingOrganization,
     NovaCastingReview,
 )
@@ -169,6 +171,111 @@ def _audit(db: Session, *, actor_id: str, organization_id: str, action: str, obj
 
 def _page(items: list, limit: int, offset: int) -> dict:
     return {"items": items, "limit": limit, "offset": offset}
+
+
+_ORG_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .'-]{0,78}$")
+
+
+def _organization_view(org: NovaCastingOrganization, *, casting_role: str) -> dict:
+    return {
+        "id": org.id,
+        "name": org.name,
+        "verification_status": org.verification_status,
+        "casting_role": casting_role,
+    }
+
+
+def ensure_sandbox_organization(
+    *, db: Session, user_id: str, tenant_id: str, payload: dict,
+) -> dict:
+    """Create a disposable organization owned by the signed-in account.
+
+    The caller cannot choose a tenant, role, or verification status. Repeating
+    the same name returns the organization that caller already organizes.
+    """
+    _guard()
+    _account(db, user_id, tenant_id)
+    name = str(payload.get("name") or "").strip()
+    if "@" in name or _ORG_NAME.fullmatch(name) is None:
+        raise CastingRequestRejected("Invalid organization name")
+    try:
+        existing = (
+            db.query(NovaCastingOrganization)
+            .join(
+                NovaCastingMembership,
+                NovaCastingMembership.organization_id == NovaCastingOrganization.id,
+            )
+            .filter(
+                NovaCastingOrganization.nova_tenant_id == tenant_id,
+                NovaCastingOrganization.name == name,
+                NovaCastingMembership.user_id == user_id,
+                NovaCastingMembership.nova_tenant_id == tenant_id,
+                NovaCastingMembership.casting_role == "organizer",
+                NovaCastingMembership.active.is_(True),
+            )
+            .one_or_none()
+        )
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+    if existing is not None:
+        return _organization_view(existing, casting_role="organizer")
+    org = NovaCastingOrganization(
+        id=_new_id(), nova_tenant_id=tenant_id, name=name,
+        verification_status="VERIFIED", created_at=_now(),
+    )
+    db.add(org)
+    _flush(db)
+    db.add(NovaCastingMembership(
+        id=_new_id(), nova_tenant_id=tenant_id, organization_id=org.id,
+        user_id=user_id, casting_role="organizer", active=True, created_at=_now(),
+    ))
+    _flush(db)
+    return _organization_view(org, casting_role="organizer")
+
+
+def grant_sandbox_reviewer(
+    *, db: Session, user_id: str, tenant_id: str, organization_id: str, payload: dict,
+) -> dict:
+    """An organizer may add one same-tenant reviewer. Organizer role is not grantable."""
+    _guard()
+    actor = _member(db, user_id, tenant_id, organization_id)
+    if not may_manage_campaign(actor, organization_id=organization_id):
+        raise CastingAccessDenied("Application unavailable")
+    if str(payload.get("casting_role") or "") != "reviewer":
+        raise CastingRequestRejected("Request rejected")
+    target_id = str(payload.get("user_id") or "").strip()
+    if not target_id or target_id == user_id or len(target_id) > 36:
+        raise CastingRequestRejected("Request rejected")
+    _account(db, target_id, tenant_id)
+    try:
+        existing = db.query(NovaCastingMembership).filter(
+            NovaCastingMembership.organization_id == organization_id,
+            NovaCastingMembership.user_id == target_id,
+        ).one_or_none()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+    if existing is not None:
+        if existing.casting_role != "reviewer":
+            raise CastingRequestRejected("Request rejected")
+        existing.active = True
+        _flush(db)
+        return {
+            "organization_id": organization_id,
+            "user_id": target_id,
+            "casting_role": "reviewer",
+            "active": True,
+        }
+    db.add(NovaCastingMembership(
+        id=_new_id(), nova_tenant_id=tenant_id, organization_id=organization_id,
+        user_id=target_id, casting_role="reviewer", active=True, created_at=_now(),
+    ))
+    _flush(db)
+    return {
+        "organization_id": organization_id,
+        "user_id": target_id,
+        "casting_role": "reviewer",
+        "active": True,
+    }
 
 
 def create_draft_campaign(

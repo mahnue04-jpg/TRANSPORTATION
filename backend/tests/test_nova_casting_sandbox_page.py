@@ -29,5 +29,7 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "No relationship or integration with Zeus" in sandbox
     assert "Nothing was submitted" in sandbox
     assert "Save campaign edits" in sandbox
+    assert "Create sandbox organization" in sandbox
+    assert "Resume saved application" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):
         assert label in sandbox

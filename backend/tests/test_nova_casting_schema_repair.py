@@ -131,3 +131,47 @@ def test_skipped_ddl_is_repaired_idempotently_and_downgrade_keeps_tables(url, mo
         with admin_engine.begin() as admin:
             admin.exec_driver_sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         admin_engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("CASTING_TEST_POSTGRES_URL"), reason="PostgreSQL CI service not configured")
+def test_older_disposable_schema_upgrades_and_rolls_back(monkeypatch):
+    """An older organization-only schema can take later revisions, then roll back."""
+    for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
+        monkeypatch.setenv(name, "disposable")
+    url = os.environ["CASTING_TEST_POSTGRES_URL"]
+    schema = "casting_history_ci"
+    admin = sa.create_engine(url)
+    with admin.begin() as conn:
+        conn.exec_driver_sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+        conn.exec_driver_sql(f"CREATE SCHEMA {schema}")
+    admin.dispose()
+    engine = sa.create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+    org = _load(ORG, "_casting_history_org")
+    content = _load(CONTENT, "_casting_history_content")
+    audit = _load(AUDIT, "_casting_history_audit")
+    repair = _load(REPAIR, "_casting_history_repair")
+    older = {"nova_casting_organizations", "nova_casting_memberships"}
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE platform_users (id VARCHAR(36) PRIMARY KEY)")
+        _run(conn, org)
+        names = set(sa.inspect(conn).get_table_names())
+        assert older <= names
+        assert "nova_casting_campaigns" not in names
+        _run(conn, content)
+        _run(conn, audit)
+        _run(conn, repair)
+        _run(conn, repair)
+        assert set(TABLES) <= set(sa.inspect(conn).get_table_names())
+        _downgrade(conn, repair)
+        assert set(TABLES) <= set(sa.inspect(conn).get_table_names())
+        _downgrade(conn, audit)
+        _downgrade(conn, content)
+        _downgrade(conn, org)
+        names = set(sa.inspect(conn).get_table_names())
+        assert not any(name.startswith("nova_casting_") for name in names)
+        assert "platform_users" in names
+    engine.dispose()
+    admin = sa.create_engine(url)
+    with admin.begin() as conn:
+        conn.exec_driver_sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+    admin.dispose()
