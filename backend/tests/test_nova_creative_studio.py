@@ -1035,6 +1035,9 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
     assert "Meet AMICOR Nova, your AI operations workspace" in html
     assert 'id="reset-project-media"' in html
     assert "Clear all generated media from this project" in html
+    assert "assets/reset-media" in js
+    assert "Clear old videos and generated media from this project?" in js
+    assert "Script, captions, storyboard, and brief will be preserved." in js
     assert "assetTypeLabel" in js
     assert "Full-body presenter" in js
     assert "Final demo video" in js
@@ -1808,8 +1811,9 @@ def test_studio_demo_ui_keeps_preview_playback_and_memory_message() -> None:
     assert "Download captions" in js
     assert 'value="half_body"' in html
     assert 'value="full_body"' in html
+    assert '<option value="coral" selected>Coral · clear female voice</option>' in html
     assert '<option value="shimmer">Genova · youthful female voice</option>' in html
-    assert 'value="coral" selected' in html
+    assert 'value="shimmer" selected' not in html
     assert 'value="coral"' in html
     assert 'value="nova"' in html
 
