@@ -1,59 +1,65 @@
-# Nova Casting staging checklist
+# Nova Casting launch checklist
 
-Status: draft branch only. Do not merge, deploy, or collect real auditions from this checklist.
+Draft pull request #308 only. Do not merge. Do not deploy. Nothing in this checklist is live on a real host.
 
-## What is enabled in a disposable test environment
+`GET /api/nova/casting/readiness` keeps `enabled`, `applications_enabled`, and `media_uploads_enabled` false. Sandbox routes open only when `NOVA_CASTING_STAGING_READS` is true and `AMICOR_ENVIRONMENT`, `ENVIRONMENT`, and `APP_ENV` agree on one allowlisted non-production value. Absent, unknown, conflicting, and production values stay off.
 
-- `GET /api/nova/casting/readiness` requires the existing Nova login. `enabled`, `applications_enabled`, and `media_uploads_enabled` stay false.
-- Authenticated reads and disposable sandbox writes run only when `NOVA_CASTING_STAGING_READS` is true and `AMICOR_ENVIRONMENT`, `ENVIRONMENT`, and `APP_ENV` agree on one allowlisted non-production value (`development`, `dev`, `test`, `testing`, `local`, `staging`, or `disposable`). Absent, unknown, conflicting, and production values stay off.
-- Sandbox routes can create and edit unpublished draft campaigns, save a consent-based test application, submit it, list status, withdraw a submitted application, record a review, shortlist, and store a human callback proposal. Nothing is emailed or texted.
-- Media metadata routes still accept MIME type and byte size only. That row is quarantined and cannot be played.
-- When sandbox writes are on, an applicant can upload `video/mp4`, `video/quicktime`, or `video/webm` bytes. The file is scanned before it is stored. The client filename is ignored. A clean file is written outside `backend/static` and outside `/media/nova-creative`, mode `0600`, under `NOVA_CASTING_PRIVATE_MEDIA_DIR` or a private temp directory. Playback is an authenticated `GET` with `Cache-Control: private, no-store` and supports one `Range` request. There is no signed URL. `media_uploads_enabled` stays false. `sandbox_private_media_enabled` follows the same sandbox flag. Withdrawal removes the private bytes after the database commit. A failed commit removes a file written in that request.
-- Audit rows record the allowlisted action, actor id, organization id, object id, and time. They do not store notes, emails, or storage keys.
-- The fictional preview at `backend/static/nova-creative/casting-preview.html` still makes no network calls. The separate page `backend/static/nova-creative/casting-sandbox.html` calls the API with the existing Creative Studio Nova token and only after readiness reports `sandbox_writes_enabled`.
+## Requirement status
 
-## What stays off
+| Requirement | Implemented | Tested | Live | Blocked by |
+| --- | --- | --- | --- | --- |
+| Authenticated organizer and applicant journey: create and edit a draft, consent, save, resume, submit, review, shortlist, callback, withdraw, and delete private media | Yes, on the sandbox page | Desktop 1280x800 and mobile 390x844 browser runs on a disposable API | No | Owner approval before any real host |
+| Same-tenant wrong-organization denial | Yes. Setup binds the organization to the caller tenant. Another account's organization returns 404 for management and for the other organization's application id | PostgreSQL HTTP test and both browser runs | No | Owner approval |
+| Sandbox organization and reviewer membership without hand-seeded casting rows | Yes. The signed-in account creates its own organization. Only `reviewer` can be granted, and only to another active user in the same tenant | PostgreSQL HTTP test and browser setup | No | Platform login still requires an existing Nova user. This does not create Nova accounts |
+| Private video upload, one byte range, withdrawal cleanup, failed-commit cleanup, orphan cleanup | Yes | Disposable PostgreSQL media test | No | Owner approval. `media_uploads_enabled` stays false |
+| Structural scan separated from antivirus readiness | Yes. Default mode is structural-only | Unit tests and browser banner | No | A structural pass is not maintained antivirus |
+| Maintained ClamAV on disposable infrastructure | Yes, as an opt-in. See `docs/nova-casting-clamav-runbook.md` | ClamAV 1.5.4 with fresh `daily.cvd` 28150, `main.cvd` 63, and `bytecode.cvd` 339 accepted a synthetic MP4 and detected EICAR directly | No | Not installed on any real host. `clamd` is not started |
+| Fresh and older disposable PostgreSQL history, repair, and rollback | Yes. Production stamps create no tables. Repair is idempotent and its downgrade keeps tables. An older organization-only schema accepts later revisions and can roll back to no casting tables | `CASTING_TEST_POSTGRES_URL` tests for repair, history, two revisions, and migration execution | No | Do not run `alembic upgrade heads` against a non-disposable database |
+| Environment gates | Yes. Default deny | Flag tests for absent, unknown, conflicting, and production values | No | Do not set the flag on a real host without approval |
 
-- Public intake, campaign publishing, public file hosting, signed media URLs, and external delivery.
-- `casting_db_models` is not imported by application startup, Creative Studio schema ensure, or Alembic autogenerate.
-- `Base.metadata.create_all` omits `nova_casting_` tables, including Health ISF startup.
-- Alembic revisions `20261010_casting_org_draft`, `20261010_casting_content_draft`, and `20261010_casting_audit_consent` return without DDL when the process is production. They still stamp the revision, so production `alembic upgrade heads` does not create casting tables.
-- Forward-only revision `20261011_casting_schema_repair` creates any missing casting tables outside production and does nothing in production. Its downgrade does not drop tables.
+## Explicitly unavailable
+
+- Public intake, campaign publishing, and a public application form.
+- Signed media URLs, public file hosting, and playback without the Nova session.
+- Email, SMS, and external delivery of callbacks.
+- Real applicant videos, names, or contact details. Tests use synthetic bytes and `.invalid` addresses.
+- Paid scanners, paid signature feeds, and third-party contact.
+- Casting tables on production startup or in production `alembic upgrade heads`.
+- Zeus or any other partner connection.
+- Website and Creative Studio diagnostic changes. Those belong to the revenue work.
+
+## Remaining dependencies
+
+- Owner approval to merge pull request #308.
+- Owner approval before any Render or other real-host deployment.
+- Owner approval before a migration against a database that is not disposable.
+- A Nova user account for each person in a sandbox demo. Casting setup does not register users.
+- If antivirus readiness is required on a future disposable host, install the free ClamAV packages from the OS archive and run `freshclam` into `NOVA_CASTING_CLAMAV_DB`. Do not treat structural mode as that install.
+
+## Rollout, only after those approvals
+
+1. Confirm the target is not production and that `AMICOR_ENVIRONMENT`, `ENVIRONMENT`, and `APP_ENV` agree on one allowlisted name.
+2. Run `alembic upgrade heads` only against a database the owner has named for this purpose. Production skips casting DDL. A database that already stamped the earlier casting revisions without tables needs the forward repair revision `20261011_casting_schema_repair`.
+3. Set `NOVA_CASTING_STAGING_READS` only on that disposable or approved staging process.
+4. Leave `media_uploads_enabled` false. It is a fixed response field, not an upload switch.
+5. Optional: set `NOVA_CASTING_SCANNER=clamav` and `NOVA_CASTING_CLAMAV_DB` after `freshclam` succeeds. Otherwise the page stays on structural-only wording.
+
+## Rollback
+
+- Turn `NOVA_CASTING_STAGING_READS` off. Routes return 503 and do not open a casting session.
+- Repair revision `20261011_casting_schema_repair` downgrade does not drop tables.
+- On a disposable database, the earlier casting revisions can downgrade and drop the casting tables. Do not do that on a shared or production database.
+- Delete the private media directory for that disposable process. It is not under `backend/static`.
 
 ## Disposable verification
-
-From the repository root, with PostgreSQL available:
 
 ```bash
 export CASTING_TEST_POSTGRES_URL=postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test
 python -m pytest --noconftest -q backend/tests/test_nova_casting_migration_execution.py backend/tests/test_nova_casting_two_migrations.py backend/tests/test_nova_casting_audit_consent.py backend/tests/test_nova_casting_schema_repair.py backend/tests/test_nova_casting_flags.py backend/tests/test_nova_casting_intake_schema.py backend/tests/test_nova_casting_schema_guard.py backend/tests/test_nova_casting_router_draft.py backend/tests/test_nova_casting_router_sandbox.py backend/tests/test_nova_casting_media_scan.py
 ```
 
-From `backend/`, against a disposable database:
+From `backend/`:
 
 ```bash
 python -m pytest -q tests/test_nova_casting_db_reads_integration.py tests/test_nova_casting_router_http.py tests/test_nova_casting_sandbox_http.py tests/test_nova_casting_private_media_http.py
 ```
-
-Local UI check, only with the flag and an allowlisted environment set on a disposable API:
-
-1. Sign in through Creative Studio or the sandbox page. The token key is `amicor_nova_creative_token`.
-2. Open `/static/nova-creative/casting-sandbox.html`.
-3. If readiness reports sandbox writes off, the page stops and tells you nothing was submitted.
-4. With writes on, an organizer creates a draft campaign and an applicant saves consent, submits, and can withdraw. The organizer reviews, shortlists, and records a callback. No message is sent.
-5. The applicant can upload a small test video. A clean file plays in the page's video element for that signed-in account. A rejected file does not play. Metadata-only rows stay unplayable.
-
-## Known gaps
-
-- Scanner readiness is explicit. The default mode is structural-only and `antivirus_ready` stays false. `NOVA_CASTING_SCANNER=clamav` requires `clamscan` and signature files newer than seven days. A missing scanner, missing or stale signatures, an unknown scanner name, a timeout, or a scanner error rejects the file and does not store it. A structural pass is not antivirus.
-- Sandbox writes do not create casting organizations or memberships. Those rows must already exist in the disposable database.
-- Campaigns cannot be published. No email or SMS is sent. Public intake stays off.
-- This is not launch-ready. Zeus is not a partner and is not connected. Do not deploy without owner approval.
-
-## Approval gates still required
-
-- Merge of PR #308.
-- Any staging or production deployment, including Render.
-- Running migrations against a non-disposable database.
-- Setting `NOVA_CASTING_STAGING_READS` on a real host.
-- Paid services, external integrations, or real applicant videos.

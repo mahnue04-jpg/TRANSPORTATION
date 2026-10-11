@@ -117,12 +117,17 @@ class ClamAvBackend:
         binary = self.binary()
         if not binary:
             return False
+        command = [binary, "--no-summary"]
+        database = str(os.getenv("NOVA_CASTING_CLAMAV_DB") or "").strip()
+        if database:
+            command.extend(["--database", database])
         with tempfile.TemporaryDirectory(prefix="nova-casting-scan-") as directory:
             target = Path(directory) / "audition.bin"
             target.write_bytes(data)
+            command.append(str(target))
             try:
                 completed = subprocess.run(
-                    [binary, "--no-summary", str(target)],
+                    command,
                     capture_output=True,
                     timeout=30,
                     check=False,

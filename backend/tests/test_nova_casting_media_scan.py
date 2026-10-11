@@ -111,14 +111,19 @@ def test_clamscan_failure_is_not_treated_as_clean(monkeypatch, tmp_path):
     monkeypatch.setattr(scan.subprocess, "run", explode)
     assert scan.scan_video_bytes(MP4, "video/mp4").clean is False
 
-    def accept(*_args, **_kwargs):
-        return subprocess.CompletedProcess(args=["clamscan"], returncode=0)
+    seen = {}
+
+    def accept(command, *_args, **_kwargs):
+        seen["command"] = command
+        return subprocess.CompletedProcess(args=command, returncode=0)
 
     monkeypatch.setattr(scan.subprocess, "run", accept)
     accepted = scan.scan_video_bytes(MP4, "video/mp4")
     assert accepted.clean is True
     assert accepted.engine == "clamscan"
     assert accepted.reason == "Antivirus scan accepted"
+    assert "--database" in seen["command"]
+    assert seen["command"][seen["command"].index("--database") + 1] == str(tmp_path / "clamav")
 
 
 def test_missing_or_stale_antivirus_fails_closed(monkeypatch, tmp_path):
