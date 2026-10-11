@@ -37,28 +37,28 @@
             <h2>Explore &amp; scope</h2>
             <p><strong>$0</strong></p>
             <p>Explore the public demo and request a scope check. The Nova app also offers a seven-day account trial with no card required.</p>
-            <button class="btn btn-ghost" type="button" data-plan-choice="Explore &amp; scope ($0)">Select</button>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Explore &amp; scope ($0)" aria-pressed="false">Select Explore &amp; scope</button>
           </article>
           <article class="card">
             <h2>Starter Task</h2>
             <p><strong>$49 one-time</strong></p>
             <p>A supported starter task, with scope reviewed before work begins.</p>
-            <button class="btn btn-primary" type="button" data-plan-choice="Starter Task ($49 one-time)">Select</button>
+            <button class="btn btn-primary" type="button" data-plan-choice="Starter Task ($49 one-time)" aria-pressed="false">Select Starter Task</button>
           </article>
           <article class="card">
             <h2>Launch Operations</h2>
             <p><strong>$99/month</strong></p>
             <p>Recurring supported digital operations. Confirm the scope and plan details in the Nova app.</p>
-            <button class="btn btn-ghost" type="button" data-plan-choice="Launch Operations ($99/month)">Select</button>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Launch Operations ($99/month)" aria-pressed="false">Select Launch Operations</button>
           </article>
           <article class="card">
             <h2>Business Operations</h2>
             <p><strong>$299/month</strong></p>
             <p>Business operations support within an agreed scope. Complex projects are quoted separately.</p>
-            <button class="btn btn-ghost" type="button" data-plan-choice="Business Operations ($299/month)">Select</button>
+            <button class="btn btn-ghost" type="button" data-plan-choice="Business Operations ($299/month)" aria-pressed="false">Select Business Operations</button>
           </article>
         </div>
-        <p data-plan-status>No starting option selected.</p>
+        <p data-plan-status role="status">No starting option selected.</p>
         <p><a href="/guides/research-memo-setup/">Read the research-memo guide</a>. That guide is also a development preview.</p>
       </div>
     </section>
@@ -66,8 +66,6 @@
       <div class="wrap">
         <h2>Request this starting option</h2>
         <p>Submitting saves the request and shows a reference ID. It does not start work, charge a card, or confirm email.</p>
-        <p class="form-error" data-form-error role="alert"></p>
-        <p class="form-success" data-form-success tabindex="-1" aria-live="polite">AMICOR saved your request.</p>
         <form class="panel" data-early-access-form data-start-funnel novalidate>
           <div class="hp" aria-hidden="true">
             <input name="middle_name_confirm" tabindex="-1" autocomplete="off" aria-hidden="true">
@@ -87,13 +85,9 @@
               <option>1000+</option>
             </select>
           </label>
-          <label>What is your inquiry about?
+          <label>Inquiry
             <select name="product" id="product" required>
-              <option value="">Select</option>
-              <option>Business Services</option>
               <option selected>Nova Operations Agent</option>
-              <option>Ask Nova</option>
-              <option>Other</option>
             </select>
           </label>
           <label>Message <textarea name="message" rows="5" required placeholder="Describe the result, deadline, and inputs."></textarea></label>
@@ -101,6 +95,8 @@
             <input name="consent" type="checkbox" value="yes" required>
             <span>I understand this is not a purchase, I have read the <a href="/privacy/">Privacy Policy</a>, I will not submit medical records or other sensitive health information, and I consent to AMICOR storing this business inquiry.</span>
           </label>
+          <p class="form-error" data-form-error role="alert"></p>
+          <p class="form-success" data-form-success tabindex="-1" aria-live="polite">AMICOR saved your request.</p>
           <button class="btn btn-primary" type="submit">Submit request</button>
         </form>
       </div>

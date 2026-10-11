@@ -48,11 +48,14 @@
     button.addEventListener("click", function () {
       var label = button.getAttribute("data-plan-choice") || "";
       form.setAttribute("data-selected-plan", label);
+      document.querySelectorAll("[data-plan-choice]").forEach(function (other) {
+        other.setAttribute("aria-pressed", other === button ? "true" : "false");
+      });
       if (planStatus) planStatus.textContent = "Selected: " + label;
       var productField = form.elements.product;
       if (productField) productField.value = "Nova Operations Agent";
       var formTop = document.getElementById("start-form");
-      if (formTop && formTop.scrollIntoView) formTop.scrollIntoView();
+      if (formTop && formTop.scrollIntoView) formTop.scrollIntoView({ block: "start" });
     });
   });
 
@@ -154,6 +157,9 @@
       consent: true,
       source: "amicor-public-website-w8"
     };
+    if (form.hasAttribute("data-start-funnel")) {
+      payload.product = "Nova Operations Agent";
+    }
     var selectedPlan = form.getAttribute("data-selected-plan") || "";
     if (selectedPlan) {
       payload.message = "Starting option: " + selectedPlan + "\n\n" + payload.message;
@@ -185,6 +191,7 @@
       if (result && result.duplicate) text += " This matches a request already on file.";
       text += " Email delivery was not confirmed.";
       success.textContent = text;
+      if (success.scrollIntoView) success.scrollIntoView({ block: "center" });
       success.focus();
     }
 

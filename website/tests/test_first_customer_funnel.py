@@ -31,6 +31,18 @@ def test_funnel_uses_published_prices_and_stays_unlisted() -> None:
     assert 'content="noindex,nofollow"' in START
     assert "data-start-funnel" in START
     assert "data-early-access-form" in START
+    for label in (
+        "Select Explore &amp; scope",
+        "Select Starter Task",
+        "Select Launch Operations",
+        "Select Business Operations",
+    ):
+        assert label in START
+    assert ">Select</button>" not in START
+    product = START.split('name="product"', 1)[1].split("</select>", 1)[0]
+    assert "Nova Operations Agent" in product
+    assert "Business Services" not in product
+    assert "Ask Nova" not in product
     assert "/start/" not in SITEMAP
     for page in NAV_PAGES:
         html = page.read_text(encoding="utf-8")
@@ -45,6 +57,9 @@ def test_funnel_posts_through_corrected_lead_capture() -> None:
     assert 'payload.message = "Starting option: "' in JS
     assert "result.referenceId" in JS
     assert "Email delivery was not confirmed." in JS
+    assert "A notification email was sent." not in JS
+    assert 'payload.product = "Nova Operations Agent"' in JS
+    assert "aria-pressed" in JS
 
 
 def test_guide_is_original_and_enrollment_pending() -> None:

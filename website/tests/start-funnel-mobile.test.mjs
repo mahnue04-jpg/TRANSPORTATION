@@ -82,7 +82,24 @@ const page = await browser.newPage({
 
 try {
   await page.goto(`http://127.0.0.1:${port}/start/`);
-  await page.getByRole("button", { name: "Select" }).nth(1).tap();
+  const choiceNames = await page.locator("[data-plan-choice]").allInnerTexts();
+  assert.deepEqual(choiceNames.map((name) => name.trim()), [
+    "Select Explore & scope",
+    "Select Starter Task",
+    "Select Launch Operations",
+    "Select Business Operations",
+  ]);
+  await page.locator("[name=name]").fill("Jordan Hale");
+  await page.locator("[name=company]").fill("North Star Transit");
+  await page.locator("[name=email]").fill("jordan@northstar.example");
+  await page.locator("[name=industry]").fill("Operations");
+  await page.locator("[name=companySize]").selectOption("11-50");
+  await page.locator("[name=message]").fill("Need a cited research memo by Friday.");
+  await page.locator("[name=consent]").check();
+  await page.locator("button[type=submit]").tap();
+  await page.locator("[data-form-error]").waitFor({ state: "visible" });
+  assert.match(await page.locator("[data-form-error]").innerText(), /Choose a starting option/);
+  await page.getByRole("button", { name: "Select Starter Task" }).tap();
   await page.waitForFunction(() => document.querySelector("[data-plan-status]").textContent.includes("Starter Task ($49 one-time)"));
   await page.locator("[name=name]").fill("Jordan Hale");
   await page.locator("[name=company]").fill("North Star Transit");
@@ -97,6 +114,10 @@ try {
   const text = await success.innerText();
   assert.match(text, /Reference AMQ-[0-9A-F]{8}/);
   assert.match(text, /Email delivery was not confirmed/);
+  assert.doesNotMatch(text, /notification email was sent/);
+  assert.equal(await page.locator("[data-plan-choice]").nth(1).getAttribute("aria-pressed"), "true");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  assert.equal(overflow, false);
   assert.match(lastBody.message, /Starting option: Starter Task \(\$49 one-time\)/);
   assert.match(lastBody.message, /cited research memo/);
   assert.equal(lastBody.product, "Nova Operations Agent");
@@ -105,6 +126,11 @@ try {
   const disclosure = await page.locator("[data-affiliate-disclosure]").innerText();
   assert.match(disclosure, /Affiliate enrollment: pending/);
   assert.match(disclosure, /no affiliate links/);
+  assert.match(disclosure, /no commission/);
+  assert.match(disclosure, /no income claim/);
+  assert.doesNotMatch(disclosure, /\$/);
+  const guideOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  assert.equal(guideOverflow, false);
   console.log("PASS mobile first-customer funnel");
   console.log("FUNNEL_MOBILE_PASSED=1");
   console.log("FUNNEL_MOBILE_FAILED=0");
