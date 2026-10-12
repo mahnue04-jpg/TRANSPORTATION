@@ -1,0 +1,42 @@
+name: Website Nova access
+
+# Test-only. Does not deploy Cloudflare Pages, Render, or Netlify.
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - ".github/workflows/website-nova-access.yml"
+  push:
+    branches:
+      - "cursor/nova-signed-in-site-ctas-bdca"
+    paths:
+      - "website/**"
+      - ".github/workflows/website-nova-access.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    name: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Direct URL and claim checks
+        run: |
+          python website/tests/test_nova_access.py
+          python website/tests/test_website_redesign.py
+          python website/tests/test_early_access_honeypot.py
+      - name: Install the browser used by the mobile check
+        run: |
+          npm install --no-save --no-fund --no-audit playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Mobile and accessibility check
+        run: node website/tests/nova-access-mobile.test.mjs

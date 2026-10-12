@@ -165,6 +165,7 @@ def page(
         current_attr = ' aria-current="page"' if href == current else ""
         nav.append(f'<a href="{href}"{current_attr}>{label}</a>')
     nav_html = "\n          ".join(nav)
+    cta_current = ' aria-current="page"' if current == "/nova-access/" else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -215,7 +216,7 @@ def page(
       <nav id="site-nav" class="nav" data-nav>
           {nav_html}
           <a class="nav-signin" href="/signin/">Sign In</a>
-          <a class="nav-cta" href="https://amicor-health-isf-py.onrender.com/nova/anonymous-agent">Try Nova</a>
+          <a class="nav-cta" href="/nova-access/"{cta_current}>Open Nova</a>
       </nav>
     </div>
   </header>
@@ -233,6 +234,7 @@ def page(
       <div class="footer-col">
         <strong>Services &amp; Products</strong>
         <nav class="footer-links" aria-label="Footer product links">
+          <a href="/nova-access/">Open Nova</a>
           <a href="/business-services/">Business Services</a>
           <a href="/ask-nova/">Ask Nova</a>
           <a href="/nova-operations/">Operations Agent</a>
@@ -1104,9 +1106,10 @@ add(
           <p class="lede">Find work. Manage work. Track revenue. Stay in control.</p>
           <p class="notice">Status: Early Access / In Development. This public page does not enable live external submissions, client contact, or financial execution.</p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="/early-access/?product=AMICOR%20Nova%20Work%20%26%20Revenue">Request Early Access</a>
-            <a class="btn btn-ghost" href="/early-access/?intent=demo&amp;product=AMICOR%20Nova%20Work%20%26%20Revenue">Watch Demo</a>
+            <a class="btn btn-primary" href="/nova-access/#work-revenue">Review signed-in status</a>
+            <a class="btn btn-ghost" href="/early-access/?product=AMICOR%20Nova%20Work%20%26%20Revenue">Request Early Access</a>
           </div>
+          <p>Signed-in review opens the existing Nova workspace. It does not submit applications, contact clients, or collect payment.</p>
         </div>
         {nova_shell()}
       </div>
@@ -1153,8 +1156,11 @@ add(
         <p class="kicker">AMICOR Nova</p>
         <h1>Nova Today</h1>
         <p class="lede">Intelligent daily command center. Today surfaces work, approvals, and owner-confirmed revenue summaries for signed-in operators.</p>
-        <p class="notice">Status: Early Access / In Development. This public website does not open a live operator workspace.</p>
-        <div class="hero-actions"><a class="btn btn-primary" href="/early-access/?product=AMICOR%20Nova%20Today">Request Early Access</a></div>
+        <p class="notice">Status: Early Access / In Development. This public page does not activate the workspace.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/nova-access/#nova-today">Review signed-in status</a>
+          <a class="btn btn-ghost" href="/early-access/?product=AMICOR%20Nova%20Today">Request Early Access</a>
+        </div>
       </div>
     </section>
     <section class="section"><div class="wrap">{nova_shell()}</div></section>
@@ -1233,6 +1239,7 @@ def main() -> None:
         "/car-hub/",
         "/about/",
         "/signin/",
+        "/nova-access/",
         "/early-access/",
         "/contact/",
         "/privacy/",

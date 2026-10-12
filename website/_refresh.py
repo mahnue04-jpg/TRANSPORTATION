@@ -4,8 +4,11 @@ from html import escape
 APP = 'https://amicor-health-isf-py.onrender.com'
 LOGIN = APP + '/nova?signin=1'
 AGENT = APP + '/nova/anonymous-agent'
+WORK = APP + '/nova/work'
+TODAY = APP + '/nova/today'
 CREATIVE = APP + '/nova/creative'
 SIGNUP = APP + '/nova/signup'
+ACCESS = '/nova-access/'
 
 
 def apply(add, pages, status_table):
@@ -47,9 +50,9 @@ def apply(add, pages, status_table):
         'AI-assisted business research, administrative support, CRM and workflow assessment, and Nova software from Minnesota-based AMICOR.',
         hero('AMICOR · Minnesota, USA', 'Less busywork.<br>More room to build.',
              'Research, reports, data cleanup, and workflow support—with AI-assisted preparation and human review.',
-             button('/business-services/', 'Explore Business Services') + button(AGENT, 'Try Nova', False))
+             button('/business-services/', 'Explore Business Services') + button(ACCESS, 'Open Nova', False))
         + section('Bring us the work that slows you down', service_cards)
-        + section('Meet Nova', product_cards + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>.</p>')
+        + section('Meet Nova', product_cards + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>.</p><p><a href="' + ACCESS + '">Choose a signed-in Nova path</a>. The public Operations Agent demo stays a sandbox and does not send email, update a CRM, or charge money.</p>')
         + section('See how a task becomes a deliverable', '<div class="grid grid-3"><article class="card"><h3>1. Define the result</h3><p>Share your goal, inputs, deadline, and acceptance criteria.</p></article><article class="card"><h3>2. Prepare &amp; review</h3><p>AMICOR checks the scope. Nova assists with supported work, and a person reviews the output.</p></article><article class="card"><h3>3. Deliver the work</h3><p>Receive the agreed materials with sources, assumptions, and next steps where relevant.</p></article></div>')
         + section('Evaluate before you commit', button(AGENT, 'Run the Interactive Demo') + ' ' + button('/samples/', 'View Sample Deliverables', False) + '<p>The app demo illustrates a lead workflow. It does not contact customers or change a live CRM. Samples are fictional examples, not client case studies.</p>')
         + section('Future AMICOR initiatives', '<p>Transportation, local delivery, Lifesaver, and connected hardware remain on separate development timelines.</p><div class="grid grid-3">' + card('Health &amp; Deliver', 'Transportation and delivery technology in development; public ride and delivery orders are not offered here.', '/health/') + card('Lifesaver AI Care Cloud', 'A connected-care technology initiative in development.', '/lifesaver/') + card('Home Hub &amp; Car Hub', 'Future hardware concepts; not for sale.', '/home-hub/') + '</div><p><a href="/products/">View the full product catalog and status</a></p>'))
@@ -75,7 +78,7 @@ def apply(add, pages, status_table):
     replace('/pricing/', 'AMICOR Nova Pricing and Project Quotes', 'Nova starting options: free exploration, $49 starter task, $99/month and $299/month. Complex projects are quoted separately.',
         hero('Pricing', 'Start small. Scope the work clearly.', 'Explore Nova before choosing a task or recurring support plan.', button(SIGNUP, 'Start a Seven-Day Trial') + button('/early-access/?product=Business%20Services&intent=quote', 'Request a Project Quote', False)) + section('Nova Operations Agent', plans) + section('Larger projects', '<p>Research projects, CRM assessments, custom workflow design, and other complex engagements receive a separate quote based on scope and deliverables.</p>'))
     replace('/signin/', 'Sign In to AMICOR Nova', 'Use your existing Nova account or create an account for the seven-day trial.',
-        hero('Your Nova account', 'Welcome back.', 'Continue to the Nova app to sign in with your existing account.', button(LOGIN, 'Sign In to Nova') + button(SIGNUP, 'Create an Account', False)) + section('One account, your Nova workspace', '<p>Use your account for Ask Nova and the Operations Agent. Product and module access depend on your plan. Creative Studio requires sign-in and enabled capabilities.</p>'))
+        hero('Your Nova account', 'Welcome back.', 'Continue to the Nova app to sign in with your existing account.', button(LOGIN, 'Sign In to Nova') + button(SIGNUP, 'Create an Account', False)) + section('One account, your Nova workspace', '<p>Use your account for Ask Nova and the Operations Agent. Work &amp; Revenue and Nova Today stay early access. Product and module access depend on your plan. Creative Studio requires sign-in and enabled capabilities. This page does not open casting, public auditions, payment collection, or automatic applications.</p>' + button(ACCESS, 'Review what is available', False)))
     replace('/nova-create/', 'Nova Creative Studio — Scripts, Storyboards and Branded Assets', 'Plan scripts, captions, storyboards and branded assets in Nova Creative Studio.',
         hero('Nova software · Supervised release', 'Creative Studio', 'Develop ideas into scripts, captions, storyboards, and branded creative assets.', button(CREATIVE, 'Open Creative Studio') + button('/early-access/?product=Nova%20Creative%20Studio&intent=demo', 'Request a Demo', False)) + section('Plan, create, review', '<div class="grid grid-3"><article class="card"><h3>Content planning</h3><p>Build a brief, script, caption, and storyboard around your audience and goal.</p></article><article class="card"><h3>Media generation</h3><p>Image, video, and voice tools depend on configured providers, account permissions, and credits.</p></article><article class="card"><h3>Review &amp; export</h3><p>Review available outputs before publishing. Video rendering is still being improved; generation and exports may fail.</p></article></div><p>Creative Studio is not advertised as an unlimited media plan. Provider costs, watermarks, licensing, and production readiness require review.</p>'))
 
@@ -98,6 +101,68 @@ def apply(add, pages, status_table):
     profile += section('Delivery approach', '<p>Remote, scoped engagements using public or client-approved inputs. AI-assisted preparation with human review. Deliverables, access, deadlines, and acceptance criteria are agreed before work begins.</p>')
     profile += section('Company &amp; contact', '<p>Public brand: AMICOR. Founder: Saye Monibah. Location: Minnesota, USA.</p><p>Website: <a href="https://getamicor.com/">getamicor.com</a><br>Email: <a href="mailto:info@getamicor.com">info@getamicor.com</a></p><p>Legal entity identifiers, registration status, insurance, references, and contract-specific qualifications are supplied only after verification. This profile makes no claim of federal past performance, certifications, awarded contracts, or guaranteed outcomes.</p><p><button class="btn btn-primary" type="button" data-print>Print / Save as PDF</button> <a class="btn btn-ghost" href="/company-profile/index.html" download="AMICOR-Company-Profile.html">Download HTML Profile</a></p>')
     replace('/company-profile/', 'AMICOR Company Profile — Business Services and Nova', 'AMICOR company capabilities, delivery approach and business contact details.', profile)
+
+    def status_card(anchor, chip_class, chip, title, text, actions):
+        return (
+            f'<article class="card" id="{anchor}">'
+            f'<p><span class="chip {chip_class}">{chip}</span></p>'
+            f'<h3>{title}</h3><p>{text}</p>'
+            f'<div class="hero-actions">{actions}</div></article>'
+        )
+
+    access_cards = '<div class="grid grid-2">' + ''.join([
+        status_card(
+            'ask-nova', 'chip-live', 'Account access',
+            'Ask Nova',
+            'Sign in before asking questions or preparing drafts. Tools depend on the account plan. This is not a public chatbot.',
+            button(LOGIN, 'Sign in to Ask Nova') + button('/ask-nova/', 'Read the product page', False),
+        ),
+        status_card(
+            'operations-agent', 'chip-supervised', 'Supervised release',
+            'Nova Operations Agent',
+            'The signed-in account is the supported path for scoped digital work. The public demo is a sandbox: it does not send email, update a CRM, charge money, or submit work on its own.',
+            button(LOGIN, 'Sign in to Nova') + button(AGENT, 'Open the sandbox demo', False),
+        ),
+        status_card(
+            'work-revenue', 'chip-early', 'Early access',
+            'Work &amp; Revenue',
+            'Signed-in operators can open the existing workspace. External application submission, client contact, and payment execution stay off. Approved is not submitted. Received revenue is owner-confirmed only.',
+            button(WORK, 'Sign in to review Work &amp; Revenue') + button('/work-revenue/', 'Read the product page', False),
+        ),
+        status_card(
+            'nova-today', 'chip-early', 'Early access',
+            'Nova Today',
+            'The command center asks for an account before it loads work. This public site does not turn that workspace on.',
+            button(TODAY, 'Sign in to Nova Today') + button('/nova-today/', 'Read the product page', False),
+        ),
+        status_card(
+            'creative-studio', 'chip-supervised', 'Supervised release',
+            'Creative Studio',
+            'Planning tools are available after sign-in. Image, video, and voice output depend on enabled providers and credits. Rendering and exports can still fail.',
+            button(CREATIVE, 'Sign in to Creative Studio') + button('/nova-create/', 'Read the product page', False),
+        ),
+    ]) + '</div>'
+    held_back = (
+        '<ul>'
+        '<li>Casting intake and public auditions are not offered from this website.</li>'
+        '<li>This website does not collect payment or confirm that money was received.</li>'
+        '<li>Nova does not submit applications, send outreach, or contact clients from these links.</li>'
+        '<li>Delivery, transportation, Lifesaver, and hardware remain coming soon or in development.</li>'
+        '</ul>'
+    )
+    replace(
+        ACCESS,
+        'Open Nova — Signed-in AMICOR workspaces',
+        'Choose a signed-in AMICOR Nova workspace. Live, supervised, early access, and coming soon stay separate. No casting, payment, or automatic applications.',
+        hero(
+            'Signed-in Nova',
+            'Open the workspace that matches the work.',
+            'Each path below is an existing Nova screen. The label tells you whether it is available after sign-in, a supervised sandbox, or still early access.',
+            button(LOGIN, 'Sign in to Nova') + button('/products/', 'See product status', False),
+        )
+        + section('Choose a workspace', access_cards)
+        + section('Held on this website', held_back + '<p><a href="/products/">Product status</a> remains the catalog. Coming soon items stay on their own pages.</p>'),
+    )
 
     # Keep the existing validated form and storage path, but make inquiry options explicit.
     for p in pages:

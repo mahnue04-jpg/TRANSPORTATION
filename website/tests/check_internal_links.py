@@ -16,7 +16,7 @@ for html in ROOT.rglob("*.html"):
         if href == "#":
             missing.append((str(html.relative_to(ROOT)), href))
             continue
-        path = href.split("?")[0]
+        path = href.split("#", 1)[0].split("?", 1)[0]
         if not path.startswith("/"):
             continue
         rel = path.lstrip("/")
