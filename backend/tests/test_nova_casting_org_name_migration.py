@@ -142,6 +142,7 @@ def test_postgres_duplicate_names_abort_without_deleting_rows():
         connection.exec_driver_sql("DROP SCHEMA IF EXISTS casting_org_name_ci CASCADE")
         connection.exec_driver_sql("CREATE SCHEMA casting_org_name_ci")
         connection.exec_driver_sql("SET search_path TO casting_org_name_ci")
+        connection.exec_driver_sql("CREATE TABLE platform_users (id VARCHAR(36) PRIMARY KEY)")
         _bind(connection, draft)
         draft.upgrade()
         connection.execute(sa.text(
