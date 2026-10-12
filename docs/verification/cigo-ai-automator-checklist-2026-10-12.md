@@ -17,7 +17,7 @@ The repository and a public search do not contain a document titled “CIGO AI A
 
 ## Studio video
 
-Inspected file: `backend/static/nova-one-minute-demo/amicor-nova-60-second-full-body.mp4` at previous head `21c7345`.
+Inspected file: `backend/static/nova-one-minute-demo/amicor-nova-60-second-full-body.mp4` from PR #323. Chrome played it unmuted at desktop size and at 390×844. Time advanced, audio bytes decoded, and the 22.5s caption was still readable at phone width. The mouth still follows the 5.04s standing plate.
 
 - Duration 59.875s video / 59.856s audio, inside 30–60s
 - 1280×948 landscape H.264, not 9:16
@@ -65,7 +65,7 @@ Chrome on the local demo process checked the form at desktop width and at 390×8
 - No vertical 9:16 assessment master
 - No commercial-use clearance for the current media
 - Official CIGO brief text is not in the repo, so extra brief items cannot be checked off
-- No physical-phone playback of the Studio file
+- No physical-phone playback. Chrome at 390×844 did play the file. Burned-in captions shrink to about 8.5 CSS pixels at that width
 - Synapse #311 and QA #312 could not be coordinated by number because they are not open here
 
 ## Owner decisions still required
