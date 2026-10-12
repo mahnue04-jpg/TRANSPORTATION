@@ -186,6 +186,7 @@ def page(
   <link rel="icon" href="{prefix}assets/logo.svg">
   <link rel="apple-touch-icon" href="{prefix}assets/logo.svg">
   <link rel="stylesheet" href="{prefix}assets/css/site.css">
+  <link rel="stylesheet" href="{prefix}assets/css/product-visuals.css">
   <script type="application/ld+json">
   {{
     "@context": "https://schema.org",
