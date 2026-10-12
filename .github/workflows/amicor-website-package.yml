@@ -6,6 +6,10 @@ on:
     paths:
       - 'website/**'
       - '.github/workflows/amicor-website-package.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/amicor-website-package.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Generate website pages
         run: python3 website/_generate.py
+      - name: Confirm committed pages match the generator
+        run: git diff --exit-code -- website
       - name: Validate product catalog and links
         run: |
           python3 - <<'PY'
