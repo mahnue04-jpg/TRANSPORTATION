@@ -2,7 +2,7 @@
 
 This checklist is for the dev-only synthetic acceptance of the existing Work and Revenue opportunity funnel. It does not authorize a merge, a deploy, a credit purchase, an external application, contact with a lead, or a production workflow.
 
-The acceptance file is `backend/tests/test_nova_opportunity_funnel_acceptance.py`. CI runs it as the `opportunity-funnel` job in `.github/workflows/work-revenue-regression.yml` on disposable sqlite `test_nova_opportunity_funnel_acceptance.db`. A missing file, a missing required case, a skip, or a failed case fails that job.
+The acceptance file is `backend/tests/test_nova_opportunity_funnel_acceptance.py`. CI runs it as the `opportunity-funnel` job in `.github/workflows/work-revenue-regression.yml` when a pull request into `main` changes `backend/**`. Pytest then isolates the run on `backend/data/chat_test_<pid>.db`. A direct invocation can use `test_nova_opportunity_funnel_acceptance.db`. A missing file, a missing required case, a skip, or a failed case fails that job.
 
 ## Required cases
 

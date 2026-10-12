@@ -4,6 +4,7 @@ name: Work and Revenue regression
 # failures in that workflow must not skip these results.
 # Disposable sqlite only. No credentials. No application submission.
 # Country eligibility fails the job when a required file or case is missing or skipped.
+# The opportunity-funnel job does the same for the synthetic funnel acceptance.
 
 on:
   pull_request:
