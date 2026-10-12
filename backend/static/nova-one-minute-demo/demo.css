@@ -23,6 +23,9 @@ h1 { margin: 0; font-size: 30px; }
 .demo-shell {
   display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; padding: 24px 30px 32px;
 }
+.saved-video { grid-column: 1 / -1; background: #fff; border: 1px solid #e0e5ed; border-radius: 16px; padding: 18px; }
+.saved-video h2 { margin: 0 0 8px; font-size: 19px; }
+.saved-video video { display: block; width: 100%; height: auto; margin: 12px 0; background: #101621; border-radius: 12px; }
 .player-card, .scene-list {
   background: #fff; border: 1px solid #e0e5ed; border-radius: 16px; box-shadow: 0 12px 32px rgba(24,32,51,.06);
 }
