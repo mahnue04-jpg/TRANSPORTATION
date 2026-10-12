@@ -20,12 +20,20 @@ Deadline stated by the owner: Wednesday 14 October 2026.
 | Pose | Standing, head to about the knees. Not sitting |
 | Lip-sync | No. The mouth belongs to the short plate, not the narration |
 | Watermark | None visible in frames at 0.5s, 8s, 20s, and 45s |
-| Mobile markup | `playsinline` is set. A physical phone was not available here |
+| Mobile markup | `playsinline` is set. Chrome played it at 390×844 |
+| Chrome playback | Unmuted, readyState 4, time reached 1.93s after 2s, 23,454 audio bytes decoded |
+| Phone captions | Burned-in type is about 8.5 CSS pixels tall at 390px wide. The 22.5s line was still readable |
 
 Frame difference of the presenter area (captions cropped off), mean absolute pixel difference on an 80×53 gray frame:
 
 - 1.20s versus 6.24s (one 5.04s cycle): about 0.44
 - 1.20s versus 3.40s (different moment in the plate): about 3.3
+
+## Browser playback
+
+Chrome played `amicor-nova-60-second-full-body.mp4` from the start on a desktop page and in a 390×844 mobile viewport. The element reported duration 59.875, size 1280×948, `muted` false, and `readyState` 4. After two seconds, `currentTime` was 1.93 and `webkitAudioDecodedByteCount` was 23454, so the audio track is being decoded. The active caption at the start was “Meet AMICOR Nova, your AI operations workspace built”. A frame at 22.5s, scaled to 390px wide, shows “The Operations Agent turns business requests into clear”. On that phone width the burned-in caption is about 8.5 CSS pixels tall. The face at both times is the same standing plate, not a new mouth shape for the later sentence.
+
+A physical phone was not used. Scrubbing did not complete against a static server that answered byte-range requests with a full 200 response; that limit is the server, and the file still has the `moov` atom first.
 
 ## Tools and licensing
 

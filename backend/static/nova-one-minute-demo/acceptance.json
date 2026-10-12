@@ -34,7 +34,21 @@
     "sidecar_captions": ["srt", "vtt"],
     "loop_period_seconds": 5.04,
     "presenter_pose": "standing_full_body",
-    "watermark_visible_in_sampled_frames": false
+    "watermark_visible_in_sampled_frames": false,
+    "chrome_playback": {
+      "played": true,
+      "muted": false,
+      "ready_state": 4,
+      "duration_seconds": 59.875,
+      "video_width": 1280,
+      "video_height": 948,
+      "current_time_after_2s": 1.93,
+      "audio_decoded_bytes_after_2s": 23454,
+      "mobile_viewport": "390x844",
+      "mobile_rendered_css_px": "390x289",
+      "burned_in_caption_css_px_at_390_wide": 8.5,
+      "caption_at_22_5s": "The Operations Agent turns business requests into clear"
+    }
   },
   "sources": {
     "presenter": "/media/nova-creative/nova-da25e10f80924d6ca99e62a04c9eb346.mp4",
