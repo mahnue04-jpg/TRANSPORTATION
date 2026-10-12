@@ -438,6 +438,11 @@ class NovaV3Kernel:
             "fee_required": qual.get("fee_required"),
             "owner_review_reason": qual.get("owner_review_reason"),
             "relevance_score": (row.provenance or {}).get("relevance_score"),
+            "language_support_label": qual.get("language_support_label") or "",
+            "eligibility_explanations": list(qual.get("eligibility_explanations") or []),
+            "eligibility_decision": qual.get("eligibility_decision") or "",
+            "native_fluency_claimed": False,
+            "native_speaker_capability": False,
         }
 
     def prepare_proposal(self, opportunity_id: str, *, organization_id: str, owner_user_id: str) -> Proposal:
@@ -453,9 +458,20 @@ class NovaV3Kernel:
                 "Live opportunity failed risk/fit qualification and cannot be prepared",
                 http_status=409,
             )
+        label = str(qual.get("language_support_label") or "")
+        explanations = [str(item) for item in (qual.get("eligibility_explanations") or [])]
+        eligibility_note = ""
+        if label or explanations:
+            eligibility_note = " Eligibility for owner review:"
+            if label:
+                eligibility_note += f" Language support label: {label}."
+            if explanations:
+                eligibility_note += " " + " ".join(explanations)
+            eligibility_note += " No native fluency is claimed."
         body = (
             f"INTERNAL DRAFT ONLY. Company: {opp.company_name}. Work: {opp.title}. "
             "Nova did not submit this. Missing facts remain [OWNER INPUT REQUIRED]."
+            f"{eligibility_note}"
         )
         proposal = Proposal(
             proposal_id=self._id("V3APP"),

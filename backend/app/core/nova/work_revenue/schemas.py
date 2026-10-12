@@ -401,6 +401,11 @@ class QualificationOut(BaseModel):
     decision: str | None = None
     evaluations: dict[str, str] = Field(default_factory=dict)
     qualified_at: datetime | None = None
+    language_support_label: str = ""
+    eligibility_explanations: list[str] = Field(default_factory=list)
+    eligibility_decision: str = ""
+    native_fluency_claimed: bool = False
+    native_speaker_capability: bool = False
 
 
 class ApplicationCreate(BaseModel):
@@ -536,6 +541,11 @@ class ApplicationOut(BaseModel):
     decided_at: datetime | None = None
     externally_ready: bool = False
     approved_equals_submitted: bool = False
+    language_support_label: str = ""
+    eligibility_explanations: list[str] = Field(default_factory=list)
+    eligibility_decision: str = ""
+    native_fluency_claimed: bool = False
+    native_speaker_capability: bool = False
 
 
 class TrackerOut(BaseModel):

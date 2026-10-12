@@ -120,6 +120,29 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
+  function eligibilityMarkup(source) {
+    source = source || {};
+    var qual = source.qualification || source.live_qualification || {};
+    var label = source.language_support_label || qual.language_support_label || "";
+    var lines = source.eligibility_explanations || qual.eligibility_explanations || [];
+    var decision = source.eligibility_decision || qual.eligibility_decision || "";
+    if (!Array.isArray(lines)) lines = [];
+    var html = "";
+    if (label) {
+      html += "<div class=\"language-support-label\">" + escapeHtml(label) + "</div>";
+    }
+    if (lines.length || decision) {
+      html += "<div class=\"eligibility-explanation\">";
+      if (decision) {
+        html += "<div class=\"muted\">Eligibility decision: " + escapeHtml(decision) + "</div>";
+      }
+      lines.forEach(function (line) {
+        html += "<div>" + escapeHtml(line) + "</div>";
+      });
+      html += "</div>";
+    }
+    return html;
+  }
   function liveJobItem(row) {
     var opp = row.opportunity || row;
     var qual = opp.live_qualification || {};
@@ -153,6 +176,7 @@
       (opp.why_searched || (opp.live_qualification && opp.live_qualification.why_searched) ? "<div class=\"muted\">Why searched: " + escapeHtml(opp.why_searched || opp.live_qualification.why_searched) + "</div>" : "") +
       (opp.search_family_label || (opp.live_qualification && opp.live_qualification.search_family_label) ? "<div class=\"muted\">Search family: " + escapeHtml(opp.search_family_label || opp.live_qualification.search_family_label) + "</div>" : "") +
       (fitSummary ? "<div class=\"muted\">Fit: " + escapeHtml(fitSummary) + "</div>" : "") +
+      eligibilityMarkup(opp) +
       (reviewReason ? "<div class=\"muted\">Owner review: " + escapeHtml(reviewReason) + "</div>" : "") +
       (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Source URL</a></div>" : "") +
       "</div>";
@@ -367,6 +391,7 @@
       (row.application_state ? " · " + escapeHtml(row.application_state) : "") +
       "</div>" +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
+      eligibilityMarkup(row) +
       "<details class=\"opportunity-details\" id=\"" + escapeHtml(detailsId) + "\"><summary>View details</summary>" +
       "<div class=\"muted\">source " + escapeHtml(row.source || row.source_type) +
       (cap.discovery_score != null ? " · discovery " + escapeHtml(cap.discovery_score) : "") +
@@ -396,6 +421,7 @@
       "<strong>" + escapeHtml(row.opportunity_title || row.application_id) + "</strong>" +
       "<div class=\"muted\">" + escapeHtml(approvalLabel(row)) +
       " · " + escapeHtml(row.application_id) + "</div>" +
+      eligibilityMarkup(row) +
       applicationActions(row) + "</div>";
   }
   function markActiveFilter() {
@@ -638,6 +664,7 @@
         (app ? " · " + escapeHtml(approvalLabel(app)) : " · no application yet") +
         "</div></div>" +
         "<div class=\"detail-block\">Capability match: " + escapeHtml(match) + "</div>" +
+        eligibilityMarkup(opp) +
         "<div class=\"detail-block\">Missing owner facts: " +
         escapeHtml(facts.length ? facts.join(", ") : "none flagged") +
         " — [OWNER INPUT REQUIRED]</div>" +
