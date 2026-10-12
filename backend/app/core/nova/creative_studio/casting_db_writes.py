@@ -185,21 +185,14 @@ def _organization_view(org: NovaCastingOrganization, *, casting_role: str) -> di
     }
 
 
-def ensure_sandbox_organization(
-    *, db: Session, user_id: str, tenant_id: str, payload: dict,
-) -> dict:
-    """Create a disposable organization owned by the signed-in account.
+def _caller_organization(db: Session, *, tenant_id: str, name: str, user_id: str):
+    """Return the caller's active organizer row for this tenant and name.
 
-    The caller cannot choose a tenant, role, or verification status. Repeating
-    the same name returns the organization that caller already organizes.
+    More than one matching row means duplicate sandbox names already exist.
+    Fail closed instead of choosing one.
     """
-    _guard()
-    _account(db, user_id, tenant_id)
-    name = str(payload.get("name") or "").strip()
-    if "@" in name or _ORG_NAME.fullmatch(name) is None:
-        raise CastingRequestRejected("Invalid organization name")
     try:
-        existing = (
+        return (
             db.query(NovaCastingOrganization)
             .join(
                 NovaCastingMembership,
@@ -217,19 +210,45 @@ def ensure_sandbox_organization(
         )
     except SQLAlchemyError as exc:
         raise CastingAccessDenied("Application unavailable") from exc
+
+
+def ensure_sandbox_organization(
+    *, db: Session, user_id: str, tenant_id: str, payload: dict,
+) -> dict:
+    """Create a disposable organization owned by the signed-in account.
+
+    The caller cannot choose a tenant, role, or verification status. Repeating
+    the same name returns the organization that caller already organizes.
+    A concurrent create of that same tenant and name loses the unique constraint
+    and returns the committed organization instead of inserting a second row.
+    A name already organized by someone else is rejected.
+    """
+    _guard()
+    _account(db, user_id, tenant_id)
+    name = str(payload.get("name") or "").strip()
+    if "@" in name or _ORG_NAME.fullmatch(name) is None:
+        raise CastingRequestRejected("Invalid organization name")
+    existing = _caller_organization(db, tenant_id=tenant_id, name=name, user_id=user_id)
     if existing is not None:
         return _organization_view(existing, casting_role="organizer")
     org = NovaCastingOrganization(
         id=_new_id(), nova_tenant_id=tenant_id, name=name,
         verification_status="VERIFIED", created_at=_now(),
     )
-    db.add(org)
-    _flush(db)
-    db.add(NovaCastingMembership(
-        id=_new_id(), nova_tenant_id=tenant_id, organization_id=org.id,
-        user_id=user_id, casting_role="organizer", active=True, created_at=_now(),
-    ))
-    _flush(db)
+    try:
+        with db.begin_nested():
+            db.add(org)
+            db.flush()
+            db.add(NovaCastingMembership(
+                id=_new_id(), nova_tenant_id=tenant_id, organization_id=org.id,
+                user_id=user_id, casting_role="organizer", active=True, created_at=_now(),
+            ))
+            db.flush()
+    except IntegrityError:
+        winner = _caller_organization(db, tenant_id=tenant_id, name=name, user_id=user_id)
+        if winner is None:
+            raise CastingRequestRejected("Request rejected")
+        return _organization_view(winner, casting_role="organizer")
     return _organization_view(org, casting_role="organizer")
 
 

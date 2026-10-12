@@ -45,6 +45,9 @@ on:
       - "backend/app/core/nova/creative_studio/casting_intake_schema.py"
       - "backend/migrations/versions/20261010_casting_audit_consent_draft.py"
       - "backend/migrations/versions/20261011_casting_schema_repair.py"
+      - "backend/migrations/versions/20261012_casting_org_name_unique.py"
+      - "backend/tests/test_nova_casting_org_name_migration.py"
+      - "backend/tests/test_nova_casting_org_name_concurrency.py"
       - "backend/app/core/nova/creative_studio/casting_router_sandbox.py"
       - "backend/app/core/nova/creative_studio/casting_db_writes.py"
       - "backend/app/main.py"
@@ -96,7 +99,7 @@ jobs:
       - name: Install standalone test runner
         run: python -m pip install --disable-pip-version-check pytest==8.3.5 sqlalchemy==2.0.44 alembic==1.17.0 psycopg2-binary==2.9.11
       - name: Verify casting preview safeguards
-        run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py backend/tests/test_nova_casting_draft_schema.py backend/tests/test_nova_casting_migration_draft.py backend/tests/test_nova_casting_migration_execution.py backend/tests/test_nova_casting_content_migration.py backend/tests/test_nova_casting_two_migrations.py backend/tests/test_nova_casting_audit_consent.py backend/tests/test_nova_casting_policy.py backend/tests/test_nova_casting_upload_rules.py backend/tests/test_nova_casting_workflow_policy.py backend/tests/test_nova_casting_responses.py backend/tests/test_nova_casting_identity.py backend/tests/test_nova_casting_membership.py backend/tests/test_nova_casting_read_service.py backend/tests/test_nova_casting_router_draft.py backend/tests/test_nova_casting_db_reads.py backend/tests/test_nova_casting_access.py backend/tests/test_nova_casting_media_access.py backend/tests/test_nova_casting_audit.py backend/tests/test_nova_casting_flags.py backend/tests/test_nova_casting_intake_schema.py backend/tests/test_nova_casting_schema_guard.py backend/tests/test_nova_casting_schema_repair.py backend/tests/test_nova_casting_router_sandbox.py backend/tests/test_nova_casting_sandbox_page.py backend/tests/test_nova_casting_media_scan.py
+        run: python -m pytest --noconftest -q backend/tests/test_nova_casting_preview.py backend/tests/test_nova_casting_draft_schema.py backend/tests/test_nova_casting_migration_draft.py backend/tests/test_nova_casting_migration_execution.py backend/tests/test_nova_casting_content_migration.py backend/tests/test_nova_casting_two_migrations.py backend/tests/test_nova_casting_audit_consent.py backend/tests/test_nova_casting_policy.py backend/tests/test_nova_casting_upload_rules.py backend/tests/test_nova_casting_workflow_policy.py backend/tests/test_nova_casting_responses.py backend/tests/test_nova_casting_identity.py backend/tests/test_nova_casting_membership.py backend/tests/test_nova_casting_read_service.py backend/tests/test_nova_casting_router_draft.py backend/tests/test_nova_casting_db_reads.py backend/tests/test_nova_casting_access.py backend/tests/test_nova_casting_media_access.py backend/tests/test_nova_casting_audit.py backend/tests/test_nova_casting_flags.py backend/tests/test_nova_casting_intake_schema.py backend/tests/test_nova_casting_schema_guard.py backend/tests/test_nova_casting_schema_repair.py backend/tests/test_nova_casting_router_sandbox.py backend/tests/test_nova_casting_sandbox_page.py backend/tests/test_nova_casting_media_scan.py backend/tests/test_nova_casting_org_name_migration.py
       - name: Check casting browser JavaScript syntax
         run: |
           python - <<'PY'
@@ -165,4 +168,4 @@ jobs:
       - name: Install backend test dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
       - name: Verify isolated casting PostgreSQL reads
-        run: python -m pytest -q tests/test_nova_casting_db_reads_integration.py tests/test_nova_casting_router_http.py tests/test_nova_casting_sandbox_http.py tests/test_nova_casting_private_media_http.py
+        run: python -m pytest -q tests/test_nova_casting_db_reads_integration.py tests/test_nova_casting_router_http.py tests/test_nova_casting_sandbox_http.py tests/test_nova_casting_private_media_http.py tests/test_nova_casting_org_name_concurrency.py
