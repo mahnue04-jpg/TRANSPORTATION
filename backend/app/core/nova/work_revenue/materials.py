@@ -150,6 +150,23 @@ def _portfolio_positioning(packet: dict[str, Any]) -> str:
     )
 
 
+def _eligibility_notice(opportunity: dict[str, Any]) -> str:
+    """Owner-facing eligibility block for a preparation draft. Empty when nothing applies."""
+    from app.core.nova.work_revenue.international_match import assess_international_match
+
+    view = assess_international_match(opportunity)
+    label = str(view.get("language_support_label") or "")
+    explanations = [str(item) for item in (view.get("eligibility_explanations") or [])]
+    if not label and not explanations:
+        return ""
+    lines = ["Eligibility for owner review:"]
+    if label:
+        lines.append(f"Language support label: {label}.")
+    lines.extend(explanations)
+    lines.append("No native fluency is claimed.")
+    return "\n".join(lines) + "\n\n"
+
+
 def _forbidden_claims() -> str:
     return (
         "This draft does not claim degrees, licenses, certifications, employment history, "
@@ -241,6 +258,7 @@ def generate_drafts(
     execution = _execution_lines(packet)
     portfolio_positioning = _portfolio_positioning(packet)
     packet_summary = work_packet_summary(packet)
+    eligibility = _eligibility_notice(opportunity)
 
     primary_revenue_proposal = _primary_revenue_proposal_body(
         opportunity,
@@ -251,6 +269,8 @@ def generate_drafts(
         execution=execution,
         forbidden=forbidden,
     )
+    if primary_revenue_proposal and eligibility:
+        primary_revenue_proposal = primary_revenue_proposal.rstrip() + "\n\n" + eligibility
 
     drafts = [
         {
@@ -261,7 +281,7 @@ def generate_drafts(
                 f"Products present in this system: "
                 f"{', '.join(profile_snapshot()['verified']['products_in_repository'])}.\n\n"
                 f"Matched capabilities for this opportunity:\n{matched_caps}\n\n"\
-                f"Broader authorized support registry:\n{caps}\n\nProduct demo: {MASTER_DEMO_URL}\n\n{unknown}\n\n{forbidden}"
+                f"Broader authorized support registry:\n{caps}\n\nProduct demo: {MASTER_DEMO_URL}\n\n{unknown}\n\n{eligibility}{forbidden}"
             ),
         },
         {
@@ -293,7 +313,7 @@ def generate_drafts(
                 f"Nova is not a human applicant and will not pretend to be one.\n\n"
                 f"Product demo / capability proof: {MASTER_DEMO_URL}\n\n"
                 f"{OWNER_INPUT_REQUIRED}: owner-specific motivation, availability, and rate.\n\n"
-                f"{forbidden}\n\n{untrusted_desc}"
+                f"{eligibility}{forbidden}\n\n{untrusted_desc}"
             ),
         },
         {
@@ -306,7 +326,7 @@ def generate_drafts(
                 f"Internal execution plan:\n{execution}\n\n"
                 f"Product demo / capability proof: {MASTER_DEMO_URL}\n\n"
                 f"Pricing: {OWNER_INPUT_REQUIRED}. Timeline: {OWNER_INPUT_REQUIRED}.\n\n"
-                f"{forbidden}"
+                f"{eligibility}{forbidden}"
             ),
         },
         {
@@ -319,7 +339,7 @@ def generate_drafts(
                 f"Q: Years of experience?\nA: {OWNER_INPUT_REQUIRED}\n\n"
                 f"Q: Licenses and certifications?\nA: {OWNER_INPUT_REQUIRED} — none are stored as verified.\n\n"
                 f"Q: Client references?\nA: {OWNER_INPUT_REQUIRED}\n\n"
-                f"{untrusted_desc}"
+                f"{eligibility}{untrusted_desc}"
             ),
         },
         {
