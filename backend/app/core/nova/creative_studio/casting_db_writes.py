@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import User as NovaUser
@@ -44,6 +44,7 @@ from .casting_workflow_policy import ApplicationState, may_schedule_callback, ma
 
 _REVIEW_STAGES = frozenset({"New", "In review", "Callback", "Closed"})
 _PAGE_LIMIT = 50
+_ORG_CREATE_ATTEMPTS = 3
 
 
 def _guard() -> None:
@@ -185,21 +186,65 @@ def _organization_view(org: NovaCastingOrganization, *, casting_role: str) -> di
     }
 
 
-def ensure_sandbox_organization(
-    *, db: Session, user_id: str, tenant_id: str, payload: dict,
-) -> dict:
-    """Create a disposable organization owned by the signed-in account.
+def _retryable_conflict(exc: OperationalError) -> bool:
+    """True when the insert lost a race the next transaction can see.
 
-    The caller cannot choose a tenant, role, or verification status. Repeating
-    the same name returns the organization that caller already organizes.
+    SQLite WAL raises SQLITE_BUSY_SNAPSHOT instead of a unique violation when
+    the write would promote a read snapshot that started before the other
+    commit. PostgreSQL uses a unique violation, or a serialization failure
+    when the transaction is repeatable-read.
     """
-    _guard()
-    _account(db, user_id, tenant_id)
-    name = str(payload.get("name") or "").strip()
-    if "@" in name or _ORG_NAME.fullmatch(name) is None:
-        raise CastingRequestRejected("Invalid organization name")
+    orig = getattr(exc, "orig", None)
+    name = str(getattr(orig, "sqlite_errorname", "") or "")
+    if name in {"SQLITE_BUSY", "SQLITE_BUSY_SNAPSHOT", "SQLITE_BUSY_TIMEOUT"}:
+        return True
+    code = str(getattr(orig, "pgcode", "") or getattr(orig, "sqlstate", "") or "")
+    if code in {"40001", "40P01"}:
+        return True
+    text = str(orig or exc).lower()
+    return (
+        "database is locked" in text
+        or "database is busy" in text
+        or "could not serialize access" in text
+        or "deadlock detected" in text
+    )
+
+
+def _release_snapshot(db: Session) -> None:
+    """End the current transaction so the next read sees the committed row.
+
+    A savepoint rollback keeps the outer snapshot. On SQLite that snapshot
+    can still miss the organization the other request just committed.
+    """
+    db.rollback()
+
+
+def _named_organization(db: Session, *, tenant_id: str, name: str):
+    """Return the sandbox organization for this tenant and name, if there is one.
+
+    More than one row means duplicates already exist. Fail closed.
+    """
     try:
-        existing = (
+        return (
+            db.query(NovaCastingOrganization)
+            .filter(
+                NovaCastingOrganization.nova_tenant_id == tenant_id,
+                NovaCastingOrganization.name == name,
+            )
+            .one_or_none()
+        )
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+
+
+def _caller_organization(db: Session, *, tenant_id: str, name: str, user_id: str):
+    """Return the caller's active organizer row for this tenant and name.
+
+    More than one matching row means duplicate sandbox names already exist.
+    Fail closed instead of choosing one.
+    """
+    try:
+        return (
             db.query(NovaCastingOrganization)
             .join(
                 NovaCastingMembership,
@@ -217,20 +262,55 @@ def ensure_sandbox_organization(
         )
     except SQLAlchemyError as exc:
         raise CastingAccessDenied("Application unavailable") from exc
-    if existing is not None:
-        return _organization_view(existing, casting_role="organizer")
-    org = NovaCastingOrganization(
-        id=_new_id(), nova_tenant_id=tenant_id, name=name,
-        verification_status="VERIFIED", created_at=_now(),
-    )
-    db.add(org)
-    _flush(db)
-    db.add(NovaCastingMembership(
-        id=_new_id(), nova_tenant_id=tenant_id, organization_id=org.id,
-        user_id=user_id, casting_role="organizer", active=True, created_at=_now(),
-    ))
-    _flush(db)
-    return _organization_view(org, casting_role="organizer")
+
+
+def ensure_sandbox_organization(
+    *, db: Session, user_id: str, tenant_id: str, payload: dict,
+) -> dict:
+    """Create a disposable organization owned by the signed-in account.
+
+    The caller cannot choose a tenant, role, or verification status. Repeating
+    the same name returns the organization that caller already organizes.
+    A concurrent create of that same tenant and name loses the unique constraint,
+    or hits a stale snapshot, and returns the committed organization instead of
+    inserting a second row. A name already organized by someone else is rejected.
+    """
+    _guard()
+    _account(db, user_id, tenant_id)
+    name = str(payload.get("name") or "").strip()
+    if "@" in name or _ORG_NAME.fullmatch(name) is None:
+        raise CastingRequestRejected("Invalid organization name")
+    for _attempt in range(_ORG_CREATE_ATTEMPTS):
+        existing = _caller_organization(db, tenant_id=tenant_id, name=name, user_id=user_id)
+        if existing is not None:
+            return _organization_view(existing, casting_role="organizer")
+        org = NovaCastingOrganization(
+            id=_new_id(), nova_tenant_id=tenant_id, name=name,
+            verification_status="VERIFIED", created_at=_now(),
+        )
+        try:
+            with db.begin_nested():
+                db.add(org)
+                db.flush()
+                db.add(NovaCastingMembership(
+                    id=_new_id(), nova_tenant_id=tenant_id, organization_id=org.id,
+                    user_id=user_id, casting_role="organizer", active=True, created_at=_now(),
+                ))
+                db.flush()
+        except IntegrityError:
+            _release_snapshot(db)
+        except OperationalError as exc:
+            if not _retryable_conflict(exc):
+                raise CastingAccessDenied("Application unavailable") from exc
+            _release_snapshot(db)
+        else:
+            return _organization_view(org, casting_role="organizer")
+        winner = _caller_organization(db, tenant_id=tenant_id, name=name, user_id=user_id)
+        if winner is not None:
+            return _organization_view(winner, casting_role="organizer")
+        if _named_organization(db, tenant_id=tenant_id, name=name) is not None:
+            raise CastingRequestRejected("Request rejected")
+    raise CastingRequestRejected("Request rejected")
 
 
 def grant_sandbox_reviewer(
