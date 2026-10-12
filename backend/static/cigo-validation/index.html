@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>CIGO validation demo (mock, nonpublic)</title>
+  <link rel="stylesheet" href="/dev/cigo-validation/demo.css" />
+</head>
+<body>
+  <main>
+    <p class="banner">Nonpublic mock data. This page does not email anyone, does not call a provider, and does not submit anything to CIGO.</p>
+    <h1>Product validation demo</h1>
+    <p class="lede">Save a product idea with a budget and currency. Email is optional unless you ask for follow-up. Each saved idea gets its own id.</p>
+
+    <form id="intake">
+      <label for="idea">Idea</label>
+      <textarea id="idea" name="idea" maxlength="500" placeholder="What should the automator do, and for whom?"></textarea>
+      <p class="field-error" id="error-idea"></p>
+
+      <div class="split">
+        <div>
+          <label for="budget">Budget</label>
+          <input id="budget" name="budget" inputmode="decimal" placeholder="1500.00" />
+          <p class="field-error" id="error-budget"></p>
+        </div>
+        <div>
+          <label for="currency">Currency</label>
+          <select id="currency" name="currency">
+            <option value="">Choose</option>
+            <option>USD</option>
+            <option>EUR</option>
+            <option>GBP</option>
+            <option>CAD</option>
+          </select>
+          <p class="field-error" id="error-currency"></p>
+        </div>
+      </div>
+
+      <label for="email">Email (optional)</label>
+      <input id="email" name="email" type="text" autocomplete="email" placeholder="name@example.com" />
+      <p class="field-error" id="error-email"></p>
+
+      <fieldset>
+        <legend>Follow-up</legend>
+        <label class="choice"><input type="radio" name="follow_up" value="none" checked /> No follow-up</label>
+        <label class="choice"><input type="radio" name="follow_up" value="email" /> Email follow-up</label>
+        <p class="field-error" id="error-follow_up"></p>
+      </fieldset>
+
+      <label class="choice"><input id="consent" name="consent" type="checkbox" /> I agree this mock record can be stored on this machine for the demo.</label>
+      <p class="field-error" id="error-consent"></p>
+
+      <label class="choice"><input id="force-failure" type="checkbox" /> Simulate a storage failure</label>
+
+      <button type="submit">Save mock record</button>
+    </form>
+
+    <section id="result" aria-live="polite"></section>
+
+    <section>
+      <div class="row">
+        <h2>Records</h2>
+        <div class="actions">
+          <a href="/dev/cigo-validation/export.json">Export JSON</a>
+          <a href="/dev/cigo-validation/export.csv">Export CSV</a>
+          <button type="button" id="reset">Clear mock data</button>
+        </div>
+      </div>
+      <div id="records"></div>
+    </section>
+    <section>
+      <h2>Alerts</h2>
+      <p class="hint">Alerts stay on this machine with status suppressed_no_outbound.</p>
+      <div id="alerts"></div>
+    </section>
+    <section>
+      <h2>Failures</h2>
+      <div id="failures"></div>
+    </section>
+  </main>
+  <script src="/dev/cigo-validation/demo.js"></script>
+</body>
+</html>
