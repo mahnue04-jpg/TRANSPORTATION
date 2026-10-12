@@ -3,6 +3,7 @@ name: Work and Revenue regression
 # Independent of Render backend diagnostic. Creative Studio and Workspace
 # failures in that workflow must not skip these results.
 # Disposable sqlite only. No credentials. No application submission.
+# Country eligibility fails the job when a required file or case is missing or skipped.
 
 on:
   pull_request:
@@ -139,45 +140,89 @@ jobs:
           failed=0
           ran=0
           absent=0
+          skipped=0
           {
             echo "### Country eligibility"
-            echo "Disposable sqlite file: \`$db\`. Files land with draft #313. Absence is reported and does not hide a failure of a file that is present."
+            echo "Disposable sqlite file: \`$db\`. Both required files and every required case must execute. A missing file, a missing case, or a skip fails this job."
           } >> "$GITHUB_STEP_SUMMARY"
-          for test_file in \
-            tests/test_nova_international_match.py \
-            tests/test_nova_work_eligibility_explanations.py
-          do
+          run_required_file() {
+            local test_file="$1"
+            shift
+            local required=("$@")
+            local name
+            local missing_cases=0
+            local case_problems=0
             if [ ! -f "$test_file" ]; then
               echo "COUNTRY_ELIGIBILITY_ABSENT $test_file"
-              echo "- absent: \`$test_file\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "- fail: \`$test_file\` missing" >> "$GITHUB_STEP_SUMMARY"
               absent=$((absent + 1))
-              continue
+              failed=$((failed + 1))
+              return
             fi
+            for name in "${required[@]}"; do
+              if ! grep -q "^def ${name}(" "$test_file"; then
+                echo "MISSING_REQUIRED_CASE ${test_file}::${name}"
+                echo "- fail: \`${test_file}::${name}\` missing" >> "$GITHUB_STEP_SUMMARY"
+                missing_cases=$((missing_cases + 1))
+              fi
+            done
             rm -f "$db" "${db}-journal" "${db}-wal" "${db}-shm"
             echo "=== $test_file disposable sqlite $db ==="
             set +e
-            output=$(python -m pytest "$test_file" -q --tb=line)
+            output=$(python -m pytest "$test_file" -v --tb=line)
             code=$?
             set -e
             printf '%s\n' "$output"
+            for name in "${required[@]}"; do
+              if ! printf '%s\n' "$output" | grep -Eq "::${name} PASSED([[:space:]]|$)"; then
+                echo "REQUIRED_CASE_NOT_PASSED ${test_file}::${name}"
+                case_problems=$((case_problems + 1))
+              fi
+            done
+            if printf '%s\n' "$output" | grep -Eq ' SKIPPED([[:space:]]|$)|[0-9]+ skipped'; then
+              echo "COUNTRY_ELIGIBILITY_SKIPPED ${test_file}"
+              skipped=$((skipped + 1))
+              case_problems=$((case_problems + 1))
+            fi
             summary=$(printf '%s\n' "$output" | awk 'NF{line=$0} END{print line}')
-            if [ "$code" -eq 0 ]; then
+            if [ "$code" -eq 0 ] && [ "$missing_cases" -eq 0 ] && [ "$case_problems" -eq 0 ]; then
               ran=$((ran + 1))
               echo "- pass: \`$test_file\` — ${summary}" >> "$GITHUB_STEP_SUMMARY"
             else
               failed=$((failed + 1))
-              echo "- fail: \`$test_file\` — ${summary} (exit ${code})" >> "$GITHUB_STEP_SUMMARY"
+              echo "- fail: \`$test_file\` — ${summary} (exit ${code}, missing cases ${missing_cases}, case problems ${case_problems})" >> "$GITHUB_STEP_SUMMARY"
             fi
-          done
+          }
+          run_required_file tests/test_nova_international_match.py \
+            test_us_resident_does_not_match_uae_only_role \
+            test_populated_field_does_not_satisfy_a_different_or_unknown_place \
+            test_missing_eligibility_fails_closed \
+            test_arabic_mena_role_is_not_cleared_by_language_or_us_residence \
+            test_multiple_allowed_countries_match_only_a_listed_place \
+            test_location_preference_is_not_mandatory_residence \
+            test_remote_client_country_is_not_worker_location \
+            test_worker_location_still_blocks_when_it_is_mandatory \
+            test_visa_and_permit_kinds_do_not_substitute_for_each_other \
+            test_native_fluency_is_never_claimed_for_a_tested_language
+          run_required_file tests/test_nova_work_eligibility_explanations.py \
+            test_owner_explanations_name_the_country_and_fail_closed \
+            test_permit_kind_and_preference_are_explained_without_a_fluency_claim \
+            test_language_rules_mark_ai_assistance_and_refuse_untested_or_native_claims \
+            test_search_results_carry_explanations_and_keep_lane_and_fee_controls \
+            test_saved_lead_preparation_and_kernel_review_show_the_same_decision \
+            test_screens_render_the_label_on_search_saved_leads_and_owner_review \
+            test_saved_lead_and_owner_review_api_show_explanations
           rm -f "$db" "${db}-journal" "${db}-wal" "${db}-shm"
-          if [ "$ran" -eq 0 ]; then
-            echo "COUNTRY_ELIGIBILITY_SKIPPED=files_not_on_branch"
-            echo "::notice::Country eligibility tests are not on this branch. They run when draft #313 files are present."
+          if [ "$ran" -ne 2 ]; then
+            echo "COUNTRY_ELIGIBILITY_SKIPPED=required_files_not_all_executed"
           fi
-          echo "COUNTRY_ELIGIBILITY_FILES_RAN=${ran} COUNTRY_ELIGIBILITY_FILES_FAILED=${failed} COUNTRY_ELIGIBILITY_FILES_ABSENT=${absent}"
+          echo "COUNTRY_ELIGIBILITY_FILES_RAN=${ran} COUNTRY_ELIGIBILITY_FILES_FAILED=${failed} COUNTRY_ELIGIBILITY_FILES_ABSENT=${absent} COUNTRY_ELIGIBILITY_FILES_SKIPPED=${skipped}"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Country eligibility files ran: ${ran}. Failed: ${failed}. Absent: ${absent}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Country eligibility files ran: ${ran}. Failed: ${failed}. Absent: ${absent}. Skipped files: ${skipped}." >> "$GITHUB_STEP_SUMMARY"
           test "$failed" -eq 0
+          test "$ran" -eq 2
+          test "$absent" -eq 0
+          test "$skipped" -eq 0
 
   work-and-revenue:
     name: work-and-revenue
