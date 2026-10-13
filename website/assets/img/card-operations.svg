@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-label="Operations board with observe, recommend, and human approval">
+  <rect width="640" height="280" rx="24" fill="#07141f"/>
+  <rect x="28" y="28" width="584" height="224" rx="18" fill="#102233"/>
+  <text x="52" y="68" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700">HUMAN REVIEW STAYS ON</text>
+  <rect x="52" y="92" width="536" height="40" rx="10" fill="#0b1c2a"/>
+  <circle cx="78" cy="112" r="12" fill="#2b97e6"/>
+  <text x="78" y="116" text-anchor="middle" fill="#041018" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700">1</text>
+  <text x="104" y="117" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="16">Observe the request</text>
+  <rect x="52" y="142" width="536" height="40" rx="10" fill="#0b1c2a"/>
+  <circle cx="78" cy="162" r="12" fill="#2b97e6"/>
+  <text x="78" y="166" text-anchor="middle" fill="#041018" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700">2</text>
+  <text x="104" y="167" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="16">Recommend a next step</text>
+  <rect x="52" y="192" width="536" height="40" rx="10" fill="#12344c" stroke="#5ee0c4"/>
+  <circle cx="78" cy="212" r="12" fill="#5ee0c4"/>
+  <text x="78" y="216" text-anchor="middle" fill="#041018" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700">3</text>
+  <text x="104" y="217" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700">Owner approves</text>
+</svg>

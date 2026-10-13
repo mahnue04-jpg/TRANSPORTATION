@@ -67,6 +67,57 @@ def test_nav_and_ctas_use_real_routes() -> None:
     assert "https://amicor-health-isf-py.onrender.com/nova/anonymous-agent" in home
 
 
+def test_product_catalog_uses_ten_distinct_images() -> None:
+    import hashlib
+    from html.parser import HTMLParser
+
+    class Cards(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.pairs = []
+            self._card = False
+            self._depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "article" and "product-visual-card" in values.get("class", ""):
+                self._card = True
+                self._depth = 1
+            elif self._card:
+                self._depth += 1
+                if tag == "img":
+                    self.pairs.append((values.get("src", ""), values.get("alt", "")))
+
+        def handle_endtag(self, tag):
+            if self._card:
+                self._depth -= 1
+                if self._depth <= 0:
+                    self._card = False
+
+    html = _html(PAGES["/products/"])
+    parser = Cards()
+    parser.feed(html)
+    assert len(parser.pairs) == 10
+    srcs = [src for src, _alt in parser.pairs]
+    alts = [alt for _src, alt in parser.pairs]
+    assert len(set(srcs)) == 10
+    assert len(set(alts)) == 10
+    hashes = []
+    for src, alt in parser.pairs:
+        path = (ROOT / "products" / src).resolve()
+        assert path.is_file(), src
+        assert len(alt) > 24, alt
+        hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
+    assert len(set(hashes)) == 10
+    assert 'type="file"' not in html
+    assert "public submissions disabled" in html.lower()
+    assert 'href="/early-access/?product=Nova%20Casting%20and%20Auditions"' in html
+    assert "card-home-hub.svg" in html
+    assert "card-car-hub.svg" in html
+    assert 'src="../assets/img/home-hub.svg"' in _html(PAGES["/home-hub/"])
+    assert 'src="../assets/img/car-hub.svg"' in _html(PAGES["/car-hub/"])
+
+
 def test_hardware_assets_exist() -> None:
     assert (ROOT / "assets" / "img" / "home-hub.svg").is_file()
     assert (ROOT / "assets" / "img" / "car-hub.svg").is_file()

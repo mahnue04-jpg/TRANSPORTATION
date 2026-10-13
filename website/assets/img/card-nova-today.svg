@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="todayTitle todayDesc">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-labelledby="todayTitle todayDesc">
   <title id="todayTitle">AMICOR Nova Today sample command center</title>
   <desc id="todayDesc">Illustrative daily command center with Today selected and sample attention items. Not live operator data.</desc>
   <rect width="640" height="280" rx="24" fill="#07141f"/>

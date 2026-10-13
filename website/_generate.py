@@ -186,6 +186,7 @@ def page(
   <link rel="icon" href="{prefix}assets/logo.svg">
   <link rel="apple-touch-icon" href="{prefix}assets/logo.svg">
   <link rel="stylesheet" href="{prefix}assets/css/site.css">
+  <link rel="stylesheet" href="{prefix}assets/css/product-visuals.css">
   <script type="application/ld+json">
   {{
     "@context": "https://schema.org",
@@ -239,6 +240,7 @@ def page(
           <a href="/work-revenue/">Nova Work &amp; Revenue</a>
           <a href="/nova-today/">Nova Today</a>
           <a href="/nova-create/">Creative Studio</a>
+          <a href="/early-access/?product=Nova%20Casting%20and%20Auditions">Casting &amp; Auditions</a>
           <a href="/deliver/">AMICOR Delivery</a>
           <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
           <a href="/home-hub/">Home Hub</a>
@@ -294,7 +296,7 @@ PRODUCT_STATUS_TABLE = """
               <tr><td>AMICOR corporate website</td><td>LIVE</td><td>This public information site.</td></tr>
               <tr><td>AMICOR Nova Work &amp; Revenue</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Find, manage, and track work. Received revenue is owner-confirmed only. No live external submit or payment collection from this site.</td></tr>
               <tr><td>AMICOR Nova Today</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Operator command center for signed-in workspaces.</td></tr>
-              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
+              <tr><td>Nova Casting &amp; Auditions</td><td>SANDBOX PREVIEW</td><td>Authenticated preview for casting campaigns and human-reviewed auditions. Public audition intake is disabled.</td></tr>\n              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
               <tr><td>Nova Operations Agent</td><td>SUPERVISED RELEASE</td><td>Public demo, account trial, and scoped digital work requests.</td></tr><tr><td>Ask Nova</td><td>ACCOUNT ACCESS</td><td>Sign-in required. Tools and access depend on plan.</td></tr>
               <tr><td>AMICOR Health</td><td>IN DEVELOPMENT</td><td>Transportation technology. No current licensed-market claim.</td></tr>
               <tr><td>AMICOR Delivery</td><td>COMING SOON / IN DEVELOPMENT</td><td>Planned delivery technology only.</td></tr>
@@ -970,13 +972,14 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card featured-work">{card_visual("../", "card-work-revenue.svg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-casting.svg", "Illustrative Nova Casting and Auditions candidate review. Sandbox preview only; no public applications.")}<span class="chip chip-early">Sandbox Preview</span><h3>Nova Casting &amp; Auditions</h3><p>Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.</p><a class="card-link" href="/early-access/?product=Nova%20Casting%20and%20Auditions">Request preview</a></article>
         <article class="card">{card_visual("../", "card-nova-today.svg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>Nova Today</h3><p>Intelligent daily command center.</p><a class="card-link" href="/nova-today/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-nova-create.svg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>Nova Create</h3><p>AI-assisted creation tools with owner review.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-delivery.svg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-lifesaver.svg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care initiative. Not a medical device.</p><a class="card-link" href="/lifesaver/">Open product page</a></article>
         <article class="card">{card_visual("../", "home-hub.svg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Home Hub</h3><p>See More. Care More. Be There.</p><a class="card-link" href="/home-hub/">Open product page</a></article>
         <article class="card">{card_visual("../", "car-hub.svg", "AMICOR Car Hub dashboard-mounted vehicle interface concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Car Hub</h3><p>On the Road. On Your Team.</p><a class="card-link" href="/car-hub/">Open product page</a></article>
-        <article class="card"><span class="chip chip-early">Early Access</span><h3>Operations Agent</h3><p>Supervised observe-recommend-approve software.</p><a class="card-link" href="/technologies/autonomous-operations-agent/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-operations.svg", "Illustrative Nova Operations Agent digital workflows; human-supervised.")}<span class="chip chip-early">Early Access</span><h3>Operations Agent</h3><p>Supervised observe-recommend-approve software.</p><a class="card-link" href="/technologies/autonomous-operations-agent/">Open product page</a></article>
       </div>
     </section>
     <section class="section"><div class="wrap"><h2>Product status</h2>{PRODUCT_STATUS_TABLE}</div></section>

@@ -163,6 +163,18 @@ def test_nonempty_honeypot_still_blocks() -> None:
     assert 'errorBox.textContent = "Request could not be sent."' in JS
 
 
+def test_every_inquiry_option_is_on_the_lead_allowlist() -> None:
+    import html as html_lib
+
+    select = re.search(r'<select name="product"[^>]*>(.*?)</select>', HTML, re.S)
+    assert select, "Inquiry select is missing"
+    options = [html_lib.unescape(item) for item in re.findall(r"<option>([^<]+)</option>", select.group(1))]
+    assert "Nova Casting & Auditions" in options
+    assert 'type="file"' not in HTML
+    for option in options:
+        assert f'"{option}"' in LEADS, option
+
+
 def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
@@ -178,6 +190,7 @@ def main() -> None:
         test_empty_honeypot_reaches_lead_submit_path,
         test_visible_autofill_does_not_populate_honeypot,
         test_nonempty_honeypot_still_blocks,
+        test_every_inquiry_option_is_on_the_lead_allowlist,
         test_leads_function_and_kv_path_unchanged,
     ]
     for test in tests:
