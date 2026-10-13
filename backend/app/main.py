@@ -499,6 +499,10 @@ app.include_router(nova_billing_router)
 app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 app.include_router(nova_casting_router)
+from app.core.cigo_idea_validation.router import demo_enabled as cigo_idea_validation_demo_enabled
+from app.core.cigo_idea_validation.router import router as cigo_idea_validation_router
+if cigo_idea_validation_demo_enabled():
+    app.include_router(cigo_idea_validation_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
