@@ -25,45 +25,11 @@ jobs:
         run: git diff --exit-code -- website
       - name: Validate product catalog and links
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          from html.parser import HTMLParser
-          root=Path('website')
-          site=(root/'products/index.html').read_text()
-          for label in ('Nova Casting & Auditions', 'Nova Creative Studio', 'Lifesaver AI Care Cloud', 'Home Hub', 'Car Hub', 'AMICOR Health'):
-              assert label in site, f'Missing product: {label}'
-          assert 'No public rides and no licensed-market claim.' in site
-          assert 'product-visual-grid' in site, 'Visual catalog not generated'
-          assert (root/'assets/css/product-visuals.css').is_file()
-          class Images(HTMLParser):
-              def __init__(self): super().__init__(); self.images=[]
-              def handle_starttag(self,tag,attrs):
-                  if tag=='img': self.images.append(dict(attrs).get('src',''))
-          parser=Images();parser.feed(site)
-          for src in parser.images:
-              if src.startswith(('http:', 'https:', 'data:')): continue
-              assert (root/'products'/src).resolve().is_file(), f'Missing image: {src}'
-          import hashlib, re
-          cards=re.findall(r'<article class="product-visual-card">.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"', site)
-          assert len(cards)==11, len(cards)
-          assert len({src for src,_ in cards})==11
-          assert len({alt for _,alt in cards})==11
-          hashes={hashlib.sha256((root/'products'/src).resolve().read_bytes()).hexdigest() for src,_ in cards}
-          assert len(hashes)==11
-          assert any(src.endswith('card-health.jpg') and 'caregiver and vehicle' in alt for src, alt in cards)
-          assert 'type="file"' not in site
-          assert 'public submissions disabled' in site.lower()
-          canonical='/early-access/?product=Nova%20Casting%20%26%20Auditions'
-          assert canonical in site, 'Casting catalog CTA is not the allowlisted product'
-          assert 'Nova%20Casting%20and%20Auditions' not in site
-          assert '\\n              <tr>' not in site
-          leads=(root/'functions/api/leads.js').read_text()
-          assert '"Nova Casting & Auditions"' in leads
-          assert (root/'../mise.toml').resolve().read_text().count('python.github_attestations = false')==1
-          assert (root/'../runtime.txt').resolve().read_text().strip()=='3.11.9'
-          print(f'Product images checked: {len(parser.images)}; catalog cards: {len(cards)}')
-          PY
+          python3 website/tests/check_catalog_package.py
           python3 website/tests/check_internal_links.py
+          python3 website/tests/test_website_redesign.py
+          python3 website/tests/test_early_access_honeypot.py
+          node website/tests/lead_allowlist_staging.mjs
       - name: Assemble site-only directory
         run: python3 website/package_public_site.py
       - name: Upload build artifact for review

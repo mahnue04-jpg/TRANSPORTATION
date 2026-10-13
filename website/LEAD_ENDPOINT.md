@@ -45,15 +45,31 @@ The Cloudflare Pages Function in `functions/api/leads.js` implements this contra
 }
 ```
 
-Allowed `product` values:
+Allowed `product` values come from `catalog.py`. Current inquiry options:
 
-- Autonomous Operations Agent
-- AMICOR Health
-- AMICOR Deliver
+- Business Services
+- Nova Operations Agent
+- Work & Revenue
+- Nova Creative Studio
+- Nova Casting & Auditions
+- Ask Nova
+- Nova Snap
+- Nova Today
 - Lifesaver AI Care Cloud
 - Home Hub
+- Car Hub
+- AMICOR Health
+- AMICOR Delivery
 - Partnership
 - Other
+
+Older strings still accepted by the lead store, and not shown as catalog cards:
+
+- Autonomous Operations Agent
+- AMICOR Nova Work & Revenue
+- AMICOR Nova Today
+- AMICOR Nova Create
+- AMICOR Deliver
 
 Do not send medical records, diagnoses, insurance IDs, or other sensitive health information.
 

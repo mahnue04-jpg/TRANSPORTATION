@@ -61,6 +61,21 @@ wrangler pages deploy . --project-name amicor-public
 4. Folder: `/website` if offered; otherwise copy `website/` to `/docs` on a dedicated pages branch.
 5. Use the `*.github.io` URL as `ORIGIN`.
 
+## Rollback
+
+Wrangler 4.150 has no Pages rollback command. `wrangler rollback` is for Workers, not this Pages project.
+
+A successful production deployment of `amicor-public` can be restored in either of these ways. Preview deployments are not rollback targets.
+
+1. Cloudflare Dashboard → Workers & Pages → `amicor-public` → Deployments → three dots on the target production deployment → Rollback to this deployment.
+2. API, only after `CLOUDFLARE_API_TOKEN` and the account id are available:
+
+```powershell
+curl -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/amicor-public/deployments/$DEPLOYMENT_ID/rollback" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+```
+
+List deployment ids first with `wrangler pages deployment list --project-name amicor-public --environment production`. This environment has no Cloudflare login and no `CLOUDFLARE_API_TOKEN`, so that list was not retrieved and production was not changed.
+
 ## After a preview URL exists
 
 - Keep product status labels unchanged.

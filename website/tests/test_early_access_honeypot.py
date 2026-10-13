@@ -165,14 +165,24 @@ def test_nonempty_honeypot_still_blocks() -> None:
 
 def test_every_inquiry_option_is_on_the_lead_allowlist() -> None:
     import html as html_lib
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from catalog import accepted_lead_names, lead_names
 
     select = re.search(r'<select name="product"[^>]*>(.*?)</select>', HTML, re.S)
     assert select, "Inquiry select is missing"
     options = [html_lib.unescape(item) for item in re.findall(r"<option>([^<]+)</option>", select.group(1))]
+    assert options == lead_names()
+    assert "Nova Snap" in options
     assert "Nova Casting & Auditions" in options
     assert 'type="file"' not in HTML
+    match = re.search(r"const PRODUCTS = new Set\(\[(.*?)\]\);", LEADS, re.S)
+    assert match, "Lead allowlist is missing"
+    allowlist = re.findall(r'"((?:\\.|[^"\\])*)"', match.group(1))
+    assert set(allowlist) == set(accepted_lead_names())
     for option in options:
-        assert f'"{option}"' in LEADS, option
+        assert option in allowlist, option
 
 
 def test_quote_message_keeps_line_breaks_and_casting_value() -> None:
@@ -227,6 +237,27 @@ if (rejected.status !== 400) process.exit(9);
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
+def test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory() -> None:
+    import subprocess
+
+    script = ROOT / "tests" / "lead_allowlist_staging.mjs"
+    source = script.read_text(encoding="utf-8")
+    assert "staging.invalid" in source
+    assert "aef188e1167a41c98ee81deabbbce50d" not in source
+    assert "getamicor.com" not in source
+    assert "pages.dev" not in source
+    completed = subprocess.run(
+        ["node", str(script)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert "STAGING_PROBES_PASSED=5" in completed.stdout
+    assert "stored_in_memory=2" in completed.stdout
+
+
 def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
@@ -244,6 +275,7 @@ def main() -> None:
         test_nonempty_honeypot_still_blocks,
         test_every_inquiry_option_is_on_the_lead_allowlist,
         test_quote_message_keeps_line_breaks_and_casting_value,
+        test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory,
         test_leads_function_and_kv_path_unchanged,
     ]
     for test in tests:
