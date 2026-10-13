@@ -46,6 +46,7 @@ project_snapshots/
 node_modules/
 .vscode/
 .wrangler/
+/dist/
 
 # Large generated reports and snapshots
 phase*_*.json
