@@ -68,4 +68,4 @@ Public software links were observed in the live Nova app on October 5, 2026. The
 
 Business Services, Ask Nova, Nova Operations, Samples, and Company Profile are new public routes. Sample deliverables are fictional. The profile offers HTML download and browser print/PDF. The existing legal entity name is retained until documentary verification supports a correction.
 
-Inquiry choices are validated by the existing lead endpoint. The frontend displays success only after a response confirms stored or notified delivery. Live KV storage and webhook notification require post-deploy verification.
+Inquiry choices are validated by the existing lead endpoint. The frontend displays success only after a response confirms the lead was stored and returns a reference ID. A webhook acceptance is not an email confirmation. Live KV storage still requires post-deploy verification.

@@ -1,0 +1,63 @@
+name: Website revenue
+
+on:
+  pull_request:
+    branches:
+      - feature/amicor-public-website-w1
+      - cursor/quote-form-confirmation-a5ee
+      - cursor/first-customer-funnel-a5ee
+    paths:
+      - "website/**"
+      - ".github/workflows/website-revenue.yml"
+  push:
+    branches:
+      - cursor/quote-form-confirmation-a5ee
+      - cursor/first-customer-funnel-a5ee
+      - feature/amicor-public-website-w1
+    paths:
+      - "website/**"
+      - ".github/workflows/website-revenue.yml"
+
+jobs:
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lead persistence, duplicates, and page checks
+        run: |
+          node --experimental-default-type=module website/tests/leads-api.test.mjs
+          python3 website/tests/test_early_access_honeypot.py
+          python3 website/tests/test_website_redesign.py
+          if [ -f website/tests/test_funnel_gate.mjs ]; then
+            python3 website/tests/test_first_customer_funnel.py
+            node --experimental-default-type=module website/tests/test_funnel_gate.mjs
+          else
+            echo "FUNNEL_GATE_SKIPPED=not_on_this_branch"
+          fi
+
+      - name: Install mobile browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/ms-playwright
+        run: |
+          npm install --prefix /tmp/pw playwright-core@1.55.0
+          npm install --prefix /tmp/pw-cli playwright@1.55.0
+          cd /tmp/pw-cli && npx playwright install --with-deps chromium
+
+      - name: Mobile quote and funnel
+        env:
+          PLAYWRIGHT_CORE: /tmp/pw/node_modules/playwright-core/index.js
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/ms-playwright
+        run: |
+          node --experimental-default-type=module website/tests/quote-form-mobile.test.mjs
+          if [ -f website/tests/start-funnel-mobile.test.mjs ]; then
+            node --experimental-default-type=module website/tests/start-funnel-mobile.test.mjs
+          else
+            echo "FUNNEL_MOBILE_SKIPPED=not_on_this_branch"
+          fi
