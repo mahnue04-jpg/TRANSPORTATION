@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" role="img" aria-labelledby="homeHubTitle homeHubDesc">
+  <title id="homeHubTitle">AMICOR Home Hub concept</title>
+  <desc id="homeHubDesc">A dark rotating tabletop smart hub with a circular light ring and a compact status display. Future hardware concept. Not for sale.</desc>
+  <defs>
+    <linearGradient id="table" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a3348"/>
+      <stop offset="100%" stop-color="#0a1824"/>
+    </linearGradient>
+    <radialGradient id="ring" cx="50%" cy="50%" r="50%">
+      <stop offset="70%" stop-color="#0b6bcb" stop-opacity="0"/>
+      <stop offset="88%" stop-color="#2b97e6" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#5ee0c4" stop-opacity=".35"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#27445c"/>
+      <stop offset="45%" stop-color="#13293c"/>
+      <stop offset="100%" stop-color="#0b1b28"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="520" rx="32" fill="#07141f"/>
+  <ellipse cx="320" cy="430" rx="210" ry="28" fill="#041018" opacity=".55"/>
+  <ellipse cx="320" cy="392" rx="188" ry="58" fill="url(#table)"/>
+  <ellipse cx="320" cy="386" rx="176" ry="50" fill="#0e2233" stroke="#2b97e6" stroke-opacity=".25"/>
+  <ellipse cx="320" cy="318" rx="118" ry="118" fill="url(#ring)"/>
+  <ellipse cx="320" cy="318" rx="92" ry="92" fill="url(#body)" stroke="#8fd4ff" stroke-opacity=".35"/>
+  <ellipse cx="320" cy="300" rx="64" ry="18" fill="#091824"/>
+  <rect x="276" y="268" width="88" height="36" rx="8" fill="#0c2436" stroke="#5ee0c4" stroke-opacity=".45"/>
+  <text x="320" y="291" text-anchor="middle" fill="#e8f6ff" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700">AMICOR</text>
+  <circle cx="320" cy="248" r="8" fill="#5ee0c4"/>
+  <path d="M210 392 Q320 348 430 392" fill="none" stroke="#5ee0c4" stroke-opacity=".2" stroke-width="6"/>
+</svg>

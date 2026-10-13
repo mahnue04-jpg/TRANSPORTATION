@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" role="img" aria-labelledby="carHubTitle carHubDesc">
+  <title id="carHubTitle">AMICOR Car Hub concept</title>
+  <desc id="carHubDesc">A dashboard-mounted in-vehicle AMICOR display with a landscape screen on a vehicle dash. Future hardware concept. Not for sale.</desc>
+  <defs>
+    <linearGradient id="dash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c3348"/>
+      <stop offset="100%" stop-color="#0b1826"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#12344c"/>
+      <stop offset="100%" stop-color="#071822"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="520" rx="32" fill="#07141f"/>
+  <path d="M40 430 C120 250 200 168 320 160 C440 168 520 250 600 430 Z" fill="#102232"/>
+  <path d="M70 430 C140 290 220 214 320 208 C420 214 500 290 570 430 Z" fill="#0a1928" opacity=".7"/>
+  <path d="M24 430 H616 C600 470 40 470 24 430 Z" fill="url(#dash)"/>
+  <rect x="168" y="214" width="304" height="168" rx="18" fill="#08141f" stroke="#2b97e6" stroke-opacity=".5"/>
+  <rect x="182" y="228" width="276" height="140" rx="10" fill="url(#screen)"/>
+  <text x="320" y="262" text-anchor="middle" fill="#8fd4ff" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">AMICOR CAR HUB</text>
+  <text x="320" y="292" text-anchor="middle" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="18" font-weight="700">On the Road. On Your Team.</text>
+  <rect x="204" y="312" width="72" height="28" rx="8" fill="#0b6bcb"/>
+  <rect x="284" y="312" width="72" height="28" rx="8" fill="#163044"/>
+  <rect x="364" y="312" width="72" height="28" rx="8" fill="#163044"/>
+  <rect x="292" y="382" width="56" height="18" rx="6" fill="#1a3348"/>
+</svg>

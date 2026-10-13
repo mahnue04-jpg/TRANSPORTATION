@@ -1,0 +1,77 @@
+name: Build AMICOR Website Upload Package
+on:
+  push:
+    branches:
+      - feature/amicor-product-visual-catalog
+    paths:
+      - 'website/**'
+      - '.github/workflows/amicor-website-package.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/amicor-website-package.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate website pages
+        run: python3 website/_generate.py
+      - name: Confirm committed pages match the generator
+        run: git diff --exit-code -- website
+      - name: Validate product catalog and links
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          root=Path('website')
+          site=(root/'products/index.html').read_text()
+          for label in ('Nova Casting & Auditions', 'Nova Creative Studio', 'Lifesaver AI Care Cloud', 'Home Hub', 'Car Hub'):
+              assert label in site, f'Missing product: {label}'
+          assert 'product-visual-grid' in site, 'Visual catalog not generated'
+          assert (root/'assets/css/product-visuals.css').is_file()
+          class Images(HTMLParser):
+              def __init__(self): super().__init__(); self.images=[]
+              def handle_starttag(self,tag,attrs):
+                  if tag=='img': self.images.append(dict(attrs).get('src',''))
+          parser=Images();parser.feed(site)
+          for src in parser.images:
+              if src.startswith(('http:', 'https:', 'data:')): continue
+              assert (root/'products'/src).resolve().is_file(), f'Missing image: {src}'
+          import hashlib, re
+          cards=re.findall(r'<article class="product-visual-card">.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"', site)
+          assert len(cards)==10, len(cards)
+          assert len({src for src,_ in cards})==10
+          assert len({alt for _,alt in cards})==10
+          hashes={hashlib.sha256((root/'products'/src).resolve().read_bytes()).hexdigest() for src,_ in cards}
+          assert len(hashes)==10
+          assert 'type="file"' not in site
+          assert 'public submissions disabled' in site.lower()
+          print(f'Product images checked: {len(parser.images)}; catalog cards: {len(cards)}')
+          PY
+          python3 website/tests/check_internal_links.py
+      - name: Assemble site-only directory
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from shutil import copy2
+          root=Path('website'); out=Path('dist'); out.mkdir(exist_ok=True)
+          extensions={'.html','.css','.js','.svg','.png','.webp','.jpg','.jpeg','.ico','.xml','.txt','.json','.webmanifest'}
+          special={'_headers','_redirects','_routes.json'}
+          for p in root.rglob('*'):
+              if not p.is_file() or any(x in {'tests','__pycache__','node_modules'} for x in p.parts): continue
+              if p.suffix not in extensions and p.name not in special: continue
+              target=out/p.relative_to(root); target.parent.mkdir(parents=True,exist_ok=True);copy2(p,target)
+          assert (out/'index.html').exists() and (out/'products/index.html').exists()
+          assert (out/'functions/api/leads.js').exists(), 'Lead handler missing - refuse package'
+          print('Prepared Cloudflare upload folder; no deployment performed')
+          PY
+      - name: Upload build artifact for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: amicor-cloudflare-website-files
+          path: dist/
+          retention-days: 7

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-label="Ask Nova question bubble and a draft reply">
+  <rect width="640" height="280" rx="24" fill="#1c2430"/>
+  <rect x="36" y="36" width="340" height="96" rx="22" fill="#f4f7fb"/>
+  <text x="60" y="78" fill="#1c2430" font-family="Segoe UI, sans-serif" font-size="22" font-weight="700">What should I prepare?</text>
+  <text x="60" y="108" fill="#5c6b7c" font-family="Segoe UI, sans-serif" font-size="16">A question for your account</text>
+  <rect x="220" y="156" width="384" height="88" rx="22" fill="#c45b3e"/>
+  <text x="248" y="196" fill="#fff8f4" font-family="Segoe UI, sans-serif" font-size="22" font-weight="700">Draft for you to review</text>
+  <text x="248" y="224" fill="#ffe1d6" font-family="Segoe UI, sans-serif" font-size="16">Sign-in required</text>
+</svg>
