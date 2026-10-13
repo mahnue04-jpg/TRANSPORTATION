@@ -247,6 +247,7 @@ def page(
           <a href="/nova-today/">Nova Today</a>
           <a href="/nova-create/">Creative Studio</a>
           <a href="{CASTING_EARLY_ACCESS}">Casting &amp; Auditions</a>
+          <a href="/health/">AMICOR Health</a>
           <a href="/deliver/">AMICOR Delivery</a>
           <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
           <a href="/home-hub/">Home Hub</a>

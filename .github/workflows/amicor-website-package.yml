@@ -30,8 +30,9 @@ jobs:
           from html.parser import HTMLParser
           root=Path('website')
           site=(root/'products/index.html').read_text()
-          for label in ('Nova Casting & Auditions', 'Nova Creative Studio', 'Lifesaver AI Care Cloud', 'Home Hub', 'Car Hub'):
+          for label in ('Nova Casting & Auditions', 'Nova Creative Studio', 'Lifesaver AI Care Cloud', 'Home Hub', 'Car Hub', 'AMICOR Health'):
               assert label in site, f'Missing product: {label}'
+          assert 'No public rides and no licensed-market claim.' in site
           assert 'product-visual-grid' in site, 'Visual catalog not generated'
           assert (root/'assets/css/product-visuals.css').is_file()
           class Images(HTMLParser):
@@ -44,11 +45,12 @@ jobs:
               assert (root/'products'/src).resolve().is_file(), f'Missing image: {src}'
           import hashlib, re
           cards=re.findall(r'<article class="product-visual-card">.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"', site)
-          assert len(cards)==10, len(cards)
-          assert len({src for src,_ in cards})==10
-          assert len({alt for _,alt in cards})==10
+          assert len(cards)==11, len(cards)
+          assert len({src for src,_ in cards})==11
+          assert len({alt for _,alt in cards})==11
           hashes={hashlib.sha256((root/'products'/src).resolve().read_bytes()).hexdigest() for src,_ in cards}
-          assert len(hashes)==10
+          assert len(hashes)==11
+          assert any(src.endswith('card-health.jpg') and 'caregiver and vehicle' in alt for src, alt in cards)
           assert 'type="file"' not in site
           assert 'public submissions disabled' in site.lower()
           canonical='/early-access/?product=Nova%20Casting%20%26%20Auditions'

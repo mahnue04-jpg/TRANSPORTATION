@@ -93,7 +93,7 @@ def test_nav_and_ctas_use_real_routes() -> None:
     assert "https://amicor-health-isf-py.onrender.com/nova/anonymous-agent" in home
 
 
-def test_product_catalog_uses_ten_distinct_images() -> None:
+def test_product_catalog_uses_distinct_images() -> None:
     import hashlib
     from html.parser import HTMLParser
 
@@ -123,18 +123,18 @@ def test_product_catalog_uses_ten_distinct_images() -> None:
     html = _html(PAGES["/products/"])
     parser = Cards()
     parser.feed(html)
-    assert len(parser.pairs) == 10
+    assert len(parser.pairs) == 11
     srcs = [src for src, _alt in parser.pairs]
     alts = [alt for _src, alt in parser.pairs]
-    assert len(set(srcs)) == 10
-    assert len(set(alts)) == 10
+    assert len(set(srcs)) == 11
+    assert len(set(alts)) == 11
     hashes = []
     for src, alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         assert path.is_file(), src
         assert len(alt) > 24, alt
         hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
-    assert len(set(hashes)) == 10
+    assert len(set(hashes)) == 11
     for src, _alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         assert src.endswith(".jpg"), src
@@ -147,6 +147,21 @@ def test_product_catalog_uses_ten_distinct_images() -> None:
     assert "\\n              <tr><td>Nova Creative Studio" not in html
     assert "card-home-hub.jpg" in html
     assert "card-car-hub.jpg" in html
+    assert "AMICOR Health" in html
+    assert 'src="../assets/img/card-health.jpg"' in html
+    assert "No public rides and no licensed-market claim." in html
+    assert "Connected-care concept, not an emergency service or medical device." in html
+    assert "card-lifesaver.jpg" in html
+    health = _html(PAGES["/health/"])
+    assert "does not claim that AMICOR currently holds a local operating license" in health
+    assert "not a diagnostic product" in _html(PAGES["/lifesaver/"]).lower()
+    visuals = (ROOT / "assets" / "css" / "product-visuals.css").read_text(encoding="utf-8")
+    assert ".product-visual-art{position:relative;height:200px;overflow:hidden" in visuals
+    home = _html(PAGES["/"])
+    assert "Health &amp; Deliver" not in home
+    assert "Health & Deliver" not in home
+    assert 'href="/health/"' in home
+    assert ">AMICOR Health</h3>" in home
     assert "Conceptual illustrations." in html
     assert 'src="../assets/img/card-home-hub.jpg"' in _html(PAGES["/home-hub/"])
     assert 'src="../assets/img/card-car-hub.jpg"' in _html(PAGES["/car-hub/"])
@@ -221,7 +236,7 @@ def main() -> None:
         test_nav_and_ctas_use_real_routes,
         test_hardware_assets_exist,
         test_customer_paths_and_price_consistency,
-        test_product_catalog_uses_ten_distinct_images,
+        test_product_catalog_uses_distinct_images,
         test_casting_ctas_use_the_canonical_product,
         test_public_claim_safety,
         test_sitemap_includes_new_routes,
