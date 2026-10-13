@@ -228,9 +228,10 @@ h3 { font-size: 1.12rem; }
 }
 .card-visual img {
   width: 100%;
-  height: 148px;
+  height: 180px;
   object-fit: cover;
-  object-position: center 42%;
+  object-position: center;
+  background: #07141f;
 }
 .featured {
   border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
@@ -517,6 +518,20 @@ textarea { min-height: 120px; }
   .nav a, .nav-cta, .nav-signin { width: 100%; }
 }
 
+.home-product-stage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+.home-product-stage img {
+  width: 100%;
+  height: 132px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #07141f;
+}
 @media (max-width: 430px) {
   .price-grid, .nova-metrics, .grid-4 { grid-template-columns: 1fr; }
   .step { grid-template-columns: 44px 1fr; }
@@ -532,6 +547,13 @@ textarea { min-height: 120px; }
 /* Services refresh: readable controls, compact sections, printable profile. */
 body { font-size: 1rem; }
 .hero { padding-top: 64px; padding-bottom: 36px; }
+@media (max-width: 700px) {
+  .hero { padding-top: 20px; padding-bottom: 12px; }
+  h1 { font-size: 1.85rem; margin-bottom: 8px; }
+  .lede { margin-top: 0; }
+  .home-product-stage { margin-top: 12px; }
+  .home-product-stage img { height: 104px; }
+}
 .section { padding-top: 32px; padding-bottom: 32px; }
 .nav a, .btn, .chip { font-size: max(.875rem, 14px); }
 .card { min-width: 0; overflow-wrap: anywhere; }

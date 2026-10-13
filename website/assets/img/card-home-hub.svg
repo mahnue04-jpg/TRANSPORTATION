@@ -1,11 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-label="Home Hub tabletop concept, not for sale">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-labelledby="hubTitle hubDesc">
+  <title id="hubTitle">Home Hub tabletop concept</title>
+  <desc id="hubDesc">Rotating tabletop smart hub. Future hardware. Not for sale.</desc>
   <rect width="640" height="280" rx="24" fill="#07141f"/>
-  <text x="48" y="58" fill="#9ad7ff" font-family="Segoe UI, sans-serif" font-size="14" font-weight="700">FUTURE HARDWARE - NOT FOR SALE</text>
-  <ellipse cx="250" cy="214" rx="120" ry="18" fill="#041018"/>
-  <ellipse cx="250" cy="168" rx="78" ry="78" fill="#14324a" stroke="#5ee0c4" stroke-width="8"/>
-  <ellipse cx="250" cy="168" rx="48" ry="48" fill="#0b1c2a"/>
-  <rect x="214" y="152" width="72" height="22" rx="6" fill="#0c2436" stroke="#5ee0c4"/>
-  <text x="250" y="168" text-anchor="middle" fill="#e8f6ff" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700">AMICOR</text>
-  <text x="390" y="150" fill="#f4f9fc" font-family="Segoe UI, sans-serif" font-size="28" font-weight="700">Home Hub</text>
-  <text x="390" y="184" fill="#b7c9d8" font-family="Segoe UI, sans-serif" font-size="16">Tabletop concept</text>
+  <ellipse cx="300" cy="214" rx="150" ry="22" fill="#041018"/>
+  <ellipse cx="300" cy="188" rx="120" ry="28" fill="#1a3348"/>
+  <ellipse cx="300" cy="118" rx="78" ry="78" fill="#14324a" stroke="#5ee0c4" stroke-width="10"/>
+  <ellipse cx="300" cy="118" rx="48" ry="48" fill="#0b1c2a"/>
+  <rect x="262" y="102" width="76" height="24" rx="6" fill="#0c2436" stroke="#5ee0c4"/>
+  <circle cx="300" cy="70" r="8" fill="#5ee0c4"/>
+  <rect x="460" y="96" width="110" height="16" rx="8" fill="#5ee0c4"/>
+  <rect x="460" y="126" width="80" height="12" rx="6" fill="#173044"/>
 </svg>

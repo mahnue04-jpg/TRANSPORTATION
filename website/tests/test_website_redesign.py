@@ -41,6 +41,32 @@ def test_required_pages_exist() -> None:
         assert path.is_file(), href
 
 
+def test_homepage_renders_product_illustrations() -> None:
+    home = _html(PAGES["/"])
+    assert "Product illustrations" in home
+    assert 'class="product-visual-grid"' in home
+    for name in (
+        "card-operations.svg",
+        "card-work-revenue.svg",
+        "card-nova-create.svg",
+        "card-casting.svg",
+        "card-ask-nova.svg",
+        "card-nova-today.svg",
+        "card-lifesaver.svg",
+        "card-home-hub.svg",
+        "card-car-hub.svg",
+        "card-delivery.svg",
+        "card-research.svg",
+        "card-data.svg",
+        "card-crm.svg",
+        "card-health.svg",
+        "card-hubs.svg",
+    ):
+        assert f'src="assets/img/{name}"' in home, name
+        assert (ROOT / "assets" / "img" / name).is_file(), name
+    assert 'src="../assets/img/' not in home
+
+
 def test_home_presents_services_and_nova() -> None:
     home = _html(PAGES["/"])
     assert 'href="/business-services/"' in home
@@ -183,6 +209,7 @@ def test_sitemap_includes_new_routes() -> None:
 def main() -> None:
     tests = [
         test_required_pages_exist,
+        test_homepage_renders_product_illustrations,
         test_home_presents_services_and_nova,
         test_no_placeholder_or_admin_links,
         test_nav_and_ctas_use_real_routes,
