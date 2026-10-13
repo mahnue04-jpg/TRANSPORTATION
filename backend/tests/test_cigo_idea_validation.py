@@ -28,10 +28,48 @@ def client():
     STORE.reset()
 
 
+def _clear_runtime_env(monkeypatch):
+    for name in (
+        "RUNTIME_ENVIRONMENT",
+        "ENVIRONMENT",
+        "AMICOR_ENVIRONMENT",
+        "APP_ENV",
+        "AMICOR_PUBLIC_URL",
+        "RENDER_EXTERNAL_URL",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_demo_stays_off_in_production(monkeypatch):
     monkeypatch.setenv("CIGO_IDEA_VALIDATION_DEMO", "1")
+    _clear_runtime_env(monkeypatch)
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "production")
     assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("AMICOR_PUBLIC_URL", "https://amicor-health-isf-py.onrender.com")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://amicor:amicor@localhost:5432/amicor")
+    assert demo_enabled() is False
+
+    _clear_runtime_env(monkeypatch)
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
     assert demo_enabled() is True
     monkeypatch.delenv("CIGO_IDEA_VALIDATION_DEMO")

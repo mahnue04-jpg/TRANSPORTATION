@@ -17,6 +17,7 @@ from app.core.cigo_idea_validation.script import (
     WORKFLOW,
     word_count,
 )
+from app.runtime_contract import _resolve_runtime_environment
 
 _SPACE = re.compile(r"\s+")
 IDEA_MIN = 12
@@ -28,8 +29,11 @@ CONSUMER_MIN = 8
 
 def demo_enabled() -> bool:
     """Local mock only. Production never mounts this, even if the flag is set."""
-    runtime = os.getenv("RUNTIME_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")).strip().lower()
-    if runtime in {"production", "prod"}:
+    for name in ("AMICOR_ENVIRONMENT", "APP_ENV", "RUNTIME_ENVIRONMENT", "ENVIRONMENT"):
+        if os.getenv(name, "").strip().lower() in {"production", "prod"}:
+            return False
+    # Also covers a public HTTPS URL plus a non-SQLite database when no explicit name is set.
+    if str(_resolve_runtime_environment() or "").strip().lower() in {"production", "prod"}:
         return False
     return os.getenv("CIGO_IDEA_VALIDATION_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
 
