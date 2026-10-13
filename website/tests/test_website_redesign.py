@@ -46,21 +46,21 @@ def test_homepage_renders_product_illustrations() -> None:
     assert "Product illustrations" in home
     assert 'class="product-visual-grid"' in home
     for name in (
-        "card-operations.svg",
-        "card-work-revenue.svg",
-        "card-nova-create.svg",
-        "card-casting.svg",
-        "card-ask-nova.svg",
-        "card-nova-today.svg",
-        "card-lifesaver.svg",
-        "card-home-hub.svg",
-        "card-car-hub.svg",
-        "card-delivery.svg",
-        "card-research.svg",
-        "card-data.svg",
-        "card-crm.svg",
-        "card-health.svg",
-        "card-hubs.svg",
+        "card-operations.jpg",
+        "card-work-revenue.jpg",
+        "card-nova-create.jpg",
+        "card-casting.jpg",
+        "card-ask-nova.jpg",
+        "card-nova-today.jpg",
+        "card-lifesaver.jpg",
+        "card-home-hub.jpg",
+        "card-car-hub.jpg",
+        "card-delivery.jpg",
+        "card-research.jpg",
+        "card-data.jpg",
+        "card-crm.jpg",
+        "card-health.jpg",
+        "card-hubs.jpg",
     ):
         assert f'src="assets/img/{name}"' in home, name
         assert (ROOT / "assets" / "img" / name).is_file(), name
@@ -135,22 +135,28 @@ def test_product_catalog_uses_ten_distinct_images() -> None:
         assert len(alt) > 24, alt
         hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
     assert len(set(hashes)) == 10
+    for src, _alt in parser.pairs:
+        path = (ROOT / "products" / src).resolve()
+        assert src.endswith(".jpg"), src
+        assert path.stat().st_size > 40_000, src
+        assert path.read_bytes()[:3] == b"\xff\xd8\xff"
     assert 'type="file"' not in html
     assert "public submissions disabled" in html.lower()
     assert 'href="/early-access/?product=Nova%20Casting%20%26%20Auditions"' in html
     assert "Nova%20Casting%20and%20Auditions" not in html
     assert "\\n              <tr><td>Nova Creative Studio" not in html
-    assert "card-home-hub.svg" in html
-    assert "card-car-hub.svg" in html
-    assert 'src="../assets/img/home-hub.svg"' in _html(PAGES["/home-hub/"])
-    assert 'src="../assets/img/car-hub.svg"' in _html(PAGES["/car-hub/"])
+    assert "card-home-hub.jpg" in html
+    assert "card-car-hub.jpg" in html
+    assert "Conceptual illustrations." in html
+    assert 'src="../assets/img/card-home-hub.jpg"' in _html(PAGES["/home-hub/"])
+    assert 'src="../assets/img/card-car-hub.jpg"' in _html(PAGES["/car-hub/"])
 
 
 def test_hardware_assets_exist() -> None:
-    assert (ROOT / "assets" / "img" / "home-hub.svg").is_file()
-    assert (ROOT / "assets" / "img" / "car-hub.svg").is_file()
-    for name in ("card-work-revenue.svg", "card-nova-today.svg", "card-nova-create.svg", "card-delivery.svg", "card-lifesaver.svg"):
-        assert (ROOT / "assets" / "img" / name).is_file(), name
+    for name in ("card-home-hub.jpg", "card-car-hub.jpg", "card-work-revenue.jpg", "card-nova-today.jpg", "card-nova-create.jpg", "card-delivery.jpg", "card-lifesaver.jpg"):
+        path = ROOT / "assets" / "img" / name
+        assert path.is_file(), name
+        assert path.stat().st_size > 40_000, name
     assert "See More. Care More. Be There." in _html(PAGES["/home-hub/"])
     assert "On the Road. On Your Team." in _html(PAGES["/car-hub/"])
 

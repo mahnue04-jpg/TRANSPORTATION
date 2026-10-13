@@ -30,7 +30,7 @@ def apply(add, pages, status_table):
         loading = 'eager' if eager else 'lazy'
         return (
             '<article class="card"><div class="card-visual">'
-            f'<img loading="{loading}" decoding="async" width="640" height="280" src="{prefix}assets/img/{art}" alt="{escape(alt)}">'
+            f'<img loading="{loading}" decoding="async" width="1280" height="720" src="{prefix}assets/img/{art}" alt="{escape(alt)}">'
             f'</div><h3>{title}</h3><p>{text}</p><a class="card-link" href="{escape(url, quote=True)}">{label}</a></article>'
         )
 
@@ -40,9 +40,9 @@ def apply(add, pages, status_table):
         card('CRM &amp; workflow assessment', 'Map your current process, identify gaps, and build a prioritized improvement plan.', '/business-services/'),
     ]) + '</div>'
     home_service_cards = '<div class="grid grid-3">' + ''.join([
-        pictured('Research &amp; reports', 'Public-source research, cited findings, document preparation, and concise reports you can review.', '/business-services/', 'card-research.svg', 'Illustrated research folder with cited pages and a review glass.', eager=True),
-        pictured('Data &amp; administrative support', 'Spreadsheet cleanup, task registers, document organization, and customer-support drafts.', '/business-services/', 'card-data.svg', 'Illustrated spreadsheet beside a stack of organized documents.', eager=True),
-        pictured('CRM &amp; workflow assessment', 'Map your current process, identify gaps, and build a prioritized improvement plan.', '/business-services/', 'card-crm.svg', 'Illustrated workflow map connecting people, tasks, and handoffs.', eager=True),
+        pictured('Research &amp; reports', 'Public-source research, cited findings, document preparation, and concise reports you can review.', '/business-services/', 'card-research.jpg', 'Conceptual illustration of a researcher reviewing source books and a folder. Not a client deliverable.'),
+        pictured('Data &amp; administrative support', 'Spreadsheet cleanup, task registers, document organization, and customer-support drafts.', '/business-services/', 'card-data.jpg', 'Conceptual illustration of a desk where documents are organized beside a spreadsheet. Not live customer data.'),
+        pictured('CRM &amp; workflow assessment', 'Map your current process, identify gaps, and build a prioritized improvement plan.', '/business-services/', 'card-crm.jpg', 'Conceptual illustration of a team mapping a workflow with cards and string. Not a live CRM.'),
     ]) + '</div>'
     product_cards = '<div class="grid grid-3">' + ''.join([
         card('Ask Nova', 'Research questions, organize ideas, and prepare drafts in your Nova account.', '/ask-nova/'),
@@ -50,30 +50,32 @@ def apply(add, pages, status_table):
         card('Nova Creative Studio', 'Plan scripts, storyboards, captions, and branded assets. Media generation depends on enabled providers and credits.', '/nova-create/'),
     ]) + '</div>'
     home_product_cards = '<div class="grid grid-3">' + ''.join([
-        pictured('Ask Nova', 'Research questions, organize ideas, and prepare drafts in your Nova account.', '/ask-nova/', 'card-ask-nova.svg', 'Ask Nova question bubble and a draft reply. Sign-in required.', eager=True),
-        pictured('Nova Operations Agent', 'Submit a digital business task, explore the interactive demo, or start a seven-day trial.', '/nova-operations/', 'card-operations.svg', 'Operations artwork with observe, recommend, and owner approval.', eager=True),
-        pictured('Nova Creative Studio', 'Plan scripts, storyboards, captions, and branded assets. Media generation depends on enabled providers and credits.', '/nova-create/', 'card-nova-create.svg', 'Creative Studio storyboard frames with an owner-review step.', eager=True),
-        pictured('Nova Casting &amp; Auditions', 'Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.', '/early-access/?product=Nova%20Casting%20%26%20Auditions', 'card-casting.svg', 'Casting spotlight profile for human review. Public submissions are off.', 'Request preview', eager=True),
+        pictured('Ask Nova', 'Research questions, organize ideas, and prepare drafts in your Nova account.', '/ask-nova/', 'card-ask-nova.jpg', 'Conceptual illustration of a person asking a question at a laptop. Sign-in required. Not a live transcript.'),
+        pictured('Nova Operations Agent', 'Submit a digital business task, explore the interactive demo, or start a seven-day trial.', '/nova-operations/', 'card-operations.jpg', 'Conceptual illustration of a digital operations workspace and workflow review. Not a live screenshot.'),
+        pictured('Nova Creative Studio', 'Plan scripts, storyboards, captions, and branded assets. Media generation depends on enabled providers and credits.', '/nova-create/', 'card-nova-create.jpg', 'Conceptual illustration of an image and video editing studio with storyboard frames.'),
+        pictured('Nova Casting &amp; Auditions', 'Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.', '/early-access/?product=Nova%20Casting%20%26%20Auditions', 'card-casting.jpg', 'Conceptual illustration of an audition camera and a reviewer at a monitor. Public submissions are off.', 'Request preview'),
     ]) + '</div>'
     visual_products = [
-        ('Nova Operations Agent', 'Supervised release', 'Digital operations, research and task support with human review.', '/nova-operations/', 'card-operations.svg', 'Operations board with observe, recommend, and owner approval.'),
-        ('Work & Revenue', 'Early access', 'Explore opportunities and organized work pipelines; no unverified application claims.', '/work-revenue/', 'card-work-revenue.svg', 'Sample work pipeline with owner-confirmed revenue labels. Not live payment data.'),
-        ('Nova Creative Studio', 'Supervised release', 'Scripts, storyboards and configured media tools.', '/nova-create/', 'card-nova-create.svg', 'Sample script and storyboard drafts with an owner-review step.'),
-        ('Nova Casting & Auditions', 'Sandbox preview', 'Casting workflows and human-reviewed auditions; public submissions disabled.', '/early-access/?product=Nova%20Casting%20%26%20Auditions', 'card-casting.svg', 'Sandbox casting profile for human review. Public audition submissions are off.'),
-        ('Ask Nova', 'Account access', 'Research, ideas and assisted drafts.', '/ask-nova/', 'card-ask-nova.svg', 'Ask Nova question and a draft reply. Sign-in required.'),
-        ('Nova Today', 'Early access', 'Signed-in operations command center.', '/nova-today/', 'card-nova-today.svg', 'Sample Nova Today command center. Not live operator data.'),
-        ('Lifesaver AI Care Cloud', 'In development', 'Connected-care concept, not an emergency service or medical device.', '/lifesaver/', 'card-lifesaver.svg', 'Connected-care concept. Not a medical device or emergency service.'),
-        ('Home Hub', 'Future hardware', 'Concept tabletop smart hub; not for sale.', '/home-hub/', 'card-home-hub.svg', 'Home Hub tabletop concept. Future hardware, not for sale.'),
-        ('Car Hub', 'Future hardware', 'Concept in-vehicle hub; not for sale.', '/car-hub/', 'card-car-hub.svg', 'Car Hub dashboard concept. Future hardware, not for sale.'),
-        ('AMICOR Delivery', 'In development', 'Planned delivery technology; no public orders.', '/deliver/', 'card-delivery.svg', 'Delivery operations concept. Not accepting public orders.'),
+        ('Nova Operations Agent', 'Supervised release', 'Digital operations, research and task support with human review.', '/nova-operations/', 'card-operations.jpg', 'Conceptual illustration of a digital operations workspace with people reviewing a workflow. Not a live screenshot.'),
+        ('Work & Revenue', 'Early access', 'Explore opportunities and organized work pipelines; no unverified application claims.', '/work-revenue/', 'card-work-revenue.jpg', 'Conceptual illustration of an opportunity pipeline on a studio display. Not live payment data.'),
+        ('Nova Creative Studio', 'Supervised release', 'Scripts, storyboards and configured media tools.', '/nova-create/', 'card-nova-create.jpg', 'Conceptual illustration of an image and video editing studio with storyboard frames.'),
+        ('Nova Casting & Auditions', 'Sandbox preview', 'Casting workflows and human-reviewed auditions; public submissions disabled.', '/early-access/?product=Nova%20Casting%20%26%20Auditions', 'card-casting.jpg', 'Conceptual illustration of an audition camera and a reviewer at a monitor. Public submissions are off.'),
+        ('Ask Nova', 'Account access', 'Research, ideas and assisted drafts.', '/ask-nova/', 'card-ask-nova.jpg', 'Conceptual illustration of a person asking a question at a laptop. Sign-in required. Not a live transcript.'),
+        ('Nova Today', 'Early access', 'Signed-in operations command center.', '/nova-today/', 'card-nova-today.jpg', 'Conceptual illustration of a morning command desk. Not live operator data.'),
+        ('Lifesaver AI Care Cloud', 'In development', 'Connected-care concept, not an emergency service or medical device.', '/lifesaver/', 'card-lifesaver.jpg', 'Conceptual illustration of a home check-in with a small sensor. Not a medical device or emergency service.'),
+        ('Home Hub', 'Future hardware', 'Concept tabletop smart hub; not for sale.', '/home-hub/', 'card-home-hub.jpg', 'Conceptual illustration of a rotating tabletop smart display. Future hardware, not for sale.'),
+        ('Car Hub', 'Future hardware', 'Concept in-vehicle hub; not for sale.', '/car-hub/', 'card-car-hub.jpg', 'Conceptual illustration of a dashboard-mounted display in a car. Future hardware, not for sale.'),
+        ('AMICOR Delivery', 'In development', 'Planned delivery technology; no public orders.', '/deliver/', 'card-delivery.jpg', 'Conceptual illustration of a dispatch desk and a courier with a parcel. Not accepting public orders.'),
     ]
 
     def visual_grid(prefix, eager=False):
-        loading = 'eager' if eager else 'lazy'
-        return '<div class="product-visual-grid">' + ''.join(
-            '<article class="product-visual-card"><div class="product-visual-art"><img loading="' + loading + '" decoding="async" width="640" height="280" src="' + prefix + 'assets/img/' + art + '" alt="' + escape(alt) + '"></div><div class="product-visual-body"><p class="product-visual-status">' + status + '</p><h3>' + title + '</h3><p>' + description + '</p><a class="card-link" href="' + url + '">Explore product →</a></div></article>'
-            for title, status, description, url, art, alt in visual_products
-        ) + '</div>'
+        cards = []
+        for index, (title, status, description, url, art, alt) in enumerate(visual_products):
+            loading = 'eager' if eager and index == 0 else 'lazy'
+            cards.append(
+                '<article class="product-visual-card"><div class="product-visual-art"><img loading="' + loading + '" decoding="async" width="1280" height="720" src="' + prefix + 'assets/img/' + art + '" alt="' + escape(alt) + '"></div><div class="product-visual-body"><p class="product-visual-status">' + status + '</p><h3>' + title + '</h3><p>' + description + '</p><a class="card-link" href="' + url + '">Explore product →</a></div></article>'
+            )
+        return '<div class="product-visual-grid">' + ''.join(cards) + '</div><p class="art-note">Conceptual illustrations. Not screenshots of live accounts, payments, or devices.</p>'
 
     plans = '<div class="price-grid">' + ''.join([
         card('Explore &amp; scope', '<strong>$0</strong>Explore the public demo and request a scope check. The Nova app also offers a seven-day account trial with no card required.', AGENT, 'Explore the demo'),
@@ -89,9 +91,9 @@ def apply(add, pages, status_table):
              button('/business-services/', 'Explore Business Services') + button(AGENT, 'Try Nova', False)).replace(
             '</div></section>',
             '<div class="home-product-stage" aria-label="Product illustrations">'
-            '<img loading="eager" decoding="async" width="640" height="280" src="assets/img/card-casting.svg" alt="Casting spotlight profile for human review. Public submissions are off.">'
-            '<img loading="eager" decoding="async" width="640" height="280" src="assets/img/card-nova-create.svg" alt="Creative Studio storyboard frames with an owner-review step.">'
-            '<img loading="eager" decoding="async" width="640" height="280" src="assets/img/card-operations.svg" alt="Operations artwork with observe, recommend, and owner approval.">'
+            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-casting.jpg" alt="Conceptual illustration of an audition camera and a reviewer at a monitor. Public submissions are off.">'
+            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-nova-create.jpg" alt="Conceptual illustration of an image and video editing studio with storyboard frames.">'
+            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-operations.jpg" alt="Conceptual illustration of a digital operations workspace and workflow review. Not a live screenshot.">'
             '</div></div></section>',
             1,
         )
@@ -100,7 +102,7 @@ def apply(add, pages, status_table):
         + section('Meet Nova', home_product_cards + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>.</p>')
         + section('See how a task becomes a deliverable', '<div class="grid grid-3"><article class="card"><h3>1. Define the result</h3><p>Share your goal, inputs, deadline, and acceptance criteria.</p></article><article class="card"><h3>2. Prepare &amp; review</h3><p>AMICOR checks the scope. Nova assists with supported work, and a person reviews the output.</p></article><article class="card"><h3>3. Deliver the work</h3><p>Receive the agreed materials with sources, assumptions, and next steps where relevant.</p></article></div>')
         + section('Evaluate before you commit', button(AGENT, 'Run the Interactive Demo') + ' ' + button('/samples/', 'View Sample Deliverables', False) + '<p>The app demo illustrates a lead workflow. It does not contact customers or change a live CRM. Samples are fictional examples, not client case studies.</p>')
-        + section('Future AMICOR initiatives', '<p>Transportation, local delivery, Lifesaver, and connected hardware remain on separate development timelines.</p><div class="grid grid-3">' + pictured('Health &amp; Deliver', 'Transportation and delivery technology in development; public ride and delivery orders are not offered here.', '/health/', 'card-health.svg', 'Illustrated care route and vehicle. Transportation technology, not a booked ride.', eager=True) + pictured('Lifesaver AI Care Cloud', 'A connected-care technology initiative in development.', '/lifesaver/', 'card-lifesaver.svg', 'Connected-care rings. Not a medical device or emergency service.', eager=True) + pictured('Home Hub &amp; Car Hub', 'Future hardware concepts; not for sale.', '/home-hub/', 'card-hubs.svg', 'Home Hub and Car Hub concepts side by side. Future hardware, not for sale.', eager=True) + '</div><p><a href="/products/">View the full product catalog and status</a></p>'))
+        + section('Future AMICOR initiatives', '<p>Transportation, local delivery, Lifesaver, and connected hardware remain on separate development timelines.</p><div class="grid grid-3">' + pictured('Health &amp; Deliver', 'Transportation and delivery technology in development; public ride and delivery orders are not offered here.', '/health/', 'card-health.jpg', 'Conceptual illustration of a caregiver and vehicle at a curb. Not a booked ride.') + pictured('Lifesaver AI Care Cloud', 'A connected-care technology initiative in development.', '/lifesaver/', 'card-lifesaver.jpg', 'Conceptual illustration of a home check-in with a small sensor. Not a medical device or emergency service.') + pictured('Home Hub &amp; Car Hub', 'Future hardware concepts; not for sale.', '/home-hub/', 'card-hubs.jpg', 'Conceptual illustration of a tabletop hub and a dashboard display. Future hardware, not for sale.') + '</div><p><a href="/products/">View the full product catalog and status</a></p>'))
 
     replace('/business-services/', 'AMICOR Business Services — Research, Data and CRM Support',
         'Request scoped research, administrative support, data cleanup, documentation, and CRM workflow assessment from AMICOR.',

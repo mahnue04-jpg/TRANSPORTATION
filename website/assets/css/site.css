@@ -547,12 +547,17 @@ textarea { min-height: 120px; }
 /* Services refresh: readable controls, compact sections, printable profile. */
 body { font-size: 1rem; }
 .hero { padding-top: 64px; padding-bottom: 36px; }
+.art-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 @media (max-width: 700px) {
   .hero { padding-top: 20px; padding-bottom: 12px; }
   h1 { font-size: 1.85rem; margin-bottom: 8px; }
   .lede { margin-top: 0; }
-  .home-product-stage { margin-top: 12px; }
-  .home-product-stage img { height: 104px; }
+  .home-product-stage { margin-top: 12px; grid-template-columns: 1fr; }
+  .home-product-stage img { height: 200px; }
 }
 .section { padding-top: 32px; padding-bottom: 32px; }
 .nav a, .btn, .chip { font-size: max(.875rem, 14px); }
