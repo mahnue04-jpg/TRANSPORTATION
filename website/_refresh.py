@@ -80,20 +80,20 @@ def apply(add, pages, status_table):
         hero('Nova software · Supervised release', 'Creative Studio', 'Develop ideas into scripts, captions, storyboards, and branded creative assets.', button(CREATIVE, 'Open Creative Studio') + button('/early-access/?product=Nova%20Creative%20Studio&intent=demo', 'Request a Demo', False)) + section('Plan, create, review', '<div class="grid grid-3"><article class="card"><h3>Content planning</h3><p>Build a brief, script, caption, and storyboard around your audience and goal.</p></article><article class="card"><h3>Media generation</h3><p>Image, video, and voice tools depend on configured providers, account permissions, and credits.</p></article><article class="card"><h3>Review &amp; export</h3><p>Review available outputs before publishing. Video rendering is still being improved; generation and exports may fail.</p></article></div><p>Creative Studio is not advertised as an unlimited media plan. Provider costs, watermarks, licensing, and production readiness require review.</p>'))
 
     visual_products = [
-        ('Nova Operations Agent', 'Supervised release', 'Digital operations, research and task support with human review.', '/nova-operations/', 'card-operations.svg'),
-        ('Work & Revenue', 'Early access', 'Explore opportunities and organized work pipelines; no unverified application claims.', '/work-revenue/', 'card-work-revenue.svg'),
-        ('Nova Creative Studio', 'Supervised release', 'Scripts, storyboards and configured media tools.', '/nova-create/', 'card-nova-create.svg'),
-        ('Nova Casting & Auditions', 'Sandbox preview', 'Casting workflows and human-reviewed auditions; public submissions disabled.', '/early-access/?product=Nova%20Casting%20and%20Auditions', 'card-casting.svg'),
-        ('Ask Nova', 'Account access', 'Research, ideas and assisted drafts.', '/ask-nova/', 'card-ask-nova.svg'),
-        ('Nova Today', 'Early access', 'Signed-in operations command center.', '/nova-today/', 'card-nova-today.svg'),
-        ('Lifesaver AI Care Cloud', 'In development', 'Connected-care concept, not an emergency service or medical device.', '/lifesaver/', 'card-lifesaver.svg'),
-        ('Home Hub', 'Future hardware', 'Concept tabletop smart hub; not for sale.', '/home-hub/', 'home-hub.svg'),
-        ('Car Hub', 'Future hardware', 'Concept in-vehicle hub; not for sale.', '/car-hub/', 'car-hub.svg'),
-        ('AMICOR Delivery', 'In development', 'Planned delivery technology; no public orders.', '/deliver/', 'card-delivery.svg'),
+        ('Nova Operations Agent', 'Supervised release', 'Digital operations, research and task support with human review.', '/nova-operations/', 'card-operations.svg', 'Operations board with observe, recommend, and owner approval.'),
+        ('Work & Revenue', 'Early access', 'Explore opportunities and organized work pipelines; no unverified application claims.', '/work-revenue/', 'card-work-revenue.svg', 'Sample work pipeline with owner-confirmed revenue labels. Not live payment data.'),
+        ('Nova Creative Studio', 'Supervised release', 'Scripts, storyboards and configured media tools.', '/nova-create/', 'card-nova-create.svg', 'Sample script and storyboard drafts with an owner-review step.'),
+        ('Nova Casting & Auditions', 'Sandbox preview', 'Casting workflows and human-reviewed auditions; public submissions disabled.', '/early-access/?product=Nova%20Casting%20and%20Auditions', 'card-casting.svg', 'Sandbox casting profile for human review. Public audition submissions are off.'),
+        ('Ask Nova', 'Account access', 'Research, ideas and assisted drafts.', '/ask-nova/', 'card-ask-nova.svg', 'Ask Nova question and a draft reply. Sign-in required.'),
+        ('Nova Today', 'Early access', 'Signed-in operations command center.', '/nova-today/', 'card-nova-today.svg', 'Sample Nova Today command center. Not live operator data.'),
+        ('Lifesaver AI Care Cloud', 'In development', 'Connected-care concept, not an emergency service or medical device.', '/lifesaver/', 'card-lifesaver.svg', 'Connected-care concept. Not a medical device or emergency service.'),
+        ('Home Hub', 'Future hardware', 'Concept tabletop smart hub; not for sale.', '/home-hub/', 'card-home-hub.svg', 'Home Hub tabletop concept. Future hardware, not for sale.'),
+        ('Car Hub', 'Future hardware', 'Concept in-vehicle hub; not for sale.', '/car-hub/', 'card-car-hub.svg', 'Car Hub dashboard concept. Future hardware, not for sale.'),
+        ('AMICOR Delivery', 'In development', 'Planned delivery technology; no public orders.', '/deliver/', 'card-delivery.svg', 'Delivery operations concept. Not accepting public orders.'),
     ]
     visual_cards = '<div class="product-visual-grid">' + ''.join(
-        '<article class="product-visual-card"><div class="product-visual-art"><img loading="lazy" decoding="async" width="640" height="280" src="../assets/img/' + art + '" alt="Illustrative concept for ' + title + '"></div><div class="product-visual-body"><p class="product-visual-status">' + status + '</p><h3>' + title + '</h3><p>' + description + '</p><a class="card-link" href="' + url + '">Explore product →</a></div></article>'
-        for title, status, description, url, art in visual_products
+        '<article class="product-visual-card"><div class="product-visual-art"><img loading="lazy" decoding="async" width="640" height="280" src="../assets/img/' + art + '" alt="' + alt + '"></div><div class="product-visual-body"><p class="product-visual-status">' + status + '</p><h3>' + title + '</h3><p>' + description + '</p><a class="card-link" href="' + url + '">Explore product →</a></div></article>'
+        for title, status, description, url, art, alt in visual_products
     ) + '</div>'
     catalog = hero('Products', 'Explore AMICOR products.', 'Modern software tools, supervised previews and clearly labeled future concepts.') + section('Our products', visual_cards) + section('Product status', status_table)
     replace('/products/', 'AMICOR Products — Nova and Future Initiatives', 'Explore AMICOR Nova tools, Casting, Creative Studio and future concepts.', catalog)

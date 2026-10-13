@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="wrTitle wrDesc">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-labelledby="wrTitle wrDesc">
   <title id="wrTitle">AMICOR Nova Work and Revenue sample workspace</title>
   <desc id="wrDesc">Illustrative software dashboard with Today, Work and Revenue, a sample queue, and owner-confirmed revenue labels. Not live customer or payment data.</desc>
   <rect width="640" height="280" rx="24" fill="#07141f"/>

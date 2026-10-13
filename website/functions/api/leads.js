@@ -1,5 +1,6 @@
 const PRODUCTS = new Set([
   "Business Services", "Ask Nova", "Nova Operations Agent", "Nova Creative Studio",
+  "Nova Casting & Auditions",
   "Autonomous Operations Agent",
   "AMICOR Nova Work & Revenue",
   "AMICOR Nova Today",

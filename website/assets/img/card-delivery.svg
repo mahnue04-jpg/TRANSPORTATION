@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="delTitle delDesc">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280" role="img" aria-labelledby="delTitle delDesc">
   <title id="delTitle">AMICOR Delivery operations concept</title>
   <desc id="delDesc">Illustrative local delivery map and status board. Coming soon. Not a live ordering service.</desc>
   <rect width="640" height="280" rx="24" fill="#07141f"/>

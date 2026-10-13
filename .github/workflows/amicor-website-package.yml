@@ -41,7 +41,16 @@ jobs:
           for src in parser.images:
               if src.startswith(('http:', 'https:', 'data:')): continue
               assert (root/'products'/src).resolve().is_file(), f'Missing image: {src}'
-          print(f'Product images checked: {len(parser.images)}')
+          import hashlib, re
+          cards=re.findall(r'<article class="product-visual-card">.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"', site)
+          assert len(cards)==10, len(cards)
+          assert len({src for src,_ in cards})==10
+          assert len({alt for _,alt in cards})==10
+          hashes={hashlib.sha256((root/'products'/src).resolve().read_bytes()).hexdigest() for src,_ in cards}
+          assert len(hashes)==10
+          assert 'type="file"' not in site
+          assert 'public submissions disabled' in site.lower()
+          print(f'Product images checked: {len(parser.images)}; catalog cards: {len(cards)}')
           PY
           python3 website/tests/check_internal_links.py
       - name: Assemble site-only directory
