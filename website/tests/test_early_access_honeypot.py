@@ -175,6 +175,58 @@ def test_every_inquiry_option_is_on_the_lead_allowlist() -> None:
         assert f'"{option}"' in LEADS, option
 
 
+def test_quote_message_keeps_line_breaks_and_casting_value() -> None:
+    import subprocess
+
+    script = r"""
+globalThis.caches = { default: { async match() { return null; }, async put() {} } };
+const { plain, onRequest } = await import("./functions/api/leads.js");
+const message = plain("Project goal:\nDeliverables needed:\r\nDeadline", 2000, true);
+if (message !== "Project goal:\nDeliverables needed:\nDeadline") process.exit(2);
+if (plain("A\nB", 20) !== "A B") process.exit(4);
+if (plain("Nova Casting & Auditions", 80) !== "Nova Casting & Auditions") process.exit(5);
+const store = { saved: "", async put(_key, value) { this.saved = value; } };
+const body = {
+  name: "Ada Owner",
+  company: "Example Co",
+  email: "ada@example.com",
+  phone: "",
+  industry: "Services",
+  companySize: "1-10",
+  product: "Nova Casting & Auditions",
+  message: "Project goal:\nDeadline",
+  consent: true,
+  middle_name_confirm: "",
+  company_website: "",
+  website: "",
+};
+const response = await onRequest({
+  request: new Request("https://getamicor.com/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  env: { AMICOR_LEADS: store },
+});
+if (response.status !== 202) {
+  console.error(response.status, await response.text());
+  process.exit(6);
+}
+const stored = JSON.parse(store.saved);
+if (stored.product !== "Nova Casting & Auditions") process.exit(7);
+if (!stored.message.includes("\n")) process.exit(8);
+const rejected = await onRequest({
+  request: new Request("https://getamicor.com/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, product: "Nova Casting and Auditions" }) }),
+  env: { AMICOR_LEADS: store },
+});
+if (rejected.status !== 400) process.exit(9);
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
 def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
@@ -191,6 +243,7 @@ def main() -> None:
         test_visible_autofill_does_not_populate_honeypot,
         test_nonempty_honeypot_still_blocks,
         test_every_inquiry_option_is_on_the_lead_allowlist,
+        test_quote_message_keeps_line_breaks_and_casting_value,
         test_leads_function_and_kv_path_unchanged,
     ]
     for test in tests:

@@ -1,0 +1,7 @@
+# Deploy previews of this website branch should serve the public site at / and /products/.
+# Production context is intentionally unset so the Netlify UI publish directory stays in place.
+[context.deploy-preview]
+  publish = "website"
+
+[context.branch-deploy]
+  publish = "website"

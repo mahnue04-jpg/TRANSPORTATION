@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent
+CASTING_PRODUCT = "Nova Casting & Auditions"
+CASTING_EARLY_ACCESS = "/early-access/?product=" + quote(CASTING_PRODUCT)
 # Official public origin. Cloudflare Pages host amicor-public.pages.dev remains the underlying project host only.
 ORIGIN = "https://getamicor.com"
 
@@ -158,8 +161,11 @@ def page(
     depth: int,
     body: str,
     theme: str = "corporate",
+    robots: str = "index,follow",
+    prefix: str | None = None,
 ) -> str:
-    prefix = asset_prefix(depth)
+    if prefix is None:
+        prefix = asset_prefix(depth)
     nav = []
     for href, label in NAV:
         current_attr = ' aria-current="page"' if href == current else ""
@@ -172,7 +178,7 @@ def page(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
   <meta name="description" content="{description}">
-  <meta name="robots" content="index,follow">
+  <meta name="robots" content="{robots}">
   <link rel="canonical" href="{ORIGIN}{path}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="AMICOR">
@@ -240,7 +246,7 @@ def page(
           <a href="/work-revenue/">Nova Work &amp; Revenue</a>
           <a href="/nova-today/">Nova Today</a>
           <a href="/nova-create/">Creative Studio</a>
-          <a href="/early-access/?product=Nova%20Casting%20and%20Auditions">Casting &amp; Auditions</a>
+          <a href="{CASTING_EARLY_ACCESS}">Casting &amp; Auditions</a>
           <a href="/deliver/">AMICOR Delivery</a>
           <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
           <a href="/home-hub/">Home Hub</a>
@@ -296,7 +302,8 @@ PRODUCT_STATUS_TABLE = """
               <tr><td>AMICOR corporate website</td><td>LIVE</td><td>This public information site.</td></tr>
               <tr><td>AMICOR Nova Work &amp; Revenue</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Find, manage, and track work. Received revenue is owner-confirmed only. No live external submit or payment collection from this site.</td></tr>
               <tr><td>AMICOR Nova Today</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Operator command center for signed-in workspaces.</td></tr>
-              <tr><td>Nova Casting &amp; Auditions</td><td>SANDBOX PREVIEW</td><td>Authenticated preview for casting campaigns and human-reviewed auditions. Public audition intake is disabled.</td></tr>\n              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
+              <tr><td>Nova Casting &amp; Auditions</td><td>SANDBOX PREVIEW</td><td>Authenticated preview for casting campaigns and human-reviewed auditions. Public audition intake is disabled.</td></tr>
+              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
               <tr><td>Nova Operations Agent</td><td>SUPERVISED RELEASE</td><td>Public demo, account trial, and scoped digital work requests.</td></tr><tr><td>Ask Nova</td><td>ACCOUNT ACCESS</td><td>Sign-in required. Tools and access depend on plan.</td></tr>
               <tr><td>AMICOR Health</td><td>IN DEVELOPMENT</td><td>Transportation technology. No current licensed-market claim.</td></tr>
               <tr><td>AMICOR Delivery</td><td>COMING SOON / IN DEVELOPMENT</td><td>Planned delivery technology only.</td></tr>
@@ -972,7 +979,7 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card featured-work">{card_visual("../", "card-work-revenue.svg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Open product page</a></article>
-        <article class="card">{card_visual("../", "card-casting.svg", "Illustrative Nova Casting and Auditions candidate review. Sandbox preview only; no public applications.")}<span class="chip chip-early">Sandbox Preview</span><h3>Nova Casting &amp; Auditions</h3><p>Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.</p><a class="card-link" href="/early-access/?product=Nova%20Casting%20and%20Auditions">Request preview</a></article>
+        <article class="card">{card_visual("../", "card-casting.svg", "Illustrative Nova Casting and Auditions candidate review. Sandbox preview only; no public applications.")}<span class="chip chip-early">Sandbox Preview</span><h3>Nova Casting &amp; Auditions</h3><p>Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.</p><a class="card-link" href="{CASTING_EARLY_ACCESS}">Request preview</a></article>
         <article class="card">{card_visual("../", "card-nova-today.svg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>Nova Today</h3><p>Intelligent daily command center.</p><a class="card-link" href="/nova-today/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-nova-create.svg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>Nova Create</h3><p>AI-assisted creation tools with owner review.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-delivery.svg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
@@ -1260,6 +1267,8 @@ def main() -> None:
             current="/",
             depth=0,
             body='<section class="hero"><div class="wrap"><h1>Page not found</h1><p class="lede">That address is not part of the AMICOR public site.</p><a class="btn btn-primary" href="/">Return home</a></div></section>',
+            robots="noindex, nofollow",
+            prefix="/",
         ),
         encoding="utf-8",
     )

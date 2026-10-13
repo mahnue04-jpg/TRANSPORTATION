@@ -35,12 +35,12 @@ function json(status, body) {
   });
 }
 
-function plain(value, max) {
-  return String(value || "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[\u0000-\u001F\u007F]/g, " ")
-    .trim()
-    .slice(0, max);
+export function plain(value, max, keepNewlines = false) {
+  const stripped = String(value || "").replace(/<[^>]*>/g, "");
+  const text = keepNewlines
+    ? stripped.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+    : stripped.replace(/[\u0000-\u001F\u007F]/g, " ");
+  return text.trim().slice(0, max);
 }
 
 function tooLong(value, max) {
@@ -109,7 +109,7 @@ export async function onRequest(context) {
     industry: plain(raw.industry, LIMITS.industry),
     companySize: plain(raw.companySize, LIMITS.companySize),
     product: plain(raw.product, LIMITS.product),
-    message: plain(raw.message, LIMITS.message),
+    message: plain(raw.message, LIMITS.message, true),
     consent: raw.consent === true || raw.consent === "yes",
     source: "amicor-public-website-w8",
   };

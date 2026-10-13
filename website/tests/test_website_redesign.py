@@ -111,7 +111,9 @@ def test_product_catalog_uses_ten_distinct_images() -> None:
     assert len(set(hashes)) == 10
     assert 'type="file"' not in html
     assert "public submissions disabled" in html.lower()
-    assert 'href="/early-access/?product=Nova%20Casting%20and%20Auditions"' in html
+    assert 'href="/early-access/?product=Nova%20Casting%20%26%20Auditions"' in html
+    assert "Nova%20Casting%20and%20Auditions" not in html
+    assert "\\n              <tr><td>Nova Creative Studio" not in html
     assert "card-home-hub.svg" in html
     assert "card-car-hub.svg" in html
     assert 'src="../assets/img/home-hub.svg"' in _html(PAGES["/home-hub/"])
@@ -147,6 +149,31 @@ def test_public_claim_safety() -> None:
     assert "not a diagnostic product" in _html(PAGES["/lifesaver/"]).lower()
 
 
+def test_casting_ctas_use_the_canonical_product() -> None:
+    from urllib.parse import parse_qs, unquote
+
+    canonical = "Nova Casting & Auditions"
+    href = "/early-access/?product=Nova%20Casting%20%26%20Auditions"
+    assert parse_qs(href.split("?", 1)[1])["product"] == [canonical]
+    assert unquote(href.split("product=", 1)[1]) == canonical
+    leads = (ROOT / "functions" / "api" / "leads.js").read_text(encoding="utf-8")
+    assert f'"{canonical}"' in leads
+    early = _html(PAGES["/early-access/"])
+    assert "<option>Nova Casting &amp; Auditions</option>" in early
+    site_js = (ROOT / "assets" / "js" / "site.js").read_text(encoding="utf-8")
+    assert 'product.value = params.get("product")' in site_js
+    wrong = "Nova%20Casting%20and%20Auditions"
+    for path in ROOT.rglob("*.html"):
+        text = path.read_text(encoding="utf-8")
+        assert wrong not in text, path.relative_to(ROOT)
+        for match in re.findall(r'href="([^"]*product=[^"]*Casting[^"]*)"', text):
+            assert parse_qs(match.split("?", 1)[1])["product"] == [canonical], match
+    not_found = (ROOT / "404.html").read_text(encoding="utf-8")
+    assert 'content="noindex, nofollow"' in not_found
+    assert 'href="/assets/css/site.css"' in not_found
+    assert 'href="assets/css/site.css"' not in not_found
+
+
 def test_sitemap_includes_new_routes() -> None:
     sitemap = (ROOT / "sitemap.xml").read_text(encoding="utf-8")
     for route in ("/work-revenue/", "/car-hub/", "/products/", "/signin/"):
@@ -161,6 +188,8 @@ def main() -> None:
         test_nav_and_ctas_use_real_routes,
         test_hardware_assets_exist,
         test_customer_paths_and_price_consistency,
+        test_product_catalog_uses_ten_distinct_images,
+        test_casting_ctas_use_the_canonical_product,
         test_public_claim_safety,
         test_sitemap_includes_new_routes,
     ]

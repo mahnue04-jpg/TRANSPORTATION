@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/amicor-product-visual-catalog
+      - feature/amicor-public-website-w1
     paths:
       - 'website/**'
       - '.github/workflows/amicor-website-package.yml'
@@ -50,6 +51,14 @@ jobs:
           assert len(hashes)==10
           assert 'type="file"' not in site
           assert 'public submissions disabled' in site.lower()
+          canonical='/early-access/?product=Nova%20Casting%20%26%20Auditions'
+          assert canonical in site, 'Casting catalog CTA is not the allowlisted product'
+          assert 'Nova%20Casting%20and%20Auditions' not in site
+          assert '\\n              <tr>' not in site
+          leads=(root/'functions/api/leads.js').read_text()
+          assert '"Nova Casting & Auditions"' in leads
+          assert (root/'../mise.toml').resolve().read_text().count('python.github_attestations = false')==1
+          assert (root/'../runtime.txt').resolve().read_text().strip()=='3.11.9'
           print(f'Product images checked: {len(parser.images)}; catalog cards: {len(cards)}')
           PY
           python3 website/tests/check_internal_links.py
