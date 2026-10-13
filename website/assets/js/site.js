@@ -29,8 +29,20 @@
   if (printButton) printButton.addEventListener("click", function () { window.print(); });
 
   var params = new URLSearchParams(window.location.search);
+  var productAliases = {
+    "Autonomous Operations Agent": "Nova Operations Agent",
+    "AMICOR Nova Create": "Nova Creative Studio",
+    "Nova Create": "Nova Creative Studio",
+    "Creative Studio": "Nova Creative Studio",
+    "AMICOR Nova Today": "Nova Today",
+    "AMICOR Nova Work & Revenue": "Work & Revenue",
+    "Nova Work & Revenue": "Work & Revenue",
+    "AMICOR Deliver": "AMICOR Delivery"
+  };
   var product = document.getElementById("product");
-  if (product && params.get("product")) product.value = params.get("product");
+  var requestedProduct = params.get("product");
+  if (requestedProduct && productAliases[requestedProduct]) requestedProduct = productAliases[requestedProduct];
+  if (product && requestedProduct) product.value = requestedProduct;
   var message = document.querySelector("[name=message]");
   if (message && params.get("intent") === "demo" && !message.value) {
     message.value = "I would like a product demo.";
@@ -142,7 +154,7 @@
 
     function finishDelivered() {
       form.reset();
-      if (product && params.get("product")) product.value = params.get("product");
+      if (product && requestedProduct) product.value = requestedProduct;
       show(success, true);
       if (success) {
         success.textContent = "Thank you. Your request was sent to AMICOR.";
@@ -154,7 +166,7 @@
     if (!endpoint) {
       saveLocal();
       form.reset();
-      if (product && params.get("product")) product.value = params.get("product");
+      if (product && requestedProduct) product.value = requestedProduct;
       show(success, true);
       if (success) {
         success.textContent = "Request saved on this device only. It was not sent to AMICOR.";

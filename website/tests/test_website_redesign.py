@@ -13,7 +13,9 @@ PAGES = {
     "/resources/": ROOT / "resources" / "index.html",
     "/work-revenue/": ROOT / "work-revenue" / "index.html",
     "/nova-today/": ROOT / "nova-today" / "index.html",
+    "/nova-operations/": ROOT / "nova-operations" / "index.html",
     "/nova-create/": ROOT / "nova-create" / "index.html",
+    "/nova-snap/": ROOT / "nova-snap" / "index.html",
     "/car-hub/": ROOT / "car-hub" / "index.html",
     "/home-hub/": ROOT / "home-hub" / "index.html",
     "/signin/": ROOT / "signin" / "index.html",
@@ -43,28 +45,14 @@ def test_required_pages_exist() -> None:
 
 def test_homepage_renders_product_illustrations() -> None:
     home = _html(PAGES["/"])
-    assert "Product illustrations" in home
-    assert 'class="product-visual-grid"' in home
-    for name in (
-        "card-operations.jpg",
-        "card-work-revenue.jpg",
-        "card-nova-create.jpg",
-        "card-casting.jpg",
-        "card-ask-nova.jpg",
-        "card-nova-today.jpg",
-        "card-lifesaver.jpg",
-        "card-home-hub.jpg",
-        "card-car-hub.jpg",
-        "card-delivery.jpg",
-        "card-research.jpg",
-        "card-data.jpg",
-        "card-crm.jpg",
-        "card-health.jpg",
-        "card-hubs.jpg",
-    ):
+    assert "product-visual-card" not in home
+    assert "These are business services, not catalog products." in home
+    assert 'data-listing="service"' in home
+    for name in ("card-casting.jpg", "card-nova-create.jpg", "card-operations.jpg", "card-research.jpg", "card-data.jpg", "card-crm.jpg"):
         assert f'src="assets/img/{name}"' in home, name
         assert (ROOT / "assets" / "img" / name).is_file(), name
     assert 'src="../assets/img/' not in home
+    assert 'href="/products/"' in home
 
 
 def test_home_presents_services_and_nova() -> None:
@@ -123,18 +111,18 @@ def test_product_catalog_uses_distinct_images() -> None:
     html = _html(PAGES["/products/"])
     parser = Cards()
     parser.feed(html)
-    assert len(parser.pairs) == 11
+    assert len(parser.pairs) == 12
     srcs = [src for src, _alt in parser.pairs]
     alts = [alt for _src, alt in parser.pairs]
-    assert len(set(srcs)) == 11
-    assert len(set(alts)) == 11
+    assert len(set(srcs)) == 12
+    assert len(set(alts)) == 12
     hashes = []
     for src, alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         assert path.is_file(), src
         assert len(alt) > 24, alt
         hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
-    assert len(set(hashes)) == 11
+    assert len(set(hashes)) == 12
     for src, _alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         assert src.endswith(".jpg"), src
@@ -161,7 +149,7 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert "Health &amp; Deliver" not in home
     assert "Health & Deliver" not in home
     assert 'href="/health/"' in home
-    assert ">AMICOR Health</h3>" in home
+    assert ">AMICOR Health</h3>" in html
     assert "Conceptual illustrations." in html
     assert 'src="../assets/img/card-home-hub.jpg"' in _html(PAGES["/home-hub/"])
     assert 'src="../assets/img/card-car-hub.jpg"' in _html(PAGES["/car-hub/"])
@@ -179,7 +167,7 @@ def test_hardware_assets_exist() -> None:
 def test_customer_paths_and_price_consistency() -> None:
     login = _html(PAGES["/signin/"])
     assert 'href="https://amicor-health-isf-py.onrender.com/nova?signin=1"' in login
-    for path in (PAGES["/pricing/"], PAGES["/technologies/autonomous-operations-agent/"]):
+    for path in (PAGES["/pricing/"], PAGES["/nova-operations/"]):
         text = _html(path)
         for price in ("$49", "$99/month", "$299/month"):
             assert price in text
@@ -208,7 +196,7 @@ def test_casting_ctas_use_the_canonical_product() -> None:
     early = _html(PAGES["/early-access/"])
     assert "<option>Nova Casting &amp; Auditions</option>" in early
     site_js = (ROOT / "assets" / "js" / "site.js").read_text(encoding="utf-8")
-    assert 'product.value = params.get("product")' in site_js
+    assert "product.value = requestedProduct" in site_js
     wrong = "Nova%20Casting%20and%20Auditions"
     for path in ROOT.rglob("*.html"):
         text = path.read_text(encoding="utf-8")
@@ -221,9 +209,63 @@ def test_casting_ctas_use_the_canonical_product() -> None:
     assert 'href="assets/css/site.css"' not in not_found
 
 
+def test_one_catalog_card_per_product() -> None:
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from catalog import PRODUCTS
+
+    cards_by_id: dict[str, list[str]] = {product["id"]: [] for product in PRODUCTS}
+    visual_outside = []
+    for path in ROOT.rglob("*.html"):
+        if "tests" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        rel = str(path.relative_to(ROOT))
+        if "product-visual-card" in text and rel != "products/index.html":
+            visual_outside.append(rel)
+        for product in PRODUCTS:
+            marker = f'data-product-id="{product["id"]}"'
+            cards_by_id[product["id"]].extend([rel] * text.count(marker))
+    assert visual_outside == []
+    for product_id, hits in cards_by_id.items():
+        assert hits == ["products/index.html"], (product_id, hits)
+    home = _html(PAGES["/"])
+    tech = _html(PAGES["/technologies/"])
+    resources = _html(PAGES["/resources/"])
+    for product in PRODUCTS:
+        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in home
+        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in tech
+        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in resources
+    assert "Home Hub &amp; Car Hub" not in home
+    assert "<h1>Nova Create</h1>" not in _html(PAGES["/nova-create/"])
+    assert "<h3>AMICOR Nova Create</h3>" not in _html(PAGES["/products/"])
+    assert "<h1>Nova Creative Studio</h1>" in _html(PAGES["/nova-create/"])
+    snap = _html(PAGES["/nova-snap/"])
+    assert "<h1>Nova Snap</h1>" in snap
+    assert "Nova Snap is not Synapse Meeting." in snap
+    assert "Live phone calling and video calling are not available." in snap
+    assert "External email send is disabled." in snap
+    assert "https://amicor-health-isf-py.onrender.com/nova/communications" in snap
+    assert 'href="/nova-snap/"' in home
+    nav = home.split('<nav id="site-nav"', 1)[1].split("</nav>", 1)[0]
+    footer = home.split("<footer", 1)[1]
+    assert nav.count('href="/nova-snap/"') == 1
+    assert footer.count('href="/nova-snap/"') == 1
+    early = _html(PAGES["/early-access/"])
+    assert "<option>Nova Snap</option>" in early
+    assert "<option>AMICOR Nova Create</option>" not in early
+    assert "<option>Autonomous Operations Agent</option>" not in early
+    assert 'label="Business services"' in early
+    assert 'label="Products"' in early
+    moved = _html(PAGES["/technologies/autonomous-operations-agent/"])
+    assert "Not a separate product." in moved
+    assert "$49" not in moved
+
+
 def test_sitemap_includes_new_routes() -> None:
     sitemap = (ROOT / "sitemap.xml").read_text(encoding="utf-8")
-    for route in ("/work-revenue/", "/car-hub/", "/products/", "/signin/"):
+    for route in ("/work-revenue/", "/car-hub/", "/products/", "/signin/", "/nova-snap/"):
         assert f"https://getamicor.com{route}" in sitemap
 
 
@@ -237,6 +279,7 @@ def main() -> None:
         test_hardware_assets_exist,
         test_customer_paths_and_price_consistency,
         test_product_catalog_uses_distinct_images,
+        test_one_catalog_card_per_product,
         test_casting_ctas_use_the_canonical_product,
         test_public_claim_safety,
         test_sitemap_includes_new_routes,

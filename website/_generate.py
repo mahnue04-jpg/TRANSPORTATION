@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
+from catalog import footer_links, status_table
+
 ROOT = Path(__file__).resolve().parent
 CASTING_PRODUCT = "Nova Casting & Auditions"
 CASTING_EARLY_ACCESS = "/early-access/?product=" + quote(CASTING_PRODUCT)
@@ -14,6 +16,7 @@ ORIGIN = "https://getamicor.com"
 NAV = [
     ("/business-services/", "Services"),
     ("/products/", "Products"),
+    ("/nova-snap/", "Nova Snap"),
     ("/solutions/", "Solutions"),
     ("/pricing/", "Pricing"),
     ("/resources/", "Resources"),
@@ -240,18 +243,7 @@ def page(
       <div class="footer-col">
         <strong>Services &amp; Products</strong>
         <nav class="footer-links" aria-label="Footer product links">
-          <a href="/business-services/">Business Services</a>
-          <a href="/ask-nova/">Ask Nova</a>
-          <a href="/nova-operations/">Operations Agent</a>
-          <a href="/work-revenue/">Nova Work &amp; Revenue</a>
-          <a href="/nova-today/">Nova Today</a>
-          <a href="/nova-create/">Creative Studio</a>
-          <a href="{CASTING_EARLY_ACCESS}">Casting &amp; Auditions</a>
-          <a href="/health/">AMICOR Health</a>
-          <a href="/deliver/">AMICOR Delivery</a>
-          <a href="/lifesaver/">Lifesaver AI Care Cloud</a>
-          <a href="/home-hub/">Home Hub</a>
-          <a href="/car-hub/">Car Hub</a>
+          {footer_links()}
         </nav>
       </div>
       <div class="footer-col">
@@ -295,26 +287,7 @@ def add(path: str, filename: str, title: str, description: str, current: str, de
     )
 
 
-PRODUCT_STATUS_TABLE = """
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Product</th><th>Public status</th><th>What this site claims</th></tr></thead>
-            <tbody>
-              <tr><td>AMICOR corporate website</td><td>LIVE</td><td>This public information site.</td></tr>
-              <tr><td>AMICOR Nova Work &amp; Revenue</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Find, manage, and track work. Received revenue is owner-confirmed only. No live external submit or payment collection from this site.</td></tr>
-              <tr><td>AMICOR Nova Today</td><td>EARLY ACCESS / IN DEVELOPMENT</td><td>Operator command center for signed-in workspaces.</td></tr>
-              <tr><td>Nova Casting &amp; Auditions</td><td>SANDBOX PREVIEW</td><td>Authenticated preview for casting campaigns and human-reviewed auditions. Public audition intake is disabled.</td></tr>
-              <tr><td>Nova Creative Studio</td><td>SUPERVISED RELEASE</td><td>Signed-in creative planning and enabled media tools. Rendering and exports remain under improvement.</td></tr>
-              <tr><td>Nova Operations Agent</td><td>SUPERVISED RELEASE</td><td>Public demo, account trial, and scoped digital work requests.</td></tr><tr><td>Ask Nova</td><td>ACCOUNT ACCESS</td><td>Sign-in required. Tools and access depend on plan.</td></tr>
-              <tr><td>AMICOR Health</td><td>IN DEVELOPMENT</td><td>Transportation technology. No current licensed-market claim.</td></tr>
-              <tr><td>AMICOR Delivery</td><td>COMING SOON / IN DEVELOPMENT</td><td>Planned delivery technology only.</td></tr>
-              <tr><td>Lifesaver AI Care Cloud</td><td>IN DEVELOPMENT</td><td>Health-technology initiative. Not a medical device or emergency service.</td></tr>
-              <tr><td>Home Hub</td><td>FUTURE HARDWARE / IN DEVELOPMENT</td><td>Planned rotating tabletop hub. Not for sale.</td></tr>
-              <tr><td>Car Hub</td><td>FUTURE HARDWARE / IN DEVELOPMENT</td><td>Planned dashboard-mounted vehicle interface. Not for sale.</td></tr>
-            </tbody>
-          </table>
-        </div>
-"""
+PRODUCT_STATUS_TABLE = status_table()
 
 add(
     "/",
@@ -356,7 +329,7 @@ add(
         </article>
         <div class="grid grid-3">
           <article class="card">{card_visual("", "card-nova-today.jpg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>AMICOR Nova Today</h3><p>Intelligent daily command center for signed-in operators.</p><a class="card-link" href="/nova-today/">Learn more</a></article>
-          <article class="card">{card_visual("", "card-nova-create.jpg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>AMICOR Nova Create</h3><p>AI-assisted drafts and work materials. Owner review required. Not a live public creation marketplace.</p><a class="card-link" href="/nova-create/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-nova-create.jpg", "Conceptual illustration of an image and video editing studio with storyboard frames.")}<span class="chip chip-dev">Supervised release</span><h3>Nova Creative Studio</h3><p>Plan scripts, storyboards, captions, and branded assets. This is not a separate Nova Create product.</p><a class="card-link" href="/nova-create/">Learn more</a></article>
           <article class="card featured-work">{card_visual("", "card-work-revenue.jpg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Learn more</a></article>
           <article class="card">{card_visual("", "card-delivery.jpg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations. Not commercially available.</p><a class="card-link" href="/deliver/">Learn more</a></article>
           <article class="card">{card_visual("", "card-lifesaver.jpg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care and health-technology initiative. Not a medical device or emergency service.</p><a class="card-link" href="/lifesaver/">Learn more</a></article>
@@ -982,7 +955,7 @@ add(
         <article class="card featured-work">{card_visual("../", "card-work-revenue.jpg", "Illustrative AMICOR Nova Work and Revenue workspace showing a sample pipeline, work queue, and owner-confirmed revenue labels. Not live customer or payment data.")}<span class="chip chip-early">Early Access</span><h3>Nova Work &amp; Revenue</h3><p>Find work. Manage work. Track owner-confirmed revenue.</p><a class="card-link" href="/work-revenue/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-casting.jpg", "Illustrative Nova Casting and Auditions candidate review. Sandbox preview only; no public applications.")}<span class="chip chip-early">Sandbox Preview</span><h3>Nova Casting &amp; Auditions</h3><p>Explore consent-aware audition and casting workflows with human review. Public submissions are not enabled.</p><a class="card-link" href="{CASTING_EARLY_ACCESS}">Request preview</a></article>
         <article class="card">{card_visual("../", "card-nova-today.jpg", "Illustrative AMICOR Nova Today command center. Sample workspace, not live operator data.")}<span class="chip chip-early">Early Access</span><h3>Nova Today</h3><p>Intelligent daily command center.</p><a class="card-link" href="/nova-today/">Open product page</a></article>
-        <article class="card">{card_visual("../", "card-nova-create.jpg", "Illustrative AMICOR Nova Create drafts with owner review. Not a live public creation marketplace.")}<span class="chip chip-dev">In Development</span><h3>Nova Create</h3><p>AI-assisted creation tools with owner review.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-nova-create.jpg", "Conceptual illustration of an image and video editing studio with storyboard frames.")}<span class="chip chip-dev">Supervised release</span><h3>Nova Creative Studio</h3><p>Plan scripts, storyboards, captions, and branded assets.</p><a class="card-link" href="/nova-create/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-delivery.jpg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-lifesaver.jpg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care initiative. Not a medical device.</p><a class="card-link" href="/lifesaver/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-home-hub.jpg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Home Hub</h3><p>See More. Care More. Be There.</p><a class="card-link" href="/home-hub/">Open product page</a></article>
@@ -1017,7 +990,8 @@ add(
           <a href="/work-revenue/">Nova Work &amp; Revenue</a></p></article>
         <article class="card"><h3>Track revenue honestly</h3><p>Expected, billed, and received stay separate. Received means owner-confirmed. <a href="/work-revenue/">Revenue tracking</a></p></article>
         <article class="card"><h3>Daily command</h3><p>A signed-in Today view for operator attention. <a href="/nova-today/">Nova Today</a></p></article>
-        <article class="card"><h3>Supervised operations AI</h3><p>Observe, recommend, approve, verify, audit. <a href="/technologies/autonomous-operations-agent/">Operations Agent</a></p></article>
+        <article class="card"><h3>Supervised operations AI</h3><p>Observe, recommend, approve, verify, audit. <a href="/nova-operations/">Nova Operations Agent</a></p></article>
+        <article class="card"><h3>Communications</h3><p>Signed-in messages and drafts. Live calling is not available, and this is not Synapse Meeting. <a href="/nova-snap/">Nova Snap</a></p></article>
         <article class="card"><h3>Delivery technology</h3><p>Planned local delivery operations. Not commercially available. <a href="/deliver/">AMICOR Delivery</a></p></article>
         <article class="card"><h3>Connected home and vehicle</h3><p>Future Home Hub and Car Hub concepts. <a href="/home-hub/">Home Hub</a> · <a href="/car-hub/">Car Hub</a></p></article>
       </div>
@@ -1066,7 +1040,7 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card"><h3>Technologies</h3><p>Software catalog and Operations Agent.</p><a class="card-link" href="/technologies/">Open</a></article>
-        <article class="card"><h3>Work &amp; Revenue</h3><p>Product presentation for the Nova work platform.</p><a class="card-link" href="/work-revenue/">Open</a></article>
+        <article class="card"><h3>Product catalog</h3><p>One card per product, with status labels. <a class="card-link" href="/products/">Open the catalog</a></p></article>
         <article class="card"><h3>Software Terms</h3><p>Business-draft software terms. Not attorney-approved.</p><a class="card-link" href="/software-terms/">Open</a></article>
         <article class="card"><h3>Accessibility</h3><p>Website accessibility goals. Not a WCAG certification.</p><a class="card-link" href="/accessibility/">Open</a></article>
         <article class="card"><h3>Privacy</h3><p>Business-draft privacy notice.</p><a class="card-link" href="/privacy/">Open</a></article>
@@ -1176,18 +1150,18 @@ add(
 add(
     "/nova-create/",
     "nova-create/index.html",
-    "AMICOR Nova Create — AI-Assisted Work Materials",
-    "AMICOR Nova Create is an in-development set of AI-assisted drafts and work materials. Owner review is required. Not a live public creation marketplace.",
+    "Nova Creative Studio — Scripts, Storyboards and Branded Assets",
+    "Plan scripts, captions, storyboards and branded assets in Nova Creative Studio.",
     "/nova-create/",
     1,
     """
     <section class="hero">
       <div class="wrap">
         <p class="kicker">AMICOR Nova</p>
-        <h1>Nova Create</h1>
-        <p class="lede">AI-assisted drafts and work materials for operators who keep humans in the review path.</p>
-        <p class="notice">Status: In Development. Create is not advertised as a finished public writing product or a live marketplace.</p>
-        <div class="hero-actions"><a class="btn btn-primary" href="/early-access/?product=AMICOR%20Nova%20Create">Join the interest list</a></div>
+        <h1>Nova Creative Studio</h1>
+        <p class="lede">Develop ideas into scripts, captions, storyboards, and branded creative assets.</p>
+        <p class="notice">Nova Creative Studio is the only public name for this product. Nova Create is not a separate product.</p>
+        <div class="hero-actions"><a class="btn btn-primary" href="/early-access/?product=Nova%20Creative%20Studio">Request a Demo</a></div>
       </div>
     </section>
     """,
@@ -1239,6 +1213,7 @@ def main() -> None:
         "/work-revenue/",
         "/nova-today/",
         "/nova-create/",
+        "/nova-snap/",
         "/lifesaver/",
         "/home-hub/",
         "/car-hub/",

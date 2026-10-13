@@ -547,6 +547,8 @@ textarea { min-height: 120px; }
 /* Services refresh: readable controls, compact sections, printable profile. */
 body { font-size: 1rem; }
 .hero { padding-top: 64px; padding-bottom: 36px; }
+.product-crosslinks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
+.product-crosslinks a { min-height: 44px; display: inline-flex; align-items: center; }
 .art-note {
   margin: 14px 0 0;
   color: var(--muted);
