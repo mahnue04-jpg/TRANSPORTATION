@@ -1,0 +1,10 @@
+# Deploy previews serve the public pages at / and /products/.
+# The package step omits owner notes, the generator, tests, and Wrangler config.
+# Production context is intentionally unset so the Netlify UI publish directory stays in place.
+[context.deploy-preview]
+  command = "python3 website/package_public_site.py"
+  publish = "dist"
+
+[context.branch-deploy]
+  command = "python3 website/package_public_site.py"
+  publish = "dist"
