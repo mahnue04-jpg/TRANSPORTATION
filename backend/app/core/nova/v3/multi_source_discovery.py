@@ -141,6 +141,7 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
         "simulated": simulated,
         "real_or_simulated": "SIMULATED" if simulated else "REAL",
         "provenance_sources": list(kwargs.get("provenance_sources") or [provider_id]),
+        "fetched_at": str(kwargs.get("fetched_at") or datetime.now(timezone.utc).isoformat()),
     }
 
 
@@ -833,7 +834,9 @@ _SAM_DIGITAL_RELEVANCE = re.compile(
     r"clerical|records management|information management|program support|"
     r"management support|business operations|technical writing|editorial|"
     r"transcription|analyst|analytical|workflow|crm|office support|"
-    r"knowledge management|policy analysis|market research"
+    r"knowledge management|policy analysis|market research|"
+    r"workflow automation|api integration|fastapi|business process|"
+    r"operational support|n8n|zapier|dify"
     r")\b",
     re.I,
 )
@@ -1627,7 +1630,7 @@ _AI_AUTOMATION_QUERY_HINTS = re.compile(
 )
 _AI_AUTOMATION_RESULT_SIGNALS = re.compile(
     r"\b(ai|artificial intelligence|automation|workflow automation|zapier|make\.com|"
-    r"n8n|api integration|prompt engineering|prompt workflow|llm|ai agent|agent workflow)\b",
+    r"n8n|dify|fastapi|api integration|prompt engineering|prompt workflow|llm|ai agent|agent workflow)\b",
     re.I,
 )
 
@@ -1637,15 +1640,25 @@ _ADMIN_STRONG_TITLE = re.compile(
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|virtual assistant|office assistant|office administrator|"
     r"operations (?:assistant|support|coordinator|administrator|analyst(?: contractor)?)|"
+    r"operational support(?: specialist| contractor| analyst)?|"
     r"business operations (?:assistant|support|coordinator)|"
-    r"data entry (?:assistant|clerk|specialist|contractor)|"
+    r"business process(?: specialist| analyst| coordinator| contractor)?|"
+    r"workflow automation(?: specialist| contractor)?|"
+    r"(?:fastapi|api integration)(?: developer| contractor| specialist| engineer)?|"
+    r"data[\s-]?entry (?:assistant|clerk|specialist|contractor|administrator)|"
     r"records (?:assistant|clerk|specialist|coordinator)|"
     r"document (?:assistant|specialist|coordinator|processor)|"
-    r"crm (?:assistant|administrator|specialist|coordinator)|"
+    r"crm (?:assistant|administrator|specialist|coordinator|support)|"
     r"scheduling (?:assistant|coordinator|specialist)|"
     r"back office (?:assistant|support|specialist)|"
     r"bookkeeping (?:assistant|support|specialist)"
     r")\b",
+    re.I,
+)
+# API integration and workflow automation are performable digital work.
+# A generic software-engineer title stays out of an administrative search.
+_PERFORMABLE_DIGITAL_TITLE = re.compile(
+    r"\b(api integration|fastapi|workflow automation|ai automation|operational support|business process)\b",
     re.I,
 )
 
@@ -1675,6 +1688,34 @@ def _discovery_query_variants(query: str) -> list[str]:
 
 
 
+def _admin_tech_title_rejected(title: str) -> bool:
+    """Drop generic engineering titles, not API or workflow automation titles."""
+    if _PERFORMABLE_DIGITAL_TITLE.search(title or ""):
+        return False
+    return bool(_ADMIN_TECH_TITLE_REJECT.search(title or ""))
+
+
+def _employee_only_without_contractor(combined: str) -> bool:
+    """True when employment wording is present and no contractor path is offered.
+
+    A negated benefits line ('no benefits') is not an employment claim.
+    """
+    found = False
+    for match in _ADMIN_EMPLOYEE_SIGNALS.finditer(combined or ""):
+        prefix = combined[max(0, match.start() - 16):match.start()]
+        if re.search(r"\b(?:no|not|without|non)\s*$", prefix, re.I):
+            continue
+        found = True
+        break
+    if not found:
+        return False
+    return not bool(re.search(
+        r"\b(contract|contractor|freelance|1099|vendor|b2b|project[- ]based)\b",
+        combined,
+        re.I,
+    ))
+
+
 def _query_relevant(row: dict[str, Any], query: str) -> bool:
     """Reject obvious provider false positives before qualification.
 
@@ -1701,8 +1742,11 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         matches_remote_digital_work_lane,
         remote_digital_performability_blockers,
         upfront_fee_required,
+        upwork_paid_connects_required,
     )
 
+    if upwork_paid_connects_required(row):
+        return False
     if blocks_physical_role_for_digital_search(row, query_text):
         return False
     if remote_digital_performability_blockers(row, query_text):
@@ -1727,7 +1771,7 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # A brief that names several digital lanes keeps a listing when its title
     # matches any one lane. It does not require every result to mention AI.
     if is_multi_lane_remote_digital_query(query_text):
-        if _ADMIN_TECH_TITLE_REJECT.search(title):
+        if _admin_tech_title_rejected(title):
             return False
         if _ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT.search(title):
             return False
@@ -1768,7 +1812,7 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
 
     # Technical IC titles should not survive an admin search merely because
     # their descriptions contain generic words like support/operations.
-    if _ADMIN_TECH_TITLE_REJECT.search(title) and not title_has_admin:
+    if _admin_tech_title_rejected(title) and not title_has_admin:
         return False
 
     # Domain-specialist analyst roles (for example digital-asset/blockchain
@@ -1785,11 +1829,7 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
             return False
 
     # This query family is explicitly for contract/vendor work, not employee jobs.
-    if _ADMIN_EMPLOYEE_SIGNALS.search(combined) and not re.search(
-        r"\b(contract|contractor|freelance|1099|vendor|b2b|project[- ]based)\b",
-        combined,
-        re.I,
-    ):
+    if _employee_only_without_contractor(combined):
         return False
 
     # Never surface pay-to-apply / paid-access admin opportunities.

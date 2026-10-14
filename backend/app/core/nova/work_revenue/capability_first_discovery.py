@@ -79,7 +79,7 @@ _DIGITAL_SEARCH_INTENT = re.compile(
     r"virtual assistant|virtual assistance|administrative|admin support|"
     r"ai operations|ai workflow|automation support|workflow automation|"
     r"content operations|project coordination|crm|reporting|research|"
-    r"data work|data entry|data cleanup|spreadsheet|bookkeeping"
+    r"data work|data[\s-]?entry|data cleanup|spreadsheet|bookkeeping"
     r")\b",
     re.I,
 )
@@ -88,7 +88,7 @@ _DIGITAL_DOMAIN = re.compile(
     r"ai operations|ai workflow|workflow automation|automation support|"
     r"administrative support|admin support|virtual assistant|virtual assistance|"
     r"project coordination|content operations|crm|customer relationship|"
-    r"research|reporting|data entry|data cleanup|data work|spreadsheet|"
+    r"research|reporting|data[\s-]?entry|data cleanup|data work|spreadsheet|"
     r"bookkeeping support|bookkeeping|digital business operations"
     r")\b",
     re.I,
@@ -210,7 +210,7 @@ def digital_contractor_rank_signal(text: str) -> bool:
 # two or more lanes is a union search: a listing may match any one lane.
 _DIGITAL_QUERY_LANES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ai", re.compile(r"\b(ai|artificial intelligence|automation|workflow automation|ai operations)\b", re.I)),
-    ("admin", re.compile(r"\b(administrative support|admin support|virtual assistant|virtual assistance|data entry)\b", re.I)),
+    ("admin", re.compile(r"\b(administrative support|admin support|virtual assistant|virtual assistance|data[\s-]?entry|operations support|operational support)\b", re.I)),
     ("research", re.compile(r"\bresearch\b", re.I)),
     ("reporting", re.compile(r"\breporting\b", re.I)),
     ("crm", re.compile(r"\bcrm\b", re.I)),
@@ -223,8 +223,10 @@ _LISTING_LANE_TITLE = re.compile(
     r"virtual assistant|virtual assistance|"
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|"
-    r"operations assistant|"
-    r"data entry|"
+    r"operations assistant|operations support|operational support|"
+    r"business process|"
+    r"workflow automation|api integration|fastapi|"
+    r"data[\s-]?entry|"
     r"research (?:assistant|contractor|support|specialist|analyst)|"
     r"business research|"
     r"reporting (?:assistant|specialist|coordinator|support)|"
@@ -287,14 +289,23 @@ def is_multi_lane_remote_digital_query(query: str | None) -> bool:
 
 # One explicit lane must match its own title family. A research description
 # inside a copywriter or project-manager listing is not research work.
+# Data entry shares the admin query lane, but a data-entry search still has
+# to keep genuine data-entry titles. A virtual-assistant search does not.
+_DATA_ENTRY_QUERY = re.compile(r"\bdata[\s-]?entry\b", re.I)
+_DATA_ENTRY_TITLE = re.compile(r"\bdata[\s-]?entry\b", re.I)
+_NEGATED_DATA_ENTRY_TITLE = re.compile(
+    r"\b(?:not|no|without|non)\s+(?:a\s+|an\s+)?data[\s-]?entry\b",
+    re.I,
+)
 _SINGLE_LANE_TITLES: dict[str, re.Pattern[str]] = {
     "admin": re.compile(
         r"\b("
         r"virtual assistant|virtual assistance|"
         r"administrative (?:assistant|support|coordinator|specialist)|"
         r"admin(?:istrative)? assistant|"
-        r"operations assistant|operations support|"
-        r"office assistant|business operations support"
+        r"operations assistant|operations support|operational support|"
+        r"office assistant|business operations support|"
+        r"business process|workflow automation|api integration|fastapi"
         r")\b",
         re.I,
     ),
@@ -332,7 +343,14 @@ def single_lane_title_match(job: dict[str, Any], query: str | None) -> bool | No
     title = str(job.get("title") or job.get("opportunity_title") or "")
     if _LEADERSHIP_TITLE.search(title):
         return False
-    return bool(pattern.search(title))
+    if pattern.search(title):
+        return True
+    lane = next(iter(lanes))
+    if lane == "admin" and _DATA_ENTRY_QUERY.search(str(query or "")):
+        if _NEGATED_DATA_ENTRY_TITLE.search(title):
+            return False
+        return bool(_DATA_ENTRY_TITLE.search(title))
+    return False
 
 
 def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
@@ -347,14 +365,75 @@ def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
     return bool(_LISTING_LANE_TITLE.search(title))
 
 
+_ONSITE_STATUS_NORMALIZED = frozenset({
+    "on site",
+    "onsite",
+    "in person",
+    "on premise",
+})
+# Explicit denial. "not remote-only" stays remote because the hyphen continues
+# the word. A separate sentence that remote work is not offered fails closed.
+_REMOTE_DENIAL = re.compile(
+    r"("
+    r"\bnot\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|role|position|job|option)\b)?"
+    r"|"
+    r"\b(?:non|no)\s+remote(?!\s*[-/])\b"
+    r"|"
+    r"\b(?:is|are)\s+not\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b"
+    r"|"
+    r"\b(?:no|without)\s+(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|working|roles?|positions?|jobs?|options?)\b)?"
+    r"|"
+    r"\bremote(?:\s+(?:work|working|roles?|positions?|jobs?|options?|employment))?\s+"
+    r"(?:(?:is|are)\s+not|(?:isn['’]t|aren['’]t))\s+"
+    r"(?:offered|available|allowed|possible|supported|provided|an\s+option)\b"
+    r"|"
+    r"\b(?:does|do)\s+not\s+offer\s+remote\b"
+    r")",
+    re.I,
+)
+
+
+def _normalized_remote_status(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _remote_denial_text(text: str) -> str:
+    """Turn not_remote / non-remote tokens into words the denial pattern can see."""
+    return re.sub(
+        r"\b(not|non|no)[_-]remote\b",
+        r"\1 remote",
+        str(text or ""),
+        flags=re.I,
+    )
+
+
+def _status_denies_remote(status: str) -> bool:
+    if status in _ONSITE_STATUS_NORMALIZED:
+        return True
+    return bool(re.search(r"\b(?:not|non|no)\b", status) and "remote" in status)
+
+
+def _listing_denies_remote(text: str) -> bool:
+    return bool(_REMOTE_DENIAL.search(_remote_denial_text(text)))
+
+
 def _role_is_remote(job: dict[str, Any]) -> bool:
-    """True when the listing is remote work rather than a place the worker must occupy."""
-    remote = str(job.get("remote_status") or "").strip().lower().replace("_", " ").replace("-", " ")
-    if "remote" in remote or remote in {"worldwide", "anywhere", "global", "work from home", "wfh"}:
+    """True when the listing is remote work rather than a place the worker must occupy.
+
+    `not_remote` is not remote. Text that says remote work is not offered is not
+    remote, even when the title or status also contains the word remote.
+    """
+    status = _normalized_remote_status(job.get("remote_status"))
+    if _status_denies_remote(status):
+        return False
+    listing = _listing_text(job)
+    if _listing_denies_remote(listing):
+        return False
+    if "remote" in status or status in {"worldwide", "anywhere", "global", "work from home", "wfh"}:
         return True
     return bool(re.search(
         r"\b(?:fully remote|remote|worldwide|work from anywhere|work from home)\b",
-        _listing_text(job),
+        listing,
         re.I,
     ))
 
@@ -506,7 +585,26 @@ def upfront_fee_required(job: dict[str, Any]) -> bool:
             str(job.get("compensation_text") or ""),
         )
     ).lower()
-    return _detect_fee(text) == FEE_YES
+    return _detect_fee(text) == FEE_YES or upwork_paid_connects_required(job)
+
+
+def upwork_paid_connects_required(job: dict[str, Any]) -> bool:
+    """Upwork charges connects to apply. That path stays closed."""
+    provider = str(job.get("provider_id") or "").strip().lower()
+    url = str(job.get("source_url") or "").strip().lower()
+    text = _listing_text(job).lower()
+    if provider == "upwork" or "upwork.com" in url:
+        return True
+    return any(
+        token in text
+        for token in (
+            "paid connects",
+            "upwork connects",
+            "connects to apply",
+            "pay for connects",
+            "buy connects",
+        )
+    )
 
 
 def remote_digital_performability_blockers(job: dict[str, Any], query: str | None) -> list[str]:
@@ -522,7 +620,9 @@ def remote_digital_performability_blockers(job: dict[str, Any], query: str | Non
         reasons.append("certification_or_license_required")
     if unverified_experience_required(job):
         reasons.append("unverified_experience_required")
-    if upfront_fee_required(job):
+    if upwork_paid_connects_required(job):
+        reasons.append("upwork_paid_connects")
+    elif upfront_fee_required(job):
         reasons.append("upfront_fee_required")
     if non_us_location_required(job):
         reasons.append("non_us_location_required")
@@ -1052,18 +1152,20 @@ _FAMILY_TEXT_EVIDENCE: dict[str, re.Pattern[str]] = {
     ),
     "b2b_workflow_automation": re.compile(
         r"\b(workflow automation|intake automation|document routing|crm automation|"
-        r"email automation|business automation|operations automation|zapier|make\.com|n8n)\b",
+        r"email automation|business automation|operations automation|business process|"
+        r"zapier|make\.com|n8n|dify|fastapi)\b",
         re.I,
     ),
     "api_micro_saas": re.compile(
-        r"\b(api endpoint|api integration|microservice|micro[- ]?saas|rapidapi|"
+        r"\b(api endpoint|api integration|fastapi|microservice|micro[- ]?saas|rapidapi|"
         r"webhook|document parser|data parser|text processing api)\b",
         re.I,
     ),
     "administrative_operations": re.compile(
         r"\b(administrative support|administrative operations|virtual assistant|"
-        r"document preparation|project administration|scheduling support|data entry|"
-        r"crm (?:cleanup|organization)|workflow documentation|business operations support)\b",
+        r"document preparation|project administration|scheduling support|data[\s-]?entry|"
+        r"crm (?:cleanup|organization|administrator)|workflow documentation|"
+        r"business operations support|operations support|operational support|business process)\b",
         re.I,
     ),
     "bookkeeping_support": re.compile(
@@ -1119,7 +1221,7 @@ _FAMILY_TEXT_EVIDENCE: dict[str, re.Pattern[str]] = {
     "ai_automation": re.compile(
         r"\b(ai workflow automation|ai workflow support|workflow automation|"
         r"ai research support|automation contractor|prompt (?:document )?workflow|"
-        r"ai content operations|ai data quality|api integration|zapier|make\.com|n8n|"
+        r"ai content operations|ai data quality|api integration|fastapi|zapier|make\.com|n8n|dify|"
         r"prompt engineering|llm|ai agent|agent workflow)\b",
         re.I,
     ),
@@ -1215,7 +1317,7 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     score += min(25, preferred_hits * 4)
     score -= min(40, downrank_hits * 12)
 
-    remote_ok = "remote" in text.lower() or str(job.get("remote_status") or "").lower() == "remote"
+    remote_ok = _role_is_remote(job)
     if remote_ok:
         score += 8
     else:
