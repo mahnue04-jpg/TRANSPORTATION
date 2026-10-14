@@ -22,6 +22,7 @@
     facing: "user",
     micOn: false,
     signalAfter: 0,
+    session: null,
     failures: 0,
     timer: null,
     recording: null,
@@ -207,8 +208,59 @@
     ["chats", "camera", "calls"].forEach(function (panel) {
       show("panel-" + panel, panel === name);
       var tab = $("tab-" + panel);
-      if (tab) tab.setAttribute("aria-pressed", panel === name ? "true" : "false");
+      if (!tab) return;
+      var on = panel === name;
+      tab.setAttribute("aria-pressed", on ? "true" : "false");
+      tab.setAttribute("aria-selected", on ? "true" : "false");
     });
+  }
+  function moveTab(event) {
+    var names = ["chats", "camera", "calls"];
+    var current = -1;
+    for (var i = 0; i < names.length; i += 1) {
+      if ($("tab-" + names[i]) === event.currentTarget) current = i;
+    }
+    if (current < 0) return;
+    var next = current;
+    if (event.key === "ArrowRight") next = (current + 1) % names.length;
+    else if (event.key === "ArrowLeft") next = (current + names.length - 1) % names.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = names.length - 1;
+    else return;
+    if (event.preventDefault) event.preventDefault();
+    showPanel(names[next]);
+    var tab = $("tab-" + names[next]);
+    if (tab && tab.focus) tab.focus();
+  }
+  function sessionApi() {
+    if (typeof NovaSnapCallSession !== "undefined" && NovaSnapCallSession) return NovaSnapCallSession;
+    return window.NovaSnapCallSession || null;
+  }
+  function note(event) {
+    if (!state.session || !state.session.apply) return;
+    try { state.session.apply(event); } catch (err) {}
+  }
+  function iceServers(config) {
+    var turn = !!(config && config.turn_configured);
+    var servers = (config && config.ice_servers) || [];
+    var kept = [];
+    servers.forEach(function (server) {
+      var urls = server && server.urls;
+      var list = Array.isArray(urls) ? urls : [urls];
+      var usable = list.filter(function (url) {
+        var value = String(url || "");
+        if (/^turns?:/i.test(value)) return turn;
+        return /^stuns?:/i.test(value);
+      });
+      if (!usable.length) return;
+      var next = { urls: usable };
+      if (turn && server.username) {
+        next.username = server.username;
+        next.credential = server.credential;
+      }
+      kept.push(next);
+    });
+    return kept;
   }
 
   function stopStream(stream) {
@@ -365,8 +417,11 @@
     state.call = await api("/calls", { method: "POST", body: JSON.stringify({ conversation_id: state.activeId, media: media }) });
     state.signalAfter = 0;
     state.remoteIce = {};
+    var sessions = sessionApi();
+    state.session = sessions ? sessions.create("caller") : null;
+    note("invite_out");
     showCall(true);
-    text("call-state", "Calling. Waiting for the other person to accept.");
+    text("call-state", "Calling. Your browser will ask for the microphone" + (media === "video" ? " and camera" : "") + ". Nothing is captured if you deny the prompt.");
     await attachMedia(media, true);
   }
   function showCall(on) {
@@ -440,7 +495,7 @@
     if (slot.play) slot.play().catch(function () { show("enable-sound", true); });
   }
   function buildPc(remoteId, config, wrapped) {
-    var pc = new RTCPeerConnection({ iceServers: (config && config.ice_servers) || [] });
+    var pc = new RTCPeerConnection({ iceServers: iceServers(config) });
     pc._remoteId = remoteId;
     pc._wrapped = !!wrapped;
     pc._descSent = false;
@@ -454,7 +509,7 @@
         ? JSON.stringify({ target: pc._remoteId, candidate: event.candidate })
         : JSON.stringify(event.candidate);
       if (!pc._descSent) pc._localIce.push(payload);
-      else sendSignal("ice", payload);
+      else sendSignal("ice", payload).then(function (ok) { if (ok) note("local_ice"); });
     };
     pc.ontrack = function (event) {
       var stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
@@ -462,12 +517,14 @@
     };
     pc.onconnectionstatechange = function () {
       var value = pc.connectionState;
+      if (value === "failed") note("ice_failed");
       if (value === "failed" || value === "disconnected") {
         text("call-error", "The direct connection failed. A relay server is not configured, so this network may be unable to complete the call.");
         text("call-quality", "Network quality: disconnected");
         sendSignal("quality", "disconnected");
       } else if (value === "connected") {
         text("call-quality", "Network quality: good");
+        text("call-adapt", "This browser reports a direct path. Two separate devices have not been verified.");
       }
     };
     if (remoteId) state.pcs[remoteId] = pc;
@@ -476,11 +533,15 @@
   async function releaseLocalIce(pc) {
     pc._descSent = true;
     var queued = (pc._localIce || []).splice(0);
-    for (var i = 0; i < queued.length; i += 1) await sendSignal("ice", queued[i]);
+    for (var i = 0; i < queued.length; i += 1) {
+      if (await sendSignal("ice", queued[i])) note("local_ice");
+    }
   }
   async function publishDescription(pc, kind, sdp) {
     var payload = pc._wrapped ? JSON.stringify({ target: pc._remoteId, sdp: sdp || "" }) : (sdp || "");
-    if (await sendSignal(kind, payload)) await releaseLocalIce(pc);
+    if (!(await sendSignal(kind, payload))) return;
+    note(kind === "answer" ? "local_answer" : "local_offer");
+    await releaseLocalIce(pc);
   }
   function stashRemoteIce(senderId, candidate) {
     var key = senderId || "_";
@@ -492,8 +553,22 @@
     var queued = state.remoteIce[key] || [];
     state.remoteIce[key] = [];
     for (var i = 0; i < queued.length; i += 1) {
-      try { await pc.addIceCandidate(queued[i]); } catch (err) {}
+      try { await pc.addIceCandidate(queued[i]); note("remote_ice"); } catch (err) {}
     }
+  }
+  async function denyCallMedia(err) {
+    note("media_denied");
+    text("call-error", err && err.name === "NotAllowedError"
+      ? "Microphone or camera permission was denied. Nothing was captured. Snap will not ask again until you start or accept another call."
+      : "Microphone or camera could not start. Nothing was captured.");
+    var error = $("call-error");
+    if (error && error.focus) error.focus();
+    if (!state.call) return;
+    try { await sendSignal("media", "denied"); } catch (ignore) {}
+    try {
+      state.call = await api("/calls/" + state.call.call_id + "/end", { method: "POST" });
+      text("call-state", "Call ended · permission_denied");
+    } catch (ignore) {}
   }
   async function attachMedia(media, isCaller) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof RTCPeerConnection === "undefined") {
@@ -504,11 +579,11 @@
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: media === "video" });
     } catch (err) {
-      text("call-error", err && err.name === "NotAllowedError"
-        ? "Microphone or camera permission was denied. The call stayed on signaling only."
-        : "Microphone or camera could not start.");
+      await denyCallMedia(err);
       return;
     }
+    note("media_granted");
+    try { await sendSignal("media", "granted"); } catch (err) {}
     eachPc().forEach(function (pc) { try { pc.close(); } catch (err) {} });
     state.pcs = {};
     state.pc = null;
@@ -566,6 +641,12 @@
         adapt(row.payload);
         continue;
       }
+      if (row.kind === "media") {
+        if (row.payload === "denied") {
+          text("call-error", "The other person denied microphone or camera access. No audio or video was exchanged.");
+        }
+        continue;
+      }
       var wrapped = parseWrapped(row.payload);
       if (wrapped && wrapped.target && state.me && wrapped.target !== state.me.user_id) continue;
       if (row.kind === "offer" || row.kind === "answer" || row.kind === "renego") {
@@ -583,6 +664,7 @@
             if (!polite) continue;
             try { await pc.setLocalDescription({ type: "rollback" }); } catch (err) {}
           }
+          note(incomingOffer ? "remote_offer" : "remote_answer");
           await pc.setRemoteDescription({ type: incomingOffer ? "offer" : "answer", sdp: sdp });
           await flushRemoteIce(row.sender_user_id, pc);
           if (incomingOffer) {
@@ -604,7 +686,7 @@
         var icePc = pcForSender(row.sender_user_id);
         if (!icePc || !icePc.remoteDescription) stashRemoteIce(row.sender_user_id, candidate);
         else {
-          try { await icePc.addIceCandidate(candidate); } catch (err) {}
+          try { await icePc.addIceCandidate(candidate); note("remote_ice"); } catch (err) {}
         }
       }
     }
@@ -682,6 +764,16 @@
       text("call-quality", "Network quality: unknown");
     }
   }
+  function paintCall() {
+    if (!state.call) return;
+    if (state.session && state.session.state === "permission_denied") {
+      text("call-state", "Microphone or camera permission was denied. Nothing was captured. Snap will not ask again until you start or accept another call.");
+      return;
+    }
+    var hint = state.call.session_hint || state.call.state;
+    text("call-state", "Call " + hint + (state.call.ended_reason ? " · " + state.call.ended_reason : ""));
+    if (state.call.calling_blocker && $("call-guidance")) $("call-guidance").textContent = state.call.calling_blocker;
+  }
   function endLocalMedia() {
     stopStream(state.localStream);
     state.localStream = null;
@@ -704,25 +796,38 @@
     state.call = await api("/calls/" + call.call_id + "/accept", { method: "POST" });
     state.signalAfter = 0;
     state.remoteIce = {};
+    if (!state.session) {
+      var sessions = sessionApi();
+      state.session = sessions ? sessions.create("callee") : null;
+      note("invite_in");
+    }
+    note("accept");
     showCall(true);
-    text("call-state", "Call accepted. Connecting directly between devices.");
+    text("call-state", "Call accepted. Your browser will ask before the microphone or camera turns on.");
     show("call-accept", false);
     show("call-decline", false);
     await attachMedia(call.media, false);
   }
   async function pollIncoming() {
     var rows = await api("/calls/incoming");
-    if (!rows.length || state.call) return;
+    var finished = state.call && (state.call.state === "ended" || state.call.state === "failed" || state.call.state === "declined");
+    if (!rows.length || (state.call && !finished)) return;
     state.call = rows[0];
+    var sessions = sessionApi();
+    state.session = sessions ? sessions.create("callee") : null;
+    note("invite_in");
     showCall(true);
-    text("call-state", "Incoming " + rows[0].media + " call.");
+    text("call-state", "Incoming " + rows[0].media + " call. Camera and microphone stay off until you accept.");
     show("call-accept", true);
     show("call-decline", true);
     var accept = $("call-accept");
     accept.onclick = function () { acceptIncoming(rows[0]); };
+    if (accept && accept.focus) accept.focus();
     $("call-decline").onclick = async function () {
+      note("decline");
       await api("/calls/" + rows[0].call_id + "/decline", { method: "POST" });
       state.call = null;
+      state.session = null;
       showCall(false);
       banner("Call declined.");
     };
@@ -744,13 +849,18 @@
       }
       if (state.call && state.call.state !== "ended" && state.call.state !== "failed" && state.call.state !== "declined") {
         state.call = await api("/calls/" + state.call.call_id);
-        text("call-state", "Call " + state.call.state + (state.call.ended_reason ? " · " + state.call.ended_reason : ""));
+        paintCall();
         text("call-quality", "Network quality: " + (state.call.quality || "unknown"));
-        if (state.call.calling_blocker && $("call-guidance")) $("call-guidance").textContent = state.call.calling_blocker;
         await consumeSignals();
         await connectMesh();
         await sampleQuality();
-        if (state.call.state === "failed" || state.call.state === "ended" || state.call.state === "declined") endLocalMedia();
+        if (state.call.state === "failed" || state.call.state === "ended" || state.call.state === "declined") {
+          if (state.call.state === "declined") note("remote_decline");
+          else if (state.call.state === "failed") note("timeout");
+          else note("end");
+          endLocalMedia();
+          state.session = null;
+        }
       } else {
         await pollIncoming();
       }
@@ -805,6 +915,9 @@
     $("tab-chats").addEventListener("click", function () { showPanel("chats"); });
     $("tab-camera").addEventListener("click", function () { showPanel("camera"); });
     $("tab-calls").addEventListener("click", function () { showPanel("calls"); });
+    ["chats", "camera", "calls"].forEach(function (name) {
+      $("tab-" + name).addEventListener("keydown", moveTab);
+    });
     $("contact-form").addEventListener("submit", async function (event) {
       event.preventDefault();
       try {
@@ -935,16 +1048,19 @@
     $("call-start-video").addEventListener("click", function () { placeCall("video").catch(function (err) { text("call-error", err.message); }); });
     $("call-hangup").addEventListener("click", async function () {
       if (!state.call) return;
+      note("hangup");
       await api("/calls/" + state.call.call_id + "/end", { method: "POST" });
       endLocalMedia();
       text("call-state", "Call ended.");
       state.call = null;
+      state.session = null;
     });
     $("call-reconnect").addEventListener("click", async function () {
       if (!state.call) return;
       try {
         state.call = await api("/calls/" + state.call.call_id + "/reconnect", { method: "POST" });
-        text("call-state", "Reconnecting. Picture and sound depend on a direct network path.");
+        note("reconnect");
+        text("call-state", "Reconnecting. Picture and sound depend on a direct network path. Two-device audio and video are not verified.");
         var pcs = eachPc();
         for (var i = 0; i < pcs.length; i += 1) {
           var pc = pcs[i];

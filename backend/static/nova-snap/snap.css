@@ -36,6 +36,7 @@ button, .tabs button {
   color: #fff;
 }
 button[disabled] { opacity: .55; }
+:focus-visible { outline: 3px solid #0b3a75; outline-offset: 2px; }
 button[aria-pressed="false"], #sign-out, #retry-outbox, #block-user, #delete-last, #remove-my-content, #call-decline {
   background: #fff;
   color: #1d4e89;

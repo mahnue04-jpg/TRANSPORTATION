@@ -27,11 +27,42 @@ This preview is not a production release.
 
 Calls are browser WebRTC between the signed-in participants. The server only exchanges call state and signaling. It does not forward audio or video.
 
-`SNAP_STUN_URLS` defaults to `stun:stun.l.google.com:19302`. Set it to `off` to disable STUN. That host is a public address-discovery service, not an AMICOR relay, and it is not a quality promise.
+The call machine on each peer is `idle → ringing → permission → connecting → connected`, plus decline, hangup, reconnect, and failure. Permission denial ends that invite with `permission_denied` and does not open the camera again until the person starts or accepts another call. Nothing is captured on page load.
 
-`SNAP_TURN_URLS`, `SNAP_TURN_USERNAME`, and `SNAP_TURN_CREDENTIAL` enable a relay only when all three are set by an operator. This change does not buy or provision TURN. Without TURN, strict NATs, some mobile carriers, and many international paths fail. `/api/nova/snap/status` reports `turn_configured: false` and `quality_guarantee: false`.
+`connected` in a browser means that browser reported a peer connection. It does not mean two devices exchanged audio or video. The automated test that reaches `connected` uses an in-process fake RTC layer and is labeled `simulated`. Its media path is `simulated-loopback`. It sends no RTP and opens no camera.
 
-Optional later team tier: a TURN relay and longer retention. No checkout and no new paid account are included.
+## STUN and TURN
+
+This preview does not buy a relay.
+
+| Piece | What it is | This build |
+| --- | --- | --- |
+| STUN | Tells a browser its public address (`stun:` or `stuns:`). It does not carry audio or video. | On by default: `SNAP_STUN_URLS=stun:stun.l.google.com:19302`. Set `off` to disable. A public STUN host is not an AMICOR service and is not a quality promise. |
+| TURN | Relays packets when a direct path cannot be built (`turn:` or `turns:`), with a username and credential. | Off unless an operator sets `SNAP_TURN_URLS`, `SNAP_TURN_USERNAME`, and `SNAP_TURN_CREDENTIAL`. URLs with embedded passwords are ignored. |
+| Relay candidate | An ICE candidate of type `relay`. | Rejected while TURN is off, including relay lines inside SDP. |
+
+`/api/nova/snap/status` reports `preview_transport: stun-only`, `turn_configured: false`, `turn_purchased: false`, `two_device_verified: false`, and `quality_guarantee: false` unless an operator has configured TURN. Configuring those variables is not a purchase made by this change. Strict NATs, some mobile carriers, and many international paths fail without a relay. There is no international quality claim.
+
+A future team option could add a TURN provider. There is no checkout and no new paid account in this change.
+
+## What a person still has to prove
+
+The simulated loopback does not replace a human test. Before any release, two physical devices on two networks must show all of the following:
+
+1. Each device is signed in as a different account in the same organization.
+2. The contact is accepted and one direct conversation is open.
+3. An audio call: each person hears the other person, not only their own sidetone.
+4. A video call: each person sees the other person's camera.
+5. Decline, hangup, and reconnect after a network change all behave as labeled.
+6. Denying the microphone and camera turns the browser capture indicator off, and it does not return by itself.
+7. A strict NAT or mobile-carrier path is expected to fail because no TURN relay is configured.
+8. The public website card stays Coming Soon until that checklist passes and the owner approves a release.
+
+## Release hold
+
+Not release-ready. Do not deploy this preview. Keep the public website card on Coming Soon.
+
+On `origin/main` (`7173f17a`, not edited here) `website/catalog.py` sets Nova Snap `status="Coming Soon"` and `website/products/index.html` shows Coming Soon. This branch does not contain `website/` and does not mark Snap live. Nova Home links to the signed-in preview and does not say Available.
 
 ## Privacy
 

@@ -5,6 +5,7 @@ Media bytes are never placed on a public path. Synapse and Casting are untouched
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -37,7 +38,8 @@ _buckets: dict[tuple[str, str], list[float]] = {}
 _seq_indexes_ready = False
 _NOT_FOUND = "Not found."
 _QUALITIES = {"excellent", "good", "fair", "poor", "disconnected", "unknown"}
-_SIGNAL_KINDS = {"offer", "answer", "ice", "quality", "renego"}
+_SIGNAL_KINDS = {"offer", "answer", "ice", "quality", "renego", "media"}
+_DESCRIPTION_KINDS = ("offer", "answer", "renego")
 
 
 def reset_limits() -> None:
@@ -762,6 +764,22 @@ def _participant_age(person: SnapCallParticipant, now: datetime) -> float:
     return (now - seen).total_seconds()
 
 
+def _media_senders(db: Session, call_id: str) -> set[str]:
+    rows = (
+        db.query(SnapSignal.sender_user_id)
+        .filter(SnapSignal.call_id == call_id, SnapSignal.kind.in_(_DESCRIPTION_KINDS + ("ice",)))
+        .distinct()
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
+def _silence_limits(has_media: bool) -> tuple[float, float]:
+    if has_media:
+        return float(policy.RECONNECT_AFTER_S), float(policy.FAIL_AFTER_S)
+    return float(policy.PERMISSION_GRACE_S), float(policy.PERMISSION_GRACE_S)
+
+
 def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
     if call.state not in {"ringing", "active"}:
         return call
@@ -779,7 +797,9 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
             db.commit()
         return call
     live = [person for person in people if person.state in {"accepted", "reconnecting"}]
-    stale = [person for person in live if _participant_age(person, now) > policy.FAIL_AFTER_S]
+    senders = _media_senders(db, call.call_id)
+    limits = {person.user_id: _silence_limits(person.user_id in senders) for person in live}
+    stale = [person for person in live if _participant_age(person, now) > limits[person.user_id][1]]
     # Two-person calls end when either side goes quiet. Count only people still
     # in the call, so an invited or already-left row cannot hide a 1:1 timeout.
     # Larger calls mark a quiet peer left and end only after every live peer is quiet.
@@ -798,12 +818,34 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
         person.state = "left"
         changed = True
     for person in live:
-        if person.state == "accepted" and _participant_age(person, now) > policy.RECONNECT_AFTER_S:
+        reconnect_after = limits[person.user_id][0]
+        if person.state == "accepted" and _participant_age(person, now) > reconnect_after:
             person.state = "reconnecting"
             changed = True
     if changed:
         db.commit()
     return call
+
+
+def _session_hint(call: SnapCall, me: SnapCallParticipant | None) -> str:
+    """Server phase. `active` means the invite was accepted, not that media flowed."""
+    if me and me.state == "declined":
+        return "declined"
+    if call.state == "declined":
+        return "declined"
+    if call.state == "failed":
+        return "failed"
+    if (me and me.state == "left") or call.state == "ended":
+        return "ended"
+    if me and me.state == "reconnecting":
+        return "reconnecting"
+    if me and me.state == "invited" and call.state == "ringing":
+        return "ringing_in"
+    if call.state == "ringing":
+        return "ringing_out"
+    if call.state == "active":
+        return "active"
+    return call.state
 
 
 def _call_out(db: Session, call: SnapCall, viewer: str) -> dict:
@@ -816,6 +858,7 @@ def _call_out(db: Session, call: SnapCall, viewer: str) -> dict:
         "conversation_id": call.conversation_id,
         "media": call.media,
         "state": call.state,
+        "session_hint": _session_hint(call, me),
         "ended_reason": call.ended_reason,
         "my_state": me.state if me else None,
         "quality": me.last_quality if me else "unknown",
@@ -970,6 +1013,18 @@ def decline_call(db: Session, user: UserContext, call_id: str) -> dict:
     return _call_out(db, call, user.user_id)
 
 
+def _ended_reason_for(db: Session, call_id: str, user_id: str) -> str:
+    latest = (
+        db.query(SnapSignal)
+        .filter_by(call_id=call_id, sender_user_id=user_id, kind="media")
+        .order_by(SnapSignal.seq.desc())
+        .first()
+    )
+    if latest is not None and latest.payload == "denied":
+        return "permission_denied"
+    return "hangup"
+
+
 def end_call(db: Session, user: UserContext, call_id: str) -> dict:
     call, me = _require_call(db, user, call_id)
     me.state = "left"
@@ -978,7 +1033,7 @@ def end_call(db: Session, user: UserContext, call_id: str) -> dict:
     still = [person for person in people if person.state in {"accepted", "reconnecting", "invited"}]
     if len([person for person in people if person.state in {"accepted", "reconnecting"}]) < 2:
         call.state = "ended"
-        call.ended_reason = "hangup"
+        call.ended_reason = _ended_reason_for(db, call.call_id, user.user_id)
         call.ended_at = _now()
         for person in still:
             person.state = "left"
@@ -1000,6 +1055,100 @@ def reconnect_call(db: Session, user: UserContext, call_id: str) -> dict:
 
 def _delete_signals(db: Session, call_id: str) -> None:
     db.query(SnapSignal).filter_by(call_id=call_id).delete()
+
+
+def _signal_target(payload: str) -> str | None:
+    if not payload or not payload.startswith("{"):
+        return None
+    try:
+        body = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    target = body.get("target")
+    return target if isinstance(target, str) else None
+
+
+def _offer_was_answered(offer: SnapSignal, others: list[SnapSignal]) -> bool:
+    target = _signal_target(offer.payload)
+    for other in others:
+        if other.kind != "answer" or other.seq <= offer.seq:
+            continue
+        if target is None or other.sender_user_id == target:
+            return True
+    return False
+
+
+def _assert_description_order(db: Session, call: SnapCall, user_id: str, kind: str, text: str) -> None:
+    rows = db.query(SnapSignal).filter(SnapSignal.call_id == call.call_id, SnapSignal.kind.in_(_DESCRIPTION_KINDS)).all()
+    mine = [row for row in rows if row.sender_user_id == user_id]
+    others = [row for row in rows if row.sender_user_id != user_id]
+    if kind == "renego" and call.state != "active":
+        raise HTTPException(409, "Restart the connection only after the call is active.")
+    if kind == "answer" and not any(row.kind in {"offer", "renego"} for row in others):
+        raise HTTPException(409, "Wait for the other person's call offer before answering.")
+    if kind in {"offer", "renego"}:
+        target = _signal_target(text)
+        for row in mine:
+            if row.kind not in {"offer", "renego"}:
+                continue
+            if _signal_target(row.payload) != target:
+                continue
+            if _offer_was_answered(row, others):
+                continue
+            raise HTTPException(409, "An offer is already waiting for an answer.")
+
+
+def _assert_ice_ready(db: Session, call: SnapCall, user_id: str) -> None:
+    found = (
+        db.query(SnapSignal.signal_id)
+        .filter(
+            SnapSignal.call_id == call.call_id,
+            SnapSignal.sender_user_id == user_id,
+            SnapSignal.kind.in_(_DESCRIPTION_KINDS),
+        )
+        .first()
+    )
+    if found is None:
+        raise HTTPException(409, "Send the call description before network candidates.")
+
+
+def _prepare_signal(db: Session, call: SnapCall, user_id: str, kind: str, payload: str) -> str:
+    text = payload if isinstance(payload, str) else ""
+    if kind == "quality":
+        if text not in _QUALITIES:
+            raise HTTPException(422, "Quality must be excellent, good, fair, poor, disconnected, or unknown.")
+        return text
+    if kind == "media":
+        if text not in {"denied", "granted"}:
+            raise HTTPException(422, "Media permission must be granted or denied.")
+        return text
+    if kind in _DESCRIPTION_KINDS:
+        try:
+            text = policy.normalize_description(text, call.media)
+        except ValueError as exc:
+            if str(exc) == "relay":
+                raise HTTPException(
+                    422,
+                    "That path needs a TURN relay. No relay is configured, and this preview did not buy one.",
+                ) from exc
+            raise HTTPException(422, "The call description must include session data for this audio or video call.") from exc
+        _assert_description_order(db, call, user_id, kind, text)
+        return text
+    if kind == "ice":
+        try:
+            text = policy.normalize_ice(text)
+        except ValueError as exc:
+            if str(exc) == "relay":
+                raise HTTPException(
+                    422,
+                    "That candidate needs a TURN relay. No relay is configured, and this preview did not buy one.",
+                ) from exc
+            raise HTTPException(422, "The network candidate is not valid.") from exc
+        _assert_ice_ready(db, call, user_id)
+        return text
+    raise HTTPException(422, "Unsupported call signal.")
 
 
 def post_signal(
@@ -1027,12 +1176,7 @@ def post_signal(
     )
     if existing:
         return {"signal_id": existing.signal_id, "seq": existing.seq, "duplicate": True}
-    text = payload if isinstance(payload, str) else ""
-    if kind == "quality":
-        if text not in _QUALITIES:
-            raise HTTPException(422, "Quality must be excellent, good, fair, poor, disconnected, or unknown.")
-    elif len(text) > 20000 or "\x00" in text:
-        raise HTTPException(422, "That call signal is too large.")
+    text = _prepare_signal(db, call, user.user_id, kind, payload)
     _rate(user.user_id, "signal", *policy.SIGNAL_RATE)
     _ensure_seq_indexes(db)
     if kind == "quality":

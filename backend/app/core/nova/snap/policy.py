@@ -1,4 +1,5 @@
 """Snap limits, link safety, and media checks. No network calls."""
+import json
 import os
 import re
 
@@ -18,6 +19,9 @@ SIGNAL_RATE = (120, 60)
 RING_TIMEOUT_S = 120
 RECONNECT_AFTER_S = 20
 FAIL_AFTER_S = 90
+# A peer who has accepted but has not sent a description yet is still in the
+# browser permission prompt. Do not treat that silence as a dropped call.
+PERMISSION_GRACE_S = 180
 
 _UNSAFE_LINK = re.compile(r"(?i)\b(?:javascript|data|vbscript|file|blob)\s*:")
 _URL = re.compile(r"(?i)\bhttps?://[^\s<>]+")
@@ -86,17 +90,32 @@ def media_limit(content_type: str) -> int:
     return MAX_PHOTO_BYTES
 
 
+_ICE_URL = re.compile(r"^(?:stun|stuns|turn|turns):[^\s@]+$", re.IGNORECASE)
+_CANDIDATE = re.compile(r"^candidate:\S+ \d+ \S+ \d+ \S+ \d+ typ (host|srflx|prflx|relay)\b")
+_TARGET = re.compile(r"^[A-Za-z0-9_\-]{1,36}$")
+
+
+def _ice_urls(raw: str) -> list[str]:
+    urls = []
+    for part in (raw or "").split(","):
+        url = part.strip()
+        if _ICE_URL.fullmatch(url):
+            urls.append(url)
+    return urls
+
+
 def ice_config() -> dict:
     """Free STUN can be configured. TURN stays off unless an operator sets it.
 
-    This does not buy a relay and does not promise call quality.
+    This module never buys a relay and never promises call quality.
+    URLs with embedded userinfo are dropped so secrets are not copied into the page.
     """
     stun_raw = os.getenv("SNAP_STUN_URLS", "stun:stun.l.google.com:19302").strip()
     turn_raw = os.getenv("SNAP_TURN_URLS", "").strip()
     turn_user = os.getenv("SNAP_TURN_USERNAME", "").strip()
     turn_secret = os.getenv("SNAP_TURN_CREDENTIAL", "").strip()
-    stun_urls = [] if stun_raw.lower() in {"", "off", "none"} else [u.strip() for u in stun_raw.split(",") if u.strip()]
-    turn_urls = [u.strip() for u in turn_raw.split(",") if u.strip()] if turn_raw else []
+    stun_urls = [] if stun_raw.lower() in {"", "off", "none"} else _ice_urls(stun_raw)
+    turn_urls = _ice_urls(turn_raw)
     turn_ready = bool(turn_urls and turn_user and turn_secret)
     servers = []
     if stun_urls:
@@ -109,7 +128,98 @@ def ice_config() -> dict:
         "ice_servers": servers,
         "quality_guarantee": False,
         "calling_mode": "browser-webrtc-direct",
+        "turn_purchased": False,
     }
+
+
+def _sdp_lines(text: str) -> list[str]:
+    if not isinstance(text, str) or "\x00" in text or len(text) > 20000:
+        raise ValueError("sdp")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = normalized.split("\n")
+    if not lines or lines[0] != "v=0":
+        raise ValueError("sdp")
+    if not any(line.startswith("m=audio ") for line in lines):
+        raise ValueError("sdp")
+    return lines
+
+
+def _reject_relay(lines: list[str]) -> None:
+    if ice_config()["turn_configured"]:
+        return
+    for line in lines:
+        if "typ relay" in line.lower():
+            raise ValueError("relay")
+
+
+def _check_sdp(text: str, media: str) -> str:
+    lines = _sdp_lines(text)
+    if media == "video" and not any(line.startswith("m=video ") for line in lines):
+        raise ValueError("sdp")
+    _reject_relay(lines)
+    return text.strip()
+
+
+def normalize_description(payload: str, media: str) -> str:
+    """Accept raw SDP or a {target, sdp} wrapper. Reject relay lines when TURN is off."""
+    text = (payload or "").strip()
+    if text.startswith("{"):
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("sdp") from exc
+        if not isinstance(body, dict):
+            raise ValueError("sdp")
+        target = body.get("target")
+        sdp = body.get("sdp")
+        if not isinstance(target, str) or not _TARGET.fullmatch(target) or not isinstance(sdp, str):
+            raise ValueError("sdp")
+        return json.dumps({"target": target, "sdp": _check_sdp(sdp, media)}, separators=(",", ":"))
+    return _check_sdp(text, media)
+
+
+def _clean_candidate(candidate: dict) -> dict:
+    line = candidate.get("candidate")
+    if not isinstance(line, str):
+        raise ValueError("ice")
+    line = line.strip()
+    if not line or len(line) > 500 or "\n" in line or "\r" in line or not _CANDIDATE.match(line):
+        raise ValueError("ice")
+    if "typ relay" in line.lower() and not ice_config()["turn_configured"]:
+        raise ValueError("relay")
+    clean = {"candidate": line}
+    mid = candidate.get("sdpMid")
+    index = candidate.get("sdpMLineIndex")
+    if isinstance(mid, str) and 0 < len(mid) <= 8:
+        clean["sdpMid"] = mid
+    if isinstance(index, int) and not isinstance(index, bool) and 0 <= index <= 8:
+        clean["sdpMLineIndex"] = index
+    return clean
+
+
+def normalize_ice(payload: str) -> str:
+    """Store a host, srflx, prflx, or configured-relay candidate. Drop other JSON fields."""
+    text = (payload or "").strip()
+    if not text.startswith("{") or len(text) > 4000:
+        raise ValueError("ice")
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("ice") from exc
+    if not isinstance(body, dict):
+        raise ValueError("ice")
+    target = None
+    candidate = body
+    nested = body.get("candidate")
+    if isinstance(nested, dict):
+        target = body.get("target")
+        candidate = nested
+    clean = _clean_candidate(candidate)
+    if target is not None:
+        if not isinstance(target, str) or not _TARGET.fullmatch(target):
+            raise ValueError("ice")
+        return json.dumps({"target": target, "candidate": clean}, separators=(",", ":"))
+    return json.dumps(clean, separators=(",", ":"))
 
 
 def public_status() -> dict:
@@ -121,6 +231,12 @@ def public_status() -> dict:
             "address discovery only. Strict NATs, some mobile carriers, and many international paths "
             "will fail. A relay would be a separate infrastructure cost and is not purchased."
         )
+    if ice["turn_configured"]:
+        transport = "operator-turn"
+    elif ice["stun_configured"]:
+        transport = "stun-only"
+    else:
+        transport = "no-ice-servers"
     return {
         "product": "Nova Snap",
         "release": "preview",
@@ -134,6 +250,10 @@ def public_status() -> dict:
         ],
         "stun_configured": ice["stun_configured"],
         "turn_configured": ice["turn_configured"],
+        "turn_purchased": False,
+        "two_device_verified": False,
+        "human_two_device_test_required": True,
+        "preview_transport": transport,
         "quality_guarantee": False,
         "calling_mode": ice["calling_mode"],
         "calling_blocker": blocker,

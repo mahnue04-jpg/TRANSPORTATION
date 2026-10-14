@@ -61,3 +61,24 @@ Headless Chrome on the local preview:
 ## Release
 
 Not release-ready. Keep the public card on Coming Soon. Do not merge to production until an owner wants this preview. Rollback is in `docs/nova/snap.md`: stop linking `/nova/snap`. The `nova_snap_*` tables are additive. Synapse, Casting, and Work & Revenue do not read them.
+
+## Continuation 2026-10-14
+
+PR #340 is still a preview. This pass hardened signaling and added a simulated two-account audio/video path. It did not buy TURN, did not deploy, and did not use two physical devices.
+
+Audio/video evidence:
+
+- Test `test_simulated_two_peer_audio_video_loopback` drives two signed-in accounts through the real Snap call API.
+- Offer, answer, host ICE, reconnect, and hangup are stored for those accounts only.
+- The RTC layer is `CallSession(simulated=True)`. Label: `simulated`. Media path: `simulated-loopback`.
+- `two_independent_devices` is false. `devices_used`, `browsers_used`, `cameras_used`, and `rtp_packets` are 0.
+- `turn_configured` and `turn_purchased` are false. Relay candidates are rejected.
+- This VM has no `/dev/video*` node. Headless Chrome rendered the signed-out page only. That render is not a call and is not two-device success.
+
+Tests on this pass:
+
+- `python3 -m pytest backend/tests/test_nova_snap.py -q`: 17 passed, 0 failed.
+- `node --test backend/tests/nova_snap_ui.test.cjs`: 6 passed, 0 failed.
+- `python3 -m pytest backend/tests/test_nova_home.py backend/tests/test_nova_synapse.py -q`: 27 passed, 0 failed (15 Home, 12 Synapse). Home and Synapse product code were not edited.
+
+A human two-device checklist remains in `docs/nova/snap.md`. Public Coming Soon on `origin/main` `website/catalog.py` was not edited.
