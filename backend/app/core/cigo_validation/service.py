@@ -54,8 +54,13 @@ FICTIONAL = (
 
 def demo_enabled() -> bool:
     """Local mock only. Production never mounts this, even if the flag is set."""
-    runtime = os.getenv("RUNTIME_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")).strip().lower()
-    if runtime in {"production", "prod"}:
+    markers = (
+        os.getenv("RUNTIME_ENVIRONMENT", ""),
+        os.getenv("ENVIRONMENT", ""),
+        os.getenv("APP_ENV", ""),
+        os.getenv("AMICOR_ENVIRONMENT", ""),
+    )
+    if any(value.strip().lower() in {"production", "prod"} for value in markers):
         return False
     return os.getenv("CIGO_VALIDATION_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
 

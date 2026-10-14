@@ -40,6 +40,12 @@ def test_demo_stays_off_in_production_even_when_flagged(monkeypatch):
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "production")
     assert demo_enabled() is False
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
+    monkeypatch.setenv("APP_ENV", "production")
+    assert demo_enabled() is False
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    assert demo_enabled() is False
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "development")
     assert demo_enabled() is True
     monkeypatch.delenv("CIGO_VALIDATION_DEMO")
     assert demo_enabled() is False
