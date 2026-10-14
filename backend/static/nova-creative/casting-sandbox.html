@@ -30,6 +30,7 @@
     <nav class="studio-nav" aria-label="Nova destinations">
       <a href="/nova/creative">Creative</a>
       <a href="/static/nova-creative/casting-preview.html">Fictional preview</a>
+      <a href="/static/nova-creative/casting-pilot-demo.html">30-day demo</a>
       <a href="/static/nova-creative/casting-sandbox.html" aria-current="page">Casting sandbox</a>
     </nav>
   </header>
@@ -144,6 +145,51 @@
       </form>
       <video id="playback" controls playsinline></video>
       <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
+    </section>
+
+    <section class="card" aria-label="Pilot intake and review">
+      <h2>Sandbox pilot <span class="badge">Demo / Early Access</span></h2>
+      <p class="hint">Consent-based intake for an authenticated test account. Audition media stays an https link. Nothing is published and no message is sent.</p>
+      <p id="retention-notice" class="hint">Sandbox consent: this test application is kept only for the retention window you select, up to 365 days. You may revoke consent, which clears the contact details and audition link from review.</p>
+      <form id="pilot-role-form" class="grid">
+        <label>Role title<input id="pilot-role-title" maxlength="80" value="Harbor lead" required /></label>
+        <label>Deadline<input id="pilot-deadline" type="datetime-local" required /></label>
+        <label class="wide">Requirements<textarea id="pilot-requirements" rows="2" maxlength="2000">A two-minute self-tape. Adults only.</textarea></label>
+        <div class="actions wrap">
+          <button type="submit" id="save-pilot-role">Save role</button>
+          <button type="button" id="load-fiction" class="secondary">Load Harborlight sample</button>
+        </div>
+      </form>
+      <form id="pilot-intake-form" class="grid">
+        <label>Role id<input id="pilot-role-id" maxlength="48" required /></label>
+        <label>Display name<input id="pilot-name" maxlength="80" autocomplete="name" required /></label>
+        <label>Contact email<input id="pilot-email" type="email" maxlength="320" autocomplete="email" required /></label>
+        <label>Age in years<input id="pilot-age" type="number" min="18" required /></label>
+        <label class="wide">Audition link<input id="pilot-link" type="url" inputmode="url" placeholder="https://example.invalid/tape" required /></label>
+        <label>Eligibility answer<input id="pilot-answer" maxlength="500" /></label>
+        <label class="wide"><input id="pilot-consent" type="checkbox" /> I am at least 18 and consent to this disposable sandbox application.</label>
+        <div class="actions wrap">
+          <button type="submit" id="save-pilot-intake">Save pilot draft</button>
+          <button type="button" id="submit-pilot-intake" class="secondary">Submit pilot draft</button>
+          <button type="button" id="revoke-pilot" class="secondary">Revoke consent</button>
+        </div>
+      </form>
+      <p id="pilot-receipt" class="hint">No pilot receipt yet.</p>
+      <form id="pilot-review-form" class="grid">
+        <label>Queue search<input id="pilot-query" maxlength="80" /></label>
+        <label>Rubric score<input id="pilot-score" type="number" min="1" max="5" value="4" /></label>
+        <label class="wide">Rubric note<textarea id="pilot-rubric" rows="2" maxlength="1000"></textarea></label>
+        <div class="actions wrap">
+          <button type="submit" id="load-queue">Search review queue</button>
+          <button type="button" id="pilot-shortlist" class="secondary">Shortlist submitted application</button>
+          <button type="button" id="save-rubric" class="secondary">Save rubric note</button>
+          <button type="button" id="draft-invite" class="secondary">Draft callback email</button>
+          <button type="button" id="approve-invite" class="secondary">Approve draft</button>
+          <button type="button" id="load-call-sheet" class="secondary">Load call sheet</button>
+        </div>
+      </form>
+      <p id="pilot-message" class="hint">No message draft yet. Outbound delivery stays off.</p>
+      <pre id="pilot-output" class="output" aria-live="polite">Pilot results appear here. No invitation is sent.</pre>
     </section>
   </main>
   <script>
@@ -488,6 +534,165 @@
         } catch (err) { /* banner already set */ }
       });
       $("sign-out").addEventListener("click", clearPlayback);
+      var pilotRoleId = "";
+      var pilotMessageId = "";
+      function pilotDeadline() {
+        var value = $("pilot-deadline").value;
+        if (!value) return "";
+        var parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return "";
+        return parsed.toISOString();
+      }
+      $("pilot-role-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var campaignId = $("application-campaign").value.trim();
+          if (!campaignId) {
+            show("Create a draft campaign first. Nothing was submitted.", false);
+            return;
+          }
+          var created = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/roles", {
+            method: "POST",
+            body: JSON.stringify({
+              title: $("pilot-role-title").value.trim(),
+              requirements: $("pilot-requirements").value.trim(),
+              deadline: pilotDeadline(),
+              minimum_age: 18,
+              questions: [{ id: "union", prompt: "Are you able to attend a sandbox callback?" }]
+            })
+          });
+          pilotRoleId = created.id || "";
+          $("pilot-role-id").value = pilotRoleId;
+          show("Role saved. The campaign was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-fiction").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var campaignId = $("application-campaign").value.trim();
+          if (!campaignId) {
+            show("Create a draft campaign first. Nothing was submitted.", false);
+            return;
+          }
+          var seeded = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/pilot-demo", { method: "POST" });
+          pilotRoleId = seeded.roles && seeded.roles[0] ? seeded.roles[0].id : "";
+          $("pilot-role-id").value = pilotRoleId;
+          pilotMessageId = seeded.message ? seeded.message.id : "";
+          $("pilot-output").textContent = "Harborlight sample loaded. Published: " + String(seeded.published) + ". Message delivered: false.";
+          show("Fictional Harborlight sample saved in this sandbox. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("pilot-intake-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox()) || !applicationId) {
+            show("Save a test application first. Nothing was submitted.", false);
+            return;
+          }
+          if (!$("pilot-consent").checked) {
+            show("Consent required. Nothing was submitted.", false);
+            return;
+          }
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake", {
+            method: "POST",
+            body: JSON.stringify({
+              role_id: $("pilot-role-id").value.trim(),
+              display_name: $("pilot-name").value.trim(),
+              contact_email: $("pilot-email").value.trim(),
+              video_url: $("pilot-link").value.trim(),
+              age_years: Number($("pilot-age").value),
+              consent_accepted: true,
+              consent_version: "sandbox-v1",
+              retention_days: 30,
+              answers: $("pilot-answer").value.trim() ? { union: $("pilot-answer").value.trim() } : {}
+            })
+          });
+          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ".";
+          show("Pilot draft saved. Nothing was published or sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("submit-pilot-intake").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake/submit", { method: "POST" });
+          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ".";
+          show("Pilot application submitted. The campaign was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("revoke-pilot").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake/revoke", { method: "POST" });
+          $("pilot-receipt").textContent = "Consent revoked. Receipt " + saved.receipt + ".";
+          show("Consent revoked. Contact details and the audition link were cleared.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("pilot-review-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/review-queue?limit=20&offset=0&q=" + encodeURIComponent($("pilot-query").value.trim()));
+          $("pilot-output").textContent = JSON.stringify(page.items || [], null, 2);
+        } catch (err) { /* banner already set */ }
+      });
+      $("pilot-shortlist").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/pilot-review", {
+            method: "POST",
+            body: JSON.stringify({ stage: "In review", shortlisted: true })
+          });
+          show("Shortlist recorded by a person. Automatic casting is " + String(saved.automatic_cast) + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("save-rubric").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/rubric", {
+            method: "POST",
+            body: JSON.stringify({
+              criterion: "clarity",
+              score: Number($("pilot-score").value),
+              comment: $("pilot-rubric").value
+            })
+          });
+          show("Rubric note saved. Decision: " + saved.decision + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("draft-invite").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/messages", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "invite",
+              application_id: applicationId,
+              idempotency_key: "sandbox-invite-" + applicationId.slice(0, 12),
+              channel: "email"
+            })
+          });
+          pilotMessageId = saved.id || "";
+          $("pilot-message").textContent = saved.body + " Delivered: " + String(saved.delivered) + ".";
+          show("Callback draft stored. No invitation was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("approve-invite").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotMessageId) return;
+          var saved = await api(base() + "/messages/" + encodeURIComponent(pilotMessageId) + "/approve", { method: "POST" });
+          $("pilot-message").textContent = "Status " + saved.status + ". Delivered: " + String(saved.delivered) + ".";
+          show("Draft approved for preview only. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-call-sheet").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotRoleId) return;
+          var sheet = await api(base() + "/roles/" + encodeURIComponent(pilotRoleId) + "/call-sheet");
+          $("pilot-output").textContent = JSON.stringify(sheet, null, 2);
+          show("Call sheet loaded. No notification was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
       if (token()) refreshReadiness().catch(function () {});
       else $("status").textContent = "Sign in to check sandbox readiness.";
     }());

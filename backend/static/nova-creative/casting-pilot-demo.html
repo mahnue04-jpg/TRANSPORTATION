@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Harborlight casting demo</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+  <style>
+    .eyebrow { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+    .pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; background: #0f5c4c; color: #fff; font-size: 0.78rem; letter-spacing: 0.02em; }
+    .pill.quiet { background: #2f2a24; }
+    .timeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; margin: 0.75rem 0; }
+    .day { border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem; background: #fff; min-height: 6.5rem; }
+    .day strong { display: block; color: var(--accent); }
+    .day.active { border-color: #0f5c4c; box-shadow: inset 0 0 0 1px #0f5c4c; }
+    .split { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0.8rem; }
+    .offer { background: #10241f; color: #f6f3ec; }
+    .offer .hint { color: #d5e4de; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+      outline: 2px solid #1f4b3a; outline-offset: 2px;
+    }
+    @media (max-width: 800px) {
+      .timeline, .split { grid-template-columns: 1fr; }
+      .studio-nav { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="studio-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Harborlight casting demo</h1>
+      </div>
+    </div>
+    <nav class="studio-nav" aria-label="Casting demo">
+      <a href="/static/nova-creative/casting-sandbox.html">Casting sandbox</a>
+      <a href="/static/nova-creative/casting-pilot-demo.html" aria-current="page">30-day demo</a>
+    </nav>
+  </header>
+  <main class="studio-main">
+    <p class="eyebrow">
+      <span class="pill">Demo / Early Access</span>
+      <span class="pill quiet">Not a live audition</span>
+    </p>
+    <p class="disclaimer">Harborlight is a fictional 30-day limited series. The people, tapes, and messages on this page are sample data stored only in this browser tab. No application is submitted, no file is uploaded, and no email or text is sent. AMICOR has no partnership with Zeus, Netflix, or any studio, and this page does not claim prior customers.</p>
+
+    <section class="card" aria-labelledby="window-title">
+      <h2 id="window-title">Thirty-day window</h2>
+      <p class="hint">1 November through 1 December 2026, shown as a sample production calendar. The campaign stays unpublished.</p>
+      <div class="timeline" id="timeline">
+        <article class="day" data-day="1"><strong>Day 1</strong> Open three unpublished roles.</article>
+        <article class="day" data-day="7"><strong>Day 7</strong> Close intake. Reject duplicates and minors.</article>
+        <article class="day" data-day="14"><strong>Day 14</strong> A person shortlists. Approve an unsent invite.</article>
+        <article class="day" data-day="30"><strong>Day 30</strong> Export a minimized list and stop.</article>
+      </div>
+      <div class="actions">
+        <button type="button" id="run-demo">Play the sample month</button>
+        <button type="button" id="reset-demo" class="secondary">Reset sample</button>
+      </div>
+      <p id="demo-status" class="hint" aria-live="polite">Press play to walk the fictional month. Nothing is sent.</p>
+    </section>
+
+    <div class="split">
+      <section class="card" aria-labelledby="intake-title">
+        <h2 id="intake-title">Participant intake</h2>
+        <p class="hint">Adults only. Consent can be revoked. The audition is an https link, not a file stored by AMICOR.</p>
+        <form id="demo-form" class="grid">
+          <label>Role
+            <select id="demo-role">
+              <option>Harbor lead</option>
+              <option>Night clerk</option>
+              <option>Background reader</option>
+            </select>
+          </label>
+          <label>Display name<input id="demo-name" maxlength="80" value="Jordan Hale" required /></label>
+          <label>Sample email<input id="demo-email" type="email" value="jordan.hale@example.invalid" required /></label>
+          <label>Age<input id="demo-age" type="number" value="28" required /></label>
+          <label class="wide">Audition link<input id="demo-link" type="url" value="https://example.invalid/tapes/jordan" required /></label>
+          <label class="wide"><input id="demo-consent" type="checkbox" checked /> I am at least 18 and consent to this sample for 30 days.</label>
+          <div class="actions wrap">
+            <button type="submit" id="save-demo">Save sample draft</button>
+            <button type="button" id="revoke-demo" class="secondary">Revoke sample consent</button>
+          </div>
+        </form>
+        <p id="demo-receipt" class="hint">No sample receipt yet.</p>
+      </section>
+      <section class="card offer" aria-labelledby="offer-title">
+        <h2 id="offer-title">Sample pilot offer</h2>
+        <p>$2,400 USD for 30 days.</p>
+        <p class="hint">One production, up to 3 roles, consent-based sandbox intake, human review, and message previews that do not send. This is a sample offer, not an invoice and not a signed agreement. Public intake, paid ads, and distribution are outside it.</p>
+        <p class="hint">For independent producers and online creators. No studio or streaming partnership is included or implied.</p>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="review-title">
+      <h2 id="review-title">Human review</h2>
+      <p class="hint">Scores are notes from a named reviewer. They do not cast anyone.</p>
+      <div id="roster" class="list"></div>
+      <div class="actions">
+        <button type="button" id="shortlist-demo">Shortlist Jordan Hale</button>
+        <button type="button" id="preview-message" class="secondary">Preview callback draft</button>
+      </div>
+      <p id="message-preview" class="hint">No draft yet.</p>
+    </section>
+
+    <section class="card" aria-labelledby="sheet-title">
+      <h2 id="sheet-title">Call sheet</h2>
+      <p class="hint">Timezone America/New_York. Crew see the call time. Contact details stay off this sheet after a shortlist preview, and revoked people are omitted.</p>
+      <pre id="call-sheet" class="output">Call sheet is empty until the sample month reaches day 18.</pre>
+    </section>
+
+    <section class="card" aria-labelledby="capability-title">
+      <h2 id="capability-title">What this pilot can show</h2>
+      <ul>
+        <li>Organization-scoped roles, deadlines, and eligibility questions.</li>
+        <li>Adult consent, retention, revocation, and duplicate detection.</li>
+        <li>Https audition links without a new public upload.</li>
+        <li>Search, shortlist, reviewer notes, and a minimized export.</li>
+        <li>Approval-gated email drafts with STOP suppression. Delivery stays off.</li>
+        <li>A timezone-aware call sheet for the shortlisted role.</li>
+      </ul>
+      <p class="hint">SMS and WhatsApp stay unavailable until a provider is configured, and even then this demo does not send. The working sandbox is separate and still requires an authenticated Nova account.</p>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var state = empty();
+      function empty() {
+        return {
+          people: [
+            { name: "Jordan Hale", email: "jordan.hale@example.invalid", age: 28, role: "Harbor lead", receipt: "CA-JORDAN0001", status: "Draft", shortlisted: false, revoked: false },
+            { name: "Priya Shah", email: "priya.shah@example.invalid", age: 31, role: "Harbor lead", receipt: "CA-PRIYA00001", status: "Submitted", shortlisted: false, revoked: false }
+          ],
+          sent: false
+        };
+      }
+      function $(id) { return document.getElementById(id); }
+      function say(text) { $("demo-status").textContent = text; }
+      function render() {
+        var root = $("roster");
+        root.textContent = "";
+        state.people.forEach(function (person) {
+          var item = document.createElement("article");
+          item.className = "item";
+          var title = document.createElement("strong");
+          title.textContent = person.revoked ? "Consent revoked" : person.name;
+          var detail = document.createElement("p");
+          detail.className = "hint";
+          detail.textContent = person.receipt + " · " + person.role + " · " + person.status + (person.shortlisted ? " · shortlisted by a person" : "");
+          item.appendChild(title);
+          item.appendChild(detail);
+          root.appendChild(item);
+        });
+      }
+      function mark(day) {
+        Array.prototype.forEach.call(document.querySelectorAll(".day"), function (node) {
+          node.classList.toggle("active", node.getAttribute("data-day") === String(day));
+        });
+      }
+      $("demo-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var age = Number($("demo-age").value);
+        var link = $("demo-link").value.trim();
+        var name = $("demo-name").value.trim();
+        if (!$("demo-consent").checked) {
+          say("Consent required. Nothing was submitted.");
+          return;
+        }
+        if (!Number.isInteger(age) || age < 18) {
+          say("Applicant does not meet the minimum age. Nothing was submitted.");
+          return;
+        }
+        if (link.indexOf("https://") !== 0 || link.indexOf("<") !== -1) {
+          say("Invalid video link. Nothing was stored.");
+          return;
+        }
+        $("demo-receipt").textContent = "Sample receipt CA-JORDAN0001 for " + name + ". Status Draft. This tab did not submit it.";
+        say("Sample draft kept in this tab. Nothing was submitted.");
+      });
+      $("revoke-demo").addEventListener("click", function () {
+        state.people[1].revoked = true;
+        state.people[1].status = "Withdrawn";
+        state.people[1].shortlisted = false;
+        render();
+        $("demo-receipt").textContent = "Sample consent revoked. Contact and the audition link were cleared in this tab.";
+        say("Revocation stays in this tab. No notice was sent.");
+      });
+      $("shortlist-demo").addEventListener("click", function () {
+        state.people[0].status = "Submitted";
+        state.people[0].shortlisted = true;
+        render();
+        say("Jordan Hale was shortlisted by a person. No automatic casting decision was made.");
+      });
+      $("preview-message").addEventListener("click", function () {
+        $("message-preview").textContent = "Sandbox callback draft for Harbor lead. No invitation was delivered. Delivered: false.";
+        say("Draft approved for preview only. Nothing was sent.");
+      });
+      $("run-demo").addEventListener("click", function () {
+        state = empty();
+        state.people[0].status = "Submitted";
+        state.people[0].shortlisted = true;
+        render();
+        mark(14);
+        $("demo-receipt").textContent = "Day 7 kept Jordan and Priya. A duplicate email and a 17-year-old were rejected. Nothing was submitted outside this tab.";
+        $("message-preview").textContent = "Day 14 callback draft approved. Delivered: false. SMS is not configured.";
+        $("call-sheet").textContent = "Day 18 call sheet\nRole: Harbor lead\nTimezone: America/New_York\nCall time: 2026-11-18T10:00:00-05:00\nLocation: Fictional reading room\nPeople: CA-JORDAN0001\nExternal delivery: false";
+        say("Sample month finished on day 30 with a minimized export. The campaign was not published and no message was sent.");
+      });
+      $("reset-demo").addEventListener("click", function () {
+        state = empty();
+        render();
+        mark(0);
+        $("demo-receipt").textContent = "No sample receipt yet.";
+        $("message-preview").textContent = "No draft yet.";
+        $("call-sheet").textContent = "Call sheet is empty until the sample month reaches day 18.";
+        say("Sample reset in this tab. Nothing was submitted.");
+      });
+      render();
+    }());
+  </script>
+</body>
+</html>
