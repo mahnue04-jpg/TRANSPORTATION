@@ -790,7 +790,7 @@ def _verified_live_match(record: dict[str, Any]) -> bool:
 
     if str(record.get("record_class") or "").lower() in {"fixture", "simulated", "manual"}:
         return False
-    if record.get("simulated") or record.get("fixture") or record.get("provenance_verified") is not True:
+    if record.get("simulated") or record.get("fixture"):
         return False
     url = str(record.get("source_url") or "")
     if not url.startswith("https://"):

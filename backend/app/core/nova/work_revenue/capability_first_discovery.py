@@ -373,15 +373,21 @@ _ONSITE_STATUS_NORMALIZED = frozenset({
 })
 # Explicit denial. "not remote-only" stays remote because the hyphen continues
 # the word. A separate sentence that remote work is not offered fails closed.
+# "no remote experience" and "no remote work history" describe the candidate.
+_REMOTE_CANDIDATE_BACKGROUND = (
+    r"(?!\s+(?:experience|history|background|(?:work|working)\s+(?:experience|history))\b)"
+)
 _REMOTE_DENIAL = re.compile(
     r"("
     r"\bnot\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|role|position|job|option)\b)?"
     r"|"
-    r"\b(?:non|no)\s+remote(?!\s*[-/])\b"
+    r"\b(?:non|no)\s+remote(?!\s*[-/])" + _REMOTE_CANDIDATE_BACKGROUND + r"\b"
     r"|"
     r"\b(?:is|are)\s+not\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b"
     r"|"
-    r"\b(?:no|without)\s+(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|working|roles?|positions?|jobs?|options?)\b)?"
+    r"\b(?:no|without)\s+(?:fully\s+)?remote(?!\s*[-/])"
+    + _REMOTE_CANDIDATE_BACKGROUND
+    + r"\b(?:\s+(?:work|working|roles?|positions?|jobs?|options?)\b)?"
     r"|"
     r"\bremote(?:\s+(?:work|working|roles?|positions?|jobs?|options?|employment))?\s+"
     r"(?:(?:is|are)\s+not|(?:isn['’]t|aren['’]t))\s+"
