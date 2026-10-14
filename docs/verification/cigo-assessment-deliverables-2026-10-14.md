@@ -1,6 +1,6 @@
 # CIGO AI Automator deliverables — 14 October 2026
 
-The official Google Form was **not submitted**. It requires this confirmation: “I have read and signed the separate intellectual-property and commercial-use agreement.” The owner forbade signing an intellectual-property, ownership-transfer, or commercial-use agreement on their behalf. There is no submission receipt.
+The official Google Form was **not submitted**. A POST to the form on 14 October 2026 returned HTTP 400. Google’s only validation error was the required checkbox “I have read and signed the separate intellectual-property and commercial-use agreement.” That box was left unchecked. The confirmation page did not appear, and there is no receipt. The other answers, including the approved video link, were accepted by that response. The owner still needs to sign that agreement and check the box.
 
 No new video was generated and no money was spent in this pass.
 
