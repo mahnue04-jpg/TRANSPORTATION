@@ -334,13 +334,13 @@ add(
           <article class="card">{card_visual("", "card-delivery.jpg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations. Not commercially available.</p><a class="card-link" href="/deliver/">Learn more</a></article>
           <article class="card">{card_visual("", "card-lifesaver.jpg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care and health-technology initiative. Not a medical device or emergency service.</p><a class="card-link" href="/lifesaver/">Learn more</a></article>
           <article class="card">{card_visual("", "card-home-hub.jpg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>AMICOR Home Hub</h3><p>Rotating tabletop smart hub for a connected home. Not for sale.</p><a class="card-link" href="/home-hub/">Learn more</a></article>
-          <article class="card">{card_visual("", "card-farm-app.svg", "AMICOR Farm App farm operations concept. Coming soon, not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>AMICOR Farm App</h3><p>Planned mobile farm records and harvest tracking. Coming soon.</p><a class="card-link" href="/farm-app/">Learn more</a></article>
+          <article class="card">{card_visual("", "card-farm-app.svg", "AMICOR Farm App illustration of field records. Coming soon, not for sale.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Farm App</h3><p>Planned mobile farm records and harvest tracking. Coming soon.</p><a class="card-link" href="/farm-app/">Learn more</a></article>
         </div>
       </div>
     </section>
     <section class="section" id="hardware">
       <div class="wrap">
-        <h2>AMICOR hardware concepts</h2>
+        <h2>AMICOR future concepts</h2>
         <div class="hardware-grid">
           <article class="panel hardware-card">
             <span class="chip chip-future">Future Hardware</span>
@@ -352,8 +352,8 @@ add(
           <article class="panel hardware-card">
             <span class="chip chip-future">Future Hardware</span>
             <h3>AMICOR Farm App</h3>
-            <p class="lede">On the Road. On Your Team.</p>
-            <img src="assets/img/card-farm-app.svg" alt="AMICOR Farm App farm operations concept. Coming soon, not for sale." width="640" height="520">
+            <p class="lede">Plan. Grow. Record.</p>
+            <img src="assets/img/card-farm-app.svg" alt="AMICOR Farm App illustration of field records. Coming soon, not for sale." width="640" height="520">
             <a class="card-link" href="/farm-app/">AMICOR Farm App details</a>
           </article>
         </div>
@@ -959,7 +959,7 @@ add(
         <article class="card">{card_visual("../", "card-delivery.jpg", "Illustrative AMICOR Delivery operations map. Coming soon. Not a live ordering service.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Delivery</h3><p>Delivery technology and operations.</p><a class="card-link" href="/deliver/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-lifesaver.jpg", "Illustrative Lifesaver connected-care concept. In development. Not a medical device or emergency service.")}<span class="chip chip-dev">In Development</span><h3>Lifesaver AI Care Cloud</h3><p>Connected care initiative. Not a medical device.</p><a class="card-link" href="/lifesaver/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-home-hub.jpg", "AMICOR Home Hub rotating tabletop smart hub concept. Future hardware. Not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>Home Hub</h3><p>See More. Care More. Be There.</p><a class="card-link" href="/home-hub/">Open product page</a></article>
-        <article class="card">{card_visual("../", "card-farm-app.svg", "AMICOR Farm App farm operations concept. Coming soon, not for sale.")}<span class="chip chip-future">Future Hardware</span><h3>AMICOR Farm App</h3><p>On the Road. On Your Team.</p><a class="card-link" href="/farm-app/">Open product page</a></article>
+        <article class="card">{card_visual("../", "card-farm-app.svg", "AMICOR Farm App illustration of field records. Coming soon, not for sale.")}<span class="chip chip-soon">Coming Soon</span><h3>AMICOR Farm App</h3><p>On the Road. On Your Team.</p><a class="card-link" href="/farm-app/">Open product page</a></article>
         <article class="card">{card_visual("../", "card-operations.jpg", "Illustrative Nova Operations Agent digital workflows; human-supervised.")}<span class="chip chip-early">Early Access</span><h3>Operations Agent</h3><p>Supervised observe-recommend-approve software.</p><a class="card-link" href="/technologies/autonomous-operations-agent/">Open product page</a></article>
       </div>
     </section>
@@ -993,7 +993,7 @@ add(
         <article class="card"><h3>Supervised operations AI</h3><p>Observe, recommend, approve, verify, audit. <a href="/nova-operations/">Nova Operations Agent</a></p></article>
         <article class="card"><h3>Communications</h3><p>Signed-in messages and drafts. Live calling is not available, and this is not Synapse Meeting. <a href="/nova-snap/">Nova Snap</a></p></article>
         <article class="card"><h3>Delivery technology</h3><p>Planned local delivery operations. Not commercially available. <a href="/deliver/">AMICOR Delivery</a></p></article>
-        <article class="card"><h3>Connected home and vehicle</h3><p>Future Home Hub and AMICOR Farm App concepts. <a href="/home-hub/">Home Hub</a> · <a href="/farm-app/">AMICOR Farm App</a></p></article>
+        <article class="card"><h3>Connected home and farm</h3><p>Future Home Hub and planned Farm App concepts. <a href="/home-hub/">Home Hub</a> · <a href="/farm-app/">AMICOR Farm App</a></p></article>
       </div>
     </section>
     """,
@@ -1171,18 +1171,18 @@ add(
 add(
     "/farm-app/",
     "farm-app/index.html",
-    "AMICOR Farm App — Planned In-Vehicle Interface",
-    "The AMICOR Farm App is a planned dashboard-mounted in-vehicle interface. Future hardware. In development. Not for sale.",
+    "AMICOR Farm App — Farm Records Coming Soon",
+    "AMICOR Farm App is a planned phone-friendly tool for field tasks, planting records, harvest logs and basic farm recordkeeping. Coming Soon.",
     "/farm-app/",
     1,
     """
     <section class="hero">
       <div class="wrap">
-        <p class="kicker">Future hardware</p>
+        <p class="kicker">Coming Soon · Farm software concept</p>
         <h1>AMICOR Farm App</h1>
-        <p class="lede">On the Road. On Your Team.</p>
-        <p>The AMICOR Farm App is the planned dashboard-mounted AMICOR interface for operators and drivers who need the ecosystem on the road. It is not a consumer vehicle for sale and not a licensed dispatch terminal.</p>
-        <p class="notice">Status: Future Hardware / In Development. The AMICOR Farm App is not available for purchase.</p>
+        <p class="lede">Plan. Grow. Record.</p>
+        <p>AMICOR Farm App is an early concept for small growers to record fields, planting, harvests, tasks, supplies and basic farm expenses on their phones. The features are not built yet.</p>
+        <p class="notice">Status: Coming Soon / Concept. AMICOR Farm App is not launched or available for purchase.</p>
         <img src="../assets/img/card-farm-app.svg" alt="Conceptual illustration of farmland and farm-record categories. Not a live screenshot." width="1280" height="720" style="margin-top:24px;max-width:640px;border-radius:20px">
       </div>
     </section>
