@@ -1,6 +1,6 @@
 # CIGO AI Automator deliverables — 14 October 2026
 
-The official Google Form was **not submitted**. A POST to the form on 14 October 2026 returned HTTP 400. Google’s only validation error was the required checkbox “I have read and signed the separate intellectual-property and commercial-use agreement.” That box was left unchecked. The confirmation page did not appear, and there is no receipt. The other answers, including the approved video link, were accepted by that response. The owner still needs to sign that agreement and check the box.
+The official Google Form was submitted on 2026-10-14 at 13:20:50 UTC. Google returned HTTP 200 and the message “Your response has been recorded.” Google did not show a separate receipt number. An earlier POST the same day returned HTTP 400 because the agreement checkbox was unchecked. The owner then authorized that checkbox after stating that written acceptance of CIGO’s one-page agreement had already been emailed. That checkbox was selected on this successful POST. No second submission was sent after the recorded response.
 
 No new video was generated and no money was spent in this pass.
 
@@ -22,7 +22,7 @@ Downloaded and checked as this exact file. SHA-256 `e6434ca7b8ecfda805a6c033ffbc
 
 Sampled frames show a seated presenter, burned-in captions, and no visible watermark. The owner had already approved the voice, lip movement, captions, and presentation. This pass did not re-grade that approval.
 
-Commercial use is **not cleared by this file**. The container identifies Kling as the producer. It does not contain a license grant. The separate IP and commercial-use agreement still needs the owner’s signature.
+The container identifies Kling as the producer. It does not contain a license grant. The owner stated that CIGO’s one-page agreement was already accepted by email, and authorized the form checkbox for that agreement.
 
 A copy is served by the demonstration at `/dev/cigo-validation/approved.mp4`. It is the same bytes. The older PR #323 loop was not used.
 
