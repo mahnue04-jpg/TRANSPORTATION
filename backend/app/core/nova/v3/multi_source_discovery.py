@@ -1716,8 +1716,8 @@ def _employee_only_without_contractor(combined: str) -> bool:
     ))
 
 
-def _query_relevant(row: dict[str, Any], query: str) -> bool:
-    """Reject obvious provider false positives before qualification.
+def relevance_exclusion(row: dict[str, Any], query: str) -> str | None:
+    """Return a stable exclusion code, or None when the listing stays eligible.
 
     This is intentionally narrow: it only applies an extra guard to
     administrative/operations searches, where broad remote-job APIs commonly
@@ -1746,17 +1746,18 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     )
 
     if upwork_paid_connects_required(row):
-        return False
+        return "upwork_paid_connects"
     if blocks_physical_role_for_digital_search(row, query_text):
-        return False
-    if remote_digital_performability_blockers(row, query_text):
-        return False
+        return "physical_licensed_or_onsite_role"
+    performability = remote_digital_performability_blockers(row, query_text)
+    if performability:
+        return str(performability[0])
 
     # User-requested U.S./remote discovery must not surface an explicitly
     # foreign-only listing merely because the listing itself also says "remote".
     if _US_REMOTE_QUERY.search(query_text):
         if _ADMIN_NON_US_GEO.search(geography) and not _EXPLICIT_US_OR_WORLD_GEO.search(geography):
-            return False
+            return "non_us_only_geography"
 
     # SAM.gov notices with a concrete place of performance are not remote
     # opportunities unless SAM itself marked the notice remote/virtual/telework.
@@ -1766,46 +1767,46 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         and place_of_performance.strip()
         and remote_status != "remote"
     ):
-        return False
+        return "sam_place_of_performance_not_remote"
 
     # A brief that names several digital lanes keeps a listing when its title
     # matches any one lane. It does not require every result to mention AI.
     if is_multi_lane_remote_digital_query(query_text):
         if _admin_tech_title_rejected(title):
-            return False
+            return "technical_title_outside_lane"
         if _ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT.search(title):
-            return False
+            return "domain_specialist_title"
         if not matches_remote_digital_work_lane(row):
-            return False
+            return "work_lane_mismatch"
         if _VENDOR_INTENT_QUERY.search(query_text):
             if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
-                return False
+                return "employee_only_listing"
         if upfront_fee_required(row):
-            return False
-        return True
+            return "upfront_fee_required"
+        return None
 
     # Capability-family searches need a positive duty signal, not merely a
     # provider keyword hit. Bookkeeping is especially noisy on broad remote-job
     # feeds, where generic operations/analyst roles can otherwise be mislabeled.
     if _BOOKKEEPING_QUERY_HINTS.search(query_text):
         if not _BOOKKEEPING_RESULT_SIGNALS.search(" ".join([title, description])):
-            return False
+            return "bookkeeping_duty_missing"
 
     # AI/automation searches must contain an actual AI/automation duty signal.
     # Generic "operations" or "digital assets" titles are not enough.
     if _AI_AUTOMATION_QUERY_HINTS.search(query_text):
         if not _AI_AUTOMATION_RESULT_SIGNALS.search(" ".join([title, description])):
-            return False
+            return "automation_duty_missing"
 
     # For any explicit vendor/contract/project search, remove obvious employee-
     # only feed results before expensive qualification. This preserves true
     # contractor/freelance/B2B listings while reducing W-2/talent-network noise.
     if _VENDOR_INTENT_QUERY.search(str(query or "")):
         if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
-            return False
+            return "employee_only_listing"
 
     if not _ADMIN_QUERY_HINTS.search(str(query or "")):
-        return True
+        return None
 
     title_has_admin = bool(_ADMIN_JOB_SIGNALS.search(title))
     body_has_admin = bool(_ADMIN_JOB_SIGNALS.search(description))
@@ -1813,7 +1814,7 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     # Technical IC titles should not survive an admin search merely because
     # their descriptions contain generic words like support/operations.
     if _admin_tech_title_rejected(title) and not title_has_admin:
-        return False
+        return "technical_title_outside_lane"
 
     # Domain-specialist analyst roles (for example digital-asset/blockchain
     # operations) are not administrative support simply because the title also
@@ -1826,21 +1827,21 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
             re.I,
         ))
         if not explicit_admin:
-            return False
+            return "domain_specialist_title"
 
     # This query family is explicitly for contract/vendor work, not employee jobs.
     if _employee_only_without_contractor(combined):
-        return False
+        return "employee_only_without_contractor"
 
     # Never surface pay-to-apply / paid-access admin opportunities.
     # "No upfront fee" is a negative statement and must stay eligible.
     if upfront_fee_required(row):
-        return False
+        return "upfront_fee_required"
 
     # Prefer U.S.-remote/nationwide work. Worldwide is allowed, but explicit
     # non-U.S.-only regions are removed from this U.S. contractor search.
     if _ADMIN_NON_US_GEO.search(geography) and not _ADMIN_US_GEO.search(geography):
-        return False
+        return "non_us_only_geography"
 
     # Public RFP/vendor notices are scoped by deliverables, not job titles.
     # Their titles are often procurement labels (for example "Data Reporting
@@ -1849,19 +1850,24 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     provider_type = str(row.get("provider_type") or "").strip().lower()
     if provider_type in {"public_rfp_feed", "government_contracting", "vendor_project_board"}:
         if not (title_has_admin or body_has_admin or _SAM_DIGITAL_RELEVANCE.search(" ".join([title, description]))):
-            return False
-        return True
+            return "public_notice_outside_digital_scope"
+        return None
 
     # Positive-fit gate for ordinary job feeds: do not keep generic managers,
     # schedulers, sales roles, or other jobs merely because their body contains
     # words such as "operations" or "support". The title itself must map to an
     # administrative work archetype Nova is actually allowed to pursue.
     if not _ADMIN_STRONG_TITLE.search(title):
-        return False
+        return "title_not_administrative_archetype"
 
     # Reaching this point means the title matched an approved administrative
     # archetype and all employee/geo/paid-access guards passed.
-    return True
+    return None
+
+
+def _query_relevant(row: dict[str, Any], query: str) -> bool:
+    """True when relevance_exclusion keeps the listing."""
+    return relevance_exclusion(row, query) is None
 
 
 def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1933,6 +1939,9 @@ def search_multi_source_jobs(
     per_provider: dict[str, int] = {}
     provider_screened_counts: dict[str, int] = {}
     provider_query_variants: dict[str, list[str]] = {}
+    exclusion_reason_counts: dict[str, int] = {}
+    exclusion_samples: list[dict[str, Any]] = []
+    seen_excluded: set[str] = set()
     query_variants = _discovery_query_variants(normalized)
 
     for provider in providers:
@@ -1947,7 +1956,27 @@ def search_multi_source_jobs(
                 used_variants.append(variant)
                 rows = call_provider_search(provider, variant, limit=capped)
                 screened += len(rows)
-                rows = [row for row in rows if _query_relevant(row, normalized)]
+                kept_rows: list[dict[str, Any]] = []
+                for row in rows:
+                    reason = relevance_exclusion(row, normalized)
+                    if reason:
+                        exclusion_reason_counts[reason] = exclusion_reason_counts.get(reason, 0) + 1
+                        sample_key = _canonical_source_url(str(row.get("source_url") or "")) or str(row.get("title") or "")
+                        if sample_key and sample_key not in seen_excluded and len(exclusion_samples) < 20:
+                            seen_excluded.add(sample_key)
+                            exclusion_samples.append(
+                                {
+                                    "title": str(row.get("title") or "")[:180],
+                                    "company_name": str(row.get("company_name") or "")[:120],
+                                    "source_url": str(row.get("source_url") or ""),
+                                    "provider_id": row.get("provider_id"),
+                                    "fetched_at": row.get("fetched_at"),
+                                    "exclusion_reason": reason,
+                                }
+                            )
+                        continue
+                    kept_rows.append(row)
+                rows = kept_rows
                 if not include_simulated:
                     rows = [row for row in rows if not row.get("simulated")]
                 provider_rows.extend(rows)
@@ -1988,6 +2017,8 @@ def search_multi_source_jobs(
         "providers_queried": [p.meta.provider_id for p in providers if p.meta.enabled],
         "provider_result_counts": per_provider,
         "provider_screened_counts": provider_screened_counts,
+        "exclusion_reason_counts": exclusion_reason_counts,
+        "exclusion_samples": exclusion_samples,
         "provider_query_variants": provider_query_variants,
         "query_variants": query_variants,
         "provider_errors": errors,

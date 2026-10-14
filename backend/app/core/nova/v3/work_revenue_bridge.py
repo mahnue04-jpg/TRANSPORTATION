@@ -153,7 +153,7 @@ def persist_live_job(
             tags=[
                 "live_discovery",
                 provider_id[:60],
-                str(job.get("qualification_status") or "unclassified")[:60],
+                str(_live_status(job) or "unclassified")[:60],
                 *(
                     [f"search_family:{str(job.get('search_family')).strip()[:80]}"]
                     if str(job.get("search_family") or "").strip()

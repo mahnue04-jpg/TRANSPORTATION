@@ -1112,6 +1112,17 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                     qual["reasons"].append(specific)
                 if not discovery.get("physical_licensed_onsite_blocked"):
                     qual["owner_review_reason"] = shown
+            if not qual.get("blockers"):
+                shown = (
+                    f"Discovery fit score {discovery.get('discovery_score')} is below the review "
+                    "threshold for this capability family."
+                )
+                qual.setdefault("blockers", []).append("discovery_fit_below_threshold")
+                qual.setdefault("reasons", []).append(shown)
+                qual["owner_review_reason"] = shown
+        row["qualification_status"] = qual["qualification_status"]
+        row["qualification_outcome"] = qual.get("qualification_outcome")
+        row["owner_review_reason"] = qual.get("owner_review_reason")
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
         if discovery.get("digital_contractor_rank_boost"):
@@ -1159,7 +1170,11 @@ def partition_by_qualification(jobs: list[dict[str, Any]]) -> dict[str, list[dic
         OUTCOME_NOT_QUALIFIED: [],
     }
     for job in jobs:
-        status = str(job.get("qualification_status") or OUTCOME_NEEDS_OWNER_REVIEW)
+        status = str(
+            (job.get("live_qualification") or {}).get("qualification_status")
+            or job.get("qualification_status")
+            or OUTCOME_NEEDS_OWNER_REVIEW
+        )
         if status not in buckets:
             buckets[OUTCOME_NEEDS_OWNER_REVIEW].append(job)
         else:

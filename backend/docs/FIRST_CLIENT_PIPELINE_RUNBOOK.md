@@ -23,11 +23,17 @@ Sent means a submission receipt is stored and `externally_submitted` is already 
 
 Preferred experience, a commitment length, a company age, and a gym or benefit membership do not by themselves reject a listing. Mandatory years of experience, an application fee, an unsupported license, mandatory on-site work, and Upwork paid connects still reject it. A line such as "Philippines-based candidates" is a residency requirement. A company based in another country is not. Operational support, CRM, business process, workflow automation, and FastAPI or API integration titles stay in scope when the listing is remote contractor work.
 
+A live search reports `exclusion_reason_counts` and a short `exclusion_samples` list for public rows dropped before qualification. Each sample keeps the source URL, provider, fetch time, and the exclusion code. A discovery reject also copies `NOT_QUALIFIED` onto the row, so a rejected listing is not counted as owner review.
+
 Draft PRs #331 and #335 are not merged here. Their dev-only funnel acceptance and fictional evidence export stay on those branches.
 
 ## Proposals
 
 Draft a proposal only for a qualified live record that has a source URL and a fetch time. Fixture and example hosts draft nothing. A draft is not a send.
+
+## Cloudflare Pages
+
+The `amicor-public` Pages project builds the `website/` directory with no build command. That directory is on `main` after the catalog commit and is not on this branch. Preview checks for this branch fail before a site build starts. This branch does not copy that site, run Wrangler, or deploy Pages. Production stays on the existing `main` deployment.
 
 ## What stays off
 
