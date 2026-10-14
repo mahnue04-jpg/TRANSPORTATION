@@ -412,11 +412,19 @@ _CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
     r"|\blicensing\s+(?:is\s+)?(?:required|mandatory)\b)",
     re.I,
 )
+# A short phrase may sit between the year count and "experience"
+# ("1-2 years of hands-on payroll processing experience"). The phrase cannot
+# cross a sentence. Unicode dashes are normalized before this pattern runs.
+_EXPERIENCE_PHRASE = r"(?:\s+[^\s.;]+){0,8}\s+(?:experience|exp)"
 _EXPERIENCE_HISTORY_REQUIRED = re.compile(
     r"(?:"
     r"\b(?:at least|minimum(?: of)?|min\.?)\s+\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
+    r"|\b(?:at least|minimum(?: of)?|min\.?)\s+\d{1,2}(?:\s*(?:-|to)\s*\d{1,2})?\s*\+?\s+years?(?:'s)?"
+    + _EXPERIENCE_PHRASE + r"\b"
     r"|\b\d{1,2}\s*\+\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
     r"|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s+years?(?:'s)?(?: of)? (?:professional |relevant |related )?(?:experience|exp)\b"
+    r"|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s+years?(?:'s)?"
+    + _EXPERIENCE_PHRASE + r"\b"
     r"|\byears of (?:professional |relevant |related )?experience required\b"
     r"|\b(?:must have|must possess|requires?)\s+(?:at least\s+)?\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"
     r"|\b\d{1,2}\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\s+(?:(?:is|are)\s+)?(?:not\s+)?(?:required|mandatory)\b"
@@ -459,7 +467,12 @@ def certification_or_license_required(job: dict[str, Any]) -> bool:
 
 def unverified_experience_required(job: dict[str, Any]) -> bool:
     """Minimum years of experience Nova would have to fabricate."""
-    return _required_claim(_EXPERIENCE_HISTORY_REQUIRED, _listing_text(job))
+    text = _listing_text(job)
+    # Some public feeds store an en dash as the three-character sequence
+    # produced when UTF-8 is read as Latin-1.
+    text = text.replace("\u00e2\u0080\u0093", "-").replace("\u00e2\u0080\u0094", "-")
+    text = re.sub(r"[\u2010-\u2015]", "-", text)
+    return _required_claim(_EXPERIENCE_HISTORY_REQUIRED, text)
 
 
 def upfront_fee_required(job: dict[str, Any]) -> bool:

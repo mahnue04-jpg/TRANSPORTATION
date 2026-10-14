@@ -352,6 +352,29 @@ def _detect_work_type(text: str, job_type: str | None) -> str:
     return WORK_UNKNOWN
 
 
+# A benefit such as a gym membership is not a fee to apply. Payment has to sit
+# next to the membership word, and benefit memberships stay eligible.
+_BENEFIT_MEMBERSHIP = re.compile(
+    r"\b(?:gym|fitness|health club|health|insurance|club|team)\s+memberships?\b",
+    re.I,
+)
+_MEMBERSHIP_PAYMENT = re.compile(
+    r"\b(?:pay|paid|payment|fee|fees|dues)\b(?:\W+\w+){0,4}\W+memberships?\b"
+    r"|\bmemberships?\b(?:\W+\w+){0,4}\W+\b(?:pay|paid|payment|fee|fees|dues)\b",
+    re.I,
+)
+
+
+def _paid_membership_nearby(text: str) -> bool:
+    """True when a sentence charges for membership access."""
+    for sentence in re.split(r"[.\n;]", text or ""):
+        if _BENEFIT_MEMBERSHIP.search(sentence):
+            continue
+        if _MEMBERSHIP_PAYMENT.search(sentence):
+            return True
+    return False
+
+
 def _detect_fee(text: str) -> str:
     negated = (
         "no membership fee",
@@ -395,9 +418,7 @@ def _detect_fee(text: str) -> str:
         return FEE_NO
     if _has_any(text, _FEE_TOKENS) or any(token in text for token in affirmative):
         return FEE_YES
-    if "membership" in text and ("pay" in text or "fee" in text or "dues" in text):
-        if "no fee" in text or "without fee" in text:
-            return FEE_NO
+    if _paid_membership_nearby(text):
         return FEE_YES
     if _has_any(text, _FEE_UNCLEAR_TOKENS):
         return FEE_UNCLEAR
