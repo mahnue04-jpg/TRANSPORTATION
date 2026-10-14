@@ -26,7 +26,8 @@ VALID = {
 
 
 @pytest.fixture()
-def client():
+def client(tmp_path):
+    STORE.bind(tmp_path / "cigo.sqlite")
     STORE.reset()
     app = FastAPI()
     app.include_router(router)
@@ -34,20 +35,14 @@ def client():
     STORE.reset()
 
 
-def test_demo_stays_off_in_production(monkeypatch):
-    monkeypatch.setenv("CIGO_VALIDATION_DEMO", "1")
+def test_assessment_page_stays_available_and_sends_nothing(monkeypatch):
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "production")
-    assert demo_enabled() is False
-    monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
     assert demo_enabled() is True
-    monkeypatch.delenv("CIGO_VALIDATION_DEMO")
-    assert demo_enabled() is False
 
 
-def test_main_mounts_the_demo_only_behind_the_flag():
+def test_main_mounts_the_assessment_page():
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
-    assert "cigo_validation_demo_enabled()" in main
-    assert "if cigo_validation_demo_enabled():" in main
+    assert "app.include_router(cigo_validation_router)" in main
     page = (ROOT / "static" / "cigo-validation" / "index.html").read_text(encoding="utf-8")
     assert 'content="noindex, nofollow"' in page
     assert "does not email anyone" in page
@@ -84,7 +79,12 @@ def test_create_duplicate_invalid_failure_and_export(client: TestClient):
 
     other = client.post("/dev/cigo-validation/submissions", json={**VALID, "email": "owner@example.com", "follow_up": "email"})
     assert other.status_code == 201
-    assert other.json()["record"]["id"] != body["record"]["id"]
+    other_body = other.json()
+    assert other_body["record"]["id"] != body["record"]["id"]
+    assert other_body["record"]["follow_up_status"] == "prepared_not_sent"
+    assert other_body["alert"]["sent"] is False
+    assert other_body["alert"]["destination"] == "owner@example.com"
+    assert other_body["outbound_sends"] == 0
 
     invalid = client.post(
         "/dev/cigo-validation/submissions",
@@ -112,7 +112,7 @@ def test_create_duplicate_invalid_failure_and_export(client: TestClient):
     assert len(client.get("/dev/cigo-validation/records").json()["records"]) == before
 
     records = client.get("/dev/cigo-validation/records").json()["records"]
-    assert [row["id"] for row in records] == [body["record"]["id"], other.json()["record"]["id"]]
+    assert [row["id"] for row in records] == [body["record"]["id"], other_body["record"]["id"]]
     alerts = client.get("/dev/cigo-validation/alerts").json()["alerts"]
     assert alerts and all(item["sent"] is False for item in alerts)
     failures = client.get("/dev/cigo-validation/failures").json()["failures"]
@@ -128,11 +128,35 @@ def test_create_duplicate_invalid_failure_and_export(client: TestClient):
 
     page = client.get("/dev/cigo-validation")
     assert page.status_code == 200
-    assert "Product validation demo" in page.text
+    assert "approved-presenter.mp4" in page.text or "approved.mp4" in page.text
+    assert "n7o5OtUWOjW2VvYEWJr9f_output.mp4" in page.text
     assert page.headers["x-robots-tag"] == "noindex, nofollow"
+    video = client.get("/dev/cigo-validation/approved.mp4")
+    assert video.status_code == 200
+    assert video.headers["content-type"].startswith("video/mp4")
+    workflow = client.get("/dev/cigo-validation/workflow.json")
+    assert workflow.json()["live_email_delivery"] is False
+    assert workflow.json()["approved_video_url"].endswith("n7o5OtUWOjW2VvYEWJr9f_output.mp4")
 
     client.post("/dev/cigo-validation/reset")
     assert client.get("/dev/cigo-validation/records").json()["records"] == []
     assert client.get("/dev/cigo-validation/alerts").json()["alerts"] == []
     assert client.get("/dev/cigo-validation/failures").json()["failures"] == []
     assert client.get("/dev/cigo-validation/export.json").json()["outbound_sends"] == 0
+
+    seeded = client.post("/dev/cigo-validation/seed-fictional")
+    assert seeded.status_code == 200
+    fictional = client.get("/dev/cigo-validation/records").json()["records"]
+    assert {row["id"] for row in fictional} == {
+        "cigo_fictional_bakery",
+        "cigo_fictional_tutor",
+        "cigo_fictional_clinic",
+    }
+    assert all(row["source"] == "fictional" for row in fictional)
+    again = client.post("/dev/cigo-validation/seed-fictional")
+    assert again.json()["created"] == 0
+    assert len(client.get("/dev/cigo-validation/records").json()["records"]) == 3
+
+    from app.core.cigo_validation.service import CigoValidationDemo
+    reopened = CigoValidationDemo(STORE.path)
+    assert [row["id"] for row in reopened.snapshot()["records"]] == [row["id"] for row in fictional]

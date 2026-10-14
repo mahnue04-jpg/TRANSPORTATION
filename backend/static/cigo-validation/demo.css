@@ -6,6 +6,7 @@ h2 { font-size: 1.1rem; margin: 0; }
 .banner { background: #fff4f2; border: 1px solid #e7c4be; color: #6b2a22; padding: 12px; border-radius: 10px; }
 .lede, .hint { color: #4d5868; line-height: 1.45; }
 form, section { background: #fff; border-radius: 12px; padding: 16px; margin: 16px 0; }
+video { width: min(100%, 420px); height: auto; background: #07111f; border-radius: 12px; display: block; margin: 8px auto 0; }
 label { display: block; font-weight: 600; margin-top: 12px; }
 input, textarea, select, button { font: inherit; }
 textarea, input, select { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px 12px; border: 1px solid #c5ced8; border-radius: 8px; }

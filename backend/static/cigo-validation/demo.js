@@ -48,7 +48,8 @@
         { key: "currency", label: "Currency" },
         { key: "email", label: "Email" },
         { key: "follow_up", label: "Follow-up" },
-        { key: "status", label: "Status" }
+        { key: "follow_up_status", label: "Follow-up status" },
+        { key: "source", label: "Source" }
       ]);
       document.getElementById("alerts").innerHTML = table(parts[1].alerts || [], [
         { key: "id", label: "Alert" },
@@ -102,8 +103,12 @@
   });
 
   document.getElementById("reset").addEventListener("click", function () {
-    if (!window.confirm("Clear the mock records, alerts, and failures on this server?")) return;
+    if (!window.confirm("Clear the demonstration records, notifications, and failures on this server?")) return;
     fetch("/dev/cigo-validation/reset", { method: "POST" }).then(load);
+  });
+
+  document.getElementById("seed").addEventListener("click", function () {
+    fetch("/dev/cigo-validation/seed-fictional", { method: "POST" }).then(load);
   });
 
   load();

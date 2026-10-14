@@ -1,0 +1,4 @@
+id,created_at,idea,budget,currency,email,consent,follow_up,follow_up_status,status,source
+cigo_fictional_bakery,2026-10-14T11:18:52+00:00,A neighborhood bakery wants a weekly specials note drafted for the owner to approve.,250.00,USD,,True,none,not_requested,recorded,fictional
+cigo_fictional_tutor,2026-10-14T11:18:52+00:00,"A tutor wants parent reminder drafts prepared, with the tutor approving each send.",75.00,GBP,tutor@example.com,True,email,prepared_not_sent,recorded,fictional
+cigo_fictional_clinic,2026-10-14T11:18:52+00:00,A small clinic wants intake questions turned into a checklist the owner reviews.,500.00,CAD,desk@example.com,True,email,prepared_not_sent,recorded,fictional

@@ -65,6 +65,27 @@ def export_json() -> JSONResponse:
     return _json(STORE.snapshot(), 200)
 
 
+@router.get("/workflow.json")
+def workflow() -> JSONResponse:
+    return _json(STORE.workflow(), 200)
+
+
+@router.post("/seed-fictional")
+def seed_fictional() -> JSONResponse:
+    result = STORE.seed_fictional()
+    status = int(result.pop("http_status"))
+    return _json(result, status)
+
+
+@router.get("/approved.mp4")
+def approved_video() -> FileResponse:
+    return FileResponse(
+        _STATIC / "approved-presenter.mp4",
+        media_type="video/mp4",
+        headers={**_NOINDEX, "Accept-Ranges": "bytes"},
+    )
+
+
 @router.get("/export.csv")
 def export_csv() -> Response:
     return Response(
@@ -79,5 +100,7 @@ def reset() -> JSONResponse:
     STORE.reset()
     return _json({"ok": True, "status": "reset"}, 200)
 
+
+STORE.seed_fictional()
 
 __all__ = ["STORE", "demo_enabled", "router"]

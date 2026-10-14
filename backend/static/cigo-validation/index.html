@@ -4,18 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>CIGO validation demo (mock, nonpublic)</title>
+  <title>AMICOR Nova idea intake</title>
   <link rel="stylesheet" href="/dev/cigo-validation/demo.css" />
 </head>
 <body>
   <main>
-    <p class="banner">Nonpublic mock data. This page does not email anyone, does not call a provider, and does not submit anything to CIGO.</p>
-    <h1>Product validation demo</h1>
-    <p class="lede">Save a product idea with a budget and currency. Email is optional unless you ask for follow-up. Each saved idea gets its own id.</p>
+    <p class="banner">Fictional demonstration. This page does not email anyone, does not call a paid provider, and does not submit anything to CIGO.</p>
+    <h1>See the work, then send your idea</h1>
+    <p class="lede">Watch the approved one-minute presenter, then save a product idea with a budget and currency. Email is optional unless you ask for follow-up.</p>
+
+    <section aria-label="Approved presenter">
+      <h2>Approved presenter</h2>
+      <video id="presenter" controls playsinline preload="metadata" aria-label="Approved 60 second vertical presenter with burned-in captions">
+        <source src="/dev/cigo-validation/approved.mp4" type="video/mp4" />
+      </video>
+      <p class="hint">Captions are burned into the picture. The file has no separate subtitle track. <a href="https://v3b.fal.media/files/b/0aae5147/n7o5OtUWOjW2VvYEWJr9f_output.mp4">Open the approved file</a></p>
+    </section>
 
     <form id="intake">
       <label for="idea">Idea</label>
-      <textarea id="idea" name="idea" maxlength="500" placeholder="What should the automator do, and for whom?"></textarea>
+      <textarea id="idea" name="idea" maxlength="500" placeholder="What should Nova draft, and who approves it?"></textarea>
       <p class="field-error" id="error-idea"></p>
 
       <div class="split">
@@ -48,12 +56,12 @@
         <p class="field-error" id="error-follow_up"></p>
       </fieldset>
 
-      <label class="choice"><input id="consent" name="consent" type="checkbox" /> I agree this mock record can be stored on this machine for the demo.</label>
+      <label class="choice"><input id="consent" name="consent" type="checkbox" /> I agree this demonstration record can be stored.</label>
       <p class="field-error" id="error-consent"></p>
 
       <label class="choice"><input id="force-failure" type="checkbox" /> Simulate a storage failure</label>
 
-      <button type="submit">Save mock record</button>
+      <button type="submit">Save idea</button>
     </form>
 
     <section id="result" aria-live="polite"></section>
@@ -64,14 +72,16 @@
         <div class="actions">
           <a href="/dev/cigo-validation/export.json">Export JSON</a>
           <a href="/dev/cigo-validation/export.csv">Export CSV</a>
-          <button type="button" id="reset">Clear mock data</button>
+          <a href="/dev/cigo-validation/workflow.json">Workflow</a>
+          <button type="button" id="seed">Restore fictional examples</button>
+          <button type="button" id="reset">Clear records</button>
         </div>
       </div>
       <div id="records"></div>
     </section>
     <section>
-      <h2>Alerts</h2>
-      <p class="hint">Alerts stay on this machine with status suppressed_no_outbound.</p>
+      <h2>Notifications</h2>
+      <p class="hint">Follow-up notices are saved here with status suppressed_no_outbound. Nothing is emailed.</p>
       <div id="alerts"></div>
     </section>
     <section>
