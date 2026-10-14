@@ -57,7 +57,7 @@ Allowed `product` values come from `catalog.py`. Current inquiry options:
 - Nova Today
 - Lifesaver AI Care Cloud
 - Home Hub
-- Car Hub
+- AMICOR Farm App
 - AMICOR Health
 - AMICOR Delivery
 - Partnership
