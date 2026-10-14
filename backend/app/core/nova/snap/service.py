@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ from .models import (
 )
 
 _buckets: dict[tuple[str, str], list[float]] = {}
+_seq_indexes_ready = False
 _NOT_FOUND = "Not found."
 _QUALITIES = {"excellent", "good", "fair", "poor", "disconnected", "unknown"}
 _SIGNAL_KINDS = {"offer", "answer", "ice", "quality", "renego"}
@@ -41,6 +42,26 @@ _SIGNAL_KINDS = {"offer", "answer", "ice", "quality", "renego"}
 
 def reset_limits() -> None:
     _buckets.clear()
+
+
+def _ensure_seq_indexes(db: Session) -> None:
+    """Create the seq unique indexes when tables already exist from an older create_all."""
+    global _seq_indexes_ready
+    if _seq_indexes_ready:
+        return
+    statements = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_snap_message_seq ON nova_snap_messages (conversation_id, seq)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_snap_signal_seq ON nova_snap_signals (call_id, seq)",
+    )
+    try:
+        bind = db.get_bind()
+        with bind.connect() as conn:
+            for statement in statements:
+                conn.execute(text(statement))
+            conn.commit()
+    except Exception:
+        pass
+    _seq_indexes_ready = True
 
 
 def organization_id(user: UserContext) -> str:
@@ -489,6 +510,29 @@ def _find_client_message(db: Session, conversation_id: str, sender: str, client_
     )
 
 
+def _allocate_message_seq(db: Session, conversation_id: str) -> int:
+    """Increment the conversation counter in one UPDATE so overlapping sends cannot share a seq."""
+    stmt = (
+        update(SnapConversation)
+        .where(SnapConversation.conversation_id == conversation_id)
+        .values(next_seq=func.coalesce(SnapConversation.next_seq, 0) + 1)
+        .returning(SnapConversation.next_seq)
+        .execution_options(synchronize_session=False)
+    )
+    return int(db.execute(stmt).scalar_one())
+
+
+def _allocate_signal_seq(db: Session, call_id: str) -> int:
+    """Serialize signal numbers on the call row, then take max(seq)+1."""
+    query = db.query(SnapCall).filter(SnapCall.call_id == call_id)
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        query = query.with_for_update()
+    query.one()
+    current = db.query(func.max(SnapSignal.seq)).filter(SnapSignal.call_id == call_id).scalar()
+    return int(current or 0) + 1
+
+
 def post_message(
     db: Session,
     user: UserContext,
@@ -523,31 +567,36 @@ def post_message(
         stored_body = body
         untrusted = False
     _rate(user.user_id, "message", *policy.MESSAGE_RATE)
-    conversation.next_seq = int(conversation.next_seq or 0) + 1
-    message = SnapMessage(
-        message_id=str(uuid4()),
-        conversation_id=conversation.conversation_id,
-        organization_id=conversation.organization_id,
-        sender_user_id=user.user_id,
-        client_message_id=client_key,
-        seq=conversation.next_seq,
-        kind=kind,
-        body=stored_body,
-        capture_id=capture_id,
-        untrusted_links=untrusted,
-        created_at=_now(),
-        deleted_at=None,
-    )
-    db.add(message)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        existing = _find_client_message(db, conversation.conversation_id, user.user_id, client_key)
-        if existing:
-            return _message_out(db, existing, duplicate=True)
-        raise HTTPException(409, "Message could not be saved. Retry with the same client id.")
-    return _message_out(db, message)
+    _ensure_seq_indexes(db)
+    conversation_id = conversation.conversation_id
+    message = None
+    for _attempt in range(4):
+        seq = _allocate_message_seq(db, conversation_id)
+        db.expire(conversation)
+        message = SnapMessage(
+            message_id=str(uuid4()),
+            conversation_id=conversation_id,
+            organization_id=conversation.organization_id,
+            sender_user_id=user.user_id,
+            client_message_id=client_key,
+            seq=seq,
+            kind=kind,
+            body=stored_body,
+            capture_id=capture_id,
+            untrusted_links=untrusted,
+            created_at=_now(),
+            deleted_at=None,
+        )
+        db.add(message)
+        try:
+            db.commit()
+            return _message_out(db, message)
+        except IntegrityError:
+            db.rollback()
+            existing = _find_client_message(db, conversation_id, user.user_id, client_key)
+            if existing:
+                return _message_out(db, existing, duplicate=True)
+    raise HTTPException(409, "Message could not be saved. Retry with the same client id.")
 
 
 def list_messages(db: Session, user: UserContext, conversation_id: str, after_seq: int = 0) -> list[dict]:
@@ -703,38 +752,47 @@ def _call_participants(db: Session, call_id: str) -> list[SnapCallParticipant]:
     return db.query(SnapCallParticipant).filter_by(call_id=call_id).all()
 
 
+def _participant_age(person: SnapCallParticipant, now: datetime) -> float:
+    seen = _aware(person.last_seen)
+    if seen is None:
+        return float(policy.FAIL_AFTER_S + 1)
+    return (now - seen).total_seconds()
+
+
 def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
     if call.state not in {"ringing", "active"}:
         return call
     people = _call_participants(db, call.call_id)
     if not people:
         return call
-    latest = max(_aware(person.last_seen) for person in people)
-    age = (_now() - latest).total_seconds()
-    if call.state == "ringing" and age > policy.RING_TIMEOUT_S:
-        call.state = "ended"
-        call.ended_reason = "unanswered"
-        call.ended_at = _now()
-        db.commit()
+    now = _now()
+    if call.state == "ringing":
+        started = _aware(call.created_at)
+        ring_age = (now - started).total_seconds() if started else 0
+        if ring_age > policy.RING_TIMEOUT_S:
+            call.state = "ended"
+            call.ended_reason = "unanswered"
+            call.ended_at = now
+            db.commit()
         return call
-    if call.state == "active" and age > policy.FAIL_AFTER_S:
+    live = [person for person in people if person.state in {"accepted", "reconnecting"}]
+    if any(_participant_age(person, now) > policy.FAIL_AFTER_S for person in live):
         call.state = "failed"
         call.ended_reason = "network_timeout"
-        call.ended_at = _now()
+        call.ended_at = now
         for person in people:
             if person.state in {"accepted", "reconnecting", "invited"}:
                 person.state = "left"
         _delete_signals(db, call.call_id)
         db.commit()
         return call
-    if call.state == "active" and age > policy.RECONNECT_AFTER_S:
-        changed = False
-        for person in people:
-            if person.state == "accepted":
-                person.state = "reconnecting"
-                changed = True
-        if changed:
-            db.commit()
+    changed = False
+    for person in live:
+        if person.state == "accepted" and _participant_age(person, now) > policy.RECONNECT_AFTER_S:
+            person.state = "reconnecting"
+            changed = True
+    if changed:
+        db.commit()
     return call
 
 
@@ -967,36 +1025,39 @@ def post_signal(
     elif len(text) > 20000 or "\x00" in text:
         raise HTTPException(422, "That call signal is too large.")
     _rate(user.user_id, "signal", *policy.SIGNAL_RATE)
-    current = db.query(SnapSignal).filter_by(call_id=call.call_id).count()
-    row = SnapSignal(
-        signal_id=str(uuid4()),
-        call_id=call.call_id,
-        sender_user_id=user.user_id,
-        seq=current + 1,
-        client_signal_id=client_key,
-        kind=kind,
-        payload=text,
-        created_at=_now(),
-    )
-    me.last_seen = row.created_at
-    if me.state == "reconnecting" and kind in {"offer", "answer", "ice", "renego"}:
-        me.state = "accepted"
-        if call.state == "ringing":
-            call.state = "active"
-    db.add(row)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        existing = (
-            db.query(SnapSignal)
-            .filter_by(call_id=call.call_id, sender_user_id=user.user_id, client_signal_id=client_key)
-            .one_or_none()
+    _ensure_seq_indexes(db)
+    call_id = call.call_id
+    for _attempt in range(4):
+        seq = _allocate_signal_seq(db, call_id)
+        row = SnapSignal(
+            signal_id=str(uuid4()),
+            call_id=call_id,
+            sender_user_id=user.user_id,
+            seq=seq,
+            client_signal_id=client_key,
+            kind=kind,
+            payload=text,
+            created_at=_now(),
         )
-        if existing:
-            return {"signal_id": existing.signal_id, "seq": existing.seq, "duplicate": True}
-        raise HTTPException(409, "Call signal could not be saved. Retry with the same client id.")
-    return {"signal_id": row.signal_id, "seq": row.seq, "duplicate": False}
+        me.last_seen = row.created_at
+        if me.state == "reconnecting" and kind in {"offer", "answer", "ice", "renego"}:
+            me.state = "accepted"
+            if call.state == "ringing":
+                call.state = "active"
+        db.add(row)
+        try:
+            db.commit()
+            return {"signal_id": row.signal_id, "seq": row.seq, "duplicate": False}
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(SnapSignal)
+                .filter_by(call_id=call_id, sender_user_id=user.user_id, client_signal_id=client_key)
+                .one_or_none()
+            )
+            if existing:
+                return {"signal_id": existing.signal_id, "seq": existing.seq, "duplicate": True}
+    raise HTTPException(409, "Call signal could not be saved. Retry with the same client id.")
 
 
 def list_signals(db: Session, user: UserContext, call_id: str, after_seq: int = 0) -> list[dict]:
@@ -1122,10 +1183,6 @@ def share_capture(db: Session, user: UserContext, capture_id: str, conversation_
     _conversation, member = _require_conversation(db, user, conversation_id)
     if not _active_member(member):
         raise HTTPException(403, "You left this conversation.")
-    row.status = "shared"
-    row.conversation_id = conversation_id
-    row.shared_at = _now()
-    db.commit()
     post_message(
         db,
         user,
@@ -1135,6 +1192,10 @@ def share_capture(db: Session, user: UserContext, capture_id: str, conversation_
         kind="capture",
         capture_id=row.capture_id,
     )
+    row.status = "shared"
+    row.conversation_id = conversation_id
+    row.shared_at = _now()
+    db.commit()
     return _capture_out(row)
 
 

@@ -59,6 +59,7 @@ class SnapMessage(Base):
     __tablename__ = "nova_snap_messages"
     __table_args__ = (
         UniqueConstraint("conversation_id", "sender_user_id", "client_message_id", name="uq_snap_message_client"),
+        UniqueConstraint("conversation_id", "seq", name="uq_snap_message_seq"),
     )
     message_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     conversation_id: Mapped[str] = mapped_column(String(36), index=True)
@@ -124,6 +125,7 @@ class SnapSignal(Base):
     __tablename__ = "nova_snap_signals"
     __table_args__ = (
         UniqueConstraint("call_id", "sender_user_id", "client_signal_id", name="uq_snap_signal_client"),
+        UniqueConstraint("call_id", "seq", name="uq_snap_signal_seq"),
     )
     signal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     call_id: Mapped[str] = mapped_column(String(36), index=True)

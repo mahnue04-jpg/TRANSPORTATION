@@ -12,14 +12,21 @@
     draftId: null,
     call: null,
     pc: null,
+    pcs: {},
     localStream: null,
+    cameraStream: null,
+    remoteNodes: [],
+    remoteIce: {},
+    iceConfig: null,
+    videoHeld: false,
     facing: "user",
     micOn: false,
     signalAfter: 0,
     failures: 0,
     timer: null,
     recording: null,
-    lastMessageId: null
+    lastMessageId: null,
+    myLastMessageId: null
   };
 
   function text(id, value) {
@@ -129,6 +136,7 @@
       }
       thread.appendChild(item);
       state.lastMessageId = row.message_id;
+      if (state.me && row.sender_user_id === state.me.user_id) state.myLastMessageId = row.message_id;
     });
   }
 
@@ -142,6 +150,8 @@
   async function selectConversation(id) {
     state.activeId = id;
     state.after = 0;
+    state.lastMessageId = null;
+    state.myLastMessageId = null;
     var thread = $("thread");
     if (thread) thread.replaceChildren();
     var match = state.conversations.filter(function (row) { return row.conversation_id === id; })[0];
@@ -217,13 +227,13 @@
       return;
     }
     try {
-      stopStream(state.localStream);
-      state.localStream = await navigator.mediaDevices.getUserMedia({
+      stopStream(state.cameraStream);
+      state.cameraStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: state.facing },
         audio: state.micOn
       });
       var preview = $("camera-preview");
-      preview.srcObject = state.localStream;
+      preview.srcObject = state.cameraStream;
       preview.hidden = false;
       ["camera-flip", "mic-toggle", "record", "camera-close"].forEach(function (id) {
         var el = $(id);
@@ -239,8 +249,8 @@
       try { state.recording.stop(); } catch (err) {}
       state.recording = null;
     }
-    stopStream(state.localStream);
-    state.localStream = null;
+    stopStream(state.cameraStream);
+    state.cameraStream = null;
     var preview = $("camera-preview");
     if (preview) { preview.srcObject = null; preview.hidden = true; }
     ["camera-flip", "mic-toggle", "record", "camera-close"].forEach(function (id) {
@@ -260,7 +270,7 @@
     syncShareButton();
   }
   function recordClip() {
-    if (!state.localStream || typeof MediaRecorder === "undefined") {
+    if (!state.cameraStream || typeof MediaRecorder === "undefined") {
       cameraError("Recording is not available in this browser.");
       return;
     }
@@ -268,9 +278,9 @@
     var started = Date.now();
     var recorder;
     try {
-      recorder = new MediaRecorder(state.localStream, { mimeType: "video/webm" });
+      recorder = new MediaRecorder(state.cameraStream, { mimeType: "video/webm" });
     } catch (err) {
-      try { recorder = new MediaRecorder(state.localStream); } catch (inner) {
+      try { recorder = new MediaRecorder(state.cameraStream); } catch (inner) {
         cameraError("Recording is not available in this browser.");
         return;
       }
@@ -354,6 +364,7 @@
     text("call-error", "");
     state.call = await api("/calls", { method: "POST", body: JSON.stringify({ conversation_id: state.activeId, media: media }) });
     state.signalAfter = 0;
+    state.remoteIce = {};
     showCall(true);
     text("call-state", "Calling. Waiting for the other person to accept.");
     await attachMedia(media, true);
@@ -362,37 +373,72 @@
     show("call-panel", on);
     showPanel("calls");
   }
-  async function attachMedia(media, isCaller) {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof RTCPeerConnection === "undefined") {
-      text("call-error", "This browser cannot place a real audio or video call. Signaling can still be tested.");
-      return;
-    }
+  function remotePeers() {
+    var mine = state.me && state.me.user_id;
+    var people = (state.call && state.call.participants) || [];
+    return people.filter(function (person) {
+      return person.user_id && person.user_id !== mine && person.state !== "left" && person.state !== "declined";
+    });
+  }
+  function eachPc() {
+    var list = [];
+    Object.keys(state.pcs).forEach(function (id) { list.push(state.pcs[id]); });
+    if (!list.length && state.pc) list.push(state.pc);
+    return list;
+  }
+  function pcForSender(senderId) {
+    if (senderId && state.pcs[senderId]) return state.pcs[senderId];
+    var ids = Object.keys(state.pcs);
+    if (ids.length === 1) return state.pcs[ids[0]];
+    return state.pc || null;
+  }
+  function parseWrapped(payload) {
+    if (!payload || payload.charAt(0) !== "{") return null;
     try {
-      state.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: media === "video" });
-    } catch (err) {
-      text("call-error", err && err.name === "NotAllowedError"
-        ? "Microphone or camera permission was denied. The call stayed on signaling only."
-        : "Microphone or camera could not start.");
-      return;
+      var body = JSON.parse(payload);
+      if (!body || !body.target) return null;
+      if (typeof body.sdp === "string" || body.candidate) return body;
+    } catch (err) {}
+    return null;
+  }
+  function attachRemote(stream) {
+    var remote = $("remote-video");
+    var slot = remote && !remote.srcObject ? remote : document.createElement("video");
+    if (slot !== remote) {
+      slot.autoplay = true;
+      slot.playsInline = true;
+      slot.setAttribute("playsinline", "");
+      var panel = $("call-panel");
+      if (panel) panel.appendChild(slot);
+      state.remoteNodes.push(slot);
     }
-    var local = $("local-video");
-    if (media === "video" && local) { local.srcObject = state.localStream; local.hidden = false; }
-    show("call-mic", true);
-    show("call-camera", media === "video");
-    var config = await api("/calls/config");
-    state.pc = new RTCPeerConnection({ iceServers: config.ice_servers || [] });
-    state.localStream.getTracks().forEach(function (track) { state.pc.addTrack(track, state.localStream); });
-    state.pc.onicecandidate = function (event) {
-      if (event.candidate) sendSignal("ice", JSON.stringify(event.candidate));
+    slot.srcObject = stream;
+    slot.hidden = false;
+    if (slot.play) slot.play().catch(function () { show("enable-sound", true); });
+  }
+  function buildPc(remoteId, config, wrapped) {
+    var pc = new RTCPeerConnection({ iceServers: (config && config.ice_servers) || [] });
+    pc._remoteId = remoteId;
+    pc._wrapped = !!wrapped;
+    pc._descSent = false;
+    pc._localIce = [];
+    if (state.localStream) {
+      state.localStream.getTracks().forEach(function (track) { pc.addTrack(track, state.localStream); });
+    }
+    pc.onicecandidate = function (event) {
+      if (!event.candidate) return;
+      var payload = pc._wrapped
+        ? JSON.stringify({ target: pc._remoteId, candidate: event.candidate })
+        : JSON.stringify(event.candidate);
+      if (!pc._descSent) pc._localIce.push(payload);
+      else sendSignal("ice", payload);
     };
-    state.pc.ontrack = function (event) {
-      var remote = $("remote-video");
-      remote.srcObject = event.streams[0];
-      remote.hidden = false;
-      remote.play().catch(function () { show("enable-sound", true); });
+    pc.ontrack = function (event) {
+      var stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
+      attachRemote(stream);
     };
-    state.pc.onconnectionstatechange = function () {
-      var value = state.pc.connectionState;
+    pc.onconnectionstatechange = function () {
+      var value = pc.connectionState;
       if (value === "failed" || value === "disconnected") {
         text("call-error", "The direct connection failed. A relay server is not configured, so this network may be unable to complete the call.");
         text("call-quality", "Network quality: disconnected");
@@ -401,66 +447,195 @@
         text("call-quality", "Network quality: good");
       }
     };
-    if (isCaller) {
-      var offer = await state.pc.createOffer();
-      await state.pc.setLocalDescription(offer);
-      await sendSignal("offer", offer.sdp || "");
+    if (remoteId) state.pcs[remoteId] = pc;
+    return pc;
+  }
+  async function releaseLocalIce(pc) {
+    pc._descSent = true;
+    var queued = (pc._localIce || []).splice(0);
+    for (var i = 0; i < queued.length; i += 1) await sendSignal("ice", queued[i]);
+  }
+  async function publishDescription(pc, kind, sdp) {
+    var payload = pc._wrapped ? JSON.stringify({ target: pc._remoteId, sdp: sdp || "" }) : (sdp || "");
+    if (await sendSignal(kind, payload)) await releaseLocalIce(pc);
+  }
+  function stashRemoteIce(senderId, candidate) {
+    var key = senderId || "_";
+    if (!state.remoteIce[key]) state.remoteIce[key] = [];
+    state.remoteIce[key].push(candidate);
+  }
+  async function flushRemoteIce(senderId, pc) {
+    var key = senderId || "_";
+    var queued = state.remoteIce[key] || [];
+    state.remoteIce[key] = [];
+    for (var i = 0; i < queued.length; i += 1) {
+      try { await pc.addIceCandidate(queued[i]); } catch (err) {}
+    }
+  }
+  async function attachMedia(media, isCaller) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof RTCPeerConnection === "undefined") {
+      text("call-error", "This browser cannot place a real audio or video call. Signaling can still be tested.");
+      return;
+    }
+    var stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: media === "video" });
+    } catch (err) {
+      text("call-error", err && err.name === "NotAllowedError"
+        ? "Microphone or camera permission was denied. The call stayed on signaling only."
+        : "Microphone or camera could not start.");
+      return;
+    }
+    eachPc().forEach(function (pc) { try { pc.close(); } catch (err) {} });
+    state.pcs = {};
+    state.pc = null;
+    state.remoteIce = {};
+    stopStream(state.localStream);
+    state.localStream = stream;
+    var local = $("local-video");
+    if (media === "video" && local) { local.srcObject = state.localStream; local.hidden = false; }
+    show("call-mic", true);
+    show("call-camera", media === "video");
+    var config = await api("/calls/config");
+    state.iceConfig = config;
+    var others = remotePeers();
+    if (!(state.me && state.me.user_id) || others.length <= 1) {
+      var remoteId = others[0] ? others[0].user_id : "";
+      state.pc = buildPc(remoteId, config, false);
+      if (isCaller) {
+        var offer = await state.pc.createOffer();
+        await state.pc.setLocalDescription(offer);
+        await publishDescription(state.pc, "offer", offer.sdp || "");
+      }
+      return;
+    }
+    if (!isCaller) return;
+    for (var i = 0; i < others.length; i += 1) {
+      var pc = buildPc(others[i].user_id, config, true);
+      if (!state.pc) state.pc = pc;
+      var groupOffer = await pc.createOffer();
+      await pc.setLocalDescription(groupOffer);
+      await publishDescription(pc, "offer", groupOffer.sdp || "");
     }
   }
   async function sendSignal(kind, payload) {
-    if (!state.call) return;
+    if (!state.call) return false;
     var id = kind.slice(0, 4) + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     try {
       await api("/calls/" + state.call.call_id + "/signals", {
         method: "POST",
         body: JSON.stringify({ kind: kind, payload: payload, client_signal_id: id })
       });
+      return true;
     } catch (err) {
       text("call-error", err.message);
+      return false;
     }
   }
   async function consumeSignals() {
-    if (!state.call || !state.pc) return;
+    if (!state.call || !state.localStream) return;
     var rows = await api("/calls/" + state.call.call_id + "/signals?after=" + state.signalAfter);
     for (var i = 0; i < rows.length; i += 1) {
       var row = rows[i];
       if (row.seq > state.signalAfter) state.signalAfter = row.seq;
-      if (row.kind === "offer" || row.kind === "answer" || row.kind === "renego") {
-        await state.pc.setRemoteDescription({ type: row.kind === "offer" ? "offer" : "answer", sdp: row.payload });
-        if (row.kind === "offer") {
-          var answer = await state.pc.createAnswer();
-          await state.pc.setLocalDescription(answer);
-          await sendSignal("answer", answer.sdp || "");
-        }
-      } else if (row.kind === "ice") {
-        try { await state.pc.addIceCandidate(JSON.parse(row.payload)); } catch (err) {}
-      } else if (row.kind === "quality") {
+      if (row.kind === "quality") {
         text("call-quality", "Network quality: " + row.payload);
         adapt(row.payload);
+        continue;
+      }
+      var wrapped = parseWrapped(row.payload);
+      if (wrapped && wrapped.target && state.me && wrapped.target !== state.me.user_id) continue;
+      if (row.kind === "offer" || row.kind === "answer" || row.kind === "renego") {
+        var sdp = wrapped && typeof wrapped.sdp === "string" ? wrapped.sdp : row.payload;
+        var incomingOffer = row.kind !== "answer";
+        var pc = pcForSender(row.sender_user_id);
+        if (!pc && incomingOffer) {
+          pc = buildPc(row.sender_user_id, state.iceConfig || { ice_servers: [] }, !!wrapped);
+          if (!state.pc) state.pc = pc;
+        }
+        if (!pc) continue;
+        try {
+          if (incomingOffer && wrapped && pc.signalingState === "have-local-offer") {
+            var polite = !!(state.me && row.sender_user_id < state.me.user_id);
+            if (!polite) continue;
+            try { await pc.setLocalDescription({ type: "rollback" }); } catch (err) {}
+          }
+          await pc.setRemoteDescription({ type: incomingOffer ? "offer" : "answer", sdp: sdp });
+          await flushRemoteIce(row.sender_user_id, pc);
+          if (incomingOffer) {
+            pc._descSent = false;
+            pc._localIce = [];
+            var answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await publishDescription(pc, "answer", answer.sdp || "");
+          }
+        } catch (err) {
+          text("call-error", "The call could not update the connection.");
+        }
+      } else if (row.kind === "ice") {
+        var candidate = wrapped && wrapped.candidate ? wrapped.candidate : null;
+        if (!candidate) {
+          try { candidate = JSON.parse(row.payload); } catch (err) { candidate = null; }
+        }
+        if (!candidate) continue;
+        var icePc = pcForSender(row.sender_user_id);
+        if (!icePc || !icePc.remoteDescription) stashRemoteIce(row.sender_user_id, candidate);
+        else {
+          try { await icePc.addIceCandidate(candidate); } catch (err) {}
+        }
       }
     }
   }
-  function adapt(quality) {
-    if (!state.pc || !state.pc.getSenders) return;
-    var sender = state.pc.getSenders().filter(function (item) { return item.track && item.track.kind === "video"; })[0];
-    if (!sender) return;
-    if (quality === "poor" || quality === "disconnected") {
-      sender.track.enabled = false;
-      text("call-adapt", "Video paused because the network is weak.");
-    }
-    if (sender.getParameters && sender.setParameters && quality === "fair") {
-      try {
-        var params = sender.getParameters();
-        if (params.encodings && params.encodings[0]) params.encodings[0].maxBitrate = 120000;
-        sender.setParameters(params);
-        text("call-adapt", "Picture rate lowered because the network is fair.");
-      } catch (err) {}
+  async function connectMesh() {
+    if (!state.call || !state.me || !state.localStream || !state.iceConfig) return;
+    var others = remotePeers();
+    if (others.length < 2) return;
+    for (var i = 0; i < others.length; i += 1) {
+      var peer = others[i];
+      if (state.pcs[peer.user_id]) continue;
+      if (state.me.user_id > peer.user_id) continue;
+      var pc = buildPc(peer.user_id, state.iceConfig, true);
+      if (!state.pc) state.pc = pc;
+      var offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await publishDescription(pc, "offer", offer.sdp || "");
     }
   }
+  function adapt(quality) {
+    var weak = quality === "poor" || quality === "disconnected";
+    var pcs = eachPc();
+    for (var p = 0; p < pcs.length; p += 1) {
+      var pc = pcs[p];
+      if (!pc.getSenders) continue;
+      var sender = pc.getSenders().filter(function (item) { return item.track && item.track.kind === "video"; })[0];
+      if (!sender || !sender.track) continue;
+      if (weak) {
+        if (sender.track.enabled) state.videoHeld = true;
+        sender.track.enabled = false;
+      } else if (state.videoHeld) {
+        sender.track.enabled = true;
+      }
+      if (!weak && sender.getParameters && sender.setParameters) {
+        try {
+          var params = sender.getParameters();
+          if (params.encodings && params.encodings[0]) {
+            if (quality === "fair") params.encodings[0].maxBitrate = 120000;
+            else delete params.encodings[0].maxBitrate;
+          }
+          sender.setParameters(params);
+        } catch (err) {}
+      }
+    }
+    if (!weak && state.videoHeld) state.videoHeld = false;
+    if (weak) text("call-adapt", "Video paused because the network is weak.");
+    else if (quality === "fair") text("call-adapt", "Picture rate lowered because the network is fair.");
+    else text("call-adapt", "");
+  }
   async function sampleQuality() {
-    if (!state.pc || !state.pc.getStats) return;
+    var pc = state.pc || eachPc()[0];
+    if (!pc || !pc.getStats) return;
     try {
-      var stats = await state.pc.getStats();
+      var stats = await pc.getStats();
       var lost = 0;
       var received = 0;
       var rtt = 0;
@@ -473,7 +648,7 @@
       });
       var ratio = received ? lost / received : 0;
       var quality = "good";
-      if (state.pc.connectionState === "failed") quality = "disconnected";
+      if (pc.connectionState === "failed") quality = "disconnected";
       else if (ratio > 0.1 || rtt > 0.7) quality = "poor";
       else if (ratio > 0.03 || rtt > 0.3) quality = "fair";
       else if (ratio < 0.01 && rtt && rtt < 0.15) quality = "excellent";
@@ -487,7 +662,16 @@
   function endLocalMedia() {
     stopStream(state.localStream);
     state.localStream = null;
-    if (state.pc) { try { state.pc.close(); } catch (err) {} state.pc = null; }
+    eachPc().forEach(function (pc) { try { pc.close(); } catch (err) {} });
+    state.pcs = {};
+    state.pc = null;
+    state.remoteIce = {};
+    state.videoHeld = false;
+    state.remoteNodes.forEach(function (node) {
+      try { node.srcObject = null; } catch (err) {}
+      if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    state.remoteNodes = [];
     ["remote-video", "local-video"].forEach(function (id) {
       var el = $(id);
       if (el) { el.srcObject = null; el.hidden = true; }
@@ -496,6 +680,7 @@
   async function acceptIncoming(call) {
     state.call = await api("/calls/" + call.call_id + "/accept", { method: "POST" });
     state.signalAfter = 0;
+    state.remoteIce = {};
     showCall(true);
     text("call-state", "Call accepted. Connecting directly between devices.");
     show("call-accept", false);
@@ -540,6 +725,7 @@
         text("call-quality", "Network quality: " + (state.call.quality || "unknown"));
         if (state.call.calling_blocker && $("call-guidance")) $("call-guidance").textContent = state.call.calling_blocker;
         await consumeSignals();
+        await connectMesh();
         await sampleQuality();
         if (state.call.state === "failed" || state.call.state === "ended" || state.call.state === "declined") endLocalMedia();
       } else {
@@ -590,6 +776,7 @@
       show("login-form", true);
       show("sign-out", false);
       text("session-meta", "Signed out");
+      closeCamera();
       endLocalMedia();
     });
     $("tab-chats").addEventListener("click", function () { showPanel("chats"); });
@@ -651,9 +838,9 @@
       await refreshConversations();
     });
     $("delete-last").addEventListener("click", async function () {
-      if (!state.lastMessageId) return;
+      if (!state.myLastMessageId) return;
       try {
-        var row = await api("/messages/" + state.lastMessageId, { method: "DELETE" });
+        var row = await api("/messages/" + state.myLastMessageId, { method: "DELETE" });
         banner(row.removed ? "Message removed." : "Message unchanged.");
       } catch (err) { banner(err.message); }
     });
@@ -670,10 +857,37 @@
     });
     $("mic-toggle").addEventListener("click", function () {
       state.micOn = !state.micOn;
-      if (state.localStream) {
-        state.localStream.getAudioTracks().forEach(function (track) { track.enabled = state.micOn; });
-      }
       text("mic-toggle", state.micOn ? "Microphone on" : "Microphone off");
+      if (!state.cameraStream) return;
+      var tracks = state.cameraStream.getAudioTracks();
+      if (!state.micOn) {
+        tracks.forEach(function (track) { track.enabled = false; });
+        return;
+      }
+      if (tracks.length) {
+        tracks.forEach(function (track) { track.enabled = true; });
+        return;
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        state.micOn = false;
+        text("mic-toggle", "Microphone off");
+        cameraError("This browser cannot open the microphone.");
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function (extra) {
+        if (!state.cameraStream || !state.micOn) {
+          stopStream(extra);
+          return;
+        }
+        extra.getAudioTracks().forEach(function (track) {
+          track.enabled = true;
+          state.cameraStream.addTrack(track);
+        });
+      }).catch(function (err) {
+        state.micOn = false;
+        text("mic-toggle", "Microphone off");
+        cameraError(err && err.name === "NotAllowedError" ? "Camera or microphone permission was denied." : "The microphone could not start.");
+      });
     });
     $("record").addEventListener("click", function () { recordClip(); });
     $("camera-file").addEventListener("change", function () {
@@ -708,16 +922,22 @@
       try {
         state.call = await api("/calls/" + state.call.call_id + "/reconnect", { method: "POST" });
         text("call-state", "Reconnecting. Picture and sound depend on a direct network path.");
-        if (state.pc && state.pc.createOffer) {
-          var offer = await state.pc.createOffer({ iceRestart: true });
-          await state.pc.setLocalDescription(offer);
-          await sendSignal("renego", offer.sdp || "");
+        var pcs = eachPc();
+        for (var i = 0; i < pcs.length; i += 1) {
+          var pc = pcs[i];
+          if (!pc.createOffer) continue;
+          pc._descSent = false;
+          pc._localIce = [];
+          var offer = await pc.createOffer({ iceRestart: true });
+          await pc.setLocalDescription(offer);
+          await publishDescription(pc, "renego", offer.sdp || "");
         }
       } catch (err) { text("call-error", err.message); }
     });
     $("enable-sound").addEventListener("click", function () {
-      var remote = $("remote-video");
-      if (remote && remote.play) remote.play().then(function () { show("enable-sound", false); }).catch(function () {});
+      var nodes = [$("remote-video")].concat(state.remoteNodes);
+      var pending = nodes.filter(function (node) { return node && node.play; }).map(function (node) { return node.play(); });
+      Promise.all(pending).then(function () { show("enable-sound", false); }).catch(function () {});
     });
     $("call-mic").addEventListener("click", function () {
       if (!state.localStream) return;
@@ -728,6 +948,7 @@
     });
     $("call-camera").addEventListener("click", function () {
       if (!state.localStream) return;
+      state.videoHeld = false;
       var tracks = state.localStream.getVideoTracks();
       var enabled = !(tracks[0] && tracks[0].enabled);
       tracks.forEach(function (track) { track.enabled = enabled; });
