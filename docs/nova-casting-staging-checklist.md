@@ -17,6 +17,8 @@ Draft pull request #308 only. Do not merge. Do not deploy. Nothing in this check
 | Fresh and older disposable PostgreSQL history, repair, and rollback | Yes. Production stamps create no tables. Repair is idempotent and its downgrade keeps tables. An older organization-only schema accepts later revisions and can roll back to no casting tables | `CASTING_TEST_POSTGRES_URL` tests for repair, history, two revisions, and migration execution | No | Do not run `alembic upgrade heads` against a non-disposable database |
 | Environment gates | Yes. Default deny | Flag tests for absent, unknown, conflicting, and production values | No | Do not set the flag on a real host without approval |
 
+The safe staging procedure is `docs/nova-casting-staging-runbook.md`. The producer-facing sample, with no partnership and no return claim, is `docs/nova-casting-pilot-offer.md`.
+
 ## Pilot extension on draft branch `cursor/casting-auditions-pilot-e1ae`
 
 Coded in the existing sandbox, not merged and not deployed. Public intake stays off. Message rows are constrained to `not_sent`.
@@ -26,7 +28,7 @@ Coded in the existing sandbox, not merged and not deployed. Public intake stays 
 | Roles, eligibility, https audition links, consent retention, revocation, dedupe, receipts | Yes, sandbox pilot routes | Unit tests in `test_nova_casting_pilot.py` | No | Owner approval before any real host or public form |
 | Human shortlist, rubric notes, reviewer-minimized queue, CSV export without links | Yes | Unit tests | No | Owner approval |
 | Approval-gated email drafts, STOP suppression, retry that does not send | Yes | Unit tests | No | No email provider is configured, and none should be enabled for this pilot |
-| Timezone call sheet and fictional Harborlight demo | Yes, demo page is browser-local | Page source test | No | Screenshots are local evidence, not a staging deploy |
+| Timezone call sheet and fictional Harborlight demo | Yes. The sandbox organization stores the sample and reloads it. The demo HTML page is a labeled preview | Page source test and authenticated SQLite HTTP test | No | Not a staging deploy |
 | SMS and WhatsApp | Rejected unless a provider name is configured, and still not sent | Unit tests | No | Do not buy a provider for this pilot |
 
 ## Explicitly unavailable

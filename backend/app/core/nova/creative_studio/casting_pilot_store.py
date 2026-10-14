@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .casting_access import CastingAccessDenied
-from .casting_db_models import NovaCastingOrganization
+from .casting_db_models import NovaCastingApplication, NovaCastingOrganization
 from .casting_db_writes import (
     _account,
     _application_row,
@@ -531,6 +531,32 @@ def export_csv(*, db: Session, user_id: str, tenant_id: str, organization_id: st
 def list_audit(*, db: Session, user_id: str, tenant_id: str, organization_id: str, limit: int, offset: int) -> dict:
     actor = _review_actor(db, user_id, tenant_id, organization_id)
     return _run(db, organization_id, actor, "list_audit", limit, offset)
+
+
+def snapshot(*, db: Session, user_id: str, tenant_id: str, organization_id: str, campaign_id: str) -> dict:
+    """Return the persisted sandbox copy for this caller. No message is sent."""
+    _guard()
+    try:
+        actor = _review_actor(db, user_id, tenant_id, organization_id)
+    except CastingAccessDenied:
+        _account(db, user_id, tenant_id)
+        _org(db, organization_id, tenant_id)
+        try:
+            owned = db.query(NovaCastingApplication).filter(
+                NovaCastingApplication.owner_id == organization_id,
+                NovaCastingApplication.applicant_id == user_id,
+            ).first()
+        except SQLAlchemyError as exc:
+            raise CastingAccessDenied("Application unavailable") from exc
+        if owned is None:
+            raise CastingAccessDenied("Application unavailable")
+        actor = {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "role": "applicant",
+            "verified": True,
+        }
+    return _run(db, organization_id, actor, "snapshot", campaign_id)
 
 
 def seed_harborlight(*, db: Session, user_id: str, tenant_id: str, organization_id: str, campaign_id: str) -> dict:

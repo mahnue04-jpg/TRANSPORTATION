@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
   <style>
     #playback { display: block; width: 100%; max-height: 240px; margin-top: 12px; background: #111; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
       outline: 2px solid #1f4b3a; outline-offset: 2px;
     }
     @media (max-width: 640px) {
@@ -149,7 +149,7 @@
 
     <section class="card" aria-label="Pilot intake and review">
       <h2>Sandbox pilot <span class="badge">Demo / Early Access</span></h2>
-      <p class="hint">Consent-based intake for an authenticated test account. Audition media stays an https link. Nothing is published and no message is sent.</p>
+      <p id="pilot-persistence" class="hint">Consent-based intake for an authenticated test account. Audition media stays an https link. Roles, drafts, and unsent previews are saved for this sandbox organization and are read back after reload. Nothing is published and no message is sent.</p>
       <p id="retention-notice" class="hint">Sandbox consent: this test application is kept only for the retention window you select, up to 365 days. You may revoke consent, which clears the contact details and audition link from review.</p>
       <form id="pilot-role-form" class="grid">
         <label>Role title<input id="pilot-role-title" maxlength="80" value="Harbor lead" required /></label>
@@ -158,13 +158,14 @@
         <div class="actions wrap">
           <button type="submit" id="save-pilot-role">Save role</button>
           <button type="button" id="load-fiction" class="secondary">Load Harborlight sample</button>
+          <button type="button" id="reload-pilot" class="secondary">Reload saved pilot</button>
         </div>
       </form>
       <form id="pilot-intake-form" class="grid">
         <label>Role id<input id="pilot-role-id" maxlength="48" required /></label>
         <label>Display name<input id="pilot-name" maxlength="80" autocomplete="name" required /></label>
         <label>Contact email<input id="pilot-email" type="email" maxlength="320" autocomplete="email" required /></label>
-        <label>Age in years<input id="pilot-age" type="number" min="18" required /></label>
+        <label>Age in years<input id="pilot-age" type="number" required /></label>
         <label class="wide">Audition link<input id="pilot-link" type="url" inputmode="url" placeholder="https://example.invalid/tape" required /></label>
         <label>Eligibility answer<input id="pilot-answer" maxlength="500" /></label>
         <label class="wide"><input id="pilot-consent" type="checkbox" /> I am at least 18 and consent to this disposable sandbox application.</label>
@@ -200,13 +201,17 @@
       var playbackUrl = "";
       var applicationId = "";
       var resumeKey = "nova_casting_sandbox_application";
-      function rememberApplication() {
-        if (!applicationId) return;
+      function rememberSandbox() {
+        var campaignId = $("application-campaign").value.trim();
+        if (!org() && !applicationId && !campaignId) return;
         sessionStorage.setItem(resumeKey, JSON.stringify({
           organizationId: org(),
           applicationId: applicationId,
-          campaignId: $("application-campaign").value.trim()
+          campaignId: campaignId
         }));
+      }
+      function rememberApplication() {
+        rememberSandbox();
       }
       function $(id) { return document.getElementById(id); }
       function token() {
@@ -305,6 +310,7 @@
             body: JSON.stringify({ name: $("organization-name").value.trim() })
           });
           $("organization-id").value = created.id || "";
+          rememberSandbox();
           show("Sandbox organization ready for this account. It is not published.", true);
         } catch (err) { /* banner already set */ }
       });
@@ -322,6 +328,7 @@
             })
           });
           $("application-campaign").value = created.id || "";
+          rememberSandbox();
           show("Draft campaign " + created.id + " saved. It was not published.", true);
         } catch (err) { /* banner already set */ }
       });
@@ -564,7 +571,8 @@
           });
           pilotRoleId = created.id || "";
           $("pilot-role-id").value = pilotRoleId;
-          show("Role saved. The campaign was not published.", true);
+          rememberSandbox();
+          show("Role saved on the server. The campaign was not published.", true);
         } catch (err) { /* banner already set */ }
       });
       $("load-fiction").addEventListener("click", async function () {
@@ -579,9 +587,41 @@
           pilotRoleId = seeded.roles && seeded.roles[0] ? seeded.roles[0].id : "";
           $("pilot-role-id").value = pilotRoleId;
           pilotMessageId = seeded.message ? seeded.message.id : "";
-          $("pilot-output").textContent = "Harborlight sample loaded. Published: " + String(seeded.published) + ". Message delivered: false.";
-          show("Fictional Harborlight sample saved in this sandbox. Nothing was sent.", true);
+          rememberSandbox();
+          $("pilot-output").textContent = "Harborlight sample saved on the server. Published: " + String(seeded.published) + ". Message delivered: " + String(seeded.message && seeded.message.delivered) + ".";
+          show("Fictional Harborlight sample saved for this sandbox organization. Nothing was sent.", true);
         } catch (err) { /* banner already set */ }
+      });
+      async function restorePilot() {
+        if (!(await requireSandbox())) return;
+        var campaignId = $("application-campaign").value.trim();
+        var path = base() + "/pilot-snapshot" + (campaignId ? "?campaign_id=" + encodeURIComponent(campaignId) : "");
+        var saved = await api(path);
+        var roles = saved.roles || [];
+        if (roles[0]) {
+          pilotRoleId = roles[0].id || "";
+          $("pilot-role-id").value = pilotRoleId;
+        }
+        var intakes = saved.intakes || [];
+        if (intakes[0]) {
+          var intake = intakes[0];
+          $("pilot-receipt").textContent = "Receipt " + intake.receipt + ". Status " + intake.status + ". Reloaded from the server.";
+          if (intake.consent_revoked) {
+            show("Consent is revoked on the server. Contact details stay cleared. Nothing was sent.", true);
+          }
+        }
+        var messages = saved.messages || [];
+        if (messages[0]) {
+          pilotMessageId = messages[0].id || "";
+          $("pilot-message").textContent = messages[0].body + " Delivered: " + String(messages[0].delivered) + ".";
+        }
+        $("pilot-output").textContent = "Server copy reloaded. Published: " + String(saved.published) + ". Delivered: " + String(saved.delivered) + ". Roles: " + roles.length + ".";
+        if (!intakes[0] || !intakes[0].consent_revoked) {
+          show("Saved pilot reloaded for this sandbox organization. Nothing was sent.", true);
+        }
+      }
+      $("reload-pilot").addEventListener("click", function () {
+        restorePilot().catch(function () {});
       });
       $("pilot-intake-form").addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -592,6 +632,11 @@
           }
           if (!$("pilot-consent").checked) {
             show("Consent required. Nothing was submitted.", false);
+            return;
+          }
+          var age = Number($("pilot-age").value);
+          if (!Number.isInteger(age) || age < 18) {
+            show("Applicant does not meet the minimum age. Nothing was submitted.", false);
             return;
           }
           var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake", {
@@ -608,8 +653,9 @@
               answers: $("pilot-answer").value.trim() ? { union: $("pilot-answer").value.trim() } : {}
             })
           });
-          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ".";
-          show("Pilot draft saved. Nothing was published or sent.", true);
+          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ". Saved on the server.";
+          rememberSandbox();
+          show("Pilot draft saved for this sandbox organization. Nothing was published or sent.", true);
         } catch (err) { /* banner already set */ }
       });
       $("submit-pilot-intake").addEventListener("click", async function () {
@@ -693,8 +739,25 @@
           show("Call sheet loaded. No notification was sent.", true);
         } catch (err) { /* banner already set */ }
       });
-      if (token()) refreshReadiness().catch(function () {});
-      else $("status").textContent = "Sign in to check sandbox readiness.";
+      try {
+        var stored = sessionStorage.getItem(resumeKey) || "";
+        var remembered = stored ? JSON.parse(stored) : null;
+        if (remembered) {
+          if (remembered.organizationId) $("organization-id").value = remembered.organizationId;
+          if (remembered.campaignId) $("application-campaign").value = remembered.campaignId;
+          if (remembered.applicationId) {
+            applicationId = remembered.applicationId;
+            $("review-application").value = applicationId;
+          }
+        }
+      } catch (err) { /* tab memory is optional; the server copy remains */ }
+      if (token()) {
+        refreshReadiness().then(function (ready) {
+          if (ready && org()) return restorePilot();
+        }).catch(function () {});
+      } else {
+        $("status").textContent = "Sign in to check sandbox readiness.";
+      }
     }());
   </script>
 </body>

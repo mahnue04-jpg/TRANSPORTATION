@@ -63,6 +63,9 @@ on:
       - "backend/app/db/session.py"
       - "backend/app/deployment/background_startup.py"
       - "docs/nova-casting-staging-checklist.md"
+      - "docs/nova-casting-staging-runbook.md"
+      - "docs/nova-casting-pilot-offer.md"
+      - "backend/tests/test_nova_casting_pilot_auth.py"
       - "backend/app/core/nova/creative_studio/casting_audit.py"
       - "backend/app/core/nova/creative_studio/casting_media_access.py"
       - "backend/app/core/nova/creative_studio/casting_access.py"
@@ -178,4 +181,47 @@ jobs:
       - name: Install backend test dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
       - name: Verify isolated casting PostgreSQL reads
-        run: python -m pytest -q tests/test_nova_casting_db_reads_integration.py tests/test_nova_casting_router_http.py tests/test_nova_casting_sandbox_http.py tests/test_nova_casting_private_media_http.py tests/test_nova_casting_org_name_concurrency.py tests/test_nova_casting_pilot_store.py
+        run: python -m pytest -q tests/test_nova_casting_db_reads_integration.py tests/test_nova_casting_router_http.py tests/test_nova_casting_sandbox_http.py tests/test_nova_casting_private_media_http.py tests/test_nova_casting_org_name_concurrency.py tests/test_nova_casting_pilot_store.py tests/test_nova_casting_pilot_auth.py
+
+  casting-postgres-gated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: casting_test
+          POSTGRES_PASSWORD: casting_test
+          POSTGRES_DB: casting_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U casting_test -d casting_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CASTING_TEST_POSTGRES_URL: postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install standalone test runner
+        run: python -m pip install --disable-pip-version-check pytest==8.3.5 sqlalchemy==2.0.44 alembic==1.17.0 psycopg2-binary==2.9.11
+      - name: Run PostgreSQL-gated casting tests and fail if any skip
+        run: |
+          set -o pipefail
+          python -m pytest --noconftest -q --tb=line \
+            backend/tests/test_nova_casting_migration_execution.py \
+            backend/tests/test_nova_casting_two_migrations.py \
+            backend/tests/test_nova_casting_audit_consent.py \
+            backend/tests/test_nova_casting_schema_repair.py \
+            backend/tests/test_nova_casting_org_name_migration.py \
+            | tee /tmp/casting-postgres-gated.txt
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("/tmp/casting-postgres-gated.txt").read_text(encoding="utf-8")
+          if "skipped" in text:
+              raise SystemExit("PostgreSQL-gated casting tests skipped:\n" + text)
+          PY

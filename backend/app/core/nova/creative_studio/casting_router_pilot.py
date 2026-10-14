@@ -309,6 +309,18 @@ def call_sheet(organization_id: str, role_id: str, user: UserContext = Depends(g
     ))
 
 
+@pilot_router.get("/organizations/{organization_id}/pilot-snapshot")
+def pilot_snapshot(organization_id: str, campaign_id: str = "",
+                   user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    if len(campaign_id) > 48:
+        raise HTTPException(status_code=422, detail="Request rejected")
+    return _call(lambda: _store().snapshot(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        campaign_id=campaign_id.strip(),
+    ))
+
+
 @pilot_router.get("/organizations/{organization_id}/pilot-export")
 def export_csv(organization_id: str, include_contact: str = "false",
                user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):

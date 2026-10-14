@@ -44,3 +44,10 @@ def test_sandbox_pilot_controls_keep_the_existing_journey():
     assert 'id="media-file" type="file"' in sandbox
     assert "Nothing was submitted" in sandbox
     assert "No relationship or integration with Zeus" in sandbox
+    assert "Reload saved pilot" in sandbox
+    assert "/pilot-snapshot" in sandbox
+    assert "Reloaded from the server" in sandbox
+    assert "Applicant does not meet the minimum age" in sandbox
+    assert 'aria-live="polite"' in sandbox
+    assert "@media (max-width: 640px)" in sandbox
+    assert "focus-visible" in sandbox

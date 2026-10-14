@@ -774,13 +774,73 @@ class PilotDirectory:
         rows.sort(key=lambda item: (item["occurred_at"], item["id"]))
         return _page(rows, limit, offset)
 
+    def snapshot(self, actor: Mapping, campaign_id: str = "") -> dict:
+        """Read the saved sandbox copy. This does not create a row or send a message."""
+        if actor.get("verified") is not True or not actor.get("user_id") or not actor.get("organization_id"):
+            raise PilotDenied("Application unavailable")
+        role_name = actor.get("role")
+        if role_name not in {"organizer", "reviewer", "applicant"}:
+            raise PilotDenied("Application unavailable")
+        organization_id = actor["organization_id"]
+        selected = str(campaign_id or "")
+        roles = [
+            _role_view(row) for row in self.roles.values()
+            if row["organization_id"] == organization_id and (not selected or row["campaign_id"] == selected)
+        ]
+        roles.sort(key=lambda item: (item["created_at"], item["id"]))
+        intakes = []
+        for row in self.intakes.values():
+            if row["organization_id"] != organization_id:
+                continue
+            if selected and row["campaign_id"] != selected:
+                continue
+            if role_name == "applicant" and row["applicant_id"] != actor["user_id"]:
+                continue
+            if role_name == "organizer":
+                view = _organizer_view(row)
+            elif role_name == "reviewer":
+                view = _reviewer_view(row)
+            else:
+                view = _applicant_view(row)
+            intakes.append(view)
+        intakes.sort(key=lambda item: (item["created_at"], item["id"]))
+        messages = []
+        if role_name == "organizer":
+            messages = [
+                _message_view(row) for row in self.messages.values()
+                if row["organization_id"] == organization_id
+            ]
+            messages.sort(key=lambda item: item["id"])
+        return {
+            "label": "Demo / Early Access",
+            "published": False,
+            "delivered": False,
+            "external_delivery": False,
+            "roles": roles[:PAGE_LIMIT],
+            "intakes": intakes[:PAGE_LIMIT],
+            "messages": messages[:PAGE_LIMIT],
+        }
+
     def seed_harborlight(self, actor: Mapping, campaign_id: str) -> dict:
         if not _organizer(actor):
             raise PilotDenied("Campaign unavailable")
         plan = sample_harborlight_plan()
         created = []
         for role in plan["roles"]:
-            created.append(self.create_role(actor, campaign_id, role))
+            title = str(role["title"]).strip().lower()
+            existing = next(
+                (
+                    row for row in self.roles.values()
+                    if row["organization_id"] == actor["organization_id"]
+                    and row["campaign_id"] == campaign_id
+                    and row["title"].strip().lower() == title
+                ),
+                None,
+            )
+            if existing is None:
+                created.append(self.create_role(actor, campaign_id, role))
+            else:
+                created.append(_role_view(existing))
         first = created[0]
         schedule = self.save_schedule(actor, campaign_id, {
             "role_id": first["id"],

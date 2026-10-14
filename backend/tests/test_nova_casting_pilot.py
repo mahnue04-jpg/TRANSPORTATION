@@ -222,6 +222,78 @@ def test_stop_list_expired_invite_and_minimized_export():
     assert "CAST" not in exported
 
 
+def test_harborlight_seed_reloads_without_a_second_copy_or_a_send():
+    pilot = load()
+    now = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    book = pilot.PilotDirectory(now)
+    actor = organizer()
+    first = book.seed_harborlight(actor, "campaign-1")
+    second = book.seed_harborlight(actor, "campaign-1")
+    assert len(book.roles) == 3
+    assert [role["id"] for role in first["roles"]] == [role["id"] for role in second["roles"]]
+    assert len(book.messages) == 1
+    message = next(iter(book.messages.values()))
+    assert message["delivered"] is False
+    assert message["external_delivery"] is False
+    assert message["delivery_state"] == "not_sent"
+    assert second["published"] is False
+    snapshot = book.snapshot(actor, "campaign-1")
+    assert snapshot["delivered"] is False
+    assert len(snapshot["roles"]) == 3
+    reviewer = {"user_id": "reviewer", "organization_id": "org-a", "role": "reviewer", "verified": True}
+    hidden = book.snapshot(reviewer, "campaign-1")
+    assert hidden["messages"] == []
+    assert hidden["delivered"] is False
+
+
+def test_daily_cap_blocks_the_twenty_first_draft_and_records_no_send():
+    pilot = load()
+    now = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    book = pilot.PilotDirectory(now)
+    actor = organizer()
+    for index in range(20):
+        message = book.draft_message(actor, {
+            "kind": "update",
+            "idempotency_key": f"daily-cap-{index:02d}",
+            "channel": "email",
+        })
+        assert message["delivered"] is False
+        assert message["external_delivery"] is False
+        assert message["delivery_state"] == "not_sent"
+    try:
+        book.draft_message(actor, {
+            "kind": "update",
+            "idempotency_key": "daily-cap-overflow",
+            "channel": "email",
+        })
+    except pilot.PilotRejected as exc:
+        assert str(exc) == "Rate limited"
+    else:
+        raise AssertionError("daily cap ignored")
+    assert len(book.messages) == 20
+    assert all(item["delivered"] is False and item["delivery_state"] == "not_sent" for item in book.messages.values())
+    repeated = book.draft_message(actor, {
+        "kind": "invite",
+        "idempotency_key": "daily-cap-00",
+        "channel": "email",
+    })
+    assert repeated["delivered"] is False
+    assert len(book.messages) == 20
+
+
+def test_pilot_sources_do_not_call_a_mail_provider():
+    pilot_source = PATH.read_text(encoding="utf-8")
+    router = ROUTER.read_text(encoding="utf-8")
+    store = (PATH.parent / "casting_pilot_store.py").read_text(encoding="utf-8")
+    for source in (pilot_source, router, store):
+        lowered = source.lower()
+        assert "smtplib" not in lowered
+        assert "sendgrid" not in lowered
+        assert "twilio" not in lowered
+        assert "boto3" not in lowered
+        assert "smtp" not in lowered
+
+
 def test_sample_offer_is_not_a_contract_or_partnership():
     pilot = load()
     plan = pilot.sample_harborlight_plan()
