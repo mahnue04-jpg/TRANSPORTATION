@@ -69,6 +69,26 @@ def test_main_mounts_the_demo_only_behind_the_flag():
         assert banned not in router_source
 
 
+def test_records_table_escapes_stored_markup(client: TestClient):
+    script = (ROOT / "static" / "cigo-validation" / "demo.js").read_text(encoding="utf-8")
+    table_fn = script.split("function table", 1)[1].split("function load", 1)[0]
+    assert "function escapeHtml(value)" in script
+    assert "escapeHtml(value)" in table_fn
+    assert "String(value)" not in table_fn
+    for target in ("records", "alerts", "failures"):
+        assert f'getElementById("{target}").innerHTML = table(' in script
+    idea = "Draft the brief <script>alert(1)</script> for approval."
+    email = 'a<b>@example.com'
+    saved = client.post(
+        "/dev/cigo-validation/submissions",
+        json={**VALID, "idea": idea, "email": email, "follow_up": "email"},
+    )
+    assert saved.status_code == 201, saved.text
+    record = saved.json()["record"]
+    assert record["idea"] == idea
+    assert record["email"] == email
+
+
 def test_create_duplicate_invalid_failure_and_export(client: TestClient):
     created = client.post("/dev/cigo-validation/submissions", json=VALID)
     assert created.status_code == 201, created.text
