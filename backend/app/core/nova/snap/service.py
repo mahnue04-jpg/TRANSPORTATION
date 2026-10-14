@@ -780,9 +780,10 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
         return call
     live = [person for person in people if person.state in {"accepted", "reconnecting"}]
     stale = [person for person in live if _participant_age(person, now) > policy.FAIL_AFTER_S]
-    # Two-person calls end when either side goes quiet. Larger calls end only
-    # after every live participant is quiet, so one dropped peer cannot hang up the rest.
-    if stale and (len(people) <= 2 or len(stale) == len(live)):
+    # Two-person calls end when either side goes quiet. Count only people still
+    # in the call, so an invited or already-left row cannot hide a 1:1 timeout.
+    # Larger calls mark a quiet peer left and end only after every live peer is quiet.
+    if stale and (len(live) <= 2 or len(stale) == len(live)):
         call.state = "failed"
         call.ended_reason = "network_timeout"
         call.ended_at = now
@@ -793,6 +794,9 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
         db.commit()
         return call
     changed = False
+    for person in stale:
+        person.state = "left"
+        changed = True
     for person in live:
         if person.state == "accepted" and _participant_age(person, now) > policy.RECONNECT_AFTER_S:
             person.state = "reconnecting"

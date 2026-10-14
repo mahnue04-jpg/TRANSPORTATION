@@ -179,6 +179,56 @@ def test_call_accept_signal_reconnect_and_network_timeout(db):
     assert err.value.status_code == 409
 
 
+def _accept_contacts(db, owner, peers):
+    for peer in peers:
+        contact = service.request_contact(db, owner, peer.user_id)
+        service.respond_contact(db, peer, contact["contact_id"], True)
+
+
+def test_group_timeout_drops_quiet_peer_so_hangup_can_finish(db):
+    owner, peer, quiet = user("owner"), user("peer"), user("quiet")
+    _accept_contacts(db, owner, [peer, quiet])
+    conversation = service.create_group(db, owner, "Crew", [peer.user_id, quiet.user_id])["conversation_id"]
+    call = service.start_call(db, owner, conversation, "audio")
+    service.accept_call(db, peer, call["call_id"])
+    service.accept_call(db, quiet, call["call_id"])
+    quiet_row = (
+        db.query(SnapCallParticipant)
+        .filter_by(call_id=call["call_id"], user_id=quiet.user_id)
+        .one()
+    )
+    quiet_row.last_seen = datetime.now(timezone.utc) - timedelta(seconds=120)
+    db.commit()
+    still = service.get_call(db, owner, call["call_id"])
+    assert still["state"] == "active"
+    states = {person["user_id"]: person["state"] for person in still["participants"]}
+    assert states[quiet.user_id] == "left"
+    assert states[owner.user_id] == "accepted"
+    assert states[peer.user_id] == "accepted"
+    ended = service.end_call(db, peer, call["call_id"])
+    assert ended["state"] == "ended"
+    assert ended["ended_reason"] == "hangup"
+    restarted = service.start_call(db, owner, conversation, "audio")
+    assert restarted["state"] == "ringing"
+    assert restarted["call_id"] != call["call_id"]
+
+
+def test_effectively_two_person_group_times_out(db):
+    owner, peer, missing = user("owner"), user("peer"), user("missing")
+    _accept_contacts(db, owner, [peer, missing])
+    conversation = service.create_group(db, owner, "Pair", [peer.user_id, missing.user_id])["conversation_id"]
+    call = service.start_call(db, owner, conversation, "audio")
+    service.accept_call(db, peer, call["call_id"])
+    for person in db.query(SnapCallParticipant).filter_by(call_id=call["call_id"], user_id=peer.user_id).all():
+        person.last_seen = datetime.now(timezone.utc) - timedelta(seconds=120)
+    db.commit()
+    failed = service.get_call(db, owner, call["call_id"])
+    assert failed["state"] == "failed"
+    assert failed["ended_reason"] == "network_timeout"
+    restarted = service.start_call(db, owner, conversation, "audio")
+    assert restarted["call_id"] != call["call_id"]
+
+
 def test_decline_and_hangup(db):
     owner, peer = user("owner"), user("peer")
     contact = service.request_contact(db, owner, peer.user_id)
