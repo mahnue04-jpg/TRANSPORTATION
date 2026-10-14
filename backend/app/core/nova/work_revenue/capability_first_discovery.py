@@ -412,10 +412,31 @@ _CERTIFICATION_OR_LICENSE_REQUIRED = re.compile(
     r"|\blicensing\s+(?:is\s+)?(?:required|mandatory)\b)",
     re.I,
 )
-# A short phrase may sit between the year count and "experience"
-# ("1-2 years of hands-on payroll processing experience"). The phrase cannot
-# cross a sentence. Unicode dashes are normalized before this pattern runs.
-_EXPERIENCE_PHRASE = r"(?:\s+[^\s.;]+){0,8}\s+(?:experience|exp)"
+# The year count has to modify experience ("1-2 years of hands-on payroll
+# processing experience"). Descriptors may sit between "of" and "experience".
+# A preference, a negation, or another claim (a commitment, a company age)
+# cannot. A duration noun counts only when it is the word before experience.
+# The phrase cannot cross a sentence. Unicode dashes are normalized first.
+_EXPERIENCE_SKIP = (
+    r"preferred|optional|optionally|not|no|without|never|non|"
+    r"old|aged|ago|age|history|founded|established|"
+    r"with|that|which|who|before|after|while|when|where|for|to|in|on|at|by|from|"
+    r"into|as|if|our|your|their|we|you|they|this|than|but|about|over|during|"
+    r"including|within|through"
+)
+_EXPERIENCE_DURATION = r"employment|tenure|commitment|commitments"
+_EXPERIENCE_DESCRIPTOR = (
+    r"(?!(?:" + _EXPERIENCE_SKIP + r"|" + _EXPERIENCE_DURATION + r")(?![A-Za-z-]))"
+    r"[A-Za-z][A-Za-z-]*"
+)
+_EXPERIENCE_PHRASE = (
+    r"(?:"
+    r"\s+of(?:\s+" + _EXPERIENCE_DESCRIPTOR + r"){0,8}"
+    r"(?:\s+(?:" + _EXPERIENCE_DURATION + r"))?"
+    r"|\s+(?:professional|relevant|related|industry|hands-on)"
+    r")?"
+    r"\s+(?:experience|exp)"
+)
 _EXPERIENCE_HISTORY_REQUIRED = re.compile(
     r"(?:"
     r"\b(?:at least|minimum(?: of)?|min\.?)\s+\d{1,2}\s*\+?\s+years?(?:'s)?(?: of)? (?:professional |relevant |related |industry )?(?:experience|exp)\b"

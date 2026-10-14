@@ -353,9 +353,10 @@ def _detect_work_type(text: str, job_type: str | None) -> str:
 
 
 # A benefit such as a gym membership is not a fee to apply. Payment has to sit
-# next to the membership word, and benefit memberships stay eligible.
+# next to the membership word. Only that benefit span is removed, so a paid
+# club, team, or health membership in the same sentence still counts.
 _BENEFIT_MEMBERSHIP = re.compile(
-    r"\b(?:gym|fitness|health club|health|insurance|club|team)\s+memberships?\b",
+    r"\b(?:gym|fitness|health club|insurance)\s+memberships?\b",
     re.I,
 )
 _MEMBERSHIP_PAYMENT = re.compile(
@@ -368,9 +369,8 @@ _MEMBERSHIP_PAYMENT = re.compile(
 def _paid_membership_nearby(text: str) -> bool:
     """True when a sentence charges for membership access."""
     for sentence in re.split(r"[.\n;]", text or ""):
-        if _BENEFIT_MEMBERSHIP.search(sentence):
-            continue
-        if _MEMBERSHIP_PAYMENT.search(sentence):
+        remaining = _BENEFIT_MEMBERSHIP.sub(" ", sentence)
+        if _MEMBERSHIP_PAYMENT.search(remaining):
             return True
     return False
 
