@@ -401,18 +401,41 @@
     } catch (err) {}
     return null;
   }
-  function attachRemote(stream) {
+  function attachRemote(stream, remoteId) {
     var remote = $("remote-video");
-    var slot = remote && !remote.srcObject ? remote : document.createElement("video");
-    if (slot !== remote) {
-      slot.autoplay = true;
-      slot.playsInline = true;
-      slot.setAttribute("playsinline", "");
-      var panel = $("call-panel");
-      if (panel) panel.appendChild(slot);
-      state.remoteNodes.push(slot);
+    var slot = null;
+    var nodes = [remote].concat(state.remoteNodes);
+    for (var i = 0; i < nodes.length; i += 1) {
+      var node = nodes[i];
+      if (!node) continue;
+      if (stream && node.srcObject === stream) { slot = node; break; }
+      if (remoteId && node._remoteId === remoteId) { slot = node; break; }
     }
-    slot.srcObject = stream;
+    if (!slot) {
+      slot = remote && !remote.srcObject ? remote : document.createElement("video");
+      if (slot !== remote) {
+        slot.autoplay = true;
+        slot.playsInline = true;
+        slot.setAttribute("playsinline", "");
+        var panel = $("call-panel");
+        if (panel) panel.appendChild(slot);
+        state.remoteNodes.push(slot);
+      }
+    }
+    if (remoteId) slot._remoteId = remoteId;
+    if (slot.srcObject && stream && slot.srcObject !== stream) {
+      var incoming = stream.getTracks();
+      for (var t = 0; t < incoming.length; t += 1) {
+        var have = slot.srcObject.getTracks();
+        var seen = false;
+        for (var h = 0; h < have.length; h += 1) {
+          if (have[h] === incoming[t]) seen = true;
+        }
+        if (!seen) slot.srcObject.addTrack(incoming[t]);
+      }
+    } else {
+      slot.srcObject = stream;
+    }
     slot.hidden = false;
     if (slot.play) slot.play().catch(function () { show("enable-sound", true); });
   }
@@ -435,7 +458,7 @@
     };
     pc.ontrack = function (event) {
       var stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
-      attachRemote(stream);
+      attachRemote(stream, pc._remoteId);
     };
     pc.onconnectionstatechange = function () {
       var value = pc.connectionState;

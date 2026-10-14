@@ -45,7 +45,11 @@ def reset_limits() -> None:
 
 
 def _ensure_seq_indexes(db: Session) -> None:
-    """Create the seq unique indexes when tables already exist from an older create_all."""
+    """Create the seq unique indexes when tables already exist from an older create_all.
+
+    Run on this session's connection. A second connection can fail while the request
+    already holds a SQLite transaction, and a failed attempt must stay retryable.
+    """
     global _seq_indexes_ready
     if _seq_indexes_ready:
         return
@@ -54,13 +58,12 @@ def _ensure_seq_indexes(db: Session) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_snap_signal_seq ON nova_snap_signals (call_id, seq)",
     )
     try:
-        bind = db.get_bind()
-        with bind.connect() as conn:
-            for statement in statements:
-                conn.execute(text(statement))
-            conn.commit()
+        for statement in statements:
+            db.execute(text(statement))
+        db.commit()
     except Exception:
-        pass
+        db.rollback()
+        return
     _seq_indexes_ready = True
 
 
@@ -776,7 +779,10 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
             db.commit()
         return call
     live = [person for person in people if person.state in {"accepted", "reconnecting"}]
-    if any(_participant_age(person, now) > policy.FAIL_AFTER_S for person in live):
+    stale = [person for person in live if _participant_age(person, now) > policy.FAIL_AFTER_S]
+    # Two-person calls end when either side goes quiet. Larger calls end only
+    # after every live participant is quiet, so one dropped peer cannot hang up the rest.
+    if stale and (len(people) <= 2 or len(stale) == len(live)):
         call.state = "failed"
         call.ended_reason = "network_timeout"
         call.ended_at = now
@@ -1021,11 +1027,12 @@ def post_signal(
     if kind == "quality":
         if text not in _QUALITIES:
             raise HTTPException(422, "Quality must be excellent, good, fair, poor, disconnected, or unknown.")
-        me.last_quality = text
     elif len(text) > 20000 or "\x00" in text:
         raise HTTPException(422, "That call signal is too large.")
     _rate(user.user_id, "signal", *policy.SIGNAL_RATE)
     _ensure_seq_indexes(db)
+    if kind == "quality":
+        me.last_quality = text
     call_id = call.call_id
     for _attempt in range(4):
         seq = _allocate_signal_seq(db, call_id)
