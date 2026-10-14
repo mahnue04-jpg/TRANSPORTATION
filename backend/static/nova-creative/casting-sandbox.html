@@ -592,31 +592,73 @@
           show("Fictional Harborlight sample saved for this sandbox organization. Nothing was sent.", true);
         } catch (err) { /* banner already set */ }
       });
+      function findRow(rows, id) {
+        if (!id) return null;
+        for (var index = 0; index < rows.length; index++) {
+          if (rows[index].id === id) return rows[index];
+        }
+        return null;
+      }
       async function restorePilot() {
         if (!(await requireSandbox())) return;
         var campaignId = $("application-campaign").value.trim();
         var path = base() + "/pilot-snapshot" + (campaignId ? "?campaign_id=" + encodeURIComponent(campaignId) : "");
         var saved = await api(path);
         var roles = saved.roles || [];
-        if (roles[0]) {
-          pilotRoleId = roles[0].id || "";
-          $("pilot-role-id").value = pilotRoleId;
-        }
         var intakes = saved.intakes || [];
-        if (intakes[0]) {
-          var intake = intakes[0];
+        var messages = saved.messages || [];
+        var intake = findRow(intakes, applicationId);
+        var typedRole = $("pilot-role-id").value.trim();
+        if (!intake && typedRole) {
+          for (var index = 0; index < intakes.length; index++) {
+            if (intakes[index].role_id === typedRole) {
+              intake = intakes[index];
+              break;
+            }
+          }
+        }
+        if (!intake && intakes.length) intake = intakes[0];
+        if (intake && intake.id) {
+          applicationId = intake.id;
+          $("review-application").value = applicationId;
+          rememberSandbox();
+        }
+        var role = intake ? findRow(roles, intake.role_id) : null;
+        if (!role) role = findRow(roles, typedRole);
+        if (!role && roles.length) role = roles[0];
+        if (role) {
+          pilotRoleId = role.id || "";
+          $("pilot-role-id").value = pilotRoleId;
+        } else {
+          pilotRoleId = "";
+          $("pilot-role-id").value = "";
+        }
+        if (intake) {
           $("pilot-receipt").textContent = "Receipt " + intake.receipt + ". Status " + intake.status + ". Reloaded from the server.";
           if (intake.consent_revoked) {
             show("Consent is revoked on the server. Contact details stay cleared. Nothing was sent.", true);
           }
         }
-        var messages = saved.messages || [];
-        if (messages[0]) {
-          pilotMessageId = messages[0].id || "";
-          $("pilot-message").textContent = messages[0].body + " Delivered: " + String(messages[0].delivered) + ".";
+        var message = null;
+        var unscoped = null;
+        for (var messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+          var row = messages[messageIndex];
+          if (applicationId && row.application_id === applicationId) {
+            message = row;
+            break;
+          }
+          if (!row.application_id && !unscoped) unscoped = row;
+        }
+        if (!message) message = unscoped;
+        if (message) {
+          pilotMessageId = message.id || "";
+          $("pilot-message").textContent = message.body + " Delivered: " + String(message.delivered) + ".";
+        } else {
+          pilotMessageId = "";
+          $("pilot-message").textContent = "No message draft yet. Outbound delivery stays off.";
         }
         $("pilot-output").textContent = "Server copy reloaded. Published: " + String(saved.published) + ". Delivered: " + String(saved.delivered) + ". Roles: " + roles.length + ".";
-        if (!intakes[0] || !intakes[0].consent_revoked) {
+        if (!intake || !intake.consent_revoked) {
           show("Saved pilot reloaded for this sandbox organization. Nothing was sent.", true);
         }
       }

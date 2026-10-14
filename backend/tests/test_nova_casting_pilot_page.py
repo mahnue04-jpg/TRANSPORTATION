@@ -47,6 +47,10 @@ def test_sandbox_pilot_controls_keep_the_existing_journey():
     assert "Reload saved pilot" in sandbox
     assert "/pilot-snapshot" in sandbox
     assert "Reloaded from the server" in sandbox
+    restore = sandbox.split("async function restorePilot", 1)[1].split("$(\"reload-pilot\")", 1)[0]
+    assert "applicationId = intake.id" in restore
+    assert "intake.role_id" in restore
+    assert "row.application_id === applicationId" in restore
     assert "Applicant does not meet the minimum age" in sandbox
     assert 'aria-live="polite"' in sandbox
     assert "@media (max-width: 640px)" in sandbox

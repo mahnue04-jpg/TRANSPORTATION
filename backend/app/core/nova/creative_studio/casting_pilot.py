@@ -806,10 +806,21 @@ class PilotDirectory:
         intakes.sort(key=lambda item: (item["created_at"], item["id"]))
         messages = []
         if role_name == "organizer":
-            messages = [
-                _message_view(row) for row in self.messages.values()
-                if row["organization_id"] == organization_id
-            ]
+            for row in self.messages.values():
+                if row["organization_id"] != organization_id:
+                    continue
+                application_id = str(row.get("application_id") or "")
+                if selected and application_id:
+                    intake = self.intakes.get(application_id)
+                    if (
+                        intake is None
+                        or intake.get("organization_id") != organization_id
+                        or intake.get("campaign_id") != selected
+                    ):
+                        continue
+                view = _message_view(row)
+                view["application_id"] = application_id
+                messages.append(view)
             messages.sort(key=lambda item: item["id"])
         return {
             "label": "Demo / Early Access",

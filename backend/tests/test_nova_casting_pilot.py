@@ -246,6 +246,43 @@ def test_harborlight_seed_reloads_without_a_second_copy_or_a_send():
     assert hidden["delivered"] is False
 
 
+def test_snapshot_keeps_campaign_drafts_and_drops_other_campaigns():
+    pilot = load()
+    now = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    book = pilot.PilotDirectory(now)
+    actor = organizer()
+    seeded = book.seed_harborlight(actor, "campaign-1")
+    lead = seeded["roles"][0]
+    other = book.create_role(actor, "campaign-2", {
+        **role_payload(),
+        "title": "Second lead",
+    })
+    book.save_intake(
+        applicant(), application_id="app-1", campaign_id="campaign-1", payload=intake_payload(lead["id"]),
+    )
+    book.save_intake(
+        applicant("applicant-b"), application_id="app-2", campaign_id="campaign-2",
+        payload=intake_payload(other["id"], display_name="Priya Shah", contact_email="priya.shah@example.invalid"),
+    )
+    own = book.draft_message(actor, {
+        "kind": "invite", "application_id": "app-1", "idempotency_key": "invite-app-1", "channel": "email",
+    })
+    other_draft = book.draft_message(actor, {
+        "kind": "invite", "application_id": "app-2", "idempotency_key": "invite-app-2", "channel": "email",
+    })
+    saved = book.snapshot(actor, "campaign-1")
+    assert [row["id"] for row in saved["intakes"]] == ["app-1"]
+    assert lead["id"] in [row["id"] for row in saved["roles"]]
+    assert other["id"] not in [row["id"] for row in saved["roles"]]
+    messages = {row["id"]: row for row in saved["messages"]}
+    assert own["id"] in messages
+    assert messages[own["id"]]["application_id"] == "app-1"
+    assert seeded["message"]["id"] in messages
+    assert messages[seeded["message"]["id"]]["application_id"] == ""
+    assert other_draft["id"] not in messages
+    assert all(row["delivered"] is False for row in saved["messages"])
+
+
 def test_daily_cap_blocks_the_twenty_first_draft_and_records_no_send():
     pilot = load()
     now = datetime(2026, 11, 2, tzinfo=timezone.utc)
