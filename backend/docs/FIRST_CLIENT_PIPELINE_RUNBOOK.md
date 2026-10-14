@@ -21,7 +21,7 @@ Sent means a submission receipt is stored and `externally_submitted` is already 
 
 ## Filter notes
 
-Preferred experience, a commitment length, a company age, and a gym or benefit membership do not by themselves reject a listing. Mandatory years of experience, an application fee, an unsupported license, mandatory on-site work, and Upwork paid connects still reject it. Operational support, CRM, business process, workflow automation, and FastAPI or API integration titles stay in scope when the listing is remote contractor work.
+Preferred experience, a commitment length, a company age, and a gym or benefit membership do not by themselves reject a listing. Mandatory years of experience, an application fee, an unsupported license, mandatory on-site work, and Upwork paid connects still reject it. A line such as "Philippines-based candidates" is a residency requirement. A company based in another country is not. Operational support, CRM, business process, workflow automation, and FastAPI or API integration titles stay in scope when the listing is remote contractor work.
 
 Draft PRs #331 and #335 are not merged here. Their dev-only funnel acceptance and fictional evidence export stay on those branches.
 

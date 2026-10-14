@@ -179,6 +179,11 @@ def test_remote_client_country_is_not_worker_location() -> None:
     assert assessed["native_speaker_capability"] is False
     assert assessed["eligibility"]["residency"]["required"] is False
     assert assessed["eligibility"]["permit"]["required"] is False
+    company = _job(
+        "Remote contractor for a Philippines-based company. No residency requirement.",
+        geography="Remote",
+    )
+    assert "residency_required" not in international_blockers(company, facts=_US_PROFILE)
 
 
 def test_worker_location_still_blocks_when_it_is_mandatory() -> None:
@@ -191,6 +196,16 @@ def test_worker_location_still_blocks_when_it_is_mandatory() -> None:
     )
     assert non_us_location_required(korea) is True
     assert "residency_required" in international_blockers(korea, facts=_POPULATED_PROFILE)
+    hyphenated = _job(
+        "Looking for Philippines-based candidates. Independent contractor. Remote.",
+        geography="Remote",
+    )
+    assert "residency_required" in international_blockers(hyphenated, facts=_US_PROFILE)
+    trailing = _job(
+        "Contractors who are Philippines-based. Remote administrative support.",
+        geography="Remote",
+    )
+    assert "residency_required" in international_blockers(trailing, facts=_US_PROFILE)
 
 
 def test_visa_and_permit_kinds_do_not_substitute_for_each_other() -> None:

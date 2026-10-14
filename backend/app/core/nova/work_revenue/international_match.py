@@ -219,6 +219,8 @@ _RESIDENCY_TOPIC = re.compile(
     r"residenc(?:y|e)\b(?!\s+(?:permits?|visas?)\b)|"
     r"must\s+be\s+(?:a\s+|an\s+)?resident\b|"
     r"(?:based|located|residing|living)\s+in\b|"
+    r"\bbased\s+(?:candidates|applicants|contractors|workers|professionals|hires)\b|"
+    r"\b(?:candidates|applicants|contractors|workers)\s+(?:who\s+are\s+|that\s+are\s+)?[a-z][a-z.\s-]{0,40}-based\b|"
     r"(?:mena|middle\s+east)\s+residency"
     r")\b",
     re.I,
