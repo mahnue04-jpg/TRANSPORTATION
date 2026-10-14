@@ -35,14 +35,24 @@ def client(tmp_path):
     STORE.reset()
 
 
-def test_assessment_page_stays_available_and_sends_nothing(monkeypatch):
+def test_demo_stays_off_in_production_even_when_flagged(monkeypatch):
+    monkeypatch.setenv("CIGO_VALIDATION_DEMO", "1")
     monkeypatch.setenv("RUNTIME_ENVIRONMENT", "production")
+    assert demo_enabled() is False
+    monkeypatch.setenv("RUNTIME_ENVIRONMENT", "development")
     assert demo_enabled() is True
+    monkeypatch.delenv("CIGO_VALIDATION_DEMO")
+    assert demo_enabled() is False
 
 
-def test_main_mounts_the_assessment_page():
+def test_main_mounts_the_demo_only_behind_the_flag():
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
-    assert "app.include_router(cigo_validation_router)" in main
+    assert "cigo_validation_demo_enabled()" in main
+    assert "if cigo_validation_demo_enabled():" in main
+    gate = main.index("if cigo_validation_demo_enabled():")
+    router_import = main.index("from app.core.cigo_validation.router import router as cigo_validation_router")
+    mount = main.index("app.include_router(cigo_validation_router)")
+    assert gate < router_import < mount
     page = (ROOT / "static" / "cigo-validation" / "index.html").read_text(encoding="utf-8")
     assert 'content="noindex, nofollow"' in page
     assert "does not email anyone" in page

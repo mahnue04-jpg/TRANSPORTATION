@@ -22,14 +22,23 @@
     result.innerHTML = '<div class="card ' + kind + '"><strong>' + title + '</strong><p>' + body + '</p></div>';
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function table(rows, columns) {
     if (!rows.length) return "<p class=\"hint\">None yet.</p>";
-    var head = "<tr>" + columns.map(function (col) { return "<th>" + col.label + "</th>"; }).join("") + "</tr>";
+    var head = "<tr>" + columns.map(function (col) { return "<th>" + escapeHtml(col.label) + "</th>"; }).join("") + "</tr>";
     var body = rows.map(function (row) {
       return "<tr>" + columns.map(function (col) {
         var value = row[col.key];
         if (value === null || value === undefined || value === "") value = "—";
-        return "<td>" + String(value) + "</td>";
+        return "<td>" + escapeHtml(value) + "</td>";
       }).join("") + "</tr>";
     }).join("");
     return "<table>" + head + body + "</table>";

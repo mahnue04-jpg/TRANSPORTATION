@@ -53,8 +53,11 @@ FICTIONAL = (
 
 
 def demo_enabled() -> bool:
-    """The assessment page is part of the app. It still does not send live email."""
-    return True
+    """Local mock only. Production never mounts this, even if the flag is set."""
+    runtime = os.getenv("RUNTIME_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")).strip().lower()
+    if runtime in {"production", "prod"}:
+        return False
+    return os.getenv("CIGO_VALIDATION_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def default_db_path() -> Path:
