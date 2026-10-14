@@ -167,6 +167,25 @@ def test_classify_live_search_does_not_claim_a_failed_source() -> None:
     assert empty["live_search_claimed"] is True
     assert empty["empty_reason"] == "no_matches"
 
+    # One timeout on a later query must not hide a provider that already
+    # returned rows. The aggregated run is partial, not a source outage.
+    mixed = classify_live_search(
+        {
+            "providers_queried": ["remotive", "remoteok"],
+            "provider_result_counts": {"remotive": 2, "remoteok": 0},
+            "provider_errors": [
+                {"provider_id": "remotive", "error": "timeout"},
+                {"provider_id": "remoteok", "error": "429"},
+            ],
+            "jobs": [{"title": "Remote notes"}],
+        }
+    )
+    assert mixed["live_search_status"] == "partial"
+    assert mixed["live_search_claimed"] is True
+    assert mixed["providers_succeeded"] == ["remotive", "remoteok"]
+    assert mixed["providers_failed"] == []
+    assert mixed["empty_reason"] is None
+
 
 def test_provider_search_retries_one_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.core.nova.v3.multi_source_discovery._RETRY_SLEEP_SECONDS", 0)

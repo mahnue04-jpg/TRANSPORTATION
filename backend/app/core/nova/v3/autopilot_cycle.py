@@ -107,17 +107,27 @@ def run_autopilot_cycle(
 
     combined: list[dict[str, Any]] = []
     providers_queried: set[str] = set()
+    provider_counts: dict[str, int] = {}
     provider_errors: list[dict[str, Any]] = []
     per_query: list[dict[str, Any]] = []
 
+    def _merge_provider_counts(result: dict[str, Any]) -> None:
+        for provider_id, count in (result.get("provider_result_counts") or {}).items():
+            key = str(provider_id or "").strip()
+            if not key:
+                continue
+            provider_counts[key] = provider_counts.get(key, 0) + int(count or 0)
+
     for query in selected_queries:
         multi = search_multi_source_jobs(query, limit=result_limit)
+        _merge_provider_counts(multi)
         used_query = query
         fallback_query = None
         if not (multi.get("jobs") or []):
             fallback_query = _fallback_query(query)
             if fallback_query and fallback_query.lower() != query.lower():
                 retry = search_multi_source_jobs(fallback_query, limit=result_limit)
+                _merge_provider_counts(retry)
                 providers_queried.update(str(item) for item in (retry.get("providers_queried") or []))
                 provider_errors.extend(list(retry.get("provider_errors") or []))
                 if retry.get("jobs"):
@@ -203,10 +213,15 @@ def run_autopilot_cycle(
         "persistent_results": persistent,
         **classify_live_search({
             "providers_queried": sorted(providers_queried),
+            # Keep a provider that finished any query, including a zero-row
+            # search. One later timeout must not drop that source.
             "provider_result_counts": {
-                provider_id: 0
+                provider_id: provider_counts.get(provider_id, 0)
                 for provider_id in providers_queried
-                if provider_id not in {str(item.get("provider_id")) for item in provider_errors if item.get("provider_id")}
+                if provider_id in provider_counts
+                or provider_id not in {
+                    str(item.get("provider_id")) for item in provider_errors if item.get("provider_id")
+                }
             },
             "provider_errors": provider_errors,
             "jobs": unique,

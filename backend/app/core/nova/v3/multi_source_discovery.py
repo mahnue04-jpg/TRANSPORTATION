@@ -317,23 +317,30 @@ def classify_live_search(result: dict[str, Any]) -> dict[str, Any]:
     """Say whether a live search actually ran.
 
     A provider that returns zero rows still counts as a completed search.
-    A provider that errors does not. If every queried provider errored, the
-    run is unavailable and must not be described as zero matches.
+    A provider that errors without recording a result count does not. If every
+    queried provider errored, the run is unavailable and must not be described
+    as zero matches.
+
+    Across several queries, a later timeout does not erase a provider that
+    already recorded a result count. Those errors make the run partial.
     """
     queried = [str(item) for item in (result.get("providers_queried") or []) if str(item)]
     counts = dict(result.get("provider_result_counts") or {})
-    failed = {
+    errored = {
         str(item.get("provider_id"))
         for item in (result.get("provider_errors") or [])
         if item.get("provider_id")
     }
-    succeeded = [provider_id for provider_id in queried if provider_id in counts and provider_id not in failed]
+    # A recorded count means this provider finished at least one search.
+    # An error from another query in an aggregated run does not cancel it.
+    succeeded = [provider_id for provider_id in queried if provider_id in counts]
+    failed = {provider_id for provider_id in errored if provider_id not in counts}
     job_count = len(result.get("jobs") or [])
     if not queried or (failed and not succeeded):
         status = "unavailable"
         claimed = False
         empty_reason = "source_unavailable"
-    elif failed and succeeded:
+    elif errored and succeeded:
         status = "partial"
         claimed = True
         empty_reason = None if job_count else "no_matches"
