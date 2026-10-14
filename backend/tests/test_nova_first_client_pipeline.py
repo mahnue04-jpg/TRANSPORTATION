@@ -19,8 +19,12 @@ from app.core.nova.v3.multi_source_discovery import (
     reset_provider_health_for_tests,
     search_multi_source_jobs,
 )
+from app.core.nova.work_revenue.first_client_pipeline import (
+    draft_targeted_proposals,
+    set_submission_transport,
+)
 from app.core.nova.work_revenue.materials import generate_drafts
-from app.core.nova.work_revenue.models import NovaWorkApplication
+from app.core.nova.work_revenue.models import NovaWorkApplication, NovaWorkMaterial
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.db.session import SessionLocal, engine
 from app.main import app
@@ -87,6 +91,39 @@ def _approve(client: TestClient, headers: dict[str, str], title: str) -> dict:
     return approved.json()
 
 
+class _PermittedTransport:
+    """In-process double. It records a receipt and does not open a socket."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls = 0
+        self.fail = fail
+        self.network_used = False
+        self.permitted_channel = {"channel_id": "fake-channel", "permitted": True, "recipient": "applications@example.invalid"}
+
+    def deliver(self, message: dict) -> dict:
+        self.calls += 1
+        if self.fail:
+            return {
+                "state": "DELIVERY_FAILURE",
+                "receipt": None,
+                "reason": "fake mailbox rejected the message",
+                "network_used": False,
+            }
+        return {
+            "state": "SENT",
+            "receipt": "fake-receipt-1",
+            "network_used": False,
+        }
+
+
+def _clear_owner_input(application_id: str) -> None:
+    with SessionLocal() as db:
+        rows = db.query(NovaWorkMaterial).filter(NovaWorkMaterial.application_id == application_id).all()
+        for row in rows:
+            row.body = str(row.body or "").replace("OWNER INPUT REQUIRED", "owner supplied this fact")
+        db.commit()
+
+
 class _FlakyProvider:
     meta = ProviderMeta(
         provider_id="flaky_test",
@@ -134,6 +171,8 @@ def test_work_page_includes_the_mobile_first_client_board(client: TestClient) ->
     script = client.get("/static/nova-work/first-client.js")
     assert script.status_code == 200
     assert "Record blocked handoff" in script.text
+    assert "Sent vs draft" in script.text
+    assert "Fetched at" in script.text
     assert "submit-email" not in script.text
     style = client.get("/static/nova-work/first-client.css")
     assert style.status_code == 200
@@ -331,10 +370,31 @@ def test_follow_up_and_delivery_failure_require_a_real_submission(client: TestCl
     )
     assert failure.status_code == 409
 
-    with SessionLocal() as db:
-        row = db.query(NovaWorkApplication).filter(NovaWorkApplication.application_id == application_id).one()
-        row.externally_submitted = True
-        db.commit()
+    transport = _PermittedTransport()
+    set_submission_transport(transport)
+    try:
+        _clear_owner_input(application_id)
+        sent = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert sent.status_code == 200, sent.text
+        assert sent.json()["ledger"]["state"] == "SENT"
+        assert sent.json()["ledger"]["receipt"]
+        assert sent.json()["application_externally_submitted"] is True
+        assert sent.json()["applications_sent_by_this_request"] == 1
+        assert transport.calls == 1
+        assert transport.network_used is False
+        again = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert again.status_code == 200, again.text
+        assert again.json()["applications_sent_by_this_request"] == 0
+        assert again.json()["ledger"]["ledger_id"] == sent.json()["ledger"]["ledger_id"]
+        assert transport.calls == 1
+    finally:
+        set_submission_transport(None)
 
     past = client.post(
         f"/api/nova/work/first-client/applications/{application_id}/follow-up",
@@ -367,4 +427,126 @@ def test_follow_up_and_delivery_failure_require_a_real_submission(client: TestCl
     )
     assert match["stage"] == "DELIVERY_FAILURE"
     assert match["actually_sent"] is True
-    assert match["receipt_verified"] is False
+    assert match["receipt_verified"] is True
+    assert match["sent_vs_draft"] == "sent"
+    assert match["receipt"] == "fake-receipt-1"
+
+
+def test_missing_auth_blocks_without_calling_transport(client: TestClient) -> None:
+    class _Counting:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.permitted_channel = None
+
+        def deliver(self, message: dict) -> dict:
+            self.calls += 1
+            return {"state": "SENT", "receipt": "should-not-exist", "network_used": False}
+
+    transport = _Counting()
+    set_submission_transport(transport)
+    try:
+        headers = _headers(client)
+        approved = _approve(client, headers, "Unauthenticated channel contractor")
+        attempted = client.post(
+            f"/api/nova/work/first-client/applications/{approved['application_id']}/submission-attempt",
+            headers=headers,
+        )
+        assert attempted.status_code == 200, attempted.text
+        body = attempted.json()
+        assert body["ledger"]["state"] == "BLOCKED"
+        assert body["applications_sent_by_this_request"] == 0
+        assert body["application_externally_submitted"] is False
+        assert "connect one authenticated permitted submission channel" in body["ledger"]["next_action"]
+        assert transport.calls == 0
+        other = client.post(
+            f"/api/nova/work/first-client/applications/{approved['application_id']}/submission-attempt",
+            headers=_headers(client, "admin@amicor.local"),
+        )
+        assert other.status_code == 404
+    finally:
+        set_submission_transport(None)
+
+
+def test_delivery_failure_and_network_flag_are_not_sends(client: TestClient) -> None:
+    headers = _headers(client)
+    approved = _approve(client, headers, "Delivery failure contractor")
+    application_id = approved["application_id"]
+    _clear_owner_input(application_id)
+    failing = _PermittedTransport(fail=True)
+    set_submission_transport(failing)
+    try:
+        failed = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert failed.status_code == 200, failed.text
+        assert failed.json()["ledger"]["state"] == "DELIVERY_FAILURE"
+        assert failed.json()["application_externally_submitted"] is False
+        assert failed.json()["applications_sent_by_this_request"] == 0
+        assert failing.network_used is False
+    finally:
+        set_submission_transport(None)
+
+    class _Network:
+        permitted_channel = {"channel_id": "network-channel", "permitted": True}
+        calls = 0
+
+        def deliver(self, message: dict) -> dict:
+            self.calls += 1
+            return {"state": "SENT", "receipt": "remote-receipt", "network_used": True}
+
+    networked = _Network()
+    set_submission_transport(networked)
+    try:
+        refused = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert refused.status_code == 200, refused.text
+        assert refused.json()["ledger"]["state"] == "BLOCKED"
+        assert refused.json()["application_externally_submitted"] is False
+        assert refused.json()["ledger"]["receipt"] in {None, ""}
+    finally:
+        set_submission_transport(None)
+
+
+def test_fixture_records_draft_zero_proposals() -> None:
+    fixtures = [
+        {
+            "record_class": "FIXTURE",
+            "fixture": True,
+            "title": "Fixture virtual assistant",
+            "company_name": "Fixture Co",
+            "description": "Remote contractor administrative support.",
+            "source_url": "https://example.invalid/fixture",
+            "fetched_at": "2026-10-14T00:00:00+00:00",
+            "qualification_status": "QUALIFIED",
+            "provenance_verified": True,
+        }
+    ]
+    assert draft_targeted_proposals(fixtures) == []
+
+
+def test_verified_shape_drafts_a_proposal_that_was_not_sent() -> None:
+    """Shape check only. This dict was not fetched from a job source."""
+    shape = {
+        "record_class": "live",
+        "provenance_verified": True,
+        "title": "Remote CRM cleanup contractor",
+        "company_name": "Shape Example",
+        "description": "Remote contractor CRM cleanup. Preferred: 5 years. No certification is stated.",
+        "source_url": "https://remotive.com/remote-jobs/shape-not-a-fetch",
+        "fetched_at": "2026-10-14T18:00:00+00:00",
+        "qualification_status": "QUALIFIED",
+        "live_qualification": {"qualification_status": "QUALIFIED", "blockers": []},
+    }
+    drafted = draft_targeted_proposals([shape, shape, shape, shape])
+    assert len(drafted) == 3
+    for item in drafted:
+        assert item["sent"] is False
+        assert item["external_action_taken"] is False
+        assert item["fixture"] is False
+        assert "This draft was not sent." in item["proposal"]
+        assert "I have 5 years" not in item["proposal"]
+        assert "SOC 2" not in item["proposal"]
+        assert "partnership with" not in item["proposal"].lower()

@@ -164,7 +164,10 @@ def first_client_submission_attempt(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Record a blocked handoff. Does not send mail or mark the application submitted."""
+    """Send one approved application only when an authenticated channel returns a receipt.
+
+    Missing auth stays BLOCKED. This route never marks a send without a receipt.
+    """
     if organization_id and organization_id != user.organization_id:
         raise HTTPException(status_code=403, detail="Cross-tenant access denied")
     try:
@@ -185,7 +188,7 @@ def first_client_follow_up(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Schedule a follow-up after a real or owner-recorded submission. Does not send it."""
+    """Schedule a follow-up only after a stored send receipt. Does not send it."""
     if payload.organization_id and payload.organization_id != user.organization_id:
         raise HTTPException(status_code=403, detail="Cross-tenant access denied")
     try:

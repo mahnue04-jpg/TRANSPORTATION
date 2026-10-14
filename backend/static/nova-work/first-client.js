@@ -37,14 +37,16 @@
     return items.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("");
   }
   function card(row) {
-    var sent = row.actually_sent ? "Yes, a confirmed send is already recorded." : "No. This has not been sent.";
+    var sent = row.actually_sent ? "Sent, with a receipt." : "Draft. This has not been sent.";
     var receipt = row.receipt_verified ? escapeHtml(row.receipt) : "No send receipt is stored.";
+    var fetched = row.provenance_fetched_at ? escapeHtml(row.provenance_fetched_at) : "No source fetch time stored.";
+    var blocker = row.blocker_reason ? escapeHtml(row.blocker_reason) : "No blocker stored.";
     var actions = "";
     if (row.application_id && (row.stage === "APPROVED_NOT_SENT" || row.stage === "BLOCKED")) {
       actions += "<button type=\"button\" data-first-client-action=\"attempt\" data-id=\"" +
         escapeHtml(row.application_id) + "\">Record blocked handoff</button>";
     }
-    if (row.application_id && (row.actually_sent || row.manual_submission_recorded)) {
+    if (row.application_id && row.receipt_verified) {
       actions += "<label>Follow-up<input type=\"datetime-local\" data-follow-up-for=\"" +
         escapeHtml(row.application_id) + "\" /></label>" +
         "<button type=\"button\" data-first-client-action=\"follow-up\" data-id=\"" +
@@ -61,8 +63,10 @@
       "<p>" + escapeHtml(row.company_name) + " · " + escapeHtml(row.record_class) +
       " · " + escapeHtml(row.source || "source not stored") + "</p>" +
       "<p>Stage: " + escapeHtml(row.stage) + "</p>" +
-      "<p>Sent: " + escapeHtml(sent) + "</p>" +
+      "<p>Sent vs draft: " + escapeHtml(sent) + "</p>" +
       "<p>Source URL: " + escapeHtml(row.source_url || "none stored") + "</p>" +
+      "<p>Fetched at: " + fetched + "</p>" +
+      "<p>Blocker: " + blocker + "</p>" +
       "<p>Qualification: " + escapeHtml(row.qualification_outcome || "not qualified yet") + "</p>" +
       "<ul>" + reasons(row.qualification_reasons) + "</ul>" +
       "<p>Proposal preview: " + escapeHtml(row.proposal_preview || "No proposal draft yet.") + "</p>" +

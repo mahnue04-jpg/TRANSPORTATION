@@ -33,6 +33,40 @@ _RANK = {
     "INSUFFICIENT_INFORMATION": 1,
 }
 _RESPONSE_STATES = {"ACKNOWLEDGED", "DELIVERY_FAILURE"}
+_SEND_KEY_PREFIX = "send:"
+_FIXTURE_HOSTS = {"example.com", "example.org", "example.invalid"}
+
+
+class SubmissionTransport:
+    """In-process submission transport. The default never opens a socket."""
+
+    permitted_channel: dict[str, Any] | None = None
+
+    def deliver(self, message: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "state": "BLOCKED",
+            "receipt": None,
+            "reason": "No authenticated permitted channel is connected.",
+            "network_used": False,
+        }
+
+
+_submission_transport: SubmissionTransport = SubmissionTransport()
+
+
+def set_submission_transport(transport: SubmissionTransport | None) -> None:
+    """Install a test double. Production keeps the default, which cannot send."""
+    global _submission_transport
+    _submission_transport = transport or SubmissionTransport()
+
+
+def permitted_submission_channel() -> dict[str, Any] | None:
+    channel = getattr(_submission_transport, "permitted_channel", None)
+    if not isinstance(channel, dict):
+        return None
+    if channel.get("permitted") is not True or not str(channel.get("channel_id") or "").strip():
+        return None
+    return channel
 
 
 class FollowUpRequest(BaseModel):
@@ -123,19 +157,28 @@ def _ledger_rows(db: Session, *, organization_id: str, user: UserContext) -> lis
     )
 
 
+def _send_receipt(rows: list[NovaWorkSubmissionLedger]) -> NovaWorkSubmissionLedger | None:
+    return next((row for row in rows if row.state == "SENT" and row.receipt), None)
+
+
 def _stage(application: NovaWorkApplication | None, rows: list[NovaWorkSubmissionLedger]) -> str:
     if application is None:
         return "DISCOVERED"
-    latest_response = next(
-        (row for row in sorted(rows, key=lambda item: item.updated_at, reverse=True) if row.state in _RESPONSE_STATES),
-        None,
-    )
+    ordered = sorted(rows, key=lambda item: item.updated_at or item.created_at, reverse=True)
+    latest = ordered[0] if ordered else None
+    sent = _send_receipt(rows)
     if application.externally_submitted:
-        if latest_response is not None:
-            return latest_response.state
+        if sent is None:
+            return "BLOCKED"
+        if latest is not None and latest.state in _RESPONSE_STATES and latest.updated_at >= sent.updated_at:
+            return latest.state
         return "SENT"
+    if latest is not None and latest.state == "DELIVERY_FAILURE":
+        return "DELIVERY_FAILURE"
+    if latest is not None and latest.state == "BLOCKED" and application.approval_state == "APPROVED":
+        return "BLOCKED"
     if application.manual_submission_recorded:
-        if latest_response is not None and latest_response.state == "ACKNOWLEDGED":
+        if latest is not None and latest.state == "ACKNOWLEDGED":
             return "ACKNOWLEDGED"
         return "MANUAL_RECORDED"
     if application.approval_state == "APPROVED" and application.approved_for_future_submission:
@@ -244,6 +287,8 @@ def _card(
         "stage": stage,
         "approval_state": application.approval_state if application else None,
         "actually_sent": actually_sent,
+        "sent_vs_draft": "sent" if actually_sent else "draft",
+        "provenance_fetched_at": qual.get("fetched_at"),
         "manual_submission_recorded": bool(application and application.manual_submission_recorded),
         "receipt": sent_row.receipt if sent_row else None,
         "receipt_verified": bool(sent_row and sent_row.receipt),
@@ -416,6 +461,55 @@ def _save_ledger(
     return row
 
 
+def _send_ledger(db: Session, *, organization_id: str, user: UserContext, application_id: str) -> NovaWorkSubmissionLedger | None:
+    return (
+        db.query(NovaWorkSubmissionLedger)
+        .filter(
+            NovaWorkSubmissionLedger.organization_id == organization_id,
+            NovaWorkSubmissionLedger.owner_user_id == user.user_id,
+            NovaWorkSubmissionLedger.idempotency_key == f"{_SEND_KEY_PREFIX}{application_id}",
+        )
+        .first()
+    )
+
+
+def _materials_need_owner_input(db: Session, *, organization_id: str, user: UserContext, application_id: str) -> bool:
+    rows = (
+        db.query(NovaWorkMaterial)
+        .filter(
+            NovaWorkMaterial.organization_id == organization_id,
+            NovaWorkMaterial.owner_user_id == user.user_id,
+            NovaWorkMaterial.application_id == application_id,
+        )
+        .all()
+    )
+    return any("OWNER INPUT REQUIRED" in str(row.body or "").upper() for row in rows)
+
+
+def _attempt_payload(
+    row: NovaWorkSubmissionLedger,
+    *,
+    application: NovaWorkApplication,
+    sent_now: int,
+    application_url: str | None,
+    provider_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "ledger": _ledger_public(row),
+        "handoff": {
+            "status": row.state,
+            "externally_submitted": bool(application.externally_submitted) and row.state == "SENT" and bool(row.receipt),
+            "external_action_taken": False,
+            "application_url": application_url,
+            "provider_id": provider_id,
+            "reason": row.blocker_reason or row.next_action,
+        },
+        "application_externally_submitted": bool(application.externally_submitted),
+        "applications_sent_by_this_request": sent_now,
+        "financial_execution": False,
+    }
+
+
 def record_submission_attempt(
     db: Session,
     application_id: str,
@@ -423,80 +517,143 @@ def record_submission_attempt(
     organization_id: str,
     user: UserContext,
 ) -> dict[str, Any]:
-    """Record the truthful handoff. This does not send and does not invent a receipt."""
+    """Send one approved application only through an authenticated permitted channel.
+
+    Missing auth, a missing receipt, or a transport failure is not a send.
+    The default transport never touches the network.
+    """
     application = _own_application(db, application_id, organization_id=organization_id, user=user)
-    before_sent = bool(application.externally_submitted)
-    result = submission.submit_or_handoff(
+    existing = _send_ledger(
+        db,
+        organization_id=organization_id,
+        user=user,
+        application_id=application.application_id,
+    )
+    if existing is not None and existing.state == "SENT" and existing.receipt and application.externally_submitted:
+        return _attempt_payload(
+            existing,
+            application=application,
+            sent_now=0,
+            application_url=None,
+            provider_id=existing.channel,
+        )
+
+    handoff = submission.submit_or_handoff(
         db,
         application.application_id,
         organization_id=organization_id,
         user=user,
     )
     db.refresh(application)
-    if application.externally_submitted and not before_sent:
+    if application.externally_submitted and not (existing and existing.receipt):
         application.externally_submitted = False
         db.flush()
-        result = {
-            **dict(result),
-            "status": "BLOCKED",
-            "externally_submitted": False,
-            "external_action_taken": False,
-            "reason": "No stored receipt was found, so this attempt was not marked sent.",
-        }
-    if result.get("externally_submitted") is True and not before_sent:
-        result = {
-            **dict(result),
-            "status": "BLOCKED",
-            "externally_submitted": False,
-            "external_action_taken": False,
-            "reason": "The handoff did not store a send receipt. Approval remains unsent.",
-        }
-    reason = str(result.get("reason") or "No verified submit channel is connected.")
-    next_action = (
-        "Owner step: open the source URL and submit the approved package yourself. "
-        + reason
+
+    opportunity = _own_opportunity(
+        db,
+        application.opportunity_id,
+        organization_id=organization_id,
+        user=user,
     )
+    provider_id = str(handoff.get("provider_id") or "handoff")
+    application_url = handoff.get("application_url") or opportunity.source_url
+    channel = permitted_submission_channel()
+    state = "BLOCKED"
+    receipt = None
+    if channel is None:
+        reason = "No authenticated permitted channel is connected."
+        next_action = (
+            "Owner step: connect one authenticated permitted submission channel for this provider, "
+            "or open the source URL and submit the approved package yourself. Nothing was sent."
+        )
+    elif _materials_need_owner_input(
+        db,
+        organization_id=organization_id,
+        user=user,
+        application_id=application.application_id,
+    ):
+        reason = "The approved draft still contains OWNER INPUT REQUIRED."
+        next_action = (
+            "Owner step: replace each OWNER INPUT REQUIRED marker in the approved draft, "
+            "then retry this single application. Nothing was sent."
+        )
+    else:
+        delivered = _submission_transport.deliver(
+            {
+                "application_id": application.application_id,
+                "channel_id": channel.get("channel_id"),
+                "source_url": application_url,
+            }
+        )
+        if delivered.get("network_used") or (delivered.get("state") == "SENT" and not delivered.get("receipt")):
+            state = "BLOCKED"
+            reason = "The transport did not return a receipt, so this attempt was not marked sent."
+            next_action = (
+                "Owner step: confirm the permitted channel can return a receipt, then retry this single application. "
+                "Nothing was sent."
+            )
+        elif delivered.get("state") == "SENT" and delivered.get("receipt"):
+            state = "SENT"
+            receipt = str(delivered.get("receipt"))[:1000]
+            reason = None
+            next_action = "Receipt stored. Record the employer response or set a follow-up. This view does not send another message."
+            application.externally_submitted = True
+        elif delivered.get("state") == "DELIVERY_FAILURE":
+            state = "DELIVERY_FAILURE"
+            reason = str(delivered.get("reason") or "The permitted channel rejected the message.")
+            next_action = "The confirmed channel failed. Do not treat this application as delivered. Fix the channel before any retry."
+            application.externally_submitted = False
+        else:
+            state = "BLOCKED"
+            reason = str(delivered.get("reason") or "The permitted channel did not accept the application.")
+            next_action = (
+                "Owner step: connect one authenticated permitted submission channel for this provider, "
+                "or open the source URL and submit the approved package yourself. Nothing was sent."
+            )
+            application.externally_submitted = False
+
+    if state != "SENT":
+        application.externally_submitted = False
     row = _save_ledger(
         db,
         organization_id=organization_id,
         user=user,
         application=application,
-        state="BLOCKED",
-        channel=str(result.get("provider_id") or "handoff"),
-        idempotency_key=f"blocked:{application.application_id}",
-        blocker_reason=reason[:1000],
+        state=state,
+        channel=str((channel or {}).get("channel_id") or provider_id)[:80],
+        idempotency_key=f"{_SEND_KEY_PREFIX}{application.application_id}",
+        recipient=(str(channel.get("recipient") or "")[:220] or None) if channel else None,
+        receipt=receipt,
+        blocker_reason=(reason or "")[:1000] or None,
         next_action=next_action[:1000],
     )
     service._record_audit(
         db,
         organization_id=organization_id,
         user=user,
-        event_type="SUBMISSION_BLOCKED",
-        summary="Submission attempt recorded as blocked. Nothing was sent.",
+        event_type="SUBMISSION_SENT" if state == "SENT" else "SUBMISSION_BLOCKED",
+        summary=(
+            "Submission receipt stored for one application."
+            if state == "SENT"
+            else "Submission attempt was not marked sent."
+        ),
         ref_id=application.application_id,
         entity_type="application",
         actor_category="NOVA",
-        new_state="BLOCKED",
+        new_state=state,
         reason=reason,
         source="first_client_pipeline",
     )
     db.commit()
     db.refresh(row)
     db.refresh(application)
-    return {
-        "ledger": _ledger_public(row),
-        "handoff": {
-            "status": "BLOCKED",
-            "externally_submitted": False,
-            "external_action_taken": False,
-            "application_url": result.get("application_url"),
-            "provider_id": result.get("provider_id"),
-            "reason": reason,
-        },
-        "application_externally_submitted": bool(application.externally_submitted),
-        "applications_sent_by_this_request": 0,
-        "financial_execution": False,
-    }
+    return _attempt_payload(
+        row,
+        application=application,
+        sent_now=1 if state == "SENT" else 0,
+        application_url=application_url,
+        provider_id=provider_id,
+    )
 
 
 def schedule_follow_up(
@@ -509,9 +666,15 @@ def schedule_follow_up(
 ) -> dict[str, Any]:
     """Set a follow-up only after a real or owner-recorded submission. Does not send."""
     application = _own_application(db, application_id, organization_id=organization_id, user=user)
-    if not application.externally_submitted and not application.manual_submission_recorded:
+    sent = _send_ledger(
+        db,
+        organization_id=organization_id,
+        user=user,
+        application_id=application.application_id,
+    )
+    if sent is None or sent.state != "SENT" or not sent.receipt or not application.externally_submitted:
         raise service.NovaWorkError(
-            "Follow-up can be scheduled only after a confirmed send or an owner-recorded manual submission. This application has not been sent.",
+            "Follow-up can be scheduled only after a submission receipt. This application has no send receipt.",
             status_code=409,
         )
     due = _as_utc(payload.follow_up_at)
@@ -565,16 +728,15 @@ def record_response(
     """Record an employer acknowledgement or a delivery failure. Does not send."""
     application = _own_application(db, application_id, organization_id=organization_id, user=user)
     outcome = payload.outcome
-    if outcome == "DELIVERY_FAILURE" and not application.externally_submitted:
+    sent = _send_ledger(
+        db,
+        organization_id=organization_id,
+        user=user,
+        application_id=application.application_id,
+    )
+    if sent is None or sent.state != "SENT" or not sent.receipt or not application.externally_submitted:
         raise service.NovaWorkError(
-            "Delivery failure can be recorded only after a confirmed send. This application has not been sent.",
-            status_code=409,
-        )
-    if outcome == "ACKNOWLEDGED" and not (
-        application.externally_submitted or application.manual_submission_recorded
-    ):
-        raise service.NovaWorkError(
-            "An acknowledgement can be recorded only after a confirmed send or an owner-recorded manual submission.",
+            "An employer response can be recorded only after a submission receipt. This application has no send receipt.",
             status_code=409,
         )
     note = re.sub(r"\s+", " ", str(payload.note or "")).strip()[:400] or None
@@ -617,3 +779,79 @@ def record_response(
         "external_action_taken": False,
         "financial_execution": False,
     }
+
+
+def _verified_live_match(record: dict[str, Any]) -> bool:
+    """True only for a qualified live record with a real source URL and fetch time.
+
+    Fixture, simulated, and example hosts never qualify as verified leads.
+    """
+    from urllib.parse import urlparse
+
+    if str(record.get("record_class") or "").lower() in {"fixture", "simulated", "manual"}:
+        return False
+    if record.get("simulated") or record.get("fixture") or record.get("provenance_verified") is not True:
+        return False
+    url = str(record.get("source_url") or "")
+    if not url.startswith("https://"):
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    if host in _FIXTURE_HOSTS or host.endswith(".invalid") or host.endswith(".example"):
+        return False
+    qual = record.get("live_qualification") if isinstance(record.get("live_qualification"), dict) else {}
+    status = str(qual.get("qualification_status") or record.get("qualification_status") or "")
+    if status != "QUALIFIED":
+        return False
+    if not str(record.get("fetched_at") or "").strip():
+        return False
+    blockers = {str(item) for item in (qual.get("blockers") or [])}
+    if blockers.intersection({
+        "upfront_fee_required",
+        "upfront_fee_or_paid_membership",
+        "upwork_paid_connects",
+        "certification_or_license_required",
+        "unverified_experience_required",
+        "physical_licensed_or_onsite_role",
+    }):
+        return False
+    return True
+
+
+def draft_targeted_proposals(records: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
+    """Draft at most three proposals for verified live matches. Fixtures draft nothing."""
+    from app.core.nova.work_revenue.materials import generate_drafts
+
+    cap = max(0, min(3, int(limit)))
+    drafted: list[dict[str, Any]] = []
+    for record in records:
+        if len(drafted) >= cap:
+            break
+        if not _verified_live_match(record):
+            continue
+        materials = generate_drafts(
+            {
+                "opportunity_title": record.get("title") or record.get("opportunity_title"),
+                "company_name": record.get("company_name"),
+                "description": record.get("description"),
+                "source_url": record.get("source_url"),
+                "search_family": record.get("search_family"),
+            }
+        )
+        proposal = next((item for item in materials if item.get("kind") == "proposal"), None)
+        if proposal is None:
+            continue
+        body = str(proposal.get("body") or "").rstrip() + "\n\nThis draft was not sent."
+        drafted.append(
+            {
+                "record_class": "live",
+                "fixture": False,
+                "source_url": record.get("source_url"),
+                "fetched_at": record.get("fetched_at"),
+                "title": record.get("title") or record.get("opportunity_title"),
+                "company_name": record.get("company_name"),
+                "proposal": body,
+                "sent": False,
+                "external_action_taken": False,
+            }
+        )
+    return drafted
