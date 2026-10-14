@@ -177,9 +177,18 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit] + "…"
 
 
+def _clip_tail(text: str, limit: int) -> str:
+    """Keep the newest text so a length cap cannot drop a later approval."""
+    if len(text) <= limit:
+        return text
+    return "…" + text[-limit:]
+
+
 def _history_text(
     history_rows: list[NovaWorkStatusHistory],
     audit_rows: list[NovaWorkAuditEvent],
+    *,
+    approval_note: str = "",
 ) -> str:
     events: list[tuple[datetime, str]] = []
     for item in history_rows:
@@ -198,7 +207,11 @@ def _history_text(
             f"{_iso(item.created_at)} audit {item.event_type} {summary}".strip(),
         ))
     events.sort(key=lambda pair: _sort_stamp(pair[0]))
-    return _clip(" ; ".join(text for _stamp, text in events[:_MAX_HISTORY]), 2000)
+    # Older create/qualify rows are dropped first. Approval evidence is newer.
+    selected = [text for _stamp, text in events[-_MAX_HISTORY:]]
+    if approval_note:
+        selected.append(approval_note)
+    return _clip_tail(" ; ".join(selected), 2000)
 
 
 def _display_source_url(value: str | None) -> str:
@@ -315,14 +328,12 @@ def build_owner_review_evidence(
         if application_id:
             history_rows.extend(history_by_ref.get(application_id, []))
             audit_rows.extend(audit_by_ref.get(application_id, []))
-        approval_history = _history_text(history_rows, audit_rows)
+        approval_note = ""
         if application and (application.owner_notes or application.notes):
             note_stamp = _iso(application.decided_at or application.updated_at)
             note_text = redact_text(application.owner_notes or application.notes)
-            approval_history = _clip(
-                f"{approval_history} ; {note_stamp} approval_note {note_text}".strip(" ;"),
-                2000,
-            )
+            approval_note = f"{note_stamp} approval_note {note_text}".strip()
+        approval_history = _history_text(history_rows, audit_rows, approval_note=approval_note)
         rows.append({
             "export_scope": _EXPORT_SCOPE,
             "opportunity_id": opportunity.opportunity_id,

@@ -6,14 +6,20 @@ an application, change approval state, or include another tenant or user.
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timedelta, timezone
 from io import StringIO
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
-from app.core.nova.work_revenue.owner_review_evidence import csv_safe, redact_text
+from app.core.nova.work_revenue.owner_review_evidence import (
+    _history_text,
+    csv_safe,
+    redact_text,
+)
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.db.session import engine
 from app.main import app
@@ -131,6 +137,48 @@ def _save_fictional(client: TestClient, headers: dict[str, str], **overrides) ->
 
 def _csv_rows(text: str) -> list[dict[str, str]]:
     return list(csv.DictReader(StringIO(text)))
+
+
+def test_history_keeps_recent_approval_when_older_text_exceeds_the_cap() -> None:
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    history = []
+    audits = []
+    for index in range(40):
+        stamp = start + timedelta(minutes=index)
+        history.append(SimpleNamespace(
+            created_at=stamp,
+            from_status="READY_FOR_OWNER_REVIEW",
+            to_status="NEEDS_CHANGES",
+            ref_type="application",
+            note="change request " + ("n" * 180),
+        ))
+        audits.append(SimpleNamespace(
+            created_at=stamp,
+            event_type="APPLICATION_STATUS_CHANGED",
+            summary="Owner requested changes. " + ("t" * 220),
+        ))
+    approved_at = start + timedelta(hours=3)
+    audits.append(SimpleNamespace(
+        created_at=approved_at,
+        event_type="OWNER_APPROVED_APPLICATION",
+        summary="Owner approved application for FUTURE submission only.",
+    ))
+    history.append(SimpleNamespace(
+        created_at=approved_at,
+        from_status="READY_FOR_OWNER_REVIEW",
+        to_status="APPROVED",
+        ref_type="application",
+        note="APPROVED",
+    ))
+    text = _history_text(
+        history,
+        audits,
+        approval_note="2026-01-01T03:00:00+00:00 approval_note Fictional owner approval. Do not send.",
+    )
+    assert "OWNER_APPROVED_APPLICATION" in text
+    assert "approval_note Fictional owner approval. Do not send." in text
+    assert "->APPROVED" in text
+    assert len(text) <= 2001
 
 
 def test_csv_formula_cells_are_prefixed() -> None:
