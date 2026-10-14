@@ -97,6 +97,29 @@ def main() -> None:
         raise AssertionError("Casting CTA uses a name that is not on the allowlist")
     if snap["href"] not in site or snap["name"] not in plain:
         raise AssertionError("Nova Snap catalog card is missing")
+    if snap["status"] != "Coming Soon":
+        raise AssertionError("Nova Snap card status must stay Coming Soon")
+    if "Join waitlist" not in site:
+        raise AssertionError("Unfinished products are missing the waitlist CTA")
+    if ">Available<" in site:
+        raise AssertionError("Catalog marks a product Available without a separate usability check")
+
+    home = (ROOT / "index.html").read_text(encoding="utf-8")
+    home_cards = _cards(home)
+    if len(home_cards) != expected:
+        raise AssertionError(f"homepage cards: {len(home_cards)}; registry: {expected}")
+    if [product_id for product_id, _src, _alt in home_cards] != [product["id"] for product in PRODUCTS]:
+        raise AssertionError("Homepage card ids drifted from the registry")
+    home_hashes = set()
+    for product, src, alt in zip(PRODUCTS, [item[1] for item in home_cards], [item[2] for item in home_cards]):
+        if not src.startswith("assets/img/"):
+            raise AssertionError(f"Homepage image path drifted: {src}")
+        path = (ROOT / src).resolve()
+        if path.name != product["art"] or alt != product["alt"] or not path.is_file():
+            raise AssertionError(f"Homepage art drifted for {product['id']}")
+        home_hashes.add(hashlib.sha256(path.read_bytes()).hexdigest())
+    if len(home_hashes) != expected:
+        raise AssertionError(f"Homepage unique image hashes: {len(home_hashes)}; registry: {expected}")
     if "\\n              <tr>" in site:
         raise AssertionError("Status table contains a literal escaped newline")
 

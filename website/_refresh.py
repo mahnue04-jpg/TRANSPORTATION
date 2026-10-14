@@ -61,20 +61,12 @@ def apply(add, pages, status_table):
         'AI-assisted business research, administrative support, CRM and workflow assessment, and Nova software from Minnesota-based AMICOR.',
         hero('AMICOR · Minnesota, USA', 'Less busywork.<br>More room to build.',
              'Research, reports, data cleanup, and workflow support—with AI-assisted preparation and human review.',
-             button('/business-services/', 'Explore Business Services') + button(AGENT, 'Try Nova', False)).replace(
-            '</div></section>',
-            '<div class="home-product-stage" aria-label="Product illustrations">'
-            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-casting.jpg" alt="Conceptual illustration of an audition camera and a reviewer at a monitor. Public submissions are off.">'
-            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-nova-create.jpg" alt="Conceptual illustration of an image and video editing studio with storyboard frames.">'
-            '<img loading="eager" decoding="async" width="1280" height="720" src="assets/img/card-operations.jpg" alt="Conceptual illustration of a digital operations workspace and workflow review. Not a live screenshot.">'
-            '</div></div></section>',
-            1,
-        )
+             button('/business-services/', 'Explore Business Services') + button(AGENT, 'Try Nova', False))
+        + '<section class="section" id="home-products"><div class="wrap"><h2>Products</h2><p>Each product appears once, with its illustration, status, and next step. Open product is not an availability claim.</p>' + visual_grid('', eager=True, grid_id='home-product-catalog') + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>. The full status table is on the <a href="/products/">product catalog</a>.</p></div></section>'
         + '<section class="section" id="customer-work"><div class="wrap"><h2>Bring us the work that slows you down</h2><p>These are business services, not catalog products.</p>' + home_service_cards + '</div></section>'
-        + section('Meet Nova', '<p>Each product has one catalog card. This list is a cross-link, not a second catalog.</p>' + cross_links(label='Product pages') + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>.</p>')
         + section('See how a task becomes a deliverable', '<div class="grid grid-3"><article class="card"><h3>1. Define the result</h3><p>Share your goal, inputs, deadline, and acceptance criteria.</p></article><article class="card"><h3>2. Prepare &amp; review</h3><p>AMICOR checks the scope. Nova assists with supported work, and a person reviews the output.</p></article><article class="card"><h3>3. Deliver the work</h3><p>Receive the agreed materials with sources, assumptions, and next steps where relevant.</p></article></div>')
         + section('Evaluate before you commit', button(AGENT, 'Run the Interactive Demo') + ' ' + button('/samples/', 'View Sample Deliverables', False) + '<p>The app demo illustrates a lead workflow. It does not contact customers or change a live CRM. Samples are fictional examples, not client case studies.</p>')
-        + section('Future AMICOR initiatives', '<p>AMICOR Health, local delivery, Lifesaver, and connected hardware remain on separate development timelines. Their single catalog cards are on the <a href="/products/">product catalog</a>.</p>'))
+        + section('Future AMICOR initiatives', '<p>AMICOR Health, local delivery, Lifesaver, and connected hardware are included once in the product cards above. They are not live services on this page.</p>'))
 
     replace('/business-services/', 'AMICOR Business Services — Research, Data and CRM Support',
         'Request scoped research, administrative support, data cleanup, documentation, and CRM workflow assessment from AMICOR.',

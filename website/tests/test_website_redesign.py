@@ -44,15 +44,31 @@ def test_required_pages_exist() -> None:
 
 
 def test_homepage_renders_product_illustrations() -> None:
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from catalog import PRODUCTS
+
     home = _html(PAGES["/"])
-    assert "product-visual-card" not in home
+    assert home.count("product-visual-card") == 12
+    assert 'id="home-product-catalog"' in home
     assert "These are business services, not catalog products." in home
     assert 'data-listing="service"' in home
-    for name in ("card-casting.jpg", "card-nova-create.jpg", "card-operations.jpg", "card-research.jpg", "card-data.jpg", "card-crm.jpg"):
-        assert f'src="assets/img/{name}"' in home, name
-        assert (ROOT / "assets" / "img" / name).is_file(), name
+    assert "home-product-stage" not in home
+    assert ">Available<" not in home
+    for product in PRODUCTS:
+        marker = f'data-product-id="{product["id"]}"'
+        assert home.count(marker) == 1, product["id"]
+        assert f'src="assets/img/{product["art"]}"' in home
+        assert (ROOT / "assets" / "img" / product["art"]).is_file()
+        assert f'<p class="product-visual-status">{product["status"]}</p>' in home
     assert 'src="../assets/img/' not in home
     assert 'href="/products/"' in home
+    assert "Join waitlist" in home
+    assert "Nova Snap" in home
+    snap = next(product for product in PRODUCTS if product["id"] == "nova-snap")
+    assert snap["status"] == "Coming Soon"
+    assert "calling is not available" in home.lower() or "Live calling is not available." in home
 
 
 def test_home_presents_services_and_nova() -> None:
@@ -222,21 +238,22 @@ def test_one_catalog_card_per_product() -> None:
             continue
         text = path.read_text(encoding="utf-8")
         rel = str(path.relative_to(ROOT))
-        if "product-visual-card" in text and rel != "products/index.html":
+        if "product-visual-card" in text and rel not in {"products/index.html", "index.html"}:
             visual_outside.append(rel)
         for product in PRODUCTS:
             marker = f'data-product-id="{product["id"]}"'
             cards_by_id[product["id"]].extend([rel] * text.count(marker))
     assert visual_outside == []
     for product_id, hits in cards_by_id.items():
-        assert hits == ["products/index.html"], (product_id, hits)
+        assert sorted(hits) == ["index.html", "products/index.html"], (product_id, hits)
     home = _html(PAGES["/"])
     tech = _html(PAGES["/technologies/"])
     resources = _html(PAGES["/resources/"])
     for product in PRODUCTS:
-        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in home
-        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in tech
-        assert f"<h3>{product['name'].replace('&', '&amp;')}</h3>" not in resources
+        name = f"<h3>{product['name'].replace('&', '&amp;')}</h3>"
+        assert home.count(name) == 1
+        assert name not in tech
+        assert name not in resources
     assert "Home Hub &amp; Car Hub" not in home
     assert "<h1>Nova Create</h1>" not in _html(PAGES["/nova-create/"])
     assert "<h3>AMICOR Nova Create</h3>" not in _html(PAGES["/products/"])

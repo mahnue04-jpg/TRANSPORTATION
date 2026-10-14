@@ -124,8 +124,8 @@ PRODUCTS = [
     _item(
         id="nova-snap",
         name="Nova Snap",
-        status="In development",
-        table_status="IN DEVELOPMENT",
+        status="Coming Soon",
+        table_status="COMING SOON / IN DEVELOPMENT",
         summary="Signed-in messages, drafts, and local calendar notes. Live calling is not available.",
         claim="Communications workspace for saved messages and drafts. Phone and video calling are not enabled. Not Synapse Meeting.",
         href="/nova-snap/",
@@ -237,11 +237,24 @@ def _esc(value: str) -> str:
     return escape(value, quote=True)
 
 
-def visual_grid(prefix: str, *, eager: bool = False) -> str:
+def card_action(product: dict) -> tuple[str, str]:
+    """Public card CTA. Available is not used until a product is independently verified as generally usable."""
+    status = product["status"].lower()
+    table = product["table_status"].lower()
+    unfinished = any(token in status for token in ("in development", "future hardware", "coming soon")) or "coming soon" in table
+    if unfinished:
+        return ("Join waitlist", "/early-access/?product=" + quote(product["lead"]))
+    if any(token in status for token in ("early access", "preview", "sandbox")):
+        label = "Preview" if "preview" in status or "sandbox" in status else "Early access"
+        return (label, product["href"])
+    return ("Open product", product["href"])
+
+
+def visual_grid(prefix: str, *, eager: bool = False, grid_id: str = "product-catalog") -> str:
     cards = []
     for index, product in enumerate(PRODUCTS):
         loading = "eager" if eager and index == 0 else "lazy"
-        label = "Explore product →"
+        label, href = card_action(product)
         cards.append(
             '<article class="product-visual-card" data-listing="product" data-product-id="'
             + _esc(product["id"])
@@ -260,13 +273,15 @@ def visual_grid(prefix: str, *, eager: bool = False) -> str:
             + "</h3><p>"
             + _esc(product["summary"])
             + '</p><a class="card-link" href="'
-            + _esc(product["href"])
+            + _esc(href)
             + '">'
-            + label
+            + _esc(label)
             + "</a></div></article>"
         )
     return (
-        '<div class="product-visual-grid" id="product-catalog">'
+        '<div class="product-visual-grid" id="'
+        + _esc(grid_id)
+        + '">'
         + "".join(cards)
         + "</div><p class=\"art-note\">Conceptual illustrations. Not screenshots of live accounts, payments, calls, or devices. Business services are listed separately and are not catalog cards.</p>"
     )
