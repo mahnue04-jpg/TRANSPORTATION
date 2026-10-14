@@ -54,7 +54,11 @@ The page plays the approved video and accepts an idea, a budget, a currency (USD
 
 Chrome on a 390×844 viewport loaded the video at 720×1280 and saved fictional idea `cigo_a2f92d905d2d4bfb95101d46224a1a43` with outbound sends 0.
 
-This route is in the application. It is not on the public internet until this branch is deployed. No production deploy was performed in this pass.
+This route is in the application. It is not on the public internet.
+
+CI on commit `4c2cc05c` is green: Jekyll run 38555811341, Nova Casting Preview run 38555811348, Work and Revenue run 38555811353, and Render backend diagnostic run 38555811342.
+
+Production `https://amicor-health-isf-py.onrender.com/dev/cigo-validation` still serves the main site shell, not this page. The Netlify preview for PR #330 returns 404 for that path because it does not run the Python app. Deploying this branch would restart the live Health ISF service, which also serves Delivery. That restart was not performed.
 
 ## 6. Connected database with fictional submissions
 
