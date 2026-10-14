@@ -18,7 +18,7 @@ from app.core.nova.v3.live_qualification import (
     partition_by_qualification,
     qualify_and_rank_live_jobs,
 )
-from app.core.nova.v3.multi_source_discovery import search_multi_source_jobs
+from app.core.nova.v3.multi_source_discovery import classify_live_search, search_multi_source_jobs
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
 from app.core.nova.work_revenue.capability_first_discovery import generate_capability_first_queries
 
@@ -201,6 +201,16 @@ def run_autopilot_cycle(
         "held_for_owner_review": held_for_owner_review,
         "blocked_packages": blocked_packages,
         "persistent_results": persistent,
+        **classify_live_search({
+            "providers_queried": sorted(providers_queried),
+            "provider_result_counts": {
+                provider_id: 0
+                for provider_id in providers_queried
+                if provider_id not in {str(item.get("provider_id")) for item in provider_errors if item.get("provider_id")}
+            },
+            "provider_errors": provider_errors,
+            "jobs": unique,
+        }),
         "external_action_taken": False,
         "external_submission": False,
         "agency_contact": False,

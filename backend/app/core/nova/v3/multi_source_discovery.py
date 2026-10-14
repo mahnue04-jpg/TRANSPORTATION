@@ -285,6 +285,71 @@ def _record_failure(provider_id: str, *, source_type: str, error: str, enabled: 
     _health[provider_id] = row
 
 
+_RETRY_SLEEP_SECONDS = 0.35
+_TRANSIENT_HTTP_STATUS = {429, 500, 502, 503, 504}
+
+
+def _transient_provider_error(exc: BaseException) -> bool:
+    """One retry is reserved for timeouts, transport drops, and upstream 429/5xx."""
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status in _TRANSIENT_HTTP_STATUS
+
+
+def call_provider_search(provider: LiveDiscoveryProvider, query: str, *, limit: int) -> list[dict[str, Any]]:
+    """Search a provider, retrying once after a transient outage.
+
+    A second failure is raised so the caller can record the source as failed
+    instead of describing the run as a search with no matches.
+    """
+    try:
+        return provider.search(query, limit=limit)
+    except Exception as exc:
+        if not _transient_provider_error(exc):
+            raise
+        time.sleep(_RETRY_SLEEP_SECONDS)
+        return provider.search(query, limit=limit)
+
+
+def classify_live_search(result: dict[str, Any]) -> dict[str, Any]:
+    """Say whether a live search actually ran.
+
+    A provider that returns zero rows still counts as a completed search.
+    A provider that errors does not. If every queried provider errored, the
+    run is unavailable and must not be described as zero matches.
+    """
+    queried = [str(item) for item in (result.get("providers_queried") or []) if str(item)]
+    counts = dict(result.get("provider_result_counts") or {})
+    failed = {
+        str(item.get("provider_id"))
+        for item in (result.get("provider_errors") or [])
+        if item.get("provider_id")
+    }
+    succeeded = [provider_id for provider_id in queried if provider_id in counts and provider_id not in failed]
+    job_count = len(result.get("jobs") or [])
+    if not queried or (failed and not succeeded):
+        status = "unavailable"
+        claimed = False
+        empty_reason = "source_unavailable"
+    elif failed and succeeded:
+        status = "partial"
+        claimed = True
+        empty_reason = None if job_count else "no_matches"
+    else:
+        status = "ok"
+        claimed = True
+        empty_reason = None if job_count else "no_matches"
+    return {
+        "live_search_status": status,
+        "live_search_claimed": claimed,
+        "empty_reason": empty_reason,
+        "providers_succeeded": succeeded,
+        "providers_failed": sorted(failed),
+    }
+
+
 class RemotiveLiveProvider:
     meta = ProviderMeta(
         provider_id="remotive",
@@ -1833,7 +1898,7 @@ def search_multi_source_jobs(
         try:
             for variant in query_variants:
                 used_variants.append(variant)
-                rows = provider.search(variant, limit=capped)
+                rows = call_provider_search(provider, variant, limit=capped)
                 screened += len(rows)
                 rows = [row for row in rows if _query_relevant(row, normalized)]
                 if not include_simulated:
@@ -1867,7 +1932,7 @@ def search_multi_source_jobs(
 
     deduped = dedupe_opportunities(collected)[:capped]
     real_jobs = [row for row in deduped if not row.get("simulated")]
-    return {
+    payload = {
         "query": normalized,
         "count": len(deduped),
         "real_count": len(real_jobs),
@@ -1886,6 +1951,8 @@ def search_multi_source_jobs(
         "financial_execution": False,
         "provider_health": provider_health_snapshot(),
     }
+    payload.update(classify_live_search(payload))
+    return payload
 
 
 def reset_provider_health_for_tests() -> None:

@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-work/work.css" />
+  <link rel="stylesheet" href="/static/nova-work/first-client.css" />
 </head>
 <body>
   <header class="work-header">
@@ -87,6 +88,13 @@
       </form>
       <p id="live-job-status" class="hint">Sign in to check live-discovery readiness.</p>
       <div id="live-job-results">No live discovery run yet.</div>
+    </section>
+
+    <section class="command-card" id="first-client-board" aria-label="First client board">
+      <h2>First client board</h2>
+      <p class="hint">Saved matches for this signed-in owner. Sent means a confirmed external submission already exists. A draft, an approval, or a blocked handoff is not a send. This board does not search or contact anyone.</p>
+      <div id="first-client-counts" class="first-client-counts">Sign in to load the board.</div>
+      <div id="first-client-list"></div>
     </section>
 
     <section class="counts" aria-label="Work counts">
@@ -399,5 +407,6 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-work/work.js"></script>
+  <script src="/static/nova-work/first-client.js"></script>
 </body>
 </html>

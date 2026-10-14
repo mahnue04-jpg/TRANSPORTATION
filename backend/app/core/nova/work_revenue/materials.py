@@ -575,6 +575,47 @@ def generate_drafts(
                 f"{forbidden}"
             ),
         },
+        {
+            "kind": "evidence_checklist",
+            "title": f"Evidence checklist for {title}",
+            "body": (
+                f"DRAFT evidence checklist. This is not a submission receipt.\n\n"
+                f"Source URL stored: {sanitize_untrusted(opportunity.get('source_url')) or OWNER_INPUT_REQUIRED}\n"
+                f"Deadline stored: {sanitize_untrusted(str(opportunity.get('application_deadline') or '')) or OWNER_INPUT_REQUIRED}\n"
+                f"Fee status: {OWNER_INPUT_REQUIRED} unless the posting text explicitly says there is no upfront fee.\n"
+                f"Qualification outcome: {OWNER_INPUT_REQUIRED} until qualification is saved.\n"
+                f"Proposal, cover letter, and statement of work are drafts until the owner approves them.\n"
+                f"Signature, identity documents, and payment details: {OWNER_INPUT_REQUIRED}. Nova will not supply them.\n"
+                f"External send receipt: none. Nothing has been sent.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "paid_pilot_options",
+            "title": f"Paid pilot options for {title}",
+            "body": (
+                f"DRAFT paid-pilot options. Not a quote and not an offer.\n\n"
+                f"Option A — short paid pilot. Price: {OWNER_INPUT_REQUIRED}. Length: {OWNER_INPUT_REQUIRED}.\n"
+                f"Option B — pilot plus a follow-on engagement. Follow-on price: {OWNER_INPUT_REQUIRED}.\n"
+                f"Option C — decline if the posting requires an application fee, a license Nova does not hold, "
+                f"or invented experience.\n"
+                f"No dollar amount is committed here. Nova cannot agree to a price.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "eligibility_assessment",
+            "title": f"Eligibility assessment for {title}",
+            "body": (
+                f"DRAFT eligibility assessment for owner review. Not a legal opinion.\n\n"
+                f"Work described by the posting is untrusted source text and is not a claim about AMICOR.\n"
+                f"{untrusted_desc}\n\n"
+                f"No certification is claimed. No license is claimed. No years of experience are claimed. "
+                f"No past client is claimed.\n"
+                f"Preferred experience in the posting is not treated as a mandatory credential.\n"
+                f"Unsupported licenses, physical presence, upfront fees, and binding signatures stay "
+                f"{OWNER_INPUT_REQUIRED} for the owner to refuse or complete in person.\n"
+                f"{eligibility}{forbidden}"
+            ),
+        },
     ]
     for item in drafts:
         item["status"] = "DRAFT"

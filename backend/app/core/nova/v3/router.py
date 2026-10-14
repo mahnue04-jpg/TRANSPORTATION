@@ -29,6 +29,7 @@ from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.multi_source_discovery import (
+    classify_live_search,
     dedupe_opportunities,
     provider_catalog,
     provider_health_snapshot,
@@ -399,6 +400,7 @@ def v3_live_job_search(
             "external_submission": False,
             "financial_execution": False,
             "jobs": ranked,
+            **classify_live_search({**multi, "jobs": ranked}),
         }
     except V3Error as exc:
         _raise(exc)
@@ -453,6 +455,12 @@ def v3_live_job_discover(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": multi.get("providers_queried") or [],
+                "provider_result_counts": multi.get("provider_result_counts") or {},
+                "provider_errors": multi.get("provider_errors") or [],
+                "jobs": ranked,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
@@ -614,6 +622,12 @@ def v3_live_job_prepare(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": sources,
+                "provider_result_counts": provider_counts,
+                "provider_errors": provider_errors,
+                "jobs": collected,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),

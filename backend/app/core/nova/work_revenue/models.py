@@ -612,3 +612,31 @@ class NovaWorkInput(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class NovaWorkSubmissionLedger(Base):
+    """Honest submission attempts. A row is not a send unless state is SENT and the application is externally submitted."""
+
+    __tablename__ = "nova_work_submission_ledger"
+    __table_args__ = (
+        Index("ix_nova_work_ledger_id", "ledger_id", unique=True),
+        Index("ix_nova_work_ledger_owner", "organization_id", "owner_user_id", "application_id"),
+        Index("ix_nova_work_ledger_idem", "organization_id", "owner_user_id", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4)
+    ledger_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    opportunity_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    channel: Mapped[str] = mapped_column(String(80), nullable=False, default="unspecified")
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    recipient: Mapped[str | None] = mapped_column(String(220), nullable=True)
+    receipt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blocker_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
