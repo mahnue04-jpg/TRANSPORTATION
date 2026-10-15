@@ -1958,14 +1958,57 @@ class CreativeStudioService(ShortDramaMixin):
             asset_ids=[video_asset.id, audio_asset.id],
             provider="nova_offline_montage",
         )
+        narration = rendered.get("narration") or {}
         return {
             "job": job.as_dict(),
             "asset": video_asset.as_dict(),
             "audio": audio_asset.as_dict(),
             "url": public_url,
+            "download_url": f"/api/nova/creative/projects/{project_id}/assets/{video_asset.id}/file",
+            "audio_download_url": f"/api/nova/creative/projects/{project_id}/assets/{audio_asset.id}/file",
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
             "click_destination": click,
+            "lip_sync": False,
+            "render_mode": "offline_montage_not_lipsync",
+            "license_status": narration.get("license_status") or "AMBER",
+            "commercial_use": narration.get("commercial_use") or "",
+            "paid_provider_charges": False,
+            "paid_render_allowed": False,
             "readiness_note": "License stays AMBER until the owner accepts the local narration license. Publishing is held.",
         }
+
+    def get_generation_job(self, owner_id: str, project_id: str, job_id: str) -> dict[str, Any]:
+        """Read one saved job. Polling this route does not start a provider."""
+        self._project_or_404(owner_id, project_id)
+        job = next((row for row in self.store.list_jobs(project_id, owner_id) if row.id == job_id), None)
+        if job is None:
+            raise CreativeStudioError("NOT_FOUND", "Job not found", http_status=404)
+        return {
+            "job": job.as_dict(),
+            "ready": job.status in {"GENERATED", "ERROR"},
+            "lip_sync": False if job.provider == "nova_offline_montage" else None,
+            "paid_provider_charges": False if job.provider == "nova_offline_montage" else None,
+        }
+
+    def open_asset_file(self, owner_id: str, project_id: str, asset_id: str) -> tuple[Path, str, str]:
+        """Owner-scoped file for playback download. Another account gets not found."""
+        from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix, _resolve_creative_media_url
+
+        self._project_or_404(owner_id, project_id)
+        asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
+        if asset is None:
+            raise CreativeStudioError("NOT_FOUND", "Asset not found", http_status=404)
+        path = _resolve_creative_media_url(asset.url)
+        root, _prefix = _creative_media_root_and_prefix()
+        if path is None or not path.is_file():
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "This asset has no downloadable file.", http_status=404)
+        resolved = path.resolve()
+        root_resolved = root.resolve()
+        if resolved != root_resolved and root_resolved not in resolved.parents:
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Asset file is outside the studio media directory.", http_status=404)
+        media_types = {".mp4": "video/mp4", ".wav": "audio/wav", ".srt": "text/plain; charset=utf-8"}
+        media_type = media_types.get(resolved.suffix.lower(), "application/octet-stream")
+        return resolved, media_type, resolved.name
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)

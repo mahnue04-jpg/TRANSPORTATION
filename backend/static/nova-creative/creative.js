@@ -908,11 +908,22 @@
       if (meta.presenter_mode === "half_body") return "Half-body presenter";
       return "Headshot presenter";
     }
+    if (row.kind === "video" && meta.render_mode === "offline_montage_not_lipsync") return "Offline montage, not lip sync";
     if (row.kind === "video" && meta.final_promo) return "Final demo video";
     if (row.kind === "video") return "Scene video";
     if (row.kind === "audio") return "Voice audio";
     if (row.kind === "image") return "Image";
     return row.kind || "Asset";
+  }
+
+  async function pollStudioJob(projectId, jobId) {
+    var last = null;
+    for (var attempt = 0; attempt < 8; attempt += 1) {
+      last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
+      if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
+      await new Promise(function (resolve) { setTimeout(resolve, 400); });
+    }
+    return last;
   }
 
   async function refreshAssets() {
@@ -958,18 +969,32 @@
         var isPresenterVideo = row.kind === "presenter_video";
         var isBodyMotion = isPresenterVideo && row.metadata &&
           (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
-        var videoLabel = isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video");
+        var offlineMontage = !isPresenterVideo && row.metadata && row.metadata.render_mode === "offline_montage_not_lipsync";
+        var videoLabel = offlineMontage
+          ? "Download offline montage"
+          : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"));
+        var downloadHref = offlineMontage
+          ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
+          : row.url;
         var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
         var subtitleUrl = row.metadata && row.metadata.subtitle_url ? String(row.metadata.subtitle_url) : "";
         var subtitleTrack = subtitleUrl ? "<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" +
           escapeHtml(subtitleUrl) + "\" default>" : "";
+        var licenseNote = "";
+        if (offlineMontage) {
+          var license = String((row.metadata && row.metadata.license_status) || "AMBER");
+          var clearance = (row.metadata && row.metadata.narration && row.metadata.narration.commercial_use) ||
+            "Local narration is not cleared for a public ad.";
+          licenseNote = "<p class=\"hint\">Lip-sync presenter: no. Commercial-use clearance: " +
+            escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
+        }
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"" +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure><a class=\"button secondary\" href=\"" +
-          escapeHtml(row.url) + "\" download>" + videoLabel + "</a>" +
+          "</figure>" + licenseNote + "<a class=\"button secondary\" href=\"" +
+          escapeHtml(downloadHref) + "\" download>" + videoLabel + "</a>" +
           (subtitleUrl ? " <a class=\"button secondary\" href=\"" + escapeHtml(subtitleUrl) + "\" download>Download captions</a>" : "");
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
@@ -1273,8 +1298,14 @@
         var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/offline-commercial", {
           method: "POST"
         });
+        var polled = rendered;
+        if (rendered.job && rendered.job.id) {
+          polled = await pollStudioJob(activeProjectId, rendered.job.id);
+        }
         renderOutput(rendered);
-        showBanner(rendered.readiness_note || "Offline montage is ready to download. Publishing stays off.", true);
+        var note = rendered.readiness_note || "Offline montage is ready to download. Publishing stays off.";
+        if (polled.job && polled.job.status === "ERROR") note = polled.job.message || note;
+        showBanner(note, !(polled.job && polled.job.status === "ERROR"));
         await refreshAssets();
       } catch (err) {
         showBanner(err.message || "Offline montage failed.", false);

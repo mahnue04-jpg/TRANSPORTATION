@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1341,6 +1342,39 @@ def click_destinations(
 ) -> dict[str, Any]:
     _require_owner(user)
     return get_service().click_destinations(platform, verify=verify)
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def project_job(
+    project_id: str,
+    job_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Poll a saved job. This does not start a render or a paid provider."""
+    _require_owner(user)
+    try:
+        return get_service(db).get_generation_job(user.user_id, project_id, job_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/file")
+def download_asset_file(
+    project_id: str,
+    asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Signed-in owner download. A different account cannot read the file."""
+    _require_owner(user)
+    try:
+        path, media_type, filename = get_service(db).open_asset_file(user.user_id, project_id, asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    return FileResponse(path, media_type=media_type, filename=filename)
 
 
 @router.post("/projects/{project_id}/assemble/offline-commercial")
