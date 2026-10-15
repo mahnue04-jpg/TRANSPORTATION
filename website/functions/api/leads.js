@@ -2,7 +2,7 @@ const PRODUCTS = new Set([
   "Business Services", "Ask Nova", "Nova Operations Agent", "Nova Creative Studio",
   "Nova Casting & Auditions", "Nova Snap", "Work & Revenue", "Nova Today",
   "AMICOR Health", "AMICOR Delivery",
-  "Lifesaver AI Care Cloud", "Home Hub", "Car Hub", "Partnership", "Other",
+  "Lifesaver AI Care Cloud", "Home Hub", "AMICOR Farm App", "Car Hub", "Partnership", "Other",
   "Autonomous Operations Agent", "AMICOR Nova Work & Revenue", "AMICOR Nova Today",
   "AMICOR Nova Create", "AMICOR Deliver",
 ]);
