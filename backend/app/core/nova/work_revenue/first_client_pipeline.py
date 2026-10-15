@@ -35,6 +35,7 @@ _RANK = {
 _RESPONSE_STATES = {"ACKNOWLEDGED", "DELIVERY_FAILURE"}
 _SEND_KEY_PREFIX = "send:"
 _FIXTURE_HOSTS = {"example.com", "example.org", "example.invalid"}
+_REJECTED_OUTCOMES = {"NOT_QUALIFIED", "NOT_SUITABLE", "PROHIBITED", "NOT_SUPPORTED"}
 
 
 class SubmissionTransport:
@@ -247,6 +248,27 @@ def _ledger_public(row: NovaWorkSubmissionLedger) -> dict[str, Any]:
     }
 
 
+def _provenance(opportunity: NovaWorkOpportunity, qual: dict[str, Any]) -> tuple[str | None, str | None, bool]:
+    """Return fetch stamp, where it came from, and whether the URL plus stamp exist."""
+    fetched = str(qual.get("fetched_at") or "").strip()
+    discovered = opportunity.discovered_at.isoformat() if opportunity.discovered_at else ""
+    stamp = fetched or discovered
+    basis = "fetched_at" if fetched else ("discovered_at" if discovered else None)
+    url = str(opportunity.source_url or "").strip()
+    complete = bool(url.startswith("http") and stamp)
+    return (stamp or None), basis, complete
+
+
+def _rejected_outcome(opportunity: NovaWorkOpportunity, qual: dict[str, Any]) -> bool:
+    outcome = str(
+        opportunity.qualification_outcome
+        or qual.get("outcome")
+        or qual.get("qualification_status")
+        or ""
+    )
+    return outcome in _REJECTED_OUTCOMES
+
+
 def _card(
     opportunity: NovaWorkOpportunity,
     application: NovaWorkApplication | None,
@@ -268,6 +290,7 @@ def _card(
     elif opportunity.follow_up_at:
         follow_up = opportunity.follow_up_at
     actually_sent = bool(application and application.externally_submitted)
+    fetched_at, provenance_basis, provenance_complete = _provenance(opportunity, qual)
     return {
         "opportunity_id": opportunity.opportunity_id,
         "application_id": application.application_id if application else None,
@@ -288,7 +311,9 @@ def _card(
         "approval_state": application.approval_state if application else None,
         "actually_sent": actually_sent,
         "sent_vs_draft": "sent" if actually_sent else "draft",
-        "provenance_fetched_at": qual.get("fetched_at"),
+        "provenance_fetched_at": fetched_at,
+        "provenance_basis": provenance_basis,
+        "provenance_complete": provenance_complete,
         "manual_submission_recorded": bool(application and application.manual_submission_recorded),
         "receipt": sent_row.receipt if sent_row else None,
         "receipt_verified": bool(sent_row and sent_row.receipt),
@@ -351,12 +376,31 @@ def build_board(db: Session, *, organization_id: str, user: UserContext) -> dict
         ranked.append(((_RANK.get(outcome, 0), fit_score, opportunity.updated_at.isoformat()), opportunity))
     ranked.sort(key=lambda item: item[0], reverse=True)
 
-    cards = []
-    for _key, opportunity in ranked[:_TOP_LIMIT]:
-        application = app_by_opp.get(opportunity.opportunity_id)
-        rows = ledger_by_app.get(application.application_id, []) if application else []
-        drafts = materials_by_app.get(application.application_id, []) if application else []
-        cards.append(_card(opportunity, application, drafts, rows))
+    eligible: list[NovaWorkOpportunity] = []
+    incomplete: list[NovaWorkOpportunity] = []
+    rejected_count = 0
+    for _key, opportunity in ranked:
+        qual = _parse_qual(opportunity.qualification_json)
+        if _rejected_outcome(opportunity, qual):
+            rejected_count += 1
+            continue
+        _stamp, _basis, complete = _provenance(opportunity, qual)
+        if complete:
+            eligible.append(opportunity)
+        else:
+            incomplete.append(opportunity)
+
+    def _cards_for(rows_in: list[NovaWorkOpportunity]) -> list[dict[str, Any]]:
+        built = []
+        for opportunity in rows_in:
+            application = app_by_opp.get(opportunity.opportunity_id)
+            rows = ledger_by_app.get(application.application_id, []) if application else []
+            drafts = materials_by_app.get(application.application_id, []) if application else []
+            built.append(_card(opportunity, application, drafts, rows))
+        return built
+
+    cards = _cards_for(eligible[:_TOP_LIMIT])
+    incomplete_cards = _cards_for(incomplete[:_TOP_LIMIT])
 
     sent_cards = []
     for application in applications:
@@ -390,11 +434,16 @@ def build_board(db: Session, *, organization_id: str, user: UserContext) -> dict
         "demo": False,
         "live_search_claimed": False,
         "live_search_status": "not_run",
-        "empty_reason": None if cards else "no_saved_opportunities",
+        "empty_reason": None if cards else (
+            "no_complete_matches" if rejected_count or incomplete_cards else "no_saved_opportunities"
+        ),
         "top_matches": cards,
+        "incomplete_provenance": incomplete_cards,
         "sent_outside_top_matches": sent_cards[:_TOP_LIMIT],
         "counts": {
             "top_matches": len(cards),
+            "incomplete_provenance": len(incomplete_cards),
+            "rejected": rejected_count,
             "drafts": _count("DRAFT") + _count("READY_FOR_OWNER_REVIEW") + _count("NEEDS_CHANGES"),
             "approved_not_sent": _count("APPROVED_NOT_SENT") + _count("BLOCKED"),
             "actually_sent": sum(1 for card in cards + sent_cards if card["actually_sent"]),
@@ -434,6 +483,9 @@ def _save_ledger(
         )
         .first()
     )
+    if existing is not None and existing.state == "SENT" and existing.receipt and state != "SENT":
+        # A stored receipt is not replaced by a later blocked or failed attempt.
+        return existing
     if existing is not None:
         existing.state = state
         existing.channel = channel[:80]
@@ -529,7 +581,11 @@ def record_submission_attempt(
         user=user,
         application_id=application.application_id,
     )
-    if existing is not None and existing.state == "SENT" and existing.receipt and application.externally_submitted:
+    if existing is not None and existing.state == "SENT" and existing.receipt:
+        if not application.externally_submitted:
+            application.externally_submitted = True
+            db.commit()
+            db.refresh(application)
         return _attempt_payload(
             existing,
             application=application,
@@ -583,18 +639,24 @@ def record_submission_attempt(
                 "application_id": application.application_id,
                 "channel_id": channel.get("channel_id"),
                 "source_url": application_url,
+                "sandbox": True,
+                "billable": False,
             }
         )
-        if delivered.get("network_used") or (delivered.get("state") == "SENT" and not delivered.get("receipt")):
+        receipt_value = str(delivered.get("receipt") or "").strip()
+        reported_sent = delivered.get("state") == "SENT"
+        # network_used means the transport left this process. This board does
+        # not record that as a send. A blank receipt is not a receipt either.
+        if delivered.get("network_used") or (reported_sent and not receipt_value):
             state = "BLOCKED"
-            reason = "The transport did not return a receipt, so this attempt was not marked sent."
+            reason = "The transport did not return a local non-network receipt, so this attempt was not marked sent."
             next_action = (
-                "Owner step: confirm the permitted channel can return a receipt, then retry this single application. "
-                "Nothing was sent."
+                "Owner step: confirm the permitted channel can return a local receipt without using the network, "
+                "then retry this single application. Nothing was sent."
             )
-        elif delivered.get("state") == "SENT" and delivered.get("receipt"):
+        elif reported_sent and receipt_value:
             state = "SENT"
-            receipt = str(delivered.get("receipt"))[:1000]
+            receipt = receipt_value[:1000]
             reason = None
             next_action = "Receipt stored. Record the employer response or set a follow-up. This view does not send another message."
             application.externally_submitted = True
@@ -612,8 +674,6 @@ def record_submission_attempt(
             )
             application.externally_submitted = False
 
-    if state != "SENT":
-        application.externally_submitted = False
     row = _save_ledger(
         db,
         organization_id=organization_id,
@@ -627,20 +687,22 @@ def record_submission_attempt(
         blocker_reason=(reason or "")[:1000] or None,
         next_action=next_action[:1000],
     )
+    application.externally_submitted = bool(row.state == "SENT" and row.receipt)
+    recorded_state = row.state if row.state == "SENT" and row.receipt else state
     service._record_audit(
         db,
         organization_id=organization_id,
         user=user,
-        event_type="SUBMISSION_SENT" if state == "SENT" else "SUBMISSION_BLOCKED",
+        event_type="SUBMISSION_SENT" if recorded_state == "SENT" else "SUBMISSION_BLOCKED",
         summary=(
             "Submission receipt stored for one application."
-            if state == "SENT"
+            if recorded_state == "SENT"
             else "Submission attempt was not marked sent."
         ),
         ref_id=application.application_id,
         entity_type="application",
         actor_category="NOVA",
-        new_state=state,
+        new_state=recorded_state,
         reason=reason,
         source="first_client_pipeline",
     )
@@ -834,11 +896,14 @@ def draft_targeted_proposals(records: list[dict[str, Any]], *, limit: int = 3) -
                 "company_name": record.get("company_name"),
                 "description": record.get("description"),
                 "source_url": record.get("source_url"),
+                "fetched_at": record.get("fetched_at"),
                 "search_family": record.get("search_family"),
             }
         )
         proposal = next((item for item in materials if item.get("kind") == "proposal"), None)
-        if proposal is None:
+        pilot = next((item for item in materials if item.get("kind") == "paid_pilot_options"), None)
+        cost_scope = next((item for item in materials if item.get("kind") == "cost_scope_check"), None)
+        if proposal is None or pilot is None or cost_scope is None:
             continue
         body = str(proposal.get("body") or "").rstrip() + "\n\nThis draft was not sent."
         drafted.append(
@@ -850,6 +915,8 @@ def draft_targeted_proposals(records: list[dict[str, Any]], *, limit: int = 3) -
                 "title": record.get("title") or record.get("opportunity_title"),
                 "company_name": record.get("company_name"),
                 "proposal": body,
+                "paid_pilot_options": pilot.get("body"),
+                "cost_scope_check": cost_scope.get("body"),
                 "sent": False,
                 "external_action_taken": False,
             }

@@ -21,19 +21,31 @@ Sent means a submission receipt is stored and `externally_submitted` is already 
 
 ## Filter notes
 
-Preferred experience, a commitment length, a company age, and a gym or benefit membership do not by themselves reject a listing. Mandatory years of experience, an application fee, an unsupported license, mandatory on-site work, and Upwork paid connects still reject it. A line such as "Philippines-based candidates" is a residency requirement. A company based in another country is not. Operational support, CRM, business process, workflow automation, and FastAPI or API integration titles stay in scope when the listing is remote contractor work.
+Preferred experience, a commitment length, a company age, a gym or benefit membership, and "join our team" on an explicit contractor listing do not by themselves reject a listing. Mandatory years of experience, an application fee, an unsupported license, mandatory on-site work, a worker native-speaker requirement, an unmet permit or residency rule, and Upwork paid connects still reject it. A line such as "Philippines-based candidates" is a residency requirement. A company based in another country is not. "Email support for native English speakers" names the audience. "Native English speaker required" names the worker. Operational support, CRM, business process, workflow automation, and FastAPI or API integration titles stay in scope when the listing is remote contractor work.
 
-A live search reports `exclusion_reason_counts` and a short `exclusion_samples` list for public rows dropped before qualification. Each sample keeps the source URL, provider, fetch time, and the exclusion code. A discovery reject also copies `NOT_QUALIFIED` onto the row, so a rejected listing is not counted as owner review.
+A live search reports `funnel`, `exclusion_reason_counts`, and a short `exclusion_samples` list. `funnel.screened_rows` counts every provider row, including the same URL seen on a later query. `unique_screened` counts each public URL once. `unique_kept` plus `unique_excluded` equals `unique_screened` (`reconciled` is true). A later timeout keeps rows from a query that already finished and marks the run partial. If every queried provider fails before returning, `live_search_claimed` is false. A discovery reject also copies `NOT_QUALIFIED` onto the row, so a rejected listing is not counted as owner review.
 
-Draft PRs #331 and #335 are not merged here. Their dev-only funnel acceptance and fictional evidence export stay on those branches.
+## Board
+
+Top matches are the signed-in owner's saved records that are not rejected and that have both a source URL and a fetch or discovery time. Rejected records stay in `counts.rejected`. A saved record with no URL stays under `incomplete_provenance`. Refresh the board from the button, from a Work page reload, or when the browser restores the page. Restarting the page loads the same owner-scoped rows. It does not search again.
 
 ## Proposals
 
-Draft a proposal only for a qualified live record that has a source URL and a fetch time. Fixture and example hosts draft nothing. A draft is not a send.
+Draft a proposal only for a qualified live record that has a source URL and a fetch time. The draft includes a 7-day paid-pilot option with no committed price, a cost and scope check, and an evidence checklist of mandatory owner facts. Fixture and example hosts draft nothing. A draft is not a send.
+
+## Sandbox submission
+
+The permitted-channel transport used in tests is not billable and does not open a socket. Missing auth does not call it. A send is stored only when that in-process channel returns a non-empty receipt and does not report network use. A blank receipt is not a receipt. Network use stays blocked even if a receipt string is present, because this board does not record a network send. The same local receipt is not stored twice. A delivery failure can be retried. A later failure does not erase a receipt already stored. This runbook does not send an application.
+
+Draft PRs #331 and #335 are not merged here. Their dev-only funnel acceptance and fictional evidence export stay on those branches.
 
 ## Cloudflare Pages
 
-The `amicor-public` Pages project builds the `website/` directory with no build command. That directory is on `main` after the catalog commit and is not on this branch. Preview checks for this branch fail before a site build starts. This branch does not copy that site, run Wrangler, or deploy Pages. Production stays on the existing `main` deployment.
+The `amicor-public` Pages project builds the `website/` directory with no build command. That directory is on this branch because `main` was merged so the preview can find the site root. This change does not run Wrangler and does not deploy production.
+
+## Rollback
+
+Revert the commits on this branch. Saved opportunities, ledger rows, and drafts already written in an environment stay there. Reverting code does not delete them and does not send anything. Leave live discovery off unless the owner turns `NOVA_V3_LIVE_DISCOVERY_ENABLED` back on. Do not enable external submission or financial actions as part of a rollback.
 
 ## What stays off
 

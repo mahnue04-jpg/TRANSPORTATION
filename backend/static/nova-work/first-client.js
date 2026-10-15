@@ -65,7 +65,7 @@
       "<p>Stage: " + escapeHtml(row.stage) + "</p>" +
       "<p>Sent vs draft: " + escapeHtml(sent) + "</p>" +
       "<p>Source URL: " + escapeHtml(row.source_url || "none stored") + "</p>" +
-      "<p>Fetched at: " + fetched + "</p>" +
+      "<p>Fetched at: " + fetched + " (" + escapeHtml(row.provenance_basis || "not stored") + ")</p>" +
       "<p>Blocker: " + blocker + "</p>" +
       "<p>Qualification: " + escapeHtml(row.qualification_outcome || "not qualified yet") + "</p>" +
       "<ul>" + reasons(row.qualification_reasons) + "</ul>" +
@@ -85,9 +85,11 @@
         countChip("Approved, not sent", counts.approved_not_sent || 0) +
         countChip("Actually sent", counts.actually_sent || 0) +
         countChip("Blocked", counts.blocked || 0) +
-        countChip("Follow-ups due", counts.follow_ups_due || 0);
+        countChip("Follow-ups due", counts.follow_ups_due || 0) +
+        countChip("Rejected", counts.rejected || 0) +
+        countChip("Incomplete provenance", counts.incomplete_provenance || 0);
     }
-    var rows = (board.top_matches || []).concat(board.sent_outside_top_matches || []);
+    var rows = (board.top_matches || []).concat(board.sent_outside_top_matches || []).concat(board.incomplete_provenance || []);
     if ($("first-client-list")) {
       $("first-client-list").innerHTML = rows.length
         ? rows.map(card).join("")
@@ -144,6 +146,13 @@
     }
   });
   document.addEventListener("nova-work-refreshed", load);
+  document.addEventListener("click", function (event) {
+    if (event.target && event.target.id === "first-client-refresh") load();
+  });
+  window.addEventListener("pageshow", load);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") load();
+  });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", load);
   } else {

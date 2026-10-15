@@ -580,8 +580,17 @@ def generate_drafts(
             "title": f"Evidence checklist for {title}",
             "body": (
                 f"DRAFT evidence checklist. This is not a submission receipt.\n\n"
+                f"Client: {company}\n"
+                f"Role: {title}\n"
                 f"Source URL stored: {sanitize_untrusted(opportunity.get('source_url')) or OWNER_INPUT_REQUIRED}\n"
+                f"Fetched at: {sanitize_untrusted(str(opportunity.get('fetched_at') or '')) or OWNER_INPUT_REQUIRED}\n"
                 f"Deadline stored: {sanitize_untrusted(str(opportunity.get('application_deadline') or '')) or OWNER_INPUT_REQUIRED}\n"
+                f"Mandatory owner facts, each still required before any send:\n"
+                f"- Legal contracting party: {OWNER_INPUT_REQUIRED}\n"
+                f"- Years of experience: {OWNER_INPUT_REQUIRED}\n"
+                f"- Licenses and certifications: {OWNER_INPUT_REQUIRED}\n"
+                f"- Client references: {OWNER_INPUT_REQUIRED}\n"
+                f"- Price and payment terms: {OWNER_INPUT_REQUIRED}\n"
                 f"Fee status: {OWNER_INPUT_REQUIRED} unless the posting text explicitly says there is no upfront fee.\n"
                 f"Qualification outcome: {OWNER_INPUT_REQUIRED} until qualification is saved.\n"
                 f"Proposal, cover letter, and statement of work are drafts until the owner approves them.\n"
@@ -591,14 +600,34 @@ def generate_drafts(
         },
         {
             "kind": "paid_pilot_options",
-            "title": f"Paid pilot options for {title}",
+            "title": f"7-day paid pilot options for {title}",
             "body": (
-                f"DRAFT paid-pilot options. Not a quote and not an offer.\n\n"
-                f"Option A — short paid pilot. Price: {OWNER_INPUT_REQUIRED}. Length: {OWNER_INPUT_REQUIRED}.\n"
-                f"Option B — pilot plus a follow-on engagement. Follow-on price: {OWNER_INPUT_REQUIRED}.\n"
+                f"DRAFT paid-pilot options for {company}: {title}. Not a quote and not an offer.\n"
+                f"Source: {sanitize_untrusted(opportunity.get('source_url')) or OWNER_INPUT_REQUIRED}\n\n"
+                f"Option A — 7-day paid pilot. Length: 7 calendar days. Price: {OWNER_INPUT_REQUIRED}. "
+                f"The work is limited to the digital tasks named in this posting.\n"
+                f"Option B — the same 7-day pilot plus a follow-on engagement. Follow-on price: {OWNER_INPUT_REQUIRED}. "
+                f"The follow-on does not start unless the owner accepts it in writing.\n"
                 f"Option C — decline if the posting requires an application fee, a license Nova does not hold, "
-                f"or invented experience.\n"
+                f"native-speaker fluency, or invented experience.\n"
                 f"No dollar amount is committed here. Nova cannot agree to a price.\n\n{forbidden}"
+            ),
+        },
+        {
+            "kind": "cost_scope_check",
+            "title": f"Cost and scope check for {title}",
+            "body": (
+                f"DRAFT cost and scope check for {company}. Not a quote. Nothing was sent.\n\n"
+                f"Cost check: no price, fee, or connect purchase is committed. "
+                f"An application fee in the posting is not paid by this pilot. "
+                f"Price remains {OWNER_INPUT_REQUIRED}.\n"
+                f"Scope check: in scope only if it is remote digital work this posting actually asks for "
+                f"and a matched capability can produce it.\n"
+                f"Matched capabilities:\n{matched_caps}\n"
+                f"Out of scope: on-site or physical presence, a license or certification Nova does not hold, "
+                f"a native-speaker claim, invented years of experience, invented clients, and any pay-to-apply fee.\n"
+                f"Source: {sanitize_untrusted(opportunity.get('source_url')) or OWNER_INPUT_REQUIRED}\n\n"
+                f"{forbidden}"
             ),
         },
         {

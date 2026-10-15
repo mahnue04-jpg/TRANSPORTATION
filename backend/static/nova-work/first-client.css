@@ -51,7 +51,12 @@
   font-size: 0.85rem;
 }
 
+#first-client-refresh {
+  min-height: 44px;
+}
+
 @media (max-width: 720px) {
+  #first-client-refresh,
   .first-client-actions,
   .first-client-actions label,
   .first-client-actions button,

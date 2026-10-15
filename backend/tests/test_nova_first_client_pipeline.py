@@ -173,6 +173,8 @@ def test_work_page_includes_the_mobile_first_client_board(client: TestClient) ->
     assert "Record blocked handoff" in script.text
     assert "Sent vs draft" in script.text
     assert "Fetched at" in script.text
+    assert "pageshow" in script.text
+    assert "Refresh board" in html
     assert "submit-email" not in script.text
     style = client.get("/static/nova-work/first-client.css")
     assert style.status_code == 200
@@ -277,7 +279,13 @@ def test_draft_materials_do_not_invent_credentials() -> None:
         assert "OWNER INPUT REQUIRED" in by_kind[kind]
     assert "No certification is claimed" in by_kind["eligibility_assessment"]
     assert "Not a quote" in by_kind["paid_pilot_options"]
+    assert "7 calendar days" in by_kind["paid_pilot_options"]
+    assert "Example Records" in by_kind["paid_pilot_options"]
     assert "$" not in by_kind["paid_pilot_options"]
+    assert "cost_scope_check" in by_kind
+    assert "Out of scope" in by_kind["cost_scope_check"]
+    assert "Years of experience" in by_kind["evidence_checklist"]
+    assert "$" not in by_kind["cost_scope_check"]
     assert "SOC 2" not in by_kind["eligibility_assessment"]
     assert "I have 5 years" not in by_kind["eligibility_assessment"]
 
@@ -547,6 +555,237 @@ def test_verified_shape_drafts_a_proposal_that_was_not_sent() -> None:
         assert item["external_action_taken"] is False
         assert item["fixture"] is False
         assert "This draft was not sent." in item["proposal"]
+        assert "7 calendar days" in item["paid_pilot_options"]
+        assert "Out of scope" in item["cost_scope_check"]
+        assert item["fetched_at"] == "2026-10-14T18:00:00+00:00"
         assert "I have 5 years" not in item["proposal"]
         assert "SOC 2" not in item["proposal"]
         assert "partnership with" not in item["proposal"].lower()
+
+
+def test_later_provider_error_keeps_rows_and_reconciles_the_funnel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.core.nova.v3.multi_source_discovery._RETRY_SLEEP_SECONDS", 0)
+    monkeypatch.setattr(
+        "app.core.nova.v3.multi_source_discovery.live_flags",
+        lambda: {"LIVE_DISCOVERY_ENABLED": True},
+    )
+    reset_provider_health_for_tests()
+
+    class _Partial( _FlakyProvider):
+        def search(self, query: str, *, limit: int = 10) -> list[dict]:
+            self.calls += 1
+            if self.calls > 1:
+                raise httpx.TimeoutException("later query timed out")
+            kept = normalize_opportunity(
+                provider_id="flaky_test",
+                provider_type="remote_contract_feed",
+                provider_identifier="va-1",
+                title="Virtual Assistant Contractor",
+                company_name="Example Client",
+                description="Remote calendar, email, document and administrative support.",
+                source_url="https://example.test/va-1",
+                job_type="contractor",
+                geography="United States remote",
+                fee_required="no",
+            )
+            duplicate = dict(kept)
+            duplicate["source_url"] = "https://example.test/va-1?utm_source=repeat"
+            excluded = normalize_opportunity(
+                provider_id="flaky_test",
+                provider_type="remote_contract_feed",
+                provider_identifier="sales-1",
+                title="Regional Sales Manager",
+                company_name="Example Client",
+                description="Contract role supporting business operations and scheduling.",
+                source_url="https://example.test/sales-1",
+                job_type="contractor",
+                geography="United States remote",
+                fee_required="no",
+            )
+            return [kept, duplicate, excluded]
+
+    provider = _Partial(failures=0)
+    result = search_multi_source_jobs(
+        "remote administrative assistant contractor",
+        providers_override=[provider],
+    )
+    funnel = result["funnel"]
+    assert provider.calls >= 2
+    assert result["live_search_status"] == "partial"
+    assert result["live_search_claimed"] is True
+    assert result["provider_errors"]
+    assert result["provider_result_counts"]["flaky_test"] >= 1
+    assert any(job["title"] == "Virtual Assistant Contractor" for job in result["jobs"])
+    assert funnel["reconciled"] is True
+    assert funnel["unique_screened"] == funnel["unique_kept"] + funnel["unique_excluded"]
+    assert funnel["screened_rows"] >= funnel["unique_screened"]
+    assert funnel["unique_kept"] >= 1
+    assert funnel["unique_excluded"] >= 1
+    assert funnel["screened_rows"] > funnel["unique_screened"]
+    assert result["external_action_taken"] is False
+    assert result["financial_execution"] is False
+
+
+def test_join_our_team_does_not_reclassify_an_explicit_contractor() -> None:
+    from app.core.nova.v3.live_qualification import qualify_live_job
+
+    contractor = qualify_live_job(
+        {
+            "title": "Remote CRM contractor",
+            "company_name": "Example",
+            "description": (
+                "Independent contractor. Join our team of freelancers. "
+                "No upfront fee. Paid project for CRM notes."
+            ),
+            "source_url": "https://example.com/crm",
+            "job_type": "contractor",
+            "remote_status": "remote",
+        }
+    )
+    assert contractor["work_type"] != "employee"
+    assert "employee_w2_staff_role" not in contractor["blockers"]
+    employee = qualify_live_job(
+        {
+            "title": "Remote CRM contractor",
+            "company_name": "Example",
+            "description": "Independent contractor. Join our team. This is a W-2 employee only role.",
+            "source_url": "https://example.com/w2",
+            "job_type": "contractor",
+            "remote_status": "remote",
+        }
+    )
+    assert "employee_w2_staff_role" in employee["blockers"]
+
+
+def test_rejected_and_incomplete_records_stay_out_of_top_matches(client: TestClient) -> None:
+    headers = _headers(client)
+    rejected = _opportunity(
+        client,
+        headers,
+        "On site surgeon employee",
+        description="Must be an on-site surgeon and a W-2 employee. Commercial truck driving required.",
+        physical_presence_required="true",
+        engagement_type="employee",
+    )
+    client.post(
+        f"/api/nova/work/opportunities/{rejected['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    incomplete = _opportunity(
+        client,
+        headers,
+        "Missing provenance contractor",
+        source_url=None,
+    )
+    client.post(
+        f"/api/nova/work/opportunities/{incomplete['opportunity_id']}/qualify",
+        headers=headers,
+    )
+    board = client.get("/api/nova/work/first-client/board", headers=headers)
+    assert board.status_code == 200, board.text
+    body = board.json()
+    titles = {item["title"] for item in body["top_matches"]}
+    assert "On site surgeon employee" not in titles
+    assert "Missing provenance contractor" not in titles
+    assert body["counts"]["rejected"] >= 1
+    assert any(item["title"] == "Missing provenance contractor" for item in body["incomplete_provenance"])
+    assert all(item["provenance_complete"] for item in body["top_matches"])
+
+
+def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> None:
+    headers = _headers(client)
+    approved = _approve(client, headers, "Sandbox receipt contractor")
+    application_id = approved["application_id"]
+    _clear_owner_input(application_id)
+
+    class _Sandbox:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.mode = "no-receipt"
+            self.permitted_channel = {
+                "channel_id": "sandbox-direct",
+                "permitted": True,
+                "recipient": "applications@example.invalid",
+            }
+
+        def deliver(self, message: dict) -> dict:
+            self.calls += 1
+            assert message["sandbox"] is True
+            assert message["billable"] is False
+            if self.mode == "no-receipt":
+                return {"state": "SENT", "receipt": "   ", "network_used": False}
+            if self.mode == "network":
+                return {"state": "SENT", "receipt": "remote-receipt", "network_used": True}
+            if self.mode == "failure":
+                return {
+                    "state": "DELIVERY_FAILURE",
+                    "receipt": None,
+                    "reason": "sandbox mailbox rejected the message",
+                    "network_used": False,
+                }
+            return {
+                "state": "SENT",
+                "receipt": "sandbox-receipt-1",
+                "network_used": False,
+            }
+
+    transport = _Sandbox()
+    set_submission_transport(transport)
+    try:
+        missing = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert missing.status_code == 200, missing.text
+        assert missing.json()["ledger"]["state"] == "BLOCKED"
+        assert missing.json()["application_externally_submitted"] is False
+        assert missing.json()["ledger"]["is_send_receipt"] is False
+        assert transport.calls == 1
+
+        transport.mode = "network"
+        networked = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert networked.status_code == 200, networked.text
+        assert networked.json()["ledger"]["state"] == "BLOCKED"
+        assert networked.json()["ledger"]["receipt"] in {None, ""}
+        assert networked.json()["application_externally_submitted"] is False
+        assert transport.calls == 2
+
+        transport.mode = "failure"
+        failed = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert failed.status_code == 200, failed.text
+        assert failed.json()["ledger"]["state"] == "DELIVERY_FAILURE"
+        assert failed.json()["application_externally_submitted"] is False
+        assert failed.json()["applications_sent_by_this_request"] == 0
+        assert transport.calls == 3
+
+        transport.mode = "sent"
+        sent = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert sent.status_code == 200, sent.text
+        assert sent.json()["ledger"]["state"] == "SENT"
+        assert sent.json()["ledger"]["receipt"] == "sandbox-receipt-1"
+        assert sent.json()["ledger"]["is_send_receipt"] is True
+        assert sent.json()["applications_sent_by_this_request"] == 1
+        assert sent.json()["financial_execution"] is False
+        assert transport.calls == 4
+
+        transport.mode = "failure"
+        repeat = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+        )
+        assert repeat.status_code == 200, repeat.text
+        assert repeat.json()["applications_sent_by_this_request"] == 0
+        assert repeat.json()["ledger"]["state"] == "SENT"
+        assert repeat.json()["ledger"]["receipt"] == "sandbox-receipt-1"
+        assert transport.calls == 4
+    finally:
+        set_submission_transport(None)

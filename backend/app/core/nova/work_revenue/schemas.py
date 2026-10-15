@@ -73,6 +73,7 @@ MATERIAL_KINDS = (
     "scope_of_work",
     "evidence_checklist",
     "paid_pilot_options",
+    "cost_scope_check",
     "eligibility_assessment",
 )
 
