@@ -16,6 +16,10 @@ def test_public_preview_route_keeps_applications_off():
     assert 'name="viewport"' in html
     assert "noindex" in html
     assert "fetch(" not in html
+    assert 'lang="en"' in html
+    assert 'href="#main"' in html
+    assert 'aria-controls="site-nav"' in html
+    assert 'aria-expanded="false"' in html
 
 
 def test_demo_is_labeled_and_offline():
@@ -65,4 +69,6 @@ def test_sandbox_pilot_controls_keep_the_existing_journey():
     assert "Applicant does not meet the minimum age" in sandbox
     assert 'aria-live="polite"' in sandbox
     assert "@media (max-width: 640px)" in sandbox
+    assert "width: 100%" in sandbox
+    assert "External delivery:" in sandbox
     assert "focus-visible" in sandbox

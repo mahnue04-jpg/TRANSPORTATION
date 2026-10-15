@@ -14,7 +14,8 @@
     }
     @media (max-width: 640px) {
       .studio-nav { flex-direction: column; align-items: flex-start; }
-      .actions { flex-direction: column; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .actions button, .actions a.button { width: 100%; }
     }
   </style>
 </head>
@@ -812,7 +813,16 @@
         try {
           if (!(await requireSandbox()) || !pilotRoleId) return;
           var sheet = await api(base() + "/roles/" + encodeURIComponent(pilotRoleId) + "/call-sheet");
-          $("pilot-output").textContent = JSON.stringify(sheet, null, 2);
+          var people = Array.isArray(sheet.people) ? sheet.people : [];
+          var summary = [
+            "Call sheet",
+            "Timezone: " + String(sheet.timezone || ""),
+            "Call time: " + String(sheet.call_time || ""),
+            "Location: " + String(sheet.location_label || ""),
+            "People: " + String(people.length),
+            "External delivery: " + String(sheet.external_delivery)
+          ];
+          $("pilot-output").textContent = summary.join("\n") + "\n\n" + JSON.stringify(sheet, null, 2);
           show("Call sheet loaded. No notification was sent.", true);
         } catch (err) { /* banner already set */ }
       });
