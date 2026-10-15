@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -66,6 +67,10 @@ SAFE_REASONS = frozenset({
     "Invalid review",
     "Request rejected",
     "Suppressed",
+    "Campaign cannot be published",
+    "Rejected by security scan",
+    "Unsupported video type",
+    "Invalid video size",
 })
 _EMAIL = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}$")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .'-]{0,78}$")
@@ -308,6 +313,11 @@ class PilotDirectory:
         self.suppressions: dict[tuple[str, str], dict] = {}
         self.schedules: dict[str, dict] = {}
         self.audit: list[dict] = []
+        self.campaigns: dict[str, dict] = {}
+        self.invites: dict[str, dict] = {}
+        self.mock_attempts: dict[str, dict] = {}
+        self.mock_media: dict[str, dict] = {}
+        self.journey_audit: list[dict] = []
         self.changed = False
 
     def _new_id(self) -> str:
@@ -324,9 +334,39 @@ class PilotDirectory:
         })
         self.changed = True
 
+    def _journey(self, actor: Mapping, action: str, object_id: str) -> None:
+        self.journey_audit.append({
+            "id": self._new_id(),
+            "actor_id": actor["user_id"],
+            "organization_id": actor["organization_id"],
+            "action": action,
+            "object_id": object_id,
+            "occurred_at": self.now.isoformat(),
+        })
+        self.changed = True
+
+    def note_campaign(self, *, organization_id: str, tenant_id: str, campaign_id: str, status: str) -> None:
+        """Remember a campaign loaded from the sandbox tables. This does not publish it."""
+        safe = status if status in {"DRAFT", "CLOSED"} else "CLOSED"
+        self.campaigns[campaign_id] = {
+            "id": campaign_id,
+            "organization_id": organization_id,
+            "tenant_id": tenant_id,
+            "status": safe,
+            "published": False,
+        }
+
     def create_role(self, actor: Mapping, campaign_id: str, payload: Mapping) -> dict:
         if not _organizer(actor) or not _same_org(actor, actor["organization_id"]):
             raise PilotDenied("Campaign unavailable")
+        campaign = self.campaigns.get(campaign_id)
+        if campaign is not None:
+            if campaign["organization_id"] != actor["organization_id"]:
+                raise PilotDenied("Campaign unavailable")
+            if campaign.get("tenant_id") and actor.get("tenant_id") and campaign["tenant_id"] != actor["tenant_id"]:
+                raise PilotDenied("Campaign unavailable")
+            if campaign["status"] != "DRAFT" or campaign.get("published"):
+                raise PilotRejected("Campaign cannot be published")
         decision = validate_role(payload)
         if not decision.accepted:
             raise PilotRejected(decision.reason)
@@ -774,6 +814,185 @@ class PilotDirectory:
         rows.sort(key=lambda item: (item["occurred_at"], item["id"]))
         return _page(rows, limit, offset)
 
+    def issue_invite(self, actor: Mapping, campaign_id: str, payload: Mapping) -> dict:
+        if not _organizer(actor):
+            raise PilotDenied("Campaign unavailable")
+        if not isinstance(payload, Mapping) or _protected(payload) or set(payload) - {"role_id", "expires_at"}:
+            raise PilotRejected("Unsupported field")
+        tenant = str(actor.get("tenant_id") or "")
+        if not tenant:
+            raise PilotDenied("Campaign unavailable")
+        campaign = self.campaigns.get(campaign_id)
+        if (
+            campaign is None
+            or campaign["organization_id"] != actor["organization_id"]
+            or campaign.get("tenant_id") != tenant
+        ):
+            raise PilotDenied("Campaign unavailable")
+        if campaign["status"] != "DRAFT" or campaign.get("published"):
+            raise PilotRejected("Campaign cannot be published")
+        role = self.roles.get(str(payload.get("role_id") or ""))
+        if role is None or role["campaign_id"] != campaign_id or role["organization_id"] != actor["organization_id"]:
+            raise PilotDenied("Campaign unavailable")
+        expires = _parse_time(payload.get("expires_at"))
+        if expires is None:
+            raise PilotRejected("Invalid schedule")
+        token = secrets.token_urlsafe(24)
+        invite_id = self._new_id()
+        status = "expired" if _as_utc(expires) <= self.now else "open"
+        record = {
+            "id": invite_id,
+            "organization_id": actor["organization_id"],
+            "tenant_id": tenant,
+            "campaign_id": campaign_id,
+            "role_id": role["id"],
+            "token": token,
+            "expires_at": _as_utc(expires).isoformat(),
+            "status": status,
+            "applicant_id": "",
+            "application_id": "",
+            "created_at": self.now.isoformat(),
+            "redeemed_at": "",
+            "published": False,
+        }
+        self.invites[invite_id] = record
+        self._journey(actor, "invite.issued", invite_id)
+        return _invite_view(record, include_token=True)
+
+    def redeem_invite(self, actor: Mapping, token: str) -> dict:
+        if actor.get("role") != "applicant" or actor.get("verified") is not True or not actor.get("user_id"):
+            raise PilotDenied("Application unavailable")
+        tenant = str(actor.get("tenant_id") or "")
+        if not tenant or not actor.get("organization_id") or not isinstance(token, str) or not token.strip():
+            raise PilotDenied("Application unavailable")
+        found = next((row for row in self.invites.values() if row["token"] == token.strip()), None)
+        if found is None or found["organization_id"] != actor["organization_id"] or found["tenant_id"] != tenant:
+            raise PilotDenied("Application unavailable")
+        if found["status"] == "revoked":
+            raise PilotDenied("Application unavailable")
+        campaign = self.campaigns.get(found["campaign_id"])
+        if campaign is None or campaign["status"] != "DRAFT" or campaign.get("published"):
+            raise PilotRejected("Campaign cannot be published")
+        expires = _parse_time(found["expires_at"])
+        if expires is None or _as_utc(expires) <= self.now or found["status"] == "expired":
+            found["status"] = "expired"
+            self._journey(actor, "invite.expired", found["id"])
+            raise PilotRejected("Expired invite")
+        if found["status"] == "redeemed":
+            if found["applicant_id"] != actor["user_id"]:
+                raise PilotDenied("Application unavailable")
+            return _invite_view(found, include_token=False)
+        if found["status"] != "open":
+            raise PilotDenied("Application unavailable")
+        found["status"] = "redeemed"
+        found["applicant_id"] = actor["user_id"]
+        found["application_id"] = self._new_id()
+        found["redeemed_at"] = self.now.isoformat()
+        self._journey(actor, "invite.redeemed", found["id"])
+        return _invite_view(found, include_token=False)
+
+    def dispatch_mock(self, actor: Mapping, message_id: str, *, fail: bool = False) -> dict:
+        if not _organizer(actor):
+            raise PilotDenied("Application unavailable")
+        record = self.messages.get(message_id)
+        if record is None or record["organization_id"] != actor["organization_id"]:
+            raise PilotDenied("Application unavailable")
+        if record["status"] not in {"approved", "failed_closed", "suppressed"}:
+            raise PilotRejected("Request rejected")
+        intake = self.intakes.get(record["application_id"]) if record["application_id"] else None
+        override = _mock_override(self, record, intake)
+        prior = ""
+        for attempt in self.mock_attempts.values():
+            if attempt["message_id"] == message_id and attempt["outcome"] == "mock_accepted" and attempt["mock_receipt"]:
+                prior = attempt["mock_receipt"]
+        attempt_number = 1 + sum(1 for item in self.mock_attempts.values() if item["message_id"] == message_id)
+        result = _mock_transport(bool(fail)).dispatch(
+            message_id=message_id,
+            idempotency_key=record["idempotency_key"],
+            channel=record["channel"],
+            outcome_override=override,
+            prior_receipt=prior,
+            attempt=attempt_number,
+        )
+        record["attempt_count"] = int(record["attempt_count"]) + 1
+        record["delivery_state"] = "not_sent"
+        record["external_delivery"] = False
+        record["delivered"] = False
+        record["mock_outcome"] = result["outcome"]
+        record["mock_receipt"] = result["mock_receipt"]
+        if result["outcome"] in {"suppressed", "opted_out"}:
+            record["status"] = "suppressed"
+        elif result["outcome"] == "mock_failed":
+            record["status"] = "failed_closed"
+        attempt_id = self._new_id()
+        self.mock_attempts[attempt_id] = {
+            "id": attempt_id,
+            "organization_id": actor["organization_id"],
+            "message_id": message_id,
+            "attempt_number": attempt_number,
+            "outcome": result["outcome"],
+            "mock_receipt": result["mock_receipt"],
+            "failure_reason": result["mock_failure"],
+            "provider": result["provider"],
+            "created_at": self.now.isoformat(),
+        }
+        record["updated_at"] = self.now.isoformat()
+        self._journey(actor, "mock.dispatched", attempt_id)
+        view = _message_view(record)
+        view["mock_failure"] = result["mock_failure"]
+        view["real_delivery"] = False
+        return view
+
+    def record_mock_media(self, actor: Mapping, application_id: str, meta: Mapping) -> dict:
+        row = self._own_intake(actor, application_id)
+        if row["consent_revoked_at"] or row["status"] == "WITHDRAWN":
+            raise PilotRejected("Consent revoked")
+        status = meta.get("scan_status")
+        if status not in {"CLEAN", "REJECTED"}:
+            raise PilotRejected("Request rejected")
+        reason = str(meta.get("scan_reason") or "")
+        if len(reason) > 120:
+            reason = reason[:120]
+        media_id = self._new_id()
+        record = {
+            "id": media_id,
+            "organization_id": actor["organization_id"],
+            "application_id": application_id,
+            "applicant_id": actor["user_id"],
+            "mime_type": str(meta.get("mime_type") or ""),
+            "byte_size": int(meta.get("byte_size") or 0),
+            "scan_status": status,
+            "scan_reason": reason,
+            "public_url": "",
+            "created_at": self.now.isoformat(),
+        }
+        self.mock_media[media_id] = record
+        self._journey(actor, "upload.mock_recorded", media_id)
+        return _mock_media_view(record)
+
+    def list_mock_media(self, actor: Mapping, application_id: str) -> dict:
+        row = self.intakes.get(application_id)
+        if row is None or row["organization_id"] != actor.get("organization_id"):
+            raise PilotDenied("Application unavailable")
+        if actor.get("verified") is not True or actor.get("role") not in {"applicant", "reviewer", "organizer"}:
+            raise PilotDenied("Application unavailable")
+        if actor.get("role") == "applicant" and row["applicant_id"] != actor.get("user_id"):
+            raise PilotDenied("Application unavailable")
+        if actor.get("role") != "applicant" and not _reviewer(actor):
+            raise PilotDenied("Application unavailable")
+        items = [
+            _mock_media_view(item)
+            for item in self.mock_media.values()
+            if item["organization_id"] == row["organization_id"] and item["application_id"] == application_id
+        ]
+        items.sort(key=lambda item: item["id"])
+        return {
+            "items": items,
+            "media_uploads_enabled": False,
+            "bytes_released": False,
+            "public_url": "",
+        }
+
     def snapshot(self, actor: Mapping, campaign_id: str = "") -> dict:
         """Read the saved sandbox copy. This does not create a row or send a message."""
         if actor.get("verified") is not True or not actor.get("user_id") or not actor.get("organization_id"):
@@ -822,14 +1041,27 @@ class PilotDirectory:
                 view["application_id"] = application_id
                 messages.append(view)
             messages.sort(key=lambda item: item["id"])
+        invites = []
+        for row in self.invites.values():
+            if row["organization_id"] != organization_id:
+                continue
+            if selected and row["campaign_id"] != selected:
+                continue
+            if role_name == "organizer":
+                invites.append(_invite_view(row, include_token=True))
+            elif role_name == "applicant" and row["applicant_id"] == actor["user_id"]:
+                invites.append(_invite_view(row, include_token=False))
+        invites.sort(key=lambda item: item["id"])
         return {
             "label": "Demo / Early Access",
             "published": False,
             "delivered": False,
             "external_delivery": False,
+            "media_uploads_enabled": False,
             "roles": roles[:PAGE_LIMIT],
             "intakes": intakes[:PAGE_LIMIT],
             "messages": messages[:PAGE_LIMIT],
+            "invites": invites[:PAGE_LIMIT],
         }
 
     def seed_harborlight(self, actor: Mapping, campaign_id: str) -> dict:
@@ -1135,8 +1367,69 @@ def _message_view(record: Mapping) -> dict:
         "delivery_state": "not_sent",
         "external_delivery": False,
         "delivered": False,
+        "real_delivery": False,
         "idempotency_key": record["idempotency_key"],
+        "mock_outcome": record.get("mock_outcome") or "not_attempted",
+        "mock_receipt": record.get("mock_receipt") or "",
+        "mock_provider": "disposable-mock" if record.get("mock_outcome") else "",
     }
+
+
+def _invite_view(record: Mapping, *, include_token: bool) -> dict:
+    return {
+        "id": record["id"],
+        "campaign_id": record["campaign_id"],
+        "role_id": record["role_id"],
+        "expires_at": record["expires_at"],
+        "status": record["status"],
+        "application_id": record["application_id"],
+        "token": record["token"] if include_token else "",
+        "published": False,
+        "public_url": "",
+        "external_delivery": False,
+    }
+
+
+def _mock_media_view(record: Mapping) -> dict:
+    return {
+        "id": record["id"],
+        "application_id": record["application_id"],
+        "mime_type": record["mime_type"],
+        "byte_size": record["byte_size"],
+        "scan_status": record["scan_status"],
+        "scan_reason": record["scan_reason"],
+        "public_url": "",
+        "playback": "unavailable",
+        "bytes_released": False,
+        "media_uploads_enabled": False,
+    }
+
+
+def _mock_transport(fail: bool):
+    try:
+        from .casting_mock_transport import MockTransport
+    except ImportError:
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent / "casting_mock_transport.py"
+        spec = importlib.util.spec_from_file_location("casting_mock_transport_standalone", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        MockTransport = module.MockTransport
+    return MockTransport(fail=fail)
+
+
+def _mock_override(directory: PilotDirectory, record: Mapping, intake: Mapping | None) -> str | None:
+    if intake is not None:
+        suppression = directory.suppressions.get((intake["organization_id"], intake.get("contact_email")))
+        if suppression is not None:
+            return "opted_out" if suppression.get("reason") == "unsubscribe" else "suppressed"
+        if intake.get("consent_revoked_at") or intake.get("contact_email") == "":
+            return "suppressed"
+    if record.get("status") == "suppressed":
+        return "suppressed"
+    return None
 
 
 def _schedule_view(record: Mapping, *, include_document: bool) -> dict:

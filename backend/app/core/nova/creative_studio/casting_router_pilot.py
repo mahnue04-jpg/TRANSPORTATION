@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -74,6 +74,22 @@ class SuppressionBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     contact_email: str
     reason: str
+
+
+class InviteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    role_id: str
+    expires_at: str
+
+
+class RedeemBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str
+
+
+class MockDispatchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    fail: bool = False
 
 
 class ScheduleBody(BaseModel):
@@ -344,4 +360,81 @@ def pilot_audit(organization_id: str, limit: str = "20", offset: str = "0",
     return _call(lambda: _store().list_audit(
         db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
         limit=parsed_limit, offset=parsed_offset,
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/campaigns/{campaign_id}/invites")
+def issue_invite(organization_id: str, campaign_id: str, payload: dict = Body(...),
+                 user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    body = _parse(InviteBody, payload)
+    return _call(lambda: _store().issue_invite(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        campaign_id=campaign_id, payload=body,
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/invites/redeem")
+def redeem_invite(organization_id: str, payload: dict = Body(...),
+                  user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    body = _parse(RedeemBody, payload)
+    return _call(lambda: _store().redeem_invite(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id, token=body["token"],
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/messages/{message_id}/mock-dispatch")
+def mock_dispatch(organization_id: str, message_id: str, payload: dict | None = Body(default=None),
+                  user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    body = _parse(MockDispatchBody, payload or {"fail": False})
+    return _call(lambda: _store().dispatch_mock(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        message_id=message_id, fail=body["fail"],
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/applications/{application_id}/mock-upload")
+async def mock_upload(organization_id: str, application_id: str, request: Request,
+                      user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    form = await request.form()
+    if str(form.get("consent_accepted") or "").lower() != "true":
+        raise HTTPException(status_code=422, detail="Consent required")
+    field = form.get("file")
+    if field is None or not hasattr(field, "read"):
+        raise HTTPException(status_code=422, detail="Request rejected")
+    declared = str(form.get("mime_type") or getattr(field, "content_type", "") or "")
+    from .casting_router_sandbox import _read_bounded_upload
+    data = await _read_bounded_upload(field)
+    if hasattr(field, "close"):
+        await field.close()
+    from .casting_mock_uploads import evaluate_mock_upload
+    meta = evaluate_mock_upload(data, declared)
+    result = _call(lambda: _store().record_mock_media(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        application_id=application_id, meta=meta, data=data if meta.get("store_bytes") else b"",
+    ))
+    result["media_uploads_enabled"] = False
+    result["bytes_released"] = False
+    return result
+
+
+@pilot_router.get("/organizations/{organization_id}/applications/{application_id}/mock-uploads")
+def list_mock_uploads(organization_id: str, application_id: str,
+                      user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    return _call(lambda: _store().list_mock_media(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        application_id=application_id,
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/mock-uploads/wipe")
+def wipe_mock_uploads(organization_id: str, user: UserContext = Depends(get_current_user_context),
+                      db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    return _call(lambda: _store().wipe_mock_holding(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
     ))

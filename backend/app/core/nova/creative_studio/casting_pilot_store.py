@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .casting_access import CastingAccessDenied
-from .casting_db_models import NovaCastingApplication, NovaCastingOrganization
+from .casting_db_models import NovaCastingApplication, NovaCastingCampaign, NovaCastingOrganization
 from .casting_db_writes import (
     _account,
     _application_row,
@@ -22,6 +22,10 @@ from .casting_identity import applicant_from_verified_session
 from .casting_pilot import PilotDenied, PilotDirectory, PilotRejected
 from .casting_pilot_models import (
     NovaCastingIntake,
+    NovaCastingInvite,
+    NovaCastingJourneyAudit,
+    NovaCastingMockAttempt,
+    NovaCastingMockMedia,
     NovaCastingPilotAudit,
     NovaCastingPilotMessage,
     NovaCastingRole,
@@ -44,6 +48,7 @@ def _organizer_actor(db: Session, user_id: str, tenant_id: str, organization_id:
     return {
         "user_id": user_id,
         "organization_id": organization_id,
+        "tenant_id": tenant_id,
         "role": "organizer",
         "verified": True,
     }
@@ -80,10 +85,28 @@ def _applicant_context(db: Session, user_id: str, tenant_id: str, organization_i
     actor = {
         "user_id": user_id,
         "organization_id": organization_id,
+        "tenant_id": tenant_id,
         "role": "applicant",
         "verified": True,
     }
     return actor, application, campaign
+
+
+def _applicant_actor(db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
+    _guard()
+    _account(db, user_id, tenant_id)
+    org = _org(db, organization_id, tenant_id)
+    if org.verification_status != "VERIFIED":
+        raise CastingAccessDenied("Application unavailable")
+    if applicant_from_verified_session(session_user_id=user_id) is None:
+        raise CastingAccessDenied("Application unavailable")
+    return {
+        "user_id": user_id,
+        "organization_id": organization_id,
+        "tenant_id": tenant_id,
+        "role": "applicant",
+        "verified": True,
+    }
 
 
 def _load(db: Session, organization_id: str) -> PilotDirectory:
@@ -96,6 +119,12 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
         suppressions = db.query(NovaCastingSuppression).filter(NovaCastingSuppression.organization_id == organization_id).all()
         schedules = db.query(NovaCastingSchedule).filter(NovaCastingSchedule.organization_id == organization_id).all()
         audit_rows = db.query(NovaCastingPilotAudit).filter(NovaCastingPilotAudit.organization_id == organization_id).all()
+        invites = db.query(NovaCastingInvite).filter(NovaCastingInvite.organization_id == organization_id).all()
+        attempts = db.query(NovaCastingMockAttempt).filter(NovaCastingMockAttempt.organization_id == organization_id).all()
+        media_rows = db.query(NovaCastingMockMedia).filter(NovaCastingMockMedia.organization_id == organization_id).all()
+        journey_rows = db.query(NovaCastingJourneyAudit).filter(NovaCastingJourneyAudit.organization_id == organization_id).all()
+        organization = db.query(NovaCastingOrganization).filter(NovaCastingOrganization.id == organization_id).one_or_none()
+        campaigns = db.query(NovaCastingCampaign).filter(NovaCastingCampaign.owner_id == organization_id).all()
     except SQLAlchemyError as exc:
         raise CastingAccessDenied("Application unavailable") from exc
     for row in roles:
@@ -168,6 +197,8 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
             "delivered": False,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "mock_outcome": "",
+            "mock_receipt": "",
         }
     for row in suppressions:
         directory.suppressions[(row.organization_id, row.contact_email)] = {
@@ -202,6 +233,71 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
         }
         for row in audit_rows
     ]
+    tenant_id = organization.nova_tenant_id if organization is not None else ""
+    for row in campaigns:
+        directory.note_campaign(
+            organization_id=organization_id,
+            tenant_id=tenant_id,
+            campaign_id=row.id,
+            status=row.status,
+        )
+    for row in invites:
+        directory.invites[row.id] = {
+            "id": row.id,
+            "organization_id": row.organization_id,
+            "tenant_id": row.tenant_id,
+            "campaign_id": row.campaign_id,
+            "role_id": row.role_id,
+            "token": row.token,
+            "expires_at": row.expires_at,
+            "status": row.status,
+            "applicant_id": row.applicant_id,
+            "application_id": row.application_id,
+            "created_at": row.created_at,
+            "redeemed_at": row.redeemed_at or "",
+            "published": False,
+        }
+    for row in attempts:
+        directory.mock_attempts[row.id] = {
+            "id": row.id,
+            "organization_id": row.organization_id,
+            "message_id": row.message_id,
+            "attempt_number": row.attempt_number,
+            "outcome": row.outcome,
+            "mock_receipt": row.mock_receipt,
+            "failure_reason": row.failure_reason,
+            "provider": row.provider,
+            "created_at": row.created_at,
+        }
+        message = directory.messages.get(row.message_id)
+        if message is not None and row.attempt_number >= int(message.get("mock_attempt_number") or 0):
+            message["mock_outcome"] = row.outcome
+            message["mock_receipt"] = row.mock_receipt
+            message["mock_attempt_number"] = row.attempt_number
+    for row in media_rows:
+        directory.mock_media[row.id] = {
+            "id": row.id,
+            "organization_id": row.organization_id,
+            "application_id": row.application_id,
+            "applicant_id": row.applicant_id,
+            "mime_type": row.mime_type,
+            "byte_size": row.byte_size,
+            "scan_status": row.scan_status,
+            "scan_reason": row.scan_reason,
+            "public_url": "",
+            "created_at": row.created_at,
+        }
+    directory.journey_audit = [
+        {
+            "id": row.id,
+            "actor_id": row.actor_id,
+            "organization_id": row.organization_id,
+            "action": row.action,
+            "object_id": row.object_id,
+            "occurred_at": row.occurred_at,
+        }
+        for row in journey_rows
+    ]
     return directory
 
 
@@ -230,6 +326,10 @@ def _capture(directory: PilotDirectory) -> dict:
         "suppressions": {row["id"]: copy.deepcopy(row) for row in directory.suppressions.values()},
         "schedules": {row["id"]: copy.deepcopy(row) for row in directory.schedules.values()},
         "audit": {item["id"] for item in directory.audit},
+        "invites": copy.deepcopy(directory.invites),
+        "mock_attempts": copy.deepcopy(directory.mock_attempts),
+        "mock_media": copy.deepcopy(directory.mock_media),
+        "journey_audit": {item["id"] for item in directory.journey_audit},
     }
 
 
@@ -294,7 +394,13 @@ def _persist(db: Session, organization_id: str, directory: PilotDirectory, befor
         messages = directory.messages
         suppressions = {row["id"]: row for row in directory.suppressions.values()}
         schedules = {row["id"]: row for row in directory.schedules.values()}
+        invites = directory.invites
+        attempts = directory.mock_attempts
+        media = directory.mock_media
         deleted = False
+        deleted |= _delete_absent(db, NovaCastingMockMedia, organization_id, before["mock_media"], media)
+        deleted |= _delete_absent(db, NovaCastingMockAttempt, organization_id, before["mock_attempts"], attempts)
+        deleted |= _delete_absent(db, NovaCastingInvite, organization_id, before["invites"], invites)
         deleted |= _delete_absent(db, NovaCastingRubric, organization_id, before["rubrics"], rubrics)
         deleted |= _delete_absent(db, NovaCastingSchedule, organization_id, before["schedules"], schedules)
         deleted |= _delete_absent(db, NovaCastingPilotMessage, organization_id, before["messages"], messages)
@@ -308,11 +414,21 @@ def _persist(db: Session, organization_id: str, directory: PilotDirectory, befor
         _replace_messages(db, organization_id, before["messages"], messages)
         _replace_suppressions(db, organization_id, before["suppressions"], suppressions)
         _replace_schedules(db, organization_id, before["schedules"], schedules)
+        _replace_invites(db, organization_id, before["invites"], invites)
+        _replace_attempts(db, organization_id, before["mock_attempts"], attempts)
+        _replace_mock_media(db, organization_id, before["mock_media"], media)
         _replace_rubrics(db, organization_id, before["rubrics"], rubrics)
         for item in directory.audit:
             if item["id"] in before["audit"] or item["organization_id"] != organization_id:
                 continue
             db.add(NovaCastingPilotAudit(
+                id=item["id"], actor_id=item["actor_id"], organization_id=organization_id,
+                action=item["action"], object_id=item["object_id"], occurred_at=item["occurred_at"],
+            ))
+        for item in directory.journey_audit:
+            if item["id"] in before["journey_audit"] or item["organization_id"] != organization_id:
+                continue
+            db.add(NovaCastingJourneyAudit(
                 id=item["id"], actor_id=item["actor_id"], organization_id=organization_id,
                 action=item["action"], object_id=item["object_id"], occurred_at=item["occurred_at"],
             ))
@@ -394,6 +510,78 @@ def _replace_schedules(db: Session, organization_id: str, before: dict, rows: di
         )
 
     _upsert(db, NovaCastingSchedule, organization_id, before, rows, build)
+
+
+def _replace_invites(db: Session, organization_id: str, before: dict, rows: dict) -> None:
+    def build(row: dict) -> NovaCastingInvite:
+        return NovaCastingInvite(
+            id=row["id"], organization_id=organization_id, tenant_id=row["tenant_id"],
+            campaign_id=row["campaign_id"], role_id=row["role_id"], token=row["token"],
+            expires_at=row["expires_at"], status=row["status"], applicant_id=row["applicant_id"],
+            application_id=row["application_id"], created_at=row["created_at"],
+            redeemed_at=row["redeemed_at"],
+        )
+
+    _upsert(db, NovaCastingInvite, organization_id, before, rows, build)
+
+
+def _replace_attempts(db: Session, organization_id: str, before: dict, rows: dict) -> None:
+    def build(row: dict) -> NovaCastingMockAttempt:
+        return NovaCastingMockAttempt(
+            id=row["id"], organization_id=organization_id, message_id=row["message_id"],
+            attempt_number=row["attempt_number"], outcome=row["outcome"],
+            mock_receipt=row["mock_receipt"], failure_reason=row["failure_reason"],
+            provider="disposable-mock", created_at=row["created_at"],
+        )
+
+    _upsert(db, NovaCastingMockAttempt, organization_id, before, rows, build)
+
+
+def _replace_mock_media(db: Session, organization_id: str, before: dict, rows: dict) -> None:
+    def build(row: dict) -> NovaCastingMockMedia:
+        return NovaCastingMockMedia(
+            id=row["id"], organization_id=organization_id, application_id=row["application_id"],
+            applicant_id=row["applicant_id"], mime_type=row["mime_type"], byte_size=row["byte_size"],
+            scan_status=row["scan_status"], scan_reason=row["scan_reason"], public_url="",
+            created_at=row["created_at"],
+        )
+
+    _upsert(db, NovaCastingMockMedia, organization_id, before, rows, build)
+
+
+def _bind_redeemed_application(db: Session, organization_id: str, user_id: str, result: dict) -> dict:
+    if result.get("status") != "redeemed" or not result.get("application_id"):
+        return result
+    campaign_id = result["campaign_id"]
+    wanted = result["application_id"]
+    try:
+        existing = db.query(NovaCastingApplication).filter(
+            NovaCastingApplication.owner_id == organization_id,
+            NovaCastingApplication.campaign_id == campaign_id,
+            NovaCastingApplication.applicant_id == user_id,
+        ).one_or_none()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+    if existing is not None:
+        if existing.id != wanted:
+            invite = db.query(NovaCastingInvite).filter(
+                NovaCastingInvite.organization_id == organization_id,
+                NovaCastingInvite.application_id == wanted,
+            ).one_or_none()
+            if invite is not None:
+                invite.application_id = existing.id
+            result = dict(result)
+            result["application_id"] = existing.id
+        return result
+    db.add(NovaCastingApplication(
+        id=wanted, owner_id=organization_id, campaign_id=campaign_id,
+        applicant_id=user_id, status="DRAFT", created_at=_now().isoformat(),
+    ))
+    try:
+        db.flush()
+    except SQLAlchemyError as exc:
+        raise CastingAccessDenied("Application unavailable") from exc
+    return result
 
 
 def _run(db: Session, organization_id: str, actor: dict, method: str, *args, **kwargs):
@@ -565,3 +753,49 @@ def seed_harborlight(*, db: Session, user_id: str, tenant_id: str, organization_
     if campaign.status != "DRAFT":
         raise CastingAccessDenied("Campaign unavailable")
     return _run(db, organization_id, actor, "seed_harborlight", campaign_id)
+
+
+def issue_invite(*, db: Session, user_id: str, tenant_id: str, organization_id: str, campaign_id: str, payload: dict) -> dict:
+    actor = _organizer_actor(db, user_id, tenant_id, organization_id)
+    campaign = _campaign_row(db, organization_id, campaign_id)
+    if campaign.status != "DRAFT":
+        raise PilotRejected("Campaign cannot be published")
+    return _run(db, organization_id, actor, "issue_invite", campaign_id, payload)
+
+
+def redeem_invite(*, db: Session, user_id: str, tenant_id: str, organization_id: str, token: str) -> dict:
+    actor = _applicant_actor(db, user_id, tenant_id, organization_id)
+    result = _run(db, organization_id, actor, "redeem_invite", token)
+    return _bind_redeemed_application(db, organization_id, user_id, result)
+
+
+def dispatch_mock(*, db: Session, user_id: str, tenant_id: str, organization_id: str, message_id: str, fail: bool = False) -> dict:
+    actor = _organizer_actor(db, user_id, tenant_id, organization_id)
+    return _run(db, organization_id, actor, "dispatch_mock", message_id, fail=fail)
+
+
+def record_mock_media(
+    *, db: Session, user_id: str, tenant_id: str, organization_id: str,
+    application_id: str, meta: dict, data: bytes,
+) -> dict:
+    actor, _application, _campaign = _applicant_context(db, user_id, tenant_id, organization_id, application_id)
+    result = _run(db, organization_id, actor, "record_mock_media", application_id, meta)
+    if meta.get("store_bytes") and result.get("scan_status") == "CLEAN":
+        from .casting_mock_uploads import hold
+        hold(result["id"], data)
+    return result
+
+
+def wipe_mock_holding(*, db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
+    _organizer_actor(db, user_id, tenant_id, organization_id)
+    from .casting_mock_uploads import wipe
+    return {"wiped": wipe(), "bytes_released": False, "public_url": "", "media_uploads_enabled": False}
+
+
+def list_mock_media(*, db: Session, user_id: str, tenant_id: str, organization_id: str, application_id: str) -> dict:
+    _guard()
+    try:
+        actor = _review_actor(db, user_id, tenant_id, organization_id)
+    except CastingAccessDenied:
+        actor, _application, _campaign = _applicant_context(db, user_id, tenant_id, organization_id, application_id)
+    return _run(db, organization_id, actor, "list_mock_media", application_id)

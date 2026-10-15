@@ -162,3 +162,89 @@ class NovaCastingPilotAudit(Base):
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     object_id: Mapped[str] = mapped_column(String(48), nullable=False)
     occurred_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+_JOURNEY_ACTIONS = (
+    "invite.issued", "invite.redeemed", "invite.expired",
+    "mock.dispatched", "upload.mock_recorded",
+)
+
+
+class NovaCastingInvite(Base):
+    __tablename__ = "nova_casting_invites"
+    __table_args__ = (
+        Index("uq_nova_casting_invite_token", "token", unique=True),
+        Index("ix_nova_casting_invite_org", "organization_id", "campaign_id"),
+        CheckConstraint("status IN ('open', 'redeemed', 'expired', 'revoked')", name="ck_nova_casting_invite_status"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    campaign_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_campaigns.id"), nullable=False)
+    role_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_roles.id"), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", server_default="open")
+    applicant_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", server_default="")
+    application_id: Mapped[str] = mapped_column(String(48), nullable=False, default="", server_default="")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    redeemed_at: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+
+
+class NovaCastingMockAttempt(Base):
+    __tablename__ = "nova_casting_mock_attempts"
+    __table_args__ = (
+        Index("ix_nova_casting_mock_attempt_message", "organization_id", "message_id"),
+        CheckConstraint(
+            "outcome IN ('mock_accepted', 'mock_failed', 'suppressed', 'opted_out')",
+            name="ck_nova_casting_mock_attempt_outcome",
+        ),
+        CheckConstraint("provider = 'disposable-mock'", name="ck_nova_casting_mock_attempt_provider"),
+        CheckConstraint("attempt_number >= 1", name="ck_nova_casting_mock_attempt_number"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_pilot_messages.id"), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    mock_receipt: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    failure_reason: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="disposable-mock", server_default="disposable-mock")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingMockMedia(Base):
+    __tablename__ = "nova_casting_mock_media"
+    __table_args__ = (
+        Index("ix_nova_casting_mock_media_application", "organization_id", "application_id"),
+        CheckConstraint("scan_status IN ('CLEAN', 'REJECTED')", name="ck_nova_casting_mock_media_status"),
+        CheckConstraint("public_url = ''", name="ck_nova_casting_mock_media_url"),
+        CheckConstraint("byte_size >= 0", name="ck_nova_casting_mock_media_size"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    application_id: Mapped[str] = mapped_column(String(48), ForeignKey("nova_casting_intakes.id"), nullable=False)
+    applicant_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    scan_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    scan_reason: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
+    public_url: Mapped[str] = mapped_column(String(8), nullable=False, default="", server_default="")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingJourneyAudit(Base):
+    __tablename__ = "nova_casting_journey_audit"
+    __table_args__ = (
+        Index("ix_nova_casting_journey_audit_org", "organization_id", "occurred_at"),
+        CheckConstraint(
+            "action IN (" + ", ".join(repr(item) for item in _JOURNEY_ACTIONS) + ")",
+            name="ck_nova_casting_journey_audit_action",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    occurred_at: Mapped[str] = mapped_column(String(64), nullable=False)
