@@ -1071,7 +1071,19 @@ def test_export_includes_social_media_production_package() -> None:
             {"id": "aud1", "kind": "audio", "title": "Voice", "status": "GENERATED", "url": "/media/voice.mp3", "metadata": {}},
             {"id": "cap1", "kind": "caption", "title": "Caption", "status": "GENERATED", "content": "Save time. Stay in control.", "metadata": {}},
             {"id": "tag1", "kind": "hashtags", "title": "Tags", "status": "GENERATED", "content": "#AMICOR #AI", "metadata": {}},
-            {"id": "vid1", "kind": "video", "title": "Final AMICOR Nova promo", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {"final_promo": True, "captions_burned_in": True, "commercial_slideshow": False}},
+            {"id": "vid1", "kind": "video", "title": "Final AMICOR Nova promo", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {
+                "final_promo": True,
+                "captions_burned_in": True,
+                "commercial_slideshow": False,
+                "audio_present": True,
+                "duration_seconds": 30,
+                "license_status": "GREEN",
+                "click_destination": {
+                    "website_field_url": "https://getamicor.com/nova-today/?utm_source=youtube&utm_medium=profile_website&utm_campaign=nova_30s_commercial",
+                    "http_status": 200,
+                    "verified": True,
+                },
+            }},
             {"id": "pres1", "kind": "presenter_video", "title": "Presenter", "status": "GENERATED", "url": "/media/presenter.mp4", "metadata": {"publish_ready": True, "quality_state": "PUBLISH_READY"}},
         ],
     }
