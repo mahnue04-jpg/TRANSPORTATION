@@ -445,7 +445,8 @@ def assemble_short_video(
 
     # Prefer getamicor.com on the closing beat when the brief CTA is empty/generic.
     cta_text = cta
-    if not cta_text or cta_text.lower() in {"learn more", "learn more about amicor nova", "start free today"}:
+    generic = re.sub(r"[.!?]+$", "", str(cta_text or "").strip().lower())
+    if generic in {"", "learn more", "learn more about amicor nova", "start free today"}:
         cta_text = "Visit getamicor.com to explore AMICOR Nova."
     cta = _preserve_brands(cta_text)
 

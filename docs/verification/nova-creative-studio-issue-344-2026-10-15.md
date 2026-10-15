@@ -88,3 +88,27 @@ Local server only, live provider flags off, video provider forced to Runway. See
 Live host `https://amicor-health-isf-py.onrender.com`: `/nova/creative` 200 but still the older shell (`60` selected, no preflight, no `getamicor.com` default). `/api/nova/creative/guardrails` and `/projects` return **401 Authentication required**. `https://getamicor.com` returned Cloudflare 403 from this environment. Production login was not attempted.
 
 Offline proof `/opt/cursor/artifacts/nova-344-local-motion-captioned.mp4` is a 5.0s 720×1280 H.264 Ken Burns clip with burned captions and a `getamicor.com` fade. It is **not** a lip-synced young Black female presenter and is **not** commercial acceptance.
+
+## Owner continuation — offline 30s montage and direct Nova links
+
+**Overall: AMBER.** Publishing and production deploy stay on hold. Lip-sync presenter stays RED. This pass does not call fal, Kling, D-ID, or OpenAI.
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| Downloadable ~30s MP4 | GREEN | `/opt/cursor/artifacts/nova-30s-offline-montage.mp4` — 30.00s, 540×960 H.264, 12 fps, AAC mono. File size 1,320,651 bytes. |
+| Audio | GREEN | AAC present. Mean volume −21.3 dB, max −2.8 dB. Engine is local `espeak-ng`, not a paid voice. |
+| Captions | GREEN | Burned in, plus SRT sidecar. Closing cue includes “Visit getamicor.com to explore AMICOR Nova.” |
+| Click-through | GREEN | `GET https://getamicor.com/nova-today/` → **200**, stayed on `getamicor.com`. TikTok and Instagram profile URLs with `utm_source` / `utm_medium=profile_website` / `utm_campaign=nova_30s_commercial` also returned **200** `first_party_nova`. Home `https://getamicor.com/` is 200 but is not the Nova product path. |
+| License | AMBER | Title cards are local AMICOR drawings. Narration engine is espeak-ng, GPL-3.0-or-later. Commercial clearance of that voice in a public ad is not marked GREEN. |
+| Lip-sync presenter | RED | Offline montage is title cards plus narration. It is not a speaking presenter and must not be labeled lip sync. |
+| Instagram / TikTok post audit | RED | No Instagram or TikTok token in this session. Post IDs and live profile links were not readable and were not invented. Nothing was published or removed. |
+| Public posting / production deploy | HOLD | Export keeps `external_publishing` false. `production_ready` stays false while license is AMBER or the click-through is unverified. |
+
+Prepared profile Website fields, not caption links (Instagram and TikTok captions are not clickable):
+
+- TikTok: `https://getamicor.com/nova-today/?utm_source=tiktok&utm_medium=profile_website&utm_campaign=nova_30s_commercial`
+- Instagram: `https://getamicor.com/nova-today/?utm_source=instagram&utm_medium=profile_website&utm_campaign=nova_30s_commercial`
+
+Wrong destinations the export now rejects: `tiktok.com` and `instagram.com` homepages, link-in-bio hosts, and a bare `getamicor.com` string with no scheme. Studio exposes **Offline 30s montage** and **Prepare Nova links**. The mobile shell screenshot at 390px is `/opt/cursor/artifacts/studio-mobile-390.png`. A signed-in iPhone pass was not run; this environment has no owner session.
+
+Tests: `tests/test_nova_creative_offline_commercial.py` and `tests/test_nova_creative_issue_344.py` — 14 passed locally. CI installs `espeak-ng` before the Creative Studio pytest step.

@@ -707,7 +707,8 @@
     var checks = [
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
       { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
-      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build Final Promo" : (finalIsSlideshow ? "Blocked: still slideshow" : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track"))), action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build Final Promo or the offline 30s montage" : (finalIsSlideshow ? "Blocked: still slideshow" : (finalVideoMeta.render_mode === "offline_montage_not_lipsync" ? "Offline montage for review. Not lip sync." : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))), action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Nova click destination", ok: !!(finalVideoMeta.click_destination && finalVideoMeta.click_destination.verified === true), note: (finalVideoMeta.click_destination && finalVideoMeta.click_destination.website_field_url) ? String(finalVideoMeta.click_destination.website_field_url) + (finalVideoMeta.click_destination.verified ? " verified" : " not yet verified") : "Prepare the profile Website link. Captions are not clickable.", action: "prepare-nova-links", actionLabel: "Prepare Nova links" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
       { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
       { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()) || finalCaptionsOk, note: (caption || finalCaptionsOk) ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
@@ -768,6 +769,7 @@
           return;
         }
         if (action === "build-final-promo") targetButton = $("build-final-promo");
+        else if (action === "prepare-nova-links") targetButton = $("prepare-nova-links");
         else if (action === "preview-talking-presenter") targetButton = $("preview-talking-presenter");
         else if (action === "generate-image") targetButton = document.querySelector('[data-action="image"]');
         else if (action === "generate-voice") targetButton = document.querySelector('[data-action="voice"]');
@@ -1254,6 +1256,49 @@
       } catch (err) {
         showBanner(err.message || "Budget confirmation failed.", false);
         confirmBudgetBtn.disabled = false;
+      }
+    });
+  }
+
+  var offlineMontageButton = $("build-offline-montage");
+  if (offlineMontageButton) {
+    offlineMontageButton.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project with a storyboard first.", false);
+        return;
+      }
+      offlineMontageButton.disabled = true;
+      showBanner("Rendering the offline montage on this server. No paid provider is called.", true);
+      try {
+        var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/offline-commercial", {
+          method: "POST"
+        });
+        renderOutput(rendered);
+        showBanner(rendered.readiness_note || "Offline montage is ready to download. Publishing stays off.", true);
+        await refreshAssets();
+      } catch (err) {
+        showBanner(err.message || "Offline montage failed.", false);
+      } finally {
+        offlineMontageButton.disabled = false;
+      }
+    });
+  }
+
+  var novaLinksButton = $("prepare-nova-links");
+  if (novaLinksButton) {
+    novaLinksButton.addEventListener("click", async function () {
+      var platformSelect = $("project-platform");
+      var platform = platformSelect ? platformSelect.value : "TikTok";
+      novaLinksButton.disabled = true;
+      try {
+        var pack = await api("/api/nova/creative/click-destinations?platform=" + encodeURIComponent(platform) + "&verify=true");
+        renderOutput(pack);
+        var verified = pack.verified ? "Verified." : "Not verified from this network.";
+        showBanner("Profile Website field: " + pack.website_field_url + " " + verified + " Nothing was posted.", pack.verified === true);
+      } catch (err) {
+        showBanner(err.message || "Could not prepare Nova links.", false);
+      } finally {
+        novaLinksButton.disabled = false;
       }
     });
   }

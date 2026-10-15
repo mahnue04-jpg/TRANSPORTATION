@@ -1863,6 +1863,110 @@ class CreativeStudioService(ShortDramaMixin):
         return {"asset": asset.as_dict(), "url": asset.url, "status": "GENERATED"}
 
 
+    def click_destinations(self, platform: str, *, verify: bool = False) -> dict[str, Any]:
+        from app.core.nova.creative_studio.click_destinations import replacement_pack, verify_click_destination
+
+        pack = replacement_pack(platform)
+        if verify:
+            probed = verify_click_destination(pack["website_field_url"])
+            pack.update(
+                {
+                    "http_status": probed["http_status"],
+                    "final_url": probed["final_url"],
+                    "redirect_chain": probed["chain"],
+                    "classification": probed["classification"],
+                    "verified": probed["verified"],
+                }
+            )
+        pack["publish"] = False
+        return pack
+
+    def render_offline_commercial(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """30s-style montage from the saved storyboard. Does not call image, voice, or video providers."""
+        from app.core.nova.creative_studio.click_destinations import replacement_pack
+        from app.core.nova.creative_studio.offline_commercial import OfflineCommercialError, render_offline_montage
+
+        project = self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        if not scenes:
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        vertical = str(project.platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
+        output_dir, public_prefix = _creative_media_root_and_prefix()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        token = new_id("promo").split("_", 1)[-1]
+        output_path = output_dir / f"nova-offline-{token}.mp4"
+        audio_path = output_dir / f"nova-offline-{token}.wav"
+        job = self._start_job(owner_id, project_id, "offline_commercial")
+        try:
+            rendered = render_offline_montage(
+                [scene.as_dict() for scene in scenes],
+                output_mp4=output_path,
+                audio_wav=audio_path,
+                vertical=vertical,
+            )
+        except OfflineCommercialError as exc:
+            self._finish_job(job, status="ERROR", message=exc.message, asset_ids=[], provider="nova_offline_montage")
+            raise CreativeStudioError(exc.code, exc.message, http_status=422) from exc
+        except Exception as exc:
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_offline_montage")
+            raise CreativeStudioError("OFFLINE_MONTAGE_FAILED", str(exc)[:500], http_status=422) from exc
+
+        click = replacement_pack(project.platform)
+        public_url = public_prefix + "/" + output_path.name
+        audio_url = public_prefix + "/" + audio_path.name
+        subtitle_url = public_prefix + "/" + output_path.with_suffix(".srt").name
+        audio_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="audio",
+            title="Offline narration",
+            content="Local espeak narration of the reviewed storyboard. Not a paid presenter voice.",
+            status="GENERATED",
+            metadata={
+                "provider_result": rendered["narration"],
+                "paid_provider_charges": False,
+                "lip_sync": False,
+            },
+            url=audio_url,
+        )
+        video_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="video",
+            title="Offline 30s AMICOR Nova montage",
+            content=(
+                "Local title-card montage with narration and burned captions. "
+                "Not a lip-synced presenter. Not approved for public posting."
+            ),
+            status="GENERATED",
+            metadata={
+                "final_promo": True,
+                **{key: value for key, value in rendered.items() if key != "subtitle_path"},
+                "subtitle_url": subtitle_url,
+                "click_destination": click,
+                "external_publishing": False,
+            },
+            url=public_url,
+        )
+        self._finish_job(
+            job,
+            status="GENERATED",
+            message=(
+                f"Offline montage rendered at {rendered['duration_seconds']}s. "
+                "No paid provider was called. Lip-sync and public posting stay off."
+            ),
+            asset_ids=[video_asset.id, audio_asset.id],
+            provider="nova_offline_montage",
+        )
+        return {
+            "job": job.as_dict(),
+            "asset": video_asset.as_dict(),
+            "audio": audio_asset.as_dict(),
+            "url": public_url,
+            "click_destination": click,
+            "readiness_note": "License stays AMBER until the owner accepts the local narration license. Publishing is held.",
+        }
+
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "export")

@@ -157,10 +157,30 @@ def test_export_caption_copy_alone_is_not_commercial_ready():
     assert social["production_ready"] is False
 
     payload["assets"][3]["metadata"]["captions_burned_in"] = True
+    payload["assets"][3]["metadata"]["audio_present"] = True
+    payload["assets"][3]["metadata"]["duration_seconds"] = 30
+    payload["assets"][3]["metadata"]["license_status"] = "GREEN"
+    payload["assets"][3]["metadata"]["click_destination"] = {
+        "website_field_url": "https://getamicor.com/nova-today/?utm_source=tiktok&utm_medium=profile_website&utm_campaign=nova_30s_commercial",
+        "http_status": 200,
+        "verified": True,
+    }
     ready = export_project_package(payload, fmt="json")["package"]["social_media_package"]
     assert ready["production_ready"] is True
+    assert ready["readiness"]["overall"] == "GREEN"
+    assert ready["click_through_verified"] is True
     assert ready["final_video"]["url"] == "/media/final.mp4"
     assert ready["presenter_video"]["publish_ready"] is True
+
+    payload["assets"][3]["metadata"]["click_destination"] = {
+        "website_field_url": "https://www.tiktok.com/",
+        "http_status": 200,
+        "verified": True,
+    }
+    wrong_dest = export_project_package(payload, fmt="json")["package"]["social_media_package"]
+    assert wrong_dest["production_ready"] is False
+    assert wrong_dest["click_destination"]["classification"] == "platform_home"
+    assert wrong_dest["readiness"]["overall"] != "GREEN"
 
     payload["assets"][3]["metadata"]["commercial_slideshow"] = True
     blocked = export_project_package(payload, fmt="json")["package"]["social_media_package"]
@@ -201,7 +221,11 @@ def test_studio_ui_defaults_vertical_thirty_second_commercial():
     assert 'option value="9:16" selected' in html
     assert "getamicor.com" in html
     assert "run-preflight" in html
+    assert "build-offline-montage" in html
+    assert "prepare-nova-links" in html
     assert "/preflight" in js
+    assert "/assemble/offline-commercial" in js
+    assert "click-destinations" in js
     assert "commercial_slideshow" in js
     assert "BUDGET" not in js or "budget-confirm" in js
 

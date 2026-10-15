@@ -1333,6 +1333,31 @@ async def save_browser_final_promo(
         raise
 
 
+@router.get("/click-destinations")
+def click_destinations(
+    platform: str = "TikTok",
+    verify: bool = False,
+    user: UserContext = Depends(get_current_user_context),
+) -> dict[str, Any]:
+    _require_owner(user)
+    return get_service().click_destinations(platform, verify=verify)
+
+
+@router.post("/projects/{project_id}/assemble/offline-commercial")
+def assemble_offline_commercial(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Local 30s montage. Does not call fal, Kling, D-ID, or OpenAI."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_offline_commercial(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assemble/final-promo")
 def assemble_final_promo(
     project_id: str,
