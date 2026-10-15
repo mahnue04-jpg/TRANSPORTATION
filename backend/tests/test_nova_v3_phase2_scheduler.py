@@ -7,6 +7,7 @@ import pytest
 
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.kernel import NovaV3Kernel
+from app.core.nova.v3.persistence import V3Store
 from app.core.nova.v3.worker import JOB_KINDS, backoff_seconds, lease_job, next_run, recover_stale
 
 
@@ -185,3 +186,75 @@ def test_hourly_and_two_hour_cadence_waits_and_does_not_send() -> None:
             frequency="every_five_minutes",
         )
     assert bad.value.code == "INVALID_CADENCE"
+
+
+def test_cadence_and_next_run_survive_restart_without_a_duplicate_tick(tmp_path) -> None:
+    store = V3Store(f"sqlite:///{tmp_path / 'scheduler.db'}")
+    kernel = NovaV3Kernel()
+    kernel.store = store
+    hourly = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="opportunity_refresh",
+        timezone_name="America/Chicago",
+        frequency="hourly",
+    )
+    two_hour = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    first = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert {item.job_id for item in first} == {hourly.job_id, two_hour.job_id}
+
+    restarted = NovaV3Kernel()
+    assert restarted.restore_scheduler(store) == 2
+    restarted.now = kernel.now
+    assert restarted.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+    restored_hourly = restarted.jobs[hourly.job_id]
+    restored_two_hour = restarted.jobs[two_hour.job_id]
+    assert restored_hourly.frequency == "hourly"
+    assert restored_two_hour.frequency == "every_two_hours"
+    assert restored_hourly.run_count == 1
+    assert restored_two_hour.run_count == 1
+    assert restored_hourly.next_run_at == hourly.next_run_at
+    assert restored_two_hour.next_run_at == two_hour.next_run_at
+    assert restored_hourly.next_run_at == next_run("hourly", "America/Chicago", kernel.now)
+    assert restored_two_hour.next_run_at == next_run("every_two_hours", "America/Chicago", kernel.now)
+
+    restarted.now = restored_hourly.next_run_at
+    second = restarted.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert [item.job_id for item in second] == [restored_hourly.job_id]
+    assert restored_hourly.run_count == 2
+    assert restored_two_hour.run_count == 1
+
+    again = NovaV3Kernel()
+    assert again.restore_scheduler(store) == 2
+    again.now = restarted.now
+    assert again.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+    manual = again.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="work_deadline",
+        timezone_name="America/Chicago",
+        frequency="manual",
+    )
+    manual_run = again.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert [item.job_id for item in manual_run] == [manual.job_id]
+    assert manual.status == "EXECUTED"
+    assert manual.next_run_at is None
+    assert again.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+    assert again.messages == {}
+
+    saved = {
+        row["job_id"]: row
+        for row in store.fetch("nova_v3_scheduler_jobs", organization_id="org-a", owner_user_id="owner-a")
+    }
+    assert saved[hourly.job_id]["frequency"] == "hourly"
+    assert saved[hourly.job_id]["next_run_at"]
+    assert saved[two_hour.job_id]["frequency"] == "every_two_hours"
+    assert saved[manual.job_id]["frequency"] == "manual"
+    assert saved[manual.job_id]["next_run_at"] is None
+    assert saved[manual.job_id]["status"] == "EXECUTED"

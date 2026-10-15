@@ -78,6 +78,20 @@ def _utc(value: datetime | None = None) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
+def scheduled_job_from_payload(payload: dict[str, Any]) -> ScheduledJob:
+    """Rebuild a scheduler row from the durable payload, including cadence."""
+    data = {key: payload[key] for key in ScheduledJob.__dataclass_fields__ if key in payload}
+    for key in ("next_run_at", "lease_expires_at"):
+        raw = data.get(key)
+        if isinstance(raw, str) and raw:
+            data[key] = datetime.fromisoformat(raw)
+        elif raw == "":
+            data[key] = None
+    if not data.get("job_id"):
+        raise V3Error("PERSISTENCE_REFUSED", "scheduler payload is missing job_id")
+    return ScheduledJob(**data)
+
+
 def require_timezone(name: str | None) -> str:
     token = str(name or "").strip()
     if not token:
@@ -894,6 +908,61 @@ class NovaV3Kernel:
         self._audit("MOCK_MESSAGE", organization_id, message_id=message_id, channel=row.channel)
         return row
 
+    def _persist_scheduler_jobs(self) -> None:
+        """Write next_run_at and cadence when a durable store is attached.
+
+        In-memory tests leave the store unset. A failed persist flag skips the
+        write so an injected storage fault does not change the tick result.
+        """
+        if self.store is None or self.fail_next_persist:
+            return
+        for row in self.jobs.values():
+            self.store.upsert(
+                "nova_v3_scheduler_jobs",
+                {
+                    "job_id": row.job_id,
+                    "organization_id": row.organization_id,
+                    "owner_user_id": row.owner_user_id,
+                    "kind": row.kind,
+                    "period_key": row.period_key,
+                },
+                row,
+            )
+
+    def restore_scheduler(self, store: V3Store) -> int:
+        """Load scheduler rows, including next_run_at and frequency, after a restart."""
+        self.store = store
+        loaded = 0
+        for payload in store.fetch_all("nova_v3_scheduler_jobs"):
+            if not isinstance(payload, dict) or not payload.get("job_id"):
+                continue
+            job = scheduled_job_from_payload(payload)
+            self.jobs[job.job_id] = job
+            digits = "".join(ch for ch in job.job_id if ch.isdigit())
+            if digits:
+                self._seq = max(self._seq, int(digits))
+            loaded += 1
+        return loaded
+
+    def boot_durable_scheduler(self) -> int:
+        """Reload cadence from the app database outside pytest.
+
+        Tests build their own store. A missing schema or engine leaves the
+        in-memory kernel unchanged.
+        """
+        import os
+
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            return 0
+        if os.getenv("NOVA_V3_DURABLE_SCHEDULER", "1") != "1":
+            return 0
+        try:
+            from app.core.nova.v3.persistence import bind_app_engine
+
+            return self.restore_scheduler(bind_app_engine())
+        except Exception:
+            return 0
+
     def schedule_job(
         self,
         *,
@@ -930,6 +999,7 @@ class NovaV3Kernel:
             if frequency == "manual" and existing.status == "EXECUTED":
                 existing.status = "PREPARED"
                 existing.next_run_at = self.now
+                self._persist_scheduler_jobs()
             return existing
         job = ScheduledJob(
             job_id=self._id("V3JOB"),
@@ -945,6 +1015,7 @@ class NovaV3Kernel:
         )
         self.jobs[job.job_id] = job
         self._audit("JOB_PREPARED", organization_id, job_id=job.job_id, worker=False)
+        self._persist_scheduler_jobs()
         return job
 
     def period_key(self, frequency: str, timezone_name: str, when: datetime | None = None) -> str:
@@ -986,6 +1057,7 @@ class NovaV3Kernel:
             raise V3Error("NOT_FOUND", "job not found", http_status=404)
         self.assert_owner(job.owner_user_id, owner_user_id)
         job.status = "PAUSED"
+        self._persist_scheduler_jobs()
         return job
 
     def resume_job(self, job_id: str, *, organization_id: str, owner_user_id: str) -> ScheduledJob:
@@ -996,6 +1068,7 @@ class NovaV3Kernel:
         if job.status == "CANCELLED":
             raise V3Error("JOB_NOT_ACTIVE", "cancelled job cannot resume")
         job.status = "PREPARED"
+        self._persist_scheduler_jobs()
         return job
 
     def cancel_job(self, job_id: str, *, organization_id: str, owner_user_id: str) -> ScheduledJob:
@@ -1004,6 +1077,7 @@ class NovaV3Kernel:
             raise V3Error("NOT_FOUND", "job not found", http_status=404)
         self.assert_owner(job.owner_user_id, owner_user_id)
         job.status = "CANCELLED"
+        self._persist_scheduler_jobs()
         return job
 
     def create_invoice(
@@ -1568,7 +1642,9 @@ class NovaV3Kernel:
                     continue
                 job.last_error = str(exc)
         if lease_mismatches and not ran and not crashed:
+            self._persist_scheduler_jobs()
             raise V3Error("LEASE_MISMATCH", "job is leased by another worker")
+        self._persist_scheduler_jobs()
         return ran
 
     def retry_job(self, job_id: str, *, organization_id: str, owner_user_id: str) -> ScheduledJob:
@@ -1581,6 +1657,7 @@ class NovaV3Kernel:
         job.dead_letter = False
         job.status = "PREPARED"
         job.lease_owner = None
+        self._persist_scheduler_jobs()
         return job
 
     def decide_opportunity(self, opportunity_id: str, *, organization_id: str, owner_user_id: str, decision: str) -> Opportunity:
@@ -1719,7 +1796,9 @@ _KERNEL: NovaV3Kernel | None = None
 def get_kernel() -> NovaV3Kernel:
     global _KERNEL
     if _KERNEL is None:
-        _KERNEL = NovaV3Kernel()
+        kernel = NovaV3Kernel()
+        kernel.boot_durable_scheduler()
+        _KERNEL = kernel
     return _KERNEL
 
 
