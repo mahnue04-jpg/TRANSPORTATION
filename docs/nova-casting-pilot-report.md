@@ -1,6 +1,6 @@
 # Casting pilot report — issue #332
 
-Session `bc-8ffc6cff-a547-5d66-89a1-cd5d9350e1ae`. Branch `cursor/casting-auditions-pilot-e1ae`. This agent is not working on Work & Revenue #336, Synapse #311, website #329, or unrelated Creative Studio changes.
+Earlier session `bc-8ffc6cff-a547-5d66-89a1-cd5d9350e1ae` opened this branch and was idle when the continuation started. Continuation session `bc-eb141276-1c6a-5237-a12f-31be865807b5` stays on branch `cursor/casting-auditions-pilot-e1ae`. This agent is not working on Work & Revenue #336, Synapse #311, website #329, or the Creative Studio video-rendering pipeline.
 
 The GitHub token for this run cannot comment on issues (`403 Resource not accessible by integration`). The acknowledgement that belongs on issue #332 is in the draft pull request instead.
 
@@ -77,18 +77,47 @@ The sandbox page is the persistent copy. A local disposable server, not a deploy
 
 ## Documents
 
+- Owner quick-start: `docs/nova-casting-quick-start.md`
 - Staging procedure: `docs/nova-casting-staging-runbook.md`
+- Launch checklist: `docs/nova-casting-staging-checklist.md`
 - Producer sample offer: `docs/nova-casting-pilot-offer.md`
+
+## Authenticated journey added 2026-10-15
+
+Still sandbox-only. Campaigns stay `DRAFT` or `CLOSED`. A status other than those two is rejected with "Campaign cannot be published". A closed campaign cannot take a new invitation, a new role, or a redeem.
+
+- Invitation tokens are issued inside the signed-in organizer session. Redeem creates or reuses one draft application for that campaign and applicant. An expired token stays closed. Another tenant receives "Application unavailable". The organizer snapshot includes the token so a reload can restore it. Reviewers and other applicants do not receive the token.
+- Mock transport provider is `disposable-mock`. Outcomes are `mock_accepted`, `mock_failed`, `suppressed`, and `opted_out`. A mock receipt looks like `MOCK-` plus part of the message id. A later call with the same prior receipt returns that receipt and does not create a second delivery. Unsubscribe becomes `opted_out`. STOP, revoked consent, and an empty address become `suppressed`. `delivery_state` stays `not_sent`. `external_delivery`, `delivered`, and `real_delivery` stay false. The module does not import a mail, SMS, or HTTP client.
+- Mock upload validates MIME and size, then runs the existing structural scan. A clean hold stays in process memory (cap 8) with an empty `public_url` and no byte column. Rejected bytes are not stored. The response sets `media_uploads_enabled` false and `bytes_released` false. Wipe clears that memory. Playback stays unavailable.
+- Journey audit rows live in `nova_casting_journey_audit` (`invite.issued`, `invite.redeemed`, `invite.expired`, `mock.dispatched`, `upload.mock_recorded`). The older pilot audit check is unchanged.
+- Migration `20261015_casting_journey` revises `20261014_casting_pilot`. Production names and missing parent tables return without DDL. Downgrade drops only `nova_casting_invites`, `nova_casting_mock_attempts`, `nova_casting_mock_media`, and `nova_casting_journey_audit`.
+
+## Tests run on 2026-10-15
+
+Local disposable Postgres 16, same URL the workflow uses (`postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test`):
+
+| Set | Result |
+| --- | --- |
+| `preview-regressions` file list, including `test_nova_casting_journey.py` | `101 passed` in 1.99s |
+| `casting-postgres-gated` file list | `25 passed` in 1.15s, and the output does not contain `skipped` |
+| `casting-db-integration` file list, from `backend/` | `32 passed` in 4.75s |
+| Authenticated browser journey, desktop 1280x900 and iPhone 390x844 | `1 passed` in 11.03s |
+
+The browser run signs in through a disposable login override, reloads the invitation from the server, redeems it, saves an https link and a `CA-` receipt, shortlists, approves a draft, runs mock transport with `Real delivery: false`, exports a CSV with no https link, and rejects an expired invitation. The iPhone viewport reloads the server copy and rejects the expired invitation. Screenshots from that run are `desktop-reloaded.png`, `desktop-receipt.png`, `desktop-call-sheet.png`, `desktop-expired.png`, `iphone-reloaded.png`, and `iphone-expired.png` under `/opt/cursor/artifacts/casting-journey/`. `smtplib` is patched to raise. This is not a deployed preview.
+
+GitHub Actions counts for this continuation are recorded on the draft pull request after the push. Do not treat the local counts above as the GitHub run.
 
 ## Rollback
 
-Turn `NOVA_CASTING_STAGING_READS` off. Routes return 503. On a disposable database, downgrade revision `20261014_casting_pilot` drops only the pilot tables. Do not downgrade it on a shared database. Production upgrade stamps the revision and does not create tables.
+Turn `NOVA_CASTING_STAGING_READS` off. Routes return 503. On a disposable database, downgrade revision `20261015_casting_journey` drops only the four journey tables. Downgrade of `20261014_casting_pilot` then drops only the earlier pilot tables. Do not downgrade either revision on a shared database. Production upgrade stamps the revision and does not create tables.
 
 ## Blockers
 
 - No issue comment was posted. The token cannot write to GitHub issues.
-- No staging host is approved, so there is no deployed preview URL. Local Postgres was used only for the gated tests above.
-- GitHub Actions job `casting-postgres-gated` is in the workflow and has not been observed on a GitHub run from this session.
+- No staging host is approved. The Netlify preview is the static site for the previous commit, not an approved Casting API. Local Postgres was used only for the gated tests above.
+- GitHub Actions on commit `5a315388` already reported `casting-postgres-gated` at 18 passed. This continuation adds the journey file to that job. Counts for the new commit are filled in on the draft pull request after the push.
 - Public applicant intake, real outbound messages, and a paid SMS or WhatsApp provider still need a separate owner decision.
-- Antivirus remains structural-only unless ClamAV is installed on a disposable host. This pilot does not add a scanner.
+- Antivirus remains structural-only unless ClamAV is installed on a disposable host. The mock upload gate uses that same structural scan. A clean result still does not release bytes or a public URL.
 - Platform accounts are still required. Casting does not register users.
+- Cloudflare Pages failed on commit `1fd90997` for project `amicor-public`. The check summary was "Build failed". The build log is only on the Cloudflare dashboard. This lane does not own the public site, so that build was not changed.
+- Creative Studio video rendering was not modified. This pilot does not generate audition media.

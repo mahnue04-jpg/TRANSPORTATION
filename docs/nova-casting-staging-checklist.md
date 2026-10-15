@@ -30,10 +30,15 @@ Coded in the existing sandbox, not merged and not deployed. Public intake stays 
 | Approval-gated email drafts, STOP suppression, retry that does not send | Yes | Unit tests | No | No email provider is configured, and none should be enabled for this pilot |
 | Timezone call sheet and fictional Harborlight demo | Yes. The sandbox organization stores the sample and reloads it. The demo HTML page is a labeled preview | Page source test and authenticated SQLite HTTP test | No | Not a staging deploy |
 | SMS and WhatsApp | Rejected unless a provider name is configured, and still not sent | Unit tests | No | Do not buy a provider for this pilot |
+| Authenticated invitation, redeem, refresh persistence, expired invite | Yes. Token stays in the organizer snapshot. Redeem reuses one draft application. Expired and closed-campaign invites stay closed | `test_nova_casting_journey.py` and the browser journey at 1280x900 and 390x844 | No | Invitations are not public links |
+| Mock transport receipts, retry, opt-out, and failure | Yes. Provider `disposable-mock`. `delivery_state` stays `not_sent` and `real_delivery` stays false | HTTP journey test and browser journey | No | Do not connect a real mail transport |
+| Disposable mock upload with MIME, size, and malware-review gate | Yes. Clean bytes stay in process memory. No public URL and no byte column. Wipe clears the hold | Unit and HTTP tests | No | `media_uploads_enabled` stays false. Do not enable public media upload |
+| Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. Cross-tenant calls return 404 | Postgres-gated journey test, `25 passed`, output has no `skipped` | No | Do not run the downgrade on a shared database |
 
 ## Explicitly unavailable
 
-- Public intake, campaign publishing, and a public application form.
+- Public intake, campaign publishing, and a public application form. Campaign status cannot leave `DRAFT` or `CLOSED`.
+- Real media upload and playback of applicant video. Mock upload metadata is not a released file.
 - Signed media URLs, public file hosting, and playback without the Nova session.
 - Email, SMS, and external delivery of callbacks.
 - Real applicant videos, names, or contact details. Tests use synthetic bytes and `.invalid` addresses.
