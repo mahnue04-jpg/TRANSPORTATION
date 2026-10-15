@@ -422,11 +422,15 @@
     if (!blob.size) throw new Error("Final promo recording produced an empty file.");
     return {
       blob: blob,
-      fileName: "amicor-nova-final-promo.webm",
+      fileName: clips.length ? "amicor-nova-final-promo.webm" : "amicor-nova-slideshow-preview.webm",
       clipCount: clips.length,
       artworkCount: artwork.length,
       hasVoice: Boolean(voiceAsset),
-      renderMode: clips.length ? "browser_scene_clips" : "browser_artwork_slideshow"
+      renderMode: clips.length ? "browser_scene_clips" : "browser_artwork_slideshow",
+      commercial_slideshow: !clips.length,
+      acceptance_note: clips.length
+        ? "Browser WebM is a review helper; prefer the server MP4 export for commercial acceptance."
+        : "Still slideshow preview only — not commercial acceptance."
     };
   }
 
@@ -688,13 +692,25 @@
             (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")))));
     var presenterCaptionsReady = !bodyLipSyncReady || bodyCaptionedReady;
 
+    var finalIsSlideshow = !!(
+      finalVideoMeta.commercial_slideshow === true ||
+      finalVideoMeta.render_mode === "ffmpeg_compat_stills" ||
+      finalVideoMeta.render_mode === "browser_artwork_slideshow"
+    );
+    var finalIsMp4 = !!(finalVideo && finalVideo.url && /\.mp4($|\?)/i.test(String(finalVideo.url)));
+    var finalCaptionsOk = !!(
+      finalVideoMeta.captions_burned_in === true ||
+      finalVideoMeta.subtitle_url ||
+      finalVideoMeta.captions_sidecar_ready
+    );
+    var commercialCandidate = !!(finalVideo && finalVideo.url && finalIsMp4 && !finalIsSlideshow && finalCaptionsOk);
     var checks = [
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
       { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
-      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build Final Promo" : (finalIsSlideshow ? "Blocked: still slideshow" : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track"))), action: "build-final-promo", actionLabel: "Build final promo" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
       { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
-      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
+      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()) || finalCaptionsOk, note: (caption || finalCaptionsOk) ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
       { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand", action: "brand-profile", actionLabel: "Set up brand" }
     ];
 
@@ -1167,6 +1183,81 @@
     throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
   }
 
+  function renderPreflight(quote) {
+    latestPreflight = quote || null;
+    var el = $("preflight-status");
+    var confirmBtn = $("confirm-budget");
+    if (!el) return;
+    if (!quote) {
+      el.textContent = "Select a project, then run preflight.";
+      if (confirmBtn) confirmBtn.disabled = true;
+      return;
+    }
+    var balance = quote.balance || {};
+    var balanceText = balance.status === "owner_reported"
+      ? ("Owner-reported balance: $" + String(balance.amount))
+      : "Balance: cannot verify (no automatic top-up)";
+    var lines = [
+      "Estimated total: $" + String(quote.estimated_total_usd) + " USD (planning only)",
+      balanceText,
+      "Paid render allowed by quote: " + (quote.paid_render_allowed ? "yes" : "no"),
+      "Owner budget confirmed: " + (quote.owner_budget_confirmed ? "yes" : "no"),
+      "Auto purchase/top-up: off"
+    ];
+    (quote.line_items || []).forEach(function (item) {
+      lines.push("- " + item.label + ": $" + String(item.estimated_usd));
+    });
+    el.innerHTML = lines.map(function (line) { return "<div>" + escapeHtml(line) + "</div>"; }).join("");
+    if (confirmBtn) {
+      confirmBtn.disabled = !quote.paid_render_allowed || !!quote.owner_budget_confirmed;
+    }
+  }
+
+  var runPreflightBtn = $("run-preflight");
+  if (runPreflightBtn) {
+    runPreflightBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project before running preflight.", false);
+        return;
+      }
+      runPreflightBtn.disabled = true;
+      try {
+        var quote = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/preflight");
+        renderPreflight(quote);
+        showBanner("Preflight complete. No provider charges were made.", true);
+      } catch (err) {
+        showBanner(err.message || "Preflight failed.", false);
+      } finally {
+        runPreflightBtn.disabled = false;
+      }
+    });
+  }
+  var confirmBudgetBtn = $("confirm-budget");
+  if (confirmBudgetBtn) {
+    confirmBudgetBtn.addEventListener("click", async function () {
+      if (!activeProjectId || !latestPreflight) {
+        showBanner("Run preflight for the active project first.", false);
+        return;
+      }
+      confirmBudgetBtn.disabled = true;
+      try {
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/budget-confirm", {
+          method: "POST",
+          body: JSON.stringify({
+            confirmed: true,
+            acknowledged_estimate_usd: latestPreflight.estimated_total_usd,
+            note: "Owner confirmed preflight estimate before paid render."
+          })
+        });
+        renderPreflight(body.quote || latestPreflight);
+        showBanner("Budget confirmation saved for this project. Still no automatic purchases.", true);
+      } catch (err) {
+        showBanner(err.message || "Budget confirmation failed.", false);
+        confirmBudgetBtn.disabled = false;
+      }
+    });
+  }
+
   var finalPromoButton = $("build-final-promo");
   if (finalPromoButton) {
     finalPromoButton.addEventListener("click", async function () {
@@ -1296,9 +1387,10 @@
     tagline: "AI help for everyday business operations",
     tone: "Professional, friendly, trustworthy",
     target_audience: "Small business owners, service businesses, local businesses, and growing teams",
-    preferred_cta: "Start free today",
+    preferred_cta: "Visit getamicor.com to explore AMICOR Nova.",
     brand_description: "AMICOR Nova helps small businesses handle documents, emails, reports, scheduling, outreach, and other day-to-day operational tasks with AI-assisted drafts you review first. Save time, stay organized, and stay in control."
   };
+  var latestPreflight = null;
 
   function applyAmicorBrandDefaults() {
     $("brand-name").value = amicorDefaults.business_name;

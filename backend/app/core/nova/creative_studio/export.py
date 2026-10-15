@@ -28,8 +28,26 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
 
     presenter_meta = (presenter_video or {}).get("metadata") or {}
     presenter_is_publish_ready = presenter_publish_ready(presenter_meta)
+    final_meta = (final_video or {}).get("metadata") or {}
     final_video_ready = bool(final_video and final_video.get("url"))
-    production_ready = bool(final_video_ready and (not presenter_video or presenter_is_publish_ready))
+    slideshow_blocked = bool(
+        str(final_meta.get("render_mode") or "") in {"ffmpeg_compat_stills", "browser_artwork_slideshow"}
+        or final_meta.get("commercial_slideshow") is True
+    )
+    captions_ok = bool(
+        final_meta.get("captions_burned_in") is True
+        or final_meta.get("subtitle_url")
+        or final_meta.get("captions_sidecar_ready")
+    )
+    commercial_ready_candidate = bool(
+        final_video_ready
+        and not slideshow_blocked
+        and captions_ok
+        and str(final_video.get("url") or "").lower().endswith(".mp4")
+    )
+    production_ready = bool(
+        commercial_ready_candidate and (not presenter_video or presenter_is_publish_ready)
+    )
 
     package = {
         "export_kind": "nova_creative_studio_project_package",
@@ -60,20 +78,27 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
                 "Final publishing remains owner-controlled.",
                 "Presenter video must be marked publish_ready when one is included.",
                 "Provider watermarks are never removed by Nova.",
+                "Static still slideshows are never commercial-acceptance.",
+                "Prefer motion MP4 with English voice continuity, captions, and getamicor.com CTA fade.",
             ],
+            "commercial_ready_candidate": commercial_ready_candidate,
+            "slideshow_blocked": slideshow_blocked,
         },
         "delivery_checklist": {
             "video_ready": final_video_ready,
+            "motion_mp4_ready": commercial_ready_candidate,
             "presenter_ready": bool(not presenter_video or presenter_is_publish_ready),
-            "caption_ready": bool(_first_content(assets, "caption")),
+            "caption_ready": bool(captions_ok or _first_content(assets, "caption")),
             "thumbnail_ready": bool(image_asset and image_asset.get("url")),
             "voice_ready": bool(audio_asset and audio_asset.get("url")),
             "brand_present": bool(brand),
+            "not_static_slideshow": not slideshow_blocked,
         },
         "metadata": {
             "asset_count": len(assets),
             "scene_count": len(scenes),
             "status_note": "Package may include real provider media, but external publishing remains OFF until owner action.",
+            "commercial_ready_candidate": commercial_ready_candidate,
         },
     }
 
