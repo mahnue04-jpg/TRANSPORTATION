@@ -852,6 +852,35 @@ class CreativeStudioService(ShortDramaMixin):
                     (image_result.get("provider") or {}).get("message")
                     or f"Nova could not create source art for scene {scene_index}."
                 )
+                # Missing credentials are CONFIG_REQUIRED, not a failed render.
+                # ERROR is reserved for a live provider that actually attempted work.
+                if provider_unavailable:
+                    blocked_status = provider_state.status or CONFIG_REQUIRED
+                    result = {
+                        "status": blocked_status,
+                        "message": message,
+                        "url": None,
+                        "asset_generated": False,
+                        "provider": video_provider().provider_id,
+                    }
+                    asset = self._save_text_asset(
+                        owner_id=owner_id,
+                        project_id=project_id,
+                        kind="video",
+                        title="Scene video provider unavailable",
+                        content=prompt_text,
+                        status="PROVIDER_CONFIG_REQUIRED" if blocked_status == CONFIG_REQUIRED else blocked_status,
+                        metadata={"provider_result": result, "brief": {"scene_index": scene_index}},
+                        url=None,
+                    )
+                    self._finish_job(
+                        job,
+                        status=blocked_status,
+                        message=message,
+                        asset_ids=[asset.id],
+                        provider=video_provider().provider_id,
+                    )
+                    return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
                 asset = self._save_text_asset(
                     owner_id=owner_id,
                     project_id=project_id,
@@ -859,11 +888,16 @@ class CreativeStudioService(ShortDramaMixin):
                     title=f"Scene {scene_index} AI motion result",
                     content=prompt_text,
                     status="ERROR",
-                    metadata={"provider_result": {"status": "ERROR", "message": message, "brief": {"scene_index": scene_index}}},
+                    metadata={"provider_result": {"status": "ERROR", "message": message, "brief": {"scene_index": scene_index}, "asset_generated": False}},
                     url=None,
                 )
                 self._finish_job(job, status="ERROR", message=message, asset_ids=[asset.id], provider=video_provider().provider_id)
-                return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
+                return {
+                    "job": job.as_dict(),
+                    "asset": asset.as_dict(),
+                    "provider": {"status": "ERROR", "message": message, "asset_generated": False},
+                    "url": None,
+                }
 
         # When live video providers are gated/unfunded, create deliberate local
         # motion instead of leaving the project stuck or falling back to a still slideshow.

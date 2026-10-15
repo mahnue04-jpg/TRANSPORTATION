@@ -1027,9 +1027,11 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
     assert 'id="production-preset"' in html
     assert 'id="project-save-settings"' in html
     assert 'href="/nova/one-minute-demo">Open the 60-second full-body demo</a>' in html
-    assert '<option value="60" selected>60</option>' in html
+    assert '<option value="30" selected>30</option>' in html
+    assert '<option value="60">60</option>' in html
     assert '<option value="full_body" selected>Full body motion</option>' in html
-    assert '<option value="16:9" selected>16:9 · YouTube / web / demo</option>' in html
+    assert '<option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>' in html
+    assert '<option value="16:9">16:9 · YouTube / web / demo</option>' in html
     assert '<option value="coral" selected>Coral · clear female voice</option>' in html
     assert "Photorealistic full-body, head-to-toe view" in html
     assert "Meet AMICOR Nova, your AI operations workspace" in html
@@ -1046,7 +1048,7 @@ def test_brand_defaults_and_production_presets_static_contract() -> None:
 
     assert 'business_name: "AMICOR Nova"' in js
     assert 'tagline: "AI help for everyday business operations"' in js
-    assert 'preferred_cta: "Start free today"' in js
+    assert 'preferred_cta: "Visit getamicor.com to explore AMICOR Nova."' in js
     assert "applyAmicorBrandDefaults" in js
     assert "applyProductionPreset" in js
     assert 'imageAspect.value = "9:16"' in js
@@ -1069,7 +1071,7 @@ def test_export_includes_social_media_production_package() -> None:
             {"id": "aud1", "kind": "audio", "title": "Voice", "status": "GENERATED", "url": "/media/voice.mp3", "metadata": {}},
             {"id": "cap1", "kind": "caption", "title": "Caption", "status": "GENERATED", "content": "Save time. Stay in control.", "metadata": {}},
             {"id": "tag1", "kind": "hashtags", "title": "Tags", "status": "GENERATED", "content": "#AMICOR #AI", "metadata": {}},
-            {"id": "vid1", "kind": "video", "title": "Final AMICOR Nova promo", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {"final_promo": True}},
+            {"id": "vid1", "kind": "video", "title": "Final AMICOR Nova promo", "status": "GENERATED", "url": "/media/final.mp4", "metadata": {"final_promo": True, "captions_burned_in": True, "commercial_slideshow": False}},
             {"id": "pres1", "kind": "presenter_video", "title": "Presenter", "status": "GENERATED", "url": "/media/presenter.mp4", "metadata": {"publish_ready": True, "quality_state": "PUBLISH_READY"}},
         ],
     }
