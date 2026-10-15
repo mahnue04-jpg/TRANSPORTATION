@@ -91,6 +91,10 @@ def pilot_app(monkeypatch, tmp_path):
         casting_pilot_models.NovaCastingSuppression.__table__,
         casting_pilot_models.NovaCastingSchedule.__table__,
         casting_pilot_models.NovaCastingPilotAudit.__table__,
+        casting_pilot_models.NovaCastingInvite.__table__,
+        casting_pilot_models.NovaCastingMockAttempt.__table__,
+        casting_pilot_models.NovaCastingMockMedia.__table__,
+        casting_pilot_models.NovaCastingJourneyAudit.__table__,
     ]
     for table in tables:
         table.create(bind=engine, checkfirst=True)
@@ -101,6 +105,7 @@ def pilot_app(monkeypatch, tmp_path):
         _user_row("reviewer", "tenant-a"),
         _user_row("applicant", "tenant-a"),
         _user_row("applicant-b", "tenant-a"),
+        _user_row("invitee", "tenant-a"),
         _user_row("stranger", "tenant-a"),
         _user_row("other-tenant", "tenant-b"),
         casting_db_models.NovaCastingOrganization(
@@ -465,3 +470,143 @@ def test_configured_fake_sms_is_stored_unsent_before_the_daily_cap(pilot_app, mo
     assert len(rows) == 2
     assert {row.delivery_state for row in rows} == {"not_sent"}
     db.close()
+
+
+def _mini_mp4() -> bytes:
+    body = b"ftyp" + b"isom" + b"\x00\x00\x00\x00"
+    return (len(body) + 4).to_bytes(4, "big") + body
+
+
+def test_authenticated_journey_invite_mock_transport_and_upload(pilot_app):
+    organizer = pilot_app["client_for"]("organizer")
+    invitee = pilot_app["client_for"]("invitee")
+    other = pilot_app["client_for"]("other-tenant", "tenant-b")
+    reviewer = pilot_app["client_for"]("reviewer")
+    role_id = _create_role(pilot_app)
+    issued = organizer.post(_path(f"/campaigns/{CAMPAIGN}/invites"), json={
+        "role_id": role_id,
+        "expires_at": "2027-12-01T18:00:00+00:00",
+    })
+    assert issued.status_code == 200, issued.text
+    invite = issued.json()
+    assert invite["published"] is False
+    assert invite["status"] == "open"
+    assert invite["public_url"] == ""
+    assert invite["token"]
+    assert other.post(_path("/invites/redeem"), json={"token": invite["token"]}).status_code == 404
+    redeemed = invitee.post(_path("/invites/redeem"), json={"token": invite["token"]})
+    assert redeemed.status_code == 200, redeemed.text
+    application_id = redeemed.json()["application_id"]
+    assert redeemed.json()["token"] == ""
+    assert redeemed.json()["public_url"] == ""
+    saved = invitee.post(_path(f"/applications/{application_id}/intake"), json=_intake(role_id, contact_email="invitee@example.invalid"))
+    assert saved.status_code == 200, saved.text
+    receipt = saved.json()["receipt"]
+    assert receipt.startswith("CA-")
+    submitted = invitee.post(_path(f"/applications/{application_id}/intake/submit"))
+    assert submitted.status_code == 200, submitted.text
+    files = {"file": ("tape.mp4", _mini_mp4(), "video/mp4")}
+    clean = invitee.post(
+        _path(f"/applications/{application_id}/mock-upload"),
+        data={"mime_type": "video/mp4", "consent_accepted": "true"},
+        files=files,
+    )
+    assert clean.status_code == 200, clean.text
+    assert clean.json()["scan_status"] == "CLEAN"
+    assert clean.json()["public_url"] == ""
+    assert clean.json()["bytes_released"] is False
+    assert clean.json()["playback"] == "unavailable"
+    assert clean.json()["media_uploads_enabled"] is False
+    hostile = invitee.post(
+        _path(f"/applications/{application_id}/mock-upload"),
+        data={"mime_type": "video/mp4", "consent_accepted": "true"},
+        files={"file": ("bad.mp4", _mini_mp4() + b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE", "video/mp4")},
+    )
+    assert hostile.status_code == 200, hostile.text
+    assert hostile.json()["scan_status"] == "REJECTED"
+    assert hostile.json()["bytes_released"] is False
+    hidden = reviewer.get(_path(f"/applications/{application_id}/mock-uploads"))
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json()["public_url"] == ""
+    assert all(item["public_url"] == "" and item["playback"] == "unavailable" for item in hidden.json()["items"])
+    assert "example.invalid" not in hidden.text
+    short = reviewer.post(_path(f"/applications/{application_id}/pilot-review"), json={"stage": "Callback", "shortlisted": True})
+    assert short.status_code == 200, short.text
+    drafted = organizer.post(_path("/messages"), json={
+        "kind": "confirmation", "idempotency_key": "journey-key-01", "channel": "email",
+        "application_id": application_id,
+    })
+    assert drafted.status_code == 200, drafted.text
+    assert drafted.json()["delivery_state"] == "not_sent"
+    blocked_send = organizer.post(_path(f"/messages/{drafted.json()['id']}/mock-dispatch"), json={"fail": False})
+    assert blocked_send.status_code == 422
+    approved = organizer.post(_path(f"/messages/{drafted.json()['id']}/approve"))
+    assert approved.status_code == 200, approved.text
+    failed = organizer.post(_path(f"/messages/{drafted.json()['id']}/mock-dispatch"), json={"fail": True})
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["mock_outcome"] == "mock_failed"
+    assert failed.json()["mock_receipt"] == ""
+    assert failed.json()["real_delivery"] is False
+    assert failed.json()["delivery_state"] == "not_sent"
+    accepted = organizer.post(_path(f"/messages/{drafted.json()['id']}/mock-dispatch"), json={"fail": False})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["mock_outcome"] == "mock_accepted"
+    assert accepted.json()["mock_receipt"].startswith("MOCK-")
+    assert accepted.json()["external_delivery"] is False
+    again = organizer.post(_path(f"/messages/{drafted.json()['id']}/mock-dispatch"), json={"fail": True})
+    assert again.status_code == 200, again.text
+    assert again.json()["mock_receipt"] == accepted.json()["mock_receipt"]
+    invitee.post(_path("/suppressions"), json={"contact_email": "invitee@example.invalid", "reason": "unsubscribe"})
+    opted = organizer.post(_path("/messages"), json={
+        "kind": "reminder", "idempotency_key": "journey-opt-01", "channel": "email",
+        "application_id": application_id,
+    })
+    assert opted.status_code == 200, opted.text
+    assert opted.json()["status"] == "suppressed"
+    opted_send = organizer.post(_path(f"/messages/{opted.json()['id']}/mock-dispatch"), json={"fail": False})
+    assert opted_send.status_code == 200, opted_send.text
+    assert opted_send.json()["mock_outcome"] == "opted_out"
+    assert opted_send.json()["mock_receipt"] == ""
+    assert opted_send.json()["real_delivery"] is False
+    scheduled = organizer.post(_path(f"/campaigns/{CAMPAIGN}/schedule"), json={
+        "role_id": role_id,
+        "timezone": "America/New_York",
+        "starts_at": "2026-11-18T15:00:00+00:00",
+        "ends_at": "2026-11-18T18:00:00+00:00",
+        "location_label": "Fictional reading room",
+        "document_url": "https://example.invalid/side.pdf",
+    })
+    assert scheduled.status_code == 200, scheduled.text
+    assert scheduled.json()["published"] is False
+    sheet = organizer.get(_path(f"/roles/{role_id}/call-sheet"))
+    assert sheet.status_code == 200, sheet.text
+    assert sheet.json()["external_delivery"] is False
+    exported = organizer.get(_path("/pilot-export?include_contact=false"))
+    assert exported.status_code == 200, exported.text
+    assert receipt in exported.text
+    assert "https://" not in exported.text
+    reloaded = organizer.get(_path(f"/pilot-snapshot?campaign_id={CAMPAIGN}"))
+    assert reloaded.status_code == 200, reloaded.text
+    assert invite["token"] in {item["token"] for item in reloaded.json()["invites"]}
+    assert reloaded.json()["delivered"] is False
+    assert reloaded.json()["media_uploads_enabled"] is False
+    expired = organizer.post(_path(f"/campaigns/{CAMPAIGN}/invites"), json={
+        "role_id": role_id, "expires_at": "2020-01-01T00:00:00+00:00",
+    })
+    assert expired.status_code == 200, expired.text
+    denied = invitee.post(_path("/invites/redeem"), json={"token": expired.json()["token"]})
+    assert denied.status_code == 422
+    assert denied.json()["detail"] == "Expired invite"
+    closed = organizer.patch(_path(f"/campaigns/{CAMPAIGN}"), json={
+        "title": "Harborlight", "category": "film", "minimum_age": 18, "status": "CLOSED",
+    })
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "CLOSED"
+    blocked = organizer.post(_path(f"/campaigns/{CAMPAIGN}/invites"), json={
+        "role_id": role_id, "expires_at": "2027-12-02T18:00:00+00:00",
+    })
+    assert blocked.status_code == 422
+    assert blocked.json()["detail"] == "Campaign cannot be published"
+    wiped = organizer.post(_path("/mock-uploads/wipe"))
+    assert wiped.status_code == 200, wiped.text
+    assert wiped.json()["bytes_released"] is False

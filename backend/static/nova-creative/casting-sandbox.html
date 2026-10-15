@@ -192,6 +192,36 @@
       <p id="pilot-message" class="hint">No message draft yet. Outbound delivery stays off.</p>
       <pre id="pilot-output" class="output" aria-live="polite">Pilot results appear here. No invitation is sent.</pre>
     </section>
+    <section>
+      <h2>Authenticated sandbox journey</h2>
+      <p class="hint">Draft campaign, invitation, https audition link, receipt, review, mock transport, call sheet, and export. Invitations are redeemed in this signed-in session. Mock upload bytes stay in disposable memory and are not played or published.</p>
+      <form id="journey-form" class="grid">
+        <label>Invitation expires<input id="journey-expires" type="datetime-local" required /></label>
+        <label>Invitation token<input id="journey-token" maxlength="64" autocomplete="off" /></label>
+        <div class="actions wrap">
+          <button type="submit" id="journey-invite">Issue invitation</button>
+          <button type="button" id="journey-redeem" class="secondary">Redeem invitation</button>
+          <button type="button" id="journey-expired" class="secondary">Try expired invitation</button>
+          <button type="button" id="journey-mock" class="secondary">Run mock transport</button>
+          <button type="button" id="journey-export" class="secondary">Export sandbox CSV</button>
+        </div>
+      </form>
+      <form id="mock-upload-form" class="grid">
+        <label>Mock file<input id="mock-file" type="file" accept="video/mp4,video/quicktime,video/webm" /></label>
+        <label>Declared type
+          <select id="mock-mime">
+            <option value="video/mp4">video/mp4</option>
+            <option value="video/webm">video/webm</option>
+            <option value="video/quicktime">video/quicktime</option>
+          </select>
+        </label>
+        <div class="actions wrap">
+          <button type="submit" id="mock-upload">Validate mock upload</button>
+          <button type="button" id="mock-wipe" class="secondary">Wipe mock memory</button>
+        </div>
+      </form>
+      <p id="journey-status" class="hint" aria-live="polite">Journey has not started. Nothing will be sent.</p>
+    </section>
   </main>
   <script>
     (function () {
@@ -657,6 +687,11 @@
           pilotMessageId = "";
           $("pilot-message").textContent = "No message draft yet. Outbound delivery stays off.";
         }
+        var invites = saved.invites || [];
+        if (invites.length && invites[0].token) {
+          $("journey-token").value = invites[0].token;
+          $("journey-status").textContent = "Invitation reloaded from the server. Status " + invites[0].status + ". Nothing was sent.";
+        }
         $("pilot-output").textContent = "Server copy reloaded. Published: " + String(saved.published) + ". Delivered: " + String(saved.delivered) + ". Roles: " + roles.length + ".";
         if (!intake || !intake.consent_revoked) {
           show("Saved pilot reloaded for this sandbox organization. Nothing was sent.", true);
@@ -793,6 +828,141 @@
           }
         }
       } catch (err) { /* tab memory is optional; the server copy remains */ }
+      function pad(value) { return String(value).padStart(2, "0"); }
+      function localStamp(date) {
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+      }
+      $("journey-expires").value = localStamp(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      $("journey-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox()) || !pilotRoleId) {
+            show("Save a role before issuing an invitation. Nothing was sent.", false);
+            return;
+          }
+          var campaignId = $("application-campaign").value.trim();
+          var expires = new Date($("journey-expires").value);
+          var issued = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/invites", {
+            method: "POST",
+            body: JSON.stringify({ role_id: pilotRoleId, expires_at: expires.toISOString() })
+          });
+          $("journey-token").value = issued.token || "";
+          $("journey-status").textContent = "Invitation " + issued.status + ". Published: " + String(issued.published) + ". Nothing was sent.";
+          show("Invitation stored in this sandbox. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-redeem").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var redeemed = await api(base() + "/invites/redeem", {
+            method: "POST",
+            body: JSON.stringify({ token: $("journey-token").value.trim() })
+          });
+          if (redeemed.application_id) {
+            applicationId = redeemed.application_id;
+            $("review-application").value = applicationId;
+            rememberSandbox();
+          }
+          if (redeemed.role_id) {
+            pilotRoleId = redeemed.role_id;
+            $("pilot-role-id").value = pilotRoleId;
+          }
+          $("journey-status").textContent = "Invitation redeemed. Application " + (redeemed.application_id || "") + ". Nothing was sent.";
+          show("Invitation redeemed for this signed-in account. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-expired").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotRoleId) return;
+          var campaignId = $("application-campaign").value.trim();
+          var issued = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/invites", {
+            method: "POST",
+            body: JSON.stringify({ role_id: pilotRoleId, expires_at: new Date(Date.now() - 3600000).toISOString() })
+          });
+          $("journey-token").value = issued.token || "";
+          await api(base() + "/invites/redeem", {
+            method: "POST",
+            body: JSON.stringify({ token: issued.token })
+          });
+          show("Expired invitation was accepted.", false);
+        } catch (err) {
+          $("journey-status").textContent = "Expired invitation stayed closed. Nothing was sent.";
+        }
+      });
+      $("journey-mock").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotMessageId) {
+            show("Approve a draft before the mock transport. Nothing was sent.", false);
+            return;
+          }
+          var result = await api(base() + "/messages/" + encodeURIComponent(pilotMessageId) + "/mock-dispatch", {
+            method: "POST",
+            body: JSON.stringify({ fail: false })
+          });
+          $("journey-status").textContent = "Mock outcome " + result.mock_outcome + ". Receipt " + (result.mock_receipt || "none") + ". Real delivery: " + String(result.real_delivery) + ".";
+          show("Mock transport finished inside this sandbox. Nothing was delivered.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-export").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = await fetch(base() + "/pilot-export?include_contact=false", { headers: headers });
+          var text = await response.text();
+          if (!response.ok) {
+            show("Export unavailable. Nothing was sent.", false);
+            return;
+          }
+          $("pilot-output").textContent = text;
+          $("journey-status").textContent = "Sandbox CSV is on this page. Nothing was sent.";
+          show("Export loaded in the page. Nothing was sent.", true);
+        } catch (err) {
+          show("Export unavailable. Nothing was sent.", false);
+        }
+      });
+      $("mock-upload-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox()) || !applicationId) {
+            show("Save an application before mock upload. Nothing was stored.", false);
+            return;
+          }
+          var file = $("mock-file").files && $("mock-file").files[0];
+          if (!file) {
+            show("Choose a file. Nothing was stored.", false);
+            return;
+          }
+          var data = new FormData();
+          data.append("file", file);
+          data.append("mime_type", $("mock-mime").value);
+          data.append("consent_accepted", "true");
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = await fetch(base() + "/applications/" + encodeURIComponent(applicationId) + "/mock-upload", {
+            method: "POST",
+            headers: headers,
+            body: data
+          });
+          var body = await response.json();
+          if (!response.ok) {
+            show(body.detail || "Request rejected", false);
+            return;
+          }
+          $("journey-status").textContent = "Mock scan " + body.scan_status + ". Playback " + body.playback + ". Public URL empty. Bytes released: " + String(body.bytes_released) + ".";
+          show("Mock upload stayed in disposable memory. Nothing was published.", true);
+        } catch (err) {
+          show("Mock upload failed. Nothing was published.", false);
+        }
+      });
+      $("mock-wipe").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var wiped = await api(base() + "/mock-uploads/wipe", { method: "POST" });
+          $("journey-status").textContent = "Wiped " + String(wiped.wiped) + " mock object(s). Bytes released: " + String(wiped.bytes_released) + ".";
+          show("Disposable mock memory cleared. Nothing was published.", true);
+        } catch (err) { /* banner already set */ }
+      });
       if (token()) {
         refreshReadiness().then(function (ready) {
           if (ready && org()) return restorePilot();
