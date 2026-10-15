@@ -97,6 +97,87 @@ def test_export_rejects_slideshow_as_commercial_ready():
     assert social["commercial_ready_candidate"] is False
 
 
+def test_unconfigured_video_keeps_config_required_and_asset_generated_false(monkeypatch):
+    monkeypatch.delenv("RUNWAYML_API_SECRET", raising=False)
+    monkeypatch.delenv("NOVA_CREATIVE_VIDEO_API_KEY", raising=False)
+    monkeypatch.delenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "runway")
+
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project(
+        "owner-344",
+        {
+            "title": "Gated scene",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+        },
+    )
+    svc.generate_storyboard("owner-344", project["id"])
+    video = svc.request_video_generation("owner-344", project["id"])
+    assert video["url"] is None
+    assert video["job"]["status"] == "CONFIG_REQUIRED"
+    assert video["provider"]["asset_generated"] is False
+    assert video["provider"]["status"] == "CONFIG_REQUIRED"
+    assert video["asset"]["url"] is None
+    assert video["asset"]["status"] == "PROVIDER_CONFIG_REQUIRED"
+
+
+def test_export_caption_copy_alone_is_not_commercial_ready():
+    """Caption text is not timed caption evidence. Burn-in or a sidecar is required."""
+    payload = {
+        "project": {"title": "Promo", "platform": "TikTok", "status": "ACTIVE"},
+        "brief": {"cta": "Visit getamicor.com"},
+        "brand": {"business_name": "AMICOR Nova"},
+        "scenes": [],
+        "assets": [
+            {"id": "img1", "kind": "image", "title": "Artwork", "status": "GENERATED", "url": "/media/art.png", "metadata": {}},
+            {"id": "aud1", "kind": "audio", "title": "Voice", "status": "GENERATED", "url": "/media/voice.mp3", "metadata": {}},
+            {"id": "cap1", "kind": "caption", "title": "Caption", "status": "GENERATED", "content": "Save time. Stay in control.", "metadata": {}},
+            {
+                "id": "vid1",
+                "kind": "video",
+                "title": "Final",
+                "status": "GENERATED",
+                "url": "/media/final.mp4",
+                "metadata": {"final_promo": True, "commercial_slideshow": False},
+            },
+            {
+                "id": "pres1",
+                "kind": "presenter_video",
+                "title": "Presenter",
+                "status": "GENERATED",
+                "url": "/media/presenter.mp4",
+                "metadata": {"publish_ready": True, "quality_state": "PUBLISH_READY"},
+            },
+        ],
+    }
+    social = export_project_package(payload, fmt="json")["package"]["social_media_package"]
+    assert social["caption_copy"] == "Save time. Stay in control."
+    assert social["production_ready"] is False
+
+    payload["assets"][3]["metadata"]["captions_burned_in"] = True
+    ready = export_project_package(payload, fmt="json")["package"]["social_media_package"]
+    assert ready["production_ready"] is True
+    assert ready["final_video"]["url"] == "/media/final.mp4"
+    assert ready["presenter_video"]["publish_ready"] is True
+
+    payload["assets"][3]["metadata"]["commercial_slideshow"] = True
+    blocked = export_project_package(payload, fmt="json")["package"]["social_media_package"]
+    assert blocked["production_ready"] is False
+    assert blocked["slideshow_blocked"] is True
+
+
+def test_duration_contract_keeps_sixty_seconds_beside_thirty_second_default():
+    html = (Path(__file__).resolve().parents[1] / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    js = (Path(__file__).resolve().parents[1] / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert '<option value="30" selected>30</option>' in html
+    assert '<option value="60">60</option>' in html
+    assert 'duration.value = "60"' in js
+    assert 'duration.value = "30"' in js
+    assert "Open the 60-second full-body demo" in html
+
+
 def test_even_spaced_english_captions_cover_script():
     cues = even_spaced_cues(
         "Meet AMICOR Nova. Busywork piles up. Visit getamicor.com.",
