@@ -7,7 +7,7 @@ import pytest
 
 from app.core.nova.v3.errors import V3Error
 from app.core.nova.v3.kernel import NovaV3Kernel
-from app.core.nova.v3.worker import JOB_KINDS, backoff_seconds, lease_job, recover_stale
+from app.core.nova.v3.worker import JOB_KINDS, backoff_seconds, lease_job, next_run, recover_stale
 
 
 def test_all_job_kinds_timezone_idempotency_pause_cancel() -> None:
@@ -103,7 +103,8 @@ def test_temporary_connector_retry_then_dead_letter() -> None:
     assert retried.dead_letter is False
     kernel.connectors[next(iter(kernel.connectors))].state = "CONNECTED"
     ran = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
-    assert ran and ran[0].status == "EXECUTED"
+    assert ran and ran[0].status == "PREPARED"
+    assert ran[0].next_run_at is not None and ran[0].next_run_at > kernel.now
 
 
 def test_owner_isolation_and_shutdown() -> None:
@@ -121,3 +122,66 @@ def test_owner_isolation_and_shutdown() -> None:
         organization_id="org-a", owner_user_id="owner-a", kind="work_deadline", timezone_name="America/Chicago"
     )
     assert kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+
+
+def test_hourly_and_two_hour_cadence_waits_and_does_not_send() -> None:
+    kernel = NovaV3Kernel()
+    started = kernel.now
+    hourly = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="opportunity_refresh",
+        timezone_name="America/Chicago",
+        frequency="hourly",
+    )
+    two_hour = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    first = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert {item.job_id for item in first} == {hourly.job_id, two_hour.job_id}
+    assert hourly.run_count == 1 and two_hour.run_count == 1
+    assert hourly.status == "PREPARED" and two_hour.status == "PREPARED"
+    assert hourly.next_run_at == next_run("hourly", "America/Chicago", started)
+    assert two_hour.next_run_at == next_run("every_two_hours", "America/Chicago", started)
+    assert kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+
+    kernel.now = hourly.next_run_at
+    second = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert [item.job_id for item in second] == [hourly.job_id]
+    assert hourly.run_count == 2
+    assert two_hour.run_count == 1
+    assert kernel.messages == {} or all(item.sent_externally is False for item in kernel.messages.values())
+
+    manual = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="work_deadline",
+        timezone_name="America/Chicago",
+        frequency="manual",
+    )
+    kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert manual.status == "EXECUTED"
+    assert manual.next_run_at is None
+    assert kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+    again = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="work_deadline",
+        timezone_name="America/Chicago",
+        frequency="manual",
+    )
+    assert again.job_id == manual.job_id
+    assert manual.status == "PREPARED"
+    with pytest.raises(V3Error) as bad:
+        kernel.schedule_job(
+            organization_id="org-a",
+            owner_user_id="owner-a",
+            kind="work_deadline",
+            timezone_name="America/Chicago",
+            frequency="every_five_minutes",
+        )
+    assert bad.value.code == "INVALID_CADENCE"

@@ -908,6 +908,12 @@ class NovaV3Kernel:
         allowed = set(JOB_KINDS) | {"invoice_follow_up"}
         if kind not in allowed:
             raise V3Error("INVALID_JOB_KIND", "unknown scheduler job kind", http_status=400)
+        if frequency not in {"manual", "hourly", "every_two_hours", "daily", "weekly", "monthly"}:
+            raise V3Error(
+                "INVALID_CADENCE",
+                "cadence must be manual, hourly, every_two_hours, daily, weekly, or monthly",
+                http_status=400,
+            )
         key = self.period_key(frequency, tz)
         existing = next(
             (
@@ -921,6 +927,9 @@ class NovaV3Kernel:
             None,
         )
         if existing:
+            if frequency == "manual" and existing.status == "EXECUTED":
+                existing.status = "PREPARED"
+                existing.next_run_at = self.now
             return existing
         job = ScheduledJob(
             job_id=self._id("V3JOB"),
@@ -946,6 +955,12 @@ class NovaV3Kernel:
             return f"{frequency}:{tz}:{iso.year}-W{iso.week:02d}"
         if frequency == "monthly":
             return f"{frequency}:{tz}:{local.strftime('%Y-%m')}"
+        if frequency == "hourly":
+            return f"{frequency}:{tz}:{local.strftime('%Y-%m-%dT%H')}"
+        if frequency == "every_two_hours":
+            return f"{frequency}:{tz}:{local.strftime('%Y-%m-%dT')}{local.hour // 2:02d}"
+        if frequency == "manual":
+            return f"{frequency}:{tz}"
         return f"{frequency}:{tz}:{local.strftime('%Y-%m-%d')}"
 
     def run_job(self, job_id: str, *, organization_id: str, owner_user_id: str) -> ScheduledJob:
@@ -1531,10 +1546,16 @@ class NovaV3Kernel:
                         job.lease_owner = None
                         job.status = "PREPARED"
                         continue
-                job.status = "EXECUTED"
                 job.run_count += 1
                 job.lease_owner = None
-                job.next_run_at = next_run(job.frequency or "daily", job.timezone_name, self.now)
+                upcoming = next_run(job.frequency or "daily", job.timezone_name, self.now)
+                if upcoming is None:
+                    job.status = "EXECUTED"
+                    job.next_run_at = None
+                else:
+                    # Repeating cadence stays prepared and waits. It does not send or apply.
+                    job.status = "PREPARED"
+                    job.next_run_at = upcoming
                 job.run_history.append({"at": self.now.isoformat(), "worker_id": worker_id, "live": False, "kind": job.kind})
                 ran.append(job)
             except V3Error as exc:
