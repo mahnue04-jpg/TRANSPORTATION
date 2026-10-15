@@ -35,6 +35,12 @@ Coded in the existing sandbox, not merged and not deployed. Public intake stays 
 | Disposable mock upload with MIME, size, and malware-review gate | Yes. Clean bytes stay in process memory. No public URL and no byte column. Wipe clears the hold | Unit and HTTP tests | No | `media_uploads_enabled` stays false. Do not enable public media upload |
 | Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. Cross-tenant calls return 404 | Postgres-gated journey test, `25 passed`, output has no `skipped` | No | Do not run the downgrade on a shared database |
 
+## Preview build (2026-10-15)
+
+The Netlify preview at `https://deploy-preview-339--grand-beignet-6447ea.netlify.app/` returned **404** on `/` and on the sandbox path. Cloudflare Pages reported **Build failed** on `ee670047`. This branch did not contain `website/package_public_site.py` or `netlify.toml`, which is the command those previews run. Main is merged back so the package command exists again.
+
+`/casting/` is a noindex staging page. It has no application form. Public intake stays off. A green Pages build is still required after this commit before the preview URL can be called working.
+
 ## Explicitly unavailable
 
 - Public intake, campaign publishing, and a public application form. Campaign status cannot leave `DRAFT` or `CLOSED`.

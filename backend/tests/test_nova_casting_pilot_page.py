@@ -7,6 +7,17 @@ SANDBOX = ROOT / "static/nova-creative/casting-sandbox.html"
 PREVIEW = ROOT / "static/nova-creative/casting-preview.html"
 
 
+def test_public_preview_route_keeps_applications_off():
+    page = Path(__file__).resolve().parents[2] / "website" / "casting" / "index.html"
+    html = page.read_text(encoding="utf-8")
+    assert "Public applications are off" in html
+    assert "Messages are not sent" in html
+    assert "<form" not in html.lower()
+    assert 'name="viewport"' in html
+    assert "noindex" in html
+    assert "fetch(" not in html
+
+
 def test_demo_is_labeled_and_offline():
     html = DEMO.read_text(encoding="utf-8")
     assert "Demo / Early Access" in html
