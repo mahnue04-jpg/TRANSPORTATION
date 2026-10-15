@@ -229,6 +229,18 @@ def test_visa_and_permit_kinds_do_not_substitute_for_each_other() -> None:
     )
 
 
+def test_audience_native_speakers_are_not_a_worker_requirement() -> None:
+    audience = (
+        "Remote contractor CRM email support for native English speakers. "
+        "No upfront fee. Work from anywhere."
+    )
+    assert "native_fluency_required" not in international_blockers(_job(audience), facts=_US_PROFILE)
+    worker = "Remote contractor. Native English speaker required. No upfront fee."
+    assert "native_fluency_required" in international_blockers(_job(worker), facts=_US_PROFILE)
+    plural = "Remote contractor. Native English speakers required."
+    assert "native_fluency_required" in international_blockers(_job(plural), facts=_US_PROFILE)
+
+
 def test_native_fluency_is_never_claimed_for_a_tested_language() -> None:
     assessed = assess_international_match(
         _job("Remote B2B CRM support. Native French speaker required. Work from anywhere."),

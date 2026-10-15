@@ -402,7 +402,18 @@ def _detect_work_type(text: str, job_type: str | None) -> str:
     jt = str(job_type or "").lower()
     contractor = _explicit_contractor(text, jt)
     if _has_any(text, _HARD_EMPLOYMENT_TOKENS):
-        return WORK_EMPLOYEE
+        # "Join our team" on an explicit contractor listing is a welcome line,
+        # not a W-2 requirement. W-2, staff, and permanent-employee wording
+        # still classifies the role as employment.
+        team_only = (
+            "join our team" in text
+            and not _has_any(
+                text,
+                tuple(token for token in _HARD_EMPLOYMENT_TOKENS if token != "join our team"),
+            )
+        )
+        if not (team_only and contractor):
+            return WORK_EMPLOYEE
     if contractor:
         if "b2b" in text or "vendor" in text or "statement of work" in text:
             return WORK_B2B

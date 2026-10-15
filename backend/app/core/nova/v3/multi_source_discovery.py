@@ -1912,6 +1912,44 @@ def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [merged[key] for key in order]
 
 
+def _funnel_key(row: dict[str, Any]) -> str:
+    """Stable identity for screened-versus-unique reconciliation."""
+    url = _canonical_source_url(str(row.get("source_url") or ""))
+    if url:
+        return url
+    title = _identity_text(row.get("title"))
+    company = _identity_text(row.get("company_name"))
+    return f"untitled:{company}:{title}"[:300]
+
+
+def merge_search_funnels(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Union kept and excluded URLs across queries. A kept URL is not excluded."""
+    screened_rows = 0
+    kept: set[str] = set()
+    excluded: dict[str, str] = {}
+    for part in parts:
+        funnel = part.get("funnel") or {}
+        screened_rows += int(funnel.get("screened_rows") or 0)
+        for url in part.get("funnel_kept_urls") or []:
+            token = str(url or "").strip()
+            if token:
+                kept.add(token)
+        for url, reason in (part.get("funnel_excluded") or {}).items():
+            token = str(url or "").strip()
+            if token and token not in kept and token not in excluded:
+                excluded[token] = str(reason or "")
+    for url in kept:
+        excluded.pop(url, None)
+    unique_screened = len(kept) + len(excluded)
+    return {
+        "screened_rows": screened_rows,
+        "unique_screened": unique_screened,
+        "unique_kept": len(kept),
+        "unique_excluded": len(excluded),
+        "reconciled": unique_screened == len(kept) + len(excluded),
+    }
+
+
 def search_multi_source_jobs(
     query: str,
     *,
@@ -1939,9 +1977,10 @@ def search_multi_source_jobs(
     per_provider: dict[str, int] = {}
     provider_screened_counts: dict[str, int] = {}
     provider_query_variants: dict[str, list[str]] = {}
-    exclusion_reason_counts: dict[str, int] = {}
-    exclusion_samples: list[dict[str, Any]] = []
-    seen_excluded: set[str] = set()
+    screened_rows = 0
+    kept_keys: set[str] = set()
+    excluded_reason: dict[str, str] = {}
+    excluded_samples: dict[str, dict[str, Any]] = {}
     query_variants = _discovery_query_variants(normalized)
 
     for provider in providers:
@@ -1951,48 +1990,84 @@ def search_multi_source_jobs(
         provider_rows: list[dict[str, Any]] = []
         screened = 0
         used_variants: list[str] = []
+        variants_completed = 0
+        provider_error: str | None = None
         try:
             for variant in query_variants:
                 used_variants.append(variant)
                 rows = call_provider_search(provider, variant, limit=capped)
+                variants_completed += 1
                 screened += len(rows)
                 kept_rows: list[dict[str, Any]] = []
                 for row in rows:
+                    screened_rows += 1
+                    key = _funnel_key(row)
                     reason = relevance_exclusion(row, normalized)
                     if reason:
-                        exclusion_reason_counts[reason] = exclusion_reason_counts.get(reason, 0) + 1
-                        sample_key = _canonical_source_url(str(row.get("source_url") or "")) or str(row.get("title") or "")
-                        if sample_key and sample_key not in seen_excluded and len(exclusion_samples) < 20:
-                            seen_excluded.add(sample_key)
-                            exclusion_samples.append(
-                                {
-                                    "title": str(row.get("title") or "")[:180],
-                                    "company_name": str(row.get("company_name") or "")[:120],
-                                    "source_url": str(row.get("source_url") or ""),
-                                    "provider_id": row.get("provider_id"),
-                                    "fetched_at": row.get("fetched_at"),
-                                    "exclusion_reason": reason,
-                                }
-                            )
+                        if key not in kept_keys and key not in excluded_reason:
+                            excluded_reason[key] = reason
+                            excluded_samples[key] = {
+                                "title": str(row.get("title") or "")[:180],
+                                "company_name": str(row.get("company_name") or "")[:120],
+                                "source_url": str(row.get("source_url") or ""),
+                                "provider_id": row.get("provider_id"),
+                                "fetched_at": row.get("fetched_at"),
+                                "exclusion_reason": reason,
+                            }
                         continue
+                    if not include_simulated and row.get("simulated"):
+                        if key not in excluded_reason:
+                            excluded_reason[key] = "simulated_record"
+                            excluded_samples[key] = {
+                                "title": str(row.get("title") or "")[:180],
+                                "company_name": str(row.get("company_name") or "")[:120],
+                                "source_url": str(row.get("source_url") or ""),
+                                "provider_id": row.get("provider_id"),
+                                "fetched_at": row.get("fetched_at"),
+                                "exclusion_reason": "simulated_record",
+                            }
+                        continue
+                    kept_keys.add(key)
+                    excluded_reason.pop(key, None)
+                    excluded_samples.pop(key, None)
                     kept_rows.append(row)
-                rows = kept_rows
-                if not include_simulated:
-                    rows = [row for row in rows if not row.get("simulated")]
-                provider_rows.extend(rows)
+                provider_rows.extend(kept_rows)
                 provider_rows = dedupe_opportunities(provider_rows)
                 if len(provider_rows) >= capped:
                     break
+        except Exception as exc:  # noqa: BLE001 - isolate provider outages
+            message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
+            provider_error = message[:300]
+            errors.append({"provider_id": meta.provider_id, "error": provider_error})
+            if variants_completed == 0:
+                _record_failure(meta.provider_id, source_type=meta.provider_type, error=provider_error)
+        if variants_completed:
             provider_rows = provider_rows[:capped]
             per_provider[meta.provider_id] = len(provider_rows)
             provider_screened_counts[meta.provider_id] = screened
             provider_query_variants[meta.provider_id] = used_variants
             _record_success(meta.provider_id, source_type=meta.provider_type, count=len(provider_rows))
+            if provider_error:
+                health = _health.get(meta.provider_id)
+                if health is not None:
+                    health.status = "partial"
+                    health.last_error = provider_error
+                    health.reachable = True
             collected.extend(provider_rows)
-        except Exception as exc:  # noqa: BLE001 - isolate provider outages
-            message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
-            _record_failure(meta.provider_id, source_type=meta.provider_type, error=message)
-            errors.append({"provider_id": meta.provider_id, "error": message[:300]})
+
+    exclusion_reason_counts: dict[str, int] = {}
+    for reason in excluded_reason.values():
+        exclusion_reason_counts[reason] = exclusion_reason_counts.get(reason, 0) + 1
+    exclusion_samples = list(excluded_samples.values())[:20]
+    unique_kept = len(kept_keys)
+    unique_excluded = len(excluded_reason)
+    funnel = {
+        "screened_rows": screened_rows,
+        "unique_screened": unique_kept + unique_excluded,
+        "unique_kept": unique_kept,
+        "unique_excluded": unique_excluded,
+        "reconciled": True,
+    }
 
     # Pending providers stay visible in diagnostics but never searched.
     for pending in PENDING_PROVIDERS:
@@ -2007,6 +2082,7 @@ def search_multi_source_jobs(
         )
 
     deduped = dedupe_opportunities(collected)[:capped]
+    funnel["returned_jobs"] = len(deduped)
     real_jobs = [row for row in deduped if not row.get("simulated")]
     payload = {
         "query": normalized,
@@ -2019,6 +2095,9 @@ def search_multi_source_jobs(
         "provider_screened_counts": provider_screened_counts,
         "exclusion_reason_counts": exclusion_reason_counts,
         "exclusion_samples": exclusion_samples,
+        "funnel": funnel,
+        "funnel_kept_urls": sorted(kept_keys),
+        "funnel_excluded": dict(excluded_reason),
         "provider_query_variants": provider_query_variants,
         "query_variants": query_variants,
         "provider_errors": errors,

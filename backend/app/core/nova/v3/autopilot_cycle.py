@@ -18,7 +18,11 @@ from app.core.nova.v3.live_qualification import (
     partition_by_qualification,
     qualify_and_rank_live_jobs,
 )
-from app.core.nova.v3.multi_source_discovery import classify_live_search, search_multi_source_jobs
+from app.core.nova.v3.multi_source_discovery import (
+    classify_live_search,
+    merge_search_funnels,
+    search_multi_source_jobs,
+)
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
 from app.core.nova.work_revenue.capability_first_discovery import generate_capability_first_queries
 
@@ -110,6 +114,7 @@ def run_autopilot_cycle(
     provider_counts: dict[str, int] = {}
     provider_errors: list[dict[str, Any]] = []
     per_query: list[dict[str, Any]] = []
+    funnel_parts: list[dict[str, Any]] = []
 
     def _merge_provider_counts(result: dict[str, Any]) -> None:
         for provider_id, count in (result.get("provider_result_counts") or {}).items():
@@ -120,6 +125,7 @@ def run_autopilot_cycle(
 
     for query in selected_queries:
         multi = search_multi_source_jobs(query, limit=result_limit)
+        funnel_parts.append(multi)
         _merge_provider_counts(multi)
         used_query = query
         fallback_query = None
@@ -127,6 +133,7 @@ def run_autopilot_cycle(
             fallback_query = _fallback_query(query)
             if fallback_query and fallback_query.lower() != query.lower():
                 retry = search_multi_source_jobs(fallback_query, limit=result_limit)
+                funnel_parts.append(retry)
                 _merge_provider_counts(retry)
                 providers_queried.update(str(item) for item in (retry.get("providers_queried") or []))
                 provider_errors.extend(list(retry.get("provider_errors") or []))
@@ -193,6 +200,7 @@ def run_autopilot_cycle(
         "per_query": per_query,
         "providers_queried": sorted(providers_queried),
         "provider_errors": provider_errors,
+        "funnel": merge_search_funnels(funnel_parts),
         "ranked_count": len(combined),
         "selected_count": len(unique),
         "qualification_counts": {
