@@ -1,0 +1,288 @@
+"""Regression tests for the Early Access honeypot rename.
+
+Website-only. Does not call production, KV, Stripe, or Nova.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+HTML = (ROOT / "early-access" / "index.html").read_text(encoding="utf-8")
+JS = (ROOT / "assets" / "js" / "site.js").read_text(encoding="utf-8")
+CONFIG = (ROOT / "assets" / "js" / "site-config.js").read_text(encoding="utf-8")
+LEADS = (ROOT / "functions" / "api" / "leads.js").read_text(encoding="utf-8")
+CSS = (ROOT / "assets" / "css" / "site.css").read_text(encoding="utf-8")
+
+HONEYPOT = "middle_name_confirm"
+FORBIDDEN_TOKENS = ("website", "company", "url", "homepage", "site")
+VISIBLE_FIELDS = ("name", "company", "email", "phone", "industry", "companySize", "product", "message")
+LEGITIMATE_PAYLOAD_FIELDS = (
+    "receivedAt",
+    "name",
+    "company",
+    "email",
+    "phone",
+    "industry",
+    "companySize",
+    "product",
+    "message",
+    "consent",
+    "source",
+)
+
+
+def _form_html() -> str:
+    match = re.search(r'<form class="panel" data-early-access-form[^>]*>(.*?)</form>', HTML, re.S)
+    assert match, "Early Access form markup is missing"
+    return match.group(1)
+
+
+def honeypot_blocks(form_data: dict[str, str]) -> bool:
+    return bool(str(form_data.get(HONEYPOT) or "").strip())
+
+
+def valid_visible_form(*, honeypot: str = "") -> dict[str, str]:
+    return {
+        "name": "Jordan Hale",
+        "company": "North Star Transit",
+        "email": "jordan@northstar.example",
+        "phone": "555-0100",
+        "industry": "Healthcare operations",
+        "companySize": "11-50",
+        "product": "Autonomous Operations Agent",
+        "message": "I would like a product demo.",
+        "consent": "yes",
+        HONEYPOT: honeypot,
+    }
+
+
+def chrome_like_visible_autofill() -> dict[str, str]:
+    """Autofill maps only ordinary visible autocomplete names, not the honeypot."""
+    return {
+        "name": "Jordan Hale",
+        "company": "North Star Transit",
+        "email": "jordan@northstar.example",
+        "phone": "555-0100",
+        "industry": "",
+        "companySize": "",
+        "product": "Autonomous Operations Agent",
+        "message": "",
+        "consent": "",
+    }
+
+
+def would_reach_lead_submit(form_data: dict[str, str]) -> bool:
+    if honeypot_blocks(form_data):
+        return False
+    for field in ("name", "company", "email", "industry", "companySize", "product", "message"):
+        if not str(form_data.get(field) or "").strip():
+            return False
+    if form_data.get("consent") not in {"yes", "true", True}:
+        return False
+    return True
+
+
+def build_payload(form_data: dict[str, str]) -> dict[str, object]:
+    return {
+        "receivedAt": "2026-09-15T03:00:00.000Z",
+        "name": form_data["name"].strip(),
+        "company": form_data["company"].strip(),
+        "email": form_data["email"].strip(),
+        "phone": str(form_data.get("phone") or "").strip(),
+        "industry": form_data["industry"].strip(),
+        "companySize": form_data["companySize"],
+        "product": form_data["product"],
+        "message": form_data["message"].strip(),
+        "consent": True,
+        "source": "amicor-public-website-w8",
+    }
+
+
+def test_honeypot_renamed_and_hidden() -> None:
+    form = _form_html()
+    names = re.findall(r'name="([^"]+)"', form)
+    assert HONEYPOT in names
+    assert "company_website" not in names
+    for token in FORBIDDEN_TOKENS:
+        assert token not in HONEYPOT
+    hp_markup = re.search(
+        r'<div class="hp"[^>]*>\s*<input name="middle_name_confirm"[^>]*>\s*</div>',
+        form,
+        re.S,
+    )
+    assert hp_markup, "Honeypot must stay inside the hidden .hp wrapper"
+    assert "Company website" not in form
+    assert 'autocomplete="off"' in hp_markup.group(0)
+    assert "aria-hidden" in hp_markup.group(0)
+    assert "tabindex=\"-1\"" in hp_markup.group(0)
+    assert ".hp { position: absolute; left: -9999px; height: 0; overflow: hidden; }" in CSS
+
+
+def test_site_js_uses_new_honeypot_and_preserves_submit_path() -> None:
+    assert "data.middle_name_confirm" in JS
+    assert "data.company_website" not in JS
+    assert 'formEndpoint: "/api/leads"' in CONFIG
+    assert "fetch(endpoint" in JS
+    assert 'method: "POST"' in JS
+    assert 'headers: { "Content-Type": "application/json" }' in JS
+    assert "JSON.stringify(payload)" in JS
+    assert "Thank you. Your request was sent to AMICOR." in JS
+    assert "Request could not be sent." in JS
+    for field in VISIBLE_FIELDS:
+        assert f"{field}:" in JS or f"data.{field}" in JS
+    assert "consent: true" in JS
+    assert 'source: "amicor-public-website-w8"' in JS
+
+
+def test_empty_honeypot_reaches_lead_submit_path() -> None:
+    form_data = valid_visible_form(honeypot="")
+    assert would_reach_lead_submit(form_data) is True
+    payload = build_payload(form_data)
+    assert HONEYPOT not in payload
+    assert set(payload) == set(LEGITIMATE_PAYLOAD_FIELDS)
+    assert payload["product"] == "Autonomous Operations Agent"
+    assert payload["consent"] is True
+
+
+def test_visible_autofill_does_not_populate_honeypot() -> None:
+    autofilled = chrome_like_visible_autofill()
+    assert HONEYPOT not in autofilled
+    merged = {**autofilled, HONEYPOT: ""}
+    assert honeypot_blocks(merged) is False
+    completed = valid_visible_form(honeypot="")
+    for field in ("name", "company", "email", "phone"):
+        completed[field] = autofilled[field]
+    assert would_reach_lead_submit(completed) is True
+
+
+def test_nonempty_honeypot_still_blocks() -> None:
+    blocked = valid_visible_form(honeypot="https://autofill.example")
+    assert honeypot_blocks(blocked) is True
+    assert would_reach_lead_submit(blocked) is False
+    assert 'errorBox.textContent = "Request could not be sent."' in JS
+
+
+def test_every_inquiry_option_is_on_the_lead_allowlist() -> None:
+    import html as html_lib
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from catalog import accepted_lead_names, lead_names
+
+    select = re.search(r'<select name="product"[^>]*>(.*?)</select>', HTML, re.S)
+    assert select, "Inquiry select is missing"
+    options = [html_lib.unescape(item) for item in re.findall(r"<option>([^<]+)</option>", select.group(1))]
+    assert options == lead_names()
+    assert "Nova Snap" in options
+    assert "Nova Casting & Auditions" in options
+    assert 'type="file"' not in HTML
+    match = re.search(r"const PRODUCTS = new Set\(\[(.*?)\]\);", LEADS, re.S)
+    assert match, "Lead allowlist is missing"
+    allowlist = re.findall(r'"((?:\\.|[^"\\])*)"', match.group(1))
+    assert set(allowlist) == set(accepted_lead_names())
+    for option in options:
+        assert option in allowlist, option
+
+
+def test_quote_message_keeps_line_breaks_and_casting_value() -> None:
+    import subprocess
+
+    script = r"""
+globalThis.caches = { default: { async match() { return null; }, async put() {} } };
+const { plain, onRequest } = await import("./functions/api/leads.js");
+const message = plain("Project goal:\nDeliverables needed:\r\nDeadline", 2000, true);
+if (message !== "Project goal:\nDeliverables needed:\nDeadline") process.exit(2);
+if (plain("A\nB", 20) !== "A B") process.exit(4);
+if (plain("Nova Casting & Auditions", 80) !== "Nova Casting & Auditions") process.exit(5);
+const store = { saved: "", async put(_key, value) { this.saved = value; } };
+const body = {
+  name: "Ada Owner",
+  company: "Example Co",
+  email: "ada@example.com",
+  phone: "",
+  industry: "Services",
+  companySize: "1-10",
+  product: "Nova Casting & Auditions",
+  message: "Project goal:\nDeadline",
+  consent: true,
+  middle_name_confirm: "",
+  company_website: "",
+  website: "",
+};
+const response = await onRequest({
+  request: new Request("https://getamicor.com/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  env: { AMICOR_LEADS: store },
+});
+if (response.status !== 202) {
+  console.error(response.status, await response.text());
+  process.exit(6);
+}
+const stored = JSON.parse(store.saved);
+if (stored.product !== "Nova Casting & Auditions") process.exit(7);
+if (!stored.message.includes("\n")) process.exit(8);
+const rejected = await onRequest({
+  request: new Request("https://getamicor.com/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, product: "Nova Casting and Auditions" }) }),
+  env: { AMICOR_LEADS: store },
+});
+if (rejected.status !== 400) process.exit(9);
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory() -> None:
+    import subprocess
+
+    script = ROOT / "tests" / "lead_allowlist_staging.mjs"
+    source = script.read_text(encoding="utf-8")
+    assert "staging.invalid" in source
+    assert "aef188e1167a41c98ee81deabbbce50d" not in source
+    assert "getamicor.com" not in source
+    assert "pages.dev" not in source
+    completed = subprocess.run(
+        ["node", str(script)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert "STAGING_PROBES_PASSED=5" in completed.stdout
+    assert "stored_in_memory=2" in completed.stdout
+
+
+def test_leads_function_and_kv_path_unchanged() -> None:
+    assert "plain(raw.middle_name_confirm, 200)" in LEADS
+    assert "env.AMICOR_LEADS" in LEADS
+    assert 'source: "amicor-public-website-w8"' in LEADS
+    assert "store.put(`lead:${payload.receivedAt}:${id}`" in LEADS
+    assert 'return json(202, { ok: true, stored, notified });' in LEADS
+
+
+def main() -> None:
+    tests = [
+        test_honeypot_renamed_and_hidden,
+        test_site_js_uses_new_honeypot_and_preserves_submit_path,
+        test_empty_honeypot_reaches_lead_submit_path,
+        test_visible_autofill_does_not_populate_honeypot,
+        test_nonempty_honeypot_still_blocks,
+        test_every_inquiry_option_is_on_the_lead_allowlist,
+        test_quote_message_keeps_line_breaks_and_casting_value,
+        test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory,
+        test_leads_function_and_kv_path_unchanged,
+    ]
+    for test in tests:
+        test()
+        print(f"PASS {test.__name__}")
+    print(f"TESTS_PASSED={len(tests)}")
+
+
+if __name__ == "__main__":
+    main()
