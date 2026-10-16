@@ -26,4 +26,13 @@ jobs:
             test -s /tmp/voice.wav
           '
       - name: Render 30-second offline montage with narration and captions
-        run: docker run --rm --entrypoint python nova-studio-narration-smoke scripts/smoke_studio_offline_montage.py
+        run: |
+          mkdir -p studio-smoke-output
+          docker run --rm -v "$PWD/studio-smoke-output:/studio-smoke-output" -e STUDIO_SMOKE_OUTPUT_DIR=/studio-smoke-output --entrypoint python nova-studio-narration-smoke scripts/smoke_studio_offline_montage.py
+      - name: Upload generated test media for reviewer verification
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-offline-30s-smoke
+          path: studio-smoke-output/
+          retention-days: 7
