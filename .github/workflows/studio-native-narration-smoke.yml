@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'backend/Dockerfile'
+      - 'backend/scripts/smoke_studio_offline_montage.py'
+      - 'backend/app/core/nova/creative_studio/**'
       - '.github/workflows/studio-native-narration-smoke.yml'
   workflow_dispatch:
 
@@ -23,3 +25,5 @@ jobs:
             espeak-ng -w /tmp/voice.wav "Nova Studio speech validation"
             test -s /tmp/voice.wav
           '
+      - name: Render 30-second offline montage with narration and captions
+        run: docker run --rm --entrypoint python nova-studio-narration-smoke scripts/smoke_studio_offline_montage.py
