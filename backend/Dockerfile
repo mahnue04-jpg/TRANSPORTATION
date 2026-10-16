@@ -12,7 +12,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends espeak-ng espeak-ng-data \
     && rm -rf /var/lib/apt/lists/* \
     && command -v espeak-ng \
-    && espeak-ng --voices >/dev/null
+    && espeak-ng --voices >/dev/null \
+    && espeak-ng -w /tmp/studio-voice-smoke.wav 'Nova Studio offline voice verification' \
+    && test -s /tmp/studio-voice-smoke.wav \
+    && rm /tmp/studio-voice-smoke.wav
 
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
