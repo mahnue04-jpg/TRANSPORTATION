@@ -3,6 +3,8 @@
 Run inside the Studio Docker image, not against a customer's saved project.
 All output is disposable. This does not establish publishing rights or lip sync.
 """
+import os
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -32,6 +34,12 @@ def main() -> None:
         assert result["captions_burned_in"] is True, result
         assert result["paid_provider_charges"] is False, result
         assert result["publish_ready"] is False, result
+        artifact_dir = os.environ.get("STUDIO_SMOKE_OUTPUT_DIR")
+        if artifact_dir:
+            target = Path(artifact_dir)
+            target.mkdir(parents=True, exist_ok=True)
+            for source in (mp4, wav, mp4.with_suffix(".srt")):
+                shutil.copy2(source, target / source.name)
         print("PASS 30-second offline MP4, WAV, SRT, audio present; no paid providers")
 
 
