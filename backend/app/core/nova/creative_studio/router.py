@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -316,6 +317,48 @@ def creative_guardrails_endpoint(
     return get_service(db).guardrails()
 
 
+class BudgetConfirmIn(BaseModel):
+    confirmed: bool = True
+    acknowledged_estimate_usd: float | None = None
+    note: str = Field(default="", max_length=500)
+
+
+@router.get("/projects/{project_id}/preflight")
+def project_preflight_quote(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Non-billable quote + provider readiness. Never purchases credits."""
+    _require_owner(user)
+    try:
+        return get_service(db).preflight_quote(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/budget-confirm")
+def confirm_project_render_budget(
+    project_id: str,
+    payload: BudgetConfirmIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).confirm_render_budget(
+            user.user_id,
+            project_id,
+            confirmed=payload.confirmed,
+            acknowledged_estimate_usd=payload.acknowledged_estimate_usd,
+            note=payload.note,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects")
 def create_project(
     payload: ProjectIn,
@@ -493,7 +536,9 @@ def generate_image(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).request_image_generation(
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        return service.request_image_generation(
             user.user_id,
             project_id,
             aspect_ratio=(payload.aspect_ratio if payload else "1:1"),
@@ -557,6 +602,7 @@ def generate_video(
     try:
         service = get_service(db)
         service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
         if not service.store.list_scenes(project_id, user.user_id):
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard before generating scene videos.", http_status=422)
         # Persist the job before responding so refresh/retries can reattach to it.
@@ -596,7 +642,9 @@ def generate_voice(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).request_voice_generation(user.user_id, project_id)
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        return service.request_voice_generation(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -638,7 +686,9 @@ def generate_presenter_voice(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        result = service.request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
@@ -656,6 +706,11 @@ def finalize_full_body_presenter_in_cloud(
     """Lip-sync and caption a generated full-body presenter without local FFmpeg."""
     _require_owner(user)
     service = get_service(db)
+    try:
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
     try:
         service._project_or_404(user.user_id, project_id)
         assets = service.store.list_assets(project_id, user.user_id)
@@ -829,6 +884,7 @@ def prepare_talking_presenter_preview(
     service = get_service(db)
     try:
         service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
         presenter_meta = {
             "presenter_style": payload.presenter_style,
             "presenter_mode": payload.presenter_mode,
@@ -1273,6 +1329,64 @@ async def save_browser_final_promo(
             filename=file.filename or "amicor-nova-final-promo.webm",
             content_type=file.content_type or "video/webm",
         )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/click-destinations")
+def click_destinations(
+    platform: str = "TikTok",
+    verify: bool = False,
+    user: UserContext = Depends(get_current_user_context),
+) -> dict[str, Any]:
+    _require_owner(user)
+    return get_service().click_destinations(platform, verify=verify)
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def project_job(
+    project_id: str,
+    job_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Poll a saved job. This does not start a render or a paid provider."""
+    _require_owner(user)
+    try:
+        return get_service(db).get_generation_job(user.user_id, project_id, job_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/file")
+def download_asset_file(
+    project_id: str,
+    asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Signed-in owner download. A different account cannot read the file."""
+    _require_owner(user)
+    try:
+        path, media_type, filename = get_service(db).open_asset_file(user.user_id, project_id, asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    return FileResponse(path, media_type=media_type, filename=filename)
+
+
+@router.post("/projects/{project_id}/assemble/offline-commercial")
+def assemble_offline_commercial(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Local 30s montage. Does not call fal, Kling, D-ID, or OpenAI."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_offline_commercial(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise

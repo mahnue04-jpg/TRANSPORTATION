@@ -141,11 +141,23 @@ button.secondary { background: #2f2a24; }
   position: relative;
 }
 
-.presenter-media video {
+.presenter-media video,
+.generated-media video {
   display: block;
   width: 100%;
   max-height: 720px;
   background: #000;
+}
+
+@media (max-width: 420px) {
+  .generated-media video,
+  .generated-media audio,
+  #asset-list .button {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  #asset-list .button { margin-top: 8px; text-align: center; }
 }
 
 .presenter-live-caption {

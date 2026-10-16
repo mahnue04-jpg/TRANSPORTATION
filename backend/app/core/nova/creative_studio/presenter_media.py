@@ -85,6 +85,41 @@ def srt_text(cues):
     return '\n\n'.join(f"{i+1}\n{_time(c['start'])} --> {_time(c['end'])}\n{c['text']}" for i,c in enumerate(cues)) + '\n'
 
 
+def even_spaced_cues(script: str, duration: float, *, words_per_cue: int = 7) -> list[dict]:
+    """Build readable English caption cues when whisper alignment is unavailable."""
+    tokens = [t for t in str(script or '').split() if t]
+    if not tokens:
+        raise RuntimeError('Caption script is empty.')
+    duration = max(0.5, float(duration or 0.5))
+    cues: list[dict] = []
+    chunk = max(1, int(words_per_cue or 7))
+    groups = [tokens[i:i + chunk] for i in range(0, len(tokens), chunk)]
+    slot = duration / len(groups)
+    for index, group in enumerate(groups):
+        start = index * slot
+        end = duration if index == len(groups) - 1 else min(duration, (index + 1) * slot)
+        cues.append({'start': round(start, 3), 'end': round(max(start + 0.05, end), 3), 'text': ' '.join(group)})
+    return cues
+
+
+def _write_ass(cues: list[dict], ass: Path, *, play_res_x: int, play_res_y: int, font_size: int) -> None:
+    lines = [
+        '[Script Info]',
+        f'PlayResX: {play_res_x}',
+        f'PlayResY: {play_res_y}',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+        f'Style: Default,DejaVu Sans,{font_size},&H00FFFFFF,&H00000000,0,1,1,0,2,24,24,36,1',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Text',
+    ]
+    for cue in cues:
+        safe = cue['text'].replace('\\', '＼').replace('{', '｛').replace('}', '｝')
+        wrapped = r'\N'.join(textwrap.wrap(safe, 34, break_long_words=True, break_on_hyphens=False))
+        lines.append(f"Dialogue: 0,{_time(cue['start'], True)},{_time(cue['end'], True)},Default,{wrapped}")
+    ass.write_text('\n'.join(lines), encoding='utf-8')
+
+
 @serialized_media
 def caption_presenter(video: Path, cues: list[dict]):
     if not cues:
@@ -94,15 +129,7 @@ def caption_presenter(video: Path, cues: list[dict]):
         raise RuntimeError('Bundled presenter caption font is missing.')
     # Pad below the original frame. Never crop or cover provider watermarks.
     ass = video.with_suffix('.ass')
-    lines = ['[Script Info]', 'PlayResX: 512', 'PlayResY: 640', '[V4+ Styles]',
-             'Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-             'Style: Default,DejaVu Sans,23,&H00FFFFFF,&H00000000,0,1,1,0,2,20,20,22,1',
-             '[Events]', 'Format: Layer, Start, End, Style, Text']
-    for cue in cues:
-        safe = cue['text'].replace('\\', '＼').replace('{', '｛').replace('}', '｝')
-        wrapped = r'\N'.join(textwrap.wrap(safe, 36, break_long_words=True, break_on_hyphens=False))
-        lines.append(f"Dialogue: 0,{_time(cue['start'],True)},{_time(cue['end'],True)},Default,{wrapped}")
-    ass.write_text('\n'.join(lines), encoding='utf-8')
+    _write_ass(cues, ass, play_res_x=512, play_res_y=640, font_size=23)
     srt = video.with_suffix('.srt')
     srt.write_text(srt_text(cues), encoding='utf-8')
     output = video.with_name(video.stem + '-captioned.mp4')
@@ -114,4 +141,76 @@ def caption_presenter(video: Path, cues: list[dict]):
              f"scale=512:512:force_original_aspect_ratio=decrease,pad=512:640:(ow-iw)/2:0:color=0x07111f,subtitles='{escaped_path}':fontsdir='{escaped_fonts}'",
              '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-tune', 'zerolatency',
              '-c:a', 'copy', '-movflags', '+faststart', str(output)], 192 * MIB)
+    return output, srt
+
+
+@serialized_media
+def burn_captions_and_cta_fade(
+    video: Path,
+    cues: list[dict],
+    *,
+    width: int = 720,
+    height: int = 1280,
+    cta_text: str = 'getamicor.com',
+    fade_seconds: float = 2.5,
+) -> tuple[Path, Path]:
+    """Burn timed English captions and a soft end-card CTA fade onto a vertical MP4.
+
+    Uses ASS subtitles only — imageio-ffmpeg builds often lack libfreetype drawtext.
+    """
+    if not cues:
+        raise RuntimeError('Timed captions are required for final commercial burn-in.')
+    font_dir = Path(__file__).parent / 'fonts'
+    if not (font_dir / 'DejaVuSans.ttf').is_file():
+        raise RuntimeError('Bundled presenter caption font is missing.')
+
+    duration = max(float(cues[-1]['end']), 1.0)
+    fade = max(1.0, float(fade_seconds or 2.5))
+    fade_start = max(0.0, duration - fade)
+    fade_ms = int(fade * 1000)
+
+    ass = video.with_name(video.stem + '-final.ass')
+    safe_cta = str(cta_text or 'getamicor.com').replace('\\', '＼').replace('{', '｛').replace('}', '｝')
+    lines = [
+        '[Script Info]',
+        f'PlayResX: {width}',
+        f'PlayResY: {height}',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+        'Style: Default,DejaVu Sans,28,&H00FFFFFF,&H00000000,0,1,1,0,2,24,24,48,1',
+        'Style: CTA,DejaVu Sans,34,&H00FFFFFF,&H00000000,0,1,2,0,2,24,24,72,1',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Text',
+    ]
+    for cue in cues:
+        safe = cue['text'].replace('\\', '＼').replace('{', '｛').replace('}', '｝')
+        wrapped = r'\N'.join(textwrap.wrap(safe, 34, break_long_words=True, break_on_hyphens=False))
+        lines.append(f"Dialogue: 0,{_time(cue['start'], True)},{_time(cue['end'], True)},Default,{wrapped}")
+    lines.append(
+        f"Dialogue: 1,{_time(fade_start, True)},{_time(duration, True)},CTA,"
+        f"{{\\fad({fade_ms},{max(200, fade_ms // 4)})}}{safe_cta}"
+    )
+    ass.write_text('\n'.join(lines), encoding='utf-8')
+    srt = video.with_name(video.stem + '-final.srt')
+    srt.write_text(srt_text(cues), encoding='utf-8')
+    output = video.with_name(video.stem + '-captioned-cta.mp4')
+
+    escaped_path = str(ass).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
+    escaped_fonts = str(font_dir).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+        f"subtitles='{escaped_path}':fontsdir='{escaped_fonts}'"
+    )
+    _encode(
+        [
+            '-threads', '1', '-filter_threads', '1',
+            '-i', str(video),
+            '-vf', vf,
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-tune', 'zerolatency',
+            '-c:a', 'copy', '-movflags', '+faststart',
+            str(output),
+        ],
+        192 * MIB,
+    )
     return output, srt

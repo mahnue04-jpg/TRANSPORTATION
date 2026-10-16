@@ -52,9 +52,28 @@
       </form>
     </section>
 
+    <section class="card" aria-label="Offline commercial">
+      <h2>30-second commercial</h2>
+      <p class="hint">Local montage only. No paid provider, no lip sync, and no posting. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable.</p>
+      <div class="actions wrap">
+        <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
+        <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
+      </div>
+    </section>
+
     <section class="card" aria-label="Provider status">
       <h2>Provider status</h2>
       <div id="provider-status" class="hint">Sign in to load provider status.</div>
+    </section>
+
+    <section class="card" aria-label="Render preflight">
+      <h2>Render preflight (no purchase)</h2>
+      <p class="hint">Estimates credits for the active project. Nova never auto-top-ups or buys provider credit. Paid fal/Kling/D-ID/OpenAI renders stay blocked until owner budget confirmation after preflight. Local motion fallback does not call paid video providers.</p>
+      <div id="preflight-status" class="hint">Select a project, then run preflight.</div>
+      <div class="actions wrap">
+        <button type="button" id="run-preflight" class="secondary">Run preflight quote</button>
+        <button type="button" id="confirm-budget" disabled>Confirm owner budget for this quote</button>
+      </div>
     </section>
 
     <section class="card" aria-label="Brand profile">
@@ -92,14 +111,14 @@
         </label>
         <label>Production preset
           <select id="production-preset">
-            <option value="vertical_short">Reels / TikTok / Shorts</option>
+            <option value="vertical_short" selected>30s vertical commercial · Reels / TikTok / Shorts</option>
             <option value="social_square">Social feed square</option>
-            <option value="youtube_web" selected>YouTube / web / demo</option>
+            <option value="youtube_web">YouTube / web / demo</option>
           </select>
         </label>
         <label>Platform
           <select id="project-platform">
-            <option>TikTok</option>
+            <option selected>TikTok</option>
             <option>Instagram</option>
             <option>Facebook</option>
             <option>YouTube Shorts</option>
@@ -112,8 +131,8 @@
         <label>Duration
           <select id="project-duration">
             <option value="15">15</option>
-            <option value="30">30</option>
-            <option value="60" selected>60</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
           </select>
         </label>
         <label>Audience<input id="project-audience" maxlength="200" /></label>
@@ -130,7 +149,7 @@
       <h2>2. Content Brief</h2>
       <form id="brief-form" class="grid">
         <label class="wide">Topic<input id="brief-topic" required maxlength="300" /></label>
-        <label>CTA<input id="brief-cta" maxlength="200" /></label>
+        <label>CTA<input id="brief-cta" maxlength="200" value="Visit getamicor.com to explore AMICOR Nova." /></label>
         <label>Style<input id="brief-style" maxlength="120" /></label>
         <button type="submit">Save brief on active project</button>
       </form>
@@ -147,8 +166,8 @@
           <select id="image-aspect">
             <option value="1:1">1:1 square</option>
             <option value="4:5">4:5 portrait</option>
-            <option value="9:16">9:16 vertical</option>
-            <option value="16:9" selected>16:9 landscape</option>
+            <option value="9:16" selected>9:16 vertical</option>
+            <option value="16:9">16:9 landscape</option>
           </select>
         </label>
         <span class="hint">AMICOR previews use the official logo overlay.</span>
@@ -178,9 +197,9 @@
           </label>
           <label>Output
             <select id="presenter-output-preset">
-              <option value="9:16">9:16 · Reels / TikTok / Shorts</option>
+              <option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>
               <option value="1:1">1:1 · Social feed</option>
-              <option value="16:9" selected>16:9 · YouTube / web / demo</option>
+              <option value="16:9">16:9 · YouTube / web / demo</option>
             </select>
           </label>
         </div>
@@ -190,7 +209,7 @@
     </label>
     <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
     <label>Talking presenter script
-          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace built to help small businesses move faster while staying in control. Nova Today brings priorities, approvals, and the AI assistant into one command center. Workspace keeps ongoing work organized so you can continue where you left off. The Operations Agent turns business requests into clear next steps, drafts, and owner-reviewed execution. Work and Revenue helps surface opportunities, prepare applications, and track the path from lead to paid work. Government, Business, Communications, and Accounting bring research, operations, follow-up, and financial visibility into the same ecosystem. Creative Studio helps create scripts, images, voice, presenter media, and marketing assets. AMICOR Nova gives you practical AI help across the workday, while you keep the final say. Start with AMICOR Nova today.</textarea>
+          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace for everyday business work. Busywork piles up fast for small business owners, and it steals focus from the work that matters. Nova helps with research, admin follow-ups, workflows, and data cleanup. Nova prepares AI-assisted drafts and next steps, then you review before anything moves forward. Keep ownership, clear the busywork, and make room for real business progress. Visit getamicor.com to explore AMICOR Nova.</textarea>
         </label>
         <p class="hint">Use this exact text for the presenter voice. AMICOR Nova is written separately so the voice pronounces the brand correctly.</p>
         <div class="actions wrap">
@@ -258,6 +277,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=browser-final-promo-persist-20261008"></script>
+  <script src="/static/nova-creative/creative.js?v=offline-montage-download-20261015"></script>
 </body>
 </html>

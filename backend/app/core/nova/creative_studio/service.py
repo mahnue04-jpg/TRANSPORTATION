@@ -728,16 +728,7 @@ class CreativeStudioService(ShortDramaMixin):
             )
 
         provider_state = video_provider().status()
-        if provider_state.status != "AVAILABLE":
-            result = {"status": provider_state.status, "message": provider_state.message, "url": None, "asset_generated": False}
-            asset = self._save_text_asset(
-                owner_id=owner_id, project_id=project_id, kind="video",
-                title="Scene video provider unavailable", content="",
-                status="PROVIDER_CONFIG_REQUIRED" if provider_state.status == CONFIG_REQUIRED else provider_state.status,
-                metadata={"provider_result": result}, url=None,
-            )
-            self._finish_job(job, status=provider_state.status, message=provider_state.message, asset_ids=[asset.id])
-            return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
+        provider_unavailable = provider_state.status != "AVAILABLE"
 
         # Resume an unfinished provider task before advancing to the next scene.
         resume_task_id = None
@@ -831,15 +822,65 @@ class CreativeStudioService(ShortDramaMixin):
                 and asset.content == prompt_text and asset.url
                 and (_resolve_creative_media_url(asset.url) is not None
                      and _resolve_creative_media_url(asset.url).is_file())), None)
-            image_result = {"url": reusable.url} if reusable else self.request_image_generation(
-                owner_id, project_id, aspect_ratio=aspect_ratio, prompt=prompt_text,
-            )
+            if reusable is None:
+                # Prefer any scene-matched generated artwork before paying again.
+                reusable = next((asset for asset in reversed(self.store.list_assets(project_id, owner_id))
+                    if asset.kind == "image" and asset.status == "GENERATED" and asset.url
+                    and (_resolve_creative_media_url(asset.url) is not None
+                         and _resolve_creative_media_url(asset.url).is_file())
+                    and int((asset.metadata or {}).get("scene_index") or -1) == int(scene_index)), None)
+            if reusable is not None:
+                image_result = {"url": reusable.url}
+            elif provider_unavailable:
+                image_result = {
+                    "url": None,
+                    "provider": {
+                        "status": provider_state.status,
+                        "message": (
+                            provider_state.message
+                            + " Generate scene artwork first, or enable a funded provider after owner budget confirmation."
+                        ),
+                    },
+                }
+            else:
+                image_result = self.request_image_generation(
+                    owner_id, project_id, aspect_ratio=aspect_ratio, prompt=prompt_text,
+                )
             source_image_url = str(image_result.get("url") or "").strip() or None
             if not source_image_url:
                 message = str(
                     (image_result.get("provider") or {}).get("message")
                     or f"Nova could not create source art for scene {scene_index}."
                 )
+                # Missing credentials are CONFIG_REQUIRED, not a failed render.
+                # ERROR is reserved for a live provider that actually attempted work.
+                if provider_unavailable:
+                    blocked_status = provider_state.status or CONFIG_REQUIRED
+                    result = {
+                        "status": blocked_status,
+                        "message": message,
+                        "url": None,
+                        "asset_generated": False,
+                        "provider": video_provider().provider_id,
+                    }
+                    asset = self._save_text_asset(
+                        owner_id=owner_id,
+                        project_id=project_id,
+                        kind="video",
+                        title="Scene video provider unavailable",
+                        content=prompt_text,
+                        status="PROVIDER_CONFIG_REQUIRED" if blocked_status == CONFIG_REQUIRED else blocked_status,
+                        metadata={"provider_result": result, "brief": {"scene_index": scene_index}},
+                        url=None,
+                    )
+                    self._finish_job(
+                        job,
+                        status=blocked_status,
+                        message=message,
+                        asset_ids=[asset.id],
+                        provider=video_provider().provider_id,
+                    )
+                    return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
                 asset = self._save_text_asset(
                     owner_id=owner_id,
                     project_id=project_id,
@@ -847,11 +888,89 @@ class CreativeStudioService(ShortDramaMixin):
                     title=f"Scene {scene_index} AI motion result",
                     content=prompt_text,
                     status="ERROR",
-                    metadata={"provider_result": {"status": "ERROR", "message": message, "brief": {"scene_index": scene_index}}},
+                    metadata={"provider_result": {"status": "ERROR", "message": message, "brief": {"scene_index": scene_index}, "asset_generated": False}},
                     url=None,
                 )
                 self._finish_job(job, status="ERROR", message=message, asset_ids=[asset.id], provider=video_provider().provider_id)
-                return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": {"status": "ERROR", "message": message}, "url": None}
+                return {
+                    "job": job.as_dict(),
+                    "asset": asset.as_dict(),
+                    "provider": {"status": "ERROR", "message": message, "asset_generated": False},
+                    "url": None,
+                }
+
+        # When live video providers are gated/unfunded, create deliberate local
+        # motion instead of leaving the project stuck or falling back to a still slideshow.
+        if provider_unavailable and source_image_url and not resume_task_id and project.project_type != "short_drama":
+            try:
+                fallback = self._build_local_scene_motion(
+                    source_image_url=source_image_url,
+                    platform=project.platform,
+                    duration_seconds=max(3, min(int(getattr(scene, "duration_seconds", 5) or 5), 8)),
+                )
+            except Exception as exc:
+                fallback = {
+                    "status": "ERROR",
+                    "message": f"Nova local motion fallback failed safely: {type(exc).__name__}: {exc}",
+                    "url": None,
+                    "asset_generated": False,
+                    "provider": "nova_ffmpeg_fallback",
+                }
+            fallback["brief"] = {
+                "scene_index": scene_index,
+                "scene_heading": scene.heading,
+                "prompt_text": prompt_text,
+                "prompt_image_url": source_image_url,
+                "local_motion_reason": provider_state.status,
+            }
+            fallback["provider_gate"] = provider_state.message
+            result = fallback
+            generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
+            status = result.get("status") or CONFIG_REQUIRED
+            metadata = {
+                "provider_result": {k: v for k, v in result.items() if k != "url"},
+                "scene_index": scene_index,
+                "generation_mode": "local_image_motion_fallback",
+                "commercial_slideshow": False,
+            }
+            asset = self._save_text_asset(
+                owner_id=owner_id,
+                project_id=project_id,
+                kind="video",
+                title=f"Scene {scene_index} local motion",
+                content=prompt_text,
+                status="GENERATED" if generated_url else status,
+                metadata=metadata,
+                url=generated_url,
+            )
+            self._finish_job(
+                job,
+                status="GENERATED" if generated_url else status,
+                message=str(result.get("message") or provider_state.message),
+                asset_ids=[asset.id],
+                provider="nova_ffmpeg_fallback",
+            )
+            return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
+
+        if provider_unavailable:
+            result = {
+                "status": provider_state.status,
+                "message": provider_state.message,
+                "url": None,
+                "asset_generated": False,
+            }
+            asset = self._save_text_asset(
+                owner_id=owner_id,
+                project_id=project_id,
+                kind="video",
+                title="Scene video provider unavailable",
+                content=prompt_text,
+                status="PROVIDER_CONFIG_REQUIRED" if provider_state.status == CONFIG_REQUIRED else provider_state.status,
+                metadata={"provider_result": result, "brief": {"scene_index": scene_index}},
+                url=None,
+            )
+            self._finish_job(job, status=provider_state.status, message=provider_state.message, asset_ids=[asset.id])
+            return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
 
         try:
             result = video_provider().generate(
@@ -884,6 +1003,8 @@ class CreativeStudioService(ShortDramaMixin):
                 "not have enough credits" in runway_message.lower()
                 or "insufficient credits" in runway_message.lower()
                 or "credit balance" in runway_message.lower()
+                or "needs credits" in runway_message.lower()
+                or "fal account needs credits" in runway_message.lower()
             )
         )
         if credit_exhausted and source_image_url and not resume_task_id and project.project_type != "short_drama":
@@ -1351,12 +1472,25 @@ class CreativeStudioService(ShortDramaMixin):
                         ffmpeg, "-y", "-i", str(joined_path), "-i", str(audio_path),
                         "-map", "0:v:0", "-map", "1:a:0",
                         "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-                        "-movflags", "+faststart", "-shortest", str(output_path),
+                        "-movflags", "+faststart", "-shortest", str(temp_root / "muxed.mp4"),
                     ]
+                    muxed_path = temp_root / "muxed.mp4"
                     mux_run = run_encoder(mux_cmd, timeout=120, required_headroom=96 * 1024 * 1024)
-                    if mux_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
+                    if mux_run.returncode != 0 or not muxed_path.is_file() or muxed_path.stat().st_size < 1024:
                         detail = (mux_run.stderr or mux_run.stdout or "")[-1800:]
                         raise RuntimeError("audio mux failed: " + detail)
+
+                    polished = self._polish_final_promo_mp4(
+                        muxed_path,
+                        output_path=output_path,
+                        audio_asset=audio,
+                        scenes=scenes,
+                        vertical=vertical,
+                        width=width,
+                        height=height,
+                    )
+                    captions_burned = bool(polished.get("captions_burned_in"))
+                    subtitle_url = polished.get("subtitle_url")
             except Exception as exc:
                 self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_copy")
                 raise CreativeStudioError(
@@ -1383,6 +1517,13 @@ class CreativeStudioService(ShortDramaMixin):
                     "scene_count": len(scenes),
                     "voice_asset_id": audio.id,
                     "brand_overlay": "preserved_from_scene_assets",
+                    "captions_burned_in": captions_burned,
+                    "subtitle_url": subtitle_url,
+                    "cta_fade": "getamicor.com",
+                    "commercial_slideshow": False,
+                    "commercial_ready_candidate": True,
+                    "publish_ready": False,
+                    "owner_review_required": True,
                 },
                 url=public_url,
             )
@@ -1392,16 +1533,40 @@ class CreativeStudioService(ShortDramaMixin):
                 message=(
                     "Final AMICOR Nova promo assembled after low-memory scene normalization."
                     if normalized_scene_clips
-                    else "Final AMICOR Nova promo assembled in low-memory mode."
+                    else "Final AMICOR Nova promo assembled with motion clips, English voice, captions, and CTA fade."
                 ),
                 asset_ids=[asset.id],
                 provider="nova_ffmpeg_copy",
             )
             return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 
-        logo_path = backend_root / "static" / "branding" / "amicor-logo-full.png"
-        if not logo_path.is_file():
-            raise CreativeStudioError("LOGO_MISSING", "Official AMICOR logo asset is unavailable.", http_status=422)
+        # Issue #344: never accept six static stills as the commercial deliverable.
+        # Convert each storyboard image into local Ken Burns motion, then assemble.
+        motion_paths: list[Path] = []
+        output_dir_tmp, public_prefix_tmp = _creative_media_root_and_prefix()
+        output_dir_tmp.mkdir(parents=True, exist_ok=True)
+        for offset, image_path in enumerate(image_paths):
+            staged = output_dir_tmp / f"nova-still-source-{new_id('scene').split('_', 1)[-1]}{image_path.suffix or '.png'}"
+            staged.write_bytes(image_path.read_bytes())
+            staged_url = public_prefix_tmp + "/" + staged.name
+            motion = self._build_local_scene_motion(
+                source_image_url=staged_url,
+                platform=project.platform,
+                duration_seconds=max(
+                    3,
+                    min(int(getattr(scenes[offset], "duration_seconds", scene_duration) or scene_duration), 8),
+                ),
+            )
+            motion_url = str(motion.get("url") or "").strip()
+            motion_path = _resolve_creative_media_url(motion_url)
+            if not motion.get("asset_generated") or motion_path is None or not motion_path.is_file():
+                raise CreativeStudioError(
+                    "LOCAL_MOTION_REQUIRED",
+                    f"Nova refused a static slideshow for scene {offset + 1}. Local motion could not be created: "
+                    + str(motion.get("message") or "unknown error"),
+                    http_status=422,
+                )
+            motion_paths.append(motion_path)
 
         output_dir, public_prefix = _creative_media_root_and_prefix()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1411,81 +1576,47 @@ class CreativeStudioService(ShortDramaMixin):
         try:
             with tempfile.TemporaryDirectory(prefix="nova-final-") as temp_dir:
                 temp_root = Path(temp_dir)
-                segment_paths: list[Path] = []
-
-                for offset, image_path in enumerate(image_paths):
-                    segment_path = temp_root / f"scene-{offset + 1}.mp4"
-                    vf = (
-                        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                        f"fps={fps},format=yuv420p"
-                    )
-                    segment_cmd = [
-                        ffmpeg, "-y", "-threads", "1", "-filter_threads", "1",
-                        "-loop", "1",
-                        "-framerate", str(fps),
-                        "-i", str(image_path),
-                        "-t", str(scene_duration),
-                        "-vf", vf,
-                        "-an",
-                        "-c:v", "libx264",
-                        "-threads", "1",
-                        "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "ref=1",
-                        "-crf", "22",
-                        "-pix_fmt", "yuv420p",
-                        "-movflags", "+faststart",
-                        str(segment_path),
-                    ]
-                    segment_run = run_encoder(segment_cmd, timeout=120)
-                    if segment_run.returncode != 0 or not segment_path.is_file() or segment_path.stat().st_size < 1024:
-                        detail = (segment_run.stderr or segment_run.stdout or "")[-1800:]
-                        raise RuntimeError(f"scene {offset + 1} render failed: {detail}")
-                    segment_paths.append(segment_path)
-
                 concat_file = temp_root / "clips.txt"
                 concat_file.write_text(
-                    "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in segment_paths) + "\n",
+                    "\n".join("file '" + str(path).replace("'", "'\\''") + "'" for path in motion_paths) + "\n",
                     encoding="utf-8",
                 )
                 joined_path = temp_root / "joined.mp4"
-                join_cmd = [
-                    ffmpeg, "-y",
-                    "-f", "concat", "-safe", "0",
-                    "-i", str(concat_file),
-                    "-c", "copy",
-                    str(joined_path),
-                ]
-                join_run = run_encoder(join_cmd, timeout=120)
+                join_run = run_encoder(
+                    [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(joined_path)],
+                    timeout=120,
+                    required_headroom=96 * 1024 * 1024,
+                )
                 if join_run.returncode != 0 or not joined_path.is_file():
                     detail = (join_run.stderr or join_run.stdout or "")[-1800:]
-                    raise RuntimeError("scene join failed: " + detail)
+                    raise RuntimeError("local motion join failed: " + detail)
 
-                final_cmd = [
-                    ffmpeg, "-y", "-threads", "1", "-filter_complex_threads", "1",
-                    "-i", str(joined_path),
-                    "-i", str(audio_path),
-                    "-i", str(logo_path),
-                    "-filter_complex",
-                    "[2:v]scale=170:-1[logo];[0:v][logo]overlay=24:24:repeatlast=1[v]",
-                    "-map", "[v]",
-                    "-map", "1:a:0",
-                    "-c:v", "libx264",
-                    "-threads", "1",
-                    "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "ref=1",
-                    "-crf", "21",
-                    "-pix_fmt", "yuv420p",
-                    "-c:a", "aac",
-                    "-b:a", "160k",
-                    "-movflags", "+faststart",
-                    "-shortest",
-                    str(output_path),
-                ]
-                final_run = run_encoder(final_cmd, timeout=180)
-                if final_run.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
-                    detail = (final_run.stderr or final_run.stdout or "")[-2200:]
-                    raise RuntimeError("final render failed: " + detail)
+                muxed_path = temp_root / "muxed.mp4"
+                mux_run = run_encoder(
+                    [
+                        ffmpeg, "-y", "-i", str(joined_path), "-i", str(audio_path),
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+                        "-movflags", "+faststart", "-shortest", str(muxed_path),
+                    ],
+                    timeout=120,
+                    required_headroom=96 * 1024 * 1024,
+                )
+                if mux_run.returncode != 0 or not muxed_path.is_file() or muxed_path.stat().st_size < 1024:
+                    detail = (mux_run.stderr or mux_run.stdout or "")[-1800:]
+                    raise RuntimeError("local motion audio mux failed: " + detail)
+
+                polished = self._polish_final_promo_mp4(
+                    muxed_path,
+                    output_path=output_path,
+                    audio_asset=audio,
+                    scenes=scenes,
+                    vertical=vertical,
+                    width=width,
+                    height=height,
+                )
         except Exception as exc:
-            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_compat")
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_ffmpeg_local_motion")
             raise CreativeStudioError(
                 "FINAL_ASSEMBLY_FAILED",
                 f"Nova final promo render failed: {str(exc)[-1200:]}",
@@ -1498,26 +1629,181 @@ class CreativeStudioService(ShortDramaMixin):
             project_id=project_id,
             kind="video",
             title="Final AMICOR Nova promo",
-            content="Final promo rendered from storyboard artwork with Nova voice narration and official AMICOR branding.",
+            content="Final promo rendered from local scene motion with Nova voice narration, captions, and getamicor.com CTA fade.",
             status="GENERATED",
             metadata={
                 "final_promo": True,
-                "render_mode": "ffmpeg_compat_stills",
+                "render_mode": "local_motion_not_slideshow",
                 "scene_count": len(scenes),
                 "voice_asset_id": audio.id,
-                "brand_overlay": "official_amicor_logo",
+                "brand_overlay": "optional_owner_review",
+                "captions_burned_in": bool(polished.get("captions_burned_in")),
+                "subtitle_url": polished.get("subtitle_url"),
+                "cta_fade": "getamicor.com",
+                "commercial_slideshow": False,
+                "commercial_ready_candidate": True,
+                "publish_ready": False,
+                "owner_review_required": True,
+                "generation_mode": "local_image_motion_fallback",
             },
             url=public_url,
         )
         self._finish_job(
             job,
             status="GENERATED",
-            message="Final AMICOR Nova promo rendered successfully.",
+            message="Final AMICOR Nova promo rendered from local motion clips (not a still slideshow).",
             asset_ids=[asset.id],
-            provider="nova_ffmpeg_compat",
+            provider="nova_ffmpeg_local_motion",
         )
         return {"job": job.as_dict(), "asset": asset.as_dict(), "url": public_url}
 
+
+    def _polish_final_promo_mp4(
+        self,
+        muxed_path: Path,
+        *,
+        output_path: Path,
+        audio_asset: CreativeAsset,
+        scenes: list[CreativeScene],
+        vertical: bool,
+        width: int,
+        height: int,
+    ) -> dict[str, Any]:
+        """Burn English captions + getamicor.com CTA fade onto the assembled MP4 when memory allows."""
+        from app.core.nova.creative_studio.presenter_media import (
+            burn_captions_and_cta_fade,
+            even_spaced_cues,
+        )
+
+        provider_result = (audio_asset.metadata or {}).get("provider_result") or {}
+        cues = provider_result.get("caption_cues")
+        script = " ".join(
+            str(scene.voiceover_text or scene.subtitle_text or "").strip()
+            for scene in scenes
+            if str(scene.voiceover_text or scene.subtitle_text or "").strip()
+        )
+        if not script:
+            script = str(audio_asset.content or "").strip()
+        if not cues:
+            # Approximate duration from scene plan when whisper cues are unavailable.
+            approx = sum(float(getattr(scene, "duration_seconds", 5) or 5) for scene in scenes) or 30.0
+            cues = even_spaced_cues(script or "Visit getamicor.com", approx)
+
+        try:
+            polished, srt = burn_captions_and_cta_fade(
+                muxed_path,
+                cues,
+                width=width if vertical else max(width, 720),
+                height=height if vertical else max(height, 720),
+                cta_text="getamicor.com",
+                fade_seconds=2.5,
+            )
+            output_path.write_bytes(polished.read_bytes())
+            srt_dest = output_path.with_suffix(".srt")
+            srt_dest.write_text(srt.read_text(encoding="utf-8"), encoding="utf-8")
+            public_prefix = _creative_media_root_and_prefix()[1]
+            return {
+                "captions_burned_in": True,
+                "subtitle_url": public_prefix + "/" + srt_dest.name,
+            }
+        except Exception as exc:
+            # Preserve the muxed MP4 rather than failing the whole commercial when
+            # caption burn-in is blocked by memory; attach an SRT sidecar when possible.
+            output_path.write_bytes(muxed_path.read_bytes())
+            subtitle_url = None
+            try:
+                from app.core.nova.creative_studio.presenter_media import srt_text
+                srt_dest = output_path.with_suffix(".srt")
+                srt_dest.write_text(srt_text(cues), encoding="utf-8")
+                subtitle_url = _creative_media_root_and_prefix()[1] + "/" + srt_dest.name
+            except Exception:
+                subtitle_url = None
+            return {
+                "captions_burned_in": False,
+                "captions_sidecar_ready": bool(subtitle_url),
+                "subtitle_url": subtitle_url,
+                "caption_render_error": str(exc),
+            }
+
+    def preflight_quote(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        from app.core.nova.creative_studio.preflight import quote_project_render
+
+        project = self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        scene_count = len(scenes) or (6 if int(project.duration_target or 30) == 30 else 4)
+        quote = quote_project_render(
+            scene_count=scene_count,
+            include_voice=True,
+            include_images=True,
+            include_presenter_lipsync=True,
+            include_cloud_captions=True,
+            duration_target=int(project.duration_target or 30),
+        )
+        meta = dict(project.metadata or {})
+        confirmation = meta.get("budget_confirmation") or {}
+        quote["project_id"] = project_id
+        quote["owner_budget_confirmed"] = bool(confirmation.get("confirmed"))
+        quote["confirmation"] = confirmation or None
+        return quote
+
+    def confirm_render_budget(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        confirmed: bool,
+        acknowledged_estimate_usd: float | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        quote = self.preflight_quote(owner_id, project_id)
+        if confirmed and quote.get("paid_render_allowed") is False:
+            raise CreativeStudioError(
+                "PAID_RENDER_BLOCKED",
+                "Paid provider renders are blocked until fal balance is funded and owner-approved. "
+                "Local motion / offline assembly may still run without provider charges.",
+                http_status=422,
+            )
+        meta = dict(project.metadata or {})
+        meta["budget_confirmation"] = {
+            "confirmed": bool(confirmed),
+            "acknowledged_estimate_usd": acknowledged_estimate_usd,
+            "quote_estimated_total_usd": quote.get("estimated_total_usd"),
+            "note": str(note or "")[:500],
+            "confirmed_at": _now() if confirmed else None,
+        }
+        project.metadata = meta
+        project.updated_at = _now()
+        self.store.save_project(project)
+        return {"project_id": project_id, "budget_confirmation": meta["budget_confirmation"], "quote": quote}
+
+    def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str) -> None:
+        from app.core.nova.creative_studio.flags import (
+            image_provider_live_enabled,
+            talking_presenter_provider_live_enabled,
+            video_provider_live_enabled,
+            voice_provider_live_enabled,
+        )
+
+        if not any(
+            [
+                image_provider_live_enabled(),
+                voice_provider_live_enabled(),
+                video_provider_live_enabled(),
+                talking_presenter_provider_live_enabled(),
+            ]
+        ):
+            return
+        project = self._project_or_404(owner_id, project_id)
+        confirmation = (project.metadata or {}).get("budget_confirmation") or {}
+        if confirmation.get("confirmed") is True:
+            return
+        raise CreativeStudioError(
+            "BUDGET_CONFIRMATION_REQUIRED",
+            "Owner budget confirmation is required before paid Creative Studio provider renders. "
+            "Run preflight, review the estimate, then confirm. No automatic purchases.",
+            http_status=422,
+        )
 
     def persist_browser_final_promo(
         self,
@@ -1555,8 +1841,14 @@ class CreativeStudioService(ShortDramaMixin):
                 "render_mode": "browser_safe_upload",
                 "publish_ready": False,
                 "owner_review_required": True,
+                "commercial_ready_candidate": suffix == ".mp4",
+                "commercial_slideshow": "slideshow" in str(filename or "").lower(),
                 "content_type": content_type,
                 "file_size_bytes": len(data),
+                "acceptance_note": (
+                    "Browser WebM uploads are review helpers only. Commercial acceptance requires a motion MP4 "
+                    "with English voice continuity, captions, and getamicor.com CTA — not a still slideshow."
+                ),
             },
             url=public_prefix + "/" + output_path.name,
         )
@@ -1570,6 +1862,153 @@ class CreativeStudioService(ShortDramaMixin):
         )
         return {"asset": asset.as_dict(), "url": asset.url, "status": "GENERATED"}
 
+
+    def click_destinations(self, platform: str, *, verify: bool = False) -> dict[str, Any]:
+        from app.core.nova.creative_studio.click_destinations import replacement_pack, verify_click_destination
+
+        pack = replacement_pack(platform)
+        if verify:
+            probed = verify_click_destination(pack["website_field_url"])
+            pack.update(
+                {
+                    "http_status": probed["http_status"],
+                    "final_url": probed["final_url"],
+                    "redirect_chain": probed["chain"],
+                    "classification": probed["classification"],
+                    "verified": probed["verified"],
+                }
+            )
+        pack["publish"] = False
+        return pack
+
+    def render_offline_commercial(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """30s-style montage from the saved storyboard. Does not call image, voice, or video providers."""
+        from app.core.nova.creative_studio.click_destinations import replacement_pack
+        from app.core.nova.creative_studio.offline_commercial import OfflineCommercialError, render_offline_montage
+
+        project = self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        if not scenes:
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        vertical = str(project.platform or "").strip().lower() in {"tiktok", "instagram", "youtube shorts"}
+        output_dir, public_prefix = _creative_media_root_and_prefix()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        token = new_id("promo").split("_", 1)[-1]
+        output_path = output_dir / f"nova-offline-{token}.mp4"
+        audio_path = output_dir / f"nova-offline-{token}.wav"
+        job = self._start_job(owner_id, project_id, "offline_commercial")
+        try:
+            rendered = render_offline_montage(
+                [scene.as_dict() for scene in scenes],
+                output_mp4=output_path,
+                audio_wav=audio_path,
+                vertical=vertical,
+            )
+        except OfflineCommercialError as exc:
+            self._finish_job(job, status="ERROR", message=exc.message, asset_ids=[], provider="nova_offline_montage")
+            raise CreativeStudioError(exc.code, exc.message, http_status=422) from exc
+        except Exception as exc:
+            self._finish_job(job, status="ERROR", message=str(exc), asset_ids=[], provider="nova_offline_montage")
+            raise CreativeStudioError("OFFLINE_MONTAGE_FAILED", str(exc)[:500], http_status=422) from exc
+
+        click = replacement_pack(project.platform)
+        public_url = public_prefix + "/" + output_path.name
+        audio_url = public_prefix + "/" + audio_path.name
+        subtitle_url = public_prefix + "/" + output_path.with_suffix(".srt").name
+        audio_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="audio",
+            title="Offline narration",
+            content="Local espeak narration of the reviewed storyboard. Not a paid presenter voice.",
+            status="GENERATED",
+            metadata={
+                "provider_result": rendered["narration"],
+                "paid_provider_charges": False,
+                "lip_sync": False,
+            },
+            url=audio_url,
+        )
+        video_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="video",
+            title="Offline 30s AMICOR Nova montage",
+            content=(
+                "Local title-card montage with narration and burned captions. "
+                "Not a lip-synced presenter. Not approved for public posting."
+            ),
+            status="GENERATED",
+            metadata={
+                "final_promo": True,
+                **{key: value for key, value in rendered.items() if key != "subtitle_path"},
+                "subtitle_url": subtitle_url,
+                "click_destination": click,
+                "external_publishing": False,
+            },
+            url=public_url,
+        )
+        self._finish_job(
+            job,
+            status="GENERATED",
+            message=(
+                f"Offline montage rendered at {rendered['duration_seconds']}s. "
+                "No paid provider was called. Lip-sync and public posting stay off."
+            ),
+            asset_ids=[video_asset.id, audio_asset.id],
+            provider="nova_offline_montage",
+        )
+        narration = rendered.get("narration") or {}
+        return {
+            "job": job.as_dict(),
+            "asset": video_asset.as_dict(),
+            "audio": audio_asset.as_dict(),
+            "url": public_url,
+            "download_url": f"/api/nova/creative/projects/{project_id}/assets/{video_asset.id}/file",
+            "audio_download_url": f"/api/nova/creative/projects/{project_id}/assets/{audio_asset.id}/file",
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
+            "click_destination": click,
+            "lip_sync": False,
+            "render_mode": "offline_montage_not_lipsync",
+            "license_status": narration.get("license_status") or "AMBER",
+            "commercial_use": narration.get("commercial_use") or "",
+            "paid_provider_charges": False,
+            "paid_render_allowed": False,
+            "readiness_note": "License stays AMBER until the owner accepts the local narration license. Publishing is held.",
+        }
+
+    def get_generation_job(self, owner_id: str, project_id: str, job_id: str) -> dict[str, Any]:
+        """Read one saved job. Polling this route does not start a provider."""
+        self._project_or_404(owner_id, project_id)
+        job = next((row for row in self.store.list_jobs(project_id, owner_id) if row.id == job_id), None)
+        if job is None:
+            raise CreativeStudioError("NOT_FOUND", "Job not found", http_status=404)
+        return {
+            "job": job.as_dict(),
+            "ready": job.status in {"GENERATED", "ERROR"},
+            "lip_sync": False if job.provider == "nova_offline_montage" else None,
+            "paid_provider_charges": False if job.provider == "nova_offline_montage" else None,
+        }
+
+    def open_asset_file(self, owner_id: str, project_id: str, asset_id: str) -> tuple[Path, str, str]:
+        """Owner-scoped file for playback download. Another account gets not found."""
+        from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix, _resolve_creative_media_url
+
+        self._project_or_404(owner_id, project_id)
+        asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
+        if asset is None:
+            raise CreativeStudioError("NOT_FOUND", "Asset not found", http_status=404)
+        path = _resolve_creative_media_url(asset.url)
+        root, _prefix = _creative_media_root_and_prefix()
+        if path is None or not path.is_file():
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "This asset has no downloadable file.", http_status=404)
+        resolved = path.resolve()
+        root_resolved = root.resolve()
+        if resolved != root_resolved and root_resolved not in resolved.parents:
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Asset file is outside the studio media directory.", http_status=404)
+        media_types = {".mp4": "video/mp4", ".wav": "audio/wav", ".srt": "text/plain; charset=utf-8"}
+        media_type = media_types.get(resolved.suffix.lower(), "application/octet-stream")
+        return resolved, media_type, resolved.name
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)
