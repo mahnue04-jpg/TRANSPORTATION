@@ -58,8 +58,14 @@ function release(){
 function assess(){
   if(!stream || !preview.videoWidth || !context)return;
   canvas.width=32;canvas.height=24;
-  context.drawImage(preview,0,0,32,24);
-  const pixels=context.getImageData(0,0,32,24).data;
+  let pixels;
+  try {
+    context.drawImage(preview,0,0,32,24);
+    pixels=context.getImageData(0,0,32,24).data;
+  } catch (_) {
+    quality.textContent='Lighting check unavailable; camera preview only.';
+    return;
+  }
   let sum=0;
   for(let i=0;i<pixels.length;i+=4)sum+=.2126*pixels[i]+.7152*pixels[i+1]+.0722*pixels[i+2];
   const mean=sum/(pixels.length/4);
@@ -73,15 +79,15 @@ start.addEventListener('click',async()=>{
   try{
     if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera preview requires HTTPS/localhost and a compatible browser.');
     const acquired=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
-    if(token!==requestToken||!consent.checked){acquired.getTracks().forEach(t=>t.stop());return}
+    if(token!==requestToken||!consent.checked||document.hidden){acquired.getTracks().forEach(t=>t.stop());return}
     stream=acquired;
     stream.getVideoTracks().forEach(track=>track.addEventListener('ended',()=>{if(stream===acquired){release();say('Camera disconnected.')}}));
     preview.srcObject=stream;
-    try{await preview.play()}catch(e){release();throw e}
-    if(token!==requestToken||!consent.checked){release();return}
+    try{await preview.play()}catch(e){if(token===requestToken){release();throw e}return}
+    if(token!==requestToken||!consent.checked||document.hidden){if(stream===acquired)release();return}
     stop.disabled=false;say('Camera on. No vital signs are being measured.');
     frameTimer=setInterval(assess,1000);
-  }catch(e){release();say('Camera unavailable: '+(e?.name==='NotAllowedError'?'permission was denied.':e?.message||'check permissions and browser support.'))}
+  }catch(e){if(token!==requestToken)return;release();say('Camera unavailable: '+(e?.name==='NotAllowedError'?'permission was denied.':e?.message||'check permissions and browser support.'))}
 });
 stop.addEventListener('click',()=>{release();say('Camera stopped and cleared.')});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){release();say('Camera stopped when page became hidden.')}});
