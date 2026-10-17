@@ -1413,8 +1413,11 @@
       setSignedIn(false);
       return;
     }
-    setSignedIn(true);
     try {
+      // A locally cached token is not proof that the staging account survived a restart.
+      // Confirm it with the server before showing the authenticated Studio controls.
+      await api("/api/auth/me");
+      setSignedIn(true);
       await refreshProviders();
       await refreshProjects();
       await refreshBrands();
