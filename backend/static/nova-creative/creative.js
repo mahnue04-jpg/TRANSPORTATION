@@ -663,6 +663,7 @@
         refreshAssets();
       });
     });
+    updateActiveProjectLabel();
   }
   async function refreshBrands() {
     var body = await api("/api/nova/creative/brands");
