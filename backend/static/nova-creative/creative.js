@@ -1420,7 +1420,7 @@
   var walkingCommercialButton = $("build-walking-commercial-30s");
   if (walkingCommercialButton) {
     walkingCommercialButton.addEventListener("click", function () {
-      runWalkingRender(
+      return runWalkingRender(
         "/assemble/walking-commercial-30s",
         walkingCommercialButton,
         "Rendering the 30s walking talking commercial. No paid provider is charged.",
