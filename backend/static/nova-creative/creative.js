@@ -523,7 +523,7 @@
       if (typeof setToken === "function") setToken("");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
-      throw new Error("Session expired. Sign in again. (401) Your active Creative Studio project is preserved.");
+      throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
@@ -561,7 +561,9 @@
   }
 
   function setSignedIn(on) {
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
+    if ($("staging-register-panel")) $("staging-register-panel").style.display = (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
