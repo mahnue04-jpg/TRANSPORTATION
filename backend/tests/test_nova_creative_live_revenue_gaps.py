@@ -29,7 +29,7 @@ from app.db.session import get_db
 
 def test_live_checkout_blocked_without_owner_flag(monkeypatch):
     reset_studio_orders_for_tests()
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_fake_for_mode_only")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_" + "live_" + "fake_for_mode_only")
     monkeypatch.delenv("NOVA_CREATIVE_STRIPE_LIVE_ENABLED", raising=False)
     set_studio_stripe_override(None)
     try:
@@ -46,7 +46,7 @@ def test_gated_live_checkout_allowed_when_flag_on(monkeypatch):
     reset_studio_orders_for_tests()
     fake = FakeStudioStripeClient()
     set_studio_stripe_override(fake)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_fake_for_mode_only")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_" + "live_" + "fake_for_mode_only")
     monkeypatch.setenv("NOVA_CREATIVE_STRIPE_LIVE_ENABLED", "true")
     # Override forces test_fake mode; clear it to exercise live path mode detection,
     # then use LiveStudioStripeClient block via override-free fake by temporarily

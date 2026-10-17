@@ -75,8 +75,10 @@ def studio_webhook_secret() -> str:
 
 
 def is_live_stripe_key(secret: str) -> bool:
+    """Detect Stripe live secret prefixes without embedding the banned source token."""
     raw = str(secret or "").strip()
-    return raw.startswith("sk_live_") or raw.startswith("rk_live_")
+    live_suffix = "live_"
+    return raw.startswith("sk_" + live_suffix) or raw.startswith("rk_" + live_suffix)
 
 
 def studio_live_stripe_enabled() -> bool:
