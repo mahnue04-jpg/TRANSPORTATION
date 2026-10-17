@@ -55,6 +55,15 @@
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
       </div>
+      <div id="staging-register-panel" style="display:none; margin-top:16px;">
+        <p><strong>New test account required.</strong> Use a separate test email and a NEW password, not your regular AMICOR password. Test accounts may be lost when this free staging server restarts.</p>
+        <button type="button" id="staging-register-toggle" class="secondary">Create test account</button>
+        <form id="staging-register-form" class="grid hidden" autocomplete="off">
+          <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
+          <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <button type="submit">Create separate test account</button>
+        </form>
+      </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
