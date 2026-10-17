@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.capability_first_discovery import (
     is_remote_digital_search_intent,
     non_us_location_required,
     score_discovery_candidate,
+    single_lane_title_match,
     search_family_catalog,
     resolve_requested_family,
     resolve_requested_families,
@@ -735,6 +736,7 @@ def test_owner_1099_search_drops_copywriter_manager_and_ai_trainer() -> None:
 _ADMIN_LANE_QUERY = "Remote 1099 administrative support work"
 _RESEARCH_LANE_QUERY = "Remote 1099 research assistant work"
 _CRM_LANE_QUERY = "Remote 1099 CRM support work"
+_DATA_ENTRY_LANE_QUERY = "Remote 1099 data entry contractor"
 
 
 def test_single_lane_searches_keep_their_own_title_family() -> None:
@@ -856,6 +858,178 @@ def test_single_lane_searches_keep_their_own_title_family() -> None:
     assert onsite["physical_licensed_onsite_blocked"] is True
     assert seasoned["discovery_band"] == "REJECT"
     assert seasoned["unverified_experience_blocked"] is True
+
+
+def test_data_entry_search_keeps_genuine_titles_and_guardrails() -> None:
+    """A data-entry query is an admin lane, and data-entry titles stay in that lane.
+
+    CRM and virtual-assistant searches keep their own titles. Negated titles,
+    leadership titles, upfront fees, and unverified credentials stay out.
+    """
+    clerk = _listed_job(
+        "Data Entry Clerk",
+        "Remote 1099 data entry for spreadsheet cleanup. No certification required. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    hyphen = _listed_job(
+        "Data-Entry Specialist",
+        "Remote data-entry contractor. Update records from source spreadsheets. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    administrator = _listed_job(
+        "Data Entry Administrator",
+        "Remote data entry for a US client. No certification required. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    negated = _listed_job(
+        "Not a Data Entry Role",
+        "Remote 1099 scheduling support. This is not a data entry role. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    leader = _listed_job(
+        "Data Entry Project Manager",
+        "Remote 1099 data entry program leadership. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    assistant = _listed_job(
+        "Virtual Assistant",
+        "Remote virtual assistant for inbox, calendar, and administrative support. No upfront fee.",
+        search_family="administrative_operations",
+    )
+    paid = _listed_job(
+        "Data Entry Clerk",
+        "Remote 1099 data entry. Application fee required. Pay to apply before tasks are visible.",
+        provider_identifier="paid-data-entry",
+        search_family="administrative_operations",
+    )
+    seasoned = _listed_job(
+        "Data Entry Specialist",
+        "Remote data entry. Minimum 7 years of experience required. No upfront fee.",
+        provider_identifier="seasoned-data-entry",
+        search_family="administrative_operations",
+    )
+    licensed = _listed_job(
+        "Data Entry Clerk",
+        "Remote data entry. PMP certification required. Must hold an active certification.",
+        provider_identifier="licensed-data-entry",
+        search_family="administrative_operations",
+    )
+
+    assert single_lane_title_match(clerk, _DATA_ENTRY_LANE_QUERY) is True
+    assert single_lane_title_match(hyphen, "Remote 1099 data-entry contractor") is True
+    assert single_lane_title_match(administrator, _DATA_ENTRY_LANE_QUERY) is True
+    assert single_lane_title_match(negated, _DATA_ENTRY_LANE_QUERY) is False
+    assert single_lane_title_match(leader, _DATA_ENTRY_LANE_QUERY) is False
+    assert single_lane_title_match(clerk, _ADMIN_LANE_QUERY) is False
+    assert single_lane_title_match(assistant, _ADMIN_LANE_QUERY) is True
+    assert single_lane_title_match(administrator, _CRM_LANE_QUERY) is False
+
+    ranked = qualify_and_rank_live_jobs(
+        _DATA_ENTRY_LANE_QUERY,
+        [clerk, hyphen, administrator, negated, leader, paid, seasoned, licensed],
+    )
+    by_id = {row.get("provider_identifier") or row["title"]: row for row in ranked}
+    for key in ("data-entry-clerk", "data-entry-specialist", "data-entry-administrator"):
+        row = by_id[key]
+        assert row["live_qualification"]["qualification_status"] != "NOT_QUALIFIED"
+        assert "work_lane_mismatch" not in row["live_qualification"].get("blockers", [])
+        assert row["live_qualification"]["external_submission"] is False
+        assert row["live_qualification"]["financial_execution"] is False
+        assert row["remote_eligibility"] == "YES"
+    assert by_id["not-a-data-entry-role"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "work_lane_mismatch" in by_id["not-a-data-entry-role"]["live_qualification"]["blockers"]
+    assert by_id["data-entry-project-manager"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert by_id["paid-data-entry"]["discovery_band"] == "REJECT"
+    assert "upfront_fee_required" in by_id["paid-data-entry"]["live_qualification"]["blockers"]
+    assert by_id["seasoned-data-entry"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "unverified_experience_required" in by_id["seasoned-data-entry"]["live_qualification"]["blockers"]
+    assert by_id["licensed-data-entry"]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
+    assert "certification_or_license_required" in by_id["licensed-data-entry"]["live_qualification"]["blockers"]
+
+    abroad = score_discovery_candidate(
+        _listed_job(
+            "Data Entry Clerk",
+            "Office data entry. Remote work is not offered.",
+            geography="India",
+            remote_status="not_remote",
+            search_family="administrative_operations",
+        ),
+        query=_DATA_ENTRY_LANE_QUERY,
+    )
+    assert abroad["remote_eligibility"] == "NO"
+    assert abroad["discovery_band"] == "REJECT"
+    assert "non_us_location_required" in abroad["remote_digital_blockers"]
+    assert "residency_required" in abroad["remote_digital_blockers"]
+    assert abroad["upfront_fee_blocked"] is False
+
+
+def test_negated_remote_does_not_waive_overseas_geography() -> None:
+    """not_remote and an explicit remote denial keep a foreign place closed."""
+    status_values = ("not_remote", "not-remote", "non_remote", "no_remote")
+    places = ("India", "Dubai", "Seoul", "London")
+    for status, place in zip(status_values, places):
+        job = _listed_job(
+            "Remote Operations Assistant",
+            "Office operations support for local staff. No upfront fee.",
+            geography=place,
+            remote_status=status,
+            search_family="administrative_operations",
+        )
+        assert non_us_location_required(job) is True
+        scored = score_discovery_candidate(job, query=_ADMIN_LANE_QUERY)
+        assert scored["remote_eligibility"] == "NO"
+        assert "non_us_location_required" in scored["remote_digital_blockers"]
+        assert "residency_required" in scored["remote_digital_blockers"]
+
+    denials = (
+        "Remote work is not offered.",
+        "Remote work is NOT offered.",
+        "Remote positions are not available.",
+        "This role is not remote.",
+        "No remote work.",
+        "The company does not offer remote work.",
+        "Remote work isn't offered.",
+    )
+    denial_places = ("Chennai", "Tokyo", "Sydney", "Singapore", "Brazil", "Poland", "Egypt")
+    for phrase, place in zip(denials, denial_places):
+        job = _listed_job(
+            "Remote Operations Assistant",
+            phrase,
+            geography=place,
+            remote_status="remote",
+            search_family="administrative_operations",
+        )
+        assert non_us_location_required(job) is True, phrase
+        scored = score_discovery_candidate(job, query=_ADMIN_LANE_QUERY)
+        assert scored["remote_eligibility"] == "NO", phrase
+        assert scored["discovery_band"] == "REJECT", phrase
+
+    onsite = _listed_job(
+        "Operations Assistant",
+        "Previously described as remote in an old posting. Current assignment is in the office.",
+        geography="Singapore",
+        remote_status="on-site",
+        search_family="administrative_operations",
+    )
+    assert non_us_location_required(onsite) is True
+    onsite_score = score_discovery_candidate(onsite, query=_ADMIN_LANE_QUERY)
+    assert onsite_score["remote_eligibility"] == "NO"
+    assert "non_us_location_required" in onsite_score["remote_digital_blockers"]
+
+    still_remote = _listed_job(
+        "Remote Operations Assistant",
+        "Fully remote contractor. Certification is not required. Work from anywhere. "
+        "No residency requirement. This is not remote-only office space.",
+        geography="Germany",
+        remote_status="remote",
+        search_family="administrative_operations",
+    )
+    assert non_us_location_required(still_remote) is False
+    still_score = score_discovery_candidate(still_remote, query=_ADMIN_LANE_QUERY)
+    assert still_score["remote_eligibility"] == "YES"
+    assert "residency_required" not in still_score["remote_digital_blockers"]
+    assert still_score["certification_or_license_blocked"] is False
+    assert still_score["upfront_fee_blocked"] is False
 
 
 _WORLDWIDE_B2B_QUERY = (
