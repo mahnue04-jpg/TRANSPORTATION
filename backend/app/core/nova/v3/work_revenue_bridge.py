@@ -6,6 +6,7 @@ Approval remains separate from submission.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -153,7 +154,7 @@ def persist_live_job(
             tags=[
                 "live_discovery",
                 provider_id[:60],
-                str(job.get("qualification_status") or "unclassified")[:60],
+                str(_live_status(job) or "unclassified")[:60],
                 *(
                     [f"search_family:{str(job.get('search_family')).strip()[:80]}"]
                     if str(job.get("search_family") or "").strip()
@@ -206,6 +207,22 @@ def persist_live_job(
         organization_id=organization_id,
         user=user,
     )
+    stored = {}
+    try:
+        stored = json.loads(work_row.qualification_json or "{}")
+    except json.JSONDecodeError:
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    fetched_at = str(job.get("fetched_at") or "").strip()
+    if fetched_at:
+        stored["fetched_at"] = fetched_at
+    if source_url:
+        stored["source_url"] = source_url
+    stored["provenance_provider"] = provider_id
+    work_row.qualification_json = json.dumps(stored)
+    db.commit()
+    db.refresh(work_row)
 
     application = work_service.get_application_for_opportunity(
         db,

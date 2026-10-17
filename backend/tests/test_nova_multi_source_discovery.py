@@ -820,6 +820,13 @@ def test_admin_search_expands_queries_and_requires_positive_title_fit(monkeypatc
     assert result["count"] == 1
     assert result["jobs"][0]["title"] == "Virtual Assistant Contractor"
     assert result["provider_screened_counts"]["positive_fit_fixture"] >= 2
+    assert result["exclusion_reason_counts"].get("title_not_administrative_archetype", 0) >= 1
+    assert any(
+        sample["title"] == "Regional Sales Manager"
+        and sample["exclusion_reason"] == "title_not_administrative_archetype"
+        and sample["source_url"] == "https://example.test/sales-1"
+        for sample in result["exclusion_samples"]
+    )
     assert "remote administrative support contractor" in result["query_variants"]
 
 

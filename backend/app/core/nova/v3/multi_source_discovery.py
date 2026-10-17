@@ -141,6 +141,7 @@ def normalize_opportunity(**kwargs: Any) -> dict[str, Any]:
         "simulated": simulated,
         "real_or_simulated": "SIMULATED" if simulated else "REAL",
         "provenance_sources": list(kwargs.get("provenance_sources") or [provider_id]),
+        "fetched_at": str(kwargs.get("fetched_at") or datetime.now(timezone.utc).isoformat()),
     }
 
 
@@ -283,6 +284,78 @@ def _record_failure(provider_id: str, *, source_type: str, error: str, enabled: 
     row.source_type = source_type
     row.status = "error" if enabled else "pending"
     _health[provider_id] = row
+
+
+_RETRY_SLEEP_SECONDS = 0.35
+_TRANSIENT_HTTP_STATUS = {429, 500, 502, 503, 504}
+
+
+def _transient_provider_error(exc: BaseException) -> bool:
+    """One retry is reserved for timeouts, transport drops, and upstream 429/5xx."""
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status in _TRANSIENT_HTTP_STATUS
+
+
+def call_provider_search(provider: LiveDiscoveryProvider, query: str, *, limit: int) -> list[dict[str, Any]]:
+    """Search a provider, retrying once after a transient outage.
+
+    A second failure is raised so the caller can record the source as failed
+    instead of describing the run as a search with no matches.
+    """
+    try:
+        return provider.search(query, limit=limit)
+    except Exception as exc:
+        if not _transient_provider_error(exc):
+            raise
+        time.sleep(_RETRY_SLEEP_SECONDS)
+        return provider.search(query, limit=limit)
+
+
+def classify_live_search(result: dict[str, Any]) -> dict[str, Any]:
+    """Say whether a live search actually ran.
+
+    A provider that returns zero rows still counts as a completed search.
+    A provider that errors without recording a result count does not. If every
+    queried provider errored, the run is unavailable and must not be described
+    as zero matches.
+
+    Across several queries, a later timeout does not erase a provider that
+    already recorded a result count. Those errors make the run partial.
+    """
+    queried = [str(item) for item in (result.get("providers_queried") or []) if str(item)]
+    counts = dict(result.get("provider_result_counts") or {})
+    errored = {
+        str(item.get("provider_id"))
+        for item in (result.get("provider_errors") or [])
+        if item.get("provider_id")
+    }
+    # A recorded count means this provider finished at least one search.
+    # An error from another query in an aggregated run does not cancel it.
+    succeeded = [provider_id for provider_id in queried if provider_id in counts]
+    failed = {provider_id for provider_id in errored if provider_id not in counts}
+    job_count = len(result.get("jobs") or [])
+    if not queried or (failed and not succeeded):
+        status = "unavailable"
+        claimed = False
+        empty_reason = "source_unavailable"
+    elif errored and succeeded:
+        status = "partial"
+        claimed = True
+        empty_reason = None if job_count else "no_matches"
+    else:
+        status = "ok"
+        claimed = True
+        empty_reason = None if job_count else "no_matches"
+    return {
+        "live_search_status": status,
+        "live_search_claimed": claimed,
+        "empty_reason": empty_reason,
+        "providers_succeeded": succeeded,
+        "providers_failed": sorted(failed),
+    }
 
 
 class RemotiveLiveProvider:
@@ -761,7 +834,9 @@ _SAM_DIGITAL_RELEVANCE = re.compile(
     r"clerical|records management|information management|program support|"
     r"management support|business operations|technical writing|editorial|"
     r"transcription|analyst|analytical|workflow|crm|office support|"
-    r"knowledge management|policy analysis|market research"
+    r"knowledge management|policy analysis|market research|"
+    r"workflow automation|api integration|fastapi|business process|"
+    r"operational support|n8n|zapier|dify"
     r")\b",
     re.I,
 )
@@ -1555,7 +1630,7 @@ _AI_AUTOMATION_QUERY_HINTS = re.compile(
 )
 _AI_AUTOMATION_RESULT_SIGNALS = re.compile(
     r"\b(ai|artificial intelligence|automation|workflow automation|zapier|make\.com|"
-    r"n8n|api integration|prompt engineering|prompt workflow|llm|ai agent|agent workflow)\b",
+    r"n8n|dify|fastapi|api integration|prompt engineering|prompt workflow|llm|ai agent|agent workflow)\b",
     re.I,
 )
 
@@ -1565,15 +1640,25 @@ _ADMIN_STRONG_TITLE = re.compile(
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|virtual assistant|office assistant|office administrator|"
     r"operations (?:assistant|support|coordinator|administrator|analyst(?: contractor)?)|"
+    r"operational support(?: specialist| contractor| analyst)?|"
     r"business operations (?:assistant|support|coordinator)|"
-    r"data entry (?:assistant|clerk|specialist|contractor)|"
+    r"business process(?: specialist| analyst| coordinator| contractor)?|"
+    r"workflow automation(?: specialist| contractor)?|"
+    r"(?:fastapi|api integration)(?: developer| contractor| specialist| engineer)?|"
+    r"data[\s-]?entry (?:assistant|clerk|specialist|contractor|administrator)|"
     r"records (?:assistant|clerk|specialist|coordinator)|"
     r"document (?:assistant|specialist|coordinator|processor)|"
-    r"crm (?:assistant|administrator|specialist|coordinator)|"
+    r"crm (?:assistant|administrator|specialist|coordinator|support)|"
     r"scheduling (?:assistant|coordinator|specialist)|"
     r"back office (?:assistant|support|specialist)|"
     r"bookkeeping (?:assistant|support|specialist)"
     r")\b",
+    re.I,
+)
+# API integration and workflow automation are performable digital work.
+# A generic software-engineer title stays out of an administrative search.
+_PERFORMABLE_DIGITAL_TITLE = re.compile(
+    r"\b(api integration|fastapi|workflow automation|ai automation|operational support|business process)\b",
     re.I,
 )
 
@@ -1603,8 +1688,36 @@ def _discovery_query_variants(query: str) -> list[str]:
 
 
 
-def _query_relevant(row: dict[str, Any], query: str) -> bool:
-    """Reject obvious provider false positives before qualification.
+def _admin_tech_title_rejected(title: str) -> bool:
+    """Drop generic engineering titles, not API or workflow automation titles."""
+    if _PERFORMABLE_DIGITAL_TITLE.search(title or ""):
+        return False
+    return bool(_ADMIN_TECH_TITLE_REJECT.search(title or ""))
+
+
+def _employee_only_without_contractor(combined: str) -> bool:
+    """True when employment wording is present and no contractor path is offered.
+
+    A negated benefits line ('no benefits') is not an employment claim.
+    """
+    found = False
+    for match in _ADMIN_EMPLOYEE_SIGNALS.finditer(combined or ""):
+        prefix = combined[max(0, match.start() - 16):match.start()]
+        if re.search(r"\b(?:no|not|without|non)\s*$", prefix, re.I):
+            continue
+        found = True
+        break
+    if not found:
+        return False
+    return not bool(re.search(
+        r"\b(contract|contractor|freelance|1099|vendor|b2b|project[- ]based)\b",
+        combined,
+        re.I,
+    ))
+
+
+def relevance_exclusion(row: dict[str, Any], query: str) -> str | None:
+    """Return a stable exclusion code, or None when the listing stays eligible.
 
     This is intentionally narrow: it only applies an extra guard to
     administrative/operations searches, where broad remote-job APIs commonly
@@ -1629,18 +1742,22 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         matches_remote_digital_work_lane,
         remote_digital_performability_blockers,
         upfront_fee_required,
+        upwork_paid_connects_required,
     )
 
+    if upwork_paid_connects_required(row):
+        return "upwork_paid_connects"
     if blocks_physical_role_for_digital_search(row, query_text):
-        return False
-    if remote_digital_performability_blockers(row, query_text):
-        return False
+        return "physical_licensed_or_onsite_role"
+    performability = remote_digital_performability_blockers(row, query_text)
+    if performability:
+        return str(performability[0])
 
     # User-requested U.S./remote discovery must not surface an explicitly
     # foreign-only listing merely because the listing itself also says "remote".
     if _US_REMOTE_QUERY.search(query_text):
         if _ADMIN_NON_US_GEO.search(geography) and not _EXPLICIT_US_OR_WORLD_GEO.search(geography):
-            return False
+            return "non_us_only_geography"
 
     # SAM.gov notices with a concrete place of performance are not remote
     # opportunities unless SAM itself marked the notice remote/virtual/telework.
@@ -1650,54 +1767,54 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
         and place_of_performance.strip()
         and remote_status != "remote"
     ):
-        return False
+        return "sam_place_of_performance_not_remote"
 
     # A brief that names several digital lanes keeps a listing when its title
     # matches any one lane. It does not require every result to mention AI.
     if is_multi_lane_remote_digital_query(query_text):
-        if _ADMIN_TECH_TITLE_REJECT.search(title):
-            return False
+        if _admin_tech_title_rejected(title):
+            return "technical_title_outside_lane"
         if _ADMIN_DOMAIN_SPECIALIST_TITLE_REJECT.search(title):
-            return False
+            return "domain_specialist_title"
         if not matches_remote_digital_work_lane(row):
-            return False
+            return "work_lane_mismatch"
         if _VENDOR_INTENT_QUERY.search(query_text):
             if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
-                return False
+                return "employee_only_listing"
         if upfront_fee_required(row):
-            return False
-        return True
+            return "upfront_fee_required"
+        return None
 
     # Capability-family searches need a positive duty signal, not merely a
     # provider keyword hit. Bookkeeping is especially noisy on broad remote-job
     # feeds, where generic operations/analyst roles can otherwise be mislabeled.
     if _BOOKKEEPING_QUERY_HINTS.search(query_text):
         if not _BOOKKEEPING_RESULT_SIGNALS.search(" ".join([title, description])):
-            return False
+            return "bookkeeping_duty_missing"
 
     # AI/automation searches must contain an actual AI/automation duty signal.
     # Generic "operations" or "digital assets" titles are not enough.
     if _AI_AUTOMATION_QUERY_HINTS.search(query_text):
         if not _AI_AUTOMATION_RESULT_SIGNALS.search(" ".join([title, description])):
-            return False
+            return "automation_duty_missing"
 
     # For any explicit vendor/contract/project search, remove obvious employee-
     # only feed results before expensive qualification. This preserves true
     # contractor/freelance/B2B listings while reducing W-2/talent-network noise.
     if _VENDOR_INTENT_QUERY.search(str(query or "")):
         if _EMPLOYEE_ONLY_SIGNALS.search(combined) and not _VENDOR_COMPATIBLE_SIGNALS.search(combined):
-            return False
+            return "employee_only_listing"
 
     if not _ADMIN_QUERY_HINTS.search(str(query or "")):
-        return True
+        return None
 
     title_has_admin = bool(_ADMIN_JOB_SIGNALS.search(title))
     body_has_admin = bool(_ADMIN_JOB_SIGNALS.search(description))
 
     # Technical IC titles should not survive an admin search merely because
     # their descriptions contain generic words like support/operations.
-    if _ADMIN_TECH_TITLE_REJECT.search(title) and not title_has_admin:
-        return False
+    if _admin_tech_title_rejected(title) and not title_has_admin:
+        return "technical_title_outside_lane"
 
     # Domain-specialist analyst roles (for example digital-asset/blockchain
     # operations) are not administrative support simply because the title also
@@ -1710,25 +1827,21 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
             re.I,
         ))
         if not explicit_admin:
-            return False
+            return "domain_specialist_title"
 
     # This query family is explicitly for contract/vendor work, not employee jobs.
-    if _ADMIN_EMPLOYEE_SIGNALS.search(combined) and not re.search(
-        r"\b(contract|contractor|freelance|1099|vendor|b2b|project[- ]based)\b",
-        combined,
-        re.I,
-    ):
-        return False
+    if _employee_only_without_contractor(combined):
+        return "employee_only_without_contractor"
 
     # Never surface pay-to-apply / paid-access admin opportunities.
     # "No upfront fee" is a negative statement and must stay eligible.
     if upfront_fee_required(row):
-        return False
+        return "upfront_fee_required"
 
     # Prefer U.S.-remote/nationwide work. Worldwide is allowed, but explicit
     # non-U.S.-only regions are removed from this U.S. contractor search.
     if _ADMIN_NON_US_GEO.search(geography) and not _ADMIN_US_GEO.search(geography):
-        return False
+        return "non_us_only_geography"
 
     # Public RFP/vendor notices are scoped by deliverables, not job titles.
     # Their titles are often procurement labels (for example "Data Reporting
@@ -1737,19 +1850,24 @@ def _query_relevant(row: dict[str, Any], query: str) -> bool:
     provider_type = str(row.get("provider_type") or "").strip().lower()
     if provider_type in {"public_rfp_feed", "government_contracting", "vendor_project_board"}:
         if not (title_has_admin or body_has_admin or _SAM_DIGITAL_RELEVANCE.search(" ".join([title, description]))):
-            return False
-        return True
+            return "public_notice_outside_digital_scope"
+        return None
 
     # Positive-fit gate for ordinary job feeds: do not keep generic managers,
     # schedulers, sales roles, or other jobs merely because their body contains
     # words such as "operations" or "support". The title itself must map to an
     # administrative work archetype Nova is actually allowed to pursue.
     if not _ADMIN_STRONG_TITLE.search(title):
-        return False
+        return "title_not_administrative_archetype"
 
     # Reaching this point means the title matched an approved administrative
     # archetype and all employee/geo/paid-access guards passed.
-    return True
+    return None
+
+
+def _query_relevant(row: dict[str, Any], query: str) -> bool:
+    """True when relevance_exclusion keeps the listing."""
+    return relevance_exclusion(row, query) is None
 
 
 def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1794,6 +1912,44 @@ def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [merged[key] for key in order]
 
 
+def _funnel_key(row: dict[str, Any]) -> str:
+    """Stable identity for screened-versus-unique reconciliation."""
+    url = _canonical_source_url(str(row.get("source_url") or ""))
+    if url:
+        return url
+    title = _identity_text(row.get("title"))
+    company = _identity_text(row.get("company_name"))
+    return f"untitled:{company}:{title}"[:300]
+
+
+def merge_search_funnels(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Union kept and excluded URLs across queries. A kept URL is not excluded."""
+    screened_rows = 0
+    kept: set[str] = set()
+    excluded: dict[str, str] = {}
+    for part in parts:
+        funnel = part.get("funnel") or {}
+        screened_rows += int(funnel.get("screened_rows") or 0)
+        for url in part.get("funnel_kept_urls") or []:
+            token = str(url or "").strip()
+            if token:
+                kept.add(token)
+        for url, reason in (part.get("funnel_excluded") or {}).items():
+            token = str(url or "").strip()
+            if token and token not in kept and token not in excluded:
+                excluded[token] = str(reason or "")
+    for url in kept:
+        excluded.pop(url, None)
+    unique_screened = len(kept) + len(excluded)
+    return {
+        "screened_rows": screened_rows,
+        "unique_screened": unique_screened,
+        "unique_kept": len(kept),
+        "unique_excluded": len(excluded),
+        "reconciled": unique_screened == len(kept) + len(excluded),
+    }
+
+
 def search_multi_source_jobs(
     query: str,
     *,
@@ -1821,6 +1977,10 @@ def search_multi_source_jobs(
     per_provider: dict[str, int] = {}
     provider_screened_counts: dict[str, int] = {}
     provider_query_variants: dict[str, list[str]] = {}
+    screened_rows = 0
+    kept_keys: set[str] = set()
+    excluded_reason: dict[str, str] = {}
+    excluded_samples: dict[str, dict[str, Any]] = {}
     query_variants = _discovery_query_variants(normalized)
 
     for provider in providers:
@@ -1830,28 +1990,84 @@ def search_multi_source_jobs(
         provider_rows: list[dict[str, Any]] = []
         screened = 0
         used_variants: list[str] = []
+        variants_completed = 0
+        provider_error: str | None = None
         try:
             for variant in query_variants:
                 used_variants.append(variant)
-                rows = provider.search(variant, limit=capped)
+                rows = call_provider_search(provider, variant, limit=capped)
+                variants_completed += 1
                 screened += len(rows)
-                rows = [row for row in rows if _query_relevant(row, normalized)]
-                if not include_simulated:
-                    rows = [row for row in rows if not row.get("simulated")]
-                provider_rows.extend(rows)
+                kept_rows: list[dict[str, Any]] = []
+                for row in rows:
+                    screened_rows += 1
+                    key = _funnel_key(row)
+                    reason = relevance_exclusion(row, normalized)
+                    if reason:
+                        if key not in kept_keys and key not in excluded_reason:
+                            excluded_reason[key] = reason
+                            excluded_samples[key] = {
+                                "title": str(row.get("title") or "")[:180],
+                                "company_name": str(row.get("company_name") or "")[:120],
+                                "source_url": str(row.get("source_url") or ""),
+                                "provider_id": row.get("provider_id"),
+                                "fetched_at": row.get("fetched_at"),
+                                "exclusion_reason": reason,
+                            }
+                        continue
+                    if not include_simulated and row.get("simulated"):
+                        if key not in excluded_reason:
+                            excluded_reason[key] = "simulated_record"
+                            excluded_samples[key] = {
+                                "title": str(row.get("title") or "")[:180],
+                                "company_name": str(row.get("company_name") or "")[:120],
+                                "source_url": str(row.get("source_url") or ""),
+                                "provider_id": row.get("provider_id"),
+                                "fetched_at": row.get("fetched_at"),
+                                "exclusion_reason": "simulated_record",
+                            }
+                        continue
+                    kept_keys.add(key)
+                    excluded_reason.pop(key, None)
+                    excluded_samples.pop(key, None)
+                    kept_rows.append(row)
+                provider_rows.extend(kept_rows)
                 provider_rows = dedupe_opportunities(provider_rows)
                 if len(provider_rows) >= capped:
                     break
+        except Exception as exc:  # noqa: BLE001 - isolate provider outages
+            message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
+            provider_error = message[:300]
+            errors.append({"provider_id": meta.provider_id, "error": provider_error})
+            if variants_completed == 0:
+                _record_failure(meta.provider_id, source_type=meta.provider_type, error=provider_error)
+        if variants_completed:
             provider_rows = provider_rows[:capped]
             per_provider[meta.provider_id] = len(provider_rows)
             provider_screened_counts[meta.provider_id] = screened
             provider_query_variants[meta.provider_id] = used_variants
             _record_success(meta.provider_id, source_type=meta.provider_type, count=len(provider_rows))
+            if provider_error:
+                health = _health.get(meta.provider_id)
+                if health is not None:
+                    health.status = "partial"
+                    health.last_error = provider_error
+                    health.reachable = True
             collected.extend(provider_rows)
-        except Exception as exc:  # noqa: BLE001 - isolate provider outages
-            message = _redact_secret(f"{type(exc).__name__}: {exc}", _sam_gov_api_key())
-            _record_failure(meta.provider_id, source_type=meta.provider_type, error=message)
-            errors.append({"provider_id": meta.provider_id, "error": message[:300]})
+
+    exclusion_reason_counts: dict[str, int] = {}
+    for reason in excluded_reason.values():
+        exclusion_reason_counts[reason] = exclusion_reason_counts.get(reason, 0) + 1
+    exclusion_samples = list(excluded_samples.values())[:20]
+    unique_kept = len(kept_keys)
+    unique_excluded = len(excluded_reason)
+    funnel = {
+        "screened_rows": screened_rows,
+        "unique_screened": unique_kept + unique_excluded,
+        "unique_kept": unique_kept,
+        "unique_excluded": unique_excluded,
+        "reconciled": True,
+    }
 
     # Pending providers stay visible in diagnostics but never searched.
     for pending in PENDING_PROVIDERS:
@@ -1866,8 +2082,9 @@ def search_multi_source_jobs(
         )
 
     deduped = dedupe_opportunities(collected)[:capped]
+    funnel["returned_jobs"] = len(deduped)
     real_jobs = [row for row in deduped if not row.get("simulated")]
-    return {
+    payload = {
         "query": normalized,
         "count": len(deduped),
         "real_count": len(real_jobs),
@@ -1876,6 +2093,11 @@ def search_multi_source_jobs(
         "providers_queried": [p.meta.provider_id for p in providers if p.meta.enabled],
         "provider_result_counts": per_provider,
         "provider_screened_counts": provider_screened_counts,
+        "exclusion_reason_counts": exclusion_reason_counts,
+        "exclusion_samples": exclusion_samples,
+        "funnel": funnel,
+        "funnel_kept_urls": sorted(kept_keys),
+        "funnel_excluded": dict(excluded_reason),
         "provider_query_variants": provider_query_variants,
         "query_variants": query_variants,
         "provider_errors": errors,
@@ -1886,6 +2108,8 @@ def search_multi_source_jobs(
         "financial_execution": False,
         "provider_health": provider_health_snapshot(),
     }
+    payload.update(classify_live_search(payload))
+    return payload
 
 
 def reset_provider_health_for_tests() -> None:
