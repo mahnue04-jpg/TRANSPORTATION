@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -18,6 +18,11 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider, video_provider
+from app.core.nova.creative_studio.studio_checkout import (
+    StudioCheckoutError,
+    process_studio_webhook,
+    verify_studio_webhook,
+)
 from app.db.session import SessionLocal, get_db
 from app.core.nova.creative_studio.drama import SAMPLE
 
@@ -81,6 +86,25 @@ router = APIRouter(
     tags=["nova-creative-studio"],
     dependencies=[Depends(require_nova_access)],
 )
+
+# Stripe webhooks cannot carry Nova session auth — dedicated unauthenticated router.
+webhook_router = APIRouter(prefix="/api/nova/creative", tags=["nova-creative-studio-webhook"])
+
+
+@webhook_router.post("/stripe/webhook")
+async def studio_stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """AMICOR Studio Checkout webhook (TEST + gated LIVE). Idempotent; fulfills paid orders."""
+    payload = await request.body()
+    try:
+        event = verify_studio_webhook(payload, stripe_signature)
+        result = process_studio_webhook(event, db=db)
+    except StudioCheckoutError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 _final_promo_lock = threading.Lock()
 _final_promo_running: set[tuple[str, str]] = set()
@@ -1375,6 +1399,158 @@ def download_asset_file(
         _raise(exc)
         raise
     return FileResponse(path, media_type=media_type, filename=filename)
+
+
+class WalkingPresenterIn(BaseModel):
+    script: str | None = Field(default=None, max_length=280)
+    voice: str | None = Field(default=None, max_length=80)
+
+
+class StudioCheckoutIn(BaseModel):
+    customer_email: str | None = Field(default=None, max_length=200)
+    success_url: str = Field(default="/nova/creative?checkout=success", max_length=500)
+    cancel_url: str = Field(default="/nova/creative?checkout=cancel", max_length=500)
+
+
+class VoiceLicenseIn(BaseModel):
+    accepted: bool = True
+    note: str = Field(default="", max_length=500)
+
+
+@router.get("/pricing")
+def studio_commercial_pricing(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Public AMICOR Studio commercial price + internal cost ceiling. No charge."""
+    _require_owner(user)
+    return get_service(db).studio_pricing()
+
+
+@router.post("/projects/{project_id}/checkout")
+def start_studio_checkout(
+    project_id: str,
+    payload: StudioCheckoutIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """AMICOR-branded Stripe Checkout for a 30s commercial order (TEST, or gated LIVE)."""
+    _require_owner(user)
+    try:
+        return get_service(db).start_studio_checkout(
+            user.user_id,
+            project_id,
+            customer_email=payload.customer_email,
+            success_url=payload.success_url,
+            cancel_url=payload.cancel_url,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/checkout/orders")
+def list_studio_checkout_orders(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).list_studio_checkout_orders(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/checkout/orders/{order_id}")
+def get_studio_checkout_order(
+    project_id: str,
+    order_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Job status + receipt for one Studio commercial order."""
+    _require_owner(user)
+    try:
+        return get_service(db).get_studio_checkout_order(user.user_id, project_id, order_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/checkout/orders/{order_id}/complete-test")
+def complete_studio_test_checkout(
+    project_id: str,
+    order_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Complete a TEST/fake checkout so receipts and job status can be verified without a live card."""
+    _require_owner(user)
+    try:
+        return get_service(db).complete_studio_test_checkout(user.user_id, project_id, order_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/voice-license")
+def accept_project_voice_license(
+    project_id: str,
+    payload: VoiceLicenseIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner accepts Studio neural voice for this commercial (license AMBER → GREEN)."""
+    _require_owner(user)
+    try:
+        return get_service(db).accept_voice_license(
+            user.user_id,
+            project_id,
+            accepted=payload.accepted,
+            note=payload.note,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/walking-presenter-proof")
+def assemble_walking_presenter_proof(
+    project_id: str,
+    payload: WalkingPresenterIn | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """5–6s full-body walking presenter proof. No paid provider charges."""
+    _require_owner(user)
+    body = payload or WalkingPresenterIn()
+    try:
+        return get_service(db).render_walking_presenter_proof(
+            user.user_id,
+            project_id,
+            script=body.script,
+            voice=body.voice,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/walking-commercial-30s")
+def assemble_walking_commercial_30s(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
 
 
 @router.post("/projects/{project_id}/assemble/offline-commercial")

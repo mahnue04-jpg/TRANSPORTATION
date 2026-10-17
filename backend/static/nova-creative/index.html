@@ -71,12 +71,47 @@
       </form>
     </section>
 
+    <section class="card" aria-label="TEST feature readiness">
+      <h2>TEST feature readiness</h2>
+      <p class="hint">Walking commercial + AMICOR Stripe Checkout run in <strong>TEST mode</strong>. Live billing, paid Genova providers, and public ad publish stay OFF. Use this path to find what still needs fixing after deploy.</p>
+      <div id="studio-test-readiness" class="hint">Sign in to load TEST readiness.</div>
+    </section>
+
+    <section class="card" aria-label="Walking presenter proof">
+      <h2>Walking presenter commercial (TEST)</h2>
+      <p class="hint">Full-body walking/gesturing presenter with natural female narration, phoneme-synced lip motion, and word-aligned captions. No fal/Kling/D-ID/OpenAI charges. Does not change the approved 60-second commercial.</p>
+      <ol class="hint" style="margin:8px 0 12px 18px; padding:0;">
+        <li>Create / select a 30s project and generate the storyboard</li>
+        <li>Accept voice license (AMBER → GREEN)</li>
+        <li>Build 30s walking commercial and download on your phone</li>
+        <li>Start TEST checkout, then Complete TEST payment for receipt/job status</li>
+      </ol>
+      <div class="actions wrap">
+        <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking presenter</button>
+        <button type="button" id="build-walking-commercial-30s">Build 30s walking commercial</button>
+        <button type="button" id="accept-voice-license" class="secondary">Accept voice license (AMBER → GREEN)</button>
+      </div>
+    </section>
+
     <section class="card" aria-label="Offline commercial">
-      <h2>30-second commercial</h2>
-      <p class="hint">Local montage only. No paid provider, no lip sync, and no posting. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable.</p>
+      <h2>30-second commercial (montage fallback)</h2>
+      <p class="hint">Local title-card montage fallback only. Prefer the walking commercial above for speech + lip motion. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable.</p>
       <div class="actions wrap">
         <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
         <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
+      </div>
+    </section>
+
+    <section class="card" aria-label="AMICOR Studio checkout">
+      <h2>AMICOR Studio checkout (TEST)</h2>
+      <p class="hint">Customer pays AMICOR via branded Stripe Checkout in test mode. Clear 30s scope and price. Internal render-cost ceiling is tracked separately. No automatic billing, no third-party vendor checkout, and no provider credit purchases. If TEST keys are not configured yet, Studio still creates a simulated TEST order you can complete for receipts.</p>
+      <div id="studio-pricing" class="hint">Sign in to load AMICOR Studio pricing.</div>
+      <div id="studio-orders" class="hint"></div>
+      <div class="actions wrap">
+        <button type="button" id="load-studio-pricing" class="secondary">Show price &amp; cost ceiling</button>
+        <button type="button" id="start-studio-checkout">Start TEST checkout</button>
+        <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
+        <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders / receipts</button>
       </div>
     </section>
 
@@ -296,6 +331,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=offline-montage-download-20261015"></script>
+  <script src="/static/nova-creative/creative.js?v=signout-only-when-signed-in-20261017"></script>
 </body>
 </html>

@@ -563,9 +563,15 @@
   }
 
   function setSignedIn(on) {
-    $("sign-in-toggle").classList.toggle("hidden", !!on);
-    $("sign-out").classList.toggle("hidden", !on);
-    if ($("staging-register-panel")) $("staging-register-panel").style.display = (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+    // Signed in → only Sign out. Signed out → only Sign in.
+    var signInBtn = $("sign-in-toggle");
+    var signOutBtn = $("sign-out");
+    if (signInBtn) signInBtn.classList.toggle("hidden", !!on);
+    if (signOutBtn) signOutBtn.classList.toggle("hidden", !on);
+    if ($("staging-register-panel")) {
+      $("staging-register-panel").style.display =
+        (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+    }
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
@@ -580,6 +586,21 @@
     $("provider-status").innerHTML = bits.map(function (line) {
       return "<div class=\"item\">" + escapeHtml(line) + "</div>";
     }).join("") || "No providers.";
+    var ready = $("studio-test-readiness");
+    if (ready) {
+      var feature = guards.studio_test_feature || {};
+      var checkout = feature.checkout || {};
+      var pricing = feature.pricing || {};
+      ready.innerHTML =
+        "<strong>Walking commercial TEST:</strong> " + (feature.walking_commercial_ready ? "ready" : "not ready") +
+        "<br><strong>Checkout mode:</strong> " + escapeHtml(String(checkout.payment_mode || guards.STUDIO_CHECKOUT_TEST_MODE || "unconfigured")) +
+        " · simulated OK: " + String(!!checkout.local_test_simulation_available) +
+        " · real Stripe TEST: " + String(!!checkout.real_test_checkout_available) +
+        "<br><strong>Customer price:</strong> $" + Number(pricing.customer_price_usd || guards.STUDIO_CUSTOMER_PRICE_USD || 0).toFixed(2) +
+        " · render ceiling $" + Number(pricing.internal_render_cost_ceiling_usd || guards.STUDIO_RENDER_COST_CEILING_USD || 0).toFixed(2) +
+        "<br><strong>Live billing / paid providers / publish:</strong> OFF";
+      if (pricing.customer_price_usd) renderStudioPricing(pricing);
+    }
   }
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");
@@ -1289,6 +1310,224 @@
     });
   }
 
+  var latestStudioOrderId = null;
+
+  async function runWalkingRender(endpoint, button, startMessage, successMessage) {
+    if (!activeProjectId) {
+      showBanner("Select or create a project first.", false);
+      return;
+    }
+    button.disabled = true;
+    showBanner(startMessage, true);
+    try {
+      var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + endpoint, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      var polled = rendered;
+      if (rendered.job && rendered.job.id) {
+        polled = await pollStudioJob(activeProjectId, rendered.job.id);
+      }
+      renderOutput(polled || rendered);
+      await refreshAssets();
+      var status = polled && polled.job && polled.job.status;
+      if (status === "ERROR") {
+        showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
+      } else {
+        showBanner(successMessage, true);
+      }
+    } catch (err) {
+      showBanner(err.message || "Walking render failed.", false);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  var walkingPresenterButton = $("build-walking-presenter");
+  if (walkingPresenterButton) {
+    walkingPresenterButton.addEventListener("click", function () {
+      runWalkingRender(
+        "/assemble/walking-presenter-proof",
+        walkingPresenterButton,
+        "Rendering the 5–6s walking presenter proof. No paid provider is charged.",
+        "Walking presenter proof ready. Download the MP4 from assets."
+      );
+    });
+  }
+
+  var walkingCommercialButton = $("build-walking-commercial-30s");
+  if (walkingCommercialButton) {
+    walkingCommercialButton.addEventListener("click", function () {
+      runWalkingRender(
+        "/assemble/walking-commercial-30s",
+        walkingCommercialButton,
+        "Rendering the 30s walking talking commercial. No paid provider is charged.",
+        "30s walking commercial ready for mobile download. Accept the voice license before public ads."
+      );
+    });
+  }
+
+  var acceptVoiceLicenseBtn = $("accept-voice-license");
+  if (acceptVoiceLicenseBtn) {
+    acceptVoiceLicenseBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      acceptVoiceLicenseBtn.disabled = true;
+      try {
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/voice-license", {
+          method: "POST",
+          body: JSON.stringify({
+            accepted: true,
+            note: "Owner accepts Studio neural voice for this commercial."
+          })
+        });
+        renderOutput(body);
+        showBanner("Voice license accepted. Future walking renders on this project use license_status GREEN.", true);
+      } catch (err) {
+        showBanner(err.message || "Voice license acceptance failed.", false);
+      } finally {
+        acceptVoiceLicenseBtn.disabled = false;
+      }
+    });
+  }
+
+  function renderStudioPricing(pricing) {
+    var el = $("studio-pricing");
+    if (!el || !pricing) return;
+    el.innerHTML =
+      "<strong>$" + Number(pricing.customer_price_usd).toFixed(2) + "</strong> · " +
+      escapeHtml(pricing.scope || "30-second commercial") +
+      "<br>Internal render-cost ceiling: $" + Number(pricing.internal_render_cost_ceiling_usd).toFixed(2) +
+      " · payment mode: " + escapeHtml(String(pricing.payment_mode || "unconfigured")) +
+      "<br>Auto-billing: no · Third-party checkout: no";
+  }
+
+  function renderStudioOrders(payload) {
+    var el = $("studio-orders");
+    if (!el) return;
+    var orders = (payload && payload.orders) || [];
+    if (!orders.length) {
+      el.textContent = "No Studio checkout orders yet for this project.";
+      return;
+    }
+    el.innerHTML = orders.map(function (order) {
+      var receipt = order.receipt ? (" · receipt " + escapeHtml(order.receipt.receipt_id || "ready")) : "";
+      var cost = order.production_cost
+        ? (" · est. render $" + Number(order.production_cost.estimated_render_cost_usd || 0).toFixed(2))
+        : "";
+      return "<div><strong>" + escapeHtml(order.id) + "</strong> · " +
+        escapeHtml(String(order.status || "")) +
+        " · job " + escapeHtml(String(order.job_status || "")) +
+        " · $" + Number(order.customer_price_usd || 0).toFixed(2) +
+        receipt + cost + "</div>";
+    }).join("");
+  }
+
+  var loadPricingBtn = $("load-studio-pricing");
+  if (loadPricingBtn) {
+    loadPricingBtn.addEventListener("click", async function () {
+      try {
+        var pricing = await api("/api/nova/creative/pricing");
+        renderStudioPricing(pricing);
+        showBanner("AMICOR Studio pricing loaded. No charge was created.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not load Studio pricing.", false);
+      }
+    });
+  }
+
+  var startCheckoutBtn = $("start-studio-checkout");
+  if (startCheckoutBtn) {
+    startCheckoutBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project before starting TEST checkout.", false);
+        return;
+      }
+      startCheckoutBtn.disabled = true;
+      try {
+        var started = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/checkout", {
+          method: "POST",
+          body: JSON.stringify({
+            success_url: window.location.origin + "/nova/creative?checkout=success",
+            cancel_url: window.location.origin + "/nova/creative?checkout=cancel"
+          })
+        });
+        renderOutput(started);
+        if (started.order) {
+          latestStudioOrderId = started.order.id;
+          renderStudioOrders({ orders: [started.order] });
+        }
+        var url = started.checkout && started.checkout.url;
+        var mode = started.order && started.order.payment_mode;
+        showBanner(
+          "TEST checkout created for $" + Number((started.order || {}).customer_price_usd || 0).toFixed(2) +
+            " (" + String(mode || "test") + "). " +
+            (mode === "test" && url
+              ? "Open the AMICOR Stripe Checkout link, or refresh orders after paying with a TEST card."
+              : "Use Complete TEST payment to verify receipts without a live card."),
+          true
+        );
+        if (mode === "test" && url && window.confirm("Open AMICOR Stripe TEST Checkout in a new tab?")) {
+          window.open(url, "_blank", "noopener");
+        }
+      } catch (err) {
+        showBanner(err.message || "Studio checkout failed.", false);
+      } finally {
+        startCheckoutBtn.disabled = false;
+      }
+    });
+  }
+
+  var completeTestCheckoutBtn = $("complete-studio-test-checkout");
+  if (completeTestCheckoutBtn) {
+    completeTestCheckoutBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      if (!latestStudioOrderId) {
+        showBanner("Start a TEST checkout first, then complete it.", false);
+        return;
+      }
+      completeTestCheckoutBtn.disabled = true;
+      try {
+        var body = await api(
+          "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) +
+            "/checkout/orders/" + encodeURIComponent(latestStudioOrderId) + "/complete-test",
+          { method: "POST", body: JSON.stringify({}) }
+        );
+        renderOutput(body);
+        renderStudioOrders({ orders: body.order ? [body.order] : [] });
+        showBanner("TEST payment recorded. Receipt and job status are ready.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not complete TEST checkout.", false);
+      } finally {
+        completeTestCheckoutBtn.disabled = false;
+      }
+    });
+  }
+
+  var refreshOrdersBtn = $("refresh-studio-orders");
+  if (refreshOrdersBtn) {
+    refreshOrdersBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      try {
+        var payload = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/checkout/orders");
+        if (payload.pricing) renderStudioPricing(payload.pricing);
+        renderStudioOrders(payload);
+        if (payload.orders && payload.orders[0]) latestStudioOrderId = payload.orders[0].id;
+        showBanner("Studio orders refreshed.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not refresh Studio orders.", false);
+      }
+    });
+  }
+
   var offlineMontageButton = $("build-offline-montage");
   if (offlineMontageButton) {
     offlineMontageButton.addEventListener("click", async function () {
@@ -1490,6 +1729,7 @@
         if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
       }
       setToken(body.access_token || "");
+      setSignedIn(true); // hide Sign in immediately; only Sign out while session is active
       showBanner("Signed in. Creative Studio session is ready.", true);
       boot();
     } catch (err) {
