@@ -12,6 +12,8 @@ from app.core.nova.creative_studio.studio_checkout import (
     CUSTOMER_PRICE_USD,
     FakeStudioStripeClient,
     RENDER_COST_CEILING_USD,
+    checkout_readiness,
+    complete_test_checkout,
     create_studio_checkout_order,
     public_pricing,
     record_production_cost,
@@ -121,11 +123,54 @@ def test_studio_checkout_blocks_over_ceiling():
 
 def test_ui_exposes_walking_presenter_and_checkout_controls():
     assert 'id="build-walking-presenter"' in HTML
+    assert 'id="build-walking-commercial-30s"' in HTML
+    assert 'id="accept-voice-license"' in HTML
+    assert 'id="complete-studio-test-checkout"' in HTML
     assert "AMICOR Studio checkout" in HTML
     assert 'id="start-studio-checkout"' in HTML
     assert "/assemble/walking-presenter-proof" in JS
+    assert "/assemble/walking-commercial-30s" in JS
+    assert "/voice-license" in JS
+    assert "/complete-test" in JS
     assert "/api/nova/creative/pricing" in JS
     assert "/checkout" in JS
+
+
+def test_voice_license_acceptance_turns_green():
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project(
+        "owner-351",
+        {"title": "License", "project_type": "short_video", "platform": "TikTok", "duration_target": 30},
+    )
+    before = svc._project_voice_license("owner-351", project["id"])
+    assert before is None
+    accepted = svc.accept_voice_license("owner-351", project["id"], accepted=True, note="Owner ok")
+    assert accepted["license_status"] == "GREEN"
+    assert svc._project_voice_license("owner-351", project["id"]) == "GREEN"
+
+
+def test_checkout_readiness_and_complete_test_flow():
+    reset_studio_orders_for_tests()
+    fake = FakeStudioStripeClient()
+    set_studio_stripe_override(fake)
+    try:
+        readiness = checkout_readiness()
+        assert readiness["payment_mode"] == "test_fake"
+        assert readiness["local_test_simulation_available"] is True
+        started = create_studio_checkout_order(
+            owner_id="owner-351",
+            project_id="proj-351",
+            success_url="https://example.test/success",
+            cancel_url="https://example.test/cancel",
+            estimated_render_cost_usd=2.0,
+        )
+        paid = complete_test_checkout(started["order"]["id"], owner_id="owner-351")
+        assert paid["status"] == "paid"
+        assert paid["receipt"]["receipt_id"].startswith("rcpt_")
+        assert paid["job_status"] == "queued_for_production"
+    finally:
+        set_studio_stripe_override(None)
+        reset_studio_orders_for_tests()
 
 
 def test_service_checkout_persists_order_asset(monkeypatch):
@@ -195,6 +240,7 @@ def test_walking_presenter_render_and_ffprobe(tmp_path, monkeypatch):
     assert meta["full_body_walking"] is True
     assert meta["word_aligned_captions"] is True
     assert meta["commercial_slideshow"] is False
+    assert meta["lip_sync_method"] == "phoneme_viseme_plus_waveform"
     assert "AMICOR" in (rendered["asset"]["content"] or "")
 
     video = tmp_path / rendered["url"].rsplit("/", 1)[-1]
@@ -207,3 +253,46 @@ def test_walking_presenter_render_and_ffprobe(tmp_path, monkeypatch):
     srt = video.with_suffix(".srt")
     assert srt.is_file()
     assert "AMICOR" in srt.read_text(encoding="utf-8")
+
+
+def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatch):
+    pytest.importorskip("edge_tts")
+    pytest.importorskip("PIL")
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+
+    def forbid_paid(*_args, **_kwargs):
+        raise AssertionError("paid provider was called")
+
+    monkeypatch.setattr(
+        "app.core.nova.creative_studio.providers.OpenAIVoiceProvider.generate",
+        forbid_paid,
+    )
+
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project(
+        "owner-351",
+        {
+            "title": "30s walking commercial",
+            "project_type": "short_video",
+            "platform": "TikTok",
+            "duration_target": 30,
+        },
+    )
+    svc.generate_storyboard("owner-351", project["id"])
+    svc.accept_voice_license("owner-351", project["id"], accepted=True, note="Owner accepted for #351")
+    rendered = svc.render_walking_commercial_30s("owner-351", project["id"])
+    assert rendered["milestone"] == "30s_walking_commercial"
+    assert rendered["lip_sync"] is True
+    assert rendered["mobile_download_ready"] is True
+    assert rendered["paid_provider_charges"] is False
+    assert rendered["license_status"] == "GREEN"
+    assert rendered["validation"]["ok"] is True
+    video = tmp_path / rendered["url"].rsplit("/", 1)[-1]
+    probe = validate_presenter_mp4(video, min_seconds=28.0, max_seconds=34.0)
+    assert probe["ok"] is True
+    assert 28.0 <= probe["duration_seconds"] <= 34.0
+    assert probe["video_codec"] in {"h264", "avc1"}
+    assert probe["audio_codec"] in {"aac", "mp4a"}
+    assert video.with_suffix(".srt").is_file()

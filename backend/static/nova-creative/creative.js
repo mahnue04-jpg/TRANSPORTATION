@@ -1289,36 +1289,85 @@
     });
   }
 
+  var latestStudioOrderId = null;
+
+  async function runWalkingRender(endpoint, button, startMessage, successMessage) {
+    if (!activeProjectId) {
+      showBanner("Select or create a project first.", false);
+      return;
+    }
+    button.disabled = true;
+    showBanner(startMessage, true);
+    try {
+      var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + endpoint, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      var polled = rendered;
+      if (rendered.job && rendered.job.id) {
+        polled = await pollStudioJob(activeProjectId, rendered.job.id);
+      }
+      renderOutput(polled || rendered);
+      await refreshAssets();
+      var status = polled && polled.job && polled.job.status;
+      if (status === "ERROR") {
+        showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
+      } else {
+        showBanner(successMessage, true);
+      }
+    } catch (err) {
+      showBanner(err.message || "Walking render failed.", false);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   var walkingPresenterButton = $("build-walking-presenter");
   if (walkingPresenterButton) {
-    walkingPresenterButton.addEventListener("click", async function () {
+    walkingPresenterButton.addEventListener("click", function () {
+      runWalkingRender(
+        "/assemble/walking-presenter-proof",
+        walkingPresenterButton,
+        "Rendering the 5–6s walking presenter proof. No paid provider is charged.",
+        "Walking presenter proof ready. Download the MP4 from assets."
+      );
+    });
+  }
+
+  var walkingCommercialButton = $("build-walking-commercial-30s");
+  if (walkingCommercialButton) {
+    walkingCommercialButton.addEventListener("click", function () {
+      runWalkingRender(
+        "/assemble/walking-commercial-30s",
+        walkingCommercialButton,
+        "Rendering the 30s walking talking commercial. No paid provider is charged.",
+        "30s walking commercial ready for mobile download. Accept the voice license before public ads."
+      );
+    });
+  }
+
+  var acceptVoiceLicenseBtn = $("accept-voice-license");
+  if (acceptVoiceLicenseBtn) {
+    acceptVoiceLicenseBtn.addEventListener("click", async function () {
       if (!activeProjectId) {
-        showBanner("Select or create a project first.", false);
+        showBanner("Select a project first.", false);
         return;
       }
-      walkingPresenterButton.disabled = true;
-      showBanner("Rendering the 5–6s walking presenter proof. No paid provider is charged.", true);
+      acceptVoiceLicenseBtn.disabled = true;
       try {
-        var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/walking-presenter-proof", {
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/voice-license", {
           method: "POST",
-          body: JSON.stringify({})
+          body: JSON.stringify({
+            accepted: true,
+            note: "Owner accepts Studio neural voice for this commercial."
+          })
         });
-        var polled = rendered;
-        if (rendered.job && rendered.job.id) {
-          polled = await pollStudioJob(activeProjectId, rendered.job.id);
-        }
-        renderOutput(polled || rendered);
-        await refreshAssets();
-        var status = polled && polled.job && polled.job.status;
-        if (status === "ERROR") {
-          showBanner("Walking presenter failed: " + (polled.job.message || "Unknown error."), false);
-        } else {
-          showBanner("Walking presenter proof ready. Download the MP4 from assets. Owner review still required before any publish.", true);
-        }
+        renderOutput(body);
+        showBanner("Voice license accepted. Future walking renders on this project use license_status GREEN.", true);
       } catch (err) {
-        showBanner(err.message || "Walking presenter proof failed.", false);
+        showBanner(err.message || "Voice license acceptance failed.", false);
       } finally {
-        walkingPresenterButton.disabled = false;
+        acceptVoiceLicenseBtn.disabled = false;
       }
     });
   }
@@ -1386,21 +1435,55 @@
         });
         renderOutput(started);
         if (started.order) {
-          renderStudioOrders({ orders: [started.order].concat((($("studio-orders").dataset || {}).orders ? [] : [])) });
+          latestStudioOrderId = started.order.id;
+          renderStudioOrders({ orders: [started.order] });
         }
         var url = started.checkout && started.checkout.url;
+        var mode = started.order && started.order.payment_mode;
         showBanner(
           "TEST checkout created for $" + Number((started.order || {}).customer_price_usd || 0).toFixed(2) +
-            ". " + (url ? "Open the AMICOR Stripe Checkout link from the JSON output." : "No checkout URL returned."),
+            " (" + String(mode || "test") + "). " +
+            (mode === "test" && url
+              ? "Open the AMICOR Stripe Checkout link, or refresh orders after paying with a TEST card."
+              : "Use Complete TEST payment to verify receipts without a live card."),
           true
         );
-        if (url && window.confirm("Open AMICOR Stripe TEST Checkout in a new tab?")) {
+        if (mode === "test" && url && window.confirm("Open AMICOR Stripe TEST Checkout in a new tab?")) {
           window.open(url, "_blank", "noopener");
         }
       } catch (err) {
         showBanner(err.message || "Studio checkout failed.", false);
       } finally {
         startCheckoutBtn.disabled = false;
+      }
+    });
+  }
+
+  var completeTestCheckoutBtn = $("complete-studio-test-checkout");
+  if (completeTestCheckoutBtn) {
+    completeTestCheckoutBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      if (!latestStudioOrderId) {
+        showBanner("Start a TEST checkout first, then complete it.", false);
+        return;
+      }
+      completeTestCheckoutBtn.disabled = true;
+      try {
+        var body = await api(
+          "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) +
+            "/checkout/orders/" + encodeURIComponent(latestStudioOrderId) + "/complete-test",
+          { method: "POST", body: JSON.stringify({}) }
+        );
+        renderOutput(body);
+        renderStudioOrders({ orders: body.order ? [body.order] : [] });
+        showBanner("TEST payment recorded. Receipt and job status are ready.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not complete TEST checkout.", false);
+      } finally {
+        completeTestCheckoutBtn.disabled = false;
       }
     });
   }
@@ -1416,6 +1499,7 @@
         var payload = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/checkout/orders");
         if (payload.pricing) renderStudioPricing(payload.pricing);
         renderStudioOrders(payload);
+        if (payload.orders && payload.orders[0]) latestStudioOrderId = payload.orders[0].id;
         showBanner("Studio orders refreshed.", true);
       } catch (err) {
         showBanner(err.message || "Could not refresh Studio orders.", false);

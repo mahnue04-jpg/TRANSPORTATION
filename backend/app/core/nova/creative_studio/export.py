@@ -48,6 +48,10 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
         and str(final_video.get("url") or "").lower().endswith(".mp4")
     )
     offline_montage = str(final_meta.get("render_mode") or "") == "offline_montage_not_lipsync"
+    walking_commercial = str(final_meta.get("render_mode") or "") in {
+        "local_walking_commercial_30s",
+        "local_walking_presenter_lipsync",
+    }
     click, click_verified = _click_destination(project, final_meta)
     license_status = str(final_meta.get("license_status") or "").upper()
     if license_status not in {"GREEN", "AMBER", "RED"}:
@@ -55,6 +59,7 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
     audio_ok = bool((audio_asset and audio_asset.get("url")) or final_meta.get("audio_present") is True)
     duration = final_meta.get("duration_seconds")
     duration_ok = isinstance(duration, (int, float)) and 28.0 <= float(duration) <= 32.0
+    lip_sync_ok = bool(final_meta.get("lip_sync") is True or final_meta.get("body_lipsync") is True)
     # Publishing stays closed unless media, a verified Nova click-through, and a GREEN license all exist.
     # An offline montage is a review file, not that approval.
     production_ready = bool(
@@ -74,6 +79,8 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
         click_verified=click_verified,
         duration_ok=duration_ok,
         offline_montage=offline_montage,
+        lip_sync_ok=lip_sync_ok,
+        walking_commercial=walking_commercial,
     )
 
     package = {
@@ -182,15 +189,23 @@ def _montage_readiness(
     click_verified: bool,
     duration_ok: bool,
     offline_montage: bool,
+    lip_sync_ok: bool = False,
+    walking_commercial: bool = False,
 ) -> dict[str, str]:
     captions = "GREEN" if captions_burned else ("AMBER" if captions_ok else "RED")
+    if offline_montage or not artifact_ok:
+        lip = "RED"
+    elif lip_sync_ok or walking_commercial:
+        lip = "GREEN" if license_status == "GREEN" else "AMBER"
+    else:
+        lip = "AMBER"
     checks = {
         "artifact": "GREEN" if artifact_ok and duration_ok else ("AMBER" if artifact_ok else "RED"),
         "audio": "GREEN" if audio_ok else "RED",
         "captions": captions,
         "license": license_status,
         "click_through": "GREEN" if click_verified else "AMBER",
-        "lip_sync_presenter": "RED" if offline_montage or not artifact_ok else "AMBER",
+        "lip_sync_presenter": lip,
         "public_publish": "HOLD",
     }
     scored = [checks[name] for name in ("artifact", "audio", "captions", "license", "click_through")]

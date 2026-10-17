@@ -33,6 +33,7 @@ _SECRET_PATTERN = re.compile(
 )
 
 _CLIENT_OVERRIDE: "StudioStripeClient | None" = None
+_DEFAULT_FAKE_CLIENT: "FakeStudioStripeClient | None" = None
 _ORDERS: dict[str, dict[str, Any]] = {}
 
 
@@ -94,7 +95,9 @@ def get_studio_stripe_override() -> StudioStripeClient | None:
 
 
 def reset_studio_orders_for_tests() -> None:
+    global _DEFAULT_FAKE_CLIENT
     _ORDERS.clear()
+    _DEFAULT_FAKE_CLIENT = None
 
 
 def stripe_runtime_mode() -> str:
@@ -110,7 +113,32 @@ def stripe_runtime_mode() -> str:
     return "unconfigured"
 
 
+def checkout_readiness() -> dict[str, Any]:
+    mode = stripe_runtime_mode()
+    secret_present = bool(stripe_secret_key())
+    publishable_present = bool(stripe_publishable_key())
+    return {
+        "payment_mode": mode,
+        "stripe_secret_configured": secret_present,
+        "stripe_publishable_configured": publishable_present,
+        "real_test_checkout_available": mode == "test",
+        "local_test_simulation_available": mode in {"test_fake", "unconfigured"} or not secret_present,
+        "live_blocked": mode == "live_blocked",
+        "message": (
+            "Stripe TEST keys are configured. Customer Checkout uses AMICOR branding."
+            if mode == "test"
+            else (
+                "Stripe TEST keys are not in this environment yet. Studio still creates "
+                "AMICOR TEST-simulated checkout orders with receipts and job status for verification."
+                if mode in {"test_fake", "unconfigured"}
+                else f"Stripe mode is {mode}."
+            )
+        ),
+    }
+
+
 def public_pricing() -> dict[str, Any]:
+    readiness = checkout_readiness()
     return {
         "product": "AMICOR Creative Studio commercial",
         "scope": SCOPE_LABEL,
@@ -129,7 +157,8 @@ def public_pricing() -> dict[str, Any]:
             "Changes to the approved 60-second commercial",
         ],
         "internal_render_cost_ceiling_usd": RENDER_COST_CEILING_USD,
-        "payment_mode": stripe_runtime_mode(),
+        "payment_mode": readiness["payment_mode"],
+        "checkout_readiness": readiness,
         "auto_billing": False,
         "requires_explicit_checkout": True,
     }
@@ -221,13 +250,16 @@ class LiveStudioStripeClient:
 
 
 def get_studio_stripe_client() -> StudioStripeClient:
+    global _DEFAULT_FAKE_CLIENT
     if _CLIENT_OVERRIDE is not None:
         return _CLIENT_OVERRIDE
     secret = stripe_secret_key()
     if not secret:
-        # Deterministic local/test client so Studio can show pricing + fake checkout
-        # without requiring secrets in agent environments.
-        return FakeStudioStripeClient()
+        # Singleton local/test client so create + complete-test share session state
+        # when Stripe TEST secrets are not yet configured in the environment.
+        if _DEFAULT_FAKE_CLIENT is None:
+            _DEFAULT_FAKE_CLIENT = FakeStudioStripeClient()
+        return _DEFAULT_FAKE_CLIENT
     if is_live_stripe_key(secret) and not studio_live_stripe_enabled():
         raise ValueError("Live Stripe keys are not allowed for Creative Studio. Use a TEST key.")
     return LiveStudioStripeClient(api_key=secret)
@@ -442,3 +474,25 @@ def mark_order_job_status(order_id: str, *, owner_id: str, job_status: str) -> d
     order["updated_at"] = _now()
     _ORDERS[order_id] = order
     return dict(order)
+
+
+def complete_test_checkout(order_id: str, *, owner_id: str) -> dict[str, Any]:
+    """Mark a TEST/fake checkout paid so receipts and job status can be verified without a card.
+
+    Only allowed when payment_mode is test_fake or test. Never creates a live charge.
+    """
+    order = get_studio_order(order_id, owner_id=owner_id)
+    if order is None:
+        raise KeyError("order_not_found")
+    mode = str(order.get("payment_mode") or stripe_runtime_mode())
+    if mode not in {"test", "test_fake"}:
+        raise ValueError("TEST checkout completion is only available in Stripe TEST mode.")
+    client = get_studio_stripe_client()
+    session_id = str(order.get("stripe_checkout_session_id") or "")
+    if isinstance(client, FakeStudioStripeClient) and session_id:
+        client.mark_paid(session_id)
+    elif mode == "test" and session_id:
+        # Real Stripe TEST sessions must be paid with a test card in Checkout UI.
+        # Sync whatever Stripe currently reports instead of forging payment.
+        return sync_studio_order_from_stripe(order_id, owner_id=owner_id)
+    return sync_studio_order_from_stripe(order_id, owner_id=owner_id)

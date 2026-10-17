@@ -1388,6 +1388,11 @@ class StudioCheckoutIn(BaseModel):
     cancel_url: str = Field(default="/nova/creative?checkout=cancel", max_length=500)
 
 
+class VoiceLicenseIn(BaseModel):
+    accepted: bool = True
+    note: str = Field(default="", max_length=500)
+
+
 @router.get("/pricing")
 def studio_commercial_pricing(
     user: UserContext = Depends(get_current_user_context),
@@ -1450,6 +1455,43 @@ def get_studio_checkout_order(
         raise
 
 
+@router.post("/projects/{project_id}/checkout/orders/{order_id}/complete-test")
+def complete_studio_test_checkout(
+    project_id: str,
+    order_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Complete a TEST/fake checkout so receipts and job status can be verified without a live card."""
+    _require_owner(user)
+    try:
+        return get_service(db).complete_studio_test_checkout(user.user_id, project_id, order_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/voice-license")
+def accept_project_voice_license(
+    project_id: str,
+    payload: VoiceLicenseIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner accepts Studio neural voice for this commercial (license AMBER → GREEN)."""
+    _require_owner(user)
+    try:
+        return get_service(db).accept_voice_license(
+            user.user_id,
+            project_id,
+            accepted=payload.accepted,
+            note=payload.note,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assemble/walking-presenter-proof")
 def assemble_walking_presenter_proof(
     project_id: str,
@@ -1467,6 +1509,21 @@ def assemble_walking_presenter_proof(
             script=body.script,
             voice=body.voice,
         )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/walking-commercial-30s")
+def assemble_walking_commercial_30s(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise

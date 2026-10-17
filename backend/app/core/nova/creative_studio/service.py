@@ -1881,6 +1881,43 @@ class CreativeStudioService(ShortDramaMixin):
         pack["publish"] = False
         return pack
 
+    def _project_voice_license(self, owner_id: str, project_id: str) -> str | None:
+        project = self._project_or_404(owner_id, project_id)
+        acceptance = (project.metadata or {}).get("voice_license_acceptance") or {}
+        if acceptance.get("accepted") is True:
+            return "GREEN"
+        return None
+
+    def accept_voice_license(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        accepted: bool = True,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Owner accepts the Studio neural voice source for this commercial (AMBER → GREEN)."""
+        project = self._project_or_404(owner_id, project_id)
+        meta = dict(project.metadata or {})
+        meta["voice_license_acceptance"] = {
+            "accepted": bool(accepted),
+            "note": str(note or "")[:500],
+            "accepted_at": _now() if accepted else None,
+            "engine": "edge-tts",
+            "statement": (
+                "Owner accepts the free Microsoft Edge neural TTS voice used by AMICOR Studio "
+                "for this project's commercial narration. No paid provider credits were purchased."
+            ),
+        }
+        project.metadata = meta
+        project.updated_at = _now()
+        self.store.save_project(project)
+        return {
+            "project_id": project_id,
+            "license_status": "GREEN" if accepted else "AMBER",
+            "voice_license_acceptance": meta["voice_license_acceptance"],
+        }
+
     def render_walking_presenter_proof(
         self,
         owner_id: str,
@@ -1911,6 +1948,7 @@ class CreativeStudioService(ShortDramaMixin):
                 output_mp4=output_path,
                 script=script or DEFAULT_SCRIPT,
                 voice=voice or DEFAULT_VOICE,
+                license_status=self._project_voice_license(owner_id, project_id),
             )
         except WalkingPresenterError as exc:
             self._finish_job(
@@ -2009,6 +2047,131 @@ class CreativeStudioService(ShortDramaMixin):
             "publish_ready": False,
             "owner_review_required": True,
         }
+
+    def render_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """30s H.264/AAC walking talking commercial for mobile download. No paid provider spend."""
+        from app.core.nova.creative_studio.click_destinations import replacement_pack
+        from app.core.nova.creative_studio.walking_presenter import (
+            WalkingPresenterError,
+            render_walking_commercial_30s,
+        )
+
+        project = self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        if not scenes:
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        output_dir, public_prefix = _creative_media_root_and_prefix()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        token = new_id("promo30").split("_", 1)[-1]
+        output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
+        job = self._start_job(owner_id, project_id, "walking_commercial_30s")
+        try:
+            rendered = render_walking_commercial_30s(
+                output_mp4=output_path,
+                scenes=[scene.as_dict() for scene in scenes],
+                license_status=self._project_voice_license(owner_id, project_id),
+            )
+        except WalkingPresenterError as exc:
+            self._finish_job(job, status="ERROR", message=exc.message, asset_ids=[], provider="nova_walking_commercial")
+            raise CreativeStudioError(exc.code, exc.message, http_status=422) from exc
+        except Exception as exc:
+            self._finish_job(job, status="ERROR", message=str(exc)[:500], asset_ids=[], provider="nova_walking_commercial")
+            raise CreativeStudioError("WALKING_COMMERCIAL_FAILED", str(exc)[:500], http_status=422) from exc
+
+        if not (rendered.get("validation") or {}).get("ok"):
+            self._finish_job(
+                job,
+                status="ERROR",
+                message="30s walking commercial failed H.264/AAC duration validation.",
+                asset_ids=[],
+                provider="nova_walking_commercial",
+            )
+            raise CreativeStudioError(
+                "WALKING_COMMERCIAL_VALIDATION_FAILED",
+                "Rendered file did not pass 30s H.264/AAC validation.",
+                http_status=422,
+            )
+
+        click = replacement_pack(project.platform)
+        public_url = public_prefix + "/" + output_path.name
+        audio_url = public_prefix + "/" + output_path.with_suffix(".wav").name
+        subtitle_url = public_prefix + "/" + output_path.with_suffix(".srt").name
+        audio_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="audio",
+            title="30s walking commercial narration",
+            content=rendered.get("script") or "",
+            status="GENERATED",
+            metadata={
+                "provider_result": rendered.get("narration") or {},
+                "paid_provider_charges": False,
+                "lip_sync": True,
+                "natural_female_voice": True,
+            },
+            url=audio_url,
+        )
+        video_asset = self._save_text_asset(
+            owner_id=owner_id,
+            project_id=project_id,
+            kind="video",
+            title="30s AMICOR walking talking commercial",
+            content=rendered.get("script") or "",
+            status="GENERATED",
+            metadata={
+                "final_promo": True,
+                **{key: value for key, value in rendered.items() if key not in {"subtitle_path", "audio_path"}},
+                "subtitle_url": subtitle_url,
+                "click_destination": click,
+                "body_lipsync": True,
+                "external_publishing": False,
+                "quality_state": "OWNER_REVIEW_READY",
+            },
+            url=public_url,
+        )
+        self._finish_job(
+            job,
+            status="GENERATED",
+            message=(
+                f"30s walking talking commercial ready at {rendered['duration_seconds']}s. "
+                "Downloadable H.264/AAC with speech, phoneme lip motion, and captions. "
+                "No paid provider was charged. Owner review still required before public ads."
+            ),
+            asset_ids=[video_asset.id, audio_asset.id],
+            provider="nova_walking_commercial",
+        )
+        return {
+            "job": job.as_dict(),
+            "asset": video_asset.as_dict(),
+            "audio": audio_asset.as_dict(),
+            "url": public_url,
+            "download_url": f"/api/nova/creative/projects/{project_id}/assets/{video_asset.id}/file",
+            "audio_download_url": f"/api/nova/creative/projects/{project_id}/assets/{audio_asset.id}/file",
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
+            "lip_sync": True,
+            "render_mode": "local_walking_commercial_30s",
+            "milestone": "30s_walking_commercial",
+            "validation": rendered.get("validation"),
+            "license_status": rendered.get("license_status") or "AMBER",
+            "paid_provider_charges": False,
+            "mobile_download_ready": True,
+            "publish_ready": False,
+            "owner_review_required": True,
+        }
+
+    def complete_studio_test_checkout(self, owner_id: str, project_id: str, order_id: str) -> dict[str, Any]:
+        from app.core.nova.creative_studio.studio_checkout import complete_test_checkout
+
+        self._project_or_404(owner_id, project_id)
+        try:
+            order = complete_test_checkout(order_id, owner_id=owner_id)
+        except KeyError as exc:
+            raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404) from exc
+        except ValueError as exc:
+            raise CreativeStudioError("CHECKOUT_BLOCKED", str(exc), http_status=422) from exc
+        if order.get("project_id") != project_id:
+            raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404)
+        return {"order": order, "receipt": order.get("receipt"), "job_status": order.get("job_status")}
 
     def studio_pricing(self) -> dict[str, Any]:
         from app.core.nova.creative_studio.studio_checkout import public_pricing
@@ -2198,7 +2361,7 @@ class CreativeStudioService(ShortDramaMixin):
         if job.provider == "nova_offline_montage":
             lip_sync = False
             paid = False
-        elif job.provider == "nova_walking_presenter":
+        elif job.provider in {"nova_walking_presenter", "nova_walking_commercial"}:
             lip_sync = True
             paid = False
         return {

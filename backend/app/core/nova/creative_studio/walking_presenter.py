@@ -148,7 +148,7 @@ def validate_presenter_mp4(
     min_seconds: float = 4.5,
     max_seconds: float = 6.5,
 ) -> dict[str, Any]:
-    """Automated acceptance probe for the 5–6s walking presenter milestone."""
+    """Automated acceptance probe for walking presenter / commercial MP4s."""
     info = _ffprobe_json(path)
     streams = list(info.get("streams") or [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -172,6 +172,59 @@ def validate_presenter_mp4(
         "audio_codec": (audio or {}).get("codec_name"),
         "size_bytes": path.stat().st_size if path.is_file() else 0,
     }
+
+
+def script_from_scenes(scenes: list[dict[str, Any]]) -> str:
+    parts = [
+        str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
+        for scene in scenes
+        if str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
+    ]
+    text = " ".join(parts)
+    if not text:
+        raise WalkingPresenterError("STORYBOARD_REQUIRED", "Generate the storyboard before the 30s walking commercial.")
+    return " ".join(text.split())
+
+
+def _viseme_openness(token: str) -> float:
+    """Map a spoken token to a rough mouth openness (0 closed → 1 open)."""
+    raw = re_sub_punct(token).casefold()
+    if not raw:
+        return 0.05
+    if raw[0] in {"p", "b", "m"}:
+        return 0.08
+    if raw[0] in {"f", "v"}:
+        return 0.22
+    if any(ch in raw for ch in "aeiou"):
+        if any(ch in raw for ch in "oâu"):
+            return 0.78
+        return 0.92
+    if raw[0] in {"w", "q"}:
+        return 0.45
+    return 0.35
+
+
+def phoneme_mouth_envelope(cues: list[dict[str, Any]], *, fps: int, frame_count: int, rms: list[float]) -> list[float]:
+    """Blend word/viseme targets with RMS energy so lips track speech, not a slideshow."""
+    out: list[float] = []
+    for index in range(frame_count):
+        t = index / max(1, fps)
+        active = next((c for c in cues if c["start"] <= t <= c["end"]), None)
+        viseme = 0.05
+        if active:
+            words = list(active.get("words") or active.get("text", "").split())
+            if words:
+                span = max(0.05, float(active["end"]) - float(active["start"]))
+                local = (t - float(active["start"])) / span
+                word_index = min(len(words) - 1, int(local * len(words)))
+                viseme = _viseme_openness(words[word_index])
+        energy = rms[index] if index < len(rms) else 0.0
+        # Keep lips mostly closed when audio is quiet; open with speech.
+        blended = max(0.04, min(1.0, 0.35 * viseme + 0.75 * energy * max(viseme, 0.25)))
+        if energy < 0.08:
+            blended = min(blended, 0.12)
+        out.append(blended)
+    return out
 
 
 def word_aligned_cues(script: str, duration: float) -> list[dict[str, Any]]:
@@ -217,7 +270,13 @@ def re_sub_punct(token: str) -> str:
     return re.sub(r"[^\w]", "", token)
 
 
-def synthesize_female_narration(script: str, dest: Path, *, voice: str = _DEFAULT_VOICE) -> dict[str, Any]:
+def synthesize_female_narration(
+    script: str,
+    dest: Path,
+    *,
+    voice: str = DEFAULT_VOICE,
+    rate: str = "+0%",
+) -> dict[str, Any]:
     """Natural female neural TTS via free edge-tts (no API key, no credit purchase).
 
     Network required. Failure is explicit — silence is never labeled as narration.
@@ -233,7 +292,7 @@ def synthesize_female_narration(script: str, dest: Path, *, voice: str = _DEFAUL
                 "NEURAL_VOICE_UNAVAILABLE",
                 "edge-tts is not installed. Natural female narration cannot run in this environment.",
             ) from exc
-        communicate = edge_tts.Communicate(spoken, voice)
+        communicate = edge_tts.Communicate(spoken, voice, rate=rate)
         await communicate.save(str(dest))
 
     try:
@@ -283,6 +342,7 @@ def synthesize_female_narration(script: str, dest: Path, *, voice: str = _DEFAUL
         ),
         "natural_female_voice": True,
         "lip_sync": True,
+        "rate": rate,
     }
 
 
@@ -391,16 +451,17 @@ def _draw_walking_frame(
     draw.ellipse((head_c[0] - 16, head_c[1] - 8, head_c[0] - 6, head_c[1] + 2), fill=(30, 24, 20))
     draw.ellipse((head_c[0] + 6, head_c[1] - 8, head_c[0] + 16, head_c[1] + 2), fill=(30, 24, 20))
 
-    # Mouth aperture synced to narration energy (lip motion)
-    open_px = 2 + int(16 * max(0.0, min(1.0, mouth)))
+    # Mouth aperture synced to phoneme + narration energy (lip motion)
+    open_px = 2 + int(18 * max(0.0, min(1.0, mouth)))
+    width_px = 10 + int(8 * max(0.0, min(1.0, mouth)))
     mouth_y = head_c[1] + 16
     draw.ellipse(
-        (head_c[0] - 12, mouth_y - open_px // 2, head_c[0] + 12, mouth_y + open_px // 2 + 2),
+        (head_c[0] - width_px, mouth_y - open_px // 2, head_c[0] + width_px, mouth_y + open_px // 2 + 2),
         fill=(120, 48, 58),
     )
-    if mouth > 0.35:
+    if mouth > 0.28:
         draw.ellipse(
-            (head_c[0] - 7, mouth_y - max(1, open_px // 3), head_c[0] + 7, mouth_y + max(1, open_px // 3)),
+            (head_c[0] - max(3, width_px - 4), mouth_y - max(1, open_px // 3), head_c[0] + max(3, width_px - 4), mouth_y + max(1, open_px // 3)),
             fill=(60, 20, 28),
         )
 
@@ -413,7 +474,7 @@ def _draw_walking_frame(
         title_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
     draw.text((36, 42), "AMICOR Nova", font=title_font, fill=(255, 255, 255))
-    draw.text((36, 88), "Full-body walking presenter proof", font=small_font, fill=(255, 210, 128))
+    draw.text((36, 88), "Full-body walking presenter", font=small_font, fill=(255, 210, 128))
     # Captions are burned in via ASS after mux — do not paint a second caption layer here.
     _ = caption_line
 
@@ -423,17 +484,23 @@ def _draw_walking_frame(
     return image
 
 
-def render_walking_presenter(
+def _render_walking_core(
     *,
     output_mp4: Path,
-    script: str = _DEFAULT_SCRIPT,
-    voice: str = _DEFAULT_VOICE,
-    target_seconds: float = _TARGET_SECONDS,
-    width: int = _WIDTH,
-    height: int = _HEIGHT,
+    script: str,
+    voice: str,
+    min_seconds: float,
+    max_seconds: float,
+    target_seconds: float,
+    fps: int,
+    width: int,
+    height: int,
+    milestone: str,
+    render_mode: str,
+    license_status: str | None = None,
+    speech_rate: str = "+0%",
 ) -> dict[str, Any]:
-    """Render the Issue #351 five-second walking presenter milestone."""
-    script = " ".join(str(script or _DEFAULT_SCRIPT).split())
+    script = " ".join(str(script or DEFAULT_SCRIPT).split())
     if not script:
         raise WalkingPresenterError("SCRIPT_REQUIRED", "Walking presenter needs a short script.")
 
@@ -441,19 +508,26 @@ def render_walking_presenter(
     with tempfile.TemporaryDirectory(prefix="nova-walk-") as temp_name:
         temp = Path(temp_name)
         audio_mp3 = temp / "narration.mp3"
-        narration = synthesize_female_narration(script, audio_mp3, voice=voice)
+        narration = synthesize_female_narration(script, audio_mp3, voice=voice, rate=speech_rate)
+        if license_status in {"GREEN", "AMBER", "RED"}:
+            narration = {**narration, "license_status": license_status}
+            if license_status == "GREEN":
+                narration["commercial_use"] = (
+                    "Owner accepted the Studio neural voice source for this AMICOR commercial. "
+                    "No paid provider credits were purchased for narration."
+                )
         wav_path = Path(narration["wav_path"])
         audio_duration = float(narration["duration_seconds"] or 0.0)
-        # Hold the picture briefly if TTS is slightly short/long; clamp to 5–6s band.
-        duration = max(4.8, min(6.2, max(audio_duration, float(target_seconds))))
-        frame_count = max(int(duration * _FPS), 24)
-        envelope = _rms_envelope(wav_path, fps=_FPS, frame_count=frame_count)
+        duration = max(min_seconds, min(max_seconds, max(audio_duration, float(target_seconds))))
+        frame_count = max(int(duration * fps), 24)
+        rms = _rms_envelope(wav_path, fps=fps, frame_count=frame_count)
         cues = word_aligned_cues(script, min(duration, max(audio_duration, 0.8)))
+        envelope = phoneme_mouth_envelope(cues, fps=fps, frame_count=frame_count, rms=rms)
 
         frames_dir = temp / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
         for index in range(frame_count):
-            t = index / _FPS
+            t = index / fps
             mouth = envelope[index] if index < len(envelope) else 0.0
             active = next((c["text"] for c in cues if c["start"] <= t <= c["end"]), cues[0]["text"] if cues else "")
             frame = _draw_walking_frame(
@@ -469,50 +543,20 @@ def render_walking_presenter(
         silent = temp / "silent.mp4"
         _run(
             [
-                ffmpeg,
-                "-y",
-                "-framerate",
-                str(_FPS),
-                "-i",
-                str(frames_dir / "frame-%05d.png"),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-pix_fmt",
-                "yuv420p",
-                "-t",
-                f"{duration:.3f}",
-                "-an",
-                str(silent),
+                ffmpeg, "-y", "-framerate", str(fps),
+                "-i", str(frames_dir / "frame-%05d.png"),
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-t", f"{duration:.3f}", "-an", str(silent),
             ]
         )
         muxed = temp / "muxed.mp4"
         _run(
             [
-                ffmpeg,
-                "-y",
-                "-i",
-                str(silent),
-                "-i",
-                str(wav_path),
-                "-filter_complex",
-                f"[1:a]apad,atrim=0:{duration:.3f}[a]",
-                "-map",
-                "0:v:0",
-                "-map",
-                "[a]",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-t",
-                f"{duration:.3f}",
-                "-movflags",
-                "+faststart",
-                str(muxed),
+                ffmpeg, "-y", "-i", str(silent), "-i", str(wav_path),
+                "-filter_complex", f"[1:a]apad,atrim=0:{duration:.3f}[a]",
+                "-map", "0:v:0", "-map", "[a]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+                "-t", f"{duration:.3f}", "-movflags", "+faststart", str(muxed),
             ]
         )
         polished, srt = burn_captions_and_cta_fade(
@@ -521,32 +565,29 @@ def render_walking_presenter(
             width=width,
             height=height,
             cta_text="getamicor.com/nova-today",
-            fade_seconds=1.2,
+            fade_seconds=min(2.5, max(1.0, duration / 10)),
         )
         output_mp4.parent.mkdir(parents=True, exist_ok=True)
         output_mp4.write_bytes(polished.read_bytes())
-        srt_dest = output_mp4.with_suffix(".srt")
-        srt_dest.write_text(srt.read_text(encoding="utf-8"), encoding="utf-8")
-        # Keep narration WAV beside the MP4 for download / receipts.
-        audio_out = output_mp4.with_suffix(".wav")
-        audio_out.write_bytes(wav_path.read_bytes())
+        output_mp4.with_suffix(".srt").write_text(srt.read_text(encoding="utf-8"), encoding="utf-8")
+        output_mp4.with_suffix(".wav").write_bytes(wav_path.read_bytes())
 
-    validation = validate_presenter_mp4(output_mp4)
+    validation = validate_presenter_mp4(output_mp4, min_seconds=min_seconds, max_seconds=max_seconds)
     return {
-        "render_mode": "local_walking_presenter_lipsync",
-        "milestone": "5s_walking_presenter",
+        "render_mode": render_mode,
+        "milestone": milestone,
         "duration_seconds": validation["duration_seconds"],
         "planned_seconds": round(duration, 3),
         "width": width,
         "height": height,
-        "fps": _FPS,
+        "fps": fps,
         "captions_burned_in": True,
         "word_aligned_captions": True,
         "subtitle_path": str(output_mp4.with_suffix(".srt")),
         "audio_path": str(output_mp4.with_suffix(".wav")),
         "audio_present": _has_audio_stream(output_mp4),
         "lip_sync": True,
-        "lip_sync_method": "waveform_mouth_aperture",
+        "lip_sync_method": "phoneme_viseme_plus_waveform",
         "presenter": True,
         "presenter_mode": "full_body",
         "motion_style": "walking_gesture",
@@ -561,4 +602,75 @@ def render_walking_presenter(
         "validation": validation,
         "visible_end_card": "getamicor.com/nova-today",
         "script": caption_script(script),
+        "mobile_download_ready": bool(validation.get("ok")),
     }
+
+
+def render_walking_presenter(
+    *,
+    output_mp4: Path,
+    script: str = DEFAULT_SCRIPT,
+    voice: str = DEFAULT_VOICE,
+    target_seconds: float = TARGET_SECONDS,
+    width: int = WIDTH,
+    height: int = HEIGHT,
+    license_status: str | None = None,
+) -> dict[str, Any]:
+    """Render the Issue #351 five-second walking presenter milestone."""
+    return _render_walking_core(
+        output_mp4=output_mp4,
+        script=script,
+        voice=voice,
+        min_seconds=4.5,
+        max_seconds=6.5,
+        target_seconds=target_seconds,
+        fps=FPS,
+        width=width,
+        height=height,
+        milestone="5s_walking_presenter",
+        render_mode="local_walking_presenter_lipsync",
+        license_status=license_status,
+    )
+
+
+def render_walking_commercial_30s(
+    *,
+    output_mp4: Path,
+    scenes: list[dict[str, Any]] | None = None,
+    script: str | None = None,
+    voice: str = DEFAULT_VOICE,
+    width: int = WIDTH,
+    height: int = HEIGHT,
+    license_status: str | None = None,
+) -> dict[str, Any]:
+    """Full ~30s H.264/AAC walking talking commercial for mobile download.
+
+    Uses the local walking presenter + neural female voice + phoneme lip motion.
+    Does not call fal/Kling/D-ID/OpenAI and does not purchase credits.
+    """
+    text = script or (script_from_scenes(scenes or []))
+    # Keep narration covering the full commercial instead of silent walk pads.
+    if len(text.split()) < 70:
+        text = (
+            f"{text} "
+            "AMICOR Nova prepares research, follow-ups, and drafts you can review first. "
+            "Visit getamicor.com slash nova-today to explore AMICOR Nova today."
+        )
+    result = _render_walking_core(
+        output_mp4=output_mp4,
+        script=text,
+        voice=voice,
+        min_seconds=28.0,
+        max_seconds=34.0,
+        target_seconds=30.0,
+        fps=12,  # keep local renders tractable while preserving visible walk motion
+        width=width,
+        height=height,
+        milestone="30s_walking_commercial",
+        render_mode="local_walking_commercial_30s",
+        license_status=license_status,
+        speech_rate="-8%",
+    )
+    result["final_promo"] = True
+    result["scope"] = "30-second AMICOR Creative Studio commercial"
+    return result

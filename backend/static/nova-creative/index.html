@@ -72,16 +72,18 @@
     </section>
 
     <section class="card" aria-label="Walking presenter proof">
-      <h2>5–6s walking presenter proof</h2>
-      <p class="hint">Full-body walking/gesturing presenter with natural female narration, waveform-synced lip motion, and word-aligned captions. No fal/Kling/D-ID/OpenAI charges. Does not change the approved 60-second commercial.</p>
+      <h2>Walking presenter commercial</h2>
+      <p class="hint">Full-body walking/gesturing presenter with natural female narration, phoneme-synced lip motion, and word-aligned captions. No fal/Kling/D-ID/OpenAI charges. Does not change the approved 60-second commercial.</p>
       <div class="actions wrap">
-        <button type="button" id="build-walking-presenter">Build 5s walking presenter</button>
+        <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking presenter</button>
+        <button type="button" id="build-walking-commercial-30s">Build 30s walking commercial</button>
+        <button type="button" id="accept-voice-license" class="secondary">Accept voice license (AMBER → GREEN)</button>
       </div>
     </section>
 
     <section class="card" aria-label="Offline commercial">
-      <h2>30-second commercial</h2>
-      <p class="hint">Local montage only. No paid provider, no lip sync, and no posting. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable. Build toward a full talking commercial after the walking-presenter milestone passes owner review.</p>
+      <h2>30-second commercial (montage fallback)</h2>
+      <p class="hint">Local title-card montage fallback only. Prefer the walking commercial above for speech + lip motion. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable.</p>
       <div class="actions wrap">
         <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
         <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
@@ -90,12 +92,13 @@
 
     <section class="card" aria-label="AMICOR Studio checkout">
       <h2>AMICOR Studio checkout (TEST)</h2>
-      <p class="hint">Customer pays AMICOR via branded Stripe Checkout in test mode. Clear 30s scope and price. Internal render-cost ceiling is tracked separately. No automatic billing, no third-party vendor checkout, and no provider credit purchases.</p>
+      <p class="hint">Customer pays AMICOR via branded Stripe Checkout in test mode. Clear 30s scope and price. Internal render-cost ceiling is tracked separately. No automatic billing, no third-party vendor checkout, and no provider credit purchases. If TEST keys are not configured yet, Studio still creates a simulated TEST order you can complete for receipts.</p>
       <div id="studio-pricing" class="hint">Sign in to load AMICOR Studio pricing.</div>
       <div id="studio-orders" class="hint"></div>
       <div class="actions wrap">
         <button type="button" id="load-studio-pricing" class="secondary">Show price &amp; cost ceiling</button>
         <button type="button" id="start-studio-checkout">Start TEST checkout</button>
+        <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
         <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders / receipts</button>
       </div>
     </section>
