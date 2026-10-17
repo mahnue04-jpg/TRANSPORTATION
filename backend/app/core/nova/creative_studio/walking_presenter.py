@@ -21,7 +21,11 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from app.core.nova.creative_studio.presenter_media import burn_captions_and_cta_fade
+from app.core.nova.creative_studio.media_runtime import MIB, memory_budget, run_encoder
+from app.core.nova.creative_studio.presenter_media import srt_text
+
+# Light local encodes only — keep headroom low enough for Render starter RAM.
+_WALK_ENCODER_HEADROOM = 80 * MIB
 
 # Spoken form for TTS; captions keep the brand spelling AMICOR.
 AMICOR_SPOKEN = "AH-mih-kor"
@@ -79,11 +83,39 @@ def _ffmpeg() -> str:
 
 
 def _run(cmd: list[str], *, timeout: int = 180) -> None:
-    run = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+    """Run ffmpeg behind the shared memory gate (walking commercials stay local)."""
+    run = run_encoder(cmd, timeout=timeout, required_headroom=_WALK_ENCODER_HEADROOM)
     if run.returncode != 0:
-        tail = (run.stderr or run.stdout or "").strip().splitlines()
-        detail = tail[-1] if tail else "ffmpeg failed"
-        raise WalkingPresenterError("FFMPEG_FAILED", detail[:400])
+        detail = (run.stderr or run.stdout or "").strip()
+        if not detail:
+            detail = "ffmpeg failed"
+        budget = memory_budget()
+        if budget and "insufficient server memory headroom" in detail.lower():
+            free_mib = max(0, (budget[1] - budget[0]) // MIB)
+            detail = (
+                f"{detail} Free memory about {free_mib} MiB; walking encode needs "
+                f"~{_WALK_ENCODER_HEADROOM // MIB} MiB free. Retry when the service is quiet, "
+                "or raise the Render instance RAM."
+            )
+        raise WalkingPresenterError("FFMPEG_FAILED", detail[:500])
+
+
+def _wrap_caption(text: str, *, width: int = 28) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        trial = (" ".join(current + [word])).strip()
+        if current and len(trial) > width:
+            lines.append(" ".join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return lines[:3]
 
 
 def probe_duration_seconds(path: Path) -> float:
@@ -384,6 +416,8 @@ def _draw_walking_frame(
     duration: float,
     mouth: float,
     caption_line: str,
+    cta_text: str = "getamicor.com/nova-today",
+    fade_seconds: float = 2.0,
 ):
     from PIL import Image, ImageDraw, ImageFont
 
@@ -475,8 +509,29 @@ def _draw_walking_frame(
         small_font = ImageFont.load_default()
     draw.text((36, 42), "AMICOR Nova", font=title_font, fill=(255, 255, 255))
     draw.text((36, 88), "Full-body walking presenter", font=small_font, fill=(255, 210, 128))
-    # Captions are burned in via ASS after mux — do not paint a second caption layer here.
-    _ = caption_line
+
+    # Burn captions in-frame so we do not need a second memory-heavy ASS re-encode on Render.
+    caption_lines = _wrap_caption(caption_line, width=30)
+    if caption_lines:
+        box_top = height - 210 - (28 * len(caption_lines))
+        draw.rounded_rectangle(
+            (28, box_top, width - 28, height - 56),
+            radius=16,
+            fill=(8, 18, 32, 220) if image.mode == "RGBA" else (8, 18, 32),
+        )
+        y = box_top + 16
+        for line in caption_lines:
+            draw.text((48, y), line, font=small_font, fill=(255, 255, 255))
+            y += 28
+
+    # Soft CTA end card in the final seconds (replaces ASS fade burn-in).
+    fade = max(1.0, float(fade_seconds or 2.0))
+    if duration > 0 and t >= max(0.0, duration - fade):
+        strength = min(1.0, (t - (duration - fade)) / fade)
+        shade = int(12 + 40 * strength)
+        draw.rectangle((0, int(height * 0.42), width, int(height * 0.62)), fill=(shade, shade + 8, shade + 18))
+        cta = str(cta_text or "getamicor.com/nova-today")
+        draw.text((48, int(height * 0.48)), cta, font=title_font, fill=(255, 255, 255))
 
     # Progress of walk across the shot (proves continuous motion)
     progress = min(1.0, t / max(0.1, duration))
@@ -524,6 +579,8 @@ def _render_walking_core(
         cues = word_aligned_cues(script, min(duration, max(audio_duration, 0.8)))
         envelope = phoneme_mouth_envelope(cues, fps=fps, frame_count=frame_count, rms=rms)
 
+        fade_seconds = min(2.5, max(1.0, duration / 10))
+        cta_text = "getamicor.com/nova-today"
         frames_dir = temp / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
         for index in range(frame_count):
@@ -537,15 +594,19 @@ def _render_walking_core(
                 duration=duration,
                 mouth=mouth,
                 caption_line=active,
+                cta_text=cta_text,
+                fade_seconds=fade_seconds,
             )
-            frame.save(frames_dir / f"frame-{index:05d}.png", format="PNG")
+            # JPEG frames use far less temp disk/RAM than PNG on small Render instances.
+            frame.save(frames_dir / f"frame-{index:05d}.jpg", format="JPEG", quality=85, optimize=True)
 
         silent = temp / "silent.mp4"
         _run(
             [
                 ffmpeg, "-y", "-framerate", str(fps),
-                "-i", str(frames_dir / "frame-%05d.png"),
-                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-i", str(frames_dir / "frame-%05d.jpg"),
+                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+                "-pix_fmt", "yuv420p",
                 "-t", f"{duration:.3f}", "-an", str(silent),
             ]
         )
@@ -559,17 +620,11 @@ def _render_walking_core(
                 "-t", f"{duration:.3f}", "-movflags", "+faststart", str(muxed),
             ]
         )
-        polished, srt = burn_captions_and_cta_fade(
-            muxed,
-            [{"start": c["start"], "end": c["end"], "text": c["text"]} for c in cues],
-            width=width,
-            height=height,
-            cta_text="getamicor.com/nova-today",
-            fade_seconds=min(2.5, max(1.0, duration / 10)),
-        )
+        # Captions + CTA are already burned into frames — skip ASS re-encode (was 192 MiB gated).
         output_mp4.parent.mkdir(parents=True, exist_ok=True)
-        output_mp4.write_bytes(polished.read_bytes())
-        output_mp4.with_suffix(".srt").write_text(srt.read_text(encoding="utf-8"), encoding="utf-8")
+        output_mp4.write_bytes(muxed.read_bytes())
+        cue_payload = [{"start": c["start"], "end": c["end"], "text": c["text"]} for c in cues]
+        output_mp4.with_suffix(".srt").write_text(srt_text(cue_payload), encoding="utf-8")
         output_mp4.with_suffix(".wav").write_bytes(wav_path.read_bytes())
 
     validation = validate_presenter_mp4(output_mp4, min_seconds=min_seconds, max_seconds=max_seconds)
@@ -659,6 +714,13 @@ def render_walking_commercial_30s(
         )
     elif len(words) > 95:
         text = " ".join(words[:95])
+    # On tight Render memory, drop to 9:16 540p so the encoder can start.
+    render_width, render_height, render_fps = width, height, 12
+    budget = memory_budget()
+    if budget:
+        free = budget[1] - budget[0]
+        if free < 140 * MIB:
+            render_width, render_height, render_fps = 540, 960, 10
     result = _render_walking_core(
         output_mp4=output_mp4,
         script=text,
@@ -666,9 +728,9 @@ def render_walking_commercial_30s(
         min_seconds=28.0,
         max_seconds=32.0,
         target_seconds=30.0,
-        fps=12,  # keep local renders tractable while preserving visible walk motion
-        width=width,
-        height=height,
+        fps=render_fps,
+        width=render_width,
+        height=render_height,
         milestone="30s_walking_commercial",
         render_mode="local_walking_commercial_30s",
         license_status=license_status,
