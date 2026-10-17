@@ -521,9 +521,11 @@
     if (res.status === 401) {
       if (isLogin) throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
       if (typeof setToken === "function") setToken("");
+      var currentSession = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
+      if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
-      throw new Error("Session expired. Sign in again. (401) Your active Creative Studio project is preserved.");
+      throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
@@ -561,7 +563,9 @@
   }
 
   function setSignedIn(on) {
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
+    if ($("staging-register-panel")) $("staging-register-panel").style.display = (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
@@ -918,10 +922,10 @@
 
   async function pollStudioJob(projectId, jobId) {
     var last = null;
-    for (var attempt = 0; attempt < 8; attempt += 1) {
+    for (var attempt = 0; attempt < 45; attempt += 1) {
       last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
       if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
-      await new Promise(function (resolve) { setTimeout(resolve, 400); });
+      await new Promise(function (resolve) { setTimeout(resolve, 2000); });
     }
     return last;
   }
@@ -1302,11 +1306,16 @@
         if (rendered.job && rendered.job.id) {
           polled = await pollStudioJob(activeProjectId, rendered.job.id);
         }
-        renderOutput(rendered);
-        var note = rendered.readiness_note || "Offline montage is ready to download. Publishing stays off.";
-        if (polled.job && polled.job.status === "ERROR") note = polled.job.message || note;
-        showBanner(note, !(polled.job && polled.job.status === "ERROR"));
+        renderOutput(polled || rendered);
+        var status = polled && polled.job && polled.job.status;
         await refreshAssets();
+        if (status === "ERROR") {
+          showBanner("Offline render failed: " + (polled.job.message || "Unknown error. Check the job result."), false);
+        } else if (status === "GENERATED" || (polled && polled.ready === true)) {
+          showBanner("Offline render completed. Check the asset list for the MP4 preview and download. No publication was made.", true);
+        } else {
+          showBanner("Offline render is still processing or its final status was not confirmed. Refresh this project and check assets before attempting download.", false);
+        }
       } catch (err) {
         showBanner(err.message || "Offline montage failed.", false);
       } finally {
@@ -1404,8 +1413,11 @@
       setSignedIn(false);
       return;
     }
-    setSignedIn(true);
     try {
+      // A locally cached token is not proof that the staging account survived a restart.
+      // Confirm it with the server before showing the authenticated Studio controls.
+      await api("/api/auth/me");
+      setSignedIn(true);
       await refreshProviders();
       await refreshProjects();
       await refreshBrands();
@@ -1415,6 +1427,32 @@
     }
   }
 
+  if (location.hostname === "nova-studio-validation-350.onrender.com") {
+    $("staging-register-panel").style.display = "block";
+    $("staging-register-toggle").addEventListener("click", function () {
+      $("staging-register-form").classList.toggle("hidden");
+    });
+    $("staging-register-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      try {
+        var email = $("staging-register-email").value.trim();
+        var password = $("staging-register-password").value;
+        if (password.length < 12) throw new Error("Test password must be at least 12 characters.");
+        await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email: email, password: password, role: "staff", display_name: "Studio Tester" })
+        });
+        $("login-email").value = email;
+        $("login-password").value = "";
+        $("login-form").classList.remove("hidden");
+        $("staging-register-form").classList.add("hidden");
+        $("staging-register-password").value = "";
+        showBanner("Test account created. Enter your NEW test password in the sign-in form. Never use your production password.", true);
+      } catch (err) {
+        showBanner("Test account creation failed: " + err.message, false);
+      }
+    });
+  }
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });

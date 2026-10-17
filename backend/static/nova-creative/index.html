@@ -31,6 +31,16 @@
 
   <main class="studio-main">
     <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, owner-enabled image generation, provider-backed true text-to-video and voice generation, plus a separate local branded image-animation fallback. Cost-bearing media providers remain owner-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
+    <div id="staging-environment-warning" role="status" style="display:none; padding:16px; margin:12px 0; border:2px solid #976b14; border-radius:12px; background:#fff6db; color:#3f3215;">
+      <strong>Creative Studio test environment</strong>
+      <p>This website has its own separate test accounts. Your regular AMICOR production password will not sign you in here. Do not reset your production password or enter sensitive customer data on this test site.</p>
+      <a href="https://amicor-health-isf-py.onrender.com/static/nova-creative/index.html">Open existing AMICOR Studio</a>
+    </div>
+    <script>
+      if (location.hostname === "nova-studio-validation-350.onrender.com") {
+        document.getElementById("staging-environment-warning").style.display = "block";
+      }
+    </script>
     <div id="banner" class="banner hidden"></div>
 
     <section class="card" aria-label="Approved 60-second AMICOR Nova demo">
@@ -44,6 +54,15 @@
       <div class="actions">
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
+      </div>
+      <div id="staging-register-panel" style="display:none; margin-top:16px;">
+        <p><strong>New test account required.</strong> Use a separate test email and a NEW password, not your regular AMICOR password. Test accounts may be lost when this free staging server restarts.</p>
+        <button type="button" id="staging-register-toggle" class="secondary">Create test account</button>
+        <form id="staging-register-form" class="grid hidden" autocomplete="off">
+          <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
+          <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <button type="submit">Create separate test account</button>
+        </form>
       </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
