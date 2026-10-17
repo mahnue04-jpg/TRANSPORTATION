@@ -50,8 +50,66 @@ button:disabled {
   cursor: wait;
 }
 button.secondary { background: #2f2a24; }
+button.btn-primary {
+  background: var(--accent);
+  font-weight: 600;
+  padding: 0.7rem 1.05rem;
+  box-shadow: 0 1px 0 rgba(15, 92, 76, 0.35);
+}
+.path-card .path-kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 650;
+}
+.path-steps {
+  margin: 0.6rem 0 0.85rem 1.1rem;
+  padding: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.path-actions {
+  align-items: center;
+}
+.path-actions .btn-primary {
+  order: -1;
+  flex: 1 1 220px;
+}
+.mode-badge {
+  vertical-align: middle;
+  background: #ece6da;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.studio-details {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.7rem;
+}
+.studio-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.92rem;
+  list-style: none;
+}
+.studio-details > summary::-webkit-details-marker { display: none; }
+.studio-details > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+.studio-details[open] > summary::before { content: "▾ "; }
+.readiness-panel.card {
+  padding: 0.85rem 1rem;
+}
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .actions.wrap { margin-top: 0.5rem; }
+.actions-dense button {
+  font-size: 0.88rem;
+  padding: 0.45rem 0.65rem;
+}
 .list .item, .output {
   border: 1px solid var(--line);
   border-radius: 8px;
