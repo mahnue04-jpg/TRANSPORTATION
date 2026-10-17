@@ -1,0 +1,88 @@
+{
+  "name": "CIGO product-validation intake",
+  "live_email_delivery": false,
+  "outbound_sends": 0,
+  "approved_video_url": "https://v3b.fal.media/files/b/0aae5147/n7o5OtUWOjW2VvYEWJr9f_output.mp4",
+  "steps": [
+    "Visitor opens the campaign page and watches the approved vertical presenter.",
+    "Visitor submits idea, budget, currency, optional email, follow-up choice, and consent.",
+    "Invalid fields are rejected and stored as a failure. No record is created.",
+    "A repeated idea and email returns the original id.",
+    "A new idea is stored in SQLite with a unique cigo_ id.",
+    "If follow-up is email, a notification is prepared and marked not sent.",
+    "Records, alerts, and failures can be exported as JSON or CSV."
+  ],
+  "records": [
+    {
+      "id": "cigo_fictional_bakery",
+      "created_at": "2026-10-14T11:18:52+00:00",
+      "idea": "A neighborhood bakery wants a weekly specials note drafted for the owner to approve.",
+      "budget": "250.00",
+      "currency": "USD",
+      "email": "",
+      "consent": true,
+      "follow_up": "none",
+      "follow_up_status": "not_requested",
+      "status": "recorded",
+      "source": "fictional"
+    },
+    {
+      "id": "cigo_fictional_tutor",
+      "created_at": "2026-10-14T11:18:52+00:00",
+      "idea": "A tutor wants parent reminder drafts prepared, with the tutor approving each send.",
+      "budget": "75.00",
+      "currency": "GBP",
+      "email": "tutor@example.com",
+      "consent": true,
+      "follow_up": "email",
+      "follow_up_status": "prepared_not_sent",
+      "status": "recorded",
+      "source": "fictional"
+    },
+    {
+      "id": "cigo_fictional_clinic",
+      "created_at": "2026-10-14T11:18:52+00:00",
+      "idea": "A small clinic wants intake questions turned into a checklist the owner reviews.",
+      "budget": "500.00",
+      "currency": "CAD",
+      "email": "desk@example.com",
+      "consent": true,
+      "follow_up": "email",
+      "follow_up_status": "prepared_not_sent",
+      "status": "recorded",
+      "source": "fictional"
+    }
+  ],
+  "alerts": [
+    {
+      "id": "alert_ba2db43c47374eae80e1136b08dff82e",
+      "at": "2026-10-14T11:18:52+00:00",
+      "record_id": "cigo_fictional_bakery",
+      "kind": "owner_review",
+      "status": "suppressed_no_outbound",
+      "destination": null,
+      "sent": false,
+      "body": "Owner review recorded. No follow-up was requested, and no email was sent."
+    },
+    {
+      "id": "alert_6775a38f91fb444793a9285bb02ae93d",
+      "at": "2026-10-14T11:18:52+00:00",
+      "record_id": "cigo_fictional_tutor",
+      "kind": "follow_up_prepared",
+      "status": "suppressed_no_outbound",
+      "destination": "tutor@example.com",
+      "sent": false,
+      "body": "Follow-up prepared for tutor@example.com. It was not delivered."
+    },
+    {
+      "id": "alert_8952c932813b4b59aa81d10ae3eaac9a",
+      "at": "2026-10-14T11:18:52+00:00",
+      "record_id": "cigo_fictional_clinic",
+      "kind": "follow_up_prepared",
+      "status": "suppressed_no_outbound",
+      "destination": "desk@example.com",
+      "sent": false,
+      "body": "Follow-up prepared for desk@example.com. It was not delivered."
+    }
+  ]
+}
