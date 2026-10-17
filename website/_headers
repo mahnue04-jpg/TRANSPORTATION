@@ -1,6 +1,9 @@
 /404.html
   X-Robots-Tag: noindex
 
+/casting/*
+  X-Robots-Tag: noindex
+
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

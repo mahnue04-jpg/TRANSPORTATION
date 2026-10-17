@@ -17,9 +17,34 @@ Draft pull request #308 only. Do not merge. Do not deploy. Nothing in this check
 | Fresh and older disposable PostgreSQL history, repair, and rollback | Yes. Production stamps create no tables. Repair is idempotent and its downgrade keeps tables. An older organization-only schema accepts later revisions and can roll back to no casting tables | `CASTING_TEST_POSTGRES_URL` tests for repair, history, two revisions, and migration execution | No | Do not run `alembic upgrade heads` against a non-disposable database |
 | Environment gates | Yes. Default deny | Flag tests for absent, unknown, conflicting, and production values | No | Do not set the flag on a real host without approval |
 
+The safe staging procedure is `docs/nova-casting-staging-runbook.md`. The producer-facing sample, with no partnership and no return claim, is `docs/nova-casting-pilot-offer.md`.
+
+## Pilot extension on draft branch `cursor/casting-auditions-pilot-e1ae`
+
+Coded in the existing sandbox, not merged and not deployed. Public intake stays off. Message rows are constrained to `not_sent`.
+
+| Requirement | Implemented | Tested | Live | Blocked by |
+| --- | --- | --- | --- | --- |
+| Roles, eligibility, https audition links, consent retention, revocation, dedupe, receipts | Yes, sandbox pilot routes | Unit tests in `test_nova_casting_pilot.py` | No | Owner approval before any real host or public form |
+| Human shortlist, rubric notes, reviewer-minimized queue, CSV export without links | Yes | Unit tests | No | Owner approval |
+| Approval-gated email drafts, STOP suppression, retry that does not send | Yes | Unit tests | No | No email provider is configured, and none should be enabled for this pilot |
+| Timezone call sheet and fictional Harborlight demo | Yes. The sandbox organization stores the sample and reloads it. The demo HTML page is a labeled preview | Page source test and authenticated SQLite HTTP test | No | Not a staging deploy |
+| SMS and WhatsApp | Rejected unless a provider name is configured, and still not sent | Unit tests | No | Do not buy a provider for this pilot |
+| Authenticated invitation, redeem, refresh persistence, expired invite | Yes. Token stays in the organizer snapshot. Redeem reuses one draft application. Expired and closed-campaign invites stay closed | `test_nova_casting_journey.py` and the browser journey at 1280x900 and 390x844 | No | Invitations are not public links |
+| Mock transport receipts, retry, opt-out, and failure | Yes. Provider `disposable-mock`. `delivery_state` stays `not_sent` and `real_delivery` stays false | HTTP journey test and browser journey | No | Do not connect a real mail transport |
+| Disposable mock upload with MIME, size, and malware-review gate | Yes. Clean bytes stay in process memory. No public URL and no byte column. Wipe clears the hold | Unit and HTTP tests | No | `media_uploads_enabled` stays false. Do not enable public media upload |
+| Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. Cross-tenant calls return 404 | Postgres-gated journey test, `25 passed`, output has no `skipped` | No | Do not run the downgrade on a shared database |
+
+## Preview build (2026-10-15)
+
+The Netlify preview at `https://deploy-preview-339--grand-beignet-6447ea.netlify.app/` returned **404** on `/` and on the sandbox path. Cloudflare Pages reported **Build failed** on `ee670047`. This branch did not contain `website/package_public_site.py` or `netlify.toml`, which is the command those previews run. Main is merged back so the package command exists again.
+
+`/casting/` is a noindex staging page. It has no application form. Public intake stays off. A green Pages build is still required after this commit before the preview URL can be called working.
+
 ## Explicitly unavailable
 
-- Public intake, campaign publishing, and a public application form.
+- Public intake, campaign publishing, and a public application form. Campaign status cannot leave `DRAFT` or `CLOSED`.
+- Real media upload and playback of applicant video. Mock upload metadata is not a released file.
 - Signed media URLs, public file hosting, and playback without the Nova session.
 - Email, SMS, and external delivery of callbacks.
 - Real applicant videos, names, or contact details. Tests use synthetic bytes and `.invalid` addresses.
