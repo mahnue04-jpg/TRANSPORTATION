@@ -50,28 +50,80 @@ def _run(cmd: list[str], *, timeout: int = 180) -> None:
 
 
 def draw_title_card(scene: dict[str, Any], dest: Path, *, width: int = 540, height: int = 960) -> None:
+    """No-cost illustrated scene card. Narration belongs in audio/captions, not a wall of text."""
     from PIL import Image, ImageDraw, ImageFont
-
-    heading = str(scene.get("heading") or "AMICOR Nova").strip()
-    body = str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
+    heading = str(scene.get("heading") or "Hook").strip()
     color = _COLORS.get(heading, (11, 42, 74))
     image = Image.new("RGB", (width, height), color)
     draw = ImageDraw.Draw(image)
     font_path = str(_FONT) if _FONT.is_file() else None
-    title_font = ImageFont.truetype(font_path, 54) if font_path else ImageFont.load_default()
-    body_font = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
-    draw.text((36, 80), "AMICOR Nova", font=title_font, fill=(232, 236, 240))
-    draw.text((36, 170), heading, font=title_font, fill=(255, 214, 140))
-    y = 280
-    for line in _wrap(body, 28):
-        draw.text((36, y), line, font=body_font, fill=(236, 240, 244))
-        y += 40
-        if y > height - 180:
-            break
-    if heading == "CTA":
-        draw.text((36, height - 160), "getamicor.com/nova-today", font=body_font, fill=(255, 255, 255))
-    image.save(dest, format="PNG")
+    def font(n):
+        return ImageFont.truetype(font_path, n) if font_path else ImageFont.load_default()
+    scale = min(width / 540, height / 960)
+    def rect(box, fill, outline=None, radius=0, stroke=2):
+        coords = tuple(round(v * scale) for v in box)
+        if radius:
+            draw.rounded_rectangle(coords, radius=round(radius * scale), fill=fill, outline=outline, width=max(1, round(stroke * scale)))
+        else:
+            draw.rectangle(coords, fill=fill, outline=outline, width=max(1, round(stroke * scale)))
+    def line(points, color, thickness=5):
+        draw.line([(round(x*scale), round(y*scale)) for x,y in points], fill=color, width=max(1,round(thickness*scale)), joint="curve")
+    def circle(box, fill):
+        draw.ellipse(tuple(round(v*scale) for v in box), fill=fill)
+    def text(x,y,value,size=24,fill=(255,255,255)):
+        draw.text((round(x*scale),round(y*scale)),value,font=font(max(10,round(size*scale))),fill=fill)
 
+    # Visual system: a phone dashboard, human silhouettes, and task/workflow
+    # illustrations. Original local vector artwork; never labeled AI footage.
+    rect((0,0,540,960),(12,30,54))
+    circle((325,90,650,415),(23,61,94))
+    circle((-140,610,205,940),(23,58,79))
+    text(35,48,"AMICOR Nova",39)
+    text(36,111,heading.upper(),29,(255,210,128))
+    rect((30,210,510,735),(235,241,247),radius=30)
+    rect((53,236,487,293),(24,56,91),radius=14)
+    text(76,249,"Nova  •  Business workspace",18)
+    if heading == "Problem":
+        for y,label in [(327,"Too many follow-ups"),(410,"Scattered paperwork"),(493,"Missing deadlines")]:
+            rect((62,y,477,y+65),(255,234,227),radius=12)
+            circle((79,y+19,110,y+50),(194,77,64))
+            text(125,y+19,label,20,(71,48,47))
+        text(88,620,"Busywork adds up",28,(45,62,82))
+    elif heading == "Capabilities":
+        for x,y,label in [(66,326,"Research"),(277,326,"Admin"),(66,477,"Follow-ups"),(277,477,"Workflows")]:
+            rect((x,y,x+188,y+128),(224,240,238),radius=15)
+            circle((x+18,y+16,x+62,y+60),(28,132,119))
+            text(x+18,y+78,label,20,(21,70,75))
+        text(75,645,"One place to organize",22,(43,62,82))
+    elif heading == "Process":
+        for y,num,label in [(335,"1","Create a task"),(445,"2","Nova drafts"),(555,"3","You review")]:
+            rect((69,y,465,y+85),(222,234,248),radius=15)
+            circle((87,y+19,137,y+69),(36,100,163))
+            text(103,y+25,num,21)
+            text(155,y+25,label,22,(29,62,93))
+        text(88,673,"You stay in control",22,(43,62,82))
+    elif heading == "Progress":
+        for y,label in [(332,"Tasks organized"),(432,"Updates prepared"),(532,"Time to focus")]:
+            rect((65,y,474,y+76),(223,243,229),radius=15)
+            circle((88,y+22,122,y+56),(37,137,83))
+            line([(96,y+38),(104,y+46),(117,y+30)],(255,255,255),3)
+            text(141,y+23,label,20,(28,77,56))
+    elif heading == "CTA":
+        rect((69,334,470,600),(217,240,252),radius=20)
+        circle((203,362,336,495),(37,120,165))
+        text(160,522,"Explore Nova",30,(22,70,103))
+        text(63,655,"getamicor.com",28,(32,66,93))
+    else:  # Hook: human entrepreneur next to Nova's task board
+        circle((107,332,217,442),(185,115,83))
+        rect((91,434,233,613),(45,115,149),radius=42)
+        rect((262,348,445,612),(218,238,249),radius=13)
+        for y in (381,452,523):
+            circle((282,y,308,y+26),(36,145,105))
+            rect((318,y+4,427,y+17),(90,134,163),radius=5)
+        text(84,650,"Meet your AI workspace",22,(38,66,91))
+    text(45,787,"Research  •  Organize  •  Follow up",19)
+    text(43,846,"getamicor.com/nova-today",19,(255,211,131))
+    image.save(dest, format="PNG")
 
 def _wrap(text: str, width: int) -> list[str]:
     words = text.split()
