@@ -113,6 +113,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "default-src 'self'; script-src 'self'; style-src 'self'; "
                 "img-src 'self' data:; connect-src 'self'" + connections + "; "
                 "media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none';")
+        if request.url.path.rstrip("/") == "/nova/snap":
+            headers["Permissions-Policy"] = "camera=(self), microphone=(self), display-capture=(), geolocation=()"
+            headers["Referrer-Policy"] = "no-referrer"
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data: blob:; connect-src 'self' stun: turn:; "
+                "media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none';")
         for header, value in headers.items():
             response.headers.setdefault(header, value) # type: ignore
         return response # type: ignore
