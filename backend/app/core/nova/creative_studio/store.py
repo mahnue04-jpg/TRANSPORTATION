@@ -16,8 +16,10 @@ from app.core.nova.creative_studio.db_models import (
     NovaCreativeBrand,
     NovaCreativeBrief,
     NovaCreativeJob,
+    NovaCreativeOrder,
     NovaCreativeProject,
     NovaCreativeScene,
+    NovaCreativeWebhookEvent,
 )
 from app.core.nova.creative_studio.models import (
     BrandProfile,
@@ -614,6 +616,8 @@ def reset_store_for_tests() -> None:
     from app.db.session import engine
 
     for table in (
+        NovaCreativeWebhookEvent.__table__,
+        NovaCreativeOrder.__table__,
         NovaCreativeJob.__table__,
         NovaCreativeScene.__table__,
         NovaCreativeAsset.__table__,

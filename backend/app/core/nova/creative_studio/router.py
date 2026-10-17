@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -18,6 +18,11 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider, video_provider
+from app.core.nova.creative_studio.studio_checkout import (
+    StudioCheckoutError,
+    process_studio_webhook,
+    verify_studio_webhook,
+)
 from app.db.session import SessionLocal, get_db
 from app.core.nova.creative_studio.drama import SAMPLE
 
@@ -81,6 +86,25 @@ router = APIRouter(
     tags=["nova-creative-studio"],
     dependencies=[Depends(require_nova_access)],
 )
+
+# Stripe webhooks cannot carry Nova session auth — dedicated unauthenticated router.
+webhook_router = APIRouter(prefix="/api/nova/creative", tags=["nova-creative-studio-webhook"])
+
+
+@webhook_router.post("/stripe/webhook")
+async def studio_stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """AMICOR Studio Checkout webhook (TEST + gated LIVE). Idempotent; fulfills paid orders."""
+    payload = await request.body()
+    try:
+        event = verify_studio_webhook(payload, stripe_signature)
+        result = process_studio_webhook(event, db=db)
+    except StudioCheckoutError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 _final_promo_lock = threading.Lock()
 _final_promo_running: set[tuple[str, str]] = set()
@@ -1410,7 +1434,7 @@ def start_studio_checkout(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """AMICOR-branded Stripe Checkout in TEST mode for a 30s commercial order."""
+    """AMICOR-branded Stripe Checkout for a 30s commercial order (TEST, or gated LIVE)."""
     _require_owner(user)
     try:
         return get_service(db).start_studio_checkout(

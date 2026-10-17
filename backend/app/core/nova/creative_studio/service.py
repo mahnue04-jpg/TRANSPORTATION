@@ -166,6 +166,7 @@ class CreativeStudioService(ShortDramaMixin):
     def guardrails(self) -> dict[str, Any]:
         from app.core.nova.creative_studio.studio_checkout import checkout_readiness, public_pricing
 
+        readiness = checkout_readiness()
         return {
             **creative_guardrails(),
             "providers": provider_statuses(),
@@ -176,13 +177,18 @@ class CreativeStudioService(ShortDramaMixin):
             "studio_test_feature": {
                 "walking_commercial_ready": True,
                 "pricing": public_pricing(),
-                "checkout": checkout_readiness(),
-                "live_billing": False,
+                "checkout": readiness,
+                "live_billing": bool(readiness.get("live_checkout_available")),
+                "durable_orders": True,
+                "webhook_configured": bool(readiness.get("stripe_webhook_configured")),
                 "paid_providers_default_off": True,
                 "publish_default_off": True,
                 "approved_60s_commercial_unchanged": True,
             },
         }
+
+    def _studio_db(self):
+        return getattr(self.store, "db", None)
 
     def create_project(self, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         title = str(payload.get("title") or "").strip()
@@ -2175,14 +2181,19 @@ class CreativeStudioService(ShortDramaMixin):
 
         self._project_or_404(owner_id, project_id)
         try:
-            order = complete_test_checkout(order_id, owner_id=owner_id)
+            order = complete_test_checkout(order_id, owner_id=owner_id, db=self._studio_db())
         except KeyError as exc:
             raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404) from exc
         except ValueError as exc:
             raise CreativeStudioError("CHECKOUT_BLOCKED", str(exc), http_status=422) from exc
         if order.get("project_id") != project_id:
             raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404)
-        return {"order": order, "receipt": order.get("receipt"), "job_status": order.get("job_status")}
+        return {
+            "order": order,
+            "receipt": order.get("receipt"),
+            "job_status": order.get("job_status"),
+            "fulfillment": order.get("fulfillment"),
+        }
 
     def studio_pricing(self) -> dict[str, Any]:
         from app.core.nova.creative_studio.studio_checkout import public_pricing
@@ -2209,6 +2220,7 @@ class CreativeStudioService(ShortDramaMixin):
                 success_url=success_url,
                 cancel_url=cancel_url,
                 estimated_render_cost_usd=float(quote.get("estimated_total_usd") or 0),
+                db=self._studio_db(),
             )
         except ValueError as exc:
             raise CreativeStudioError("CHECKOUT_BLOCKED", str(exc), http_status=422) from exc
@@ -2246,24 +2258,30 @@ class CreativeStudioService(ShortDramaMixin):
         from app.core.nova.creative_studio.studio_checkout import list_studio_orders
 
         self._project_or_404(owner_id, project_id)
-        orders = list_studio_orders(owner_id=owner_id, project_id=project_id)
+        orders = list_studio_orders(owner_id=owner_id, project_id=project_id, db=self._studio_db())
         return {"project_id": project_id, "orders": orders, "pricing": self.studio_pricing()}
 
     def get_studio_checkout_order(self, owner_id: str, project_id: str, order_id: str) -> dict[str, Any]:
         from app.core.nova.creative_studio.studio_checkout import get_studio_order, sync_studio_order_from_stripe
 
         self._project_or_404(owner_id, project_id)
+        db = self._studio_db()
         try:
-            order = sync_studio_order_from_stripe(order_id, owner_id=owner_id)
+            order = sync_studio_order_from_stripe(order_id, owner_id=owner_id, db=db)
         except KeyError as exc:
             raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404) from exc
         except Exception:
-            order = get_studio_order(order_id, owner_id=owner_id)
+            order = get_studio_order(order_id, owner_id=owner_id, db=db)
             if order is None:
                 raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404)
         if order.get("project_id") != project_id:
             raise CreativeStudioError("NOT_FOUND", "Checkout order not found", http_status=404)
-        return {"order": order, "receipt": order.get("receipt"), "job_status": order.get("job_status")}
+        return {
+            "order": order,
+            "receipt": order.get("receipt"),
+            "job_status": order.get("job_status"),
+            "fulfillment": order.get("fulfillment"),
+        }
 
     def render_offline_commercial(self, owner_id: str, project_id: str) -> dict[str, Any]:
         """30s-style montage from the saved storyboard. Does not call image, voice, or video providers."""

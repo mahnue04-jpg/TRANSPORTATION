@@ -39,7 +39,11 @@
 
 ## Explicitly still OFF after TEST deploy
 
-- Stripe LIVE / real customer charges  
+- Stripe LIVE / real customer charges (until owner sets `NOVA_CREATIVE_STRIPE_LIVE_ENABLED` + LIVE keys + webhook)  
 - fal/Kling/D-ID/OpenAI live flags and credit purchases  
 - Public advertisement publish  
 - Changes to the approved 60s commercial  
+
+## LIVE public carry-over (code ready, not deployed)
+
+See `docs/verification/nova-creative-studio-351-live-gaps.md` for durable orders, webhook, gated LIVE checkout, and post-pay fulfill. **Do not merge/deploy until owner approves.** 

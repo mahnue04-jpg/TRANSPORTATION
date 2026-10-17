@@ -122,3 +122,49 @@ class NovaCreativeJob(Base):
     provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeOrder(Base):
+    """Durable Studio commercial checkout orders (survives process restart for LIVE revenue)."""
+
+    __tablename__ = "nova_creative_orders"
+    __table_args__ = (
+        Index("ix_nova_creative_order_owner_project", "owner_id", "project_id", "created_at"),
+        Index("ix_nova_creative_order_session", "stripe_checkout_session_id"),
+        Index("ix_nova_creative_order_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="checkout_open")
+    payment_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unpaid")
+    job_status: Mapped[str] = mapped_column(String(64), nullable=False, default="awaiting_payment")
+    payment_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="test_fake")
+    customer_price_usd: Mapped[float] = mapped_column(Float, nullable=False, default=49.0)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    scope: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    customer_email: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    checkout_url: Mapped[str | None] = mapped_column(String(800), nullable=True)
+    production_cost_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    receipt_json: Mapped[str] = mapped_column(Text, nullable=False, default="null")
+    fulfillment_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeWebhookEvent(Base):
+    """Idempotent Stripe webhook ledger for Creative Studio checkout."""
+
+    __tablename__ = "nova_creative_webhook_events"
+    __table_args__ = (Index("ix_nova_creative_webhook_event_id", "stripe_event_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    stripe_event_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    order_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    processing_result: Mapped[str] = mapped_column(String(48), nullable=False, default="ok")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)

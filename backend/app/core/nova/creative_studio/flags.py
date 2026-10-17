@@ -96,6 +96,9 @@ def creative_guardrails() -> dict[str, bool | str]:
         "STUDIO_CHECKOUT_SIMULATION_AVAILABLE": bool(checkout.get("local_test_simulation_available")),
         "STUDIO_CUSTOMER_PRICE_USD": pricing.get("customer_price_usd"),
         "STUDIO_RENDER_COST_CEILING_USD": pricing.get("internal_render_cost_ceiling_usd"),
-        "LIVE_STRIPE_BLOCKED": True,
+        "LIVE_STRIPE_BLOCKED": bool(checkout.get("live_blocked")) or not bool(checkout.get("live_checkout_available")),
+        "LIVE_STRIPE_CHECKOUT_AVAILABLE": bool(checkout.get("live_checkout_available")),
+        "STUDIO_WEBHOOK_CONFIGURED": bool(checkout.get("stripe_webhook_configured")),
+        "STUDIO_DURABLE_ORDERS": True,
         "PAID_PROVIDER_LIVE_DEFAULT_OFF": True,
     }
