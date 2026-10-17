@@ -1415,6 +1415,32 @@
     }
   }
 
+  if (location.hostname === "nova-studio-validation-350.onrender.com") {
+    $("staging-register-panel").style.display = "block";
+    $("staging-register-toggle").addEventListener("click", function () {
+      $("staging-register-form").classList.toggle("hidden");
+    });
+    $("staging-register-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      try {
+        var email = $("staging-register-email").value.trim();
+        var password = $("staging-register-password").value;
+        if (password.length < 12) throw new Error("Test password must be at least 12 characters.");
+        await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email: email, password: password, role: "staff", display_name: "Studio Tester" })
+        });
+        $("login-email").value = email;
+        $("login-password").value = "";
+        $("login-form").classList.remove("hidden");
+        $("staging-register-form").classList.add("hidden");
+        $("staging-register-password").value = "";
+        showBanner("Test account created. Enter your NEW test password in the sign-in form. Never use your production password.", true);
+      } catch (err) {
+        showBanner("Test account creation failed: " + err.message, false);
+      }
+    });
+  }
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });
