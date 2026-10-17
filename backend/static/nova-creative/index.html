@@ -71,49 +71,55 @@
       </form>
     </section>
 
-    <section class="card" aria-label="TEST feature readiness">
-      <h2>TEST feature readiness</h2>
-      <p class="hint">Walking commercial + AMICOR Stripe Checkout run in <strong>TEST mode</strong>. Live billing, paid Genova providers, and public ad publish stay OFF. Use this path to find what still needs fixing after deploy.</p>
-      <div id="studio-test-readiness" class="hint">Sign in to load TEST readiness.</div>
-    </section>
-
-    <section class="card" aria-label="Walking presenter proof">
-      <h2>Walking presenter commercial (TEST)</h2>
-      <p class="hint">Full-body walking/gesturing presenter with natural female narration, phoneme-synced lip motion, and word-aligned captions. No fal/Kling/D-ID/OpenAI charges. Does not change the approved 60-second commercial.</p>
-      <ol class="hint" style="margin:8px 0 12px 18px; padding:0;">
-        <li>Create / select a 30s project and generate the storyboard</li>
-        <li>Accept voice license (AMBER → GREEN)</li>
-        <li>Build 30s walking commercial and download on your phone</li>
-        <li>Start TEST checkout, then Complete TEST payment for receipt/job status</li>
+    <section class="card path-card" aria-label="Second commercial path">
+      <p class="path-kicker">Second commercial · 30 seconds</p>
+      <h2>Walking commercial</h2>
+      <p class="hint">Full-body presenter, natural female narration, lip sync, and captions. Does not change the approved 60-second demo. Customer price <strong>$49</strong>.</p>
+      <ol class="path-steps">
+        <li>Select <strong>AMICOR Second Commercial</strong> (or create a 30s project + storyboard)</li>
+        <li>Accept the voice license</li>
+        <li>Build the 30s commercial and download on your phone</li>
+        <li>Start checkout for the receipt</li>
       </ol>
-      <div class="actions wrap">
-        <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking presenter</button>
-        <button type="button" id="build-walking-commercial-30s">Build 30s walking commercial</button>
-        <button type="button" id="accept-voice-license" class="secondary">Accept voice license (AMBER → GREEN)</button>
+      <div class="actions wrap path-actions">
+        <button type="button" id="select-second-commercial" class="secondary">Select Second Commercial</button>
+        <button type="button" id="accept-voice-license" class="secondary">Accept voice license</button>
+        <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
       </div>
-    </section>
-
-    <section class="card" aria-label="Offline commercial">
-      <h2>30-second commercial (montage fallback)</h2>
-      <p class="hint">Local title-card montage fallback only. Prefer the walking commercial above for speech + lip motion. Put the prepared link in the TikTok or Instagram profile Website field. Those captions are not clickable.</p>
-      <div class="actions wrap">
-        <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
-        <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
-      </div>
+      <details class="studio-details">
+        <summary>Optional · 5s preview &amp; montage fallback</summary>
+        <p class="hint">Prefer the 30s walking commercial above. Montage is title-card only (no speech/lip sync). Put the prepared link in TikTok/Instagram profile Website — captions are not clickable.</p>
+        <div class="actions wrap">
+          <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking preview</button>
+          <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
+          <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
+        </div>
+      </details>
     </section>
 
     <section class="card" aria-label="AMICOR Studio checkout">
-      <h2>AMICOR Studio checkout (TEST)</h2>
-      <p class="hint">Customer pays AMICOR via branded Stripe Checkout in test mode. Clear 30s scope and price. Internal render-cost ceiling is tracked separately. No automatic billing, no third-party vendor checkout, and no provider credit purchases. If TEST keys are not configured yet, Studio still creates a simulated TEST order you can complete for receipts.</p>
-      <div id="studio-pricing" class="hint">Sign in to load AMICOR Studio pricing.</div>
+      <h2>Checkout <span class="badge mode-badge">TEST</span></h2>
+      <p class="hint">Branded Stripe Checkout for the 30s commercial. Live billing stays off until you enable it. No automatic billing and no third-party vendor checkout.</p>
+      <div id="studio-pricing" class="hint">Sign in to load pricing.</div>
       <div id="studio-orders" class="hint"></div>
-      <div class="actions wrap">
-        <button type="button" id="load-studio-pricing" class="secondary">Show price &amp; cost ceiling</button>
-        <button type="button" id="start-studio-checkout">Start TEST checkout</button>
-        <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
-        <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders / receipts</button>
+      <div class="actions wrap path-actions">
+        <button type="button" id="start-studio-checkout" class="btn-primary">Start checkout</button>
+        <button type="button" id="load-studio-pricing" class="secondary">Show price</button>
+        <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders</button>
       </div>
+      <details class="studio-details">
+        <summary>Owner · simulated payment</summary>
+        <div class="actions wrap">
+          <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
+        </div>
+      </details>
     </section>
+
+    <details class="card studio-details readiness-panel" aria-label="Studio readiness">
+      <summary>Studio readiness <span class="badge mode-badge">TEST details</span></summary>
+      <p class="hint">Walking commercial and Stripe Checkout are in TEST mode. Live billing, paid Genova providers, and public ad publish stay OFF.</p>
+      <div id="studio-test-readiness" class="hint">Sign in to load readiness.</div>
+    </details>
 
     <section class="card" aria-label="Provider status">
       <h2>Provider status</h2>
@@ -272,16 +278,16 @@
           <button type="button" id="preview-talking-presenter">Talking Presenter Preview</button>
         </div>
       </div>
-      <div class="actions wrap">
-        <button type="button" data-action="script">3. Generate Script</button>
-        <button type="button" data-action="caption">4. Generate Caption</button>
-        <button type="button" data-action="storyboard">5. Generate Storyboard</button>
-        <button type="button" data-action="image-prompt">6. Generate Image Prompt</button>
-        <button type="button" data-action="image">7. Generate Image</button>
-        <button type="button" data-action="video">8. Generate Next AI Scene</button>
-        <button type="button" data-action="voice">9. Generate Voice</button>
-        <button type="button" id="build-final-promo">10. Build Final Promo</button>
-        <button type="button" data-action="export">13. Export project package</button>
+      <div class="actions wrap actions-dense" aria-label="Project generate steps">
+        <button type="button" data-action="script" class="secondary">3. Script</button>
+        <button type="button" data-action="caption" class="secondary">4. Caption</button>
+        <button type="button" data-action="storyboard" class="secondary">5. Storyboard</button>
+        <button type="button" data-action="image-prompt" class="secondary">6. Image prompt</button>
+        <button type="button" data-action="image" class="secondary">7. Image</button>
+        <button type="button" data-action="video" class="secondary">8. Next scene</button>
+        <button type="button" data-action="voice" class="secondary">9. Voice</button>
+        <button type="button" id="build-final-promo" class="secondary">10. Final promo</button>
+        <button type="button" data-action="export" class="secondary">13. Export</button>
       </div>
       <pre id="output" class="output" aria-live="polite"></pre>
     </section>
@@ -331,6 +337,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=signout-only-when-signed-in-20261017"></script>
+  <script src="/static/nova-creative/creative.js?v=second-commercial-path-20261017"></script>
 </body>
 </html>

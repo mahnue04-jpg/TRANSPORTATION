@@ -591,14 +591,17 @@
       var feature = guards.studio_test_feature || {};
       var checkout = feature.checkout || {};
       var pricing = feature.pricing || {};
+      var walkReady = feature.walking_commercial_ready ? "Ready" : "Not ready";
+      var mode = String(checkout.payment_mode || guards.STUDIO_CHECKOUT_TEST_MODE || "unconfigured");
+      var price = Number(pricing.customer_price_usd || guards.STUDIO_CUSTOMER_PRICE_USD || 0).toFixed(2);
+      var ceiling = Number(pricing.internal_render_cost_ceiling_usd || guards.STUDIO_RENDER_COST_CEILING_USD || 0).toFixed(2);
       ready.innerHTML =
-        "<strong>Walking commercial TEST:</strong> " + (feature.walking_commercial_ready ? "ready" : "not ready") +
-        "<br><strong>Checkout mode:</strong> " + escapeHtml(String(checkout.payment_mode || guards.STUDIO_CHECKOUT_TEST_MODE || "unconfigured")) +
-        " · simulated OK: " + String(!!checkout.local_test_simulation_available) +
-        " · real Stripe TEST: " + String(!!checkout.real_test_checkout_available) +
-        "<br><strong>Customer price:</strong> $" + Number(pricing.customer_price_usd || guards.STUDIO_CUSTOMER_PRICE_USD || 0).toFixed(2) +
-        " · render ceiling $" + Number(pricing.internal_render_cost_ceiling_usd || guards.STUDIO_RENDER_COST_CEILING_USD || 0).toFixed(2) +
-        "<br><strong>Live billing / paid providers / publish:</strong> OFF";
+        "<div class=\"item\"><strong>Walking commercial:</strong> " + escapeHtml(walkReady) + "</div>" +
+        "<div class=\"item\"><strong>Checkout:</strong> " + escapeHtml(mode) +
+        (checkout.real_test_checkout_available ? " · Stripe TEST connected" : "") + "</div>" +
+        "<div class=\"item\"><strong>Customer price:</strong> $" + escapeHtml(price) +
+        " · render ceiling $" + escapeHtml(ceiling) + "</div>" +
+        "<div class=\"item muted\">Live billing / paid providers / publish: OFF</div>";
       if (pricing.customer_price_usd) renderStudioPricing(pricing);
     }
   }
@@ -1393,15 +1396,39 @@
     });
   }
 
+  var selectSecondCommercialBtn = $("select-second-commercial");
+  if (selectSecondCommercialBtn) {
+    selectSecondCommercialBtn.addEventListener("click", async function () {
+      selectSecondCommercialBtn.disabled = true;
+      try {
+        if (!projectRowsCache.length) await refreshProjects();
+        var match = projectRowsCache.find(function (row) {
+          return String(row.title || "").toLowerCase().indexOf("second commercial") !== -1;
+        });
+        if (!match) {
+          showBanner("AMICOR Second Commercial was not found. Create a 30s promo project first.", false);
+          return;
+        }
+        setActiveProjectId(match.id);
+        await refreshProjects();
+        await refreshAssets();
+        showBanner("Active project: " + match.title + ". Accept voice license, then Build 30s.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not select Second Commercial.", false);
+      } finally {
+        selectSecondCommercialBtn.disabled = false;
+      }
+    });
+  }
+
   function renderStudioPricing(pricing) {
     var el = $("studio-pricing");
     if (!el || !pricing) return;
     el.innerHTML =
       "<strong>$" + Number(pricing.customer_price_usd).toFixed(2) + "</strong> · " +
       escapeHtml(pricing.scope || "30-second commercial") +
-      "<br>Internal render-cost ceiling: $" + Number(pricing.internal_render_cost_ceiling_usd).toFixed(2) +
-      " · payment mode: " + escapeHtml(String(pricing.payment_mode || "unconfigured")) +
-      "<br>Auto-billing: no · Third-party checkout: no";
+      "<div class=\"muted\">Render ceiling $" + Number(pricing.internal_render_cost_ceiling_usd).toFixed(2) +
+      " · " + escapeHtml(String(pricing.payment_mode || "unconfigured")) + " mode</div>";
   }
 
   function renderStudioOrders(payload) {
