@@ -521,6 +521,8 @@
     if (res.status === 401) {
       if (isLogin) throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
       if (typeof setToken === "function") setToken("");
+      var currentSession = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
+      if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
       throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
