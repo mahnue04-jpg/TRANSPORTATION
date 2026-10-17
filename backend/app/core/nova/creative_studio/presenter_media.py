@@ -8,7 +8,7 @@ from pathlib import Path
 from app.core.nova.creative_studio.media_runtime import MIB, run_encoder, serialized_media
 
 
-def _encode(args, headroom=128 * MIB):
+def _encode(args, headroom=96 * MIB):
     import imageio_ffmpeg
     result = run_encoder([imageio_ffmpeg.get_ffmpeg_exe(), '-hide_banner', '-y', *args],
                          timeout=180, required_headroom=headroom)
@@ -140,7 +140,7 @@ def caption_presenter(video: Path, cues: list[dict]):
     _encode(['-threads', '1', '-filter_threads', '1', '-i', str(video), '-vf',
              f"scale=512:512:force_original_aspect_ratio=decrease,pad=512:640:(ow-iw)/2:0:color=0x07111f,subtitles='{escaped_path}':fontsdir='{escaped_fonts}'",
              '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-tune', 'zerolatency',
-             '-c:a', 'copy', '-movflags', '+faststart', str(output)], 192 * MIB)
+             '-c:a', 'copy', '-movflags', '+faststart', str(output)], 96 * MIB)
     return output, srt
 
 
@@ -211,6 +211,6 @@ def burn_captions_and_cta_fade(
             '-c:a', 'copy', '-movflags', '+faststart',
             str(output),
         ],
-        192 * MIB,
+        96 * MIB,
     )
     return output, srt
