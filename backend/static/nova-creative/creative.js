@@ -563,9 +563,15 @@
   }
 
   function setSignedIn(on) {
-    $("sign-in-toggle").classList.toggle("hidden", !!on);
-    $("sign-out").classList.toggle("hidden", !on);
-    if ($("staging-register-panel")) $("staging-register-panel").style.display = (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+    // Signed in → only Sign out. Signed out → only Sign in.
+    var signInBtn = $("sign-in-toggle");
+    var signOutBtn = $("sign-out");
+    if (signInBtn) signInBtn.classList.toggle("hidden", !!on);
+    if (signOutBtn) signOutBtn.classList.toggle("hidden", !on);
+    if ($("staging-register-panel")) {
+      $("staging-register-panel").style.display =
+        (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+    }
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
@@ -1723,6 +1729,7 @@
         if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
       }
       setToken(body.access_token || "");
+      setSignedIn(true); // hide Sign in immediately; only Sign out while session is active
       showBanner("Signed in. Creative Studio session is ready.", true);
       boot();
     } catch (err) {
