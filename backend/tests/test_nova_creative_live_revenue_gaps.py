@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from app.core.nova.creative_studio.router import webhook_router
 from app.core.nova.creative_studio.studio_checkout import (
     FakeStudioStripeClient,
+    _stripe_attr,
+    _stripe_value_to_dict,
     checkout_readiness,
     create_studio_checkout_order,
     get_studio_order,
@@ -248,3 +250,19 @@ def test_guardrails_expose_durable_orders_and_webhook_fields(monkeypatch):
         set_studio_stripe_override(None)
         reset_studio_orders_for_tests()
         app.dependency_overrides.clear()
+
+
+def test_stripe_sdk_objects_normalize_to_plain_dicts():
+    class StripeLike:
+        def to_dict(self):
+            return {"order_id": "nord_1", "scope": "30s"}
+
+    class MappingLike:
+        def items(self):
+            return [("k", "v")]
+
+    assert _stripe_value_to_dict(StripeLike()) == {"order_id": "nord_1", "scope": "30s"}
+    assert _stripe_value_to_dict(MappingLike()) == {"k": "v"}
+    assert _stripe_value_to_dict({"plain": True}) == {"plain": True}
+    assert _stripe_attr({"id": "cs_test"}, "id") == "cs_test"
+    assert _stripe_attr(type("Obj", (), {"id": "cs_obj"})(), "id") == "cs_obj"
