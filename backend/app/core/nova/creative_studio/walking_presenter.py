@@ -21,11 +21,11 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from app.core.nova.creative_studio.media_runtime import MIB, memory_budget, run_encoder
+from app.core.nova.creative_studio.media_runtime import MIB, SERVER_RESERVE, memory_budget, run_encoder
 from app.core.nova.creative_studio.presenter_media import srt_text
 
 # Light local encodes only — keep headroom low enough for Render starter RAM.
-_WALK_ENCODER_HEADROOM = 80 * MIB
+_WALK_ENCODER_HEADROOM = 72 * MIB
 
 # Spoken form for TTS; captions keep the brand spelling AMICOR.
 AMICOR_SPOKEN = "AH-mih-kor"
@@ -90,7 +90,10 @@ def _run(cmd: list[str], *, timeout: int = 180) -> None:
         if not detail:
             detail = "ffmpeg failed"
         budget = memory_budget()
-        if budget and "insufficient server memory headroom" in detail.lower():
+        if budget and (
+            "insufficient server memory headroom" in detail.lower()
+            or "protect the server from its memory limit" in detail.lower()
+        ):
             free_mib = max(0, (budget[1] - budget[0]) // MIB)
             detail = (
                 f"{detail} Free memory about {free_mib} MiB; walking encode needs "
@@ -98,6 +101,114 @@ def _run(cmd: list[str], *, timeout: int = 180) -> None:
                 "or raise the Render instance RAM."
             )
         raise WalkingPresenterError("FFMPEG_FAILED", detail[:500])
+
+
+def _memory_profile(*, width: int, height: int, fps: int, target_seconds: float) -> tuple[int, int, int]:
+    """Shrink resolution/fps on small Render cgroups so libx264 can finish."""
+    budget = memory_budget()
+    if not budget:
+        return width, height, fps
+    _used, limit = budget
+    free = limit - _used
+    # Typical Render starter is 512 MiB. Prefer a light phone-vertical profile.
+    if limit <= 640 * MIB or free < 160 * MIB:
+        if target_seconds >= 20:
+            return 360, 640, 8
+        return 480, 854, 10
+    if free < 140 * MIB:
+        return 540, 960, 10
+    return width, height, fps
+
+
+def _encode_frames_pipe(
+    *,
+    ffmpeg: str,
+    frames,
+    fps: int,
+    duration: float,
+    output_mp4: Path,
+) -> None:
+    """Stream JPEG frames into ffmpeg (image2pipe) to avoid holding a full frame directory."""
+    import io
+    import subprocess
+
+    budget = memory_budget()
+    if budget and budget[1] - budget[0] < _WALK_ENCODER_HEADROOM:
+        free_mib = max(0, (budget[1] - budget[0]) // MIB)
+        raise WalkingPresenterError(
+            "FFMPEG_FAILED",
+            (
+                "Nova paused video rendering: insufficient server memory headroom. No encoder was started. "
+                f"Free memory about {free_mib} MiB; walking encode needs ~{_WALK_ENCODER_HEADROOM // MIB} MiB free."
+            ),
+        )
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "image2pipe",
+        "-framerate",
+        str(fps),
+        "-i",
+        "-",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-threads",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-t",
+        f"{duration:.3f}",
+        "-an",
+        str(output_mp4),
+    ]
+    child = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert child.stdin is not None
+    stopped_for_memory = False
+    stderr = b""
+    stdout = b""
+    try:
+        for frame in frames:
+            buf = io.BytesIO()
+            frame.save(buf, format="JPEG", quality=78, optimize=True)
+            child.stdin.write(buf.getvalue())
+            # Drop the PIL image ASAP.
+            frame.close()
+            budget = memory_budget()
+            if budget and budget[1] - budget[0] < SERVER_RESERVE:
+                stopped_for_memory = True
+                break
+        try:
+            child.stdin.close()
+        except Exception:
+            pass
+        # Do not call communicate() after closing stdin — it tries to flush a closed pipe.
+        stdout = child.stdout.read() if child.stdout else b""
+        stderr = child.stderr.read() if child.stderr else b""
+        child.wait(timeout=180)
+    except Exception:
+        child.kill()
+        try:
+            child.wait(timeout=10)
+        except Exception:
+            pass
+        raise
+    if stopped_for_memory:
+        child.kill()
+        try:
+            child.wait(timeout=10)
+        except Exception:
+            pass
+        raise WalkingPresenterError(
+            "FFMPEG_FAILED",
+            "Nova stopped video rendering to protect the server from its memory limit. The render did not complete.",
+        )
+    if child.returncode != 0:
+        detail = (stderr or stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
+        raise WalkingPresenterError("FFMPEG_FAILED", (detail[-1] if detail else "ffmpeg failed")[:500])
 
 
 def _wrap_caption(text: str, *, width: int = 28) -> list[str]:
@@ -581,34 +692,34 @@ def _render_walking_core(
 
         fade_seconds = min(2.5, max(1.0, duration / 10))
         cta_text = "getamicor.com/nova-today"
-        frames_dir = temp / "frames"
-        frames_dir.mkdir(parents=True, exist_ok=True)
-        for index in range(frame_count):
-            t = index / fps
-            mouth = envelope[index] if index < len(envelope) else 0.0
-            active = next((c["text"] for c in cues if c["start"] <= t <= c["end"]), cues[0]["text"] if cues else "")
-            frame = _draw_walking_frame(
-                width=width,
-                height=height,
-                t=t,
-                duration=duration,
-                mouth=mouth,
-                caption_line=active,
-                cta_text=cta_text,
-                fade_seconds=fade_seconds,
-            )
-            # JPEG frames use far less temp disk/RAM than PNG on small Render instances.
-            frame.save(frames_dir / f"frame-{index:05d}.jpg", format="JPEG", quality=85, optimize=True)
+
+        def _iter_frames():
+            for index in range(frame_count):
+                t = index / fps
+                mouth = envelope[index] if index < len(envelope) else 0.0
+                active = next(
+                    (c["text"] for c in cues if c["start"] <= t <= c["end"]),
+                    cues[0]["text"] if cues else "",
+                )
+                yield _draw_walking_frame(
+                    width=width,
+                    height=height,
+                    t=t,
+                    duration=duration,
+                    mouth=mouth,
+                    caption_line=active,
+                    cta_text=cta_text,
+                    fade_seconds=fade_seconds,
+                )
 
         silent = temp / "silent.mp4"
-        _run(
-            [
-                ffmpeg, "-y", "-framerate", str(fps),
-                "-i", str(frames_dir / "frame-%05d.jpg"),
-                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-                "-pix_fmt", "yuv420p",
-                "-t", f"{duration:.3f}", "-an", str(silent),
-            ]
+        # Stream frames into ffmpeg so Render starter RAM is not filled with a frame directory.
+        _encode_frames_pipe(
+            ffmpeg=ffmpeg,
+            frames=_iter_frames(),
+            fps=fps,
+            duration=duration,
+            output_mp4=silent,
         )
         muxed = temp / "muxed.mp4"
         _run(
@@ -672,6 +783,12 @@ def render_walking_presenter(
     license_status: str | None = None,
 ) -> dict[str, Any]:
     """Render the Issue #351 five-second walking presenter milestone."""
+    render_width, render_height, render_fps = _memory_profile(
+        width=width,
+        height=height,
+        fps=FPS,
+        target_seconds=float(target_seconds),
+    )
     return _render_walking_core(
         output_mp4=output_mp4,
         script=script,
@@ -679,9 +796,9 @@ def render_walking_presenter(
         min_seconds=4.5,
         max_seconds=6.5,
         target_seconds=target_seconds,
-        fps=FPS,
-        width=width,
-        height=height,
+        fps=render_fps,
+        width=render_width,
+        height=render_height,
         milestone="5s_walking_presenter",
         render_mode="local_walking_presenter_lipsync",
         license_status=license_status,
@@ -714,13 +831,12 @@ def render_walking_commercial_30s(
         )
     elif len(words) > 95:
         text = " ".join(words[:95])
-    # On tight Render memory, drop to 9:16 540p so the encoder can start.
-    render_width, render_height, render_fps = width, height, 12
-    budget = memory_budget()
-    if budget:
-        free = budget[1] - budget[0]
-        if free < 140 * MIB:
-            render_width, render_height, render_fps = 540, 960, 10
+    render_width, render_height, render_fps = _memory_profile(
+        width=width,
+        height=height,
+        fps=12,
+        target_seconds=30.0,
+    )
     result = _render_walking_core(
         output_mp4=output_mp4,
         script=text,
