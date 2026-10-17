@@ -918,10 +918,10 @@
 
   async function pollStudioJob(projectId, jobId) {
     var last = null;
-    for (var attempt = 0; attempt < 8; attempt += 1) {
+    for (var attempt = 0; attempt < 45; attempt += 1) {
       last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
       if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
-      await new Promise(function (resolve) { setTimeout(resolve, 400); });
+      await new Promise(function (resolve) { setTimeout(resolve, 2000); });
     }
     return last;
   }
@@ -1302,11 +1302,16 @@
         if (rendered.job && rendered.job.id) {
           polled = await pollStudioJob(activeProjectId, rendered.job.id);
         }
-        renderOutput(rendered);
-        var note = rendered.readiness_note || "Offline montage is ready to download. Publishing stays off.";
-        if (polled.job && polled.job.status === "ERROR") note = polled.job.message || note;
-        showBanner(note, !(polled.job && polled.job.status === "ERROR"));
+        renderOutput(polled || rendered);
+        var status = polled && polled.job && polled.job.status;
         await refreshAssets();
+        if (status === "ERROR") {
+          showBanner("Offline render failed: " + (polled.job.message || "Unknown error. Check the job result."), false);
+        } else if (status === "GENERATED" || (polled && polled.ready === true)) {
+          showBanner("Offline render completed. Check the asset list for the MP4 preview and download. No publication was made.", true);
+        } else {
+          showBanner("Offline render is still processing or its final status was not confirmed. Refresh this project and check assets before attempting download.", false);
+        }
       } catch (err) {
         showBanner(err.message || "Offline montage failed.", false);
       } finally {
