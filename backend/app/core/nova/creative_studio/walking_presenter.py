@@ -649,19 +649,22 @@ def render_walking_commercial_30s(
     Does not call fal/Kling/D-ID/OpenAI and does not purchase credits.
     """
     text = script or (script_from_scenes(scenes or []))
-    # Keep narration covering the full commercial instead of silent walk pads.
-    if len(text.split()) < 70:
+    # Keep narration covering ~30s without drifting far over the tolerance band.
+    words = text.split()
+    if len(words) < 55:
         text = (
             f"{text} "
             "AMICOR Nova prepares research, follow-ups, and drafts you can review first. "
             "Visit getamicor.com slash nova-today to explore AMICOR Nova today."
         )
+    elif len(words) > 95:
+        text = " ".join(words[:95])
     result = _render_walking_core(
         output_mp4=output_mp4,
         script=text,
         voice=voice,
         min_seconds=28.0,
-        max_seconds=34.0,
+        max_seconds=32.0,
         target_seconds=30.0,
         fps=12,  # keep local renders tractable while preserving visible walk motion
         width=width,
@@ -669,7 +672,7 @@ def render_walking_commercial_30s(
         milestone="30s_walking_commercial",
         render_mode="local_walking_commercial_30s",
         license_status=license_status,
-        speech_rate="-8%",
+        speech_rate="-4%",
     )
     result["final_promo"] = True
     result["scope"] = "30-second AMICOR Creative Studio commercial"

@@ -164,6 +164,8 @@ class CreativeStudioService(ShortDramaMixin):
 
 
     def guardrails(self) -> dict[str, Any]:
+        from app.core.nova.creative_studio.studio_checkout import checkout_readiness, public_pricing
+
         return {
             **creative_guardrails(),
             "providers": provider_statuses(),
@@ -171,6 +173,15 @@ class CreativeStudioService(ShortDramaMixin):
             "platforms": list(PLATFORMS),
             "durations": list(DURATIONS),
             "image_aspects": list(IMAGE_ASPECTS),
+            "studio_test_feature": {
+                "walking_commercial_ready": True,
+                "pricing": public_pricing(),
+                "checkout": checkout_readiness(),
+                "live_billing": False,
+                "paid_providers_default_off": True,
+                "publish_default_off": True,
+                "approved_60s_commercial_unchanged": True,
+            },
         }
 
     def create_project(self, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:

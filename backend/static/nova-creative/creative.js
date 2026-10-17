@@ -580,6 +580,21 @@
     $("provider-status").innerHTML = bits.map(function (line) {
       return "<div class=\"item\">" + escapeHtml(line) + "</div>";
     }).join("") || "No providers.";
+    var ready = $("studio-test-readiness");
+    if (ready) {
+      var feature = guards.studio_test_feature || {};
+      var checkout = feature.checkout || {};
+      var pricing = feature.pricing || {};
+      ready.innerHTML =
+        "<strong>Walking commercial TEST:</strong> " + (feature.walking_commercial_ready ? "ready" : "not ready") +
+        "<br><strong>Checkout mode:</strong> " + escapeHtml(String(checkout.payment_mode || guards.STUDIO_CHECKOUT_TEST_MODE || "unconfigured")) +
+        " · simulated OK: " + String(!!checkout.local_test_simulation_available) +
+        " · real Stripe TEST: " + String(!!checkout.real_test_checkout_available) +
+        "<br><strong>Customer price:</strong> $" + Number(pricing.customer_price_usd || guards.STUDIO_CUSTOMER_PRICE_USD || 0).toFixed(2) +
+        " · render ceiling $" + Number(pricing.internal_render_cost_ceiling_usd || guards.STUDIO_RENDER_COST_CEILING_USD || 0).toFixed(2) +
+        "<br><strong>Live billing / paid providers / publish:</strong> OFF";
+      if (pricing.customer_price_usd) renderStudioPricing(pricing);
+    }
   }
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");

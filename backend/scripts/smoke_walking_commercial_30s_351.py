@@ -36,7 +36,7 @@ def main() -> int:
         scenes=board["scenes"],
         license_status="GREEN",
     )
-    probe = validate_presenter_mp4(mp4, min_seconds=28.0, max_seconds=34.0)
+    probe = validate_presenter_mp4(mp4, min_seconds=28.0, max_seconds=32.0)
     summary = {
         "mp4": str(mp4),
         "size_bytes": mp4.stat().st_size,

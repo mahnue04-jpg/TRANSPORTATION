@@ -126,6 +126,8 @@ def test_ui_exposes_walking_presenter_and_checkout_controls():
     assert 'id="build-walking-commercial-30s"' in HTML
     assert 'id="accept-voice-license"' in HTML
     assert 'id="complete-studio-test-checkout"' in HTML
+    assert 'id="studio-test-readiness"' in HTML
+    assert "TEST feature readiness" in HTML
     assert "AMICOR Studio checkout" in HTML
     assert 'id="start-studio-checkout"' in HTML
     assert "/assemble/walking-presenter-proof" in JS
@@ -134,6 +136,7 @@ def test_ui_exposes_walking_presenter_and_checkout_controls():
     assert "/complete-test" in JS
     assert "/api/nova/creative/pricing" in JS
     assert "/checkout" in JS
+    assert "studio_test_feature" in JS
 
 
 def test_voice_license_acceptance_turns_green():
@@ -290,9 +293,9 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     assert rendered["license_status"] == "GREEN"
     assert rendered["validation"]["ok"] is True
     video = tmp_path / rendered["url"].rsplit("/", 1)[-1]
-    probe = validate_presenter_mp4(video, min_seconds=28.0, max_seconds=34.0)
+    probe = validate_presenter_mp4(video, min_seconds=28.0, max_seconds=32.0)
     assert probe["ok"] is True
-    assert 28.0 <= probe["duration_seconds"] <= 34.0
+    assert 28.0 <= probe["duration_seconds"] <= 32.0
     assert probe["video_codec"] in {"h264", "avc1"}
     assert probe["audio_codec"] in {"aac", "mp4a"}
     assert video.with_suffix(".srt").is_file()
