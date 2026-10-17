@@ -64,6 +64,11 @@ button.btn-primary {
   color: var(--accent);
   font-weight: 650;
 }
+.path-active {
+  margin: 0.35rem 0 0.55rem;
+  color: var(--ink);
+  font-weight: 600;
+}
 .path-steps {
   margin: 0.6rem 0 0.85rem 1.1rem;
   padding: 0;
