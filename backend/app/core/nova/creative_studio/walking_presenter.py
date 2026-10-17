@@ -414,10 +414,8 @@ def _draw_walking_frame(
         small_font = ImageFont.load_default()
     draw.text((36, 42), "AMICOR Nova", font=title_font, fill=(255, 255, 255))
     draw.text((36, 88), "Full-body walking presenter proof", font=small_font, fill=(255, 210, 128))
-    if caption_line:
-        # Live caption preview under the figure; final burn-in uses ASS.
-        draw.rectangle((40, height - 160, width - 40, height - 70), fill=(7, 14, 24))
-        draw.text((56, height - 130), caption_line[:48], font=small_font, fill=(255, 255, 255))
+    # Captions are burned in via ASS after mux — do not paint a second caption layer here.
+    _ = caption_line
 
     # Progress of walk across the shot (proves continuous motion)
     progress = min(1.0, t / max(0.1, duration))
