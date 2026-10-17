@@ -27,25 +27,40 @@
       : ("Active project: " + activeProjectId);
   }
 
+  var SECOND_COMMERCIAL_FALLBACK_ID = "cproj_eadc72d001ca";
+
   function findSecondCommercialProject(rows) {
     var list = rows || projectRowsCache || [];
     return list.find(function (row) {
-      return String(row.title || "").toLowerCase().indexOf("second commercial") !== -1;
+      var title = String(row.title || "").toLowerCase();
+      return title.indexOf("second commercial") !== -1 || row.id === SECOND_COMMERCIAL_FALLBACK_ID;
     }) || null;
   }
 
   async function ensureSecondCommercialSelected() {
-    if (!projectRowsCache.length) await refreshProjects();
+    // Always refresh so we never trust a stale empty cache or a dead localStorage id.
+    try {
+      await refreshProjects();
+    } catch (err) {
+      // Keep going with whatever cache we have; caller shows a clear banner.
+    }
+    var match = findSecondCommercialProject(projectRowsCache);
+    if (match) {
+      setActiveProjectId(match.id);
+      try { await refreshAssets(); } catch (err2) { /* non-fatal */ }
+      return match.id;
+    }
     if (activeProjectId && projectRowsCache.some(function (row) { return row.id === activeProjectId; })) {
       updateActiveProjectLabel();
       return activeProjectId;
     }
-    var match = findSecondCommercialProject(projectRowsCache);
-    if (!match) return null;
-    setActiveProjectId(match.id);
-    await refreshProjects();
-    await refreshAssets();
-    return match.id;
+    var fallback = projectRowsCache.find(function (row) {
+      return row.project_type === "promo_video" || Number(row.duration_target) === 30;
+    }) || projectRowsCache[0] || null;
+    if (!fallback) return null;
+    setActiveProjectId(fallback.id);
+    try { await refreshAssets(); } catch (err3) { /* non-fatal */ }
+    return fallback.id;
   }
 
   function $(id) { return document.getElementById(id); }
@@ -645,25 +660,29 @@
   }
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");
-    var rows = body.projects || [];
+    var rows = (body && body.projects) || (Array.isArray(body) ? body : []) || [];
     projectRowsCache = rows.slice();
     if (activeProjectId && !rows.some(function (row) { return row.id === activeProjectId; })) {
       setActiveProjectId(null);
     }
-    $("project-list").innerHTML = rows.map(function (row) {
-      var active = row.id === activeProjectId ? " · ACTIVE" : "";
-      return "<div class=\"item\" data-id=\"" + escapeHtml(row.id) + "\"><strong>" + escapeHtml(row.title) + "</strong>" +
-        "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" + active +
-        "<div class=\"muted\">" + escapeHtml(row.project_type) + " · " + escapeHtml(row.platform) + "</div></div>";
-    }).join("") || "<p class=\"hint\">No projects yet.</p>";
-    Array.prototype.forEach.call(document.querySelectorAll("#project-list .item"), function (el) {
-      el.addEventListener("click", function () {
-        setActiveProjectId(el.getAttribute("data-id"));
-        refreshProjects();
-        refreshAssets();
+    var listEl = $("project-list");
+    if (listEl) {
+      listEl.innerHTML = rows.map(function (row) {
+        var active = row.id === activeProjectId ? " · ACTIVE" : "";
+        return "<div class=\"item\" data-id=\"" + escapeHtml(row.id) + "\"><strong>" + escapeHtml(row.title) + "</strong>" +
+          "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" + active +
+          "<div class=\"muted\">" + escapeHtml(row.project_type) + " · " + escapeHtml(row.platform) + "</div></div>";
+      }).join("") || "<p class=\"hint\">No projects yet.</p>";
+      Array.prototype.forEach.call(document.querySelectorAll("#project-list .item"), function (el) {
+        el.addEventListener("click", function () {
+          setActiveProjectId(el.getAttribute("data-id"));
+          refreshProjects();
+          refreshAssets();
+        });
       });
-    });
+    }
     updateActiveProjectLabel();
+    return rows;
   }
   async function refreshBrands() {
     var body = await api("/api/nova/creative/brands");
@@ -1356,12 +1375,13 @@
   async function runWalkingRender(endpoint, button, startMessage, successMessage) {
     button.disabled = true;
     try {
-      var projectId = activeProjectId || await ensureSecondCommercialSelected();
+      // Never rely on a bare localStorage id — always resolve against the live project list.
+      var projectId = await ensureSecondCommercialSelected();
       if (!projectId) {
-        showBanner("Select or create a project first. Use Select Second Commercial if it already exists.", false);
+        showBanner("No Studio project found. Sign in, then click Select Second Commercial (or create a 30s project).", false);
         return;
       }
-      showBanner(startMessage, true);
+      showBanner(startMessage + " Active: " + projectId, true);
       var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + endpoint, {
         method: "POST",
         body: JSON.stringify({})
@@ -1400,7 +1420,7 @@
   var walkingCommercialButton = $("build-walking-commercial-30s");
   if (walkingCommercialButton) {
     walkingCommercialButton.addEventListener("click", function () {
-      runWalkingRender(
+      return runWalkingRender(
         "/assemble/walking-commercial-30s",
         walkingCommercialButton,
         "Rendering the 30s walking talking commercial. No paid provider is charged.",
@@ -1414,9 +1434,9 @@
     acceptVoiceLicenseBtn.addEventListener("click", async function () {
       acceptVoiceLicenseBtn.disabled = true;
       try {
-        var projectId = activeProjectId || await ensureSecondCommercialSelected();
+        var projectId = await ensureSecondCommercialSelected();
         if (!projectId) {
-          showBanner("Select a project first. Use Select Second Commercial.", false);
+          showBanner("No Studio project found. Sign in, then click Select Second Commercial.", false);
           return;
         }
         var body = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/voice-license", {
@@ -1505,9 +1525,9 @@
     startCheckoutBtn.addEventListener("click", async function () {
       startCheckoutBtn.disabled = true;
       try {
-        var projectId = activeProjectId || await ensureSecondCommercialSelected();
+        var projectId = await ensureSecondCommercialSelected();
         if (!projectId) {
-          showBanner("Select a project before starting TEST checkout. Use Select Second Commercial.", false);
+          showBanner("No Studio project found. Sign in, then click Select Second Commercial before checkout.", false);
           return;
         }
         var started = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/checkout", {
