@@ -234,6 +234,32 @@ class FakeStudioStripeClient:
         return dict(record)
 
 
+def _stripe_value_to_dict(value: Any) -> dict[str, Any]:
+    """Normalize Stripe SDK objects (and plain dicts) into a JSON-safe mapping."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        converted = to_dict()
+        return dict(converted) if isinstance(converted, dict) else {}
+    # Older SDK shapes sometimes expose mapping helpers without to_dict().
+    items = getattr(value, "items", None)
+    if callable(items):
+        try:
+            return dict(items())
+        except Exception:
+            return {}
+    return {}
+
+
+def _stripe_attr(obj: Any, key: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class LiveStudioStripeClient:
     def __init__(self, *, api_key: str):
         if is_live_stripe_key(api_key) and not studio_live_stripe_enabled():
@@ -249,34 +275,39 @@ class LiveStudioStripeClient:
 
     def create_checkout_session(self, *, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._build_client()
-        created = client.v1.checkout.sessions.create(payload)
+        # Stripe Python v1 client expects keyword params= for checkout sessions.
+        try:
+            created = client.v1.checkout.sessions.create(params=payload)
+        except TypeError:
+            created = client.v1.checkout.sessions.create(payload)
         return {
-            "id": getattr(created, "id", None) or (created.get("id") if isinstance(created, dict) else None),
+            "id": _stripe_attr(created, "id"),
             "object": "checkout.session",
-            "mode": getattr(created, "mode", None) or (created.get("mode") if isinstance(created, dict) else "payment"),
-            "status": getattr(created, "status", None) or (created.get("status") if isinstance(created, dict) else "open"),
-            "payment_status": getattr(created, "payment_status", None)
-            or (created.get("payment_status") if isinstance(created, dict) else "unpaid"),
-            "url": getattr(created, "url", None) or (created.get("url") if isinstance(created, dict) else None),
-            "metadata": dict(getattr(created, "metadata", None) or (created.get("metadata") if isinstance(created, dict) else {}) or {}),
-            "amount_total": getattr(created, "amount_total", None)
-            or (created.get("amount_total") if isinstance(created, dict) else CUSTOMER_PRICE_MINOR),
-            "currency": getattr(created, "currency", None) or (created.get("currency") if isinstance(created, dict) else CURRENCY),
+            "mode": _stripe_attr(created, "mode", "payment"),
+            "status": _stripe_attr(created, "status", "open"),
+            "payment_status": _stripe_attr(created, "payment_status", "unpaid"),
+            "url": _stripe_attr(created, "url"),
+            "metadata": _stripe_value_to_dict(_stripe_attr(created, "metadata")),
+            "amount_total": _stripe_attr(created, "amount_total", CUSTOMER_PRICE_MINOR),
+            "currency": _stripe_attr(created, "currency", CURRENCY),
         }
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         client = self._build_client()
-        retrieved = client.v1.checkout.sessions.retrieve(str(session_id))
+        try:
+            retrieved = client.v1.checkout.sessions.retrieve(str(session_id))
+        except TypeError:
+            retrieved = client.v1.checkout.sessions.retrieve(params={"id": str(session_id)})
         if isinstance(retrieved, dict):
             return retrieved
         return {
-            "id": getattr(retrieved, "id", session_id),
-            "status": getattr(retrieved, "status", None),
-            "payment_status": getattr(retrieved, "payment_status", None),
-            "url": getattr(retrieved, "url", None),
-            "metadata": dict(getattr(retrieved, "metadata", None) or {}),
-            "amount_total": getattr(retrieved, "amount_total", None),
-            "currency": getattr(retrieved, "currency", None),
+            "id": _stripe_attr(retrieved, "id", session_id),
+            "status": _stripe_attr(retrieved, "status"),
+            "payment_status": _stripe_attr(retrieved, "payment_status"),
+            "url": _stripe_attr(retrieved, "url"),
+            "metadata": _stripe_value_to_dict(_stripe_attr(retrieved, "metadata")),
+            "amount_total": _stripe_attr(retrieved, "amount_total"),
+            "currency": _stripe_attr(retrieved, "currency"),
         }
 
 

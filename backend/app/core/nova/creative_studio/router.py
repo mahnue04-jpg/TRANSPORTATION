@@ -1427,10 +1427,27 @@ def studio_commercial_pricing(
     return get_service(db).studio_pricing()
 
 
+def _absolute_checkout_url(raw: str, request: Request) -> str:
+    """Stripe requires absolute success/cancel URLs."""
+    value = str(raw or "").strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if not value.startswith("/"):
+        value = "/" + value
+    base = str(request.base_url).rstrip("/")
+    # Prefer the public Render host over internal proxy bases when forwarded.
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    if forwarded and host:
+        base = f"{forwarded}://{host}"
+    return base + value
+
+
 @router.post("/projects/{project_id}/checkout")
 def start_studio_checkout(
     project_id: str,
     payload: StudioCheckoutIn,
+    request: Request,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -1441,8 +1458,8 @@ def start_studio_checkout(
             user.user_id,
             project_id,
             customer_email=payload.customer_email,
-            success_url=payload.success_url,
-            cancel_url=payload.cancel_url,
+            success_url=_absolute_checkout_url(payload.success_url, request),
+            cancel_url=_absolute_checkout_url(payload.cancel_url, request),
         )
     except CreativeStudioError as exc:
         _raise(exc)
