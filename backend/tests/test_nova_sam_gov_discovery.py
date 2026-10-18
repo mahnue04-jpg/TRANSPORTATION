@@ -6,6 +6,7 @@ No proposal submission, agency contact, contract acceptance, or Stripe/financial
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -268,7 +269,7 @@ def test_capability_qualification_accepts_digital_admin() -> None:
         geography="Remote, Nationwide, UNITED STATES",
         place_of_performance="Remote, Nationwide, UNITED STATES",
         set_aside="Total Small Business Set-Aside (FAR 19.5)",
-        response_deadline="2026-10-15T17:00:00-04:00",
+        response_deadline=(datetime.now(timezone.utc) + timedelta(days=45)).replace(microsecond=0).isoformat(),
         fee_required="no",
     )
     qual = qualify_live_job(job)
