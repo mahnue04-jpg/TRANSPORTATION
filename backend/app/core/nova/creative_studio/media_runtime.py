@@ -49,10 +49,12 @@ def run_encoder(
     *,
     timeout: int,
     required_headroom: int | None = None,
+    kill_reserve: int | None = None,
 ) -> subprocess.CompletedProcess:
     """Bound logs and abort the encoder while memory remains for web traffic."""
     budget = memory_budget()
     headroom = ENCODER_HEADROOM if required_headroom is None else max(SERVER_RESERVE, int(required_headroom))
+    stop_floor = SERVER_RESERVE if kill_reserve is None else max(16 * MIB, int(kill_reserve))
     if budget and budget[1] - budget[0] < headroom:
         message = "Nova paused video rendering: insufficient server memory headroom. No encoder was started."
         logger.warning("CREATIVE_ENCODER_MEMORY_BLOCKED memory_budget=%s required_headroom_bytes=%s", budget, headroom)
@@ -67,10 +69,10 @@ def run_encoder(
                 budget = memory_budget()
                 if budget:
                     peak = max(peak, budget[0])
-                    if budget[1] - budget[0] < SERVER_RESERVE:
+                    if budget[1] - budget[0] < stop_floor:
                         stopped_for_memory = True
                         child.kill()
-                        logger.warning("CREATIVE_ENCODER_MEMORY_STOPPED memory_budget=%s", budget)
+                        logger.warning("CREATIVE_ENCODER_MEMORY_STOPPED memory_budget=%s stop_floor=%s", budget, stop_floor)
                         break
                 if time.monotonic() - started > timeout:
                     raise subprocess.TimeoutExpired(cmd, timeout)

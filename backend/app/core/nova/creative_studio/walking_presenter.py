@@ -25,7 +25,10 @@ from app.core.nova.creative_studio.media_runtime import MIB, SERVER_RESERVE, mem
 from app.core.nova.creative_studio.presenter_media import srt_text
 
 # Light local encodes only — keep headroom low enough for Render starter RAM.
-_WALK_ENCODER_HEADROOM = 72 * MIB
+_WALK_ENCODER_HEADROOM = 64 * MIB
+# Mid-encode kill floor for walking only (shared SERVER_RESERVE=96 is too strict on 512 MiB).
+_WALK_ENCODE_RESERVE = 40 * MIB
+_WALK_CHUNK_SECONDS = 4.0
 
 # Spoken form for TTS; captions keep the brand spelling AMICOR.
 AMICOR_SPOKEN = "AH-mih-kor"
@@ -84,7 +87,12 @@ def _ffmpeg() -> str:
 
 def _run(cmd: list[str], *, timeout: int = 180) -> None:
     """Run ffmpeg behind the shared memory gate (walking commercials stay local)."""
-    run = run_encoder(cmd, timeout=timeout, required_headroom=_WALK_ENCODER_HEADROOM)
+    run = run_encoder(
+        cmd,
+        timeout=timeout,
+        required_headroom=_WALK_ENCODER_HEADROOM,
+        kill_reserve=_WALK_ENCODE_RESERVE,
+    )
     if run.returncode != 0:
         detail = (run.stderr or run.stdout or "").strip()
         if not detail:
@@ -111,10 +119,10 @@ def _memory_profile(*, width: int, height: int, fps: int, target_seconds: float)
     _used, limit = budget
     free = limit - _used
     # Typical Render starter is 512 MiB. Prefer a light phone-vertical profile.
-    if limit <= 640 * MIB or free < 160 * MIB:
+    if limit <= 640 * MIB or free < 180 * MIB:
         if target_seconds >= 20:
-            return 360, 640, 8
-        return 480, 854, 10
+            return 270, 480, 6
+        return 360, 640, 8
     if free < 140 * MIB:
         return 540, 960, 10
     return width, height, fps
@@ -127,8 +135,10 @@ def _encode_frames_pipe(
     fps: int,
     duration: float,
     output_mp4: Path,
+    kill_reserve: int = _WALK_ENCODE_RESERVE,
 ) -> None:
     """Stream JPEG frames into ffmpeg (image2pipe) to avoid holding a full frame directory."""
+    import gc
     import io
     import subprocess
 
@@ -160,6 +170,10 @@ def _encode_frames_pipe(
         "1",
         "-pix_fmt",
         "yuv420p",
+        "-g",
+        "12",
+        "-bf",
+        "0",
         "-t",
         f"{duration:.3f}",
         "-an",
@@ -173,12 +187,12 @@ def _encode_frames_pipe(
     try:
         for frame in frames:
             buf = io.BytesIO()
-            frame.save(buf, format="JPEG", quality=78, optimize=True)
+            frame.save(buf, format="JPEG", quality=70, optimize=True)
             child.stdin.write(buf.getvalue())
             # Drop the PIL image ASAP.
             frame.close()
             budget = memory_budget()
-            if budget and budget[1] - budget[0] < SERVER_RESERVE:
+            if budget and budget[1] - budget[0] < kill_reserve:
                 stopped_for_memory = True
                 break
         try:
@@ -196,6 +210,8 @@ def _encode_frames_pipe(
         except Exception:
             pass
         raise
+    finally:
+        gc.collect()
     if stopped_for_memory:
         child.kill()
         try:
@@ -209,6 +225,75 @@ def _encode_frames_pipe(
     if child.returncode != 0:
         detail = (stderr or stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
         raise WalkingPresenterError("FFMPEG_FAILED", (detail[-1] if detail else "ffmpeg failed")[:500])
+
+
+def _encode_walking_silent_chunked(
+    *,
+    ffmpeg: str,
+    temp: Path,
+    frame_builder,
+    frame_count: int,
+    fps: int,
+    duration: float,
+    output_mp4: Path,
+) -> None:
+    """Encode short silent chunks then concat — keeps peak RAM low on 512 MiB hosts."""
+    import gc
+
+    chunk_frames = max(8, int(_WALK_CHUNK_SECONDS * fps))
+    parts: list[Path] = []
+    index = 0
+    part_no = 0
+    while index < frame_count:
+        end = min(frame_count, index + chunk_frames)
+        part_path = temp / f"walk-part-{part_no:03d}.mp4"
+        part_duration = (end - index) / float(fps)
+
+        def _chunk_frames(start=index, stop=end):
+            for frame_i in range(start, stop):
+                yield frame_builder(frame_i)
+
+        _encode_frames_pipe(
+            ffmpeg=ffmpeg,
+            frames=_chunk_frames(),
+            fps=fps,
+            duration=part_duration,
+            output_mp4=part_path,
+            kill_reserve=_WALK_ENCODE_RESERVE,
+        )
+        parts.append(part_path)
+        index = end
+        part_no += 1
+        gc.collect()
+
+    if len(parts) == 1:
+        output_mp4.write_bytes(parts[0].read_bytes())
+        return
+
+    manifest = temp / "walk-parts.txt"
+    manifest.write_text(
+        "".join(f"file '{part.resolve().as_posix()}'\n" for part in parts),
+        encoding="utf-8",
+    )
+    # concat demuxer + stream copy is cheap compared with a single long encode.
+    _run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(manifest),
+            "-c",
+            "copy",
+            "-t",
+            f"{duration:.3f}",
+            "-an",
+            str(output_mp4),
+        ]
+    )
 
 
 def _wrap_caption(text: str, *, width: int = 28) -> list[str]:
@@ -693,30 +778,31 @@ def _render_walking_core(
         fade_seconds = min(2.5, max(1.0, duration / 10))
         cta_text = "getamicor.com/nova-today"
 
-        def _iter_frames():
-            for index in range(frame_count):
-                t = index / fps
-                mouth = envelope[index] if index < len(envelope) else 0.0
-                active = next(
-                    (c["text"] for c in cues if c["start"] <= t <= c["end"]),
-                    cues[0]["text"] if cues else "",
-                )
-                yield _draw_walking_frame(
-                    width=width,
-                    height=height,
-                    t=t,
-                    duration=duration,
-                    mouth=mouth,
-                    caption_line=active,
-                    cta_text=cta_text,
-                    fade_seconds=fade_seconds,
-                )
+        def _frame_at(index: int):
+            t = index / fps
+            mouth = envelope[index] if index < len(envelope) else 0.0
+            active = next(
+                (c["text"] for c in cues if c["start"] <= t <= c["end"]),
+                cues[0]["text"] if cues else "",
+            )
+            return _draw_walking_frame(
+                width=width,
+                height=height,
+                t=t,
+                duration=duration,
+                mouth=mouth,
+                caption_line=active,
+                cta_text=cta_text,
+                fade_seconds=fade_seconds,
+            )
 
         silent = temp / "silent.mp4"
-        # Stream frames into ffmpeg so Render starter RAM is not filled with a frame directory.
-        _encode_frames_pipe(
+        # Chunked encode keeps peak RAM under Render starter limits for ~30s spots.
+        _encode_walking_silent_chunked(
             ffmpeg=ffmpeg,
-            frames=_iter_frames(),
+            temp=temp,
+            frame_builder=_frame_at,
+            frame_count=frame_count,
             fps=fps,
             duration=duration,
             output_mp4=silent,
@@ -727,7 +813,8 @@ def _render_walking_core(
                 ffmpeg, "-y", "-i", str(silent), "-i", str(wav_path),
                 "-filter_complex", f"[1:a]apad,atrim=0:{duration:.3f}[a]",
                 "-map", "0:v:0", "-map", "[a]",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "96k",
+                "-ac", "1", "-ar", "24000",
                 "-t", f"{duration:.3f}", "-movflags", "+faststart", str(muxed),
             ]
         )
