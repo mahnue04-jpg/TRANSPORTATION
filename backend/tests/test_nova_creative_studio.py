@@ -471,7 +471,7 @@ def test_create_project_ux_static_contract(client: TestClient):
     assert "createBtn.disabled = true" in js
     assert "createBtn.disabled = false" in js
     assert "await refreshProjects()" in js
-    assert "Session expired. Sign in again. (401)" in js
+    assert "Your login session expired (401). Sign in again." in js
     assert "Access denied. (403)" in js
     assert "Validation failed. (422)" in js or "(422)" in js
     assert 'res.status >= 500' in js
@@ -563,7 +563,7 @@ def test_generate_actions_ux_static_contract(client: TestClient):
     assert "await refreshProjects()" in js
     assert "renderOutput(body)" in js
     assert "Not found. Check the selected project. (404)" in js
-    assert "Session expired. Sign in again. (401)" in js
+    assert "Your login session expired (401). Sign in again." in js
     css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
     assert "button:disabled" in css
     work = client.get("/nova/work")
@@ -872,8 +872,8 @@ def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
 def test_creative_ui_exposes_live_video_and_voice_actions() -> None:
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
-    assert "8. Generate Next AI Scene" in html
-    assert "9. Generate Voice" in html
+    assert "Generate Next AI Scene" in html
+    assert "Generate Voice" in html
     assert "Download AI video" in js
     assert "Download voice" in js
     assert "<video controls playsinline" in js
@@ -1832,3 +1832,15 @@ def test_project_media_reset_includes_presenter_video() -> None:
     service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
     assert '"presenter_video"' in service
     assert 'removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}' in service
+
+
+def test_30s_reuse_and_persisted_success_contract() -> None:
+    """Only saved 30s video is reusable; the successful response must survive refresh."""
+    js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert 'View completed 30s video' in js
+    assert 'asset.metadata.render_mode === "local_walking_commercial_30s"' in js
+    assert 'asset.media_available !== false' in js
+    assert 'asset.url === expectedUrl' in js
+    assert 'var persisted = await api(' in js
+    assert 'showBanner(saved ? successMessage' in js
+    assert 'no new render was started.' in js
