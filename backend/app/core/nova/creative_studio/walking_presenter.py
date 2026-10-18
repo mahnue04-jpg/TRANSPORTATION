@@ -98,16 +98,13 @@ def _run(cmd: list[str], *, timeout: int = 180) -> None:
         detail = (run.stderr or run.stdout or "").strip()
         if not detail:
             detail = "ffmpeg failed"
-        budget = memory_budget()
-        if budget and (
+        if (
             "insufficient server memory headroom" in detail.lower()
             or "protect the server from its memory limit" in detail.lower()
         ):
-            free_mib = max(0, (budget[1] - budget[0]) // MIB)
             detail = (
-                f"{detail} Free memory about {free_mib} MiB; walking encode needs "
-                f"~{_WALK_ENCODER_HEADROOM // MIB} MiB free. Retry when the service is quiet, "
-                "or raise the Render instance RAM."
+                f"{detail} Walking encode is memory-gated for the 512 MiB host. "
+                "Retry when the service is quiet, or raise the Render instance RAM."
             )
         raise WalkingPresenterError("FFMPEG_FAILED", detail[:500])
 
