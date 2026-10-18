@@ -218,6 +218,17 @@ def test_browser_journey_desktop_and_iphone(tmp_path):
             mobile.click("#reload-pilot")
             mobile.wait_for_selector("#journey-status:has-text('Invitation reloaded')")
             assert mobile.input_value("#journey-token")
+            mobile.click("#load-call-sheet")
+            mobile.wait_for_selector("#banner:has-text('Call sheet loaded')")
+            sheet_text = mobile.inner_text("#pilot-output")
+            assert "Call sheet" in sheet_text
+            assert "External delivery: false" in sheet_text
+            assert "https://" not in sheet_text
+            assert "{" not in sheet_text
+            fits = mobile.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+            assert fits
             mobile.screenshot(path=str(shots / "iphone-reloaded.png"), full_page=True)
             mobile.click("#journey-expired")
             mobile.wait_for_selector("#journey-status:has-text('Expired invitation stayed closed')")

@@ -607,6 +607,48 @@ def test_authenticated_journey_invite_mock_transport_and_upload(pilot_app):
     })
     assert blocked.status_code == 422
     assert blocked.json()["detail"] == "Campaign cannot be published"
+    from app.core.nova.creative_studio.casting_pilot_models import (
+        NovaCastingInvite, NovaCastingJourneyAudit, NovaCastingMockAttempt,
+        NovaCastingMockMedia, NovaCastingPilotMessage,
+    )
+    before_restart = sessionmaker(bind=sa.create_engine(
+        pilot_app["url"], connect_args={"check_same_thread": False},
+    ))()
+    assert before_restart.query(NovaCastingMockMedia).count() >= 1
+    assert "byte" not in {column.name for column in NovaCastingMockMedia.__table__.columns if "url" in column.name or column.name == "payload"}
+    assert not any(column.name in {"file_bytes", "content", "payload"} for column in NovaCastingMockMedia.__table__.columns)
+    assert {row.action for row in before_restart.query(NovaCastingJourneyAudit).all()} >= {"invite.issued", "invite.redeemed", "mock.dispatched"}
+    assert any(row.mock_receipt.startswith("MOCK-") for row in before_restart.query(NovaCastingMockAttempt).all())
+    assert {row.delivery_state for row in before_restart.query(NovaCastingPilotMessage).all()} == {"not_sent"}
+    saved_token = before_restart.query(NovaCastingInvite).filter(NovaCastingInvite.status == "redeemed").one().token
+    before_restart.close()
+    audit = organizer.get(_path("/pilot-audit?limit=50&offset=0"))
+    assert audit.status_code == 200, audit.text
+    audit_actions = {item["action"] for item in audit.json()["items"]}
+    assert {"invite.issued", "invite.redeemed", "mock.dispatched", "upload.mock_recorded"} <= audit_actions
+    assert saved_token not in audit.text
+    assert "example.invalid" not in audit.text
+    assert other.get(_path("/pilot-audit?limit=50&offset=0")).status_code == 404
+    assert saved_token not in other.get(_path("/pilot-audit?limit=50&offset=0")).text
+    stranger = pilot_app["client_for"]("stranger")
+    assert stranger.get(_path("/pilot-audit?limit=50&offset=0")).status_code == 404
+    assert saved_token not in stranger.get(_path("/pilot-snapshot")).text
+    assert other.get(_path("/pilot-snapshot")).status_code == 404
+    assert saved_token not in other.get(_path("/pilot-snapshot")).text
     wiped = organizer.post(_path("/mock-uploads/wipe"))
     assert wiped.status_code == 200, wiped.text
     assert wiped.json()["bytes_released"] is False
+    assert wiped.json()["wiped"] >= 1
+    after_restart = sessionmaker(bind=sa.create_engine(
+        pilot_app["url"], connect_args={"check_same_thread": False},
+    ))()
+    assert after_restart.query(NovaCastingMockMedia).count() == 0
+    assert after_restart.query(NovaCastingInvite).filter(NovaCastingInvite.status == "redeemed").count() == 1
+    assert {row.delivery_state for row in after_restart.query(NovaCastingPilotMessage).all()} == {"not_sent"}
+    after_restart.close()
+    listed = organizer.get(_path(f"/applications/{application_id}/mock-uploads"))
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []
+    assert listed.json()["bytes_released"] is False
+    assert listed.json()["media_uploads_enabled"] is False
+    assert other.post(_path("/mock-uploads/wipe")).status_code == 404

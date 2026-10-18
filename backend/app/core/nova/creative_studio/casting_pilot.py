@@ -318,6 +318,7 @@ class PilotDirectory:
         self.mock_attempts: dict[str, dict] = {}
         self.mock_media: dict[str, dict] = {}
         self.journey_audit: list[dict] = []
+        self.tenant_id = ""
         self.changed = False
 
     def _new_id(self) -> str:
@@ -348,6 +349,8 @@ class PilotDirectory:
     def note_campaign(self, *, organization_id: str, tenant_id: str, campaign_id: str, status: str) -> None:
         """Remember a campaign loaded from the sandbox tables. This does not publish it."""
         safe = status if status in {"DRAFT", "CLOSED"} else "CLOSED"
+        if tenant_id and not self.tenant_id:
+            self.tenant_id = tenant_id
         self.campaigns[campaign_id] = {
             "id": campaign_id,
             "organization_id": organization_id,
@@ -808,9 +811,12 @@ class PilotDirectory:
         return text
 
     def list_audit(self, actor: Mapping, limit: int = 20, offset: int = 0) -> dict:
-        if not _reviewer(actor):
+        if not _reviewer(actor) or not _tenant_allowed(self, actor):
             raise PilotDenied("Application unavailable")
-        rows = [dict(item) for item in self.audit if item["organization_id"] == actor["organization_id"]]
+        rows = [
+            _audit_view(item) for item in (*self.audit, *self.journey_audit)
+            if _visible_to_actor(item, actor)
+        ]
         rows.sort(key=lambda item: (item["occurred_at"], item["id"]))
         return _page(rows, limit, offset)
 
@@ -998,7 +1004,7 @@ class PilotDirectory:
         if actor.get("verified") is not True or not actor.get("user_id") or not actor.get("organization_id"):
             raise PilotDenied("Application unavailable")
         role_name = actor.get("role")
-        if role_name not in {"organizer", "reviewer", "applicant"}:
+        if role_name not in {"organizer", "reviewer", "applicant"} or not _tenant_allowed(self, actor):
             raise PilotDenied("Application unavailable")
         organization_id = actor["organization_id"]
         selected = str(campaign_id or "")
@@ -1043,7 +1049,7 @@ class PilotDirectory:
             messages.sort(key=lambda item: item["id"])
         invites = []
         for row in self.invites.values():
-            if row["organization_id"] != organization_id:
+            if row["organization_id"] != organization_id or not _visible_to_actor(row, actor):
                 continue
             if selected and row["campaign_id"] != selected:
                 continue
@@ -1289,6 +1295,32 @@ def _bounds(limit: int, offset: int) -> tuple[int, int]:
 def _page(items: list, limit: int, offset: int) -> dict:
     limit, offset = _bounds(limit, offset)
     return {"items": items[offset:offset + limit], "limit": limit, "offset": offset}
+
+
+def _tenant_allowed(directory, actor: Mapping) -> bool:
+    actor_tenant = str(actor.get("tenant_id") or "")
+    directory_tenant = str(getattr(directory, "tenant_id", "") or "")
+    return not (directory_tenant and actor_tenant and directory_tenant != actor_tenant)
+
+
+def _visible_to_actor(row: Mapping, actor: Mapping) -> bool:
+    if row.get("organization_id") != actor.get("organization_id"):
+        return False
+    row_tenant = str(row.get("tenant_id") or "")
+    actor_tenant = str(actor.get("tenant_id") or "")
+    return not (row_tenant and actor_tenant and row_tenant != actor_tenant)
+
+
+def _audit_view(item: Mapping) -> dict:
+    """Return the audit fields a reviewer may see. Tokens and contact values stay out."""
+    return {
+        "id": item["id"],
+        "actor_id": item["actor_id"],
+        "organization_id": item["organization_id"],
+        "action": item["action"],
+        "object_id": item["object_id"],
+        "occurred_at": item["occurred_at"],
+    }
 
 
 def _search_blob(row: Mapping, roles: Mapping) -> str:

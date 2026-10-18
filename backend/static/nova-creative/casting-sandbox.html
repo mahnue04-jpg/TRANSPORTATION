@@ -13,9 +13,13 @@
       outline: 2px solid #1f4b3a; outline-offset: 2px;
     }
     @media (max-width: 640px) {
+      .studio-header, .studio-main { padding: 0.75rem; }
       .studio-nav { flex-direction: column; align-items: flex-start; }
+      .grid { grid-template-columns: 1fr; }
       .actions { flex-direction: column; align-items: stretch; }
-      .actions button, .actions a.button { width: 100%; }
+      .actions button, .actions a.button { width: 100%; min-height: 44px; }
+      input, select, textarea { width: 100%; max-width: 100%; }
+      .output { overflow-wrap: anywhere; word-break: break-word; }
     }
   </style>
 </head>
@@ -400,8 +404,11 @@
       $("load-audit").addEventListener("click", async function () {
         try {
           if (!(await requireSandbox())) return;
-          var page = await api(base() + "/audit?limit=50&offset=0");
-          $("applications").textContent = JSON.stringify(page.items || [], null, 2);
+          var page = await api(base() + "/pilot-audit?limit=50&offset=0");
+          var lines = (page.items || []).map(function (item) {
+            return String(item.occurred_at || "") + "  " + String(item.action || "");
+          });
+          $("applications").textContent = lines.join("\n") || "No sandbox audit rows.";
         } catch (err) { /* banner already set */ }
       });
       async function reviewCall(path, payload) {
@@ -820,9 +827,13 @@
             "Call time: " + String(sheet.call_time || ""),
             "Location: " + String(sheet.location_label || ""),
             "People: " + String(people.length),
+            "Document: " + String(sheet.document_preview || "hidden"),
             "External delivery: " + String(sheet.external_delivery)
           ];
-          $("pilot-output").textContent = summary.join("\n") + "\n\n" + JSON.stringify(sheet, null, 2);
+          people.forEach(function (person) {
+            summary.push("Receipt " + String(person.receipt || "") + " at " + String(person.call_time || ""));
+          });
+          $("pilot-output").textContent = summary.join("\n");
           show("Call sheet loaded. No notification was sent.", true);
         } catch (err) { /* banner already set */ }
       });

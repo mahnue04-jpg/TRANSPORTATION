@@ -92,6 +92,40 @@ def test_invite_is_tenant_bound_and_a_closed_campaign_cannot_mint_another():
         raise AssertionError("closed campaign redeemed an invite")
 
 
+def test_audit_lists_journey_events_without_the_token():
+    pilot = load_pilot()
+    book = _book(pilot)
+    role = book.create_role(_organizer(), "campaign-1", _role(pilot))
+    issued = book.issue_invite(_organizer(), "campaign-1", {
+        "role_id": role["id"], "expires_at": "2026-11-20T18:00:00+00:00",
+    })
+    book.redeem_invite(_applicant(), issued["token"])
+    other = {"user_id": "outsider", "organization_id": "org-b", "tenant_id": "tenant-b", "role": "organizer", "verified": True}
+    try:
+        book.list_audit(other)
+    except pilot.PilotDenied:
+        pass
+    else:
+        raise AssertionError("other tenant read the audit")
+    mismatched = {"user_id": "organizer", "organization_id": "org-a", "tenant_id": "tenant-b", "role": "organizer", "verified": True}
+    try:
+        book.snapshot(mismatched)
+    except pilot.PilotDenied:
+        pass
+    else:
+        raise AssertionError("other tenant read the snapshot")
+    page = book.list_audit(_organizer())
+    actions = {item["action"] for item in page["items"]}
+    assert "invite.issued" in actions
+    assert "invite.redeemed" in actions
+    rendered = str(page)
+    assert issued["token"] not in rendered
+    assert "example.invalid" not in rendered
+    reviewer = {"user_id": "reviewer", "organization_id": "org-a", "tenant_id": "tenant-a", "role": "reviewer", "verified": True}
+    hidden = book.list_audit(reviewer)
+    assert issued["token"] not in str(hidden)
+
+
 def test_expired_invite_does_not_open_an_application():
     pilot = load_pilot()
     book = _book(pilot)

@@ -33,13 +33,17 @@ Coded in the existing sandbox, not merged and not deployed. Public intake stays 
 | Authenticated invitation, redeem, refresh persistence, expired invite | Yes. Token stays in the organizer snapshot. Redeem reuses one draft application. Expired and closed-campaign invites stay closed | `test_nova_casting_journey.py` and the browser journey at 1280x900 and 390x844 | No | Invitations are not public links |
 | Mock transport receipts, retry, opt-out, and failure | Yes. Provider `disposable-mock`. `delivery_state` stays `not_sent` and `real_delivery` stays false | HTTP journey test and browser journey | No | Do not connect a real mail transport |
 | Disposable mock upload with MIME, size, and malware-review gate | Yes. Clean bytes stay in process memory. No public URL and no byte column. Wipe clears the hold | Unit and HTTP tests | No | `media_uploads_enabled` stays false. Do not enable public media upload |
-| Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. Cross-tenant calls return 404 | Postgres-gated journey test, `25 passed`, output has no `skipped` | No | Do not run the downgrade on a shared database |
+| Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. A mismatched tenant cannot read the snapshot or the journey audit. Wipe removes mock metadata so a new database session does not restore it | Postgres-gated file list, `26 passed`, output has no `skipped`, measured 2026-10-18 on disposable Postgres 16 | No | Do not run the downgrade on a shared database |
 
-## Preview build (2026-10-15)
+## Preview build (2026-10-18)
 
-The Netlify preview at `https://deploy-preview-339--grand-beignet-6447ea.netlify.app/` returned **404** on `/` and on the sandbox path. Cloudflare Pages reported **Build failed** on `ee670047`. This branch did not contain `website/package_public_site.py` or `netlify.toml`, which is the command those previews run. Main is merged back so the package command exists again.
+On commit `e1d30c2a`, before this follow-up, these public URLs returned **200**:
 
-`/casting/` is a noindex staging page. It has no application form. Public intake stays off. A green Pages build is still required after this commit before the preview URL can be called working.
+- `https://deploy-preview-339--grand-beignet-6447ea.netlify.app/`
+- `https://deploy-preview-339--grand-beignet-6447ea.netlify.app/casting/`
+- `https://cursor-casting-auditions-pil.amicor-public.pages.dev/casting/`
+
+`/static/nova-creative/casting-sandbox.html` on that Netlify host returned **404**. That host publishes the public site only. The page now says the signed-in sandbox is not hosted there. It still has no application form, no fetch, and `noindex`. Public intake stays off. The authenticated sandbox remains on the Nova app, which is not this public preview.
 
 ## Explicitly unavailable
 

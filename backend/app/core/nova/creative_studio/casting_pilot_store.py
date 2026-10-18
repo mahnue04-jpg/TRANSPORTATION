@@ -63,6 +63,7 @@ def _review_actor(db: Session, user_id: str, tenant_id: str, organization_id: st
     return {
         "user_id": user_id,
         "organization_id": organization_id,
+        "tenant_id": tenant_id,
         "role": role,
         "verified": True,
     }
@@ -234,6 +235,7 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
         for row in audit_rows
     ]
     tenant_id = organization.nova_tenant_id if organization is not None else ""
+    directory.tenant_id = tenant_id
     for row in campaigns:
         directory.note_campaign(
             organization_id=organization_id,
@@ -707,7 +709,13 @@ def call_sheet(*, db: Session, user_id: str, tenant_id: str, organization_id: st
     except CastingAccessDenied:
         _account(db, user_id, tenant_id)
         _org(db, organization_id, tenant_id)
-        actor = {"user_id": user_id, "organization_id": organization_id, "role": "applicant", "verified": True}
+        actor = {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "tenant_id": tenant_id,
+            "role": "applicant",
+            "verified": True,
+        }
     return _run(db, organization_id, actor, "call_sheet", role_id)
 
 
@@ -741,6 +749,7 @@ def snapshot(*, db: Session, user_id: str, tenant_id: str, organization_id: str,
         actor = {
             "user_id": user_id,
             "organization_id": organization_id,
+            "tenant_id": tenant_id,
             "role": "applicant",
             "verified": True,
         }
@@ -787,9 +796,25 @@ def record_mock_media(
 
 
 def wipe_mock_holding(*, db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
+    """Clear disposable mock metadata and this process's bytes. Nothing is published."""
     _organizer_actor(db, user_id, tenant_id, organization_id)
+    _lock_organization(db, organization_id)
+    directory = _load(db, organization_id)
+    before = _capture(directory)
+    removed = sum(1 for row in directory.mock_media.values() if row.get("organization_id") == organization_id)
+    directory.mock_media = {
+        key: row for key, row in directory.mock_media.items()
+        if row.get("organization_id") != organization_id
+    }
+    _persist(db, organization_id, directory, before)
     from .casting_mock_uploads import wipe
-    return {"wiped": wipe(), "bytes_released": False, "public_url": "", "media_uploads_enabled": False}
+    wipe()
+    return {
+        "wiped": removed,
+        "bytes_released": False,
+        "public_url": "",
+        "media_uploads_enabled": False,
+    }
 
 
 def list_mock_media(*, db: Session, user_id: str, tenant_id: str, organization_id: str, application_id: str) -> dict:

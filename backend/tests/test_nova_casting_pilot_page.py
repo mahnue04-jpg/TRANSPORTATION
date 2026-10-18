@@ -16,6 +16,9 @@ def test_public_preview_route_keeps_applications_off():
     assert 'name="viewport"' in html
     assert "noindex" in html
     assert "fetch(" not in html
+    assert "/static/nova-creative/casting-sandbox.html" not in html
+    assert "Signed-in sandbox: not hosted on this public preview" in html
+    assert "Public intake: off" in html
     assert 'lang="en"' in html
     assert 'href="#main"' in html
     assert 'aria-controls="site-nav"' in html
@@ -72,3 +75,7 @@ def test_sandbox_pilot_controls_keep_the_existing_journey():
     assert "width: 100%" in sandbox
     assert "External delivery:" in sandbox
     assert "focus-visible" in sandbox
+    assert "/pilot-audit?limit=50" in sandbox
+    assert "JSON.stringify(sheet" not in sandbox
+    assert "overflow-wrap: anywhere" in sandbox
+    assert "grid-template-columns: 1fr" in sandbox

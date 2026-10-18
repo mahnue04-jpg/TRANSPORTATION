@@ -111,13 +111,45 @@ GitHub Actions counts for this continuation are recorded on the draft pull reque
 
 Turn `NOVA_CASTING_STAGING_READS` off. Routes return 503. On a disposable database, downgrade revision `20261015_casting_journey` drops only the four journey tables. Downgrade of `20261014_casting_pilot` then drops only the earlier pilot tables. Do not downgrade either revision on a shared database. Production upgrade stamps the revision and does not create tables.
 
+## Follow-up 2026-10-18
+
+Prior owner `bc-8ffc6cff` and every other Casting agent on this branch were `IDLE`. This session is `bc-2c6fd122` on the same branch. It did not resume the idle session.
+
+Before, at `e1d30c2a`:
+
+- Load audit called `/audit` and did not show journey rows (`invite.issued`, `invite.redeemed`, `mock.dispatched`, `upload.mock_recorded`).
+- Wipe cleared process memory only. Mock metadata rows came back in a new database session.
+- A caller whose tenant did not match the organization could still be handed the in-memory snapshot when the organization id matched.
+- The phone call sheet appended raw JSON, including long https values.
+- The public `/casting/` page pointed at `/static/nova-creative/casting-sandbox.html`, which returns 404 on the Netlify and Cloudflare public previews.
+- CI on `e1d30c2a` was green. Root and `/casting/` returned 200. The sandbox static path on Netlify returned 404.
+
+After this follow-up, still on the draft branch:
+
+- `/pilot-audit` returns those journey actions for the organizer. The token and contact email are not in the payload. Another tenant and a same-tenant non-member receive 404.
+- Wipe deletes the organization's mock metadata rows and the in-memory bytes. A new engine sees zero mock-media rows. `bytes_released` stays false. The redeemed invite and `delivery_state = not_sent` remain.
+- Snapshot and audit refuse a mismatched tenant.
+- The phone call sheet is a short summary. The iPhone 390x844 run fitted the viewport, showed `External delivery: false`, and did not print `https://` or raw JSON.
+- The public preview states that it does not host the signed-in sandbox.
+
+Local disposable Postgres 16, `CASTING_TEST_POSTGRES_URL=postgresql+psycopg2://casting_test:casting_test@127.0.0.1:5432/casting_test`:
+
+| Set | Result |
+| --- | --- |
+| `preview-regressions` file list | `103 passed` |
+| `casting-postgres-gated` file list | `26 passed`, and the output does not contain `skipped` |
+| `casting-db-integration` file list | `32 passed` |
+| `test_nova_casting_pilot_page.py` and `test_nova_casting_pilot_auth.py` | `12 passed` |
+| Authenticated browser journey, desktop 1280x900 and iPhone 390x844 | `1 passed` |
+
+GitHub Actions for this commit are recorded on the draft pull request after the push. The local counts above are not that run.
+
 ## Blockers
 
-- No issue comment was posted. The token cannot write to GitHub issues.
-- No staging host is approved. The Netlify preview is the static site for the previous commit, not an approved Casting API. Local Postgres was used only for the gated tests above.
-- GitHub Actions on commit `5a315388` already reported `casting-postgres-gated` at 18 passed. This continuation adds the journey file to that job. Counts for the new commit are filled in on the draft pull request after the push.
-- Public applicant intake, real outbound messages, and a paid SMS or WhatsApp provider still need a separate owner decision.
-- Antivirus remains structural-only unless ClamAV is installed on a disposable host. The mock upload gate uses that same structural scan. A clean result still does not release bytes or a public URL.
-- Platform accounts are still required. Casting does not register users.
-- Cloudflare Pages failed on commit `1fd90997` for project `amicor-public`. The check summary was "Build failed". The build log is only on the Cloudflare dashboard. This lane does not own the public site, so that build was not changed.
-- Creative Studio video rendering was not modified. This pilot does not generate audition media.
+- This draft is not merged and not deployed. Owner approval is still required before either.
+- No staging API host is approved. The Netlify and Cloudflare previews publish the public site. They do not run the authenticated sandbox.
+- Public intake, real email, SMS, and WhatsApp stay off until a separate owner decision.
+- Antivirus remains structural-only unless ClamAV is installed on a disposable host. A clean mock scan still does not release bytes or a public URL.
+- Casting does not register Nova users. A sandbox demo still needs an existing account.
+- GitHub Actions for this follow-up commit are not the local counts above. Read the draft pull request after the push.
+- Work & Revenue, Creative Studio rendering, Synapse #311, and QA #312 were not changed.
