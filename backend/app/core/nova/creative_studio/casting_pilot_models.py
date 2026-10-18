@@ -248,3 +248,34 @@ class NovaCastingJourneyAudit(Base):
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     object_id: Mapped[str] = mapped_column(String(48), nullable=False)
     occurred_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCastingFaqTicket(Base):
+    """Sandbox subscriber question. Billing flags stay false and nothing is sent."""
+
+    __tablename__ = "nova_casting_faq_tickets"
+    __table_args__ = (
+        Index("ix_nova_casting_faq_org", "organization_id", "created_at"),
+        CheckConstraint(
+            "status IN ('answered', 'waiting_for_person', 'acknowledged')",
+            name="ck_nova_casting_faq_status",
+        ),
+        CheckConstraint("external_delivery = 'false'", name="ck_nova_casting_faq_delivery"),
+        CheckConstraint("credentials_stored = 'false'", name="ck_nova_casting_faq_credentials"),
+        CheckConstraint("billing_collected = 'false'", name="ck_nova_casting_faq_billing"),
+        CheckConstraint("length(question) > 0 AND length(question) <= 500", name="ck_nova_casting_faq_question"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("nova_casting_organizations.id"), nullable=False)
+    asker_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id"), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    topic: Mapped[str] = mapped_column(String(40), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    human_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    external_delivery: Mapped[str] = mapped_column(String(8), nullable=False, default="false", server_default="false")
+    credentials_stored: Mapped[str] = mapped_column(String(8), nullable=False, default="false", server_default="false")
+    billing_collected: Mapped[str] = mapped_column(String(8), nullable=False, default="false", server_default="false")
+    acknowledged_by: Mapped[str] = mapped_column(String(36), nullable=False, default="", server_default="")
+    acknowledged_at: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)

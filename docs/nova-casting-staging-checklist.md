@@ -34,6 +34,7 @@ Coded in the existing sandbox, not merged and not deployed. Public intake stays 
 | Mock transport receipts, retry, opt-out, and failure | Yes. Provider `disposable-mock`. `delivery_state` stays `not_sent` and `real_delivery` stays false | HTTP journey test and browser journey | No | Do not connect a real mail transport |
 | Disposable mock upload with MIME, size, and malware-review gate | Yes. Clean bytes stay in process memory. No public URL and no byte column. Wipe clears the hold | Unit and HTTP tests | No | `media_uploads_enabled` stays false. Do not enable public media upload |
 | Journey migration reversibility and tenant isolation | Yes. Revision `20261015_casting_journey`. Downgrade drops four tables. A mismatched tenant cannot read the snapshot or the journey audit. Wipe removes mock metadata so a new database session does not restore it | Postgres-gated file list, `26 passed`, output has no `skipped`, measured 2026-10-18 on disposable Postgres 16 | No | Do not run the downgrade on a shared database |
+| Fictional subscriber FAQ with human escalation | Yes, signed-in sandbox only. Listed Harborlight answers are canned. Unlisted, ticket, and billing questions wait for a person. A reviewer acknowledge does not send. Card numbers are redacted. Public `/casting/` has no form | `test_nova_casting_subscriber_faq.py` | No | No billing credentials, no public intake, and no outbound message |
 
 ## Preview build (2026-10-18)
 

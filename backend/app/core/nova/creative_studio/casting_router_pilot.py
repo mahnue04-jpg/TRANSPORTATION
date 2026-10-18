@@ -92,6 +92,11 @@ class MockDispatchBody(BaseModel):
     fail: bool = False
 
 
+class FaqBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question: str
+
+
 class ScheduleBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     role_id: str
@@ -350,6 +355,38 @@ def export_csv(organization_id: str, include_contact: str = "false",
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=casting-sandbox.csv", "Cache-Control": "private, no-store"},
     )
+
+
+@pilot_router.post("/organizations/{organization_id}/subscriber-faq")
+def ask_subscriber_faq(organization_id: str, payload: dict = Body(...),
+                       user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    body = _parse(FaqBody, payload)
+    return _call(lambda: _store().ask_subscriber_faq(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        question=body["question"],
+    ))
+
+
+@pilot_router.get("/organizations/{organization_id}/subscriber-faq")
+def list_subscriber_faq(organization_id: str, user: UserContext = Depends(get_current_user_context),
+                        db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    return _call(lambda: _store().list_subscriber_faq(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+    ))
+
+
+@pilot_router.post("/organizations/{organization_id}/subscriber-faq/{ticket_id}/acknowledge")
+def acknowledge_subscriber_faq(organization_id: str, ticket_id: str,
+                               user: UserContext = Depends(get_current_user_context), db=Depends(pilot_session)):
+    user_id, tenant_id = _identity(user)
+    if not ticket_id or len(ticket_id) > 48:
+        raise HTTPException(status_code=422, detail="Request rejected")
+    return _call(lambda: _store().acknowledge_subscriber_faq(
+        db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
+        ticket_id=ticket_id,
+    ))
 
 
 @pilot_router.get("/organizations/{organization_id}/pilot-audit")

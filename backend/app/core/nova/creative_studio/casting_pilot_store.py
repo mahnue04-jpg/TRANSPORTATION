@@ -21,6 +21,7 @@ from .casting_db_writes import (
 from .casting_identity import applicant_from_verified_session
 from .casting_pilot import PilotDenied, PilotDirectory, PilotRejected
 from .casting_pilot_models import (
+    NovaCastingFaqTicket,
     NovaCastingIntake,
     NovaCastingInvite,
     NovaCastingJourneyAudit,
@@ -93,6 +94,13 @@ def _applicant_context(db: Session, user_id: str, tenant_id: str, organization_i
     return actor, application, campaign
 
 
+def _faq_actor(db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
+    try:
+        return _review_actor(db, user_id, tenant_id, organization_id)
+    except CastingAccessDenied:
+        return _applicant_actor(db, user_id, tenant_id, organization_id)
+
+
 def _applicant_actor(db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
     _guard()
     _account(db, user_id, tenant_id)
@@ -124,6 +132,7 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
         attempts = db.query(NovaCastingMockAttempt).filter(NovaCastingMockAttempt.organization_id == organization_id).all()
         media_rows = db.query(NovaCastingMockMedia).filter(NovaCastingMockMedia.organization_id == organization_id).all()
         journey_rows = db.query(NovaCastingJourneyAudit).filter(NovaCastingJourneyAudit.organization_id == organization_id).all()
+        faq_rows = db.query(NovaCastingFaqTicket).filter(NovaCastingFaqTicket.organization_id == organization_id).all()
         organization = db.query(NovaCastingOrganization).filter(NovaCastingOrganization.id == organization_id).one_or_none()
         campaigns = db.query(NovaCastingCampaign).filter(NovaCastingCampaign.owner_id == organization_id).all()
     except SQLAlchemyError as exc:
@@ -300,6 +309,23 @@ def _load(db: Session, organization_id: str) -> PilotDirectory:
         }
         for row in journey_rows
     ]
+    for row in faq_rows:
+        directory.faq_tickets[row.id] = {
+            "id": row.id,
+            "organization_id": row.organization_id,
+            "asker_id": row.asker_id,
+            "question": row.question,
+            "topic": row.topic,
+            "answer": row.answer,
+            "status": row.status,
+            "human_required": bool(row.human_required),
+            "external_delivery": "false",
+            "credentials_stored": "false",
+            "billing_collected": "false",
+            "acknowledged_by": row.acknowledged_by or "",
+            "acknowledged_at": row.acknowledged_at or "",
+            "created_at": row.created_at,
+        }
     return directory
 
 
@@ -332,6 +358,7 @@ def _capture(directory: PilotDirectory) -> dict:
         "mock_attempts": copy.deepcopy(directory.mock_attempts),
         "mock_media": copy.deepcopy(directory.mock_media),
         "journey_audit": {item["id"] for item in directory.journey_audit},
+        "faq_tickets": copy.deepcopy(directory.faq_tickets),
     }
 
 
@@ -399,7 +426,9 @@ def _persist(db: Session, organization_id: str, directory: PilotDirectory, befor
         invites = directory.invites
         attempts = directory.mock_attempts
         media = directory.mock_media
+        faq_tickets = directory.faq_tickets
         deleted = False
+        deleted |= _delete_absent(db, NovaCastingFaqTicket, organization_id, before["faq_tickets"], faq_tickets)
         deleted |= _delete_absent(db, NovaCastingMockMedia, organization_id, before["mock_media"], media)
         deleted |= _delete_absent(db, NovaCastingMockAttempt, organization_id, before["mock_attempts"], attempts)
         deleted |= _delete_absent(db, NovaCastingInvite, organization_id, before["invites"], invites)
@@ -419,6 +448,7 @@ def _persist(db: Session, organization_id: str, directory: PilotDirectory, befor
         _replace_invites(db, organization_id, before["invites"], invites)
         _replace_attempts(db, organization_id, before["mock_attempts"], attempts)
         _replace_mock_media(db, organization_id, before["mock_media"], media)
+        _replace_faq_tickets(db, organization_id, before["faq_tickets"], faq_tickets)
         _replace_rubrics(db, organization_id, before["rubrics"], rubrics)
         for item in directory.audit:
             if item["id"] in before["audit"] or item["organization_id"] != organization_id:
@@ -549,6 +579,21 @@ def _replace_mock_media(db: Session, organization_id: str, before: dict, rows: d
         )
 
     _upsert(db, NovaCastingMockMedia, organization_id, before, rows, build)
+
+
+def _replace_faq_tickets(db: Session, organization_id: str, before: dict, rows: dict) -> None:
+    def build(row: dict) -> NovaCastingFaqTicket:
+        return NovaCastingFaqTicket(
+            id=row["id"], organization_id=organization_id, asker_id=row["asker_id"],
+            question=row["question"], topic=row["topic"], answer=row["answer"],
+            status=row["status"], human_required=bool(row["human_required"]),
+            external_delivery="false", credentials_stored="false", billing_collected="false",
+            acknowledged_by=row.get("acknowledged_by") or "",
+            acknowledged_at=row.get("acknowledged_at") or "",
+            created_at=row["created_at"],
+        )
+
+    _upsert(db, NovaCastingFaqTicket, organization_id, before, rows, build)
 
 
 def _bind_redeemed_application(db: Session, organization_id: str, user_id: str, result: dict) -> dict:
@@ -824,3 +869,18 @@ def list_mock_media(*, db: Session, user_id: str, tenant_id: str, organization_i
     except CastingAccessDenied:
         actor, _application, _campaign = _applicant_context(db, user_id, tenant_id, organization_id, application_id)
     return _run(db, organization_id, actor, "list_mock_media", application_id)
+
+
+def ask_subscriber_faq(*, db: Session, user_id: str, tenant_id: str, organization_id: str, question: str) -> dict:
+    actor = _faq_actor(db, user_id, tenant_id, organization_id)
+    return _run(db, organization_id, actor, "ask_subscriber_faq", question)
+
+
+def list_subscriber_faq(*, db: Session, user_id: str, tenant_id: str, organization_id: str) -> dict:
+    actor = _faq_actor(db, user_id, tenant_id, organization_id)
+    return _run(db, organization_id, actor, "list_subscriber_faq")
+
+
+def acknowledge_subscriber_faq(*, db: Session, user_id: str, tenant_id: str, organization_id: str, ticket_id: str) -> dict:
+    actor = _review_actor(db, user_id, tenant_id, organization_id)
+    return _run(db, organization_id, actor, "acknowledge_subscriber_faq", ticket_id)

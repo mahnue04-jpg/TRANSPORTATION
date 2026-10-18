@@ -71,6 +71,7 @@ SAFE_REASONS = frozenset({
     "Rejected by security scan",
     "Unsupported video type",
     "Invalid video size",
+    "Invalid question",
 })
 _EMAIL = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}$")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .'-]{0,78}$")
@@ -278,6 +279,35 @@ def sample_harborlight_plan() -> dict:
     }
 
 
+def _faq_participant(actor: Mapping) -> bool:
+    return bool(
+        actor.get("user_id")
+        and actor.get("verified") is True
+        and actor.get("role") in {"applicant", "reviewer", "organizer"}
+        and actor.get("organization_id")
+    )
+
+
+def _faq_view(row: Mapping, *, include_asker: bool) -> dict:
+    view = {
+        "id": row["id"],
+        "topic": row["topic"],
+        "question": row["question"],
+        "answer": row["answer"],
+        "status": row["status"],
+        "human_required": bool(row["human_required"]),
+        "external_delivery": False,
+        "credentials_stored": False,
+        "billing_collected": False,
+        "created_at": row["created_at"],
+        "label": "Demo / Early Access",
+    }
+    if include_asker:
+        view["asker_id"] = row["asker_id"]
+        view["acknowledged_by"] = row.get("acknowledged_by") or ""
+    return view
+
+
 def _organizer(actor: Mapping) -> bool:
     return bool(
         actor.get("user_id")
@@ -318,6 +348,7 @@ class PilotDirectory:
         self.mock_attempts: dict[str, dict] = {}
         self.mock_media: dict[str, dict] = {}
         self.journey_audit: list[dict] = []
+        self.faq_tickets: dict[str, dict] = {}
         self.tenant_id = ""
         self.changed = False
 
@@ -998,6 +1029,73 @@ class PilotDirectory:
             "bytes_released": False,
             "public_url": "",
         }
+
+    def ask_subscriber_faq(self, actor: Mapping, question: str) -> dict:
+        """Answer from the fictional list or hold the question for a person."""
+        from .casting_subscriber_faq import classify_subscriber_question, redact_subscriber_question
+
+        if not _faq_participant(actor) or not _tenant_allowed(self, actor):
+            raise PilotDenied("Application unavailable")
+        cleaned = redact_subscriber_question(question)
+        decision = classify_subscriber_question(question)
+        if decision["status"] == "rejected" or not cleaned:
+            raise PilotRejected("Invalid question")
+        ticket = {
+            "id": self._new_id(),
+            "organization_id": actor["organization_id"],
+            "asker_id": actor["user_id"],
+            "question": cleaned,
+            "topic": decision["topic"],
+            "answer": decision["answer"],
+            "status": decision["status"],
+            "human_required": bool(decision["human_required"]),
+            "external_delivery": "false",
+            "credentials_stored": "false",
+            "billing_collected": "false",
+            "acknowledged_by": "",
+            "acknowledged_at": "",
+            "created_at": self.now.isoformat(),
+        }
+        self.faq_tickets[ticket["id"]] = ticket
+        self.changed = True
+        return _faq_view(ticket, include_asker=actor.get("role") != "applicant")
+
+    def list_subscriber_faq(self, actor: Mapping) -> dict:
+        if not _faq_participant(actor) or not _tenant_allowed(self, actor):
+            raise PilotDenied("Application unavailable")
+        include_asker = actor.get("role") != "applicant"
+        items = []
+        for row in self.faq_tickets.values():
+            if row["organization_id"] != actor["organization_id"]:
+                continue
+            if actor.get("role") == "applicant" and row["asker_id"] != actor["user_id"]:
+                continue
+            items.append(_faq_view(row, include_asker=include_asker))
+        items.sort(key=lambda item: (item["created_at"], item["id"]))
+        return {
+            "items": items[:PAGE_LIMIT],
+            "external_delivery": False,
+            "billing_collected": False,
+            "credentials_stored": False,
+        }
+
+    def acknowledge_subscriber_faq(self, actor: Mapping, ticket_id: str) -> dict:
+        if not _reviewer(actor) or not _tenant_allowed(self, actor):
+            raise PilotDenied("Application unavailable")
+        row = self.faq_tickets.get(str(ticket_id or ""))
+        if row is None or row["organization_id"] != actor["organization_id"]:
+            raise PilotDenied("Application unavailable")
+        if row["status"] != "waiting_for_person":
+            raise PilotRejected("Invalid question")
+        row["status"] = "acknowledged"
+        row["human_required"] = True
+        row["acknowledged_by"] = actor["user_id"]
+        row["acknowledged_at"] = self.now.isoformat()
+        row["external_delivery"] = "false"
+        row["credentials_stored"] = "false"
+        row["billing_collected"] = "false"
+        self.changed = True
+        return _faq_view(row, include_asker=True)
 
     def snapshot(self, actor: Mapping, campaign_id: str = "") -> dict:
         """Read the saved sandbox copy. This does not create a row or send a message."""

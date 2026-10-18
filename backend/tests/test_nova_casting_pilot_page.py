@@ -79,3 +79,12 @@ def test_sandbox_pilot_controls_keep_the_existing_journey():
     assert "JSON.stringify(sheet" not in sandbox
     assert "overflow-wrap: anywhere" in sandbox
     assert "grid-template-columns: 1fr" in sandbox
+    assert 'id="faq-question"' in sandbox
+    assert "/subscriber-faq" in sandbox
+    faq = sandbox.split('aria-label="Subscriber FAQ"', 1)[1].split("<section", 1)[0]
+    assert 'type="password"' not in faq
+    assert "cc-number" not in faq
+    assert "billing" in faq.lower()
+    assert "No card, password, or account credential is collected" in faq
+    assert "External delivery: false" in faq
+    assert "<form" not in (Path(__file__).resolve().parents[2] / "website" / "casting" / "index.html").read_text(encoding="utf-8").lower()

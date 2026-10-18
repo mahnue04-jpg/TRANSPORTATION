@@ -197,6 +197,21 @@
       <p id="pilot-message" class="hint">No message draft yet. Outbound delivery stays off.</p>
       <pre id="pilot-output" class="output" aria-live="polite">Pilot results appear here. No invitation is sent.</pre>
     </section>
+    <section class="card" aria-label="Subscriber FAQ">
+      <h2>Subscriber FAQ <span class="badge">Demo / Early Access</span></h2>
+      <p class="hint">Fictional Harborlight subscriber questions for this signed-in sandbox. Listed answers are canned. Anything else, including tickets and billing, waits for a person. No card, password, or account credential is collected, and no message is sent.</p>
+      <form id="faq-form" class="grid">
+        <label class="wide">Question
+          <textarea id="faq-question" rows="3" maxlength="500" required placeholder="When is the fictional callback?"></textarea>
+        </label>
+        <div class="actions wrap">
+          <button type="submit" id="ask-faq">Ask the demo</button>
+          <button type="button" id="load-faq" class="secondary">Load questions</button>
+          <button type="button" id="ack-faq" class="secondary">Person acknowledges</button>
+        </div>
+      </form>
+      <p id="faq-status" class="hint" aria-live="polite">No subscriber question yet. External delivery: false.</p>
+    </section>
     <section>
       <h2>Authenticated sandbox journey</h2>
       <p class="hint">Draft campaign, invitation, https audition link, receipt, review, mock transport, call sheet, and export. Invitations are redeemed in this signed-in session. Mock upload bytes stay in disposable memory and are not played or published.</p>
@@ -982,6 +997,50 @@
           var wiped = await api(base() + "/mock-uploads/wipe", { method: "POST" });
           $("journey-status").textContent = "Wiped " + String(wiped.wiped) + " mock object(s). Bytes released: " + String(wiped.bytes_released) + ".";
           show("Disposable mock memory cleared. Nothing was published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      var faqTicketId = "";
+      $("faq-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var asked = await api(base() + "/subscriber-faq", {
+            method: "POST",
+            body: JSON.stringify({ question: $("faq-question").value })
+          });
+          faqTicketId = asked.id || "";
+          $("faq-status").textContent = "Topic " + asked.topic + ". Status " + asked.status
+            + ". Human required: " + String(asked.human_required)
+            + ". External delivery: " + String(asked.external_delivery)
+            + ". Billing collected: " + String(asked.billing_collected)
+            + ". " + asked.answer;
+          show("Subscriber question saved in the sandbox. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-faq").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/subscriber-faq");
+          var first = (page.items || [])[0];
+          if (first) faqTicketId = first.id;
+          $("faq-status").textContent = "Saved questions: " + String((page.items || []).length)
+            + ". External delivery: " + String(page.external_delivery)
+            + ". Billing collected: " + String(page.billing_collected) + ".";
+          show("Subscriber questions reloaded. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("ack-faq").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          if (!faqTicketId) {
+            show("Load a question that is waiting for a person first.", false);
+            return;
+          }
+          var acked = await api(base() + "/subscriber-faq/" + encodeURIComponent(faqTicketId) + "/acknowledge", { method: "POST" });
+          $("faq-status").textContent = "Status " + acked.status
+            + ". External delivery: " + String(acked.external_delivery)
+            + ". A person acknowledged the question. Nothing was sent.";
+          show("A person acknowledged the question. Nothing was sent.", true);
         } catch (err) { /* banner already set */ }
       });
       if (token()) {

@@ -62,6 +62,7 @@ def test_sqlite_pilot_persists_intake_and_refuses_delivery(monkeypatch):
         casting_pilot_models.NovaCastingMockAttempt.__table__,
         casting_pilot_models.NovaCastingMockMedia.__table__,
         casting_pilot_models.NovaCastingJourneyAudit.__table__,
+        casting_pilot_models.NovaCastingFaqTicket.__table__,
     ]
     for table in tables:
         table.create(bind=engine, checkfirst=True)

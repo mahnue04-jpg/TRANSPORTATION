@@ -70,6 +70,7 @@ def _build_app(tmp_path):
         casting_pilot_models.NovaCastingMockAttempt.__table__,
         casting_pilot_models.NovaCastingMockMedia.__table__,
         casting_pilot_models.NovaCastingJourneyAudit.__table__,
+        casting_pilot_models.NovaCastingFaqTicket.__table__,
     ]
     for table in tables:
         table.create(bind=engine, checkfirst=True)
