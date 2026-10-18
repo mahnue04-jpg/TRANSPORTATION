@@ -1421,8 +1421,17 @@
       var status = polled && polled.job && polled.job.status;
       if (status === "ERROR") {
         showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
-      } else if (status === "GENERATED" && (polled.asset && polled.asset.url || rendered.asset && rendered.asset.url)) {
-        showBanner(successMessage, true);
+      } else if (status === "GENERATED") {
+        // Confirm the result survived a new API read; a job response alone is not a saved MP4.
+        var persisted = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+        var expectedUrl = (polled.asset && polled.asset.url) || (rendered.asset && rendered.asset.url);
+        var saved = (persisted.assets || []).some(function (asset) {
+          return asset.kind === "video" && asset.status === "GENERATED" &&
+            asset.media_available !== false && asset.url && asset.url === expectedUrl &&
+            (endpoint !== "/assemble/walking-commercial-30s" ||
+              (asset.metadata && asset.metadata.render_mode === "local_walking_commercial_30s"));
+        });
+        showBanner(saved ? successMessage : "Render completed but the saved MP4 is not yet confirmed in project assets. Refresh and inspect before retrying.", saved);
       } else {
         showBanner("Render has not confirmed a saved playable MP4. Check the project assets and job status before trying again.", false);
       }
