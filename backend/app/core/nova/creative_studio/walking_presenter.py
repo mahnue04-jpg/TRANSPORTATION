@@ -25,9 +25,10 @@ from app.core.nova.creative_studio.media_runtime import MIB, SERVER_RESERVE, mem
 from app.core.nova.creative_studio.presenter_media import srt_text
 
 # Light local encodes only — keep headroom low enough for Render starter RAM.
-_WALK_ENCODER_HEADROOM = 64 * MIB
+# Live 512 MiB hosts often sit near ~64 MiB free; require less than that to start.
+_WALK_ENCODER_HEADROOM = 48 * MIB
 # Mid-encode kill floor for walking only (shared SERVER_RESERVE=96 is too strict on 512 MiB).
-_WALK_ENCODE_RESERVE = 40 * MIB
+_WALK_ENCODE_RESERVE = 32 * MIB
 _WALK_CHUNK_SECONDS = 4.0
 
 # Spoken form for TTS; captions keep the brand spelling AMICOR.
