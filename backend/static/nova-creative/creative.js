@@ -1020,6 +1020,16 @@
     }
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
     var project = detail.project || {};
+    // A completed 30s commercial is a saved asset, not a request to render again.
+    var saved30s = (detail.assets || []).filter(function (asset) {
+      return asset.kind === "video" && asset.status === "GENERATED" &&
+        asset.url && asset.media_available !== false && asset.metadata &&
+        asset.metadata.render_mode === "local_walking_commercial_30s";
+    }).pop();
+    var walk30Button = $("build-walking-commercial-30s");
+    if (walk30Button) {
+      walk30Button.textContent = saved30s ? "View completed 30s video" : "Build 30s walking commercial";
+    }
     var production = (project.metadata && project.metadata.production_settings) || {};
     if ($("project-title")) $("project-title").value = project.title || "";
     if ($("project-type") && project.project_type) $("project-type").value = project.project_type;
@@ -1381,6 +1391,22 @@
         showBanner("No Studio project found. Sign in, then click Select Second Commercial (or create a 30s project).", false);
         return;
       }
+      // Never rerender a completed commercial just to view it; rendering may be costly.
+      if (endpoint === "/assemble/walking-commercial-30s") {
+        var current = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+        var finished = (current.assets || []).filter(function (asset) {
+          return asset.kind === "video" && asset.status === "GENERATED" &&
+            asset.url && asset.media_available !== false && asset.metadata &&
+            asset.metadata.render_mode === "local_walking_commercial_30s";
+        }).pop();
+        if (finished) {
+          await refreshAssets();
+          var list = $("asset-list");
+          if (list && list.scrollIntoView) list.scrollIntoView({behavior: "smooth", block: "start"});
+          showBanner("Completed 30s video is saved below. Press Play or Download; no new render was started.", true);
+          return;
+        }
+      }
       showBanner(startMessage + " Active: " + projectId, true);
       var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + endpoint, {
         method: "POST",
@@ -1395,8 +1421,10 @@
       var status = polled && polled.job && polled.job.status;
       if (status === "ERROR") {
         showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
-      } else {
+      } else if (status === "GENERATED" && (polled.asset && polled.asset.url || rendered.asset && rendered.asset.url)) {
         showBanner(successMessage, true);
+      } else {
+        showBanner("Render has not confirmed a saved playable MP4. Check the project assets and job status before trying again.", false);
       }
     } catch (err) {
       showBanner(err.message || "Walking render failed.", false);
