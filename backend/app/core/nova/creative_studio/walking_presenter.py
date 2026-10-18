@@ -604,6 +604,57 @@ def _rms_envelope(wav_path: Path, *, fps: int, frame_count: int) -> list[float]:
     return [min(1.0, value / peak) for value in envelope]
 
 
+def _prepare_presenter_plate(presenter_image: Path | None, *, width: int, height: int):
+    """Load/resize Genova photoreal still once for the whole render (memory-safe).
+
+    Returns (plate_image, mouth_y_ratio) or (None, None).
+    Landscape full-body Genova stills place the face near the top of a 9:16 crop;
+    portrait headshots keep the mouth lower.
+    """
+    if presenter_image is None:
+        return None, None
+    path = Path(presenter_image)
+    if not path.is_file():
+        return None, None
+    from PIL import Image
+
+    plate = Image.open(path).convert("RGB")
+    src_w, src_h = plate.size
+    # Cover the vertical frame while keeping the presenter centered.
+    scale = max(width / max(1, src_w), height / max(1, src_h))
+    resized = plate.resize((max(1, int(src_w * scale)), max(1, int(src_h * scale))), Image.Resampling.BILINEAR)
+    left = max(0, (resized.size[0] - width) // 2)
+    top = max(0, (resized.size[1] - height) // 2)
+    cropped = resized.crop((left, top, left + width, top + height))
+    plate.close()
+    resized.close()
+    # Full-body landscape sources → face near top; portrait headshots → mid-upper face.
+    mouth_y_ratio = 0.155 if src_w >= src_h else 0.38
+    return cropped, mouth_y_ratio
+
+
+def _paste_plate_with_motion(image, plate, *, x_shift: int, y_shift: int) -> None:
+    """Paste the Genova plate with walk offsets and fill edge gaps from plate borders."""
+    width, height = image.size
+    image.paste(plate, (x_shift, y_shift))
+    if x_shift > 0:
+        strip = plate.crop((0, 0, 1, height)).resize((x_shift, height))
+        image.paste(strip, (0, max(0, y_shift)))
+        strip.close()
+    elif x_shift < 0:
+        strip = plate.crop((width - 1, 0, width, height)).resize((-x_shift, height))
+        image.paste(strip, (width + x_shift, max(0, y_shift)))
+        strip.close()
+    if y_shift > 0:
+        strip = plate.crop((0, 0, width, 1)).resize((width, y_shift))
+        image.paste(strip, (0, 0))
+        strip.close()
+    elif y_shift < 0:
+        strip = plate.crop((0, height - 1, width, height)).resize((width, -y_shift))
+        image.paste(strip, (0, height + y_shift))
+        strip.close()
+
+
 def _draw_walking_frame(
     *,
     width: int,
@@ -614,111 +665,134 @@ def _draw_walking_frame(
     caption_line: str,
     cta_text: str = "getamicor.com/nova-today",
     fade_seconds: float = 2.0,
+    presenter_plate=None,
+    mouth_y_ratio: float = 0.18,
 ):
     from PIL import Image, ImageDraw, ImageFont
-
-    image = Image.new("RGB", (width, height), (12, 28, 48))
-    draw = ImageDraw.Draw(image)
-
-    # Soft studio backdrop
-    for y in range(height):
-        blend = y / max(1, height - 1)
-        color = (
-            int(12 + 28 * blend),
-            int(28 + 40 * blend),
-            int(48 + 36 * blend),
-        )
-        draw.line([(0, y), (width, y)], fill=color)
-    draw.ellipse((width * 0.15, height * 0.08, width * 0.95, height * 0.42), fill=(28, 62, 92))
-    draw.rectangle((0, int(height * 0.78), width, height), fill=(22, 40, 58))
 
     # Walk cycle: one full step ~0.55s
     phase = (t / 0.55) * math.pi * 2
     stride = math.sin(phase)
     bob = abs(math.sin(phase)) * 10
-    cx = int(width * 0.48 + math.sin(t * 0.7) * 18)
-    base_y = int(height * 0.72 - bob)
+    mouth_v = max(0.0, min(1.0, float(mouth)))
 
-    skin = (198, 142, 104)
-    hair = (28, 18, 14)
-    blazer = (28, 78, 132)
-    pants = (24, 36, 58)
-    shoes = (20, 20, 24)
-    shirt = (236, 242, 248)
+    if presenter_plate is not None:
+        # Photoreal Genova plate with walk-illusion motion + phoneme mouth aperture.
+        # This is NOT a paid Kling/D-ID re-synthesis; it reuses an existing Genova still.
+        image = Image.new("RGB", (width, height), (12, 28, 48))
+        x_shift = int(14 * stride) + int(8 * math.sin(t * 2.1))
+        y_shift = int(-bob)
+        _paste_plate_with_motion(image, presenter_plate, x_shift=x_shift, y_shift=y_shift)
+        # Scale mouth to face size: full-body plates have a small face near the top.
+        face_scale = max(0.45, min(1.0, float(mouth_y_ratio or 0.18) / 0.22))
+        mx = width // 2 + x_shift // 3
+        my = int(height * float(mouth_y_ratio or 0.18)) + y_shift
+        if mouth_v > 0.08:
+            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            odraw = ImageDraw.Draw(overlay)
+            open_px = max(1, int((1 + 7 * mouth_v) * face_scale))
+            width_px = max(3, int((5 + 6 * mouth_v) * face_scale))
+            alpha = int(40 + 90 * mouth_v)
+            odraw.ellipse(
+                (mx - width_px, my - open_px // 2, mx + width_px, my + open_px // 2 + 1),
+                fill=(70, 25, 35, alpha),
+            )
+            if mouth_v > 0.35:
+                inner = max(1, width_px - 2)
+                odraw.ellipse(
+                    (mx - inner, my - max(1, open_px // 4), mx + inner, my + max(1, open_px // 3)),
+                    fill=(35, 12, 18, int(alpha * 0.85)),
+                )
+            image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+            overlay.close()
+        draw = ImageDraw.Draw(image)
+        visual_mode = "genova_photoreal_plate"
+    else:
+        image = Image.new("RGB", (width, height), (12, 28, 48))
+        draw = ImageDraw.Draw(image)
+        # Soft studio backdrop
+        for y in range(height):
+            blend = y / max(1, height - 1)
+            color = (
+                int(12 + 28 * blend),
+                int(28 + 40 * blend),
+                int(48 + 36 * blend),
+            )
+            draw.line([(0, y), (width, y)], fill=color)
+        draw.ellipse((width * 0.15, height * 0.08, width * 0.95, height * 0.42), fill=(28, 62, 92))
+        draw.rectangle((0, int(height * 0.78), width, height), fill=(22, 40, 58))
 
-    # Legs (walking)
-    hip = (cx, base_y - 210)
-    left_knee = (cx - 18 + int(42 * stride), base_y - 110)
-    right_knee = (cx + 18 - int(42 * stride), base_y - 110)
-    left_foot = (left_knee[0] - 8 + int(28 * stride), base_y - 8)
-    right_foot = (right_knee[0] + 8 - int(28 * stride), base_y - 8)
-    draw.line([hip, left_knee, left_foot], fill=pants, width=18)
-    draw.line([hip, right_knee, right_foot], fill=pants, width=18)
-    draw.ellipse((left_foot[0] - 16, left_foot[1] - 8, left_foot[0] + 22, left_foot[1] + 10), fill=shoes)
-    draw.ellipse((right_foot[0] - 16, right_foot[1] - 8, right_foot[0] + 22, right_foot[1] + 10), fill=shoes)
+        cx = int(width * 0.48 + math.sin(t * 0.7) * 18)
+        base_y = int(height * 0.72 - bob)
+        skin = (198, 142, 104)
+        hair = (28, 18, 14)
+        blazer = (28, 78, 132)
+        pants = (24, 36, 58)
+        shoes = (20, 20, 24)
+        shirt = (236, 242, 248)
 
-    # Torso
-    torso_top = (cx, base_y - 360)
-    draw.rounded_rectangle((cx - 48, base_y - 360, cx + 48, base_y - 210), radius=28, fill=blazer)
-    draw.rectangle((cx - 18, base_y - 340, cx + 18, base_y - 250), fill=shirt)
-
-    # Arms + gesture
-    shoulder = (cx, base_y - 340)
-    left_hand = (cx - 70 - int(20 * stride), base_y - 250 + int(18 * math.cos(phase)))
-    # Presenting gesture with the right hand toward camera / product space
-    gesture = 0.35 + 0.25 * math.sin(t * 2.2)
-    right_hand = (cx + 55 + int(70 * gesture), base_y - 300 - int(40 * gesture))
-    draw.line([shoulder, left_hand], fill=blazer, width=14)
-    draw.line([shoulder, (cx + 40, base_y - 300), right_hand], fill=blazer, width=14)
-    draw.ellipse((left_hand[0] - 12, left_hand[1] - 12, left_hand[0] + 12, left_hand[1] + 12), fill=skin)
-    draw.ellipse((right_hand[0] - 12, right_hand[1] - 12, right_hand[0] + 12, right_hand[1] + 12), fill=skin)
-
-    # Head
-    head_c = (cx, base_y - 410)
-    draw.ellipse((head_c[0] - 38, head_c[1] - 46, head_c[0] + 38, head_c[1] + 40), fill=skin)
-    draw.ellipse((head_c[0] - 42, head_c[1] - 58, head_c[0] + 42, head_c[1] - 8), fill=hair)
-    # Eyes
-    draw.ellipse((head_c[0] - 16, head_c[1] - 8, head_c[0] - 6, head_c[1] + 2), fill=(30, 24, 20))
-    draw.ellipse((head_c[0] + 6, head_c[1] - 8, head_c[0] + 16, head_c[1] + 2), fill=(30, 24, 20))
-
-    # Mouth aperture synced to phoneme + narration energy (lip motion)
-    open_px = 2 + int(18 * max(0.0, min(1.0, mouth)))
-    width_px = 10 + int(8 * max(0.0, min(1.0, mouth)))
-    mouth_y = head_c[1] + 16
-    draw.ellipse(
-        (head_c[0] - width_px, mouth_y - open_px // 2, head_c[0] + width_px, mouth_y + open_px // 2 + 2),
-        fill=(120, 48, 58),
-    )
-    if mouth > 0.28:
+        hip = (cx, base_y - 210)
+        left_knee = (cx - 18 + int(42 * stride), base_y - 110)
+        right_knee = (cx + 18 - int(42 * stride), base_y - 110)
+        left_foot = (left_knee[0] - 8 + int(28 * stride), base_y - 8)
+        right_foot = (right_knee[0] + 8 - int(28 * stride), base_y - 8)
+        draw.line([hip, left_knee, left_foot], fill=pants, width=18)
+        draw.line([hip, right_knee, right_foot], fill=pants, width=18)
+        draw.ellipse((left_foot[0] - 16, left_foot[1] - 8, left_foot[0] + 22, left_foot[1] + 10), fill=shoes)
+        draw.ellipse((right_foot[0] - 16, right_foot[1] - 8, right_foot[0] + 22, right_foot[1] + 10), fill=shoes)
+        draw.rounded_rectangle((cx - 48, base_y - 360, cx + 48, base_y - 210), radius=28, fill=blazer)
+        draw.rectangle((cx - 18, base_y - 340, cx + 18, base_y - 250), fill=shirt)
+        shoulder = (cx, base_y - 340)
+        left_hand = (cx - 70 - int(20 * stride), base_y - 250 + int(18 * math.cos(phase)))
+        gesture = 0.35 + 0.25 * math.sin(t * 2.2)
+        right_hand = (cx + 55 + int(70 * gesture), base_y - 300 - int(40 * gesture))
+        draw.line([shoulder, left_hand], fill=blazer, width=14)
+        draw.line([shoulder, (cx + 40, base_y - 300), right_hand], fill=blazer, width=14)
+        draw.ellipse((left_hand[0] - 12, left_hand[1] - 12, left_hand[0] + 12, left_hand[1] + 12), fill=skin)
+        draw.ellipse((right_hand[0] - 12, right_hand[1] - 12, right_hand[0] + 12, right_hand[1] + 12), fill=skin)
+        head_c = (cx, base_y - 410)
+        draw.ellipse((head_c[0] - 38, head_c[1] - 46, head_c[0] + 38, head_c[1] + 40), fill=skin)
+        draw.ellipse((head_c[0] - 42, head_c[1] - 58, head_c[0] + 42, head_c[1] - 8), fill=hair)
+        draw.ellipse((head_c[0] - 16, head_c[1] - 8, head_c[0] - 6, head_c[1] + 2), fill=(30, 24, 20))
+        draw.ellipse((head_c[0] + 6, head_c[1] - 8, head_c[0] + 16, head_c[1] + 2), fill=(30, 24, 20))
+        open_px = 2 + int(18 * mouth_v)
+        width_px = 10 + int(8 * mouth_v)
+        mouth_y = head_c[1] + 16
         draw.ellipse(
-            (head_c[0] - max(3, width_px - 4), mouth_y - max(1, open_px // 3), head_c[0] + max(3, width_px - 4), mouth_y + max(1, open_px // 3)),
-            fill=(60, 20, 28),
+            (head_c[0] - width_px, mouth_y - open_px // 2, head_c[0] + width_px, mouth_y + open_px // 2 + 2),
+            fill=(120, 48, 58),
         )
+        visual_mode = "illustrated_fallback"
 
     # Brand strip (not a title-card montage — presenter remains the subject)
     font_path = Path(__file__).parent / "fonts" / "DejaVuSans.ttf"
     try:
-        title_font = ImageFont.truetype(str(font_path), 34) if font_path.is_file() else ImageFont.load_default()
-        small_font = ImageFont.truetype(str(font_path), 22) if font_path.is_file() else ImageFont.load_default()
+        title_font = ImageFont.truetype(str(font_path), 28) if font_path.is_file() else ImageFont.load_default()
+        small_font = ImageFont.truetype(str(font_path), 18) if font_path.is_file() else ImageFont.load_default()
     except Exception:
         title_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
-    draw.text((36, 42), "AMICOR Nova", font=title_font, fill=(255, 255, 255))
-    draw.text((36, 88), "Full-body walking presenter", font=small_font, fill=(255, 210, 128))
+    draw.text((24, 28), "AMICOR Nova", font=title_font, fill=(255, 255, 255))
+    draw.text(
+        (24, 62),
+        "Genova presenter" if presenter_plate is not None else "Illustrated fallback",
+        font=small_font,
+        fill=(255, 210, 128),
+    )
 
     # Burn captions in-frame so we do not need a second memory-heavy ASS re-encode on Render.
-    caption_lines = _wrap_caption(caption_line, width=30)
+    caption_lines = _wrap_caption(caption_line, width=28)
     if caption_lines:
-        box_top = height - 210 - (28 * len(caption_lines))
+        box_top = height - 160 - (24 * len(caption_lines))
         draw.rounded_rectangle(
-            (28, box_top, width - 28, height - 56),
-            radius=16,
-            fill=(8, 18, 32, 220) if image.mode == "RGBA" else (8, 18, 32),
+            (16, box_top, width - 16, height - 40),
+            radius=12,
+            fill=(8, 18, 32),
         )
-        y = box_top + 16
+        y = box_top + 12
         for line in caption_lines:
-            draw.text((48, y), line, font=small_font, fill=(255, 255, 255))
-            y += 28
+            draw.text((28, y), line, font=small_font, fill=(255, 255, 255))
+            y += 24
 
     # Soft CTA end card in the final seconds (replaces ASS fade burn-in).
     fade = max(1.0, float(fade_seconds or 2.0))
@@ -727,11 +801,12 @@ def _draw_walking_frame(
         shade = int(12 + 40 * strength)
         draw.rectangle((0, int(height * 0.42), width, int(height * 0.62)), fill=(shade, shade + 8, shade + 18))
         cta = str(cta_text or "getamicor.com/nova-today")
-        draw.text((48, int(height * 0.48)), cta, font=title_font, fill=(255, 255, 255))
+        draw.text((28, int(height * 0.48)), cta, font=title_font, fill=(255, 255, 255))
 
     # Progress of walk across the shot (proves continuous motion)
     progress = min(1.0, t / max(0.1, duration))
-    draw.rectangle((40, height - 36, 40 + int((width - 80) * progress), height - 24), fill=(64, 168, 214))
+    draw.rectangle((24, height - 28, 24 + int((width - 48) * progress), height - 18), fill=(64, 168, 214))
+    image.info["visual_mode"] = visual_mode
     return image
 
 
@@ -750,80 +825,94 @@ def _render_walking_core(
     render_mode: str,
     license_status: str | None = None,
     speech_rate: str = "+0%",
+    presenter_image: Path | None = None,
 ) -> dict[str, Any]:
     script = " ".join(str(script or DEFAULT_SCRIPT).split())
     if not script:
         raise WalkingPresenterError("SCRIPT_REQUIRED", "Walking presenter needs a short script.")
 
     ffmpeg = _ffmpeg()
-    with tempfile.TemporaryDirectory(prefix="nova-walk-") as temp_name:
-        temp = Path(temp_name)
-        audio_mp3 = temp / "narration.mp3"
-        narration = synthesize_female_narration(script, audio_mp3, voice=voice, rate=speech_rate)
-        if license_status in {"GREEN", "AMBER", "RED"}:
-            narration = {**narration, "license_status": license_status}
-            if license_status == "GREEN":
-                narration["commercial_use"] = (
-                    "Owner accepted the Studio neural voice source for this AMICOR commercial. "
-                    "No paid provider credits were purchased for narration."
+    presenter_plate, mouth_y_ratio = _prepare_presenter_plate(
+        presenter_image, width=width, height=height
+    )
+    visual_mode = "genova_photoreal_plate" if presenter_plate is not None else "illustrated_fallback"
+    try:
+        with tempfile.TemporaryDirectory(prefix="nova-walk-") as temp_name:
+            temp = Path(temp_name)
+            audio_mp3 = temp / "narration.mp3"
+            narration = synthesize_female_narration(script, audio_mp3, voice=voice, rate=speech_rate)
+            if license_status in {"GREEN", "AMBER", "RED"}:
+                narration = {**narration, "license_status": license_status}
+                if license_status == "GREEN":
+                    narration["commercial_use"] = (
+                        "Owner accepted the Studio neural voice source for this AMICOR commercial. "
+                        "No paid provider credits were purchased for narration."
+                    )
+            wav_path = Path(narration["wav_path"])
+            audio_duration = float(narration["duration_seconds"] or 0.0)
+            duration = max(min_seconds, min(max_seconds, max(audio_duration, float(target_seconds))))
+            frame_count = max(int(duration * fps), 24)
+            rms = _rms_envelope(wav_path, fps=fps, frame_count=frame_count)
+            cues = word_aligned_cues(script, min(duration, max(audio_duration, 0.8)))
+            envelope = phoneme_mouth_envelope(cues, fps=fps, frame_count=frame_count, rms=rms)
+
+            fade_seconds = min(2.5, max(1.0, duration / 10))
+            cta_text = "getamicor.com/nova-today"
+
+            def _frame_at(index: int):
+                t = index / fps
+                mouth = envelope[index] if index < len(envelope) else 0.0
+                active = next(
+                    (c["text"] for c in cues if c["start"] <= t <= c["end"]),
+                    cues[0]["text"] if cues else "",
                 )
-        wav_path = Path(narration["wav_path"])
-        audio_duration = float(narration["duration_seconds"] or 0.0)
-        duration = max(min_seconds, min(max_seconds, max(audio_duration, float(target_seconds))))
-        frame_count = max(int(duration * fps), 24)
-        rms = _rms_envelope(wav_path, fps=fps, frame_count=frame_count)
-        cues = word_aligned_cues(script, min(duration, max(audio_duration, 0.8)))
-        envelope = phoneme_mouth_envelope(cues, fps=fps, frame_count=frame_count, rms=rms)
+                return _draw_walking_frame(
+                    width=width,
+                    height=height,
+                    t=t,
+                    duration=duration,
+                    mouth=mouth,
+                    caption_line=active,
+                    cta_text=cta_text,
+                    fade_seconds=fade_seconds,
+                    presenter_plate=presenter_plate,
+                    mouth_y_ratio=mouth_y_ratio or 0.18,
+                )
 
-        fade_seconds = min(2.5, max(1.0, duration / 10))
-        cta_text = "getamicor.com/nova-today"
-
-        def _frame_at(index: int):
-            t = index / fps
-            mouth = envelope[index] if index < len(envelope) else 0.0
-            active = next(
-                (c["text"] for c in cues if c["start"] <= t <= c["end"]),
-                cues[0]["text"] if cues else "",
-            )
-            return _draw_walking_frame(
-                width=width,
-                height=height,
-                t=t,
+            silent = temp / "silent.mp4"
+            # Chunked encode keeps peak RAM under Render starter limits for ~30s spots.
+            _encode_walking_silent_chunked(
+                ffmpeg=ffmpeg,
+                temp=temp,
+                frame_builder=_frame_at,
+                frame_count=frame_count,
+                fps=fps,
                 duration=duration,
-                mouth=mouth,
-                caption_line=active,
-                cta_text=cta_text,
-                fade_seconds=fade_seconds,
+                output_mp4=silent,
             )
-
-        silent = temp / "silent.mp4"
-        # Chunked encode keeps peak RAM under Render starter limits for ~30s spots.
-        _encode_walking_silent_chunked(
-            ffmpeg=ffmpeg,
-            temp=temp,
-            frame_builder=_frame_at,
-            frame_count=frame_count,
-            fps=fps,
-            duration=duration,
-            output_mp4=silent,
-        )
-        muxed = temp / "muxed.mp4"
-        _run(
-            [
-                ffmpeg, "-y", "-i", str(silent), "-i", str(wav_path),
-                "-filter_complex", f"[1:a]apad,atrim=0:{duration:.3f}[a]",
-                "-map", "0:v:0", "-map", "[a]",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "96k",
-                "-ac", "1", "-ar", "24000",
-                "-t", f"{duration:.3f}", "-movflags", "+faststart", str(muxed),
-            ]
-        )
-        # Captions + CTA are already burned into frames — skip ASS re-encode (was 192 MiB gated).
-        output_mp4.parent.mkdir(parents=True, exist_ok=True)
-        output_mp4.write_bytes(muxed.read_bytes())
-        cue_payload = [{"start": c["start"], "end": c["end"], "text": c["text"]} for c in cues]
-        output_mp4.with_suffix(".srt").write_text(srt_text(cue_payload), encoding="utf-8")
-        output_mp4.with_suffix(".wav").write_bytes(wav_path.read_bytes())
+            muxed = temp / "muxed.mp4"
+            _run(
+                [
+                    ffmpeg, "-y", "-i", str(silent), "-i", str(wav_path),
+                    "-filter_complex", f"[1:a]apad,atrim=0:{duration:.3f}[a]",
+                    "-map", "0:v:0", "-map", "[a]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "96k",
+                    "-ac", "1", "-ar", "24000",
+                    "-t", f"{duration:.3f}", "-movflags", "+faststart", str(muxed),
+                ]
+            )
+            # Captions + CTA are already burned into frames — skip ASS re-encode (was 192 MiB gated).
+            output_mp4.parent.mkdir(parents=True, exist_ok=True)
+            output_mp4.write_bytes(muxed.read_bytes())
+            cue_payload = [{"start": c["start"], "end": c["end"], "text": c["text"]} for c in cues]
+            output_mp4.with_suffix(".srt").write_text(srt_text(cue_payload), encoding="utf-8")
+            output_mp4.with_suffix(".wav").write_bytes(wav_path.read_bytes())
+    finally:
+        if presenter_plate is not None:
+            try:
+                presenter_plate.close()
+            except Exception:
+                pass
 
     validation = validate_presenter_mp4(output_mp4, min_seconds=min_seconds, max_seconds=max_seconds)
     return {
@@ -845,6 +934,12 @@ def _render_walking_core(
         "presenter_mode": "full_body",
         "motion_style": "walking_gesture",
         "full_body_walking": True,
+        "visual_mode": visual_mode,
+        "illustrated_fallback": visual_mode == "illustrated_fallback",
+        "genova_photoreal_plate": visual_mode == "genova_photoreal_plate",
+        "presenter_image": str(presenter_image) if presenter_image else None,
+        "true_ai_motion_synthesis": False,
+        "motion_engine": "local_plate_walk_illusion",
         "paid_provider_charges": False,
         "commercial_slideshow": False,
         "publish_ready": False,
@@ -856,6 +951,18 @@ def _render_walking_core(
         "visible_end_card": "getamicor.com/nova-today",
         "script": caption_script(script),
         "mobile_download_ready": bool(validation.get("ok")),
+        "blocker_for_true_talking_walk": (
+            None
+            if visual_mode == "genova_photoreal_plate"
+            else "Genova presenter still missing from media store."
+        ),
+        "paid_motion_blocker": (
+            "True photoreal synchronized walking + lip re-synthesis needs owner-approved "
+            "Kling/D-ID (or equivalent) credits. Current engine uses Genova still + local "
+            "walk illusion + phoneme mouth aperture without purchasing credits."
+            if visual_mode == "genova_photoreal_plate"
+            else None
+        ),
     }
 
 
@@ -868,6 +975,7 @@ def render_walking_presenter(
     width: int = WIDTH,
     height: int = HEIGHT,
     license_status: str | None = None,
+    presenter_image: Path | None = None,
 ) -> dict[str, Any]:
     """Render the Issue #351 five-second walking presenter milestone."""
     render_width, render_height, render_fps = _memory_profile(
@@ -889,6 +997,7 @@ def render_walking_presenter(
         milestone="5s_walking_presenter",
         render_mode="local_walking_presenter_lipsync",
         license_status=license_status,
+        presenter_image=presenter_image,
     )
 
 
@@ -901,6 +1010,7 @@ def render_walking_commercial_30s(
     width: int = WIDTH,
     height: int = HEIGHT,
     license_status: str | None = None,
+    presenter_image: Path | None = None,
 ) -> dict[str, Any]:
     """Full ~30s H.264/AAC walking talking commercial for mobile download.
 
@@ -938,6 +1048,7 @@ def render_walking_commercial_30s(
         render_mode="local_walking_commercial_30s",
         license_status=license_status,
         speech_rate="-4%",
+        presenter_image=presenter_image,
     )
     result["final_promo"] = True
     result["scope"] = "30-second AMICOR Creative Studio commercial"

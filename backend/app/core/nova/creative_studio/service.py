@@ -1935,6 +1935,57 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
+    def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
+        """Prefer project Genova full-body stills; fall back to known media-root plates."""
+        preferred_names = (
+            "nova-c4edd02f88a04f7081a79a18fd98a935.png",
+            "nova-18f6ccddce0249f7a77e696c808fdf89.png",
+        )
+        assets = [
+            asset
+            for asset in self.store.list_assets(project_id, owner_id)
+            if asset.kind == "image"
+            and asset.url
+            and str(asset.status or "").upper() == "GENERATED"
+        ]
+
+        def _is_genova(asset: CreativeAsset) -> bool:
+            content = str(asset.content or "").lower()
+            return (
+                "genova presenter v2" in content
+                or (
+                    ("black woman" in content or "african american woman" in content)
+                    and "presenter" in content
+                )
+            )
+
+        scored: list[tuple[int, Path]] = []
+        for asset in assets:
+            path = _resolve_creative_media_url(asset.url)
+            if path is None or not path.is_file():
+                continue
+            name = path.name.lower()
+            score = 0
+            if name in preferred_names:
+                score += 100
+            if _is_genova(asset):
+                score += 50
+            if name.startswith("nova-") and name.endswith(".png"):
+                score += 5
+            if score:
+                scored.append((score, path))
+        if scored:
+            scored.sort(key=lambda item: item[0], reverse=True)
+            return scored[0][1]
+
+        root, _prefix = _creative_media_root_and_prefix()
+        for name in preferred_names:
+            candidate = root / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @serialized_media
     def render_walking_presenter_proof(
         self,
         owner_id: str,
@@ -1959,6 +2010,7 @@ class CreativeStudioService(ShortDramaMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("walk").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-presenter-{token}.mp4"
+        presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "walking_presenter_proof")
         try:
             rendered = render_walking_presenter(
@@ -1966,6 +2018,7 @@ class CreativeStudioService(ShortDramaMixin):
                 script=script or DEFAULT_SCRIPT,
                 voice=voice or DEFAULT_VOICE,
                 license_status=self._project_voice_license(owner_id, project_id),
+                presenter_image=presenter_image,
             )
         except WalkingPresenterError as exc:
             self._finish_job(
@@ -2036,12 +2089,13 @@ class CreativeStudioService(ShortDramaMixin):
             },
             url=public_url,
         )
+        visual_mode = str(rendered.get("visual_mode") or "illustrated_fallback")
         self._finish_job(
             job,
             status="GENERATED",
             message=(
                 f"Walking presenter proof ready at {rendered['duration_seconds']}s with "
-                "natural female narration, waveform lip motion, and word-aligned captions. "
+                f"{visual_mode}, natural female narration, phoneme lip motion, and word-aligned captions. "
                 "No paid provider was charged."
             ),
             asset_ids=[video_asset.id, audio_asset.id],
@@ -2058,6 +2112,11 @@ class CreativeStudioService(ShortDramaMixin):
             "lip_sync": True,
             "render_mode": "local_walking_presenter_lipsync",
             "milestone": "5s_walking_presenter",
+            "visual_mode": visual_mode,
+            "illustrated_fallback": rendered.get("illustrated_fallback"),
+            "genova_photoreal_plate": rendered.get("genova_photoreal_plate"),
+            "true_ai_motion_synthesis": False,
+            "paid_motion_blocker": rendered.get("paid_motion_blocker"),
             "validation": rendered.get("validation"),
             "license_status": (rendered.get("narration") or {}).get("license_status") or "AMBER",
             "paid_provider_charges": False,
@@ -2065,6 +2124,7 @@ class CreativeStudioService(ShortDramaMixin):
             "owner_review_required": True,
         }
 
+    @serialized_media
     def render_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
         """30s H.264/AAC walking talking commercial for mobile download. No paid provider spend."""
         from app.core.nova.creative_studio.click_destinations import replacement_pack
@@ -2081,12 +2141,14 @@ class CreativeStudioService(ShortDramaMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
+        presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "walking_commercial_30s")
         try:
             rendered = render_walking_commercial_30s(
                 output_mp4=output_path,
                 scenes=[scene.as_dict() for scene in scenes],
                 license_status=self._project_voice_license(owner_id, project_id),
+                presenter_image=presenter_image,
             )
         except WalkingPresenterError as exc:
             self._finish_job(job, status="ERROR", message=exc.message, asset_ids=[], provider="nova_walking_commercial")
@@ -2146,12 +2208,13 @@ class CreativeStudioService(ShortDramaMixin):
             },
             url=public_url,
         )
+        visual_mode = str(rendered.get("visual_mode") or "illustrated_fallback")
         self._finish_job(
             job,
             status="GENERATED",
             message=(
-                f"30s walking talking commercial ready at {rendered['duration_seconds']}s. "
-                "Downloadable H.264/AAC with speech, phoneme lip motion, and captions. "
+                f"30s walking talking commercial ready at {rendered['duration_seconds']}s "
+                f"({visual_mode}). Downloadable H.264/AAC with speech, phoneme lip motion, and captions. "
                 "No paid provider was charged. Owner review still required before public ads."
             ),
             asset_ids=[video_asset.id, audio_asset.id],
@@ -2168,6 +2231,11 @@ class CreativeStudioService(ShortDramaMixin):
             "lip_sync": True,
             "render_mode": "local_walking_commercial_30s",
             "milestone": "30s_walking_commercial",
+            "visual_mode": visual_mode,
+            "illustrated_fallback": rendered.get("illustrated_fallback"),
+            "genova_photoreal_plate": rendered.get("genova_photoreal_plate"),
+            "true_ai_motion_synthesis": False,
+            "paid_motion_blocker": rendered.get("paid_motion_blocker"),
             "validation": rendered.get("validation"),
             "license_status": rendered.get("license_status") or "AMBER",
             "paid_provider_charges": False,
