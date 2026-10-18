@@ -1,0 +1,40 @@
+name: Build AMICOR Website Upload Package
+on:
+  push:
+    branches:
+      - feature/amicor-product-visual-catalog
+      - feature/amicor-public-website-w1
+    paths:
+      - 'website/**'
+      - '.github/workflows/amicor-website-package.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/amicor-website-package.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate website pages
+        run: python3 website/_generate.py
+      - name: Confirm committed pages match the generator
+        run: git diff --exit-code -- website
+      - name: Validate product catalog and links
+        run: |
+          python3 website/tests/check_catalog_package.py
+          python3 website/tests/check_internal_links.py
+          python3 website/tests/test_website_redesign.py
+          python3 website/tests/test_early_access_honeypot.py
+          node website/tests/lead_allowlist_staging.mjs
+      - name: Assemble site-only directory
+        run: python3 website/package_public_site.py
+      - name: Upload build artifact for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: amicor-cloudflare-website-files
+          path: dist/
+          retention-days: 7

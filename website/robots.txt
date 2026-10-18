@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://getamicor.com/sitemap.xml

@@ -21,6 +21,8 @@
       <a href="/nova">Nova Home</a>
       <a href="/nova/work">Work</a>
       <a href="/nova/creative" aria-current="page">Creative</a>
+      <a href="/static/nova-creative/casting-preview.html">Casting &amp; Auditions</a>
+      <a href="/static/nova-creative/casting-sandbox.html">Casting sandbox</a>
       <a href="/nova/one-minute-demo">60s Demo</a>
       <a href="/nova/master-demo">Master Demo</a>
       <a href="/nova/today">Today</a>
@@ -29,6 +31,16 @@
 
   <main class="studio-main">
     <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, owner-enabled image generation, provider-backed true text-to-video and voice generation, plus a separate local branded image-animation fallback. Cost-bearing media providers remain owner-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
+    <div id="staging-environment-warning" role="status" style="display:none; padding:16px; margin:12px 0; border:2px solid #976b14; border-radius:12px; background:#fff6db; color:#3f3215;">
+      <strong>Creative Studio test environment</strong>
+      <p>This website has its own separate test accounts. Your regular AMICOR production password will not sign you in here. Do not reset your production password or enter sensitive customer data on this test site.</p>
+      <a href="https://amicor-health-isf-py.onrender.com/static/nova-creative/index.html">Open existing AMICOR Studio</a>
+    </div>
+    <script>
+      if (location.hostname === "nova-studio-validation-350.onrender.com") {
+        document.getElementById("staging-environment-warning").style.display = "block";
+      }
+    </script>
     <div id="banner" class="banner hidden"></div>
 
     <section class="card" aria-label="Approved 60-second AMICOR Nova demo">
@@ -43,6 +55,15 @@
         <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
       </div>
+      <div id="staging-register-panel" style="display:none; margin-top:16px;">
+        <p><strong>New test account required.</strong> Use a separate test email and a NEW password, not your regular AMICOR password. Test accounts may be lost when this free staging server restarts.</p>
+        <button type="button" id="staging-register-toggle" class="secondary">Create test account</button>
+        <form id="staging-register-form" class="grid hidden" autocomplete="off">
+          <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
+          <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <button type="submit">Create separate test account</button>
+        </form>
+      </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
@@ -50,9 +71,70 @@
       </form>
     </section>
 
+    <section class="card path-card" aria-label="Second commercial path">
+      <p class="path-kicker">Second commercial · 30 seconds</p>
+      <h2>Walking commercial</h2>
+      <p class="hint">Full-body presenter, natural female narration, lip sync, and captions. Does not change the approved 60-second demo. Customer price <strong>$49</strong>.</p>
+      <p id="active-project-label" class="hint path-active" role="status">No project selected yet.</p>
+      <ol class="path-steps">
+        <li>Select <strong>AMICOR Second Commercial</strong> (or create a 30s project + storyboard)</li>
+        <li>Accept the voice license</li>
+        <li>Build the 30s commercial and download on your phone</li>
+        <li>Start checkout for the receipt</li>
+      </ol>
+      <div class="actions wrap path-actions">
+        <button type="button" id="select-second-commercial" class="secondary">Select Second Commercial</button>
+        <button type="button" id="accept-voice-license" class="secondary">Accept voice license</button>
+        <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
+      </div>
+      <details class="studio-details">
+        <summary>Optional · 5s preview &amp; montage fallback</summary>
+        <p class="hint">Prefer the 30s walking commercial above. Montage is title-card only (no speech/lip sync). Put the prepared link in TikTok/Instagram profile Website — captions are not clickable.</p>
+        <div class="actions wrap">
+          <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking preview</button>
+          <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
+          <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card" aria-label="AMICOR Studio checkout">
+      <h2>Checkout <span class="badge mode-badge">TEST</span></h2>
+      <p class="hint">Branded Stripe Checkout for the 30s commercial. Live billing stays off until you enable it. No automatic billing and no third-party vendor checkout.</p>
+      <div id="studio-pricing" class="hint">Sign in to load pricing.</div>
+      <div id="studio-orders" class="hint"></div>
+      <div class="actions wrap path-actions">
+        <button type="button" id="start-studio-checkout" class="btn-primary">Start checkout</button>
+        <button type="button" id="load-studio-pricing" class="secondary">Show price</button>
+        <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders</button>
+      </div>
+      <details class="studio-details">
+        <summary>Owner · simulated payment</summary>
+        <div class="actions wrap">
+          <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
+        </div>
+      </details>
+    </section>
+
+    <details class="card studio-details readiness-panel" aria-label="Studio readiness">
+      <summary>Studio readiness <span class="badge mode-badge">TEST details</span></summary>
+      <p class="hint">Walking commercial and Stripe Checkout are in TEST mode. Live billing, paid Genova providers, and public ad publish stay OFF.</p>
+      <div id="studio-test-readiness" class="hint">Sign in to load readiness.</div>
+    </details>
+
     <section class="card" aria-label="Provider status">
       <h2>Provider status</h2>
       <div id="provider-status" class="hint">Sign in to load provider status.</div>
+    </section>
+
+    <section class="card" aria-label="Render preflight">
+      <h2>Render preflight (no purchase)</h2>
+      <p class="hint">Estimates credits for the active project. Nova never auto-top-ups or buys provider credit. Paid fal/Kling/D-ID/OpenAI renders stay blocked until owner budget confirmation after preflight. Local motion fallback does not call paid video providers.</p>
+      <div id="preflight-status" class="hint">Select a project, then run preflight.</div>
+      <div class="actions wrap">
+        <button type="button" id="run-preflight" class="secondary">Run preflight quote</button>
+        <button type="button" id="confirm-budget" disabled>Confirm owner budget for this quote</button>
+      </div>
     </section>
 
     <section class="card" aria-label="Brand profile">
@@ -90,14 +172,14 @@
         </label>
         <label>Production preset
           <select id="production-preset">
-            <option value="vertical_short">Reels / TikTok / Shorts</option>
+            <option value="vertical_short" selected>30s vertical commercial · Reels / TikTok / Shorts</option>
             <option value="social_square">Social feed square</option>
-            <option value="youtube_web" selected>YouTube / web / demo</option>
+            <option value="youtube_web">YouTube / web / demo</option>
           </select>
         </label>
         <label>Platform
           <select id="project-platform">
-            <option>TikTok</option>
+            <option selected>TikTok</option>
             <option>Instagram</option>
             <option>Facebook</option>
             <option>YouTube Shorts</option>
@@ -110,8 +192,8 @@
         <label>Duration
           <select id="project-duration">
             <option value="15">15</option>
-            <option value="30">30</option>
-            <option value="60" selected>60</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
           </select>
         </label>
         <label>Audience<input id="project-audience" maxlength="200" /></label>
@@ -128,7 +210,7 @@
       <h2>2. Content Brief</h2>
       <form id="brief-form" class="grid">
         <label class="wide">Topic<input id="brief-topic" required maxlength="300" /></label>
-        <label>CTA<input id="brief-cta" maxlength="200" /></label>
+        <label>CTA<input id="brief-cta" maxlength="200" value="Visit getamicor.com to explore AMICOR Nova." /></label>
         <label>Style<input id="brief-style" maxlength="120" /></label>
         <button type="submit">Save brief on active project</button>
       </form>
@@ -145,8 +227,8 @@
           <select id="image-aspect">
             <option value="1:1">1:1 square</option>
             <option value="4:5">4:5 portrait</option>
-            <option value="9:16">9:16 vertical</option>
-            <option value="16:9" selected>16:9 landscape</option>
+            <option value="9:16" selected>9:16 vertical</option>
+            <option value="16:9">16:9 landscape</option>
           </select>
         </label>
         <span class="hint">AMICOR previews use the official logo overlay.</span>
@@ -176,9 +258,9 @@
           </label>
           <label>Output
             <select id="presenter-output-preset">
-              <option value="9:16">9:16 · Reels / TikTok / Shorts</option>
+              <option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>
               <option value="1:1">1:1 · Social feed</option>
-              <option value="16:9" selected>16:9 · YouTube / web / demo</option>
+              <option value="16:9">16:9 · YouTube / web / demo</option>
             </select>
           </label>
         </div>
@@ -188,7 +270,7 @@
     </label>
     <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
     <label>Talking presenter script
-          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace built to help small businesses move faster while staying in control. Nova Today brings priorities, approvals, and the AI assistant into one command center. Workspace keeps ongoing work organized so you can continue where you left off. The Operations Agent turns business requests into clear next steps, drafts, and owner-reviewed execution. Work and Revenue helps surface opportunities, prepare applications, and track the path from lead to paid work. Government, Business, Communications, and Accounting bring research, operations, follow-up, and financial visibility into the same ecosystem. Creative Studio helps create scripts, images, voice, presenter media, and marketing assets. AMICOR Nova gives you practical AI help across the workday, while you keep the final say. Start with AMICOR Nova today.</textarea>
+          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace for everyday business work. Busywork piles up fast for small business owners, and it steals focus from the work that matters. Nova helps with research, admin follow-ups, workflows, and data cleanup. Nova prepares AI-assisted drafts and next steps, then you review before anything moves forward. Keep ownership, clear the busywork, and make room for real business progress. Visit getamicor.com to explore AMICOR Nova.</textarea>
         </label>
         <p class="hint">Use this exact text for the presenter voice. AMICOR Nova is written separately so the voice pronounces the brand correctly.</p>
         <div class="actions wrap">
@@ -197,16 +279,16 @@
           <button type="button" id="preview-talking-presenter">Talking Presenter Preview</button>
         </div>
       </div>
-      <div class="actions wrap">
-        <button type="button" data-action="script">3. Generate Script</button>
-        <button type="button" data-action="caption">4. Generate Caption</button>
-        <button type="button" data-action="storyboard">5. Generate Storyboard</button>
-        <button type="button" data-action="image-prompt">6. Generate Image Prompt</button>
-        <button type="button" data-action="image">7. Generate Image</button>
-        <button type="button" data-action="video">8. Generate Next AI Scene</button>
-        <button type="button" data-action="voice">9. Generate Voice</button>
-        <button type="button" id="build-final-promo">10. Build Final Promo</button>
-        <button type="button" data-action="export">13. Export project package</button>
+      <div class="actions wrap actions-dense" aria-label="Project generate steps">
+        <button type="button" data-action="script" class="secondary">3. Script</button>
+        <button type="button" data-action="caption" class="secondary">4. Caption</button>
+        <button type="button" data-action="storyboard" class="secondary">5. Storyboard</button>
+        <button type="button" data-action="image-prompt" class="secondary">6. Image prompt</button>
+        <button type="button" data-action="image" class="secondary">7. Image</button>
+        <button type="button" data-action="video" class="secondary">8. Next scene</button>
+        <button type="button" data-action="voice" class="secondary">9. Voice</button>
+        <button type="button" id="build-final-promo" class="secondary">10. Final promo</button>
+        <button type="button" data-action="export" class="secondary">13. Export</button>
       </div>
       <pre id="output" class="output" aria-live="polite"></pre>
     </section>
@@ -256,6 +338,6 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-creative/creative.js?v=browser-final-promo-persist-20261008"></script>
+  <script src="/static/nova-creative/creative.js?v=force-project-select-20261017b"></script>
 </body>
 </html>

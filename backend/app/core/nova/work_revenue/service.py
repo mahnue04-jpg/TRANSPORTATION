@@ -316,9 +316,12 @@ def get_application(db: Session, application_id: str, *, organization_id: str, u
 
 
 def _with_capability(row: NovaWorkOpportunity, qual: dict[str, Any] | None) -> dict[str, Any]:
+    from app.core.nova.work_revenue.international_match import attach_owner_eligibility
+
+    payload = _opportunity_payload(row)
     merged = dict(qual or {})
-    merged.update(classify_opportunity_capability(_opportunity_payload(row)))
-    return merged
+    merged.update(classify_opportunity_capability(payload))
+    return attach_owner_eligibility(payload, merged)
 
 
 def opportunity_out(
@@ -437,6 +440,19 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         .order_by(NovaWorkOwnerAction.created_at.asc())
         .all()
     )
+    opportunity = (
+        db.query(NovaWorkOpportunity)
+        .filter(
+            NovaWorkOpportunity.opportunity_id == row.opportunity_id,
+            NovaWorkOpportunity.organization_id == row.organization_id,
+        )
+        .first()
+    )
+    eligibility = (
+        _with_capability(opportunity, _parse_qual(opportunity.qualification_json) or {})
+        if opportunity is not None
+        else {}
+    )
     return ApplicationOut(
         application_id=row.application_id,
         opportunity_id=row.opportunity_id,
@@ -449,14 +465,12 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         follow_up_at=row.follow_up_at,
         interview_at=row.interview_at,
         notes=row.notes,
-        opportunity_title=(
-            db.query(NovaWorkOpportunity.opportunity_title)
-            .filter(
-                NovaWorkOpportunity.opportunity_id == row.opportunity_id,
-                NovaWorkOpportunity.organization_id == row.organization_id,
-            )
-            .scalar()
-        ),
+        opportunity_title=opportunity.opportunity_title if opportunity is not None else None,
+        language_support_label=str(eligibility.get("language_support_label") or ""),
+        eligibility_explanations=list(eligibility.get("eligibility_explanations") or []),
+        eligibility_decision=str(eligibility.get("eligibility_decision") or ""),
+        native_fluency_claimed=False,
+        native_speaker_capability=False,
         materials=[material_out(item) for item in materials],
         owner_actions=[owner_action_out(item) for item in actions],
         owner_notes=getattr(row, "owner_notes", None),
@@ -1330,6 +1344,7 @@ def get_application_package_review(
         for row in materials
     ]
     review = review_application_package(_opportunity_payload(opportunity), material_payload)
+    eligibility = _with_capability(opportunity, _parse_qual(opportunity.qualification_json) or {})
     return {
         **review,
         "application_id": application.application_id,
@@ -1337,6 +1352,11 @@ def get_application_package_review(
         "approval_state": application.approval_state,
         "approved_for_future_submission": bool(application.approved_for_future_submission),
         "externally_submitted": False,
+        "language_support_label": str(eligibility.get("language_support_label") or ""),
+        "eligibility_explanations": list(eligibility.get("eligibility_explanations") or []),
+        "eligibility_decision": str(eligibility.get("eligibility_decision") or ""),
+        "native_fluency_claimed": False,
+        "native_speaker_capability": False,
     }
 
 

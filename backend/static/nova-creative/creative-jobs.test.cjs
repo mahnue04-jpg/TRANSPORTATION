@@ -20,7 +20,7 @@ test('saved motion failures render the provider reason safely after a project re
   const escape = source.slice(source.indexOf('  function escapeHtml('), source.indexOf('  function loadImage('));
   const memoryNotice = source.slice(source.indexOf('  function memoryHeadroomNotice('), source.indexOf('  function assetFailureHtml('));
   const failure = source.slice(source.indexOf('  function assetFailureHtml('), source.indexOf('  async function downloadBrandedImage('));
-  const refresh = source.slice(source.indexOf('  async function refreshAssets('), source.indexOf('  async function waitForScene('));
+  const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('  async function waitForScene('));
   // refreshAssets is followed by event registration; isolate its declaration.
   const end = refresh.indexOf('\n  $("reset-project-media")');
   vm.runInContext(escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);

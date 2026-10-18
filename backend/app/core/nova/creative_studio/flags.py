@@ -70,6 +70,10 @@ def talking_presenter_provider_live_enabled() -> bool:
 
 
 def creative_guardrails() -> dict[str, bool | str]:
+    from app.core.nova.creative_studio.studio_checkout import checkout_readiness, public_pricing
+
+    pricing = public_pricing()
+    checkout = checkout_readiness()
     return {
         "EXTERNAL_SUBMISSION_ENABLED": EXTERNAL_SUBMISSION_ENABLED,
         "FINANCIAL_EXECUTION_ENABLED": FINANCIAL_EXECUTION_ENABLED,
@@ -85,4 +89,16 @@ def creative_guardrails() -> dict[str, bool | str]:
         "TALKING_PRESENTER_PROVIDER_LIVE_ENABLED": talking_presenter_provider_live_enabled(),
         "PLANNING_MODE_AVAILABLE": True,
         "MODE": "PLANNING_SCRIPT_STORYBOARD",
+        # Issue #351 TEST feature surface — no live billing implied.
+        "WALKING_COMMERCIAL_TEST_READY": True,
+        "STUDIO_CHECKOUT_TEST_MODE": str(checkout.get("payment_mode") or "unconfigured"),
+        "STUDIO_CHECKOUT_REAL_TEST_AVAILABLE": bool(checkout.get("real_test_checkout_available")),
+        "STUDIO_CHECKOUT_SIMULATION_AVAILABLE": bool(checkout.get("local_test_simulation_available")),
+        "STUDIO_CUSTOMER_PRICE_USD": pricing.get("customer_price_usd"),
+        "STUDIO_RENDER_COST_CEILING_USD": pricing.get("internal_render_cost_ceiling_usd"),
+        "LIVE_STRIPE_BLOCKED": bool(checkout.get("live_blocked")) or not bool(checkout.get("live_checkout_available")),
+        "LIVE_STRIPE_CHECKOUT_AVAILABLE": bool(checkout.get("live_checkout_available")),
+        "STUDIO_WEBHOOK_CONFIGURED": bool(checkout.get("stripe_webhook_configured")),
+        "STUDIO_DURABLE_ORDERS": True,
+        "PAID_PROVIDER_LIVE_DEFAULT_OFF": True,
     }

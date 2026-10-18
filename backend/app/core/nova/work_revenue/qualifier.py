@@ -375,7 +375,7 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "prohibited_activity": "YES" if driving or regulated else "NO",
         "unsupported_activity": "YES" if outcome in {"NOT_SUITABLE", "HUMAN_REQUIRED"} and not matched_caps else "NO",
     }
-    return {
+    result = {
         "outcome": outcome,
         "lifecycle_outcome": lifecycle,
         "decision": decision_map.get(outcome, lifecycle),
@@ -431,3 +431,6 @@ def qualify_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "auto_prepare_allowed": capability["auto_prepare_allowed"],
         "title_used_for_decision": False,
     }
+    from app.core.nova.work_revenue.international_match import attach_owner_eligibility
+
+    return attach_owner_eligibility(opportunity, result)
