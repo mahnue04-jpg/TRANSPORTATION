@@ -9,7 +9,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,11 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.core.nova.creative_studio.providers import CONFIG_REQUIRED, talking_presenter_provider, video_provider
+from app.core.nova.creative_studio.studio_checkout import (
+    StudioCheckoutError,
+    process_studio_webhook,
+    verify_studio_webhook,
+)
 from app.db.session import SessionLocal, get_db
 from app.core.nova.creative_studio.drama import SAMPLE
 
@@ -80,6 +86,25 @@ router = APIRouter(
     tags=["nova-creative-studio"],
     dependencies=[Depends(require_nova_access)],
 )
+
+# Stripe webhooks cannot carry Nova session auth — dedicated unauthenticated router.
+webhook_router = APIRouter(prefix="/api/nova/creative", tags=["nova-creative-studio-webhook"])
+
+
+@webhook_router.post("/stripe/webhook")
+async def studio_stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """AMICOR Studio Checkout webhook (TEST + gated LIVE). Idempotent; fulfills paid orders."""
+    payload = await request.body()
+    try:
+        event = verify_studio_webhook(payload, stripe_signature)
+        result = process_studio_webhook(event, db=db)
+    except StudioCheckoutError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 _final_promo_lock = threading.Lock()
 _final_promo_running: set[tuple[str, str]] = set()
@@ -316,6 +341,48 @@ def creative_guardrails_endpoint(
     return get_service(db).guardrails()
 
 
+class BudgetConfirmIn(BaseModel):
+    confirmed: bool = True
+    acknowledged_estimate_usd: float | None = None
+    note: str = Field(default="", max_length=500)
+
+
+@router.get("/projects/{project_id}/preflight")
+def project_preflight_quote(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Non-billable quote + provider readiness. Never purchases credits."""
+    _require_owner(user)
+    try:
+        return get_service(db).preflight_quote(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/budget-confirm")
+def confirm_project_render_budget(
+    project_id: str,
+    payload: BudgetConfirmIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).confirm_render_budget(
+            user.user_id,
+            project_id,
+            confirmed=payload.confirmed,
+            acknowledged_estimate_usd=payload.acknowledged_estimate_usd,
+            note=payload.note,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects")
 def create_project(
     payload: ProjectIn,
@@ -493,7 +560,9 @@ def generate_image(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).request_image_generation(
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        return service.request_image_generation(
             user.user_id,
             project_id,
             aspect_ratio=(payload.aspect_ratio if payload else "1:1"),
@@ -557,6 +626,7 @@ def generate_video(
     try:
         service = get_service(db)
         service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
         if not service.store.list_scenes(project_id, user.user_id):
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard before generating scene videos.", http_status=422)
         # Persist the job before responding so refresh/retries can reattach to it.
@@ -596,7 +666,9 @@ def generate_voice(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        return get_service(db).request_voice_generation(user.user_id, project_id)
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        return service.request_voice_generation(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -638,7 +710,9 @@ def generate_presenter_voice(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        result = get_service(db).request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
+        service = get_service(db)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        result = service.request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
@@ -656,6 +730,11 @@ def finalize_full_body_presenter_in_cloud(
     """Lip-sync and caption a generated full-body presenter without local FFmpeg."""
     _require_owner(user)
     service = get_service(db)
+    try:
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
     try:
         service._project_or_404(user.user_id, project_id)
         assets = service.store.list_assets(project_id, user.user_id)
@@ -829,6 +908,7 @@ def prepare_talking_presenter_preview(
     service = get_service(db)
     try:
         service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
         presenter_meta = {
             "presenter_style": payload.presenter_style,
             "presenter_mode": payload.presenter_mode,
@@ -1273,6 +1353,233 @@ async def save_browser_final_promo(
             filename=file.filename or "amicor-nova-final-promo.webm",
             content_type=file.content_type or "video/webm",
         )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/click-destinations")
+def click_destinations(
+    platform: str = "TikTok",
+    verify: bool = False,
+    user: UserContext = Depends(get_current_user_context),
+) -> dict[str, Any]:
+    _require_owner(user)
+    return get_service().click_destinations(platform, verify=verify)
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def project_job(
+    project_id: str,
+    job_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Poll a saved job. This does not start a render or a paid provider."""
+    _require_owner(user)
+    try:
+        return get_service(db).get_generation_job(user.user_id, project_id, job_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/file")
+def download_asset_file(
+    project_id: str,
+    asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Signed-in owner download. A different account cannot read the file."""
+    _require_owner(user)
+    try:
+        path, media_type, filename = get_service(db).open_asset_file(user.user_id, project_id, asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    return FileResponse(path, media_type=media_type, filename=filename)
+
+
+class WalkingPresenterIn(BaseModel):
+    script: str | None = Field(default=None, max_length=280)
+    voice: str | None = Field(default=None, max_length=80)
+
+
+class StudioCheckoutIn(BaseModel):
+    customer_email: str | None = Field(default=None, max_length=200)
+    success_url: str = Field(default="/nova/creative?checkout=success", max_length=500)
+    cancel_url: str = Field(default="/nova/creative?checkout=cancel", max_length=500)
+
+
+class VoiceLicenseIn(BaseModel):
+    accepted: bool = True
+    note: str = Field(default="", max_length=500)
+
+
+@router.get("/pricing")
+def studio_commercial_pricing(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Public AMICOR Studio commercial price + internal cost ceiling. No charge."""
+    _require_owner(user)
+    return get_service(db).studio_pricing()
+
+
+def _absolute_checkout_url(raw: str, request: Request) -> str:
+    """Stripe requires absolute success/cancel URLs."""
+    value = str(raw or "").strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if not value.startswith("/"):
+        value = "/" + value
+    base = str(request.base_url).rstrip("/")
+    # Prefer the public Render host over internal proxy bases when forwarded.
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    if forwarded and host:
+        base = f"{forwarded}://{host}"
+    return base + value
+
+
+@router.post("/projects/{project_id}/checkout")
+def start_studio_checkout(
+    project_id: str,
+    payload: StudioCheckoutIn,
+    request: Request,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """AMICOR-branded Stripe Checkout for a 30s commercial order (TEST, or gated LIVE)."""
+    _require_owner(user)
+    try:
+        return get_service(db).start_studio_checkout(
+            user.user_id,
+            project_id,
+            customer_email=payload.customer_email,
+            success_url=_absolute_checkout_url(payload.success_url, request),
+            cancel_url=_absolute_checkout_url(payload.cancel_url, request),
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/checkout/orders")
+def list_studio_checkout_orders(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).list_studio_checkout_orders(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/checkout/orders/{order_id}")
+def get_studio_checkout_order(
+    project_id: str,
+    order_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Job status + receipt for one Studio commercial order."""
+    _require_owner(user)
+    try:
+        return get_service(db).get_studio_checkout_order(user.user_id, project_id, order_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/checkout/orders/{order_id}/complete-test")
+def complete_studio_test_checkout(
+    project_id: str,
+    order_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Complete a TEST/fake checkout so receipts and job status can be verified without a live card."""
+    _require_owner(user)
+    try:
+        return get_service(db).complete_studio_test_checkout(user.user_id, project_id, order_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/voice-license")
+def accept_project_voice_license(
+    project_id: str,
+    payload: VoiceLicenseIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner accepts Studio neural voice for this commercial (license AMBER → GREEN)."""
+    _require_owner(user)
+    try:
+        return get_service(db).accept_voice_license(
+            user.user_id,
+            project_id,
+            accepted=payload.accepted,
+            note=payload.note,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/walking-presenter-proof")
+def assemble_walking_presenter_proof(
+    project_id: str,
+    payload: WalkingPresenterIn | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """5–6s full-body walking presenter proof. No paid provider charges."""
+    _require_owner(user)
+    body = payload or WalkingPresenterIn()
+    try:
+        return get_service(db).render_walking_presenter_proof(
+            user.user_id,
+            project_id,
+            script=body.script,
+            voice=body.voice,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/walking-commercial-30s")
+def assemble_walking_commercial_30s(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/assemble/offline-commercial")
+def assemble_offline_commercial(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Local 30s montage. Does not call fal, Kling, D-ID, or OpenAI."""
+    _require_owner(user)
+    try:
+        return get_service(db).render_offline_commercial(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise

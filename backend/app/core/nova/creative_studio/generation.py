@@ -443,39 +443,70 @@ def assemble_short_video(
     tone = str(tone or "clear").strip()
     cta = _preserve_brands(str(cta or pack["cta"]).strip())
 
+    # Prefer getamicor.com on the closing beat when the brief CTA is empty/generic.
+    cta_text = cta
+    generic = re.sub(r"[.!?]+$", "", str(cta_text or "").strip().lower())
+    if generic in {"", "learn more", "learn more about amicor nova", "start free today"}:
+        cta_text = "Visit getamicor.com to explore AMICOR Nova."
+    cta = _preserve_brands(cta_text)
+
     if duration == 15:
         weights = [3.0, 7.0, 5.0]
         headings = ["Hook", "Value", "CTA"]
     elif duration == 60:
-        weights = [8.0, 14.0, 14.0, 14.0, 10.0]
-        headings = ["Hook", "Problem", "Solution", "Proof", "CTA"]
+        weights = [8.0, 12.0, 12.0, 12.0, 8.0, 8.0]
+        headings = ["Hook", "Problem", "Capabilities", "Process", "Progress", "CTA"]
     else:
-        weights = [5.0, 10.0, 10.0, 5.0]
-        headings = ["Hook", "Problem", "Solution", "CTA"]
+        # ~30s vertical commercial: six deliberate beats (Issue #344).
+        weights = [5.0, 5.0, 6.0, 5.0, 5.0, 4.0]
+        headings = ["Hook", "Problem", "Capabilities", "Process", "Progress", "CTA"]
 
     vo_by_heading = {
-        "Hook": pack["hook"],
+        "Hook": pack["hook"] if "nova" in pack["hook"].lower() else f"Meet {brand}, your AI operations workspace.",
         "Problem": f"Busywork piles up fast for {aud} — and it steals focus from real work.",
+        "Capabilities": (
+            f"{brand} helps with research, admin follow-ups, workflows, and data cleanup — "
+            "the everyday work that slows teams down."
+        ),
+        "Process": (
+            f"{brand} prepares AI-assisted drafts and next steps, then you review before anything moves forward."
+        ),
+        "Progress": "Keep ownership, clear the busywork, and make room for real business progress.",
         "Solution": f"{brand} helps you {benefit} with drafts you can review first.",
         "Proof": "Owner controls stay with you. Nova prepares the next step.",
         "Value": f"{brand} helps you {benefit} without handing over the keys.",
         "CTA": cta,
     }
     desc_by_heading = {
-        "Hook": f"Open on a tight talking-head or bold on-screen text delivering the hook. Style: {style}.",
+        "Hook": f"Introduce {brand} with a consistent young presenter facing camera. Style: {style}.",
         "Problem": f"Show cluttered inbox / task pile / clock pressure for {aud}. Tone: {tone}.",
+        "Capabilities": (
+            "Cut across research, admin, workflow, and data-cleanup moments without overclaiming outcomes."
+        ),
+        "Process": "Show AI-assisted preparation beside a human review checkpoint — owner stays in control.",
+        "Progress": "Calm progress beat: clearer desk, reviewed draft approved, forward motion for the business.",
         "Solution": f"Cut to a clean product/workflow moment that shows {brand} assisting — not replacing — the owner.",
         "Proof": "Quick overlay: owner review checkmark, then calm desk or dashboard shot.",
         "Value": f"Show a clear before/after energy shift without deceptive claims — lighter workload vibe.",
-        "CTA": f"End card with {brand} wordmark and spoken CTA on screen.",
+        "CTA": f"End card with {brand} mark, spoken CTA, and smooth fade to getamicor.com.",
     }
     visual_by_heading = {
-        "Hook": f"Vertical {platform} cold open, readable hook text, {tone} lighting, no logos of other brands.",
+        "Hook": (
+            f"Vertical {platform} cold open with a consistent young Black/African American female presenter; "
+            f"{tone} lighting; no logos of other brands."
+        ),
         "Problem": f"Vertical scene of everyday busywork friction for {aud}; naturalistic; {style}.",
+        "Capabilities": (
+            "Vertical montage implying research, admin, workflows, and data cleanup; brand-safe; no fake UI claims."
+        ),
+        "Process": (
+            "Vertical shot of AI-assisted draft preparation plus human review; owner control visible; brand-safe."
+        ),
+        "Progress": "Vertical progress beat — lighter workload, approved next step, confident forward motion.",
         "Solution": f"Vertical demo-style shot implying AI assist for {benefit}; clean UI blur OK; brand-safe.",
         "Proof": "Vertical B-roll of owner reviewing a draft on laptop/phone; calm confidence.",
         "Value": f"Vertical lifestyle/ops shot showing regained focus after {benefit}.",
-        "CTA": f"Vertical end card, {brand}, high-contrast CTA text.",
+        "CTA": f"Vertical end card, {brand}, high-contrast getamicor.com CTA with soft fade.",
     }
 
     scenes = []

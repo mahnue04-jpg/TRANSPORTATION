@@ -1,0 +1,38 @@
+name: Creative Studio native narration smoke
+
+on:
+  pull_request:
+    paths:
+      - 'backend/Dockerfile'
+      - 'backend/scripts/smoke_studio_offline_montage.py'
+      - 'backend/app/core/nova/creative_studio/**'
+      - '.github/workflows/studio-native-narration-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  narration-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Studio backend image and exercise native voice in Dockerfile
+        run: docker build --progress=plain -t nova-studio-narration-smoke ./backend
+      - name: Verify native voice and WAV inside built image
+        run: |
+          docker run --rm --entrypoint sh nova-studio-narration-smoke -ec '
+            command -v espeak-ng
+            espeak-ng --voices >/dev/null
+            espeak-ng -w /tmp/voice.wav "Nova Studio speech validation"
+            test -s /tmp/voice.wav
+          '
+      - name: Render 30-second offline montage with narration and captions
+        run: |
+          mkdir -p studio-smoke-output
+          docker run --rm -v "$PWD/studio-smoke-output:/studio-smoke-output" -e STUDIO_SMOKE_OUTPUT_DIR=/studio-smoke-output --entrypoint python nova-studio-narration-smoke scripts/smoke_studio_offline_montage.py
+      - name: Upload generated test media for reviewer verification
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-offline-30s-smoke
+          path: studio-smoke-output/
+          retention-days: 7

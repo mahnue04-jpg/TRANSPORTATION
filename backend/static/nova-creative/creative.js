@@ -3,11 +3,64 @@
   var activeProjectKey = "amicor_nova_creative_active_project";
   var activeProjectId = localStorage.getItem(activeProjectKey) || null;
   var activeBrandId = null;
+  var projectRowsCache = [];
 
   function setActiveProjectId(value) {
     activeProjectId = value || null;
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
+    updateActiveProjectLabel();
+  }
+
+  function updateActiveProjectLabel() {
+    var el = $("active-project-label");
+    if (!el) return;
+    if (!activeProjectId) {
+      el.textContent = "No project selected yet. Click Select Second Commercial, or Build will pick it for you.";
+      return;
+    }
+    var row = (typeof projectRowsCache !== "undefined" ? projectRowsCache : []).find(function (item) {
+      return item.id === activeProjectId;
+    });
+    el.textContent = row
+      ? ("Active project: " + row.title + " · " + activeProjectId)
+      : ("Active project: " + activeProjectId);
+  }
+
+  var SECOND_COMMERCIAL_FALLBACK_ID = "cproj_eadc72d001ca";
+
+  function findSecondCommercialProject(rows) {
+    var list = rows || projectRowsCache || [];
+    return list.find(function (row) {
+      var title = String(row.title || "").toLowerCase();
+      return title.indexOf("second commercial") !== -1 || row.id === SECOND_COMMERCIAL_FALLBACK_ID;
+    }) || null;
+  }
+
+  async function ensureSecondCommercialSelected() {
+    // Always refresh so we never trust a stale empty cache or a dead localStorage id.
+    try {
+      await refreshProjects();
+    } catch (err) {
+      // Keep going with whatever cache we have; caller shows a clear banner.
+    }
+    var match = findSecondCommercialProject(projectRowsCache);
+    if (match) {
+      setActiveProjectId(match.id);
+      try { await refreshAssets(); } catch (err2) { /* non-fatal */ }
+      return match.id;
+    }
+    if (activeProjectId && projectRowsCache.some(function (row) { return row.id === activeProjectId; })) {
+      updateActiveProjectLabel();
+      return activeProjectId;
+    }
+    var fallback = projectRowsCache.find(function (row) {
+      return row.project_type === "promo_video" || Number(row.duration_target) === 30;
+    }) || projectRowsCache[0] || null;
+    if (!fallback) return null;
+    setActiveProjectId(fallback.id);
+    try { await refreshAssets(); } catch (err3) { /* non-fatal */ }
+    return fallback.id;
   }
 
   function $(id) { return document.getElementById(id); }
@@ -422,11 +475,15 @@
     if (!blob.size) throw new Error("Final promo recording produced an empty file.");
     return {
       blob: blob,
-      fileName: "amicor-nova-final-promo.webm",
+      fileName: clips.length ? "amicor-nova-final-promo.webm" : "amicor-nova-slideshow-preview.webm",
       clipCount: clips.length,
       artworkCount: artwork.length,
       hasVoice: Boolean(voiceAsset),
-      renderMode: clips.length ? "browser_scene_clips" : "browser_artwork_slideshow"
+      renderMode: clips.length ? "browser_scene_clips" : "browser_artwork_slideshow",
+      commercial_slideshow: !clips.length,
+      acceptance_note: clips.length
+        ? "Browser WebM is a review helper; prefer the server MP4 export for commercial acceptance."
+        : "Still slideshow preview only — not commercial acceptance."
     };
   }
 
@@ -517,9 +574,11 @@
     if (res.status === 401) {
       if (isLogin) throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
       if (typeof setToken === "function") setToken("");
+      var currentSession = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
+      if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
-      throw new Error("Session expired. Sign in again. (401) Your active Creative Studio project is preserved.");
+      throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
@@ -557,7 +616,15 @@
   }
 
   function setSignedIn(on) {
-    $("sign-out").classList.toggle("hidden", !on);
+    // Signed in → only Sign out. Signed out → only Sign in.
+    var signInBtn = $("sign-in-toggle");
+    var signOutBtn = $("sign-out");
+    if (signInBtn) signInBtn.classList.toggle("hidden", !!on);
+    if (signOutBtn) signOutBtn.classList.toggle("hidden", !on);
+    if ($("staging-register-panel")) {
+      $("staging-register-panel").style.display =
+        (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+    }
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
@@ -572,27 +639,50 @@
     $("provider-status").innerHTML = bits.map(function (line) {
       return "<div class=\"item\">" + escapeHtml(line) + "</div>";
     }).join("") || "No providers.";
+    var ready = $("studio-test-readiness");
+    if (ready) {
+      var feature = guards.studio_test_feature || {};
+      var checkout = feature.checkout || {};
+      var pricing = feature.pricing || {};
+      var walkReady = feature.walking_commercial_ready ? "Ready" : "Not ready";
+      var mode = String(checkout.payment_mode || guards.STUDIO_CHECKOUT_TEST_MODE || "unconfigured");
+      var price = Number(pricing.customer_price_usd || guards.STUDIO_CUSTOMER_PRICE_USD || 0).toFixed(2);
+      var ceiling = Number(pricing.internal_render_cost_ceiling_usd || guards.STUDIO_RENDER_COST_CEILING_USD || 0).toFixed(2);
+      ready.innerHTML =
+        "<div class=\"item\"><strong>Walking commercial:</strong> " + escapeHtml(walkReady) + "</div>" +
+        "<div class=\"item\"><strong>Checkout:</strong> " + escapeHtml(mode) +
+        (checkout.real_test_checkout_available ? " · Stripe TEST connected" : "") + "</div>" +
+        "<div class=\"item\"><strong>Customer price:</strong> $" + escapeHtml(price) +
+        " · render ceiling $" + escapeHtml(ceiling) + "</div>" +
+        "<div class=\"item muted\">Live billing / paid providers / publish: OFF</div>";
+      if (pricing.customer_price_usd) renderStudioPricing(pricing);
+    }
   }
   async function refreshProjects() {
     var body = await api("/api/nova/creative/projects");
-    var rows = body.projects || [];
+    var rows = (body && body.projects) || (Array.isArray(body) ? body : []) || [];
     projectRowsCache = rows.slice();
     if (activeProjectId && !rows.some(function (row) { return row.id === activeProjectId; })) {
       setActiveProjectId(null);
     }
-    $("project-list").innerHTML = rows.map(function (row) {
-      var active = row.id === activeProjectId ? " · ACTIVE" : "";
-      return "<div class=\"item\" data-id=\"" + escapeHtml(row.id) + "\"><strong>" + escapeHtml(row.title) + "</strong>" +
-        "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" + active +
-        "<div class=\"muted\">" + escapeHtml(row.project_type) + " · " + escapeHtml(row.platform) + "</div></div>";
-    }).join("") || "<p class=\"hint\">No projects yet.</p>";
-    Array.prototype.forEach.call(document.querySelectorAll("#project-list .item"), function (el) {
-      el.addEventListener("click", function () {
-        setActiveProjectId(el.getAttribute("data-id"));
-        refreshProjects();
-        refreshAssets();
+    var listEl = $("project-list");
+    if (listEl) {
+      listEl.innerHTML = rows.map(function (row) {
+        var active = row.id === activeProjectId ? " · ACTIVE" : "";
+        return "<div class=\"item\" data-id=\"" + escapeHtml(row.id) + "\"><strong>" + escapeHtml(row.title) + "</strong>" +
+          "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" + active +
+          "<div class=\"muted\">" + escapeHtml(row.project_type) + " · " + escapeHtml(row.platform) + "</div></div>";
+      }).join("") || "<p class=\"hint\">No projects yet.</p>";
+      Array.prototype.forEach.call(document.querySelectorAll("#project-list .item"), function (el) {
+        el.addEventListener("click", function () {
+          setActiveProjectId(el.getAttribute("data-id"));
+          refreshProjects();
+          refreshAssets();
+        });
       });
-    });
+    }
+    updateActiveProjectLabel();
+    return rows;
   }
   async function refreshBrands() {
     var body = await api("/api/nova/creative/brands");
@@ -688,13 +778,26 @@
             (presenterDemoAccepted ? "DEMO_READY_WITH_PROVIDER_WATERMARK" : (presenterMeta.quality_state || "PREVIEW_ONLY")))));
     var presenterCaptionsReady = !bodyLipSyncReady || bodyCaptionedReady;
 
+    var finalIsSlideshow = !!(
+      finalVideoMeta.commercial_slideshow === true ||
+      finalVideoMeta.render_mode === "ffmpeg_compat_stills" ||
+      finalVideoMeta.render_mode === "browser_artwork_slideshow"
+    );
+    var finalIsMp4 = !!(finalVideo && finalVideo.url && /\.mp4($|\?)/i.test(String(finalVideo.url)));
+    var finalCaptionsOk = !!(
+      finalVideoMeta.captions_burned_in === true ||
+      finalVideoMeta.subtitle_url ||
+      finalVideoMeta.captions_sidecar_ready
+    );
+    var commercialCandidate = !!(finalVideo && finalVideo.url && finalIsMp4 && !finalIsSlideshow && finalCaptionsOk);
     var checks = [
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
       { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
-      { label: "Final video", ok: !!(finalVideo && finalVideo.url), note: finalVideo && finalVideo.url ? "Ready" : "Build Final Promo", action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build Final Promo or the offline 30s montage" : (finalIsSlideshow ? "Blocked: still slideshow" : (finalVideoMeta.render_mode === "offline_montage_not_lipsync" ? "Offline montage for review. Not lip sync." : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))), action: "build-final-promo", actionLabel: "Build final promo" },
+      { label: "Nova click destination", ok: !!(finalVideoMeta.click_destination && finalVideoMeta.click_destination.verified === true), note: (finalVideoMeta.click_destination && finalVideoMeta.click_destination.website_field_url) ? String(finalVideoMeta.click_destination.website_field_url) + (finalVideoMeta.click_destination.verified ? " verified" : " not yet verified") : "Prepare the profile Website link. Captions are not clickable.", action: "prepare-nova-links", actionLabel: "Prepare Nova links" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
       { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
-      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()), note: caption ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
+      { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()) || finalCaptionsOk, note: (caption || finalCaptionsOk) ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
       { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand", action: "brand-profile", actionLabel: "Set up brand" }
     ];
 
@@ -752,6 +855,7 @@
           return;
         }
         if (action === "build-final-promo") targetButton = $("build-final-promo");
+        else if (action === "prepare-nova-links") targetButton = $("prepare-nova-links");
         else if (action === "preview-talking-presenter") targetButton = $("preview-talking-presenter");
         else if (action === "generate-image") targetButton = document.querySelector('[data-action="image"]');
         else if (action === "generate-voice") targetButton = document.querySelector('[data-action="voice"]');
@@ -783,7 +887,6 @@
       $("drama-voice-" + suffix).value = character.voice;
     });
   }
-  var projectRowsCache = [];
   function refreshDrama(detail) {
     var project = detail && detail.project;
     var plan = project && project.metadata && project.metadata.short_drama;
@@ -890,11 +993,22 @@
       if (meta.presenter_mode === "half_body") return "Half-body presenter";
       return "Headshot presenter";
     }
+    if (row.kind === "video" && meta.render_mode === "offline_montage_not_lipsync") return "Offline montage, not lip sync";
     if (row.kind === "video" && meta.final_promo) return "Final demo video";
     if (row.kind === "video") return "Scene video";
     if (row.kind === "audio") return "Voice audio";
     if (row.kind === "image") return "Image";
     return row.kind || "Asset";
+  }
+
+  async function pollStudioJob(projectId, jobId) {
+    var last = null;
+    for (var attempt = 0; attempt < 45; attempt += 1) {
+      last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
+      if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
+      await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+    }
+    return last;
   }
 
   async function refreshAssets() {
@@ -940,18 +1054,32 @@
         var isPresenterVideo = row.kind === "presenter_video";
         var isBodyMotion = isPresenterVideo && row.metadata &&
           (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
-        var videoLabel = isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video");
+        var offlineMontage = !isPresenterVideo && row.metadata && row.metadata.render_mode === "offline_montage_not_lipsync";
+        var videoLabel = offlineMontage
+          ? "Download offline montage"
+          : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"));
+        var downloadHref = offlineMontage
+          ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
+          : row.url;
         var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
         var subtitleUrl = row.metadata && row.metadata.subtitle_url ? String(row.metadata.subtitle_url) : "";
         var subtitleTrack = subtitleUrl ? "<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" +
           escapeHtml(subtitleUrl) + "\" default>" : "";
+        var licenseNote = "";
+        if (offlineMontage) {
+          var license = String((row.metadata && row.metadata.license_status) || "AMBER");
+          var clearance = (row.metadata && row.metadata.narration && row.metadata.narration.commercial_use) ||
+            "Local narration is not cleared for a public ad.";
+          licenseNote = "<p class=\"hint\">Lip-sync presenter: no. Commercial-use clearance: " +
+            escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
+        }
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
           escapeHtml(row.url) + "\"" +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure><a class=\"button secondary\" href=\"" +
-          escapeHtml(row.url) + "\" download>" + videoLabel + "</a>" +
+          "</figure>" + licenseNote + "<a class=\"button secondary\" href=\"" +
+          escapeHtml(downloadHref) + "\" download>" + videoLabel + "</a>" +
           (subtitleUrl ? " <a class=\"button secondary\" href=\"" + escapeHtml(subtitleUrl) + "\" download>Download captions</a>" : "");
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
@@ -1167,6 +1295,376 @@
     throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
   }
 
+  function renderPreflight(quote) {
+    latestPreflight = quote || null;
+    var el = $("preflight-status");
+    var confirmBtn = $("confirm-budget");
+    if (!el) return;
+    if (!quote) {
+      el.textContent = "Select a project, then run preflight.";
+      if (confirmBtn) confirmBtn.disabled = true;
+      return;
+    }
+    var balance = quote.balance || {};
+    var balanceText = balance.status === "owner_reported"
+      ? ("Owner-reported balance: $" + String(balance.amount))
+      : "Balance: cannot verify (no automatic top-up)";
+    var lines = [
+      "Estimated total: $" + String(quote.estimated_total_usd) + " USD (planning only)",
+      balanceText,
+      "Paid render allowed by quote: " + (quote.paid_render_allowed ? "yes" : "no"),
+      "Owner budget confirmed: " + (quote.owner_budget_confirmed ? "yes" : "no"),
+      "Auto purchase/top-up: off"
+    ];
+    (quote.line_items || []).forEach(function (item) {
+      lines.push("- " + item.label + ": $" + String(item.estimated_usd));
+    });
+    el.innerHTML = lines.map(function (line) { return "<div>" + escapeHtml(line) + "</div>"; }).join("");
+    if (confirmBtn) {
+      confirmBtn.disabled = !quote.paid_render_allowed || !!quote.owner_budget_confirmed;
+    }
+  }
+
+  var runPreflightBtn = $("run-preflight");
+  if (runPreflightBtn) {
+    runPreflightBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project before running preflight.", false);
+        return;
+      }
+      runPreflightBtn.disabled = true;
+      try {
+        var quote = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/preflight");
+        renderPreflight(quote);
+        showBanner("Preflight complete. No provider charges were made.", true);
+      } catch (err) {
+        showBanner(err.message || "Preflight failed.", false);
+      } finally {
+        runPreflightBtn.disabled = false;
+      }
+    });
+  }
+  var confirmBudgetBtn = $("confirm-budget");
+  if (confirmBudgetBtn) {
+    confirmBudgetBtn.addEventListener("click", async function () {
+      if (!activeProjectId || !latestPreflight) {
+        showBanner("Run preflight for the active project first.", false);
+        return;
+      }
+      confirmBudgetBtn.disabled = true;
+      try {
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/budget-confirm", {
+          method: "POST",
+          body: JSON.stringify({
+            confirmed: true,
+            acknowledged_estimate_usd: latestPreflight.estimated_total_usd,
+            note: "Owner confirmed preflight estimate before paid render."
+          })
+        });
+        renderPreflight(body.quote || latestPreflight);
+        showBanner("Budget confirmation saved for this project. Still no automatic purchases.", true);
+      } catch (err) {
+        showBanner(err.message || "Budget confirmation failed.", false);
+        confirmBudgetBtn.disabled = false;
+      }
+    });
+  }
+
+  var latestStudioOrderId = null;
+
+  async function runWalkingRender(endpoint, button, startMessage, successMessage) {
+    button.disabled = true;
+    try {
+      // Never rely on a bare localStorage id — always resolve against the live project list.
+      var projectId = await ensureSecondCommercialSelected();
+      if (!projectId) {
+        showBanner("No Studio project found. Sign in, then click Select Second Commercial (or create a 30s project).", false);
+        return;
+      }
+      showBanner(startMessage + " Active: " + projectId, true);
+      var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + endpoint, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      var polled = rendered;
+      if (rendered.job && rendered.job.id) {
+        polled = await pollStudioJob(projectId, rendered.job.id);
+      }
+      renderOutput(polled || rendered);
+      await refreshAssets();
+      var status = polled && polled.job && polled.job.status;
+      if (status === "ERROR") {
+        showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
+      } else {
+        showBanner(successMessage, true);
+      }
+    } catch (err) {
+      showBanner(err.message || "Walking render failed.", false);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  var walkingPresenterButton = $("build-walking-presenter");
+  if (walkingPresenterButton) {
+    walkingPresenterButton.addEventListener("click", function () {
+      runWalkingRender(
+        "/assemble/walking-presenter-proof",
+        walkingPresenterButton,
+        "Rendering the 5–6s walking presenter proof. No paid provider is charged.",
+        "Walking presenter proof ready. Download the MP4 from assets."
+      );
+    });
+  }
+
+  var walkingCommercialButton = $("build-walking-commercial-30s");
+  if (walkingCommercialButton) {
+    walkingCommercialButton.addEventListener("click", function () {
+      return runWalkingRender(
+        "/assemble/walking-commercial-30s",
+        walkingCommercialButton,
+        "Rendering the 30s walking talking commercial. No paid provider is charged.",
+        "30s walking commercial ready for mobile download. Accept the voice license before public ads."
+      );
+    });
+  }
+
+  var acceptVoiceLicenseBtn = $("accept-voice-license");
+  if (acceptVoiceLicenseBtn) {
+    acceptVoiceLicenseBtn.addEventListener("click", async function () {
+      acceptVoiceLicenseBtn.disabled = true;
+      try {
+        var projectId = await ensureSecondCommercialSelected();
+        if (!projectId) {
+          showBanner("No Studio project found. Sign in, then click Select Second Commercial.", false);
+          return;
+        }
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/voice-license", {
+          method: "POST",
+          body: JSON.stringify({
+            accepted: true,
+            note: "Owner accepts Studio neural voice for this commercial."
+          })
+        });
+        renderOutput(body);
+        showBanner("Voice license accepted on the active project. Future walking renders use license_status GREEN.", true);
+      } catch (err) {
+        showBanner(err.message || "Voice license acceptance failed.", false);
+      } finally {
+        acceptVoiceLicenseBtn.disabled = false;
+      }
+    });
+  }
+
+  var selectSecondCommercialBtn = $("select-second-commercial");
+  if (selectSecondCommercialBtn) {
+    selectSecondCommercialBtn.addEventListener("click", async function () {
+      selectSecondCommercialBtn.disabled = true;
+      try {
+        var projectId = await ensureSecondCommercialSelected();
+        if (!projectId) {
+          showBanner("AMICOR Second Commercial was not found. Create a 30s promo project first.", false);
+          return;
+        }
+        var match = findSecondCommercialProject(projectRowsCache);
+        showBanner("Active project: " + ((match && match.title) || projectId) + ". Accept voice license, then Build 30s.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not select Second Commercial.", false);
+      } finally {
+        selectSecondCommercialBtn.disabled = false;
+      }
+    });
+  }
+
+  function renderStudioPricing(pricing) {
+    var el = $("studio-pricing");
+    if (!el || !pricing) return;
+    el.innerHTML =
+      "<strong>$" + Number(pricing.customer_price_usd).toFixed(2) + "</strong> · " +
+      escapeHtml(pricing.scope || "30-second commercial") +
+      "<div class=\"muted\">Render ceiling $" + Number(pricing.internal_render_cost_ceiling_usd).toFixed(2) +
+      " · " + escapeHtml(String(pricing.payment_mode || "unconfigured")) + " mode</div>";
+  }
+
+  function renderStudioOrders(payload) {
+    var el = $("studio-orders");
+    if (!el) return;
+    var orders = (payload && payload.orders) || [];
+    if (!orders.length) {
+      el.textContent = "No Studio checkout orders yet for this project.";
+      return;
+    }
+    el.innerHTML = orders.map(function (order) {
+      var receipt = order.receipt ? (" · receipt " + escapeHtml(order.receipt.receipt_id || "ready")) : "";
+      var cost = order.production_cost
+        ? (" · est. render $" + Number(order.production_cost.estimated_render_cost_usd || 0).toFixed(2))
+        : "";
+      return "<div><strong>" + escapeHtml(order.id) + "</strong> · " +
+        escapeHtml(String(order.status || "")) +
+        " · job " + escapeHtml(String(order.job_status || "")) +
+        " · $" + Number(order.customer_price_usd || 0).toFixed(2) +
+        receipt + cost + "</div>";
+    }).join("");
+  }
+
+  var loadPricingBtn = $("load-studio-pricing");
+  if (loadPricingBtn) {
+    loadPricingBtn.addEventListener("click", async function () {
+      try {
+        var pricing = await api("/api/nova/creative/pricing");
+        renderStudioPricing(pricing);
+        showBanner("AMICOR Studio pricing loaded. No charge was created.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not load Studio pricing.", false);
+      }
+    });
+  }
+
+  var startCheckoutBtn = $("start-studio-checkout");
+  if (startCheckoutBtn) {
+    startCheckoutBtn.addEventListener("click", async function () {
+      startCheckoutBtn.disabled = true;
+      try {
+        var projectId = await ensureSecondCommercialSelected();
+        if (!projectId) {
+          showBanner("No Studio project found. Sign in, then click Select Second Commercial before checkout.", false);
+          return;
+        }
+        var started = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/checkout", {
+          method: "POST",
+          body: JSON.stringify({
+            success_url: window.location.origin + "/nova/creative?checkout=success",
+            cancel_url: window.location.origin + "/nova/creative?checkout=cancel"
+          })
+        });
+        renderOutput(started);
+        if (started.order) {
+          latestStudioOrderId = started.order.id;
+          renderStudioOrders({ orders: [started.order] });
+        }
+        var url = started.checkout && started.checkout.url;
+        var mode = started.order && started.order.payment_mode;
+        showBanner(
+          "TEST checkout created for $" + Number((started.order || {}).customer_price_usd || 0).toFixed(2) +
+            " (" + String(mode || "test") + "). " +
+            (mode === "test" && url
+              ? "Open the AMICOR Stripe Checkout link, or refresh orders after paying with a TEST card."
+              : "Use Complete TEST payment to verify receipts without a live card."),
+          true
+        );
+        if (mode === "test" && url && window.confirm("Open AMICOR Stripe TEST Checkout in a new tab?")) {
+          window.open(url, "_blank", "noopener");
+        }
+      } catch (err) {
+        showBanner(err.message || "Studio checkout failed.", false);
+      } finally {
+        startCheckoutBtn.disabled = false;
+      }
+    });
+  }
+
+  var completeTestCheckoutBtn = $("complete-studio-test-checkout");
+  if (completeTestCheckoutBtn) {
+    completeTestCheckoutBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      if (!latestStudioOrderId) {
+        showBanner("Start a TEST checkout first, then complete it.", false);
+        return;
+      }
+      completeTestCheckoutBtn.disabled = true;
+      try {
+        var body = await api(
+          "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) +
+            "/checkout/orders/" + encodeURIComponent(latestStudioOrderId) + "/complete-test",
+          { method: "POST", body: JSON.stringify({}) }
+        );
+        renderOutput(body);
+        renderStudioOrders({ orders: body.order ? [body.order] : [] });
+        showBanner("TEST payment recorded. Receipt and job status are ready.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not complete TEST checkout.", false);
+      } finally {
+        completeTestCheckoutBtn.disabled = false;
+      }
+    });
+  }
+
+  var refreshOrdersBtn = $("refresh-studio-orders");
+  if (refreshOrdersBtn) {
+    refreshOrdersBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project first.", false);
+        return;
+      }
+      try {
+        var payload = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/checkout/orders");
+        if (payload.pricing) renderStudioPricing(payload.pricing);
+        renderStudioOrders(payload);
+        if (payload.orders && payload.orders[0]) latestStudioOrderId = payload.orders[0].id;
+        showBanner("Studio orders refreshed.", true);
+      } catch (err) {
+        showBanner(err.message || "Could not refresh Studio orders.", false);
+      }
+    });
+  }
+
+  var offlineMontageButton = $("build-offline-montage");
+  if (offlineMontageButton) {
+    offlineMontageButton.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project with a storyboard first.", false);
+        return;
+      }
+      offlineMontageButton.disabled = true;
+      showBanner("Rendering the offline montage on this server. No paid provider is called.", true);
+      try {
+        var rendered = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assemble/offline-commercial", {
+          method: "POST"
+        });
+        var polled = rendered;
+        if (rendered.job && rendered.job.id) {
+          polled = await pollStudioJob(activeProjectId, rendered.job.id);
+        }
+        renderOutput(polled || rendered);
+        var status = polled && polled.job && polled.job.status;
+        await refreshAssets();
+        if (status === "ERROR") {
+          showBanner("Offline render failed: " + (polled.job.message || "Unknown error. Check the job result."), false);
+        } else if (status === "GENERATED" || (polled && polled.ready === true)) {
+          showBanner("Offline render completed. Check the asset list for the MP4 preview and download. No publication was made.", true);
+        } else {
+          showBanner("Offline render is still processing or its final status was not confirmed. Refresh this project and check assets before attempting download.", false);
+        }
+      } catch (err) {
+        showBanner(err.message || "Offline montage failed.", false);
+      } finally {
+        offlineMontageButton.disabled = false;
+      }
+    });
+  }
+
+  var novaLinksButton = $("prepare-nova-links");
+  if (novaLinksButton) {
+    novaLinksButton.addEventListener("click", async function () {
+      var platformSelect = $("project-platform");
+      var platform = platformSelect ? platformSelect.value : "TikTok";
+      novaLinksButton.disabled = true;
+      try {
+        var pack = await api("/api/nova/creative/click-destinations?platform=" + encodeURIComponent(platform) + "&verify=true");
+        renderOutput(pack);
+        var verified = pack.verified ? "Verified." : "Not verified from this network.";
+        showBanner("Profile Website field: " + pack.website_field_url + " " + verified + " Nothing was posted.", pack.verified === true);
+      } catch (err) {
+        showBanner(err.message || "Could not prepare Nova links.", false);
+      } finally {
+        novaLinksButton.disabled = false;
+      }
+    });
+  }
+
   var finalPromoButton = $("build-final-promo");
   if (finalPromoButton) {
     finalPromoButton.addEventListener("click", async function () {
@@ -1235,12 +1733,22 @@
   async function boot() {
     if (!token()) {
       setSignedIn(false);
+      updateActiveProjectLabel();
       return;
     }
-    setSignedIn(true);
     try {
+      // A locally cached token is not proof that the staging account survived a restart.
+      // Confirm it with the server before showing the authenticated Studio controls.
+      await api("/api/auth/me");
+      setSignedIn(true);
       await refreshProviders();
       await refreshProjects();
+      // Prefer the Second Commercial project so Build / Checkout never hit "select a project first".
+      if (!activeProjectId || !projectRowsCache.some(function (row) { return row.id === activeProjectId; })) {
+        await ensureSecondCommercialSelected();
+      } else {
+        updateActiveProjectLabel();
+      }
       await refreshBrands();
       await refreshAssets();
     } catch (err) {
@@ -1248,6 +1756,32 @@
     }
   }
 
+  if (location.hostname === "nova-studio-validation-350.onrender.com") {
+    $("staging-register-panel").style.display = "block";
+    $("staging-register-toggle").addEventListener("click", function () {
+      $("staging-register-form").classList.toggle("hidden");
+    });
+    $("staging-register-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      try {
+        var email = $("staging-register-email").value.trim();
+        var password = $("staging-register-password").value;
+        if (password.length < 12) throw new Error("Test password must be at least 12 characters.");
+        await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email: email, password: password, role: "staff", display_name: "Studio Tester" })
+        });
+        $("login-email").value = email;
+        $("login-password").value = "";
+        $("login-form").classList.remove("hidden");
+        $("staging-register-form").classList.add("hidden");
+        $("staging-register-password").value = "";
+        showBanner("Test account created. Enter your NEW test password in the sign-in form. Never use your production password.", true);
+      } catch (err) {
+        showBanner("Test account creation failed: " + err.message, false);
+      }
+    });
+  }
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });
@@ -1285,6 +1819,7 @@
         if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
       }
       setToken(body.access_token || "");
+      setSignedIn(true); // hide Sign in immediately; only Sign out while session is active
       showBanner("Signed in. Creative Studio session is ready.", true);
       boot();
     } catch (err) {
@@ -1296,9 +1831,10 @@
     tagline: "AI help for everyday business operations",
     tone: "Professional, friendly, trustworthy",
     target_audience: "Small business owners, service businesses, local businesses, and growing teams",
-    preferred_cta: "Start free today",
+    preferred_cta: "Visit getamicor.com to explore AMICOR Nova.",
     brand_description: "AMICOR Nova helps small businesses handle documents, emails, reports, scheduling, outreach, and other day-to-day operational tasks with AI-assisted drafts you review first. Save time, stay organized, and stay in control."
   };
+  var latestPreflight = null;
 
   function applyAmicorBrandDefaults() {
     $("brand-name").value = amicorDefaults.business_name;
