@@ -182,12 +182,31 @@ def _identity_text(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
+def _shared_bulletin_identity(row: dict[str, Any]) -> str | None:
+    """Identity for many notices that share one public bulletin URL.
+
+    Minnesota OSP publishes each open solicitation on a single page. The page
+    URL is real provenance, but it is not a per-notice identity. Keying on that
+    URL collapses unrelated solicitations and can attach one notice's title to
+    another notice's description.
+    """
+    origin = str((row.get("raw_source_metadata") or {}).get("origin") or "")
+    identifier = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
+    if origin == "mn_osp_public_posting" and identifier:
+        return "mn_osp:" + identifier
+    return None
+
+
 def opportunity_dedupe_key(row: dict[str, Any]) -> str:
     provider = str(row.get("provider_id") or "").strip().lower()
     identifier = str(row.get("notice_id") or row.get("provider_identifier") or "").strip().lower()
     # SAM notice IDs are canonical across notice URL variants.
     if provider == "sam_gov" and identifier:
         return "sam_notice:" + identifier
+
+    bulletin = _shared_bulletin_identity(row)
+    if bulletin:
+        return bulletin
 
     # A canonical public URL is stronger for cross-provider duplicates: the same
     # listing can be syndicated by more than one feed with different provider IDs.
@@ -1914,6 +1933,9 @@ def dedupe_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _funnel_key(row: dict[str, Any]) -> str:
     """Stable identity for screened-versus-unique reconciliation."""
+    bulletin = _shared_bulletin_identity(row)
+    if bulletin:
+        return bulletin
     url = _canonical_source_url(str(row.get("source_url") or ""))
     if url:
         return url
