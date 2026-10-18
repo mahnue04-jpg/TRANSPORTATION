@@ -27,6 +27,8 @@ This preview is not a production release.
 
 Calls are browser WebRTC between the signed-in participants. The server only exchanges call state and signaling. It does not forward audio or video.
 
+An ICE restart is stored as `renego` only after the call is active. It replaces that sender's unanswered offer to the same person, and the other person receives the latest description. A restart during ringing is rejected. The browser posts the new description before it installs the local offer, so a rejected restart leaves the current peer connection in place. A group call marks a quiet participant left while at least two people remain. If a timeout would leave fewer than two people, the call fails with `network_timeout` and a new call can start.
+
 The call machine on each peer is `idle → ringing → permission → connecting → connected`, plus decline, hangup, reconnect, and failure. Permission denial ends that invite with `permission_denied` and does not open the camera again until the person starts or accepts another call. Nothing is captured on page load.
 
 `connected` in a browser means that browser reported a peer connection. It does not mean two devices exchanged audio or video. The automated test that reaches `connected` uses an in-process fake RTC layer and is labeled `simulated`. Its media path is `simulated-loopback`. It sends no RTP and opens no camera.

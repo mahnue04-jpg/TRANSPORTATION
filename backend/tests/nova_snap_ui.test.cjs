@@ -138,6 +138,20 @@ test("simulated session exchanges descriptions without claiming a second device"
   assert.equal(callee.state, "declined");
 });
 
+test("reconnect posts the restart before installing it locally", () => {
+  const handler = source.slice(source.indexOf("$(\"call-reconnect\")"), source.indexOf("$(\"enable-sound\")"));
+  assert.match(handler, /state\.call\.state !== "active"/);
+  assert.match(handler, /restartPeer/);
+  const fnStart = source.indexOf("async function restartPeer");
+  const fnEnd = source.indexOf("async function sendSignal");
+  assert.ok(fnStart > 0 && fnEnd > fnStart);
+  const fn = source.slice(fnStart, fnEnd);
+  const post = fn.indexOf('sendSignal("renego"');
+  const apply = fn.lastIndexOf("setLocalDescription(offer)");
+  assert.ok(post > 0 && apply > post);
+  assert.match(source, /signalingState === "have-remote-offer"/);
+});
+
 test("arrow keys move between snap sections", async () => {
   const view = setup();
   await settle();

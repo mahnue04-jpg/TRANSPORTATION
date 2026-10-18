@@ -800,10 +800,13 @@ def _touch_liveness(db: Session, call: SnapCall) -> SnapCall:
     senders = _media_senders(db, call.call_id)
     limits = {person.user_id: _silence_limits(person.user_id in senders) for person in live}
     stale = [person for person in live if _participant_age(person, now) > limits[person.user_id][1]]
-    # Two-person calls end when either side goes quiet. Count only people still
-    # in the call, so an invited or already-left row cannot hide a 1:1 timeout.
-    # Larger calls mark a quiet peer left and end only after every live peer is quiet.
-    if stale and (len(live) <= 2 or len(stale) == len(live)):
+    stale_ids = {person.user_id for person in stale}
+    remaining = [person for person in live if person.user_id not in stale_ids]
+    # Count only people still in the call, so an invited or already-left row
+    # cannot hide a 1:1 timeout. A quiet peer is marked left while two or more
+    # people remain. Fewer than two remaining ends the call, including when
+    # several peers go quiet in the same check.
+    if stale and len(remaining) < 2:
         call.state = "failed"
         call.ended_reason = "network_timeout"
         call.ended_at = now
@@ -1097,6 +1100,10 @@ def _assert_description_order(db: Session, call: SnapCall, user_id: str, kind: s
                 continue
             if _offer_was_answered(row, others):
                 continue
+            # An active ICE restart replaces this sender's unanswered description.
+            # A second offer, or a restart while the call is still ringing, does not.
+            if kind == "renego" and call.state == "active":
+                continue
             raise HTTPException(409, "An offer is already waiting for an answer.")
 
 
@@ -1215,6 +1222,15 @@ def post_signal(
     raise HTTPException(409, "Call signal could not be saved. Retry with the same client id.")
 
 
+def _latest_description_ids(rows: list[SnapSignal]) -> set[str]:
+    latest: dict[tuple[str, str | None], str] = {}
+    for row in rows:
+        if row.kind not in {"offer", "renego"}:
+            continue
+        latest[(row.sender_user_id, _signal_target(row.payload))] = row.signal_id
+    return set(latest.values())
+
+
 def list_signals(db: Session, user: UserContext, call_id: str, after_seq: int = 0) -> list[dict]:
     call, me = _require_call(db, user, call_id)
     if me.state in {"declined", "left"} or call.state in {"ended", "failed", "declined"}:
@@ -1226,9 +1242,15 @@ def list_signals(db: Session, user: UserContext, call_id: str, after_seq: int = 
         .limit(100)
         .all()
     )
+    current = _latest_description_ids(rows)
+    visible = []
+    for row in rows:
+        if row.kind in {"offer", "renego"} and row.signal_id not in current:
+            continue
+        visible.append(row)
     return [
         {"signal_id": row.signal_id, "seq": row.seq, "sender_user_id": row.sender_user_id, "kind": row.kind, "payload": row.payload}
-        for row in rows
+        for row in visible
     ]
 
 

@@ -82,3 +82,21 @@ Tests on this pass:
 - `python3 -m pytest backend/tests/test_nova_home.py backend/tests/test_nova_synapse.py -q`: 27 passed, 0 failed (15 Home, 12 Synapse). Home and Synapse product code were not edited.
 
 A human two-device checklist remains in `docs/nova/snap.md`. Public Coming Soon on `origin/main` `website/catalog.py` was not edited.
+
+## Continuation 2026-10-18
+
+Two open review findings on `e751760c`:
+
+- Reconnect posted `renego` after installing a new local offer. The server rejected that restart while the call was ringing and while the first offer was still unanswered, so the browser and the other person diverged.
+- A group timeout marked every quiet peer left and could leave one person in an active call, which blocked the next call.
+
+The active-call restart now replaces that sender's unanswered offer. Ringing restarts stay rejected. The browser sends the restart before `setLocalDescription`, and it does not install the offer when the call is not active. A timeout that would leave fewer than two people fails the call with `network_timeout`.
+
+This is still a simulated signaling check. `two_independent_devices` stays false. No TURN server was purchased. The public card stays Coming Soon.
+
+Tests on this pass:
+
+- `python3 -m pytest tests/test_nova_snap.py tests/test_nova_home.py tests/test_nova_synapse.py -q`: 45 passed, 0 failed (18 Snap, 27 Home and Synapse).
+- `node --test tests/nova_snap_ui.test.cjs`: 7 passed, 0 failed.
+
+No browser on two devices was used. Headless rendering from earlier passes is still the signed-out page, not a call.

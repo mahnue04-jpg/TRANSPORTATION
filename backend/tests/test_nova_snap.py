@@ -259,6 +259,50 @@ def test_group_timeout_drops_quiet_peer_so_hangup_can_finish(db):
     assert restarted["call_id"] != call["call_id"]
 
 
+def test_group_partial_timeout_does_not_leave_one_person(db):
+    owner, peer, quiet, extra = user("owner"), user("peer"), user("quiet"), user("extra")
+    _accept_contacts(db, owner, [peer, quiet, extra])
+    conversation = service.create_group(db, owner, "Four", [peer.user_id, quiet.user_id, extra.user_id])["conversation_id"]
+    call = service.start_call(db, owner, conversation, "audio")
+    service.accept_call(db, peer, call["call_id"])
+    service.accept_call(db, quiet, call["call_id"])
+    service.accept_call(db, extra, call["call_id"])
+    quiet_at = datetime.now(timezone.utc) - timedelta(seconds=policy.PERMISSION_GRACE_S + 30)
+    for person in db.query(SnapCallParticipant).filter_by(call_id=call["call_id"]).all():
+        if person.user_id in {quiet.user_id, extra.user_id}:
+            person.last_seen = quiet_at
+    db.commit()
+    held = service.get_call(db, owner, call["call_id"])
+    assert held["state"] == "active"
+    states = {person["user_id"]: person["state"] for person in held["participants"]}
+    assert states[owner.user_id] == "accepted"
+    assert states[peer.user_id] == "accepted"
+    assert states[quiet.user_id] == "left"
+    assert states[extra.user_id] == "left"
+    for person in db.query(SnapCallParticipant).filter_by(call_id=call["call_id"]).all():
+        if person.user_id != owner.user_id and person.state in {"accepted", "reconnecting"}:
+            person.last_seen = quiet_at
+    db.commit()
+    # One fresh participant and one quiet participant is a two-person timeout.
+    failed_pair = service.get_call(db, owner, call["call_id"])
+    assert failed_pair["state"] == "failed"
+    assert failed_pair["ended_reason"] == "network_timeout"
+    simultaneous = service.start_call(db, owner, conversation, "audio")
+    service.accept_call(db, peer, simultaneous["call_id"])
+    service.accept_call(db, quiet, simultaneous["call_id"])
+    service.accept_call(db, extra, simultaneous["call_id"])
+    for person in db.query(SnapCallParticipant).filter_by(call_id=simultaneous["call_id"]).all():
+        if person.user_id != owner.user_id:
+            person.last_seen = quiet_at
+    db.commit()
+    failed = service.get_call(db, owner, simultaneous["call_id"])
+    assert failed["state"] == "failed"
+    assert failed["ended_reason"] == "network_timeout"
+    assert all(person["state"] == "left" for person in failed["participants"])
+    restarted = service.start_call(db, owner, conversation, "audio")
+    assert restarted["call_id"] != simultaneous["call_id"]
+
+
 def test_effectively_two_person_group_times_out(db):
     owner, peer, missing = user("owner"), user("peer"), user("missing")
     _accept_contacts(db, owner, [peer, missing])
@@ -537,6 +581,19 @@ def test_signal_order_sdp_and_relay_rules(db, monkeypatch):
         service.post_signal(db, owner, call["call_id"], kind="renego", payload=offer, client_signal_id="renego-early01")
     assert err.value.status_code == 409
     service.accept_call(db, peer, call["call_id"])
+    restart = sdp(video=True, ufrag="owner2")
+    assert service.post_signal(db, owner, call["call_id"], kind="renego", payload=restart, client_signal_id="renego-stuck01")["duplicate"] is False
+    visible = [row for row in service.list_signals(db, peer, call["call_id"]) if row["kind"] in {"offer", "renego"}]
+    assert [row["kind"] for row in visible] == ["renego"]
+    assert "a=ice-ufrag:owner2" in visible[0]["payload"]
+    again = sdp(video=True, ufrag="owner3")
+    service.post_signal(db, owner, call["call_id"], kind="renego", payload=again, client_signal_id="renego-stuck02")
+    latest = [row for row in service.list_signals(db, peer, call["call_id"]) if row["kind"] in {"offer", "renego"}]
+    assert len(latest) == 1
+    assert "a=ice-ufrag:owner3" in latest[0]["payload"]
+    with pytest.raises(HTTPException) as err:
+        service.post_signal(db, owner, call["call_id"], kind="offer", payload=again, client_signal_id="offer-stack-01")
+    assert err.value.status_code == 409
     with pytest.raises(HTTPException) as err:
         service.list_signals(db, user("stranger"), call["call_id"])
     assert err.value.status_code == 404

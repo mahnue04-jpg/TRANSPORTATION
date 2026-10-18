@@ -539,8 +539,42 @@
   }
   async function publishDescription(pc, kind, sdp) {
     var payload = pc._wrapped ? JSON.stringify({ target: pc._remoteId, sdp: sdp || "" }) : (sdp || "");
-    if (!(await sendSignal(kind, payload))) return;
+    if (!(await sendSignal(kind, payload))) return false;
     note(kind === "answer" ? "local_answer" : "local_offer");
+    await releaseLocalIce(pc);
+    return true;
+  }
+  async function restartPeer(pc) {
+    var offer;
+    try {
+      offer = await pc.createOffer({ iceRestart: true });
+    } catch (err) {
+      if (pc.signalingState !== "have-local-offer" && pc.signalingState !== "have-remote-offer") {
+        text("call-error", "The call could not update the connection.");
+        return;
+      }
+      try { await pc.setLocalDescription({ type: "rollback" }); } catch (ignore) {}
+      try {
+        offer = await pc.createOffer({ iceRestart: true });
+      } catch (again) {
+        text("call-error", "The call could not update the connection.");
+        return;
+      }
+    }
+    var payload = pc._wrapped ? JSON.stringify({ target: pc._remoteId, sdp: offer.sdp || "" }) : (offer.sdp || "");
+    if (!(await sendSignal("renego", payload))) return;
+    if (pc.signalingState === "have-local-offer" || pc.signalingState === "have-remote-offer") {
+      try { await pc.setLocalDescription({ type: "rollback" }); } catch (ignore) {}
+    }
+    try {
+      await pc.setLocalDescription(offer);
+    } catch (err) {
+      text("call-error", "The call could not update the connection.");
+      return;
+    }
+    pc._descSent = false;
+    pc._localIce = [];
+    note("local_offer");
     await releaseLocalIce(pc);
   }
   function stashRemoteIce(senderId, candidate) {
@@ -659,7 +693,10 @@
         }
         if (!pc) continue;
         try {
-          if (incomingOffer && wrapped && pc.signalingState === "have-local-offer") {
+          if (incomingOffer && pc.signalingState === "have-remote-offer") {
+            try { await pc.setLocalDescription({ type: "rollback" }); } catch (err) {}
+          }
+          if (incomingOffer && pc.signalingState === "have-local-offer") {
             var polite = !!(state.me && row.sender_user_id < state.me.user_id);
             if (!polite) continue;
             try { await pc.setLocalDescription({ type: "rollback" }); } catch (err) {}
@@ -1060,16 +1097,16 @@
       try {
         state.call = await api("/calls/" + state.call.call_id + "/reconnect", { method: "POST" });
         note("reconnect");
+        if (state.call.state !== "active") {
+          text("call-error", "Restart the connection only after the call is active.");
+          text("call-state", "Waiting. Picture and sound depend on a direct network path. Two-device audio and video are not verified.");
+          return;
+        }
         text("call-state", "Reconnecting. Picture and sound depend on a direct network path. Two-device audio and video are not verified.");
         var pcs = eachPc();
         for (var i = 0; i < pcs.length; i += 1) {
-          var pc = pcs[i];
-          if (!pc.createOffer) continue;
-          pc._descSent = false;
-          pc._localIce = [];
-          var offer = await pc.createOffer({ iceRestart: true });
-          await pc.setLocalDescription(offer);
-          await publishDescription(pc, "renego", offer.sdp || "");
+          if (!pcs[i].createOffer) continue;
+          await restartPeer(pcs[i]);
         }
       } catch (err) { text("call-error", err.message); }
     });
