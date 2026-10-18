@@ -872,8 +872,8 @@ def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
 def test_creative_ui_exposes_live_video_and_voice_actions() -> None:
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
-    assert "Generate Next AI Scene" in html
-    assert "Generate Voice" in html
+    assert 'data-action="video"' in html && "8. Next scene" in html
+    assert 'data-action="voice"' in html && "9. Voice" in html
     assert "Download AI video" in js
     assert "Download voice" in js
     assert "<video controls playsinline" in js
