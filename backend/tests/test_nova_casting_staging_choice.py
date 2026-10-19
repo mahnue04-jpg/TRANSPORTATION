@@ -7,7 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app.core.casting_staging_choice import ACCEPTANCE_STAGES, decide_staging_store
+from app.core.casting_staging_choice import (
+    ACCEPTANCE_STAGES,
+    PREVIEW_WEB_SERVICE,
+    VERIFIED_STAGING_DATABASE,
+    decide_preview_database_link,
+    decide_staging_store,
+)
 from app.db.session import _classify_db_connection_error
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -24,6 +30,9 @@ def test_acceptance_stages_keep_retry_intake_and_outbound_closed() -> None:
         assert stage["copies_accounts"] is False
     assert ACCEPTANCE_STAGES[1]["dashboard_read_only"] is True
     assert ACCEPTANCE_STAGES[2]["requires_free_slot_empty"] is True
+    assert ACCEPTANCE_STAGES[3]["save_mode"] == "save-only"
+    assert ACCEPTANCE_STAGES[3]["database_id"] == "dpg-dbap057btjjs7381egmg-a"
+    assert ACCEPTANCE_STAGES[3]["service_id"] == "srv-db7r3ke7bikc73ddosmg"
     assert ACCEPTANCE_STAGES[4]["uses_owner_password"] is False
 
 
@@ -92,6 +101,91 @@ def test_inspection_and_ephemeral_preview_cost_nothing() -> None:
 def test_suspended_postgres_message_is_classified_without_connecting() -> None:
     category = _classify_db_connection_error(ConnectionError("connection refused"))
     assert category == "missing_or_suspended_postgresql_service"
+
+
+def test_verified_preview_link_stays_save_only_and_stores_no_uri() -> None:
+    linked = decide_preview_database_link(
+        database_id=VERIFIED_STAGING_DATABASE["id"],
+        database_name=VERIFIED_STAGING_DATABASE["name"],
+        service_id=PREVIEW_WEB_SERVICE["id"],
+        service_name=PREVIEW_WEB_SERVICE["name"],
+        plan="free",
+        region="virginia",
+        status="available",
+    )
+    assert linked["allowed_now"] is True
+    assert linked["executable_without_owner"] is False
+    assert linked["agent_can_store_reference"] is False
+    assert linked["monthly_usd"] == 0
+    assert linked["owner_retry_allowed"] is False
+    assert linked["provisioned"] is False
+    assert linked["schema_initialized"] is False
+    assert linked["public_intake"] is False
+    assert linked["outbound"] is False
+    assert linked["media_uploads"] is False
+    assert linked["copies_accounts"] is False
+    assert linked["save_mode"] == "save-only"
+    assert linked["database_id"] == "dpg-dbap057btjjs7381egmg-a"
+    assert linked["service_id"] == "srv-db7r3ke7bikc73ddosmg"
+    rendered = json.dumps(linked)
+    assert "postgres://" not in rendered
+    assert "postgresql://" not in rendered
+    assert "password" not in rendered
+
+    secret = "connection-string-must-not-be-stored"
+    refused_secret = decide_preview_database_link(
+        database_id=VERIFIED_STAGING_DATABASE["id"],
+        database_name=VERIFIED_STAGING_DATABASE["name"],
+        service_id=PREVIEW_WEB_SERVICE["id"],
+        service_name=PREVIEW_WEB_SERVICE["name"],
+        connection_string=secret,
+    )
+    assert refused_secret["allowed_now"] is False
+    assert refused_secret["owner_retry_allowed"] is False
+    assert secret not in json.dumps(refused_secret)
+
+    refused = [
+        decide_preview_database_link(
+            database_id="dpg-production",
+            database_name="amicor-health-isf-db",
+            service_id=PREVIEW_WEB_SERVICE["id"],
+            service_name=PREVIEW_WEB_SERVICE["name"],
+        ),
+        decide_preview_database_link(
+            database_id=VERIFIED_STAGING_DATABASE["id"],
+            database_name=VERIFIED_STAGING_DATABASE["name"],
+            service_id="srv-production",
+            service_name="amicor-health-isf-py",
+        ),
+        decide_preview_database_link(
+            database_id=VERIFIED_STAGING_DATABASE["id"],
+            database_name=VERIFIED_STAGING_DATABASE["name"],
+            service_id=PREVIEW_WEB_SERVICE["id"],
+            service_name=PREVIEW_WEB_SERVICE["name"],
+            plan="0.1c-256mb",
+        ),
+        decide_preview_database_link(
+            database_id=VERIFIED_STAGING_DATABASE["id"],
+            database_name=VERIFIED_STAGING_DATABASE["name"],
+            service_id=PREVIEW_WEB_SERVICE["id"],
+            service_name=PREVIEW_WEB_SERVICE["name"],
+            deploy_requested=True,
+        ),
+        decide_preview_database_link(
+            database_id=VERIFIED_STAGING_DATABASE["id"],
+            database_name=VERIFIED_STAGING_DATABASE["name"],
+            service_id=PREVIEW_WEB_SERVICE["id"],
+            service_name=PREVIEW_WEB_SERVICE["name"],
+            status="creating",
+        ),
+        decide_staging_store(
+            "link_verified_preview_database",
+            database_name=VERIFIED_STAGING_DATABASE["name"],
+        ),
+    ]
+    assert all(item["allowed_now"] is False for item in refused)
+    assert all(item["owner_retry_allowed"] is False for item in refused)
+    assert refused[2]["monthly_usd"] == 6
 
 
 def test_postgres_url_keeps_the_owner_retry_gate_closed() -> None:

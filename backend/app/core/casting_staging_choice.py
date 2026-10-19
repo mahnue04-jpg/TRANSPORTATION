@@ -23,6 +23,35 @@ PRODUCTION_DATABASE_NAMES = frozenset({
     "amicor-nova-db",
 })
 
+PRODUCTION_SERVICE_NAMES = frozenset({
+    "amicor-health-isf",
+    "amicor-health-isf-py",
+})
+
+# Owner-connected Render inspection on 2026-10-19. No connection string is stored.
+VERIFIED_STAGING_DATABASE = {
+    "name": "amicor-casting-staging-db",
+    "id": "dpg-dbap057btjjs7381egmg-a",
+    "plan": "free",
+    "region": "virginia",
+    "status": "available",
+    "expires_on": "2026-11-18",
+}
+
+PREVIEW_WEB_SERVICE = {
+    "id": "srv-db7r3ke7bikc73ddosmg",
+    "name": "amicor-health-isf-pr-339",
+}
+
+PREVIEW_LINK_ENV_KEYS = ("DATABASE_URL", "JWT_SECRET", "SECRET_KEY")
+PREVIEW_LINK_MUST_STAY_UNSET = (
+    "AMICOR_SEED_PASSWORD",
+    "NOVA_CASTING_STAGING_READS",
+    "ALLOWED_ORIGINS",
+    "AMICOR_PUBLIC_URL",
+    "APP_VERSION",
+)
+
 PAID_POSTGRES_MONTHLY_USD = 6
 PAID_WEB_MONTHLY_USD = 7
 DISK_USD_PER_GB = 0.25
@@ -71,6 +100,9 @@ ACCEPTANCE_STAGES = (
         "public_intake": False,
         "outbound": False,
         "copies_accounts": False,
+        "save_mode": "save-only",
+        "database_id": VERIFIED_STAGING_DATABASE["id"],
+        "service_id": PREVIEW_WEB_SERVICE["id"],
     },
     {
         "stage": 4,
@@ -151,4 +183,95 @@ def decide_staging_store(
             "an empty Free Postgres is $0 for 30 days and still leaves the retry gate closed"
         )
         return decision
+    if action == "link_verified_preview_database":
+        return decide_preview_database_link(
+            database_id=name,
+            database_name=name,
+            service_id="",
+            service_name="",
+        )
+    return decision
+
+
+def decide_preview_database_link(
+    *,
+    database_id: str,
+    database_name: str,
+    service_id: str,
+    service_name: str,
+    plan: str = "free",
+    region: str = "virginia",
+    status: str = "available",
+    connection_string: str | None = None,
+    copy_requested: bool = False,
+    deploy_requested: bool = False,
+) -> dict[str, object]:
+    """Decide the preview link. The result never contains a connection string.
+
+    ``allowed_now`` means the owner may perform the save-only dashboard step.
+    This function does not call Render and does not store a secret reference.
+    """
+    decision: dict[str, object] = {
+        "action": "link_verified_preview_database",
+        "allowed_now": False,
+        "executable_without_owner": False,
+        "agent_can_store_reference": False,
+        "monthly_usd": 0,
+        "durable": False,
+        "owner_retry_allowed": False,
+        "provisioned": False,
+        "copies_accounts": False,
+        "public_intake": False,
+        "outbound": False,
+        "media_uploads": False,
+        "schema_initialized": False,
+        "save_mode": "save-only",
+        "env_keys": list(PREVIEW_LINK_ENV_KEYS),
+        "must_stay_unset": list(PREVIEW_LINK_MUST_STAY_UNSET),
+        "database_id": VERIFIED_STAGING_DATABASE["id"],
+        "database_name": VERIFIED_STAGING_DATABASE["name"],
+        "service_id": PREVIEW_WEB_SERVICE["id"],
+        "service_name": PREVIEW_WEB_SERVICE["name"],
+        "reason": "that preview link is not available",
+    }
+    if connection_string is not None or copy_requested:
+        decision["reason"] = "a connection string is not stored"
+        return decision
+    if deploy_requested:
+        decision["reason"] = "save only; a preview deploy waits for a later review"
+        return decision
+    if (plan or "").strip().lower() != "free":
+        decision["monthly_usd"] = PAID_POSTGRES_MONTHLY_USD
+        decision["reason"] = "changing the free database to a paid plan is not approved"
+        return decision
+    requested_name = (database_name or "").strip()
+    requested_id = (database_id or "").strip()
+    if requested_name in PRODUCTION_DATABASE_NAMES or requested_id in PRODUCTION_DATABASE_NAMES:
+        decision["reason"] = "production databases stay unattached"
+        return decision
+    requested_service_name = (service_name or "").strip()
+    requested_service_id = (service_id or "").strip()
+    if requested_service_name in PRODUCTION_SERVICE_NAMES:
+        decision["reason"] = "production services stay unchanged"
+        return decision
+    identity_matches = (
+        requested_id == VERIFIED_STAGING_DATABASE["id"]
+        and requested_name == VERIFIED_STAGING_DATABASE["name"]
+        and requested_service_id == PREVIEW_WEB_SERVICE["id"]
+        and requested_service_name == PREVIEW_WEB_SERVICE["name"]
+    )
+    if not identity_matches:
+        decision["reason"] = "only the verified free database links to the preview service"
+        return decision
+    if (status or "").strip().lower() != VERIFIED_STAGING_DATABASE["status"]:
+        decision["reason"] = "the database is not available"
+        return decision
+    if (region or "").strip().lower() != VERIFIED_STAGING_DATABASE["region"]:
+        decision["reason"] = "the internal reference requires Virginia on the database and the preview"
+        return decision
+    decision["allowed_now"] = True
+    decision["durable"] = True
+    decision["reason"] = (
+        "the owner can save a secret reference and new signing keys on the preview only"
+    )
     return decision
