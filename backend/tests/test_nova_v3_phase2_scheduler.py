@@ -1,7 +1,7 @@
 """Phase 2 synthetic scheduler: leases, retry, DLQ, isolation."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -258,3 +258,103 @@ def test_cadence_and_next_run_survive_restart_without_a_duplicate_tick(tmp_path)
     assert saved[manual.job_id]["frequency"] == "manual"
     assert saved[manual.job_id]["next_run_at"] is None
     assert saved[manual.job_id]["status"] == "EXECUTED"
+
+
+def test_reregister_after_period_change_and_restart_does_not_duplicate(tmp_path) -> None:
+    """Re-saving a repeating job after the clock period changes must not start a second job.
+
+    The durable row keeps the period key from when it was created. A restart in
+    the next hour, followed by the same schedule request, used to insert another
+    prepared job that could tick before the saved next_run_at.
+    """
+    store = V3Store(f"sqlite:///{tmp_path / 'scheduler-reregister.db'}")
+    kernel = NovaV3Kernel()
+    kernel.store = store
+    kernel.now = datetime(2026, 10, 19, 15, 30, tzinfo=timezone.utc)
+    hourly = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="opportunity_refresh",
+        timezone_name="America/Chicago",
+        frequency="hourly",
+    )
+    two_hour = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    first = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
+    assert {item.job_id for item in first} == {hourly.job_id, two_hour.job_id}
+    assert hourly.run_count == 1 and two_hour.run_count == 1
+    hourly_due = hourly.next_run_at
+    two_hour_due = two_hour.next_run_at
+    assert hourly_due == datetime(2026, 10, 19, 16, 30, tzinfo=timezone.utc)
+    assert two_hour_due == datetime(2026, 10, 19, 17, 30, tzinfo=timezone.utc)
+
+    kernel.now = datetime(2026, 10, 19, 16, 5, tzinfo=timezone.utc)
+    again_hourly = kernel.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="opportunity_refresh",
+        timezone_name="America/Chicago",
+        frequency="hourly",
+    )
+    assert again_hourly.job_id == hourly.job_id
+    assert hourly.run_count == 1
+    assert hourly.next_run_at == hourly_due
+    assert hourly.status == "PREPARED"
+    assert len(kernel.jobs) == 2
+    assert kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+
+    restarted = NovaV3Kernel()
+    restarted.now = datetime(2026, 10, 19, 16, 5, tzinfo=timezone.utc)
+    assert restarted.restore_scheduler(store) == 2
+    restored_hourly = restarted.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="opportunity_refresh",
+        timezone_name="America/Chicago",
+        frequency="hourly",
+    )
+    restored_two_hour = restarted.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    assert restored_hourly.job_id == hourly.job_id
+    assert restored_two_hour.job_id == two_hour.job_id
+    assert len(restarted.jobs) == 2
+    assert restarted.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []
+    assert restored_hourly.run_count == 1
+    assert restored_two_hour.run_count == 1
+    assert restored_hourly.next_run_at == hourly_due
+    assert restored_two_hour.next_run_at == two_hour_due
+    assert restarted.messages == {}
+
+    later = NovaV3Kernel()
+    later.now = datetime(2026, 10, 19, 15, 30, tzinfo=timezone.utc)
+    only_two_hour = later.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    assert later.tick_worker(organization_id="org-a", owner_user_id="owner-a")[0].job_id == only_two_hour.job_id
+    later.now = datetime(2026, 10, 19, 17, 5, tzinfo=timezone.utc)
+    again_two_hour = later.schedule_job(
+        organization_id="org-a",
+        owner_user_id="owner-a",
+        kind="application_followup",
+        timezone_name="America/Chicago",
+        frequency="every_two_hours",
+    )
+    assert again_two_hour.job_id == only_two_hour.job_id
+    assert only_two_hour.run_count == 1
+    assert only_two_hour.next_run_at == two_hour_due
+    assert len(later.jobs) == 1
+    assert later.tick_worker(organization_id="org-a", owner_user_id="owner-a") == []

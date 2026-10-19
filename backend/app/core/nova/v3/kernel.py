@@ -995,6 +995,24 @@ class NovaV3Kernel:
             ),
             None,
         )
+        # Repeating jobs keep the period key from the hour they were created.
+        # After that hour changes, a restart that asks for the same cadence
+        # must reuse the prepared row. A second row would tick immediately
+        # and also wake at the saved next_run_at.
+        if existing is None and frequency != "manual":
+            existing = next(
+                (
+                    item
+                    for item in self.jobs.values()
+                    if item.organization_id == organization_id
+                    and item.owner_user_id == owner_user_id
+                    and item.kind == kind
+                    and (item.frequency or "daily") == frequency
+                    and item.timezone_name == tz
+                    and item.status not in {"CANCELLED", "ARCHIVED", "EXECUTED"}
+                ),
+                None,
+            )
         if existing:
             if frequency == "manual" and existing.status == "EXECUTED":
                 existing.status = "PREPARED"
