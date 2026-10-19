@@ -327,6 +327,13 @@
         el.classList.toggle("error", !ok);
         $("status").textContent = ok ? "Ready" : "Request error";
       }
+      function showSandboxOff(prefix) {
+        var el = $("banner");
+        var notice = "Sandbox workflows are off. Use the fictional preview. Nothing was submitted.";
+        el.textContent = prefix ? (prefix + " " + notice) : notice;
+        el.classList.remove("hidden", "error");
+        $("status").textContent = "Sandbox workflows are off.";
+      }
       function org() { return $("organization-id").value.trim(); }
       function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
       async function api(path, options) {
@@ -341,8 +348,10 @@
         }
         if (!response.ok) {
           var detail = body && body.detail ? body.detail : "Request failed";
+          var failure = new Error(String(detail));
+          failure.status = response.status;
           show(String(detail), false);
-          throw new Error(String(detail));
+          throw failure;
         }
         $("status").textContent = "Ready";
         return body;
@@ -363,7 +372,7 @@
           ? "Antivirus signatures are current."
           : "Structural scan only. Antivirus is not ready.";
         if (!writesEnabled) {
-          show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
+          showSandboxOff("");
           return false;
         }
         show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
@@ -388,7 +397,8 @@
           });
           rememberSession(body);
           $("login-password").value = "";
-          await refreshReadiness();
+          var ready = await refreshReadiness();
+          if (!ready) showSandboxOff("Signed in.");
         } catch (err) { /* banner already set */ }
       });
       $("signup-form").addEventListener("submit", async function (event) {
@@ -428,7 +438,14 @@
           $("login-password").value = "";
           var ready = await refreshReadiness();
           if (ready) show("Nova account created and signed in. Nothing was published.", true);
-        } catch (err) { /* banner already set */ }
+          else showSandboxOff("Nova account created and signed in.");
+        } catch (err) {
+          if (err && Number(err.status) === 409) {
+            $("signup-password").value = "";
+            $("signup-confirm").value = "";
+            show("This email already has a Nova account. Sign in instead. Nothing was created.", false);
+          }
+        }
       });
       $("forgot-form").addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -700,7 +717,8 @@
       $("upload-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!(await requireSandbox()) || !privateMedia || !applicationId) {
+          if (!(await requireSandbox())) return;
+          if (!privateMedia || !applicationId) {
             show("Private video upload is off. Nothing was submitted.", false);
             return;
           }
@@ -878,7 +896,8 @@
       $("pilot-intake-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!(await requireSandbox()) || !applicationId) {
+          if (!(await requireSandbox())) return;
+          if (!applicationId) {
             show("Save a test application first. Nothing was submitted.", false);
             return;
           }
@@ -1024,7 +1043,8 @@
       $("journey-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!(await requireSandbox()) || !pilotRoleId) {
+          if (!(await requireSandbox())) return;
+          if (!pilotRoleId) {
             show("Save a role before issuing an invitation. Nothing was sent.", false);
             return;
           }
@@ -1079,7 +1099,8 @@
       });
       $("journey-mock").addEventListener("click", async function () {
         try {
-          if (!(await requireSandbox()) || !pilotMessageId) {
+          if (!(await requireSandbox())) return;
+          if (!pilotMessageId) {
             show("Approve a draft before the mock transport. Nothing was sent.", false);
             return;
           }
@@ -1112,7 +1133,8 @@
       $("mock-upload-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!(await requireSandbox()) || !applicationId) {
+          if (!(await requireSandbox())) return;
+          if (!applicationId) {
             show("Save an application before mock upload. Nothing was stored.", false);
             return;
           }

@@ -28,6 +28,10 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert 'aria-live="polite"' in sandbox
     assert "No relationship or integration with Zeus" in sandbox
     assert "Nothing was submitted" in sandbox
+    assert "function showSandboxOff" in sandbox
+    assert "Signed in." in sandbox
+    assert "This email already has a Nova account. Sign in instead. Nothing was created." in sandbox
+    assert "failure.status = response.status" in sandbox
     assert "Save campaign edits" in sandbox
     assert "Create sandbox organization" in sandbox
     assert 'id="create-account"' in sandbox
