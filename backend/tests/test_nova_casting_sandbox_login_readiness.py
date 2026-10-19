@@ -147,6 +147,8 @@ def page(sandbox_server):
 def test_login_200_with_disabled_readiness_keeps_session(page) -> None:
     LOG.reset()
     page.goto("/static/nova-creative/casting-sandbox.html", wait_until="domcontentloaded")
+    assert page.is_visible("#sign-in")
+    assert page.is_hidden("#sign-out")
     page.fill("#login-email", "owner@example.com")
     page.fill("#login-password", PASSWORD)
     with page.expect_response(lambda response: response.url.endswith("/api/nova/casting/readiness")):
@@ -154,6 +156,10 @@ def test_login_200_with_disabled_readiness_keeps_session(page) -> None:
     page.wait_for_selector("#banner:has-text('Signed in.')")
     state = _session(page)
     assert state["status"] == "Sandbox workflows are off."
+    assert "HTTP 200. Sandbox workflows are off." in page.inner_text("#auth-http")
+    assert page.is_visible("#sign-out")
+    assert page.is_hidden("#sign-in")
+    assert page.is_hidden("#create-account")
     assert "Request error" not in state["status"]
     assert "Request error" not in state["banner"]
     assert "error" not in state["bannerClass"].split()
@@ -193,7 +199,10 @@ def test_login_401_is_a_request_error_without_a_session(page) -> None:
         page.click("#sign-in")
     page.wait_for_selector("#banner:has-text('Invalid email or password')")
     state = _session(page)
-    assert state["status"] == "Request error"
+    assert state["status"] == "401 Unauthorized"
+    assert "HTTP 401" in page.inner_text("#auth-http")
+    assert page.is_visible("#sign-in")
+    assert page.is_hidden("#sign-out")
     assert "error" in state["bannerClass"].split()
     assert state["token"] in (None, "")
     assert state["refresh"] in (None, "")
@@ -219,7 +228,10 @@ def test_existing_email_409_does_not_create_a_session(page) -> None:
     page.wait_for_selector("#banner:has-text('This email already has a Nova account')")
     state = _session(page)
     assert "Sign in instead. Nothing was created." in state["banner"]
-    assert state["status"] == "Request error"
+    assert state["status"] == "409 Conflict"
+    assert "HTTP 409" in page.inner_text("#auth-http")
+    assert page.is_visible("#sign-in")
+    assert page.is_hidden("#sign-out")
     assert "error" in state["bannerClass"].split()
     assert state["token"] in (None, "")
     assert state["refresh"] in (None, "")
@@ -227,3 +239,47 @@ def test_existing_email_409_does_not_create_a_session(page) -> None:
     assert page.input_value("#signup-confirm") == ""
     assert password not in page.inner_text("body")
     assert LOG.api_calls() == [("POST", "/api/nova/signup/free")]
+
+
+def test_login_200_phone_keeps_auth_controls_exclusive(sandbox_server) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(
+            base_url=sandbox_server,
+            viewport={"width": 390, "height": 844},
+            is_mobile=True,
+            has_touch=True,
+        )
+        page = context.new_page()
+        try:
+            page.goto("/static/nova-creative/casting-sandbox.html", wait_until="domcontentloaded")
+            assert page.is_visible("#sign-in")
+            assert page.is_hidden("#sign-out")
+            fits = page.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+            assert fits
+            sign_in_height = page.evaluate(
+                "() => document.getElementById('sign-in').getBoundingClientRect().height"
+            )
+            assert sign_in_height >= 44
+            page.fill("#login-email", "owner@example.com")
+            page.fill("#login-password", PASSWORD)
+            page.click("#sign-in")
+            page.wait_for_function(
+                "() => document.getElementById('status').textContent === 'Sandbox workflows are off.'"
+            )
+            assert page.is_hidden("#sign-in")
+            assert page.is_visible("#sign-out")
+            assert "HTTP 200. Sandbox workflows are off." in page.inner_text("#auth-http")
+            assert "Request error" not in page.inner_text("#status")
+            sign_out_height = page.evaluate(
+                "() => document.getElementById('sign-out').getBoundingClientRect().height"
+            )
+            assert sign_out_height >= 44
+            page.click("#sign-out")
+            page.wait_for_selector("#banner:has-text('Signed out')")
+            assert page.is_visible("#sign-in")
+            assert page.is_hidden("#sign-out")
+        finally:
+            browser.close()

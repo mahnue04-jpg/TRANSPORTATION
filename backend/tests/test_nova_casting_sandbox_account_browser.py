@@ -142,6 +142,9 @@ def test_account_forms_desktop_and_phone():
             _fill_signup(page, desktop_account)
             page.click("#create-account")
             page.wait_for_selector("#banner:has-text('Nova account created and signed in')")
+            assert page.is_hidden("#sign-in")
+            assert page.is_visible("#sign-out")
+            assert "HTTP 200" in page.inner_text("#auth-http")
             assert desktop_account["password"] not in page.inner_text("body")
             page.fill("#organization-name", desktop_account["org"])
             page.click("#create-organization")
@@ -150,6 +153,8 @@ def test_account_forms_desktop_and_phone():
             assert org_id
             page.click("#sign-out")
             page.wait_for_selector("#banner:has-text('Signed out')")
+            assert page.is_visible("#sign-in")
+            assert page.is_hidden("#sign-out")
             page.fill("#login-email", desktop_account["email"])
             page.fill("#login-password", desktop_account["password"])
             page.click("#sign-in")
@@ -199,11 +204,19 @@ def test_account_forms_desktop_and_phone():
             _fill_signup(mobile, phone_account)
             mobile.click("#create-account")
             mobile.wait_for_selector("#banner:has-text('Nova account created and signed in')")
+            assert mobile.is_hidden("#sign-in")
+            assert mobile.is_visible("#sign-out")
+            sign_out_height = mobile.evaluate(
+                "() => document.getElementById('sign-out').getBoundingClientRect().height"
+            )
+            assert sign_out_height >= 44
             mobile.fill("#organization-name", phone_account["org"])
             mobile.click("#create-organization")
             mobile.wait_for_selector("#banner:has-text('Sandbox organization ready')")
             mobile.click("#sign-out")
             mobile.wait_for_selector("#banner:has-text('Signed out')")
+            assert mobile.is_visible("#sign-in")
+            assert mobile.is_hidden("#sign-out")
             mobile.fill("#login-email", phone_account["email"])
             mobile.fill("#login-password", phone_account["password"])
             mobile.click("#sign-in")

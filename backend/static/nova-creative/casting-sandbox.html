@@ -47,15 +47,24 @@
 
     <section class="card" aria-label="Sign in">
       <p id="session-meta" class="hint">Use the shared Nova account. This page does not create a separate casting password.</p>
-      <h2>Sign in</h2>
-      <form id="login-form" class="grid">
-        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
-        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+      <p id="auth-http" class="hint" aria-live="polite">No auth response yet.</p>
+      <div id="signed-out-login">
+        <h2>Sign in</h2>
+        <form id="login-form" class="grid">
+          <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+          <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+          <div class="actions wide">
+            <button type="submit" id="sign-in">Sign in</button>
+          </div>
+        </form>
+      </div>
+      <div id="signed-in-auth" class="hidden">
+        <h2>Signed in</h2>
         <div class="actions wide">
-          <button type="submit" id="sign-in">Sign in</button>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
         </div>
-      </form>
+      </div>
+      <div id="signup-block">
       <h2>Create account</h2>
       <p class="hint">Creates a Nova account through the shared signup. No card is collected here, and the password is not stored on this page.</p>
       <form id="signup-form" class="grid">
@@ -71,6 +80,7 @@
           <button type="submit" id="create-account">Create account</button>
         </div>
       </form>
+      </div>
       <h2>Forgot password</h2>
       <p class="hint">Asks the shared reset service for this Nova account. If reset email is not configured, the response says that no message was sent.</p>
       <form id="forgot-form" class="grid">
@@ -319,13 +329,32 @@
       function rememberSession(body) {
         setToken(body && body.access_token ? body.access_token : "");
         setRefresh(body && body.refresh_token ? body.refresh_token : "");
+        syncAuthControls();
       }
-      function show(message, ok) {
+      function setAuthHttp(text) {
+        var el = $("auth-http");
+        if (el) el.textContent = text;
+      }
+      function httpStatusLabel(status) {
+        if (status === 401) return "401 Unauthorized";
+        if (status === 409) return "409 Conflict";
+        return "HTTP " + String(status);
+      }
+      function syncAuthControls() {
+        var on = Boolean(token());
+        $("signed-out-login").classList.toggle("hidden", on);
+        $("signup-block").classList.toggle("hidden", on);
+        $("signed-in-auth").classList.toggle("hidden", !on);
+        $("session-meta").textContent = on
+          ? "Signed in with the shared Nova account. Sign out before using a different account."
+          : "Use the shared Nova account. This page does not create a separate casting password.";
+      }
+      function show(message, ok, statusText) {
         var el = $("banner");
         el.textContent = message;
         el.classList.remove("hidden");
         el.classList.toggle("error", !ok);
-        $("status").textContent = ok ? "Ready" : "Request error";
+        $("status").textContent = statusText || (ok ? "Ready" : "Request error");
       }
       function showSandboxOff(prefix) {
         var el = $("banner");
@@ -333,6 +362,7 @@
         el.textContent = prefix ? (prefix + " " + notice) : notice;
         el.classList.remove("hidden", "error");
         $("status").textContent = "Sandbox workflows are off.";
+        setAuthHttp("HTTP 200. Sandbox workflows are off.");
       }
       function org() { return $("organization-id").value.trim(); }
       function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
@@ -350,9 +380,12 @@
           var detail = body && body.detail ? body.detail : "Request failed";
           var failure = new Error(String(detail));
           failure.status = response.status;
-          show(String(detail), false);
+          failure.statusLabel = httpStatusLabel(response.status);
+          setAuthHttp("HTTP " + response.status + ". " + failure.statusLabel + ".");
+          show(String(detail), false, failure.statusLabel);
           throw failure;
         }
+        setAuthHttp("HTTP " + response.status + ".");
         $("status").textContent = "Ready";
         return body;
       }
@@ -375,6 +408,7 @@
           showSandboxOff("");
           return false;
         }
+        setAuthHttp("HTTP 200. Ready.");
         show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
         return true;
       }
@@ -443,7 +477,8 @@
           if (err && Number(err.status) === 409) {
             $("signup-password").value = "";
             $("signup-confirm").value = "";
-            show("This email already has a Nova account. Sign in instead. Nothing was created.", false);
+            show("This email already has a Nova account. Sign in instead. Nothing was created.", false, err.statusLabel || "409 Conflict");
+            setAuthHttp("HTTP 409. 409 Conflict.");
           }
         }
       });
@@ -502,6 +537,7 @@
           $("reset-confirm").value = "";
           setToken("");
           setRefresh("");
+          syncAuthControls();
           var message = body && body.message ? String(body.message) : "Password updated. You can sign in with your new password.";
           show(message, true);
         } catch (err) { /* banner already set */ }
@@ -511,6 +547,8 @@
         setToken("");
         setRefresh("");
         writesEnabled = false;
+        syncAuthControls();
+        setAuthHttp("Signed out. No auth response.");
         if (refresh) {
           fetch("/api/auth/logout", {
             method: "POST",
@@ -1217,6 +1255,7 @@
           show("A person acknowledged the question. Nothing was sent.", true);
         } catch (err) { /* banner already set */ }
       });
+      syncAuthControls();
       if (token()) {
         refreshReadiness().then(function (ready) {
           if (ready && org()) return restorePilot();

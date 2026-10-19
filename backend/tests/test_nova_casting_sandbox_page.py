@@ -29,6 +29,11 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "No relationship or integration with Zeus" in sandbox
     assert "Nothing was submitted" in sandbox
     assert "function showSandboxOff" in sandbox
+    assert "function syncAuthControls" in sandbox
+    assert "401 Unauthorized" in sandbox
+    assert "409 Conflict" in sandbox
+    assert 'id="signed-out-login"' in sandbox
+    assert 'id="signed-in-auth"' in sandbox
     assert "Signed in." in sandbox
     assert "This email already has a Nova account. Sign in instead. Nothing was created." in sandbox
     assert "failure.status = response.status" in sandbox

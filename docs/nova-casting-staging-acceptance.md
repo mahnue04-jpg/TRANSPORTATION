@@ -1,12 +1,12 @@
 # Casting staging acceptance
 
-Draft pull request #339. The live preview is head `26a57cd6`. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
+Draft pull request #339. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
 
-Measured again on 2026-10-19 against `https://amicor-health-isf-pr-339.onrender.com`:
+Measured on 2026-10-19 against `https://amicor-health-isf-pr-339.onrender.com` after the service woke. An earlier reading the same day was `26a57cd6`. This reading is the preview before the auth-control commit.
 
 | Check | Result |
 | --- | --- |
-| `GET /api/health/live` | 200. `deploy_commit` `26a57cd648798ec1283cbabf7fa61788d80ecdad`. Branch `cursor/casting-auditions-pilot-e1ae`. Runtime environment `development`. |
+| `GET /api/health/live` | 200. `deploy_commit` `d0d4164e930f4b1774eff5085e3773d5e87dbd60`. Branch `cursor/casting-auditions-pilot-e1ae`. Runtime environment `development`. |
 | `GET /api/auth/deployment/seed-status` | 200. sqlite, `durable` false, `location` `workspace`, `signing_key` `ephemeral`, `restart_observed` false. `owner_retry_allowed` false. Blocked because accounts are stored in ephemeral sqlite. `AMICOR_SEED_PASSWORD` is unset. Ten of ten seed rows are present. |
 | `GET /api/health/readiness` | 503. `overall_status` `not_ready`. `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET` are missing, along with `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION`. The nested `database.connected: true` is the workspace SQLite file, not a Postgres service. |
 | `GET /api/nova/casting/readiness` | 401. Authentication required. The handler still returns `enabled`, `applications_enabled`, and `media_uploads_enabled` false for a signed-in caller. |
