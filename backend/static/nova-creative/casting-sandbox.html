@@ -46,13 +46,48 @@
     <p id="scanner-readiness" class="hint" aria-live="polite">Scanner readiness has not been checked.</p>
 
     <section class="card" aria-label="Sign in">
-      <p id="session-meta" class="hint">Sign in with the existing Nova account used by Creative Studio.</p>
+      <p id="session-meta" class="hint">Use the shared Nova account. This page does not create a separate casting password.</p>
+      <h2>Sign in</h2>
       <form id="login-form" class="grid">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
         <div class="actions wide">
           <button type="submit" id="sign-in">Sign in</button>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </form>
+      <h2>Create account</h2>
+      <p class="hint">Creates a Nova account through the shared signup. No card is collected here, and the password is not stored on this page.</p>
+      <form id="signup-form" class="grid">
+        <label>Business name<input id="signup-business" maxlength="128" autocomplete="organization" required /></label>
+        <label>Contact name<input id="signup-contact" maxlength="128" autocomplete="name" required /></label>
+        <label>Email<input id="signup-email" type="email" autocomplete="email" required /></label>
+        <label>Phone<input id="signup-phone" type="tel" autocomplete="tel" minlength="7" maxlength="40" required /></label>
+        <label>Industry<input id="signup-industry" maxlength="128" value="creative" required /></label>
+        <label>Password<input id="signup-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label>Confirm password<input id="signup-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label class="wide"><input id="signup-terms" type="checkbox" /> I accept the Nova account terms.</label>
+        <div class="actions wide">
+          <button type="submit" id="create-account">Create account</button>
+        </div>
+      </form>
+      <h2>Forgot password</h2>
+      <p class="hint">Asks the shared reset service for this Nova account. If reset email is not configured, the response says that no message was sent.</p>
+      <form id="forgot-form" class="grid">
+        <label>Email<input id="forgot-email" type="email" autocomplete="email" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="send-reset">Request password reset</button>
+        </div>
+      </form>
+      <p id="reset-delivery" class="hint" aria-live="polite">No reset request yet. No message has been sent.</p>
+      <h2>Reset password</h2>
+      <p class="hint">Paste the one-time token from a reset link you already have. The token is not repeated in the status line.</p>
+      <form id="reset-form" class="grid">
+        <label class="wide">Reset token<input id="reset-token" autocomplete="one-time-code" maxlength="256" spellcheck="false" required /></label>
+        <label>New password<input id="reset-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label>Confirm password<input id="reset-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="update-password">Update password</button>
         </div>
       </form>
     </section>
@@ -246,6 +281,7 @@
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
+      var refreshKey = "amicor_nova_creative_refresh";
       var writesEnabled = false;
       var privateMedia = false;
       var playbackUrl = "";
@@ -275,6 +311,14 @@
       function setToken(value) {
         if (value) localStorage.setItem(tokenKey, value);
         else localStorage.removeItem(tokenKey);
+      }
+      function setRefresh(value) {
+        if (value) sessionStorage.setItem(refreshKey, value);
+        else sessionStorage.removeItem(refreshKey);
+      }
+      function rememberSession(body) {
+        setToken(body && body.access_token ? body.access_token : "");
+        setRefresh(body && body.refresh_token ? body.refresh_token : "");
       }
       function show(message, ok) {
         var el = $("banner");
@@ -342,13 +386,121 @@
               password: $("login-password").value
             })
           });
-          setToken(body.access_token || "");
+          rememberSession(body);
+          $("login-password").value = "";
           await refreshReadiness();
         } catch (err) { /* banner already set */ }
       });
+      $("signup-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var password = $("signup-password").value;
+        var confirmPassword = $("signup-confirm").value;
+        if (password !== confirmPassword) {
+          show("Passwords do not match. Nothing was created.", false);
+          return;
+        }
+        if (!$("signup-terms").checked) {
+          show("Terms must be accepted. Nothing was created.", false);
+          return;
+        }
+        var email = $("signup-email").value.trim();
+        try {
+          await api("/api/nova/signup/free", {
+            method: "POST",
+            body: JSON.stringify({
+              business_name: $("signup-business").value.trim(),
+              contact_name: $("signup-contact").value.trim(),
+              email: email,
+              phone: $("signup-phone").value.trim(),
+              industry: $("signup-industry").value.trim(),
+              password: password,
+              terms_accepted: true
+            })
+          });
+          $("signup-password").value = "";
+          $("signup-confirm").value = "";
+          var body = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: email, password: password })
+          });
+          rememberSession(body);
+          $("login-email").value = email;
+          $("login-password").value = "";
+          var ready = await refreshReadiness();
+          if (ready) show("Nova account created and signed in. Nothing was published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("forgot-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          var body = await api("/api/auth/forgot-password", {
+            method: "POST",
+            body: JSON.stringify({ email: $("forgot-email").value.trim() })
+          });
+          var message = body && body.message ? String(body.message) : "Password reset email is not available in this environment. No message was sent.";
+          $("reset-delivery").textContent = message;
+          show(message, true);
+        } catch (err) { /* banner already set */ }
+      });
+      function tokenFromQuery() {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var value = params.get("token") || "";
+          if (value && window.history && window.history.replaceState) {
+            params.delete("token");
+            var query = params.toString();
+            window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+          }
+          return value;
+        } catch (err) {
+          return "";
+        }
+      }
+      var presetToken = tokenFromQuery();
+      if (presetToken) $("reset-token").value = presetToken;
+      $("reset-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var nextPassword = $("reset-password").value;
+        var confirmPassword = $("reset-confirm").value;
+        var resetToken = $("reset-token").value.trim();
+        if (!resetToken) {
+          show("Enter the reset token from your link. Nothing was changed.", false);
+          return;
+        }
+        if (nextPassword !== confirmPassword) {
+          show("Passwords do not match. Nothing was changed.", false);
+          return;
+        }
+        try {
+          var body = await api("/api/auth/reset-password", {
+            method: "POST",
+            body: JSON.stringify({
+              token: resetToken,
+              new_password: nextPassword,
+              confirm_password: confirmPassword
+            })
+          });
+          $("reset-token").value = "";
+          $("reset-password").value = "";
+          $("reset-confirm").value = "";
+          setToken("");
+          setRefresh("");
+          var message = body && body.message ? String(body.message) : "Password updated. You can sign in with your new password.";
+          show(message, true);
+        } catch (err) { /* banner already set */ }
+      });
       $("sign-out").addEventListener("click", function () {
+        var refresh = sessionStorage.getItem(refreshKey) || "";
         setToken("");
+        setRefresh("");
         writesEnabled = false;
+        if (refresh) {
+          fetch("/api/auth/logout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refresh })
+          }).catch(function () {});
+        }
         show("Signed out. Nothing was submitted.", true);
       });
       $("organization-form").addEventListener("submit", async function (event) {

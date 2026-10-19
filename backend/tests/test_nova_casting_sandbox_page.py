@@ -30,6 +30,16 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "Nothing was submitted" in sandbox
     assert "Save campaign edits" in sandbox
     assert "Create sandbox organization" in sandbox
+    assert 'id="create-account"' in sandbox
+    assert 'id="send-reset"' in sandbox
+    assert 'id="update-password"' in sandbox
+    assert "/api/nova/signup/free" in sandbox
+    assert "/api/auth/forgot-password" in sandbox
+    assert "/api/auth/reset-password" in sandbox
+    assert "No message was sent." in sandbox
+    assert "Sign in with Google" not in sandbox
+    assert "accounts.google.com" not in sandbox
+    assert "separate casting password" in sandbox
     assert "Resume saved application" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):
         assert label in sandbox

@@ -48,6 +48,8 @@ def _free_signup(client: TestClient) -> dict:
 
 def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
     monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    for name in ("AUTH_SMTP_HOST", "AUTH_SMTP_FROM", "MARKETING_SMTP_HOST", "MARKETING_SMTP_FROM"):
+        monkeypatch.delenv(name, raising=False)
     clear_test_reset_capture()
     client = _client()
     assert client.get("/nova/forgot-password").status_code == 200
@@ -56,7 +58,10 @@ def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
 
     missing = client.post("/api/auth/forgot-password", json={"email": "nobody-exists@example.com"})
     assert missing.status_code == 200, missing.text
-    assert "If an account exists" in missing.json()["message"]
+    assert missing.json()["message"] == (
+        "Password reset email is not available in this environment. No message was sent."
+    )
+    assert "have been sent" not in missing.text
     assert get_test_reset_token("nobody-exists@example.com") is None
 
     payload = _free_signup(client)
@@ -74,6 +79,35 @@ def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
         assert len(rows) == 1
         assert rows[0].token_hash == hash_reset_token(token)
         assert rows[0].token_hash != token
+
+
+def test_configured_smtp_keeps_generic_sent_message(monkeypatch) -> None:
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    monkeypatch.setenv("AUTH_SMTP_HOST", "smtp.example.invalid")
+    monkeypatch.setenv("AUTH_SMTP_FROM", "reset@example.invalid")
+    clear_test_reset_capture()
+    sent: dict[str, str] = {}
+
+    def fake_send(*, to_email: str, reset_url: str) -> dict:
+        sent["to"] = to_email
+        sent["url"] = reset_url
+        return {"attempted": True, "sent": True, "reason": "sent"}
+
+    monkeypatch.setattr("app.password_reset_service._send_reset_email", fake_send)
+    client = _client()
+    missing = client.post("/api/auth/forgot-password", json={"email": "nobody-exists@example.com"})
+    payload = _free_signup(client)
+    asked = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert missing.status_code == 200
+    assert asked.json() == missing.json()
+    assert "If an account exists" in asked.json()["message"]
+    assert "have been sent" in asked.json()["message"]
+    token = get_test_reset_token(payload["email"])
+    assert token
+    assert token not in asked.text
+    assert token in sent["url"]
+    assert sent["to"] == payload["email"].lower()
+    assert get_test_reset_token("nobody-exists@example.com") is None
 
 
 def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:

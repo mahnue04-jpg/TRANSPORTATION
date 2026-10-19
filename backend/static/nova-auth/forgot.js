@@ -15,7 +15,7 @@
     }).then(function (response) {
       return response.json().then(function (body) {
         if (!response.ok) throw new Error((body && body.detail) || "Request failed.");
-        show(body.message || "If an account exists for that email, password reset instructions have been sent.", true);
+        show(body.message || "Password reset email is not available in this environment. No message was sent.", true);
       });
     }).catch(function (err) {
       show(err.message || String(err));
