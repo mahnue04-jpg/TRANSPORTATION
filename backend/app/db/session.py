@@ -12,11 +12,56 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # ── Connection string resolution ───────────────────────────────────────────────
-_db_filename = os.getenv("DB_FILENAME", os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "chat.db")
-))
-_default_url = f"sqlite:///{_db_filename}"
-DATABASE_URL: str = os.getenv("DATABASE_URL", _default_url)
+def _workspace_sqlite_path() -> str:
+    return os.getenv(
+        "DB_FILENAME",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "chat.db")),
+    )
+
+
+def _candidate_durable_dirs() -> list[tuple[str, str]]:
+    """Directories that can keep accounts across a stage process restart."""
+    found: list[tuple[str, str]] = []
+    explicit = os.getenv("AMICOR_AUTH_STORE_DIR", "").strip()
+    if explicit:
+        found.append((os.path.abspath(explicit), "configured-directory"))
+    disk = "/data/onboarding_docs"
+    if os.path.isdir(disk):
+        found.append((os.path.abspath(os.path.join(disk, "casting-preview-auth")), "render-disk"))
+    return found
+
+
+def _prepare_private_dir(path: str) -> bool:
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        os.chmod(path, 0o700)
+        probe = os.path.join(path, ".write_probe")
+        fd = os.open(probe, os.O_CREAT | os.O_WRONLY, 0o600)
+        os.close(fd)
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+        return True
+    except OSError:
+        return False
+
+
+def _resolve_sqlite_fallback() -> tuple[str, bool, str]:
+    for directory, label in _candidate_durable_dirs():
+        if _prepare_private_dir(directory):
+            return os.path.join(directory, "chat.db"), True, label
+    return _workspace_sqlite_path(), False, "workspace"
+
+
+_configured_database_url = os.getenv("DATABASE_URL", "").strip()
+if _configured_database_url:
+    DATABASE_URL = _configured_database_url
+    _auth_store_durable = False
+    _auth_store_location = "external"
+else:
+    _sqlite_path, _auth_store_durable, _auth_store_location = _resolve_sqlite_fallback()
+    DATABASE_URL = f"sqlite:///{_sqlite_path}"
 
 # The production image installs psycopg2-binary. Some managed PostgreSQL
 # connection strings explicitly request SQLAlchemy's psycopg v3 dialect
@@ -61,6 +106,19 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
+
+
+def auth_store_metadata() -> dict[str, str | bool]:
+    """Safe description of where accounts live. No paths, passwords, or keys."""
+    return {
+        "backend": "sqlite" if _is_sqlite else "postgres",
+        "durable": bool(_auth_store_durable),
+        "location": _auth_store_location,
+    }
+
+
+def auth_store_is_durable() -> bool:
+    return bool(_auth_store_durable)
 
 
 def omit_casting_tables(tables):
@@ -111,6 +169,15 @@ def get_db():
         db.close()
 
 
+def _sqlite_file_path() -> str | None:
+    if not _is_sqlite or not str(DATABASE_URL).startswith("sqlite:///"):
+        return None
+    path = str(DATABASE_URL)[len("sqlite:///"):]
+    if not path or path == ":memory:":
+        return None
+    return path
+
+
 def init_platform_db() -> None:
     """Create SQLAlchemy-managed tables (idempotent, safe to run on startup).
 
@@ -125,7 +192,9 @@ def init_platform_db() -> None:
     from app.core.nova.business import models as nova_business_models  # noqa: F401
     from app.core.nova.today import models as nova_today_models  # noqa: F401
     from app.core.nova.autonomy import models as nova_autonomy_models  # noqa: F401
-    os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
+    sqlite_path = _sqlite_file_path()
+    if sqlite_path:
+        os.makedirs(os.path.dirname(sqlite_path) or ".", exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
     tables = omit_casting_tables(
         table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only

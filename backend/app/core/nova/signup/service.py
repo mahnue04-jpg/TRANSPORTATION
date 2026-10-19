@@ -137,6 +137,13 @@ def create_signup(
     if len(password) < _MIN_PASSWORD_LEN or len(password) > _MAX_PASSWORD_LEN:
         raise SignupError("Password does not meet requirements", status_code=422)
 
+    from app.db.models import User as UserModel
+
+    # A platform account already owns this login identity. Do not replace its
+    # password from a later signup attempt, including a still-pending signup row.
+    if db.query(UserModel).filter(func.lower(UserModel.email) == email).first() is not None:
+        raise SignupError("Email already registered", status_code=409)
+
     existing = db.query(NovaSignupAccount).filter(func.lower(NovaSignupAccount.email) == email).first()
     if existing is not None:
         if existing.status in ACTIVATED_STATUSES:
@@ -154,11 +161,6 @@ def create_signup(
             db.commit()
             db.refresh(existing)
             return existing
-        raise SignupError("Email already registered", status_code=409)
-
-    from app.db.models import User as UserModel
-
-    if db.query(UserModel).filter(func.lower(UserModel.email) == email).first() is not None:
         raise SignupError("Email already registered", status_code=409)
 
     row = NovaSignupAccount(
