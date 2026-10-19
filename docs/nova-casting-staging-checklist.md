@@ -62,7 +62,7 @@ On commit `e1d30c2a`, before this follow-up, these public URLs returned **200**:
 
 - Owner approval to merge pull request #308.
 - Owner approval before any Render or other real-host deployment.
-- Owner approval before a preview database. The free preview keeps ephemeral sqlite and an ephemeral signing key, so existing passwords do not survive a restart. Do not attach production `amicor-health-isf-db`. A new isolated Postgres is $6/month when a free database is already active; a new free database is $0 for 30 days and is then deleted. See the durable login gate in `docs/nova-casting-staging-runbook.md`. `owner_retry_allowed` stays false until a restart proof exists.
+- Owner decision A, B, or C in `docs/nova-casting-staging-acceptance.md` before any preview database. The live preview at `235c4ef3` keeps ephemeral sqlite and an ephemeral signing key, so existing passwords do not survive a restart. Do not attach `amicor-health-isf-db` or `amicor-nova-db`, and do not resume or copy the suspended free staging database. A new empty Free Postgres is $0 for 30 days only when no Free Postgres is active. Paid Postgres is $6/month and a disk is $7/month plus $0.25 per GB. Spending is not approved. `owner_retry_allowed` stays false.
 - Owner approval before a migration against a database that is not disposable.
 - A Nova user account for each person in a sandbox demo. Casting setup does not register users.
 - If antivirus readiness is required on a future disposable host, install the free ClamAV packages from the OS archive and run `freshclam` into `NOVA_CASTING_CLAMAV_DB`. Do not treat structural mode as that install.

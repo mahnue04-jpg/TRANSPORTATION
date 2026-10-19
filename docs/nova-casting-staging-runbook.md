@@ -117,19 +117,11 @@ Measured on the preview `https://amicor-health-isf-pr-339.onrender.com` at head 
 
 `render.yaml` sets the web service plan to `free`. This preview has no disk and no `DATABASE_URL`. A free web service filesystem is discarded on restart, redeploy, and spin-down, and it cannot attach a disk. The code already keeps sqlite and the signing key when `/data/onboarding_docs` exists or `AMICOR_AUTH_STORE_DIR` is set. Neither is present on this preview. `owner_retry_allowed` stays false until a later process observes that marker. Do not ask the owner to sign in while it is false.
 
-This workspace can have only one Free Render Postgres. The blueprint already names `amicor-health-isf-db` and `amicor-nova-db` at plan `free`. This run has no Render API key, so it did not list which live database is still on the free plan. A second free database is not available while one free database is active.
+This workspace can have only one active Free Render Postgres. The blueprint names `amicor-health-isf-db` and `amicor-nova-db` at plan `free`. Checked on 2026-10-19, the live preview is still head `235c4ef3`: sqlite, `durable` false, `signing_key` `ephemeral`, and `owner_retry_allowed` false. This run has no Render API key, so it did not list the suspended free staging database and did not resume, upgrade, or copy it. Production readiness stayed 200. That database was not attached and its URL was not read.
 
-Do not point the preview at `amicor-health-isf-db` or copy the production `DATABASE_URL`, `JWT_SECRET`, or `SECRET_KEY`. Do not set `AMICOR_SEED_PASSWORD` on the preview. Seed sync rewrites seed-account passwords, and the owner password must stay as it is.
+Do not point the preview at `amicor-health-isf-db` or `amicor-nova-db`, and do not copy the production `DATABASE_URL`, `JWT_SECRET`, or `SECRET_KEY`. Do not set `AMICOR_SEED_PASSWORD` on the preview. Seed sync rewrites seed-account passwords, and the owner password must stay as it is. A Postgres URL alone does not open the retry gate.
 
-Minimal owner action, only after approval. Nothing below has been done:
-
-1. In the Render dashboard, see whether a Free Postgres is already active.
-2. If one is active, create a new Postgres for this preview only on plan `0.1c-256mb` ($6/month, 1 GB included). Do not select the production database.
-3. If none is active, a new Free Postgres is $0 and expires 30 days after creation. Render deletes it 14 days after expiry unless it is upgraded. The paid plan above is the one that keeps accounts past that window.
-4. On preview service `amicor-health-isf-pr-339` only, set `DATABASE_URL` from that new database and generate a new `JWT_SECRET`. Leave production `amicor-health-isf-py` unchanged.
-5. A disk is not the $0 path. It needs the Starter web plan at $7/month plus $0.25 per GB per month, and the production disk must not be reused.
-
-A later run has to show a synthetic signup, a preview restart, and a successful login before `owner_retry_allowed` is true. Until that proof, the owner does not retry the existing password.
+The staged plan and the prices are in `docs/nova-casting-staging-acceptance.md`. Spending is not approved. The closed choices are resuming or upgrading the suspended database, a new `0.1c-256mb` Postgres at $6/month, and a disk on the $7/month web plan at $0.25 per GB. The owner decision is A, B, or C in that plan. Until one is chosen, the owner does not retry the existing password.
 
 ## Still blocked
 
