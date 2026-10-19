@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import time
 from pathlib import Path
 
 import pytest
@@ -145,11 +146,28 @@ def test_signed_in_walking_commercial_download(monkeypatch, tmp_path):
     rendered = client.post(f"/api/nova/creative/projects/{project_id}/assemble/walking-commercial-30s")
     assert rendered.status_code == 200, rendered.text
     body = rendered.json()
-    assert body["lip_sync"] is True
-    assert body["mobile_download_ready"] is True
-    assert body["license_status"] == "GREEN"
     assert body["paid_provider_charges"] is False
-    assert 28.0 <= float(body["validation"]["duration_seconds"]) <= 32.0
+    if body.get("ready") is not True:
+        job_id = body["job"]["id"]
+        assert body["job"]["status"] in {"QUEUED", "RUNNING"}
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            polled = client.get(f"/api/nova/creative/projects/{project_id}/jobs/{job_id}")
+            assert polled.status_code == 200, polled.text
+            body = polled.json()
+            if body.get("ready") and body["job"]["status"] == "GENERATED":
+                break
+            assert body["job"]["status"] != "ERROR", body["job"].get("message")
+            time.sleep(0.5)
+    assert body["job"]["status"] == "GENERATED"
+    assert body.get("ready") is True
+    asset_meta = (body.get("asset") or {}).get("metadata") or {}
+    validation = body.get("validation") or asset_meta.get("validation") or {}
+    assert body.get("lip_sync") is True or asset_meta.get("lip_sync") is True
+    assert body.get("mobile_download_ready") is True or asset_meta.get("mobile_download_ready") is True
+    assert body.get("license_status") == "GREEN" or asset_meta.get("license_status") == "GREEN"
+    assert body["paid_provider_charges"] is False
+    assert 28.0 <= float(validation["duration_seconds"]) <= 32.0
 
     asset_id = body["asset"]["id"]
     download = client.get(f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file")
@@ -158,3 +176,66 @@ def test_signed_in_walking_commercial_download(monkeypatch, tmp_path):
     assert len(download.content) > 1000
     video = tmp_path / Path(body["url"]).name
     assert video.is_file()
+
+
+def test_walking_commercial_post_returns_job_before_render(monkeypatch, tmp_path):
+    """The owner request must return a job id before the MP4 exists."""
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    service = CreativeStudioService(CreativeStudioStore())
+    client, _holder = _client(monkeypatch, service, "owner-351-queue")
+    created = client.post(
+        "/api/nova/creative/projects",
+        json={"title": "Queue 30s", "project_type": "short_video", "platform": "TikTok", "duration_target": 30},
+    )
+    assert created.status_code == 200, created.text
+    project_id = created.json()["id"]
+    service.generate_storyboard("owner-351-queue", project_id)
+    gate = {"release": False}
+
+    def slow_render(owner_id, project_id_arg, existing_job_id=None):
+        job = next(row for row in service.store.list_jobs(project_id_arg, owner_id) if row.id == existing_job_id)
+        service._finish_job(
+            job,
+            status="RUNNING",
+            message="still rendering",
+            asset_ids=[],
+            provider="nova_walking_commercial",
+        )
+        deadline = time.monotonic() + 2
+        while not gate["release"] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        service._finish_job(
+            job,
+            status="GENERATED",
+            message="saved",
+            asset_ids=[],
+            provider="nova_walking_commercial",
+        )
+        return {"job": job.as_dict()}
+
+    service.render_walking_commercial_30s = slow_render
+    started = time.monotonic()
+    rendered = client.post(f"/api/nova/creative/projects/{project_id}/assemble/walking-commercial-30s")
+    elapsed = time.monotonic() - started
+    assert rendered.status_code == 200, rendered.text
+    body = rendered.json()
+    assert elapsed < 0.75, elapsed
+    assert body["ready"] is False
+    assert body["paid_provider_charges"] is False
+    assert body["job"]["status"] in {"QUEUED", "RUNNING"}
+    job_id = body["job"]["id"]
+    assert job_id
+    early = client.get(f"/api/nova/creative/projects/{project_id}/jobs/{job_id}")
+    assert early.status_code == 200
+    assert early.json()["ready"] is False
+    gate["release"] = True
+    deadline = time.monotonic() + 3
+    final = early.json()
+    while time.monotonic() < deadline:
+        final = client.get(f"/api/nova/creative/projects/{project_id}/jobs/{job_id}").json()
+        if final["job"]["status"] == "GENERATED":
+            break
+        time.sleep(0.05)
+    assert final["job"]["status"] == "GENERATED"
+    # No video asset was saved by the stub, so success stays withheld.
+    assert final["ready"] is False

@@ -496,6 +496,55 @@ def re_sub_punct(token: str) -> str:
     return re.sub(r"[^\w]", "", token)
 
 
+def synthesize_espeak_narration(script: str, dest_wav: Path) -> dict[str, Any]:
+    """Local espeak-ng narration. No network and no paid voice provider."""
+    import shutil
+    import subprocess
+
+    binary = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not binary:
+        raise WalkingPresenterError(
+            "LOCAL_NARRATION_UNAVAILABLE",
+            "Native espeak-ng is not installed. No paid voice provider was called, and silence was not labeled as narration.",
+        )
+    spoken = canonical_spoken_script(script)
+    dest_wav.parent.mkdir(parents=True, exist_ok=True)
+    voice = "en-us"
+    probe = subprocess.run([binary, "--voices"], check=False, capture_output=True, text=True, timeout=15)
+    if "en-us" not in (probe.stdout or ""):
+        voice = "en"
+    run = subprocess.run(
+        [binary, "-w", str(dest_wav), "-s", "132", "-v", voice, spoken[:1800]],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if run.returncode != 0 or not dest_wav.is_file() or dest_wav.stat().st_size < 44:
+        detail = (run.stderr or run.stdout or "espeak failed").strip()
+        raise WalkingPresenterError("LOCAL_NARRATION_FAILED", detail[:400] or "espeak-ng failed")
+    duration = probe_duration_seconds(dest_wav)
+    engine = Path(binary).name
+    return {
+        "engine": engine,
+        "voice": voice,
+        "spoken_script": spoken,
+        "caption_script": caption_script(script),
+        "duration_seconds": round(duration, 3),
+        "wav_path": str(dest_wav),
+        "source_path": str(dest_wav),
+        "paid_provider_charges": False,
+        "license_status": "AMBER",
+        "commercial_use": (
+            f"{engine} is the local narration fallback (GPL-3.0-or-later). "
+            "No paid provider was called. Commercial-use clearance stays AMBER until the owner accepts it."
+        ),
+        "natural_female_voice": False,
+        "lip_sync": True,
+        "fallback_from": "edge-tts",
+    }
+
+
 def synthesize_female_narration(
     script: str,
     dest: Path,
@@ -503,12 +552,20 @@ def synthesize_female_narration(
     voice: str = DEFAULT_VOICE,
     rate: str = "+0%",
 ) -> dict[str, Any]:
-    """Natural female neural TTS via free edge-tts (no API key, no credit purchase).
+    """Prefer free edge-tts, then native espeak-ng. Never a paid voice provider.
 
-    Network required. Failure is explicit — silence is never labeled as narration.
+    edge-tts is bounded so a stalled network call cannot hold the render open.
+    Silence is never labeled as narration.
     """
+    import os
+
     spoken = canonical_spoken_script(script)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        timeout_seconds = float(os.getenv("NOVA_CREATIVE_EDGE_TTS_TIMEOUT_SECONDS") or "12")
+    except ValueError:
+        timeout_seconds = 12.0
+    timeout_seconds = max(2.0, min(timeout_seconds, 30.0))
 
     async def _synthesize() -> None:
         try:
@@ -521,18 +578,22 @@ def synthesize_female_narration(
         communicate = edge_tts.Communicate(spoken, voice, rate=rate)
         await communicate.save(str(dest))
 
+    edge_error = ""
     try:
-        asyncio.run(_synthesize())
-    except WalkingPresenterError:
-        raise
+        asyncio.run(asyncio.wait_for(_synthesize(), timeout=timeout_seconds))
+        if not dest.is_file() or dest.stat().st_size < 200:
+            raise WalkingPresenterError("NEURAL_VOICE_FAILED", "Narration file was empty after synthesis.")
     except Exception as exc:
-        raise WalkingPresenterError(
-            "NEURAL_VOICE_FAILED",
-            f"Natural female narration failed without purchasing credits: {exc}"[:400],
-        ) from exc
-
-    if not dest.is_file() or dest.stat().st_size < 200:
-        raise WalkingPresenterError("NEURAL_VOICE_FAILED", "Narration file was empty after synthesis.")
+        edge_error = str(getattr(exc, "message", "") or exc)[:300]
+        try:
+            native = synthesize_espeak_narration(script, dest.with_suffix(".wav"))
+        except WalkingPresenterError as native_exc:
+            raise WalkingPresenterError(
+                native_exc.code,
+                f"Neural narration failed ({edge_error or type(exc).__name__}) and native espeak-ng did not finish: {native_exc.message}"[:400],
+            ) from native_exc
+        native["edge_tts_error"] = edge_error or type(exc).__name__
+        return native
 
     # Normalize to WAV for amplitude lip-sync analysis.
     wav = dest.with_suffix(".wav") if dest.suffix.lower() != ".wav" else dest

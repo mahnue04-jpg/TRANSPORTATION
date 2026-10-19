@@ -2124,8 +2124,88 @@ class CreativeStudioService(ShortDramaMixin):
             "owner_review_required": True,
         }
 
+    def _walking_commercial_asset_payload(self, asset: CreativeAsset) -> dict[str, Any] | None:
+        meta = asset.metadata or {}
+        if asset.kind != "video" or asset.status != "GENERATED" or not asset.url:
+            return None
+        if meta.get("render_mode") != "local_walking_commercial_30s":
+            return None
+        path = _resolve_creative_media_url(asset.url)
+        if path is None or not path.is_file() or path.stat().st_size < 1000:
+            return None
+        payload = asset.as_dict()
+        payload["media_available"] = True
+        return payload
+
+    def prepare_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Validate and queue a 30s render without holding the HTTP request open."""
+        self._project_or_404(owner_id, project_id)
+        scenes = self.store.list_scenes(project_id, owner_id)
+        if not scenes:
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        saved = None
+        for asset in self.store.list_assets(project_id, owner_id):
+            payload = self._walking_commercial_asset_payload(asset)
+            if payload is not None:
+                saved = payload
+        if saved is not None:
+            return {
+                "status": "GENERATED",
+                "ready": True,
+                "reused_existing_asset": True,
+                "paid_provider_charges": False,
+                "job": {
+                    "status": "GENERATED",
+                    "kind": "walking_commercial_30s",
+                    "message": "Completed 30s video is already saved. No new render was started.",
+                },
+                "asset": saved,
+                "url": saved.get("url"),
+                "message": "Completed 30s video is already saved. No new render was started.",
+            }
+        inflight = next(
+            (
+                job
+                for job in self.store.list_jobs(project_id, owner_id)
+                if job.kind == "walking_commercial_30s" and job.status in {"QUEUED", "RUNNING"}
+            ),
+            None,
+        )
+        if inflight is not None:
+            return {
+                "status": "PROCESSING",
+                "ready": False,
+                "reused_existing_asset": False,
+                "paid_provider_charges": False,
+                "job": inflight.as_dict(),
+                "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{inflight.id}",
+                "message": "30s render is already running. Poll this job; success waits for the saved MP4.",
+            }
+        job = self._start_job(owner_id, project_id, "walking_commercial_30s")
+        self._finish_job(
+            job,
+            status="QUEUED",
+            message="30s walking commercial queued. The MP4 is not ready yet.",
+            asset_ids=[],
+            provider="nova_walking_commercial",
+        )
+        return {
+            "status": "PROCESSING",
+            "ready": False,
+            "reused_existing_asset": False,
+            "paid_provider_charges": False,
+            "job": job.as_dict(),
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
+            "message": "30s walking commercial queued. Poll this job until the saved MP4 exists.",
+        }
+
     @serialized_media
-    def render_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
+    def render_walking_commercial_30s(
+        self,
+        owner_id: str,
+        project_id: str,
+        existing_job_id: str | None = None,
+    ) -> dict[str, Any]:
         """30s H.264/AAC walking talking commercial for mobile download. No paid provider spend."""
         from app.core.nova.creative_studio.click_destinations import replacement_pack
         from app.core.nova.creative_studio.walking_presenter import (
@@ -2142,7 +2222,24 @@ class CreativeStudioService(ShortDramaMixin):
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
         presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
-        job = self._start_job(owner_id, project_id, "walking_commercial_30s")
+        if existing_job_id:
+            job = next(
+                (row for row in self.store.list_jobs(project_id, owner_id) if row.id == existing_job_id),
+                None,
+            )
+            if job is None:
+                raise CreativeStudioError("NOT_FOUND", "Render job not found", http_status=404)
+            if job.status == "GENERATED" and job.result_asset_ids:
+                return self.get_generation_job(owner_id, project_id, job.id)
+            self._finish_job(
+                job,
+                status="RUNNING",
+                message="Rendering the 30s walking commercial. No paid provider is charged.",
+                asset_ids=[],
+                provider="nova_walking_commercial",
+            )
+        else:
+            job = self._start_job(owner_id, project_id, "walking_commercial_30s")
         try:
             rendered = render_walking_commercial_30s(
                 output_mp4=output_path,
@@ -2461,9 +2558,30 @@ class CreativeStudioService(ShortDramaMixin):
         elif job.provider in {"nova_walking_presenter", "nova_walking_commercial"}:
             lip_sync = True
             paid = False
+        asset_payload = None
+        for asset_id in job.result_asset_ids or []:
+            asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
+            if asset is None or asset.kind != "video":
+                continue
+            asset_payload = asset.as_dict()
+            path = _resolve_creative_media_url(asset.url)
+            if path is not None:
+                asset_payload["media_available"] = path.is_file() and path.stat().st_size > 1000
+            else:
+                asset_payload["media_available"] = str(asset.url or "").startswith(("http://", "https://"))
+            break
+        ready = job.status in {"GENERATED", "ERROR"}
+        if (
+            job.kind == "walking_commercial_30s"
+            and job.status == "GENERATED"
+            and (asset_payload is None or asset_payload.get("media_available") is False)
+        ):
+            ready = False
         return {
             "job": job.as_dict(),
-            "ready": job.status in {"GENERATED", "ERROR"},
+            "ready": ready,
+            "asset": asset_payload,
+            "url": (asset_payload or {}).get("url"),
             "lip_sync": lip_sync,
             "paid_provider_charges": paid,
         }

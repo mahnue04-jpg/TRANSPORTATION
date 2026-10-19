@@ -1001,14 +1001,76 @@
     return row.kind || "Asset";
   }
 
-  async function pollStudioJob(projectId, jobId) {
+  var walkingPollJobId = null;
+
+  async function pollStudioJob(projectId, jobId, maxAttempts) {
+    var limit = maxAttempts || 45;
     var last = null;
-    for (var attempt = 0; attempt < 45; attempt += 1) {
+    for (var attempt = 0; attempt < limit; attempt += 1) {
       last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
-      if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
+      var jobStatus = last && last.job && last.job.status;
+      var fileReady = last && last.asset && last.asset.url && last.asset.media_available !== false;
+      if (last && last.ready && (jobStatus !== "GENERATED" || fileReady)) return last;
+      if (jobStatus === "ERROR") return last;
+      if (attempt % 3 === 2) {
+        showBanner("Rendering the 30s commercial... " + String((attempt + 1) * 2) + "s. Waiting for the saved MP4. Job " + jobId + ".", true);
+      }
       await new Promise(function (resolve) { setTimeout(resolve, 2000); });
     }
     return last;
+  }
+
+  async function confirmWalkingResult(projectId, endpoint, polled, rendered, successMessage) {
+    renderOutput(polled || rendered);
+    await refreshAssets();
+    var status = polled && polled.job && polled.job.status;
+    if (status === "ERROR") {
+      showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
+      return;
+    }
+    if (status === "GENERATED") {
+      var persisted = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+      var expectedUrl = (polled.asset && polled.asset.url) || (rendered && rendered.asset && rendered.asset.url);
+      var saved = (persisted.assets || []).some(function (asset) {
+        return asset.kind === "video" && asset.status === "GENERATED" &&
+          asset.media_available !== false && asset.url && expectedUrl && asset.url === expectedUrl &&
+          (endpoint !== "/assemble/walking-commercial-30s" ||
+            (asset.metadata && asset.metadata.render_mode === "local_walking_commercial_30s"));
+      });
+      showBanner(saved ? successMessage : "Render completed but the saved MP4 is not yet confirmed in project assets. Refresh and inspect before retrying.", saved);
+      return;
+    }
+    var jobId = (polled && polled.job && polled.job.id) || "";
+    showBanner("Render has not confirmed a saved playable MP4" + (jobId ? " (job " + jobId + "). Reload the page to keep waiting." : "."), false);
+  }
+
+  function maybeResumeWalkingCommercial(detail) {
+    if (!detail || !activeProjectId || walkingPollJobId) return;
+    var job = (detail.jobs || []).filter(function (row) {
+      return row && row.kind === "walking_commercial_30s" && (row.status === "QUEUED" || row.status === "RUNNING") && row.id;
+    }).pop();
+    if (!job) return;
+    var projectId = activeProjectId;
+    walkingPollJobId = job.id;
+    showBanner("30s render is still running (" + job.id + "). Waiting for the saved MP4.", true);
+    pollStudioJob(projectId, job.id, 150).then(function (polled) {
+      var stillRunning = polled && polled.job && (polled.job.status === "QUEUED" || polled.job.status === "RUNNING");
+      if (stillRunning) {
+        showBanner("30s render is still running (" + job.id + "). Reload the page to keep waiting. Success is shown only after the MP4 is saved.", false);
+        return;
+      }
+      walkingPollJobId = null;
+      return confirmWalkingResult(
+        projectId,
+        "/assemble/walking-commercial-30s",
+        polled,
+        null,
+        "30s walking commercial ready for mobile download. Accept the voice license before public ads."
+      );
+    }).catch(function (err) {
+      walkingPollJobId = null;
+      showBanner((err && err.message) || "Could not check the 30s render.", false);
+    });
   }
 
   async function refreshAssets() {
@@ -1102,6 +1164,7 @@
         assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
+    maybeResumeWalkingCommercial(detail);
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
       if (!caption) return;
@@ -1413,28 +1476,17 @@
         body: JSON.stringify({})
       });
       var polled = rendered;
-      if (rendered.job && rendered.job.id) {
-        polled = await pollStudioJob(projectId, rendered.job.id);
+      if (rendered.job && rendered.job.id && !(rendered.ready === true && rendered.job.status === "GENERATED")) {
+        var attempts = endpoint === "/assemble/walking-commercial-30s" ? 150 : 45;
+        walkingPollJobId = rendered.job.id;
+        try {
+          polled = await pollStudioJob(projectId, rendered.job.id, attempts);
+        } finally {
+          var stillRunning = polled && polled.job && (polled.job.status === "QUEUED" || polled.job.status === "RUNNING");
+          if (!stillRunning) walkingPollJobId = null;
+        }
       }
-      renderOutput(polled || rendered);
-      await refreshAssets();
-      var status = polled && polled.job && polled.job.status;
-      if (status === "ERROR") {
-        showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
-      } else if (status === "GENERATED") {
-        // Confirm the result survived a new API read; a job response alone is not a saved MP4.
-        var persisted = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
-        var expectedUrl = (polled.asset && polled.asset.url) || (rendered.asset && rendered.asset.url);
-        var saved = (persisted.assets || []).some(function (asset) {
-          return asset.kind === "video" && asset.status === "GENERATED" &&
-            asset.media_available !== false && asset.url && asset.url === expectedUrl &&
-            (endpoint !== "/assemble/walking-commercial-30s" ||
-              (asset.metadata && asset.metadata.render_mode === "local_walking_commercial_30s"));
-        });
-        showBanner(saved ? successMessage : "Render completed but the saved MP4 is not yet confirmed in project assets. Refresh and inspect before retrying.", saved);
-      } else {
-        showBanner("Render has not confirmed a saved playable MP4. Check the project assets and job status before trying again.", false);
-      }
+      await confirmWalkingResult(projectId, endpoint, polled, rendered, successMessage);
     } catch (err) {
       showBanner(err.message || "Walking render failed.", false);
     } finally {

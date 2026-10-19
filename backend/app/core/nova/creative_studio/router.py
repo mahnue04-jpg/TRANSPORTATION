@@ -110,6 +110,46 @@ _final_promo_lock = threading.Lock()
 _final_promo_running: set[tuple[str, str]] = set()
 
 
+_walk30_lock = threading.Lock()
+_walk30_running: set[str] = set()
+
+
+def _run_walking_commercial_background(owner_id: str, project_id: str, job_id: str) -> None:
+    """Render after the HTTP response. The request itself must not wait out a 30s proxy cutoff."""
+    db = None
+    try:
+        db = SessionLocal()
+        get_service(db).render_walking_commercial_30s(
+            owner_id,
+            project_id,
+            existing_job_id=job_id,
+        )
+    except Exception:
+        logger.exception(
+            "30s walking commercial failed job=%s project=%s",
+            job_id,
+            project_id,
+        )
+    finally:
+        if db is not None:
+            db.close()
+        with _walk30_lock:
+            _walk30_running.discard(job_id)
+
+
+def _ensure_walking_commercial_worker(owner_id: str, project_id: str, job_id: str) -> None:
+    with _walk30_lock:
+        if job_id in _walk30_running:
+            return
+        _walk30_running.add(job_id)
+    threading.Thread(
+        target=_run_walking_commercial_background,
+        args=(owner_id, project_id, job_id),
+        name=f"walk30-{job_id}",
+        daemon=True,
+    ).start()
+
+
 def _run_final_promo_background(owner_id: str, project_id: str) -> None:
     key = (owner_id, project_id)
     db = SessionLocal()
@@ -1561,13 +1601,22 @@ def assemble_walking_commercial_30s(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    """Queue a 30s walking commercial and return the job id immediately.
+
+    The MP4 is rendered after this response. Callers poll the job until a saved
+    file exists. No paid provider charges.
+    """
     _require_owner(user)
     try:
-        return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+        started = get_service(db).prepare_walking_commercial_30s(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+    job = started.get("job") or {}
+    job_id = str(job.get("id") or "")
+    if job_id and str(job.get("status") or "") in {"QUEUED", "RUNNING"} and not started.get("ready"):
+        _ensure_walking_commercial_worker(user.user_id, project_id, job_id)
+    return started
 
 
 @router.post("/projects/{project_id}/assemble/offline-commercial")

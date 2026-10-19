@@ -872,8 +872,8 @@ def test_creative_ui_has_first_real_promo_video_export_contract() -> None:
 def test_creative_ui_exposes_live_video_and_voice_actions() -> None:
     html = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
-    assert 'data-action="video"' in html && "8. Next scene" in html
-    assert 'data-action="voice"' in html && "9. Voice" in html
+    assert 'data-action="video"' in html and "8. Next scene" in html
+    assert 'data-action="voice"' in html and "9. Voice" in html
     assert "Download AI video" in js
     assert "Download voice" in js
     assert "<video controls playsinline" in js
@@ -1844,3 +1844,5 @@ def test_30s_reuse_and_persisted_success_contract() -> None:
     assert 'var persisted = await api(' in js
     assert 'showBanner(saved ? successMessage' in js
     assert 'no new render was started.' in js
+    assert 'pollStudioJob(projectId, rendered.job.id, attempts)' in js
+    assert 'Waiting for the saved MP4' in js

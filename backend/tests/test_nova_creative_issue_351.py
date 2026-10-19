@@ -258,6 +258,27 @@ def test_walking_presenter_render_and_ffprobe(tmp_path, monkeypatch):
     assert "AMICOR" in srt.read_text(encoding="utf-8")
 
 
+def test_narration_falls_back_to_native_espeak(tmp_path, monkeypatch):
+    import edge_tts
+
+    from app.core.nova.creative_studio.walking_presenter import synthesize_female_narration
+
+    class StalledCommunicate:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def save(self, _dest):
+            raise TimeoutError("edge-tts stalled")
+
+    monkeypatch.setattr(edge_tts, "Communicate", StalledCommunicate)
+    result = synthesize_female_narration("Meet AMICOR Nova today.", tmp_path / "narration.mp3")
+    assert result["engine"] == "espeak-ng"
+    assert result["paid_provider_charges"] is False
+    assert result["natural_female_voice"] is False
+    assert Path(result["wav_path"]).is_file()
+    assert result["duration_seconds"] > 0
+
+
 def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatch):
     pytest.importorskip("edge_tts")
     pytest.importorskip("PIL")
