@@ -110,6 +110,16 @@ _final_promo_lock = threading.Lock()
 _final_promo_running: set[tuple[str, str]] = set()
 
 
+def _run_walking_commercial_background(owner_id: str, project_id: str, job_id: str) -> None:
+    db = SessionLocal()
+    try:
+        get_service(db).render_walking_commercial_30s(owner_id, project_id, job_id=job_id)
+    except Exception:
+        logger.exception("30s walking commercial background render failed")
+    finally:
+        db.close()
+
+
 def _run_final_promo_background(owner_id: str, project_id: str) -> None:
     key = (owner_id, project_id)
     db = SessionLocal()
@@ -1558,16 +1568,24 @@ def assemble_walking_presenter_proof(
 @router.post("/projects/{project_id}/assemble/walking-commercial-30s")
 def assemble_walking_commercial_30s(
     project_id: str,
+    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    """Queue a 30s walking talking commercial. The MP4 is saved by the background job."""
     _require_owner(user)
     try:
-        return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+        queued = get_service(db).queue_walking_commercial_30s(user.user_id, project_id)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+    background_tasks.add_task(
+        _run_walking_commercial_background,
+        user.user_id,
+        project_id,
+        queued["job"]["id"],
+    )
+    return queued
 
 
 @router.post("/projects/{project_id}/assemble/offline-commercial")

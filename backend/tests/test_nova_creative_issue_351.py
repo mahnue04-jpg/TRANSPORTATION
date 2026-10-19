@@ -127,11 +127,15 @@ def test_ui_exposes_walking_presenter_and_checkout_controls():
     assert 'id="accept-voice-license"' in HTML
     assert 'id="complete-studio-test-checkout"' in HTML
     assert 'id="studio-test-readiness"' in HTML
-    assert "TEST feature readiness" in HTML
+    assert "Studio readiness" in HTML
+    assert "TEST details" in HTML
     assert "AMICOR Studio checkout" in HTML
     assert 'id="start-studio-checkout"' in HTML
     assert "/assemble/walking-presenter-proof" in JS
     assert "/assemble/walking-commercial-30s" in JS
+    assert 'status === "GENERATED" && savedUrl' in JS
+    assert "Nothing was marked ready." in JS
+    assert "60-second full-body demo" in HTML
     assert "/voice-license" in JS
     assert "/complete-test" in JS
     assert "/api/nova/creative/pricing" in JS

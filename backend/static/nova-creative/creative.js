@@ -578,7 +578,7 @@
       if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
       if (typeof setSignedIn === "function") setSignedIn(false);
       if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
-      throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
+      throw new Error("Session expired. Sign in again. (401). On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
     if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
@@ -1001,9 +1001,10 @@
     return row.kind || "Asset";
   }
 
-  async function pollStudioJob(projectId, jobId) {
+  async function pollStudioJob(projectId, jobId, maxAttempts) {
     var last = null;
-    for (var attempt = 0; attempt < 45; attempt += 1) {
+    var limit = maxAttempts || 45;
+    for (var attempt = 0; attempt < limit; attempt += 1) {
       last = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/jobs/" + encodeURIComponent(jobId));
       if (last.ready || (last.job && (last.job.status === "GENERATED" || last.job.status === "ERROR"))) return last;
       await new Promise(function (resolve) { setTimeout(resolve, 2000); });
@@ -1388,15 +1389,18 @@
       });
       var polled = rendered;
       if (rendered.job && rendered.job.id) {
-        polled = await pollStudioJob(projectId, rendered.job.id);
+        polled = await pollStudioJob(projectId, rendered.job.id, 150);
       }
       renderOutput(polled || rendered);
       await refreshAssets();
       var status = polled && polled.job && polled.job.status;
+      var savedUrl = polled && (polled.download_url || polled.url || (polled.asset && polled.asset.url));
       if (status === "ERROR") {
         showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
-      } else {
+      } else if (status === "GENERATED" && savedUrl) {
         showBanner(successMessage, true);
+      } else {
+        showBanner("30s render is still processing. Refresh this project and check assets before downloading. Nothing was marked ready.", false);
       }
     } catch (err) {
       showBanner(err.message || "Walking render failed.", false);

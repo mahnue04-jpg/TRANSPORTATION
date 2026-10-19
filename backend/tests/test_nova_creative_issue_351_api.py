@@ -144,12 +144,29 @@ def test_signed_in_walking_commercial_download(monkeypatch, tmp_path):
 
     rendered = client.post(f"/api/nova/creative/projects/{project_id}/assemble/walking-commercial-30s")
     assert rendered.status_code == 200, rendered.text
-    body = rendered.json()
-    assert body["lip_sync"] is True
-    assert body["mobile_download_ready"] is True
-    assert body["license_status"] == "GREEN"
+    queued = rendered.json()
+    assert queued["ready"] is False
+    assert queued["mobile_download_ready"] is False
+    assert queued["paid_provider_charges"] is False
+    assert queued["job"]["status"] == "RUNNING"
+    job_id = queued["job"]["id"]
+
+    body = None
+    for _ in range(180):
+        polled = client.get(f"/api/nova/creative/projects/{project_id}/jobs/{job_id}")
+        assert polled.status_code == 200, polled.text
+        body = polled.json()
+        if body.get("ready") is True:
+            break
+    assert body is not None and body["ready"] is True
+    assert body["job"]["status"] == "GENERATED"
     assert body["paid_provider_charges"] is False
-    assert 28.0 <= float(body["validation"]["duration_seconds"]) <= 32.0
+    assert body["url"]
+    assert body["download_url"]
+    validation = body["validation"]
+    assert 28.0 <= float(validation["duration_seconds"]) <= 32.0
+    assert validation["checks"]["has_audio"] is True
+    assert validation["checks"]["audio_aac"] is True
 
     asset_id = body["asset"]["id"]
     download = client.get(f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file")
@@ -158,3 +175,52 @@ def test_signed_in_walking_commercial_download(monkeypatch, tmp_path):
     assert len(download.content) > 1000
     video = tmp_path / Path(body["url"]).name
     assert video.is_file()
+    captions = video.with_suffix(".srt")
+    assert captions.is_file()
+    assert captions.read_text(encoding="utf-8").strip()
+    refreshed = client.get(f"/api/nova/creative/projects/{project_id}")
+    assert refreshed.status_code == 200
+    saved = [row for row in refreshed.json()["assets"] if row["id"] == asset_id]
+    assert saved and saved[0]["url"] == body["url"]
+    replay = client.get(f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file")
+    assert replay.status_code == 200
+    assert replay.content == download.content
+
+    playwright_sync = pytest.importorskip("playwright.sync_api")
+    with playwright_sync.sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": 390, "height": 844},
+            is_mobile=True,
+            has_touch=True,
+        )
+        page = context.new_page()
+        try:
+            page.goto(video.as_uri())
+            played = page.evaluate(
+                """() => {
+                  const v = document.querySelector('video');
+                  if (!v) return {ok: false, reason: 'no video element'};
+                  return new Promise((resolve) => {
+                    const finish = () => resolve({
+                      ok: Number.isFinite(v.duration) && v.duration >= 28 && v.duration <= 32 && v.readyState >= 1,
+                      duration: v.duration,
+                      width: v.videoWidth,
+                      height: v.videoHeight
+                    });
+                    if (v.readyState >= 1) finish();
+                    else v.onloadedmetadata = finish;
+                    v.onerror = () => resolve({ok: false, reason: 'decode error'});
+                  });
+                }"""
+            )
+            assert played["ok"] is True, played
+            page.goto((Path(__file__).resolve().parents[1] / "static/nova-creative/index.html").as_uri())
+            assert page.locator("#build-walking-commercial-30s").is_visible()
+            assert page.get_by_text("60-second full-body demo").is_visible()
+            fits = page.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+            assert fits
+        finally:
+            browser.close()

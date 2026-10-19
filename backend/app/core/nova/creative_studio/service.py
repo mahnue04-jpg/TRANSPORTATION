@@ -2124,8 +2124,32 @@ class CreativeStudioService(ShortDramaMixin):
             "owner_review_required": True,
         }
 
+    def queue_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Persist a running job and return before the encode starts.
+
+        The HTTP handler answers immediately so a proxy timeout cannot drop the
+        only copy of the result. The background render finishes this same job.
+        """
+        self._project_or_404(owner_id, project_id)
+        if not self.store.list_scenes(project_id, owner_id):
+            raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        job = self._start_job(owner_id, project_id, "walking_commercial_30s")
+        return {
+            "job": job.as_dict(),
+            "ready": False,
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
+            "mobile_download_ready": False,
+            "paid_provider_charges": False,
+            "publish_ready": False,
+        }
+
     @serialized_media
-    def render_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
+    def render_walking_commercial_30s(
+        self,
+        owner_id: str,
+        project_id: str,
+        job_id: str | None = None,
+    ) -> dict[str, Any]:
         """30s H.264/AAC walking talking commercial for mobile download. No paid provider spend."""
         from app.core.nova.creative_studio.click_destinations import replacement_pack
         from app.core.nova.creative_studio.walking_presenter import (
@@ -2142,7 +2166,12 @@ class CreativeStudioService(ShortDramaMixin):
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
         presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
-        job = self._start_job(owner_id, project_id, "walking_commercial_30s")
+        if job_id:
+            job = next((row for row in self.store.list_jobs(project_id, owner_id) if row.id == job_id), None)
+            if job is None:
+                raise CreativeStudioError("NOT_FOUND", "Job not found", http_status=404)
+        else:
+            job = self._start_job(owner_id, project_id, "walking_commercial_30s")
         try:
             rendered = render_walking_commercial_30s(
                 output_mp4=output_path,
@@ -2461,12 +2490,26 @@ class CreativeStudioService(ShortDramaMixin):
         elif job.provider in {"nova_walking_presenter", "nova_walking_commercial"}:
             lip_sync = True
             paid = False
-        return {
+        payload = {
             "job": job.as_dict(),
             "ready": job.status in {"GENERATED", "ERROR"},
             "lip_sync": lip_sync,
             "paid_provider_charges": paid,
         }
+        if job.status == "GENERATED" and job.result_asset_ids:
+            wanted = set(job.result_asset_ids)
+            matched = [row for row in self.store.list_assets(project_id, owner_id) if row.id in wanted]
+            video = next((row for row in matched if row.kind in {"video", "presenter_video"}), None)
+            if video is not None:
+                payload["asset"] = video.as_dict()
+                payload["url"] = video.url
+                payload["download_url"] = (
+                    f"/api/nova/creative/projects/{project_id}/assets/{video.id}/file"
+                )
+                validation = (video.metadata or {}).get("validation")
+                if isinstance(validation, dict):
+                    payload["validation"] = validation
+        return payload
 
     def open_asset_file(self, owner_id: str, project_id: str, asset_id: str) -> tuple[Path, str, str]:
         """Owner-scoped file for playback download. Another account gets not found."""
