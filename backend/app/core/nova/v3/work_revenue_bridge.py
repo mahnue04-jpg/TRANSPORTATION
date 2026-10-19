@@ -38,6 +38,22 @@ def _amount_from_job(job: dict[str, Any]) -> float | None:
         return None
 
 
+def source_eligibility_reasons(job: dict[str, Any]) -> list[str]:
+    """Owner-facing reasons already computed for this source listing.
+
+    Empty when the listing has none. This does not invent a reason.
+    """
+    live = job.get("live_qualification") if isinstance(job.get("live_qualification"), dict) else {}
+    seen: list[str] = []
+    for item in list(job.get("eligibility_explanations") or []) + list(live.get("eligibility_explanations") or []):
+        text = str(item).strip()
+        if text and text not in seen:
+            seen.append(text[:500])
+        if len(seen) >= 8:
+            return seen
+    return seen
+
+
 def _response_deadline(job: dict[str, Any]):
     raw = str(job.get("response_deadline") or "").strip()
     if not raw:
@@ -220,6 +236,15 @@ def persist_live_job(
     if source_url:
         stored["source_url"] = source_url
     stored["provenance_provider"] = provider_id
+    stored["source_provider_id"] = provider_id
+    reasons = source_eligibility_reasons(job)
+    if reasons:
+        stored["source_eligibility_reasons"] = reasons
+        stored["eligibility_explanations"] = reasons
+    live = job.get("live_qualification") if isinstance(job.get("live_qualification"), dict) else {}
+    decision = str(job.get("eligibility_decision") or live.get("eligibility_decision") or "").strip()
+    if decision:
+        stored["eligibility_decision"] = decision[:80]
     work_row.qualification_json = json.dumps(stored)
     db.commit()
     db.refresh(work_row)

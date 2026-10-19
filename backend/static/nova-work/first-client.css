@@ -59,6 +59,7 @@
   #first-client-refresh,
   .first-client-actions,
   .first-client-actions label,
+  .first-client-consent,
   .first-client-actions button,
   .first-client-actions input {
     width: 100%;

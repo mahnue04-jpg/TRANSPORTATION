@@ -4,13 +4,15 @@ No live job source and no email provider are contacted.
 """
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
+from app.auth import SEED_PASSWORD, UserContext, ensure_auth_schema, seed_default_users
 from app.core.nova.v3.multi_source_discovery import (
     ProviderMeta,
     call_provider_search,
@@ -24,7 +26,13 @@ from app.core.nova.work_revenue.first_client_pipeline import (
     set_submission_transport,
 )
 from app.core.nova.work_revenue.materials import generate_drafts
-from app.core.nova.work_revenue.models import NovaWorkApplication, NovaWorkMaterial
+from app.core.nova.v3.work_revenue_bridge import persist_live_job, source_eligibility_reasons
+from app.core.nova.work_revenue.models import (
+    NovaWorkApplication,
+    NovaWorkMaterial,
+    NovaWorkOpportunity,
+    NovaWorkSubmissionLedger,
+)
 from app.core.nova.work_revenue.schema_ensure import ensure_work_revenue_schema
 from app.db.session import SessionLocal, engine
 from app.main import app
@@ -170,7 +178,10 @@ def test_work_page_includes_the_mobile_first_client_board(client: TestClient) ->
     assert "/static/nova-work/first-client.css" in html
     script = client.get("/static/nova-work/first-client.js")
     assert script.status_code == 200
-    assert "Record blocked handoff" in script.text
+    assert "Store mock receipt" in script.text
+    assert "mock_receipt_consent" in script.text
+    assert "source_eligibility_reasons" in script.text
+    assert "visibilitychange" in script.text
     assert "Sent vs draft" in script.text
     assert "Fetched at" in script.text
     assert "pageshow" in script.text
@@ -382,62 +393,57 @@ def test_follow_up_and_delivery_failure_require_a_real_submission(client: TestCl
     set_submission_transport(transport)
     try:
         _clear_owner_input(application_id)
-        sent = client.post(
+        refused = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": False},
         )
-        assert sent.status_code == 200, sent.text
-        assert sent.json()["ledger"]["state"] == "SENT"
-        assert sent.json()["ledger"]["receipt"]
-        assert sent.json()["application_externally_submitted"] is True
-        assert sent.json()["applications_sent_by_this_request"] == 1
+        assert refused.status_code == 200, refused.text
+        assert refused.json()["ledger"]["state"] == "BLOCKED"
+        assert "consent" in refused.json()["ledger"]["blocker_reason"].lower()
+        assert refused.json()["application_externally_submitted"] is False
+        assert transport.calls == 0
+        mock = client.post(
+            f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
+            headers=headers,
+            json={"mock_receipt_consent": True},
+        )
+        assert mock.status_code == 200, mock.text
+        assert mock.json()["ledger"]["state"] == "MOCK_RECEIPT"
+        assert mock.json()["ledger"]["mock_only"] is True
+        assert mock.json()["ledger"]["is_send_receipt"] is False
+        assert mock.json()["mock_only"] is True
+        assert mock.json()["application_externally_submitted"] is False
+        assert mock.json()["applications_sent_by_this_request"] == 0
         assert transport.calls == 1
         assert transport.network_used is False
         again = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert again.status_code == 200, again.text
         assert again.json()["applications_sent_by_this_request"] == 0
-        assert again.json()["ledger"]["ledger_id"] == sent.json()["ledger"]["ledger_id"]
+        assert again.json()["ledger"]["ledger_id"] == mock.json()["ledger"]["ledger_id"]
         assert transport.calls == 1
     finally:
         set_submission_transport(None)
 
-    past = client.post(
-        f"/api/nova/work/first-client/applications/{application_id}/follow-up",
-        headers=headers,
-        json={"follow_up_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
-    )
-    assert past.status_code == 422
-    scheduled = client.post(
+    still_blocked = client.post(
         f"/api/nova/work/first-client/applications/{application_id}/follow-up",
         headers=headers,
         json={"follow_up_at": future},
     )
-    assert scheduled.status_code == 200, scheduled.text
-    assert scheduled.json()["message_sent"] is False
-    assert scheduled.json()["externally_submitted"] is True
-    recorded = client.post(
-        f"/api/nova/work/first-client/applications/{application_id}/response",
-        headers=headers,
-        json={"outcome": "DELIVERY_FAILURE", "note": "mailbox rejected the message"},
-    )
-    assert recorded.status_code == 200, recorded.text
-    assert recorded.json()["applications_sent_by_this_request"] == 0
-    assert recorded.json()["actually_sent"] is True
-    assert recorded.json()["ledger"]["state"] == "DELIVERY_FAILURE"
+    assert still_blocked.status_code == 409
     board = client.get("/api/nova/work/first-client/board", headers=headers)
-    match = next(
-        item
-        for item in board.json()["top_matches"] + board.json()["sent_outside_top_matches"]
-        if item["application_id"] == application_id
-    )
-    assert match["stage"] == "DELIVERY_FAILURE"
-    assert match["actually_sent"] is True
-    assert match["receipt_verified"] is True
-    assert match["sent_vs_draft"] == "sent"
+    match = next(item for item in board.json()["top_matches"] if item["application_id"] == application_id)
+    assert match["stage"] == "MOCK_RECEIPT"
+    assert match["actually_sent"] is False
+    assert match["mock_only"] is True
+    assert match["sent_vs_draft"] == "draft"
     assert match["receipt"] == "fake-receipt-1"
+    assert board.json()["counts"]["actually_sent"] == 0
+    assert board.json()["counts"]["mock_receipts"] >= 1
 
 
 def test_missing_auth_blocks_without_calling_transport(client: TestClient) -> None:
@@ -486,6 +492,7 @@ def test_delivery_failure_and_network_flag_are_not_sends(client: TestClient) -> 
         failed = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert failed.status_code == 200, failed.text
         assert failed.json()["ledger"]["state"] == "DELIVERY_FAILURE"
@@ -509,6 +516,7 @@ def test_delivery_failure_and_network_flag_are_not_sends(client: TestClient) -> 
         refused = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert refused.status_code == 200, refused.text
         assert refused.json()["ledger"]["state"] == "BLOCKED"
@@ -735,6 +743,7 @@ def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> No
         missing = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert missing.status_code == 200, missing.text
         assert missing.json()["ledger"]["state"] == "BLOCKED"
@@ -746,6 +755,7 @@ def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> No
         networked = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert networked.status_code == 200, networked.text
         assert networked.json()["ledger"]["state"] == "BLOCKED"
@@ -757,6 +767,7 @@ def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> No
         failed = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert failed.status_code == 200, failed.text
         assert failed.json()["ledger"]["state"] == "DELIVERY_FAILURE"
@@ -768,12 +779,15 @@ def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> No
         sent = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert sent.status_code == 200, sent.text
-        assert sent.json()["ledger"]["state"] == "SENT"
+        assert sent.json()["ledger"]["state"] == "MOCK_RECEIPT"
         assert sent.json()["ledger"]["receipt"] == "sandbox-receipt-1"
-        assert sent.json()["ledger"]["is_send_receipt"] is True
-        assert sent.json()["applications_sent_by_this_request"] == 1
+        assert sent.json()["ledger"]["is_send_receipt"] is False
+        assert sent.json()["ledger"]["mock_only"] is True
+        assert sent.json()["applications_sent_by_this_request"] == 0
+        assert sent.json()["application_externally_submitted"] is False
         assert sent.json()["financial_execution"] is False
         assert transport.calls == 4
 
@@ -781,11 +795,145 @@ def test_sandbox_receipt_idempotency_retry_and_failure(client: TestClient) -> No
         repeat = client.post(
             f"/api/nova/work/first-client/applications/{application_id}/submission-attempt",
             headers=headers,
+            json={"mock_receipt_consent": True},
         )
         assert repeat.status_code == 200, repeat.text
         assert repeat.json()["applications_sent_by_this_request"] == 0
-        assert repeat.json()["ledger"]["state"] == "SENT"
+        assert repeat.json()["ledger"]["state"] == "MOCK_RECEIPT"
         assert repeat.json()["ledger"]["receipt"] == "sandbox-receipt-1"
+        assert repeat.json()["application_externally_submitted"] is False
         assert transport.calls == 4
     finally:
         set_submission_transport(None)
+
+
+def test_source_eligibility_reasons_do_not_invent_text() -> None:
+    assert source_eligibility_reasons({}) == []
+    assert source_eligibility_reasons({"eligibility_explanations": ["  ", "Fee status is unclear."]}) == [
+        "Fee status is unclear."
+    ]
+
+
+def test_source_eligibility_persists_on_the_board_and_across_refresh(client: TestClient) -> None:
+    headers = _headers(client)
+    created = _opportunity(client, headers, "Source eligibility persistence contractor")
+    opportunity_id = created["opportunity_id"]
+    explanation = "Preferred residency: United States. A preference is not a blocker."
+    with SessionLocal() as db:
+        row = db.query(NovaWorkOpportunity).filter(NovaWorkOpportunity.opportunity_id == opportunity_id).one()
+        row.qualification_json = json.dumps(
+            {
+                "reasons": ["Saved work qualifier reason."],
+                "source_eligibility_reasons": [explanation],
+                "eligibility_decision": "clear",
+                "source_provider_id": "remotive",
+                "capability_fit_score": 10000,
+                "fetched_at": "2026-10-18T12:00:00+00:00",
+            }
+        )
+        row.qualification_outcome = "NOVA_CAN_PERFORM"
+        row.updated_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        organization_id = row.organization_id
+        owner_user_id = row.owner_user_id
+        db.commit()
+
+    def _card(payload: dict) -> dict:
+        rows = payload["top_matches"] + payload["incomplete_provenance"]
+        return next(item for item in rows if item["opportunity_id"] == opportunity_id)
+
+    first = client.get("/api/nova/work/first-client/board", headers=headers)
+    assert first.status_code == 200, first.text
+    card = _card(first.json())
+    assert card["source_eligibility_reasons"] == [explanation]
+    assert card["eligibility_decision"] == "clear"
+    assert card["source_provider_id"] == "remotive"
+    refreshed = client.get("/api/nova/work/first-client/board", headers=headers)
+    assert _card(refreshed.json())["source_eligibility_reasons"] == [explanation]
+
+    qualified = client.post(
+        f"/api/nova/work/opportunities/{opportunity_id}/qualify",
+        headers=headers,
+    )
+    assert qualified.status_code == 200, qualified.text
+    with SessionLocal() as db:
+        row = db.query(NovaWorkOpportunity).filter(NovaWorkOpportunity.opportunity_id == opportunity_id).one()
+        stored = json.loads(row.qualification_json or "{}")
+        user = UserContext(
+            user_id=owner_user_id,
+            email="dispatcher@amicor.local",
+            role="dispatcher",
+            organization_id=organization_id,
+        )
+    assert stored["source_eligibility_reasons"] == [explanation]
+    assert stored["source_provider_id"] == "remotive"
+
+    job = {
+        "title": "Remote CRM source eligibility contractor",
+        "company_name": "Harbor Ledger",
+        "source_url": "https://example.com/roles/source-eligibility-live",
+        "description": "Remote independent contractor CRM notes. No upfront fee.",
+        "provider_id": "jobicy",
+        "fetched_at": "2026-10-18T15:00:00+00:00",
+        "eligibility_explanations": [explanation],
+        "eligibility_decision": "clear",
+        "remote_status": "remote",
+        "job_type": "contractor",
+    }
+    with SessionLocal() as db:
+        persisted = persist_live_job(db, job, organization_id=organization_id, user=user)
+        saved = (
+            db.query(NovaWorkOpportunity)
+            .filter(NovaWorkOpportunity.opportunity_id == persisted["work_opportunity_id"])
+            .one()
+        )
+        copied = json.loads(saved.qualification_json or "{}")
+        assert copied["source_eligibility_reasons"] == [explanation]
+        copied["capability_fit_score"] = 10000
+        saved.qualification_json = json.dumps(copied)
+        saved.qualification_outcome = "NOVA_CAN_PERFORM"
+        saved.updated_at = datetime(2099, 1, 2, tzinfo=timezone.utc)
+        db.commit()
+    assert persisted["persisted"] is True
+    assert copied["source_provider_id"] == "jobicy"
+    assert copied["eligibility_decision"] == "clear"
+    live_board = client.get("/api/nova/work/first-client/board", headers=headers)
+    live_card = next(
+        item
+        for item in live_board.json()["top_matches"] + live_board.json()["incomplete_provenance"]
+        if item["opportunity_id"] == persisted["work_opportunity_id"]
+    )
+    assert live_card["source_eligibility_reasons"] == [explanation]
+
+
+def test_follow_up_still_requires_a_stored_send_receipt(client: TestClient) -> None:
+    """The mock workflow does not create this row. It is a fixture receipt."""
+    headers = _headers(client)
+    approved = _approve(client, headers, "Fixture send receipt contractor")
+    application_id = approved["application_id"]
+    with SessionLocal() as db:
+        application = db.query(NovaWorkApplication).filter(NovaWorkApplication.application_id == application_id).one()
+        application.externally_submitted = True
+        db.add(
+            NovaWorkSubmissionLedger(
+                ledger_id=f"NWL-{uuid.uuid4().hex[:12]}",
+                organization_id=application.organization_id,
+                owner_user_id=application.owner_user_id,
+                application_id=application.application_id,
+                opportunity_id=application.opportunity_id,
+                channel="fixture",
+                state="SENT",
+                receipt="fixture-receipt-not-a-network-send",
+                idempotency_key=f"send:{application.application_id}",
+                next_action="Fixture receipt. Nothing was sent by this test.",
+            )
+        )
+        db.commit()
+    future = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    scheduled = client.post(
+        f"/api/nova/work/first-client/applications/{application_id}/follow-up",
+        headers=headers,
+        json={"follow_up_at": future},
+    )
+    assert scheduled.status_code == 200, scheduled.text
+    assert scheduled.json()["message_sent"] is False
+    assert scheduled.json()["externally_submitted"] is True

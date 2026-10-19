@@ -32,19 +32,23 @@
   function countChip(label, value) {
     return "<span>" + escapeHtml(label) + ": " + escapeHtml(value) + "</span>";
   }
-  function reasons(items) {
-    if (!items || !items.length) return "<li>No qualification reason stored yet.</li>";
+  function reasons(items, empty) {
+    if (!items || !items.length) return "<li>" + escapeHtml(empty || "No qualification reason stored yet.") + "</li>";
     return items.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("");
   }
   function card(row) {
     var sent = row.actually_sent ? "Sent, with a receipt." : "Draft. This has not been sent.";
-    var receipt = row.receipt_verified ? escapeHtml(row.receipt) : "No send receipt is stored.";
+    var receipt = row.mock_only
+      ? "Mock receipt only. Nothing was sent. " + escapeHtml(row.receipt || "")
+      : (row.receipt_verified ? escapeHtml(row.receipt) : "No send receipt is stored.");
     var fetched = row.provenance_fetched_at ? escapeHtml(row.provenance_fetched_at) : "No source fetch time stored.";
     var blocker = row.blocker_reason ? escapeHtml(row.blocker_reason) : "No blocker stored.";
     var actions = "";
-    if (row.application_id && (row.stage === "APPROVED_NOT_SENT" || row.stage === "BLOCKED")) {
-      actions += "<button type=\"button\" data-first-client-action=\"attempt\" data-id=\"" +
-        escapeHtml(row.application_id) + "\">Record blocked handoff</button>";
+    if (row.application_id && !row.mock_only && (row.stage === "APPROVED_NOT_SENT" || row.stage === "BLOCKED" || row.stage === "DELIVERY_FAILURE")) {
+      actions += "<label class=\"first-client-consent\"><input type=\"checkbox\" data-mock-consent-for=\"" +
+        escapeHtml(row.application_id) + "\" /> I consent to store a mock receipt only. This does not send the application.</label>" +
+        "<button type=\"button\" data-first-client-action=\"attempt\" data-id=\"" +
+        escapeHtml(row.application_id) + "\">Store mock receipt</button>";
     }
     if (row.application_id && row.receipt_verified) {
       actions += "<label>Follow-up<input type=\"datetime-local\" data-follow-up-for=\"" +
@@ -69,6 +73,11 @@
       "<p>Blocker: " + blocker + "</p>" +
       "<p>Qualification: " + escapeHtml(row.qualification_outcome || "not qualified yet") + "</p>" +
       "<ul>" + reasons(row.qualification_reasons) + "</ul>" +
+      "<p>Source eligibility" +
+      (row.eligibility_decision ? " (" + escapeHtml(row.eligibility_decision) + ")" : "") +
+      (row.source_provider_id ? " · " + escapeHtml(row.source_provider_id) : "") +
+      ":</p>" +
+      "<ul>" + reasons(row.source_eligibility_reasons, "No source eligibility reason stored yet.") + "</ul>" +
       "<p>Proposal preview: " + escapeHtml(row.proposal_preview || "No proposal draft yet.") + "</p>" +
       "<p>Receipt: " + receipt + "</p>" +
       "<p>Next action: " + escapeHtml(row.next_action) + "</p>" +
@@ -84,6 +93,7 @@
         countChip("Drafts", counts.drafts || 0) +
         countChip("Approved, not sent", counts.approved_not_sent || 0) +
         countChip("Actually sent", counts.actually_sent || 0) +
+        countChip("Mock receipts", counts.mock_receipts || 0) +
         countChip("Blocked", counts.blocked || 0) +
         countChip("Follow-ups due", counts.follow_ups_due || 0) +
         countChip("Rejected", counts.rejected || 0) +
@@ -120,8 +130,19 @@
     var id = button.getAttribute("data-id");
     try {
       if (action === "attempt") {
-        await api("/api/nova/work/first-client/applications/" + encodeURIComponent(id) + "/submission-attempt", { method: "POST" });
-        note(id, "Blocked handoff recorded. Nothing was sent.");
+        var consentBox = document.querySelector("[data-mock-consent-for=\"" + id + "\"]");
+        var consent = !!(consentBox && consentBox.checked);
+        var result = await api("/api/nova/work/first-client/applications/" + encodeURIComponent(id) + "/submission-attempt", {
+          method: "POST",
+          body: JSON.stringify({ mock_receipt_consent: consent })
+        });
+        var message = "Nothing was sent.";
+        if (result && result.mock_only) message = "Mock receipt stored. Nothing was sent.";
+        else if (!consent) message = "Consent is required. Nothing was sent.";
+        else if (result && result.ledger && result.ledger.blocker_reason) message = result.ledger.blocker_reason;
+        await load();
+        note(id, message);
+        return;
       } else if (action === "follow-up") {
         var input = document.querySelector("[data-follow-up-for=\"" + id + "\"]");
         if (!input || !input.value) {
@@ -132,13 +153,17 @@
           method: "POST",
           body: JSON.stringify({ follow_up_at: new Date(input.value).toISOString() })
         });
+        await load();
         note(id, "Follow-up saved. Nothing was sent.");
+        return;
       } else if (action === "ack" || action === "failure") {
         await api("/api/nova/work/first-client/applications/" + encodeURIComponent(id) + "/response", {
           method: "POST",
           body: JSON.stringify({ outcome: action === "ack" ? "ACKNOWLEDGED" : "DELIVERY_FAILURE" })
         });
+        await load();
         note(id, action === "ack" ? "Acknowledgement recorded. Nothing was sent." : "Delivery failure recorded. This is not a delivery.");
+        return;
       }
       await load();
     } catch (err) {

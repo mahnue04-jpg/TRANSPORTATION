@@ -6,17 +6,17 @@ This runbook is for the owner board at `/nova/work`. It does not deploy anything
 
 `GET /api/nova/work/first-client/board` lists the signed-in owner's saved opportunities. It does not call a job source. A failed live search stays on the discovery control and is labeled source-unavailable. It is not shown as zero matches.
 
-Sent means a submission receipt is stored and `externally_submitted` is already true. Approval, a draft, a blocked handoff, and a delivery failure are not sends. A follow-up can be saved only after that receipt. This request does not send mail.
+Sent means a submission receipt is stored and `externally_submitted` is already true. Approval, a draft, a blocked handoff, a delivery failure, and a consented mock receipt are not sends. A follow-up can be saved only after a real send receipt. A mock receipt does not unlock follow-up. This request does not send mail.
 
 ## Owner steps
 
 1. Sign in on `/nova/work`.
 2. Run Find Paid Jobs only when live discovery is enabled in the environment. If every source fails, stop. Do not treat that screen as an empty market.
-3. Review the first-client board. Each card shows the source URL, qualification reasons, a proposal preview, the stage, and one next action.
+3. Review the first-client board. Each card shows the source URL, qualification reasons, the source-level eligibility reasons saved with that listing, a proposal preview, the stage, and one next action. Refreshing the page, including on a phone, loads those same saved rows.
 4. Prepare a draft from a saved opportunity. The draft includes an evidence checklist, paid-pilot options with no committed price, and an eligibility assessment. Missing facts stay `[OWNER INPUT REQUIRED]`.
 5. Approve a package only when the text is true. Approval still does not send.
-6. Use Record blocked handoff when no authenticated permitted channel is connected. The ledger state is `BLOCKED`, with one owner step: connect that channel, or open the source URL and submit the approved package yourself.
-7. A send is stored only when that channel accepts the one application and returns a receipt. The states are draft, approved-for-future, sent, delivery failure, acknowledgement, and blocked. Missing auth stays blocked. A transport that reports network use without a local receipt is blocked.
+6. Use Store mock receipt only after checking the consent box. Without that consent the ledger stays `BLOCKED` and the transport is not called. With consent, a local non-network receipt is stored as `MOCK_RECEIPT`. That row is not a send, does not set `externally_submitted`, and does not charge a fee. Missing auth stays blocked.
+7. This board does not mark an application sent. The states are draft, approved-for-future, mock receipt, delivery failure, acknowledgement, and blocked. A transport that reports network use is blocked even when a receipt string is present. A follow-up still requires a real send receipt that this board does not create.
 8. Schedule a follow-up only after a send receipt. Saving a follow-up does not send the message. Record an acknowledgement or a later delivery failure only after that same receipt. A delivery failure is not a successful send.
 
 ## Filter notes
@@ -35,7 +35,7 @@ Draft a proposal only for a qualified live record that has a source URL and a fe
 
 ## Sandbox submission
 
-The permitted-channel transport used in tests is not billable and does not open a socket. Missing auth does not call it. A send is stored only when that in-process channel returns a non-empty receipt and does not report network use. A blank receipt is not a receipt. Network use stays blocked even if a receipt string is present, because this board does not record a network send. The same local receipt is not stored twice. A delivery failure can be retried. A later failure does not erase a receipt already stored. This runbook does not send an application.
+The permitted-channel transport used in tests is not billable and does not open a socket. Missing auth does not call it. Missing mock-receipt consent does not call it. A consented local receipt is stored as a mock receipt and is not a send. A blank receipt is not a receipt. Network use stays blocked even if a receipt string is present. The same mock receipt is not stored twice. A delivery failure can be retried until a mock receipt is stored. A later failure does not erase a mock receipt already stored. This runbook does not send an application.
 
 Draft PRs #331 and #335 are not merged here. Their dev-only funnel acceptance and fictional evidence export stay on those branches.
 

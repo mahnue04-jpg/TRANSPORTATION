@@ -160,22 +160,26 @@ def first_client_board(
 @router.post("/first-client/applications/{application_id}/submission-attempt")
 def first_client_submission_attempt(
     application_id: str,
+    payload: first_client_pipeline.SubmissionAttemptRequest | None = None,
     organization_id: str | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Send one approved application only when an authenticated channel returns a receipt.
+    """Store a consented mock receipt. This route never marks a real send.
 
-    Missing auth stays BLOCKED. This route never marks a send without a receipt.
+    Missing auth stays BLOCKED. Missing consent does not call the transport.
     """
-    if organization_id and organization_id != user.organization_id:
+    body = payload or first_client_pipeline.SubmissionAttemptRequest()
+    requested_org = organization_id or body.organization_id
+    if requested_org and requested_org != user.organization_id:
         raise HTTPException(status_code=403, detail="Cross-tenant access denied")
     try:
         return first_client_pipeline.record_submission_attempt(
             db,
             application_id,
-            organization_id=_resolve_org(user, organization_id),
+            organization_id=_resolve_org(user, requested_org),
             user=user,
+            mock_receipt_consent=bool(body.mock_receipt_consent),
         )
     except service.NovaWorkError as exc:
         _raise(exc)

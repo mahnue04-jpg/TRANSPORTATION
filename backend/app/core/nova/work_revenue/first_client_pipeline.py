@@ -70,6 +70,16 @@ def permitted_submission_channel() -> dict[str, Any] | None:
     return channel
 
 
+class SubmissionAttemptRequest(BaseModel):
+    """Consent is required before a local mock receipt can be stored.
+
+    The default is no consent. This request never authorizes a network send.
+    """
+
+    mock_receipt_consent: bool = False
+    organization_id: str | None = None
+
+
 class FollowUpRequest(BaseModel):
     follow_up_at: datetime
     organization_id: str | None = None
@@ -174,6 +184,8 @@ def _stage(application: NovaWorkApplication | None, rows: list[NovaWorkSubmissio
         if latest is not None and latest.state in _RESPONSE_STATES and latest.updated_at >= sent.updated_at:
             return latest.state
         return "SENT"
+    if any(row.state == "MOCK_RECEIPT" and row.receipt for row in rows):
+        return "MOCK_RECEIPT"
     if latest is not None and latest.state == "DELIVERY_FAILURE":
         return "DELIVERY_FAILURE"
     if latest is not None and latest.state == "BLOCKED" and application.approval_state == "APPROVED":
@@ -199,6 +211,8 @@ def _next_action(
     opportunity: NovaWorkOpportunity,
     blocked: NovaWorkSubmissionLedger | None,
 ) -> str:
+    if stage == "MOCK_RECEIPT":
+        return "Mock receipt stored. This is not an application send. Nothing was delivered and no fee was charged."
     if stage == "SENT":
         return "Record the employer response, or set a follow-up time. This view does not send another message."
     if stage == "ACKNOWLEDGED":
@@ -240,6 +254,7 @@ def _ledger_public(row: NovaWorkSubmissionLedger) -> dict[str, Any]:
         "recipient": row.recipient,
         "receipt": row.receipt,
         "receipt_verified": bool(row.receipt) and row.state in {"SENT", "ACKNOWLEDGED", "DELIVERY_FAILURE"},
+        "mock_only": row.state == "MOCK_RECEIPT" and bool(row.receipt),
         "blocker_reason": row.blocker_reason,
         "next_action": row.next_action,
         "follow_up_due_at": row.follow_up_due_at.isoformat() if row.follow_up_due_at else None,
@@ -279,11 +294,19 @@ def _card(
     reasons = [str(item) for item in (qual.get("reasons") or []) if str(item).strip()]
     if opportunity.qualification_reason and opportunity.qualification_reason not in reasons:
         reasons.insert(0, opportunity.qualification_reason)
+    source_reasons = []
+    for item in list(qual.get("source_eligibility_reasons") or []) + list(qual.get("eligibility_explanations") or []):
+        text = str(item).strip()
+        if text and text not in source_reasons:
+            source_reasons.append(text)
+        if len(source_reasons) >= 8:
+            break
     stage = _stage(application, rows)
     blocked = next((row for row in rows if row.state == "BLOCKED"), None)
     proposal = next((item for item in materials if item.kind == "proposal"), None)
     pilot = next((item for item in materials if item.kind == "paid_pilot_options"), None)
     sent_row = next((row for row in rows if row.state == "SENT" and row.receipt), None)
+    mock_row = next((row for row in rows if row.state == "MOCK_RECEIPT" and row.receipt), None)
     follow_up = None
     if application and application.follow_up_at:
         follow_up = application.follow_up_at
@@ -304,6 +327,9 @@ def _card(
         "application_deadline": opportunity.application_deadline.isoformat() if opportunity.application_deadline else None,
         "qualification_outcome": opportunity.qualification_outcome,
         "qualification_reasons": reasons[:8],
+        "source_eligibility_reasons": source_reasons,
+        "eligibility_decision": str(qual.get("eligibility_decision") or "") or None,
+        "source_provider_id": str(qual.get("source_provider_id") or qual.get("provenance_provider") or "") or None,
         "capability_fit_score": qual.get("capability_fit_score"),
         "proposal_preview": _preview(proposal.body if proposal else None),
         "paid_pilot_preview": _preview(pilot.body if pilot else None),
@@ -315,8 +341,9 @@ def _card(
         "provenance_basis": provenance_basis,
         "provenance_complete": provenance_complete,
         "manual_submission_recorded": bool(application and application.manual_submission_recorded),
-        "receipt": sent_row.receipt if sent_row else None,
+        "receipt": sent_row.receipt if sent_row else (mock_row.receipt if mock_row else None),
         "receipt_verified": bool(sent_row and sent_row.receipt),
+        "mock_only": bool(mock_row) and not actually_sent,
         "follow_up_at": follow_up.isoformat() if follow_up else None,
         "blocker_reason": blocked.blocker_reason if blocked else None,
         "next_action": _next_action(stage=stage, opportunity=opportunity, blocked=blocked),
@@ -447,6 +474,7 @@ def build_board(db: Session, *, organization_id: str, user: UserContext) -> dict
             "drafts": _count("DRAFT") + _count("READY_FOR_OWNER_REVIEW") + _count("NEEDS_CHANGES"),
             "approved_not_sent": _count("APPROVED_NOT_SENT") + _count("BLOCKED"),
             "actually_sent": sum(1 for card in cards + sent_cards if card["actually_sent"]),
+            "mock_receipts": _count("MOCK_RECEIPT"),
             "manual_recorded": _count("MANUAL_RECORDED"),
             "blocked": _count("BLOCKED"),
             "delivery_failures": _count("DELIVERY_FAILURE"),
@@ -484,7 +512,10 @@ def _save_ledger(
         .first()
     )
     if existing is not None and existing.state == "SENT" and existing.receipt and state != "SENT":
-        # A stored receipt is not replaced by a later blocked or failed attempt.
+        # A stored send receipt is not replaced by a later blocked or failed attempt.
+        return existing
+    if existing is not None and existing.state == "MOCK_RECEIPT" and existing.receipt and state != "SENT":
+        # A stored mock receipt is not a send and is not replaced by a later attempt.
         return existing
     if existing is not None:
         existing.state = state
@@ -558,6 +589,7 @@ def _attempt_payload(
         },
         "application_externally_submitted": bool(application.externally_submitted),
         "applications_sent_by_this_request": sent_now,
+        "mock_only": row.state == "MOCK_RECEIPT" and bool(row.receipt),
         "financial_execution": False,
     }
 
@@ -568,10 +600,12 @@ def record_submission_attempt(
     *,
     organization_id: str,
     user: UserContext,
+    mock_receipt_consent: bool = False,
 ) -> dict[str, Any]:
-    """Send one approved application only through an authenticated permitted channel.
+    """Store a consented local mock receipt, or leave the attempt blocked.
 
-    Missing auth, a missing receipt, or a transport failure is not a send.
+    This route does not mark an application sent. A mock receipt is not a
+    delivery, and the transport is not called without explicit consent.
     The default transport never touches the network.
     """
     application = _own_application(db, application_id, organization_id=organization_id, user=user)
@@ -581,6 +615,18 @@ def record_submission_attempt(
         user=user,
         application_id=application.application_id,
     )
+    if existing is not None and existing.state == "MOCK_RECEIPT" and existing.receipt:
+        if application.externally_submitted:
+            application.externally_submitted = False
+            db.commit()
+            db.refresh(application)
+        return _attempt_payload(
+            existing,
+            application=application,
+            sent_now=0,
+            application_url=None,
+            provider_id=existing.channel,
+        )
     if existing is not None and existing.state == "SENT" and existing.receipt:
         if not application.externally_submitted:
             application.externally_submitted = True
@@ -633,6 +679,12 @@ def record_submission_attempt(
             "Owner step: replace each OWNER INPUT REQUIRED marker in the approved draft, "
             "then retry this single application. Nothing was sent."
         )
+    elif not mock_receipt_consent:
+        reason = "Owner consent is required before a mock receipt can be stored."
+        next_action = (
+            "Owner step: check the mock-receipt consent box to store a local receipt. "
+            "That receipt is not an application send, and no fee is charged."
+        )
     else:
         delivered = _submission_transport.deliver(
             {
@@ -655,11 +707,14 @@ def record_submission_attempt(
                 "then retry this single application. Nothing was sent."
             )
         elif reported_sent and receipt_value:
-            state = "SENT"
+            state = "MOCK_RECEIPT"
             receipt = receipt_value[:1000]
             reason = None
-            next_action = "Receipt stored. Record the employer response or set a follow-up. This view does not send another message."
-            application.externally_submitted = True
+            next_action = (
+                "Mock receipt stored. This is not an application send. "
+                "Nothing was delivered and no fee was charged."
+            )
+            application.externally_submitted = False
         elif delivered.get("state") == "DELIVERY_FAILURE":
             state = "DELIVERY_FAILURE"
             reason = str(delivered.get("reason") or "The permitted channel rejected the message.")
@@ -688,17 +743,22 @@ def record_submission_attempt(
         next_action=next_action[:1000],
     )
     application.externally_submitted = bool(row.state == "SENT" and row.receipt)
-    recorded_state = row.state if row.state == "SENT" and row.receipt else state
+    recorded_state = row.state
+    if recorded_state == "MOCK_RECEIPT" and row.receipt:
+        event_type = "MOCK_RECEIPT_STORED"
+        summary = "Mock receipt stored. Nothing was sent."
+    elif recorded_state == "SENT" and row.receipt:
+        event_type = "SUBMISSION_SENT"
+        summary = "Submission receipt stored for one application."
+    else:
+        event_type = "SUBMISSION_BLOCKED"
+        summary = "Submission attempt was not marked sent."
     service._record_audit(
         db,
         organization_id=organization_id,
         user=user,
-        event_type="SUBMISSION_SENT" if recorded_state == "SENT" else "SUBMISSION_BLOCKED",
-        summary=(
-            "Submission receipt stored for one application."
-            if recorded_state == "SENT"
-            else "Submission attempt was not marked sent."
-        ),
+        event_type=event_type,
+        summary=summary,
         ref_id=application.application_id,
         entity_type="application",
         actor_category="NOVA",
