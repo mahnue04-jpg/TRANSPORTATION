@@ -19,13 +19,19 @@ def _workspace_sqlite_path() -> str:
     )
 
 
+def _disk_root() -> str:
+    """Mounted disk root. Tests can point this at a missing path."""
+    configured = os.getenv("AMICOR_AUTH_DISK_DIR", "").strip()
+    return configured or "/data/onboarding_docs"
+
+
 def _candidate_durable_dirs() -> list[tuple[str, str]]:
     """Directories that can keep accounts across a stage process restart."""
     found: list[tuple[str, str]] = []
     explicit = os.getenv("AMICOR_AUTH_STORE_DIR", "").strip()
     if explicit:
         found.append((os.path.abspath(explicit), "configured-directory"))
-    disk = "/data/onboarding_docs"
+    disk = _disk_root()
     if os.path.isdir(disk):
         found.append((os.path.abspath(os.path.join(disk, "casting-preview-auth")), "render-disk"))
     return found
@@ -47,20 +53,56 @@ def _prepare_private_dir(path: str) -> bool:
         return False
 
 
-def _resolve_sqlite_fallback() -> tuple[str, bool, str]:
+def _observe_restart_marker(directory: str) -> bool:
+    """True when an earlier process already created the marker beside the store.
+
+    The marker contains no password and no signing key. An ephemeral workspace
+    never writes one, so a free-tier restart cannot look proven.
+    """
+    marker = os.path.join(directory, ".restart_marker")
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return True
+    except OSError:
+        return False
+    try:
+        os.write(fd, b"1")
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(marker, 0o600)
+    except OSError:
+        pass
+    return False
+
+
+def _postgres_url(url: str) -> bool:
+    lowered = url.lower()
+    return lowered.startswith("postgres://") or lowered.startswith("postgresql")
+
+
+def _resolve_sqlite_fallback() -> tuple[str, bool, str, bool]:
     for directory, label in _candidate_durable_dirs():
         if _prepare_private_dir(directory):
-            return os.path.join(directory, "chat.db"), True, label
-    return _workspace_sqlite_path(), False, "workspace"
+            return os.path.join(directory, "chat.db"), True, label, _observe_restart_marker(directory)
+    return _workspace_sqlite_path(), False, "workspace", False
 
 
 _configured_database_url = os.getenv("DATABASE_URL", "").strip()
+_auth_restart_observed = False
 if _configured_database_url:
     DATABASE_URL = _configured_database_url
-    _auth_store_durable = False
-    _auth_store_location = "external"
+    if _postgres_url(DATABASE_URL):
+        # The server can keep rows. This process has not seen a restart yet,
+        # and it does not write a proof row into that database.
+        _auth_store_durable = True
+        _auth_store_location = "postgres"
+    else:
+        _auth_store_durable = False
+        _auth_store_location = "workspace"
 else:
-    _sqlite_path, _auth_store_durable, _auth_store_location = _resolve_sqlite_fallback()
+    _sqlite_path, _auth_store_durable, _auth_store_location, _auth_restart_observed = _resolve_sqlite_fallback()
     DATABASE_URL = f"sqlite:///{_sqlite_path}"
 
 # The production image installs psycopg2-binary. Some managed PostgreSQL
@@ -114,6 +156,7 @@ def auth_store_metadata() -> dict[str, str | bool]:
         "backend": "sqlite" if _is_sqlite else "postgres",
         "durable": bool(_auth_store_durable),
         "location": _auth_store_location,
+        "restart_observed": bool(_auth_restart_observed),
     }
 
 

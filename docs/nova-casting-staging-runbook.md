@@ -107,6 +107,30 @@ Both counts must be 0. `nova_casting_mock_media` has no byte column. Delivery st
 3. Delete that process's private media directory if one was created. It is not under `backend/static`.
 4. Do not run this downgrade against a shared or production database.
 
+## Durable login gate
+
+Measured on the preview `https://amicor-health-isf-pr-339.onrender.com` at head `f7e06179`, before this note, and again while preparing this gate:
+
+- `GET /api/auth/deployment/seed-status` returned sqlite, `durable` false, `location` `workspace`, `signing_key` `ephemeral`. Seed accounts were present. `AMICOR_SEED_PASSWORD` was unset.
+- `GET /api/health/readiness` returned 503 because `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET` are missing on that service.
+- Production `https://amicor-health-isf-py.onrender.com/api/health/readiness` returned 200. `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET` are present there and the database is connected. This run did not read those values.
+
+`render.yaml` sets the web service plan to `free`. This preview has no disk and no `DATABASE_URL`. A free web service filesystem is discarded on restart, redeploy, and spin-down, and it cannot attach a disk. The code already keeps sqlite and the signing key when `/data/onboarding_docs` exists or `AMICOR_AUTH_STORE_DIR` is set. Neither is present on this preview. `owner_retry_allowed` stays false until a later process observes that marker. Do not ask the owner to sign in while it is false.
+
+This workspace can have only one Free Render Postgres. The blueprint already names `amicor-health-isf-db` and `amicor-nova-db` at plan `free`. This run has no Render API key, so it did not list which live database is still on the free plan. A second free database is not available while one free database is active.
+
+Do not point the preview at `amicor-health-isf-db` or copy the production `DATABASE_URL`, `JWT_SECRET`, or `SECRET_KEY`. Do not set `AMICOR_SEED_PASSWORD` on the preview. Seed sync rewrites seed-account passwords, and the owner password must stay as it is.
+
+Minimal owner action, only after approval. Nothing below has been done:
+
+1. In the Render dashboard, see whether a Free Postgres is already active.
+2. If one is active, create a new Postgres for this preview only on plan `0.1c-256mb` ($6/month, 1 GB included). Do not select the production database.
+3. If none is active, a new Free Postgres is $0 and expires 30 days after creation. Render deletes it 14 days after expiry unless it is upgraded. The paid plan above is the one that keeps accounts past that window.
+4. On preview service `amicor-health-isf-pr-339` only, set `DATABASE_URL` from that new database and generate a new `JWT_SECRET`. Leave production `amicor-health-isf-py` unchanged.
+5. A disk is not the $0 path. It needs the Starter web plan at $7/month plus $0.25 per GB per month, and the production disk must not be reused.
+
+A later run has to show a synthetic signup, a preview restart, and a successful login before `owner_retry_allowed` is true. Until that proof, the owner does not retry the existing password.
+
 ## Still blocked
 
 - No production host and no staging URL is approved by this runbook.

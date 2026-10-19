@@ -611,6 +611,42 @@ def signing_key_source() -> str:
     return _SIGNING_KEY_SOURCE
 
 
+def owner_signin_gate() -> dict[str, str | bool]:
+    """Whether an existing password can be tried again.
+
+    A durable directory and a stable signing key are not enough. A later
+    process must have seen the restart marker. Postgres is not marked proven
+    here, because this process does not write a proof into that database.
+    """
+    from app.db.session import auth_store_metadata
+
+    store = auth_store_metadata()
+    signing = signing_key_source()
+    durable = bool(store.get("durable"))
+    key_ok = signing in {"env", "durable-file"}
+    restart_ok = bool(store.get("restart_observed"))
+    location = str(store.get("location") or "")
+    allowed = (
+        durable
+        and key_ok
+        and restart_ok
+        and location in {"configured-directory", "render-disk"}
+    )
+    if allowed:
+        reason = ""
+    elif not durable:
+        reason = "accounts are stored in ephemeral sqlite"
+    elif not key_ok:
+        reason = "signing key is ephemeral"
+    else:
+        reason = "restart survival has not been observed on this store"
+    return {
+        "signing_key": signing,
+        "owner_retry_allowed": allowed,
+        "blocked_reason": reason,
+    }
+
+
 TOKEN_SIGNING_SECRET = (JWT_SECRET or SECRET_KEY).strip()
 _SIGNING_KEY_SOURCE = "env"
 
@@ -1156,8 +1192,11 @@ def deployment_seed_status(db: Session = Depends(get_db)):
 
     allowlist = active_seed_emails()
     sync_key_env = deployment_sync_key()
+    gate = owner_signin_gate()
     return {
-        "auth_store": {**auth_store_metadata(), "signing_key": signing_key_source()},
+        "auth_store": {**auth_store_metadata(), "signing_key": gate["signing_key"]},
+        "owner_retry_allowed": gate["owner_retry_allowed"],
+        "blocked_reason": gate["blocked_reason"],
         "expected_accounts": len(emails),
         "present_accounts": len(present),
         "missing_accounts": [email for email in emails if email not in present_set],
@@ -1232,9 +1271,10 @@ def _fetch_login_user(db: Session, email: str) -> Any | None:
 
     normalized = email.strip().lower()
     try:
+        # Match the stored address without rewriting it or its password hash.
         return (
             db.query(UserModel)
-            .filter(UserModel.email == normalized)
+            .filter(func.lower(UserModel.email) == normalized)
             .first()
         )
     except Exception:
