@@ -108,6 +108,10 @@ def test_nova_home_destination_links() -> None:
     assert 'href="/nova/workspace#files" data-destination="files"' in HOME_HTML
     assert 'href="/nova/voice" data-destination="voice"' in HOME_HTML
     assert 'href="/nova/synapse" data-destination="synapse"' in HOME_HTML
+    assert 'href="/nova/snap" data-destination="snap"' in HOME_HTML
+    assert "Open Snap preview" in HOME_HTML
+    assert "not a production release" in HOME_HTML
+    assert "Available" not in HOME_HTML.split("Nova Snap")[1].split("</article>")[0]
     assert 'href="/nova/communications" data-destination="communications"' in HOME_HTML
     assert 'href="/nova/government" data-destination="government"' in HOME_HTML
     assert 'href="/nova/business" data-destination="business"' in HOME_HTML

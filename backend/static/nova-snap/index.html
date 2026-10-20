@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Nova Snap preview</title>
+  <link rel="stylesheet" href="/static/nova-snap/snap.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="kicker">AMICOR NOVA</p>
+      <h1>Nova Snap</h1>
+      <p id="product-note">Preview. Not a production release. Private messages, short camera captures, and direct browser calls. This is not Synapse Meeting, not Casting, and not the Nova inbox.</p>
+    </div>
+    <p id="session-meta">Sign in with your Nova account.</p>
+  </header>
+
+  <p id="status-banner" class="banner" role="status" aria-live="polite"></p>
+  <p id="network-note" class="note">Calls use a direct browser connection. A relay server is not included, so some networks and international paths fail. Snap does not guarantee sound or picture quality.</p>
+
+  <form id="login-form" class="panel">
+    <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+    <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+    <button type="submit">Sign in</button>
+  </form>
+  <button type="button" id="sign-out" hidden>Sign out</button>
+
+  <nav class="tabs" role="tablist" aria-label="Snap sections">
+    <button type="button" id="tab-chats" role="tab" aria-controls="panel-chats" aria-selected="true" aria-pressed="true">Chats</button>
+    <button type="button" id="tab-camera" role="tab" aria-controls="panel-camera" aria-selected="false" aria-pressed="false">Camera</button>
+    <button type="button" id="tab-calls" role="tab" aria-controls="panel-calls" aria-selected="false" aria-pressed="false">Calls</button>
+  </nav>
+
+  <div class="layout">
+    <section id="panel-chats" role="tabpanel" aria-label="Messages">
+      <h2>Contacts</h2>
+      <form id="contact-form">
+        <label>Invite by email<input id="contact-email" type="email" autocomplete="off" required /></label>
+        <button type="submit" id="contact-request">Send contact request</button>
+      </form>
+      <ul id="contact-list"></ul>
+
+      <h2>Conversations</h2>
+      <button type="button" id="new-group">New group</button>
+      <form id="group-form" hidden>
+        <label>Group name<input id="group-title" type="text" maxlength="80" /></label>
+        <label>Member user ids, separated by commas<input id="group-members" type="text" /></label>
+        <button type="submit">Create group</button>
+      </form>
+      <ul id="conversation-list"></ul>
+      <p id="unread" class="note"></p>
+
+      <h2 id="thread-title">Choose a conversation</h2>
+      <ol id="thread" aria-live="polite"></ol>
+      <form id="composer">
+        <label class="sr-only" for="message-body">Message</label>
+        <textarea id="message-body" rows="3" maxlength="2000" placeholder="Write a message"></textarea>
+        <button type="submit" id="send-message">Send</button>
+        <button type="button" id="retry-outbox">Retry unsent</button>
+      </form>
+      <p class="note">Links stay as text. Snap does not open them. Unsafe links are rejected.</p>
+      <form id="report-form">
+        <label>Report reason<input id="report-reason" type="text" maxlength="500" /></label>
+        <button type="submit" id="report-send">Report</button>
+        <button type="button" id="block-user">Block</button>
+        <button type="button" id="delete-last">Remove my last message</button>
+        <button type="button" id="remove-my-content">Remove my Snap content</button>
+      </form>
+    </section>
+
+    <section id="panel-camera" role="tabpanel" hidden aria-label="Camera">
+      <h2>Camera</h2>
+      <p id="camera-help" class="note">Nothing is captured until you ask. Permission refusal stops here. Clips are limited to 15 seconds and stay in a private draft until you consent to share.</p>
+      <div class="row">
+        <button type="button" id="camera-open" aria-describedby="camera-help">Open camera</button>
+        <button type="button" id="camera-flip" disabled>Flip camera</button>
+        <button type="button" id="mic-toggle" disabled>Microphone off</button>
+        <button type="button" id="record" disabled>Record 15 seconds</button>
+        <button type="button" id="camera-close" disabled>Close camera</button>
+      </div>
+      <video id="camera-preview" playsinline muted hidden aria-label="Camera preview. Recording starts only after you press record or save."></video>
+      <video id="replay" playsinline controls hidden aria-label="Private capture replay"></video>
+      <p id="camera-error" class="banner" role="alert"></p>
+      <label>Or choose a photo or short clip<input id="camera-file" type="file" accept="image/jpeg,image/png,image/webp,video/webm,video/mp4" /></label>
+      <button type="button" id="save-draft" disabled>Save private draft</button>
+      <label><input id="consent" type="checkbox" /> I consent to share this draft with the open conversation only</label>
+      <button type="button" id="share-capture" disabled>Share with conversation</button>
+      <ul id="capture-list"></ul>
+    </section>
+
+    <section id="panel-calls" role="tabpanel" hidden aria-label="Calls">
+      <h2>Direct call</h2>
+      <p id="call-guidance" class="note">Start a call from a conversation. The other person must accept. Camera and microphone stay off until you accept or start.</p>
+      <p id="call-unverified" class="note">No TURN server was purchased. Public STUN only discovers an address. A connection on this page does not prove that two separate devices exchanged audio or video.</p>
+      <div class="row">
+        <button type="button" id="call-start-audio">Start audio call</button>
+        <button type="button" id="call-start-video">Start video call</button>
+      </div>
+      <div id="call-panel" hidden>
+        <p id="call-state" role="status" aria-live="polite"></p>
+        <p id="call-quality">Network quality: unknown</p>
+        <p id="call-adapt"></p>
+        <p id="call-error" class="banner" role="alert" tabindex="-1"></p>
+        <video id="remote-video" playsinline hidden aria-label="Other person's video"></video>
+        <video id="local-video" playsinline muted hidden aria-label="Your camera"></video>
+        <div class="row">
+          <button type="button" id="call-accept" hidden>Accept</button>
+          <button type="button" id="call-decline" hidden>Decline</button>
+          <button type="button" id="call-hangup" aria-label="Hang up the call">Hang up</button>
+          <button type="button" id="call-reconnect" aria-label="Reconnect the call">Reconnect</button>
+          <button type="button" id="enable-sound" hidden>Enable sound</button>
+          <button type="button" id="call-mic" hidden>Mute microphone</button>
+          <button type="button" id="call-camera" hidden>Turn camera off</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <p class="foot"><a href="/nova/home">Back to Nova Home</a></p>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-snap/snap-session.js"></script>
+  <script src="/static/nova-snap/snap.js"></script>
+</body>
+</html>
