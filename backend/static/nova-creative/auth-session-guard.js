@@ -1,4 +1,7 @@
 (function () {
+  var SESSION_MISMATCH_MESSAGE =
+    "Nova rejected these sign-in credentials (401). This is not a new casting password issue. The current browser session is tied to a different Nova account. Sign in with the existing account used by Creative Studio for this Render sandbox, and do not create a second casting password or a new sandbox account.";
+
   function showBannerMessage(message) {
     var banner = document.getElementById("banner");
     if (!banner) return;
@@ -27,9 +30,7 @@
     if (!event || !event.target || event.target.id !== "login-form") return;
     if (!hasServerSession()) return;
     event.preventDefault();
-    showBannerMessage(
-      "Nova rejected these sign-in credentials (401). Main Nova sign-in may use a different session; check this server account without creating a second casting password."
-    );
+    showBannerMessage(SESSION_MISMATCH_MESSAGE);
     return false;
   }
 
@@ -45,9 +46,7 @@
         var detail = event && event.detail ? event.detail : {};
         var reason = String(detail.reason || "");
         if (reason.indexOf("401") !== -1 || reason.indexOf("invalid") !== -1 || reason.indexOf("access_401") !== -1) {
-          showBannerMessage(
-            "Nova rejected these sign-in credentials (401). Main Nova sign-in may use a different session; check this server account without creating a second casting password."
-          );
+          showBannerMessage(SESSION_MISMATCH_MESSAGE);
         }
       });
     }
