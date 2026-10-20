@@ -2,6 +2,28 @@
 
 Draft pull request #339. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
 
+## Measured 2026-10-20 after a preview process replacement
+
+Idle wake is not this proof. Preview deploy `ff7dc16ff7bffefb18e4319cc7e888ba5668a4b9` finished at `2026-10-20T19:33:15Z`. Seed-status on that process was postgres, `durable` true, `location` postgres, `signing_key` env, `restart_observed` false, and `owner_retry_allowed` false. A synthetic free signup on that same process returned 200, `trialing`, price 0, and no checkout URL. Login returned 200. The password, token, and email were not written here.
+
+Preview deploy `63550261fc0f830599a05d7257de73c407df5c7f` finished at `2026-10-20T19:39:55Z` on `amicor-health-isf-pr-339` only. That deploy started a new process. It was not an idle wake and not a production deploy.
+
+| Check | Result |
+| --- | --- |
+| `GET /api/health/live` | 200. SHA `63550261fc0f830599a05d7257de73c407df5c7f`. Branch `cursor/casting-auditions-pilot-e1ae`. Environment `production` is inferred from https plus Postgres. |
+| `GET /api/auth/deployment/seed-status` | 200. `restart_observed` true. `restart_marker_recorded` true. `owner_retry_allowed` true. `blocked_reason` empty. `AMICOR_SEED_PASSWORD` unset. The gate opened because this process found a different instance id already stored in `amicor_auth_restart_marker`. |
+| Saved access token | `GET /api/auth/me` 200. Same user id and organization id as the login from the earlier process. |
+| Password login | 200. Same user id and organization id. |
+| Repeat signup | 409. Email already registered. |
+| Wrong password | 401. Invalid email or password. |
+| Casting readiness | 200. `enabled`, `applications_enabled`, `media_uploads_enabled`, `staging_reads_enabled`, and `sandbox_writes_enabled` are false. |
+| Sandbox organization | 503. Casting application access is not enabled. |
+| `GET /api/health/readiness` | 503. `overall_status` `not_ready`. Database connected. `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET` are present. Missing `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION`. |
+
+`app_version_set` already passes from `backend/release.version` (`2026.08.01-phase56a-fast-boot.1`). The readiness route still returns 503 unless `overall_status` is `ready`, and that status requires the `APP_VERSION` variable itself. These three names are not secrets. They were not set, and production values were not copied. `render.yaml` was not changed. This run has no Render credential. If a later preview-only change sets them, the origin and public URL are `https://amicor-health-isf-pr-339.onrender.com` with no wildcard, and `APP_VERSION` can be that same release label.
+
+Local tests: 16 passed in `test_nova_casting_postgres_restart_marker.py`, `test_nova_casting_staging_choice.py`, and `test_nova_casting_auth_restart.py`. The first writer and the same boot id stay closed. A different id opens the gate. A failed Postgres connection does not. The owner password was not used. This result is not a request to sign in. Public intake, media, email, SMS, and WhatsApp stay off. Production was not deployed.
+
 ## Measured 2026-10-20 after the preview deploy
 
 The owner deployed the preview around 13:17 CDT. This run measured `https://amicor-health-isf-pr-339.onrender.com` at `2026-10-20T18:32:12Z` and again at `2026-10-20T18:52:58Z` after the service had been idle. The second live request took 104 seconds, which is a new process. The deployed SHA stayed `500bb1f06c37adcef8b43666e4f71979bf7f80e2`.
@@ -14,7 +36,7 @@ The owner deployed the preview around 13:17 CDT. This run measured `https://amic
 | Synthetic account | Two new preview accounts signed up through the free path, with no checkout URL and no card. Each login returned 200. Logout returned 200 and revoked the refresh token with 401. The same account logged in again with the same user id and organization id. A second account received a different user id and organization id. Repeating the first email returned 409. A wrong password returned 401. |
 | Saved token after the idle restart | The access token from before the idle period still returned 200 for `/api/auth/me`, with the same user id and organization id. Password login also returned the same ids. |
 | Authenticated casting readiness | 200. `enabled`, `applications_enabled`, `media_uploads_enabled`, `staging_reads_enabled`, and `sandbox_writes_enabled` are false. Creating a sandbox organization returned 503. |
-| Owner login | Still closed on this deploy. The idle wake was not a restart proof. The gate now opens for Postgres only after a later process finds a different instance id in `amicor_auth_restart_marker`. The first writer stays closed. That preview restart is not in this row yet. |
+| Owner login | Closed on `500bb1f0`. The process replacement that opened the gate is in the section above. |
 
 The synthetic password was not the owner password. It was not written to Slack, GitHub, or this file. Public intake, media uploads, email, SMS, and WhatsApp were not enabled. Production was not changed.
 
