@@ -2,6 +2,22 @@
 
 Draft pull request #339. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
 
+## Measured 2026-10-20 after the preview deploy
+
+The owner deployed the preview around 13:17 CDT. This run measured `https://amicor-health-isf-pr-339.onrender.com` at `2026-10-20T18:32:12Z` and again at `2026-10-20T18:52:58Z` after the service had been idle. The second live request took 104 seconds, which is a new process. The deployed SHA stayed `500bb1f06c37adcef8b43666e4f71979bf7f80e2`.
+
+| Check | Result |
+| --- | --- |
+| `GET /api/health/live` | 200. Branch `cursor/casting-auditions-pilot-e1ae`. The payload says environment `production` because an https service URL plus a non-SQLite database is inferred as production when `AMICOR_ENVIRONMENT` is unset. This was not a production deploy. |
+| `GET /api/auth/deployment/seed-status` | 200. postgres, `durable` true, `location` postgres, `signing_key` env, `restart_observed` false. `owner_retry_allowed` false. Blocked because restart survival has not been observed on this store. `AMICOR_SEED_PASSWORD` is unset. |
+| `GET /api/health/readiness` | 503. `overall_status` `not_ready`. `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET` are present and the database is connected. The 503 is the promotion checklist: `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION` are unset. The route returns 503 for every status other than `ready`. |
+| Synthetic account | Two new preview accounts signed up through the free path, with no checkout URL and no card. Each login returned 200. Logout returned 200 and revoked the refresh token with 401. The same account logged in again with the same user id and organization id. A second account received a different user id and organization id. Repeating the first email returned 409. A wrong password returned 401. |
+| Saved token after the idle restart | The access token from before the idle period still returned 200 for `/api/auth/me`, with the same user id and organization id. Password login also returned the same ids. |
+| Authenticated casting readiness | 200. `enabled`, `applications_enabled`, `media_uploads_enabled`, `staging_reads_enabled`, and `sandbox_writes_enabled` are false. Creating a sandbox organization returned 503. |
+| Owner login | Still closed. Postgres never sets `restart_observed`, and the owner gate only opens for `configured-directory` or `render-disk`. |
+
+The synthetic password was not the owner password. It was not written to Slack, GitHub, or this file. Public intake, media uploads, email, SMS, and WhatsApp were not enabled. Production was not changed.
+
 Measured on 2026-10-19 against `https://amicor-health-isf-pr-339.onrender.com` after the service woke. An earlier reading the same day was `26a57cd6`. This reading is the preview before the auth-control commit.
 
 | Check | Result |
