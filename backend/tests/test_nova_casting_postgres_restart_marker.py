@@ -82,6 +82,15 @@ def test_blank_or_non_instance_marker_is_not_proof(tmp_path: Path) -> None:
     assert _gate(True)["owner_retry_allowed"] is True
 
 
+def test_sqlite_does_not_claim_the_postgres_marker_was_recorded() -> None:
+    from app.db.session import auth_store_metadata, observe_postgres_restart_marker
+
+    assert observe_postgres_restart_marker() is False
+    meta = auth_store_metadata()
+    assert meta["restart_marker_recorded"] is False
+    assert meta["restart_observed"] is False
+
+
 def test_seed_status_observes_the_marker_before_the_gate() -> None:
     source = inspect.getsource(deployment_seed_status)
     assert source.index("observe_postgres_restart_marker") < source.index("owner_signin_gate")

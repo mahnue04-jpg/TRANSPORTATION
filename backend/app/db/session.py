@@ -19,6 +19,7 @@ logger = logging.getLogger("amicor.db.session")
 _AUTH_RESTART_MARKER = "amicor_auth_restart_marker"
 _PROCESS_BOOT_ID = ""
 _postgres_marker_checked = False
+_postgres_marker_recorded = False
 
 # ── Connection string resolution ───────────────────────────────────────────────
 def _workspace_sqlite_path() -> str:
@@ -166,6 +167,7 @@ def auth_store_metadata() -> dict[str, str | bool]:
         "durable": bool(_auth_store_durable),
         "location": _auth_store_location,
         "restart_observed": bool(_auth_restart_observed),
+        "restart_marker_recorded": bool(_postgres_marker_recorded),
     }
 
 
@@ -255,7 +257,7 @@ def observe_postgres_restart_marker() -> bool:
     Import and the owner gate itself do not connect. Seed-status calls this
     once a request is already being served. A failed read is not cached.
     """
-    global _auth_restart_observed, _postgres_marker_checked
+    global _auth_restart_observed, _postgres_marker_checked, _postgres_marker_recorded
     if _is_sqlite or not _postgres_url(str(DATABASE_URL)):
         return bool(_auth_restart_observed)
     if _postgres_marker_checked:
@@ -269,6 +271,7 @@ def observe_postgres_restart_marker() -> bool:
         logger.warning("auth restart marker was not recorded")
         return False
     _auth_restart_observed = bool(observed)
+    _postgres_marker_recorded = True
     _postgres_marker_checked = True
     return bool(_auth_restart_observed)
 
