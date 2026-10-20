@@ -268,8 +268,18 @@
             })
           });
           var shared = window.AmiCorSession || null;
-          if (shared && typeof shared.setSession === "function") {
-            shared.setSession({accessToken: body.access_token || "", refreshToken: body.refresh_token || null, tokenExpiresAt: body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null});
+          if (shared && typeof shared.start === "function") {
+            shared.start({
+              userId: body.user_id,
+              email: body.email || $("login-email").value.trim(),
+              name: body.name || body.display_name || $("login-email").value.trim(),
+              role: body.role || body.session_role || "staff",
+              organizationId: body.organization_id || null,
+              organizationName: body.organization_name || null,
+              accessToken: body.access_token || null,
+              refreshToken: body.refresh_token || null,
+              tokenExpiresAt: body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null
+            });
             if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
           }
           setToken(body.access_token || "");
