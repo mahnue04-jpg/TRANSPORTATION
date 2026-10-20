@@ -2,6 +2,10 @@
 
 Draft pull request #339. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
 
+## Measured 2026-10-20 after the studio-page merge
+
+Preview deploy `8d0a71f2ccb946a03d60d545a2b1f96dd7e9ae10` finished at `2026-10-20T20:11:55Z`. `GET /api/health/live` returned 200 with that SHA. Seed-status stayed postgres, `durable` true, `signing_key` env, `restart_observed` true, `restart_marker_recorded` true, and `owner_retry_allowed` true. Readiness stayed 503 for the same three unset names: `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION`. `GET /nova/creative` returned 200 and the full page, including the casting preview link, the casting sandbox link, the project form, and `auth-session-guard.js`. The saved synthetic token from the earlier process was not replayed. `preview-regressions` and `backend-diagnostic` passed on this commit.
+
 ## Measured 2026-10-20 after a preview process replacement
 
 Idle wake is not this proof. Preview deploy `ff7dc16ff7bffefb18e4319cc7e888ba5668a4b9` finished at `2026-10-20T19:33:15Z`. Seed-status on that process was postgres, `durable` true, `location` postgres, `signing_key` env, `restart_observed` false, and `owner_retry_allowed` false. A synthetic free signup on that same process returned 200, `trialing`, price 0, and no checkout URL. Login returned 200. The password, token, and email were not written here.
