@@ -14,7 +14,7 @@ The owner deployed the preview around 13:17 CDT. This run measured `https://amic
 | Synthetic account | Two new preview accounts signed up through the free path, with no checkout URL and no card. Each login returned 200. Logout returned 200 and revoked the refresh token with 401. The same account logged in again with the same user id and organization id. A second account received a different user id and organization id. Repeating the first email returned 409. A wrong password returned 401. |
 | Saved token after the idle restart | The access token from before the idle period still returned 200 for `/api/auth/me`, with the same user id and organization id. Password login also returned the same ids. |
 | Authenticated casting readiness | 200. `enabled`, `applications_enabled`, `media_uploads_enabled`, `staging_reads_enabled`, and `sandbox_writes_enabled` are false. Creating a sandbox organization returned 503. |
-| Owner login | Still closed. Postgres never sets `restart_observed`, and the owner gate only opens for `configured-directory` or `render-disk`. |
+| Owner login | Still closed on this deploy. The idle wake was not a restart proof. The gate now opens for Postgres only after a later process finds a different instance id in `amicor_auth_restart_marker`. The first writer stays closed. That preview restart is not in this row yet. |
 
 The synthetic password was not the owner password. It was not written to Slack, GitHub, or this file. Public intake, media uploads, email, SMS, and WhatsApp were not enabled. Production was not changed.
 
@@ -44,7 +44,7 @@ The owner approved one new empty Free Postgres for staging only. An owner-connec
 | Preview service | `srv-db7r3ke7bikc73ddosmg` (`amicor-health-isf-pr-339`) |
 | Spend authorized | $0. No charge beyond free. |
 
-The name is not `amicor-health-isf-db` or `amicor-nova-db`. No connection string was read, copied, or stored. The preview measured above is still ephemeral sqlite.
+The name is not `amicor-health-isf-db` or `amicor-nova-db`. No connection string was read, copied, or stored. The 2026-10-19 preview in the table above was ephemeral sqlite. The 2026-10-20 preview is Postgres.
 
 ## What was not done
 
@@ -63,7 +63,7 @@ Checked against Render's pricing, free-plan, and disk pages on 2026-10-19.
 | New Postgres plan `0.1c-256mb` | $6, 1 GB included | Yes | No. |
 | Persistent disk | $7 web plan `0.5c-512mb` plus $0.25 per GB. Free web services cannot attach a disk. | Yes | No. The production disk is not reused. |
 
-Attaching a Postgres URL and a new `JWT_SECRET` does not open the retry gate. The gate still requires a durable directory or Render disk, a stable signing key, and a restart marker. Postgres is recorded as durable, and `owner_retry_allowed` stays false. A local test uses `127.0.0.1:1` and does not open a connection.
+Attaching a Postgres URL and a new `JWT_SECRET` does not by itself open the retry gate. Postgres is durable, and the gate stays closed until a later process reads a different instance id from `amicor_auth_restart_marker`. The same id, including an idle wake, stays closed. A directory or Render disk marker still counts. A local test uses `127.0.0.1:1` and does not open a connection.
 
 ## Stages
 

@@ -611,17 +611,11 @@ def signing_key_source() -> str:
     return _SIGNING_KEY_SOURCE
 
 
-def owner_signin_gate() -> dict[str, str | bool]:
-    """Whether an existing password can be tried again.
+_PROVEN_STORE_LOCATIONS = {"configured-directory", "render-disk", "postgres"}
 
-    A durable directory and a stable signing key are not enough. A later
-    process must have seen the restart marker. Postgres is not marked proven
-    here, because this process does not write a proof into that database.
-    """
-    from app.db.session import auth_store_metadata
 
-    store = auth_store_metadata()
-    signing = signing_key_source()
+def signin_gate_from_store(store: dict, signing: str) -> dict[str, str | bool]:
+    """Apply the retry rule to an already measured store. This does not connect."""
     durable = bool(store.get("durable"))
     key_ok = signing in {"env", "durable-file"}
     restart_ok = bool(store.get("restart_observed"))
@@ -630,7 +624,7 @@ def owner_signin_gate() -> dict[str, str | bool]:
         durable
         and key_ok
         and restart_ok
-        and location in {"configured-directory", "render-disk"}
+        and location in _PROVEN_STORE_LOCATIONS
     )
     if allowed:
         reason = ""
@@ -645,6 +639,19 @@ def owner_signin_gate() -> dict[str, str | bool]:
         "owner_retry_allowed": allowed,
         "blocked_reason": reason,
     }
+
+
+def owner_signin_gate() -> dict[str, str | bool]:
+    """Whether an existing password can be tried again.
+
+    A durable store and a stable signing key are not enough. A later process
+    must have seen the restart marker. Postgres counts only after a different
+    instance id is already stored. The first process writes that row and
+    leaves the gate closed. This function does not connect.
+    """
+    from app.db.session import auth_store_metadata
+
+    return signin_gate_from_store(auth_store_metadata(), signing_key_source())
 
 
 TOKEN_SIGNING_SECRET = (JWT_SECRET or SECRET_KEY).strip()
@@ -1188,8 +1195,9 @@ def deployment_seed_status(db: Session = Depends(get_db)):
     }
     present = sorted(by_email.keys())
     present_set = set(present)
-    from app.db.session import auth_store_metadata
+    from app.db.session import auth_store_metadata, observe_postgres_restart_marker
 
+    observe_postgres_restart_marker()
     allowlist = active_seed_emails()
     sync_key_env = deployment_sync_key()
     gate = owner_signin_gate()

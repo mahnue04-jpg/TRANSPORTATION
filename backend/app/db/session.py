@@ -6,10 +6,19 @@ Set DATABASE_URL env var:
   postgresql://user:pass@host:5432/amicor   — production PostgreSQL
   sqlite:///absolute/path/to/chat.db         — SQLite (derived from DB_FILENAME if not set)
 """
+import logging
 import os
+import uuid
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+logger = logging.getLogger("amicor.db.session")
+
+_AUTH_RESTART_MARKER = "amicor_auth_restart_marker"
+_PROCESS_BOOT_ID = ""
+_postgres_marker_checked = False
 
 # ── Connection string resolution ───────────────────────────────────────────────
 def _workspace_sqlite_path() -> str:
@@ -94,8 +103,8 @@ _auth_restart_observed = False
 if _configured_database_url:
     DATABASE_URL = _configured_database_url
     if _postgres_url(DATABASE_URL):
-        # The server can keep rows. This process has not seen a restart yet,
-        # and it does not write a proof row into that database.
+        # Durable, but this process has not seen an earlier instance yet.
+        # The marker row is written later, on the seed-status read, not at import.
         _auth_store_durable = True
         _auth_store_location = "postgres"
     else:
@@ -158,6 +167,110 @@ def auth_store_metadata() -> dict[str, str | bool]:
         "location": _auth_store_location,
         "restart_observed": bool(_auth_restart_observed),
     }
+
+
+def current_auth_boot_id() -> str:
+    """Identity of this process. Empty values never count as a prior boot."""
+    global _PROCESS_BOOT_ID
+    for name in ("RENDER_INSTANCE_ID", "AMICOR_AUTH_BOOT_ID"):
+        value = os.getenv(name, "").strip()
+        if value and len(value) <= 128:
+            return value
+    if not _PROCESS_BOOT_ID:
+        _PROCESS_BOOT_ID = uuid.uuid4().hex
+    return _PROCESS_BOOT_ID
+
+
+def apply_auth_restart_marker(bind, boot_id: str) -> bool:
+    """Write this boot id and report whether a different one was already stored.
+
+    The first writer leaves the gate closed. The same id, including an idle
+    wake of this process, also stays closed. A later non-empty id is the proof.
+    The row holds no password, token, or connection string.
+    """
+    boot_id = (boot_id or "").strip()
+    if not boot_id or len(boot_id) > 128:
+        return False
+    with bind.connect() as connection:
+        connection.execute(text(
+            f"CREATE TABLE IF NOT EXISTS {_AUTH_RESTART_MARKER} ("
+            "id INTEGER PRIMARY KEY, "
+            "instance_id TEXT NOT NULL, "
+            "marker_kind TEXT NOT NULL)"
+        ))
+        connection.commit()
+        return _record_boot_marker(connection, boot_id)
+
+
+def _record_boot_marker(connection, boot_id: str) -> bool:
+    row = connection.execute(text(
+        f"SELECT instance_id, marker_kind FROM {_AUTH_RESTART_MARKER} WHERE id = 1"
+    )).first()
+    if row is None:
+        try:
+            connection.execute(
+                text(
+                    f"INSERT INTO {_AUTH_RESTART_MARKER} "
+                    "(id, instance_id, marker_kind) VALUES (1, :boot, 'instance')"
+                ),
+                {"boot": boot_id},
+            )
+            connection.commit()
+            return False
+        except IntegrityError:
+            connection.rollback()
+            row = connection.execute(text(
+                f"SELECT instance_id, marker_kind FROM {_AUTH_RESTART_MARKER} WHERE id = 1"
+            )).first()
+            if row is None:
+                return False
+    stored = str(row[0] or "").strip()
+    kind = str(row[1] or "").strip()
+    if kind != "instance" or not stored:
+        connection.execute(
+            text(
+                f"UPDATE {_AUTH_RESTART_MARKER} "
+                "SET instance_id = :boot, marker_kind = 'instance' WHERE id = 1"
+            ),
+            {"boot": boot_id},
+        )
+        connection.commit()
+        return False
+    if stored == boot_id:
+        return False
+    connection.execute(
+        text(
+            f"UPDATE {_AUTH_RESTART_MARKER} "
+            "SET instance_id = :boot WHERE id = 1 AND marker_kind = 'instance'"
+        ),
+        {"boot": boot_id},
+    )
+    connection.commit()
+    return True
+
+
+def observe_postgres_restart_marker() -> bool:
+    """Record this Postgres process. Connection failures leave the gate closed.
+
+    Import and the owner gate itself do not connect. Seed-status calls this
+    once a request is already being served. A failed read is not cached.
+    """
+    global _auth_restart_observed, _postgres_marker_checked
+    if _is_sqlite or not _postgres_url(str(DATABASE_URL)):
+        return bool(_auth_restart_observed)
+    if _postgres_marker_checked:
+        return bool(_auth_restart_observed)
+    boot_id = current_auth_boot_id()
+    if not boot_id:
+        return False
+    try:
+        observed = apply_auth_restart_marker(engine, boot_id)
+    except Exception:
+        logger.warning("auth restart marker was not recorded")
+        return False
+    _auth_restart_observed = bool(observed)
+    _postgres_marker_checked = True
+    return bool(_auth_restart_observed)
 
 
 def auth_store_is_durable() -> bool:
