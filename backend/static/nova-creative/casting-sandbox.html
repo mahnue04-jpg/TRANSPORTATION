@@ -56,10 +56,11 @@
         <label>Organization name<input id="organization-name" maxlength="80" value="Disposable studio" required /></label>
         <label>Casting organization id<input id="organization-id" maxlength="36" autocomplete="off" /></label>
         <div class="actions wide">
-          <button type="submit" id="create-organization">Create sandbox organization</button>
+          <button type="submit" id="create-organization" disabled aria-describedby="organization-readiness">Create sandbox organization</button>
         </div>
       </form>
-      <p class="hint">This creates a disposable organization for the signed-in account. It does not publish a campaign.</p>
+      <p id="organization-readiness" class="hint" role="status" aria-live="polite">Checking sandbox readiness. No organization ID has been created.</p>
+      <p class="hint">This creates a disposable organization for the signed-in account. It does not publish a campaign. <a href="/static/nova-creative/casting-preview.html">Open the fictional preview</a> when sandbox writes are unavailable.</p>
     </section>
 
     <section class="card" aria-label="Organizer workspace">
@@ -154,6 +155,10 @@
       var playbackUrl = "";
       var applicationId = "";
       var resumeKey = "nova_casting_sandbox_application";
+      function setOrganizationReadiness(enabled, message) {
+        $("create-organization").disabled = !enabled;
+        $("organization-readiness").textContent = message;
+      }
       function rememberApplication() {
         if (!applicationId) return;
         sessionStorage.setItem(resumeKey, JSON.stringify({
@@ -205,6 +210,7 @@
       async function refreshReadiness() {
         if (!token()) {
           writesEnabled = false;
+          setOrganizationReadiness(false, "Sign in to check sandbox availability. No organization ID has been created.");
           $("status").textContent = "Sign in to check sandbox readiness.";
           return false;
         }
@@ -218,9 +224,11 @@
           ? "Antivirus signatures are current."
           : "Structural scan only. Antivirus is not ready.";
         if (!writesEnabled) {
+          setOrganizationReadiness(false, "Organization creation is unavailable: sandbox workflows are off. No organization ID was generated. Use the fictional preview or ask the operator to enable a disposable non-production staging environment.");
           show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
           return false;
         }
+        setOrganizationReadiness(true, "Sandbox organization creation is available for this disposable test environment. A successful creation will fill the organization ID below.");
         show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
         return true;
       }
@@ -248,6 +256,7 @@
       $("sign-out").addEventListener("click", function () {
         setToken("");
         writesEnabled = false;
+        setOrganizationReadiness(false, "Signed out. Sign in to check sandbox availability.");
         show("Signed out. Nothing was submitted.", true);
       });
       $("organization-form").addEventListener("submit", async function (event) {
