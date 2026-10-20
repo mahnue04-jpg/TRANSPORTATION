@@ -147,6 +147,7 @@
       <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
     </section>
   </main>
+  <script src="/static/ux/sessionManager.js"></script>
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
@@ -191,9 +192,17 @@
       function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
       async function api(path, options) {
         $("status").textContent = "Loading";
+        var isLogin = path === "/api/auth/login";
         var headers = { "Content-Type": "application/json" };
-        if (token()) headers.Authorization = "Bearer " + token();
-        var response = await fetch(path, Object.assign({ headers: headers }, options || {}));
+        var shared = window.AmiCorSession || null;
+        var response;
+        if (!isLogin && shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+        if (!isLogin && shared && typeof shared.authFetch === "function") {
+          response = await shared.authFetch(path, Object.assign({ headers: headers }, options || {}));
+        } else {
+          if (!isLogin && token()) headers.Authorization = "Bearer " + token();
+          response = await fetch(path, Object.assign({ headers: headers }, options || {}));
+        }
         var text = await response.text();
         var body = {};
         if (text) {
@@ -201,6 +210,15 @@
         }
         if (!response.ok) {
           var detail = body && body.detail ? body.detail : "Request failed";
+          if (response.status === 401) {
+            if (isLogin) detail = "Nova rejected these sign-in credentials (401). Main Nova sign-in may use a different session; check this server account without creating a second casting password.";
+            else {
+              setToken("");
+              writesEnabled = false;
+              setOrganizationReadiness(false, "Session expired or unauthorized. No organization ID was created.");
+              detail = "Casting session is unauthorized (401). Return to the main Nova sign-in on this server, then reopen Casting. No data was submitted.";
+            }
+          }
           show(String(detail), false);
           throw new Error(String(detail));
         }
@@ -249,6 +267,11 @@
               password: $("login-password").value
             })
           });
+          var shared = window.AmiCorSession || null;
+          if (shared && typeof shared.setSession === "function") {
+            shared.setSession({accessToken: body.access_token || "", refreshToken: body.refresh_token || null, tokenExpiresAt: body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null});
+            if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
+          }
           setToken(body.access_token || "");
           await refreshReadiness();
         } catch (err) { /* banner already set */ }
