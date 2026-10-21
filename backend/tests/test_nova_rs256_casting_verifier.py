@@ -217,3 +217,45 @@ def test_casting_verifier_accepts_synthetic_discovery_rotation_and_membership(mo
     with pytest.raises(RuntimeError):
         fetch(ISSUER + "/.well-known/jwks.json")
     assert _jwt_verify(hs256)["sub"] == OTHER_SUBJECT
+
+
+def test_disposable_membership_survives_reopen_without_a_password(monkeypatch, rsa_keys, tmp_path) -> None:
+    primary, _secondary = rsa_keys
+    verifier = _verifier()
+    _arm(monkeypatch, "issue")
+    install_synthetic_keys(primary)
+    issued_at = 1_700_000_000
+    monkeypatch.setattr("app.core.nova_rs256_issuer.time.time", lambda: float(issued_at))
+    token = create_access_token(_claims())
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    def fetch(url: str):
+        response = client.get(urlsplit(url).path)
+        response.raise_for_status()
+        return response.json()
+
+    verified = verifier.verify_nova_token(
+        token,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        ring=verifier.KeyRing(fetch, ISSUER),
+        now=issued_at,
+    )
+    path = tmp_path / "membership.sqlite"
+    store = verifier.SqliteMembershipStore(str(path))
+    first = verifier.establish_staging_membership(store, verified)
+    store.connection.close()
+    reopened = verifier.SqliteMembershipStore(str(path))
+    second = verifier.establish_staging_membership(reopened, verified)
+    columns = [
+        row[1]
+        for row in reopened.connection.execute("PRAGMA table_info(casting_trusted_memberships)")
+    ]
+    assert second["local_id"] == first["local_id"]
+    assert second["created"] is False
+    assert second["subject"] == SUBJECT
+    assert "password" not in columns
+    assert "email" not in columns
+    reopened.connection.close()

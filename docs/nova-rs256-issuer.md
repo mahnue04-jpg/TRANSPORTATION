@@ -4,6 +4,8 @@ Status: development and testing only. This branch is not merged and not deployed
 
 Casting draft PR #339 is a separate branch. This change does not edit it. The synthetic test imports that branch's verifier at commit `0f42164a`.
 
+The review packet is `docs/nova-rs256-security-review.md`. Independent review has not been requested from the Synapse QA track and has not passed.
+
 ## Proposed identity
 
 Current Nova access tokens are HS256. `JWT_ISSUER` and `JWT_AUDIENCE` default to empty, so live tokens do not carry an issuer or audience. Signup, password reset, and the production health check use `https://amicor-health-isf-py.onrender.com`.
