@@ -6,7 +6,7 @@ Draft pull request #339. Nothing here merges, deploys production, opens public i
 
 The live preview form posts to this preview's `/api/auth/login`. Session copy on the deployed sandbox says the preview keeps its own accounts and a main Nova sign-in is not in this database. A 401 from that form is that local check. It is not a finding that the owner password is wrong.
 
-No supported shared-auth path exists. The blocker and the design that stays off are in `docs/nova-casting-trusted-signin.md`. `trusted_signin_decision()` stays disabled even when the proposed issuer variables are set. Account rows are not imported. Production integration is not turned on.
+No supported shared-auth path exists for main Nova. The production origin is `https://amicor-health-isf-py.onrender.com`, and that issuer is not activated. Staging tests can verify RS256 tokens for a synthetic `.test` issuer and create a local membership for the verified subject only. The design and the remaining issuer-side decision are in `docs/nova-casting-trusted-signin.md`. Account rows are not imported. Production integration is not turned on.
 
 Checked the deployed preview at SHA `cbd43874ec1d1d66a2127847175c03681c51ba54` before this design commit. `GET /api/health/live` returned 200. The sandbox page returned 200, posts to `/api/auth/login`, includes the own-accounts sentence, starts with Sign out hidden, and clears the stored token on HTTP 401. It does not contain "Request error" or "Nova rejected these sign-in credentials". `auth-session-guard.js` is the no-op and does not contain that sentence. Local tests for the decision, the sandbox page, a stale-token 401, and a login 401 passed. The owner password was not used.
 
