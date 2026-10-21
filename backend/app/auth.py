@@ -593,7 +593,24 @@ def _jwt_sign(payload: dict) -> str: # type: ignore
     return f"{header}.{body}.{_b64url_encode(sig)}"
 
 
+def _presented_as_rs256(token: str) -> bool:
+    """True only when the unverified header says RS256. HS256 tokens skip it."""
+    try:
+        header_b64 = str(token).split(".", 1)[0]
+        header = _json.loads(_b64url_decode(header_b64))
+    except Exception:
+        return False
+    return isinstance(header, dict) and header.get("alg") == "RS256"
+
+
 def _jwt_verify(token: str) -> dict: # type: ignore
+    if _presented_as_rs256(token):
+        from app.core.nova_rs256_issuer import IssuerRejected, verify_local_rs256
+
+        try:
+            return verify_local_rs256(token)
+        except IssuerRejected as exc:
+            raise HTTPException(status_code=401, detail=exc.detail) from exc
     try:
         header_b64, body_b64, sig_b64 = token.split(".")
     except ValueError:
@@ -618,6 +635,15 @@ def _jwt_verify(token: str) -> dict: # type: ignore
 
 
 def create_access_token(data: dict) -> str: # type: ignore
+    if os.getenv("NOVA_RS256_ISSUER", "").strip().lower() == "synthetic":
+        from app.core.nova_rs256_issuer import IssuerRejected, issue_if_enabled
+
+        try:
+            issued = issue_if_enabled(data, ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+        except IssuerRejected as exc:
+            raise HTTPException(status_code=401, detail=exc.detail) from exc
+        if issued is not None:
+            return issued
     payload = {**data, "exp": time.time() + ACCESS_TOKEN_EXPIRE_MINUTES * 60} # type: ignore
     if JWT_ISSUER:
         payload["iss"] = JWT_ISSUER

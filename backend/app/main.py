@@ -96,6 +96,7 @@ from app.core.nova.marketplace.router import router as nova_marketplace_router  
 from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
 from app.core.nova.creative_studio.router import webhook_router as nova_creative_webhook_router  # type: ignore
 from app.core.nova.creative_studio.casting_router_draft import router as nova_casting_router  # type: ignore
+from app.core.nova_rs256_issuer import router as nova_rs256_issuer_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -467,6 +468,7 @@ async def disable_dev_static_cache(
 
 # ── Auth router ───────────────────────────────────────────────────────────────
 app.include_router(auth_module.router)
+app.include_router(nova_rs256_issuer_router)
 app.include_router(ecosystem_module.router)
 app.include_router(voice_module.router)
 app.include_router(nova_router)
