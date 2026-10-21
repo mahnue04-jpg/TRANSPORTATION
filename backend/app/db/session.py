@@ -6,17 +6,114 @@ Set DATABASE_URL env var:
   postgresql://user:pass@host:5432/amicor   — production PostgreSQL
   sqlite:///absolute/path/to/chat.db         — SQLite (derived from DB_FILENAME if not set)
 """
+import logging
 import os
+import uuid
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+logger = logging.getLogger("amicor.db.session")
+
+_AUTH_RESTART_MARKER = "amicor_auth_restart_marker"
+_PROCESS_BOOT_ID = ""
+_postgres_marker_checked = False
+_postgres_marker_recorded = False
+
 # ── Connection string resolution ───────────────────────────────────────────────
-_db_filename = os.getenv("DB_FILENAME", os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "chat.db")
-))
-_default_url = f"sqlite:///{_db_filename}"
-DATABASE_URL: str = os.getenv("DATABASE_URL", _default_url)
+def _workspace_sqlite_path() -> str:
+    return os.getenv(
+        "DB_FILENAME",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "chat.db")),
+    )
+
+
+def _disk_root() -> str:
+    """Mounted disk root. Tests can point this at a missing path."""
+    configured = os.getenv("AMICOR_AUTH_DISK_DIR", "").strip()
+    return configured or "/data/onboarding_docs"
+
+
+def _candidate_durable_dirs() -> list[tuple[str, str]]:
+    """Directories that can keep accounts across a stage process restart."""
+    found: list[tuple[str, str]] = []
+    explicit = os.getenv("AMICOR_AUTH_STORE_DIR", "").strip()
+    if explicit:
+        found.append((os.path.abspath(explicit), "configured-directory"))
+    disk = _disk_root()
+    if os.path.isdir(disk):
+        found.append((os.path.abspath(os.path.join(disk, "casting-preview-auth")), "render-disk"))
+    return found
+
+
+def _prepare_private_dir(path: str) -> bool:
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        os.chmod(path, 0o700)
+        probe = os.path.join(path, ".write_probe")
+        fd = os.open(probe, os.O_CREAT | os.O_WRONLY, 0o600)
+        os.close(fd)
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+        return True
+    except OSError:
+        return False
+
+
+def _observe_restart_marker(directory: str) -> bool:
+    """True when an earlier process already created the marker beside the store.
+
+    The marker contains no password and no signing key. An ephemeral workspace
+    never writes one, so a free-tier restart cannot look proven.
+    """
+    marker = os.path.join(directory, ".restart_marker")
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return True
+    except OSError:
+        return False
+    try:
+        os.write(fd, b"1")
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(marker, 0o600)
+    except OSError:
+        pass
+    return False
+
+
+def _postgres_url(url: str) -> bool:
+    lowered = url.lower()
+    return lowered.startswith("postgres://") or lowered.startswith("postgresql")
+
+
+def _resolve_sqlite_fallback() -> tuple[str, bool, str, bool]:
+    for directory, label in _candidate_durable_dirs():
+        if _prepare_private_dir(directory):
+            return os.path.join(directory, "chat.db"), True, label, _observe_restart_marker(directory)
+    return _workspace_sqlite_path(), False, "workspace", False
+
+
+_configured_database_url = os.getenv("DATABASE_URL", "").strip()
+_auth_restart_observed = False
+if _configured_database_url:
+    DATABASE_URL = _configured_database_url
+    if _postgres_url(DATABASE_URL):
+        # Durable, but this process has not seen an earlier instance yet.
+        # The marker row is written later, on the seed-status read, not at import.
+        _auth_store_durable = True
+        _auth_store_location = "postgres"
+    else:
+        _auth_store_durable = False
+        _auth_store_location = "workspace"
+else:
+    _sqlite_path, _auth_store_durable, _auth_store_location, _auth_restart_observed = _resolve_sqlite_fallback()
+    DATABASE_URL = f"sqlite:///{_sqlite_path}"
 
 # The production image installs psycopg2-binary. Some managed PostgreSQL
 # connection strings explicitly request SQLAlchemy's psycopg v3 dialect
@@ -61,6 +158,126 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
+
+
+def auth_store_metadata() -> dict[str, str | bool]:
+    """Safe description of where accounts live. No paths, passwords, or keys."""
+    return {
+        "backend": "sqlite" if _is_sqlite else "postgres",
+        "durable": bool(_auth_store_durable),
+        "location": _auth_store_location,
+        "restart_observed": bool(_auth_restart_observed),
+        "restart_marker_recorded": bool(_postgres_marker_recorded),
+    }
+
+
+def current_auth_boot_id() -> str:
+    """Identity of this process. Empty values never count as a prior boot."""
+    global _PROCESS_BOOT_ID
+    for name in ("RENDER_INSTANCE_ID", "AMICOR_AUTH_BOOT_ID"):
+        value = os.getenv(name, "").strip()
+        if value and len(value) <= 128:
+            return value
+    if not _PROCESS_BOOT_ID:
+        _PROCESS_BOOT_ID = uuid.uuid4().hex
+    return _PROCESS_BOOT_ID
+
+
+def apply_auth_restart_marker(bind, boot_id: str) -> bool:
+    """Write this boot id and report whether a different one was already stored.
+
+    The first writer leaves the gate closed. The same id, including an idle
+    wake of this process, also stays closed. A later non-empty id is the proof.
+    The row holds no password, token, or connection string.
+    """
+    boot_id = (boot_id or "").strip()
+    if not boot_id or len(boot_id) > 128:
+        return False
+    with bind.connect() as connection:
+        connection.execute(text(
+            f"CREATE TABLE IF NOT EXISTS {_AUTH_RESTART_MARKER} ("
+            "id INTEGER PRIMARY KEY, "
+            "instance_id TEXT NOT NULL, "
+            "marker_kind TEXT NOT NULL)"
+        ))
+        connection.commit()
+        return _record_boot_marker(connection, boot_id)
+
+
+def _record_boot_marker(connection, boot_id: str) -> bool:
+    row = connection.execute(text(
+        f"SELECT instance_id, marker_kind FROM {_AUTH_RESTART_MARKER} WHERE id = 1"
+    )).first()
+    if row is None:
+        try:
+            connection.execute(
+                text(
+                    f"INSERT INTO {_AUTH_RESTART_MARKER} "
+                    "(id, instance_id, marker_kind) VALUES (1, :boot, 'instance')"
+                ),
+                {"boot": boot_id},
+            )
+            connection.commit()
+            return False
+        except IntegrityError:
+            connection.rollback()
+            row = connection.execute(text(
+                f"SELECT instance_id, marker_kind FROM {_AUTH_RESTART_MARKER} WHERE id = 1"
+            )).first()
+            if row is None:
+                return False
+    stored = str(row[0] or "").strip()
+    kind = str(row[1] or "").strip()
+    if kind != "instance" or not stored:
+        connection.execute(
+            text(
+                f"UPDATE {_AUTH_RESTART_MARKER} "
+                "SET instance_id = :boot, marker_kind = 'instance' WHERE id = 1"
+            ),
+            {"boot": boot_id},
+        )
+        connection.commit()
+        return False
+    if stored == boot_id:
+        return False
+    connection.execute(
+        text(
+            f"UPDATE {_AUTH_RESTART_MARKER} "
+            "SET instance_id = :boot WHERE id = 1 AND marker_kind = 'instance'"
+        ),
+        {"boot": boot_id},
+    )
+    connection.commit()
+    return True
+
+
+def observe_postgres_restart_marker() -> bool:
+    """Record this Postgres process. Connection failures leave the gate closed.
+
+    Import and the owner gate itself do not connect. Seed-status calls this
+    once a request is already being served. A failed read is not cached.
+    """
+    global _auth_restart_observed, _postgres_marker_checked, _postgres_marker_recorded
+    if _is_sqlite or not _postgres_url(str(DATABASE_URL)):
+        return bool(_auth_restart_observed)
+    if _postgres_marker_checked:
+        return bool(_auth_restart_observed)
+    boot_id = current_auth_boot_id()
+    if not boot_id:
+        return False
+    try:
+        observed = apply_auth_restart_marker(engine, boot_id)
+    except Exception:
+        logger.warning("auth restart marker was not recorded")
+        return False
+    _auth_restart_observed = bool(observed)
+    _postgres_marker_recorded = True
+    _postgres_marker_checked = True
+    return bool(_auth_restart_observed)
+
+
+def auth_store_is_durable() -> bool:
+    return bool(_auth_store_durable)
 
 
 def omit_casting_tables(tables):
@@ -111,6 +328,15 @@ def get_db():
         db.close()
 
 
+def _sqlite_file_path() -> str | None:
+    if not _is_sqlite or not str(DATABASE_URL).startswith("sqlite:///"):
+        return None
+    path = str(DATABASE_URL)[len("sqlite:///"):]
+    if not path or path == ":memory:":
+        return None
+    return path
+
+
 def init_platform_db() -> None:
     """Create SQLAlchemy-managed tables (idempotent, safe to run on startup).
 
@@ -125,7 +351,9 @@ def init_platform_db() -> None:
     from app.core.nova.business import models as nova_business_models  # noqa: F401
     from app.core.nova.today import models as nova_today_models  # noqa: F401
     from app.core.nova.autonomy import models as nova_autonomy_models  # noqa: F401
-    os.makedirs(os.path.dirname(_db_filename), exist_ok=True)
+    sqlite_path = _sqlite_file_path()
+    if sqlite_path:
+        os.makedirs(os.path.dirname(sqlite_path) or ".", exist_ok=True)
     payment_alembic_only = {"amicor_customer_payments", "amicor_customer_payment_events"}
     tables = omit_casting_tables(
         table for table in Base.metadata.sorted_tables if table.name not in payment_alembic_only

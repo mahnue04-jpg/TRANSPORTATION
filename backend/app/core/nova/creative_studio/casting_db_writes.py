@@ -395,10 +395,13 @@ def update_draft_campaign(
     row = _campaign_row(db, organization_id, campaign_id)
     if row.status != "DRAFT":
         raise CastingAccessDenied("Campaign unavailable")
+    next_status = str(payload.get("status", "DRAFT"))
+    if next_status not in {"DRAFT", "CLOSED"}:
+        raise CastingRequestRejected("Campaign cannot be published")
     row.title = str(payload["title"]).strip()
     row.category = str(payload["category"])
     row.minimum_age = int(payload.get("minimum_age", 18))
-    row.status = str(payload.get("status", "DRAFT"))
+    row.status = next_status
     _flush(db)
     return campaign_public_view(_campaign_dict(row))
 

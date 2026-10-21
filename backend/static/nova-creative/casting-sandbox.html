@@ -9,12 +9,17 @@
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
   <style>
     #playback { display: block; width: 100%; max-height: 240px; margin-top: 12px; background: #111; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
       outline: 2px solid #1f4b3a; outline-offset: 2px;
     }
     @media (max-width: 640px) {
+      .studio-header, .studio-main { padding: 0.75rem; }
       .studio-nav { flex-direction: column; align-items: flex-start; }
-      .actions { flex-direction: column; }
+      .grid { grid-template-columns: 1fr; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .actions button, .actions a.button { width: 100%; min-height: 44px; }
+      input, select, textarea { width: 100%; max-width: 100%; }
+      .output { overflow-wrap: anywhere; word-break: break-word; }
     }
   </style>
 </head>
@@ -30,6 +35,7 @@
     <nav class="studio-nav" aria-label="Nova destinations">
       <a href="/nova/creative">Creative</a>
       <a href="/static/nova-creative/casting-preview.html">Fictional preview</a>
+      <a href="/static/nova-creative/casting-pilot-demo.html">30-day demo</a>
       <a href="/static/nova-creative/casting-sandbox.html" aria-current="page">Casting sandbox</a>
     </nav>
   </header>
@@ -40,13 +46,58 @@
     <p id="scanner-readiness" class="hint" aria-live="polite">Scanner readiness has not been checked.</p>
 
     <section class="card" aria-label="Sign in">
-      <p id="session-meta" class="hint">Sign in with the existing Nova account used by Creative Studio.</p>
-      <form id="login-form" class="grid">
-        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
-        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+      <p id="session-meta" class="hint">This preview keeps its own accounts. A main Nova sign-in is not in this database.</p>
+      <p id="auth-http" class="hint" aria-live="polite">No auth response yet.</p>
+      <div id="signed-out-login">
+        <h2>Sign in</h2>
+        <form id="login-form" class="grid">
+          <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+          <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+          <div class="actions wide">
+            <button type="submit" id="sign-in">Sign in</button>
+          </div>
+        </form>
+      </div>
+      <div id="signed-in-auth" class="hidden" hidden>
+        <h2>Signed in</h2>
         <div class="actions wide">
-          <button type="submit" id="sign-in">Sign in</button>
           <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </div>
+      <div id="signup-block">
+      <h2>Create account</h2>
+      <p class="hint">Creates a Nova account through the shared signup. No card is collected here, and the password is not stored on this page.</p>
+      <form id="signup-form" class="grid">
+        <label>Business name<input id="signup-business" maxlength="128" autocomplete="organization" required /></label>
+        <label>Contact name<input id="signup-contact" maxlength="128" autocomplete="name" required /></label>
+        <label>Email<input id="signup-email" type="email" autocomplete="email" required /></label>
+        <label>Phone<input id="signup-phone" type="tel" autocomplete="tel" minlength="7" maxlength="40" required /></label>
+        <label>Industry<input id="signup-industry" maxlength="128" value="creative" required /></label>
+        <label>Password<input id="signup-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label>Confirm password<input id="signup-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label class="wide"><input id="signup-terms" type="checkbox" /> I accept the Nova account terms.</label>
+        <div class="actions wide">
+          <button type="submit" id="create-account">Create account</button>
+        </div>
+      </form>
+      </div>
+      <h2>Forgot password</h2>
+      <p class="hint">Asks the shared reset service for this Nova account. If reset email is not configured, the response says that no message was sent.</p>
+      <form id="forgot-form" class="grid">
+        <label>Email<input id="forgot-email" type="email" autocomplete="email" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="send-reset">Request password reset</button>
+        </div>
+      </form>
+      <p id="reset-delivery" class="hint" aria-live="polite">No reset request yet. No message has been sent.</p>
+      <h2>Reset password</h2>
+      <p class="hint">Paste the one-time token from a reset link you already have. The token is not repeated in the status line.</p>
+      <form id="reset-form" class="grid">
+        <label class="wide">Reset token<input id="reset-token" autocomplete="one-time-code" maxlength="256" spellcheck="false" required /></label>
+        <label>New password<input id="reset-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label>Confirm password<input id="reset-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <div class="actions wide">
+          <button type="submit" id="update-password">Update password</button>
         </div>
       </form>
     </section>
@@ -145,22 +196,118 @@
       <video id="playback" controls playsinline></video>
       <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
     </section>
+
+    <section class="card" aria-label="Pilot intake and review">
+      <h2>Sandbox pilot <span class="badge">Demo / Early Access</span></h2>
+      <p id="pilot-persistence" class="hint">Consent-based intake for an authenticated test account. Audition media stays an https link. Roles, drafts, and unsent previews are saved for this sandbox organization and are read back after reload. Nothing is published and no message is sent.</p>
+      <p id="retention-notice" class="hint">Sandbox consent: this test application is kept only for the retention window you select, up to 365 days. You may revoke consent, which clears the contact details and audition link from review.</p>
+      <form id="pilot-role-form" class="grid">
+        <label>Role title<input id="pilot-role-title" maxlength="80" value="Harbor lead" required /></label>
+        <label>Deadline<input id="pilot-deadline" type="datetime-local" required /></label>
+        <label class="wide">Requirements<textarea id="pilot-requirements" rows="2" maxlength="2000">A two-minute self-tape. Adults only.</textarea></label>
+        <div class="actions wrap">
+          <button type="submit" id="save-pilot-role">Save role</button>
+          <button type="button" id="load-fiction" class="secondary">Load Harborlight sample</button>
+          <button type="button" id="reload-pilot" class="secondary">Reload saved pilot</button>
+        </div>
+      </form>
+      <form id="pilot-intake-form" class="grid">
+        <label>Role id<input id="pilot-role-id" maxlength="48" required /></label>
+        <label>Display name<input id="pilot-name" maxlength="80" autocomplete="name" required /></label>
+        <label>Contact email<input id="pilot-email" type="email" maxlength="320" autocomplete="email" required /></label>
+        <label>Age in years<input id="pilot-age" type="number" required /></label>
+        <label class="wide">Audition link<input id="pilot-link" type="url" inputmode="url" placeholder="https://example.invalid/tape" required /></label>
+        <label>Eligibility answer<input id="pilot-answer" maxlength="500" /></label>
+        <label class="wide"><input id="pilot-consent" type="checkbox" /> I am at least 18 and consent to this disposable sandbox application.</label>
+        <div class="actions wrap">
+          <button type="submit" id="save-pilot-intake">Save pilot draft</button>
+          <button type="button" id="submit-pilot-intake" class="secondary">Submit pilot draft</button>
+          <button type="button" id="revoke-pilot" class="secondary">Revoke consent</button>
+        </div>
+      </form>
+      <p id="pilot-receipt" class="hint">No pilot receipt yet.</p>
+      <form id="pilot-review-form" class="grid">
+        <label>Queue search<input id="pilot-query" maxlength="80" /></label>
+        <label>Rubric score<input id="pilot-score" type="number" min="1" max="5" value="4" /></label>
+        <label class="wide">Rubric note<textarea id="pilot-rubric" rows="2" maxlength="1000"></textarea></label>
+        <div class="actions wrap">
+          <button type="submit" id="load-queue">Search review queue</button>
+          <button type="button" id="pilot-shortlist" class="secondary">Shortlist submitted application</button>
+          <button type="button" id="save-rubric" class="secondary">Save rubric note</button>
+          <button type="button" id="draft-invite" class="secondary">Draft callback email</button>
+          <button type="button" id="approve-invite" class="secondary">Approve draft</button>
+          <button type="button" id="load-call-sheet" class="secondary">Load call sheet</button>
+        </div>
+      </form>
+      <p id="pilot-message" class="hint">No message draft yet. Outbound delivery stays off.</p>
+      <pre id="pilot-output" class="output" aria-live="polite">Pilot results appear here. No invitation is sent.</pre>
+    </section>
+    <section class="card" aria-label="Subscriber FAQ">
+      <h2>Subscriber FAQ <span class="badge">Demo / Early Access</span></h2>
+      <p class="hint">Fictional Harborlight subscriber questions for this signed-in sandbox. Listed answers are canned. Anything else, including tickets and billing, waits for a person. No card, password, or account credential is collected, and no message is sent.</p>
+      <form id="faq-form" class="grid">
+        <label class="wide">Question
+          <textarea id="faq-question" rows="3" maxlength="500" required placeholder="When is the fictional callback?"></textarea>
+        </label>
+        <div class="actions wrap">
+          <button type="submit" id="ask-faq">Ask the demo</button>
+          <button type="button" id="load-faq" class="secondary">Load questions</button>
+          <button type="button" id="ack-faq" class="secondary">Person acknowledges</button>
+        </div>
+      </form>
+      <p id="faq-status" class="hint" aria-live="polite">No subscriber question yet. External delivery: false.</p>
+    </section>
+    <section>
+      <h2>Authenticated sandbox journey</h2>
+      <p class="hint">Draft campaign, invitation, https audition link, receipt, review, mock transport, call sheet, and export. Invitations are redeemed in this signed-in session. Mock upload bytes stay in disposable memory and are not played or published.</p>
+      <form id="journey-form" class="grid">
+        <label>Invitation expires<input id="journey-expires" type="datetime-local" required /></label>
+        <label>Invitation token<input id="journey-token" maxlength="64" autocomplete="off" /></label>
+        <div class="actions wrap">
+          <button type="submit" id="journey-invite">Issue invitation</button>
+          <button type="button" id="journey-redeem" class="secondary">Redeem invitation</button>
+          <button type="button" id="journey-expired" class="secondary">Try expired invitation</button>
+          <button type="button" id="journey-mock" class="secondary">Run mock transport</button>
+          <button type="button" id="journey-export" class="secondary">Export sandbox CSV</button>
+        </div>
+      </form>
+      <form id="mock-upload-form" class="grid">
+        <label>Mock file<input id="mock-file" type="file" accept="video/mp4,video/quicktime,video/webm" /></label>
+        <label>Declared type
+          <select id="mock-mime">
+            <option value="video/mp4">video/mp4</option>
+            <option value="video/webm">video/webm</option>
+            <option value="video/quicktime">video/quicktime</option>
+          </select>
+        </label>
+        <div class="actions wrap">
+          <button type="submit" id="mock-upload">Validate mock upload</button>
+          <button type="button" id="mock-wipe" class="secondary">Wipe mock memory</button>
+        </div>
+      </form>
+      <p id="journey-status" class="hint" aria-live="polite">Journey has not started. Nothing will be sent.</p>
+    </section>
   </main>
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
+      var refreshKey = "amicor_nova_creative_refresh";
       var writesEnabled = false;
       var privateMedia = false;
       var playbackUrl = "";
       var applicationId = "";
       var resumeKey = "nova_casting_sandbox_application";
-      function rememberApplication() {
-        if (!applicationId) return;
+      function rememberSandbox() {
+        var campaignId = $("application-campaign").value.trim();
+        if (!org() && !applicationId && !campaignId) return;
         sessionStorage.setItem(resumeKey, JSON.stringify({
           organizationId: org(),
           applicationId: applicationId,
-          campaignId: $("application-campaign").value.trim()
+          campaignId: campaignId
         }));
+      }
+      function rememberApplication() {
+        rememberSandbox();
       }
       function $(id) { return document.getElementById(id); }
       function token() {
@@ -175,12 +322,53 @@
         if (value) localStorage.setItem(tokenKey, value);
         else localStorage.removeItem(tokenKey);
       }
-      function show(message, ok) {
+      function setRefresh(value) {
+        if (value) sessionStorage.setItem(refreshKey, value);
+        else sessionStorage.removeItem(refreshKey);
+      }
+      function rememberSession(body) {
+        setToken(body && body.access_token ? body.access_token : "");
+        setRefresh(body && body.refresh_token ? body.refresh_token : "");
+        syncAuthControls();
+      }
+      function setAuthHttp(text) {
+        var el = $("auth-http");
+        if (el) el.textContent = text;
+      }
+      function httpStatusLabel(status) {
+        if (status === 401) return "401 Unauthorized";
+        if (status === 409) return "409 Conflict";
+        return "HTTP " + String(status);
+      }
+      function setExclusive(id, hidden) {
+        var el = $(id);
+        if (!el) return;
+        el.hidden = hidden;
+        el.classList.toggle("hidden", hidden);
+      }
+      function syncAuthControls() {
+        var on = Boolean(token());
+        setExclusive("signed-out-login", on);
+        setExclusive("signup-block", on);
+        setExclusive("signed-in-auth", !on);
+        $("session-meta").textContent = on
+          ? "Signed in on this preview. Sign out before using another preview account."
+          : "This preview keeps its own accounts. A main Nova sign-in is not in this database.";
+      }
+      function show(message, ok, statusText) {
         var el = $("banner");
         el.textContent = message;
         el.classList.remove("hidden");
         el.classList.toggle("error", !ok);
-        $("status").textContent = ok ? "Ready" : "Request error";
+        $("status").textContent = statusText || (ok ? "Ready" : "Not completed");
+      }
+      function showSandboxOff(prefix) {
+        var el = $("banner");
+        var notice = "Sandbox workflows are off. Use the fictional preview. Nothing was submitted.";
+        el.textContent = prefix ? (prefix + " " + notice) : notice;
+        el.classList.remove("hidden", "error");
+        $("status").textContent = "Sandbox workflows are off.";
+        setAuthHttp("HTTP 200. Sandbox workflows are off.");
       }
       function org() { return $("organization-id").value.trim(); }
       function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
@@ -195,10 +383,20 @@
           try { body = JSON.parse(text); } catch (err) { body = {}; }
         }
         if (!response.ok) {
+          if (response.status === 401) {
+            setToken("");
+            setRefresh("");
+            syncAuthControls();
+          }
           var detail = body && body.detail ? body.detail : "Request failed";
-          show(String(detail), false);
-          throw new Error(String(detail));
+          var failure = new Error(String(detail));
+          failure.status = response.status;
+          failure.statusLabel = httpStatusLabel(response.status);
+          setAuthHttp("HTTP " + response.status + ". " + failure.statusLabel + ".");
+          show(String(detail), false, failure.statusLabel);
+          throw failure;
         }
+        setAuthHttp("HTTP " + response.status + ".");
         $("status").textContent = "Ready";
         return body;
       }
@@ -218,9 +416,10 @@
           ? "Antivirus signatures are current."
           : "Structural scan only. Antivirus is not ready.";
         if (!writesEnabled) {
-          show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
+          showSandboxOff("");
           return false;
         }
+        setAuthHttp("HTTP 200. Ready.");
         show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
         return true;
       }
@@ -241,13 +440,133 @@
               password: $("login-password").value
             })
           });
-          setToken(body.access_token || "");
-          await refreshReadiness();
+          rememberSession(body);
+          $("login-password").value = "";
+          var ready = await refreshReadiness();
+          if (!ready) showSandboxOff("Signed in.");
+        } catch (err) { /* banner already set */ }
+      });
+      $("signup-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var password = $("signup-password").value;
+        var confirmPassword = $("signup-confirm").value;
+        if (password !== confirmPassword) {
+          show("Passwords do not match. Nothing was created.", false);
+          return;
+        }
+        if (!$("signup-terms").checked) {
+          show("Terms must be accepted. Nothing was created.", false);
+          return;
+        }
+        var email = $("signup-email").value.trim();
+        try {
+          await api("/api/nova/signup/free", {
+            method: "POST",
+            body: JSON.stringify({
+              business_name: $("signup-business").value.trim(),
+              contact_name: $("signup-contact").value.trim(),
+              email: email,
+              phone: $("signup-phone").value.trim(),
+              industry: $("signup-industry").value.trim(),
+              password: password,
+              terms_accepted: true
+            })
+          });
+          $("signup-password").value = "";
+          $("signup-confirm").value = "";
+          var body = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: email, password: password })
+          });
+          rememberSession(body);
+          $("login-email").value = email;
+          $("login-password").value = "";
+          var ready = await refreshReadiness();
+          if (ready) show("Nova account created and signed in. Nothing was published.", true);
+          else showSandboxOff("Nova account created and signed in.");
+        } catch (err) {
+          if (err && Number(err.status) === 409) {
+            $("signup-password").value = "";
+            $("signup-confirm").value = "";
+            show("This email already has a Nova account. Sign in instead. Nothing was created.", false, err.statusLabel || "409 Conflict");
+            setAuthHttp("HTTP 409. 409 Conflict.");
+          }
+        }
+      });
+      $("forgot-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          var body = await api("/api/auth/forgot-password", {
+            method: "POST",
+            body: JSON.stringify({ email: $("forgot-email").value.trim() })
+          });
+          var message = body && body.message ? String(body.message) : "Password reset email is not available in this environment. No message was sent.";
+          $("reset-delivery").textContent = message;
+          show(message, true);
+        } catch (err) { /* banner already set */ }
+      });
+      function tokenFromQuery() {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var value = params.get("token") || "";
+          if (value && window.history && window.history.replaceState) {
+            params.delete("token");
+            var query = params.toString();
+            window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+          }
+          return value;
+        } catch (err) {
+          return "";
+        }
+      }
+      var presetToken = tokenFromQuery();
+      if (presetToken) $("reset-token").value = presetToken;
+      $("reset-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var nextPassword = $("reset-password").value;
+        var confirmPassword = $("reset-confirm").value;
+        var resetToken = $("reset-token").value.trim();
+        if (!resetToken) {
+          show("Enter the reset token from your link. Nothing was changed.", false);
+          return;
+        }
+        if (nextPassword !== confirmPassword) {
+          show("Passwords do not match. Nothing was changed.", false);
+          return;
+        }
+        try {
+          var body = await api("/api/auth/reset-password", {
+            method: "POST",
+            body: JSON.stringify({
+              token: resetToken,
+              new_password: nextPassword,
+              confirm_password: confirmPassword
+            })
+          });
+          $("reset-token").value = "";
+          $("reset-password").value = "";
+          $("reset-confirm").value = "";
+          setToken("");
+          setRefresh("");
+          syncAuthControls();
+          var message = body && body.message ? String(body.message) : "Password updated. You can sign in with your new password.";
+          show(message, true);
         } catch (err) { /* banner already set */ }
       });
       $("sign-out").addEventListener("click", function () {
+        var refresh = sessionStorage.getItem(refreshKey) || "";
         setToken("");
+        setRefresh("");
         writesEnabled = false;
+        syncAuthControls();
+        setAuthHttp("Signed out. No auth response.");
+        if (refresh) {
+          fetch("/api/auth/logout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refresh })
+          }).catch(function () {});
+        }
         show("Signed out. Nothing was submitted.", true);
       });
       $("organization-form").addEventListener("submit", async function (event) {
@@ -259,6 +578,7 @@
             body: JSON.stringify({ name: $("organization-name").value.trim() })
           });
           $("organization-id").value = created.id || "";
+          rememberSandbox();
           show("Sandbox organization ready for this account. It is not published.", true);
         } catch (err) { /* banner already set */ }
       });
@@ -276,6 +596,7 @@
             })
           });
           $("application-campaign").value = created.id || "";
+          rememberSandbox();
           show("Draft campaign " + created.id + " saved. It was not published.", true);
         } catch (err) { /* banner already set */ }
       });
@@ -316,8 +637,11 @@
       $("load-audit").addEventListener("click", async function () {
         try {
           if (!(await requireSandbox())) return;
-          var page = await api(base() + "/audit?limit=50&offset=0");
-          $("applications").textContent = JSON.stringify(page.items || [], null, 2);
+          var page = await api(base() + "/pilot-audit?limit=50&offset=0");
+          var lines = (page.items || []).map(function (item) {
+            return String(item.occurred_at || "") + "  " + String(item.action || "");
+          });
+          $("applications").textContent = lines.join("\n") || "No sandbox audit rows.";
         } catch (err) { /* banner already set */ }
       });
       async function reviewCall(path, payload) {
@@ -442,7 +766,8 @@
       $("upload-form").addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!(await requireSandbox()) || !privateMedia || !applicationId) {
+          if (!(await requireSandbox())) return;
+          if (!privateMedia || !applicationId) {
             show("Private video upload is off. Nothing was submitted.", false);
             return;
           }
@@ -488,8 +813,467 @@
         } catch (err) { /* banner already set */ }
       });
       $("sign-out").addEventListener("click", clearPlayback);
-      if (token()) refreshReadiness().catch(function () {});
-      else $("status").textContent = "Sign in to check sandbox readiness.";
+      var pilotRoleId = "";
+      var pilotMessageId = "";
+      function pilotDeadline() {
+        var value = $("pilot-deadline").value;
+        if (!value) return "";
+        var parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return "";
+        return parsed.toISOString();
+      }
+      $("pilot-role-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var campaignId = $("application-campaign").value.trim();
+          if (!campaignId) {
+            show("Create a draft campaign first. Nothing was submitted.", false);
+            return;
+          }
+          var created = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/roles", {
+            method: "POST",
+            body: JSON.stringify({
+              title: $("pilot-role-title").value.trim(),
+              requirements: $("pilot-requirements").value.trim(),
+              deadline: pilotDeadline(),
+              minimum_age: 18,
+              questions: [{ id: "union", prompt: "Are you able to attend a sandbox callback?" }]
+            })
+          });
+          pilotRoleId = created.id || "";
+          $("pilot-role-id").value = pilotRoleId;
+          rememberSandbox();
+          show("Role saved on the server. The campaign was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-fiction").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var campaignId = $("application-campaign").value.trim();
+          if (!campaignId) {
+            show("Create a draft campaign first. Nothing was submitted.", false);
+            return;
+          }
+          var seeded = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/pilot-demo", { method: "POST" });
+          pilotRoleId = seeded.roles && seeded.roles[0] ? seeded.roles[0].id : "";
+          $("pilot-role-id").value = pilotRoleId;
+          pilotMessageId = seeded.message ? seeded.message.id : "";
+          rememberSandbox();
+          $("pilot-output").textContent = "Harborlight sample saved on the server. Published: " + String(seeded.published) + ". Message delivered: " + String(seeded.message && seeded.message.delivered) + ".";
+          show("Fictional Harborlight sample saved for this sandbox organization. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      function findRow(rows, id) {
+        if (!id) return null;
+        for (var index = 0; index < rows.length; index++) {
+          if (rows[index].id === id) return rows[index];
+        }
+        return null;
+      }
+      async function restorePilot() {
+        if (!(await requireSandbox())) return;
+        var campaignId = $("application-campaign").value.trim();
+        var path = base() + "/pilot-snapshot" + (campaignId ? "?campaign_id=" + encodeURIComponent(campaignId) : "");
+        var saved = await api(path);
+        var roles = saved.roles || [];
+        var intakes = saved.intakes || [];
+        var messages = saved.messages || [];
+        var intake = findRow(intakes, applicationId);
+        var typedRole = $("pilot-role-id").value.trim();
+        if (!intake && typedRole) {
+          for (var index = 0; index < intakes.length; index++) {
+            if (intakes[index].role_id === typedRole) {
+              intake = intakes[index];
+              break;
+            }
+          }
+        }
+        if (!intake && intakes.length) intake = intakes[0];
+        if (intake && intake.id) {
+          applicationId = intake.id;
+          $("review-application").value = applicationId;
+          rememberSandbox();
+        }
+        var role = intake ? findRow(roles, intake.role_id) : null;
+        if (!role) role = findRow(roles, typedRole);
+        if (!role && roles.length) role = roles[0];
+        if (role) {
+          pilotRoleId = role.id || "";
+          $("pilot-role-id").value = pilotRoleId;
+        } else {
+          pilotRoleId = "";
+          $("pilot-role-id").value = "";
+        }
+        if (intake) {
+          $("pilot-receipt").textContent = "Receipt " + intake.receipt + ". Status " + intake.status + ". Reloaded from the server.";
+          if (intake.consent_revoked) {
+            show("Consent is revoked on the server. Contact details stay cleared. Nothing was sent.", true);
+          }
+        }
+        var message = null;
+        var unscoped = null;
+        for (var messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+          var row = messages[messageIndex];
+          if (applicationId && row.application_id === applicationId) {
+            message = row;
+            break;
+          }
+          if (!row.application_id && !unscoped) unscoped = row;
+        }
+        if (!message) message = unscoped;
+        if (message) {
+          pilotMessageId = message.id || "";
+          $("pilot-message").textContent = message.body + " Delivered: " + String(message.delivered) + ".";
+        } else {
+          pilotMessageId = "";
+          $("pilot-message").textContent = "No message draft yet. Outbound delivery stays off.";
+        }
+        var invites = saved.invites || [];
+        if (invites.length && invites[0].token) {
+          $("journey-token").value = invites[0].token;
+          $("journey-status").textContent = "Invitation reloaded from the server. Status " + invites[0].status + ". Nothing was sent.";
+        }
+        $("pilot-output").textContent = "Server copy reloaded. Published: " + String(saved.published) + ". Delivered: " + String(saved.delivered) + ". Roles: " + roles.length + ".";
+        if (!intake || !intake.consent_revoked) {
+          show("Saved pilot reloaded for this sandbox organization. Nothing was sent.", true);
+        }
+      }
+      $("reload-pilot").addEventListener("click", function () {
+        restorePilot().catch(function () {});
+      });
+      $("pilot-intake-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          if (!applicationId) {
+            show("Save a test application first. Nothing was submitted.", false);
+            return;
+          }
+          if (!$("pilot-consent").checked) {
+            show("Consent required. Nothing was submitted.", false);
+            return;
+          }
+          var age = Number($("pilot-age").value);
+          if (!Number.isInteger(age) || age < 18) {
+            show("Applicant does not meet the minimum age. Nothing was submitted.", false);
+            return;
+          }
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake", {
+            method: "POST",
+            body: JSON.stringify({
+              role_id: $("pilot-role-id").value.trim(),
+              display_name: $("pilot-name").value.trim(),
+              contact_email: $("pilot-email").value.trim(),
+              video_url: $("pilot-link").value.trim(),
+              age_years: Number($("pilot-age").value),
+              consent_accepted: true,
+              consent_version: "sandbox-v1",
+              retention_days: 30,
+              answers: $("pilot-answer").value.trim() ? { union: $("pilot-answer").value.trim() } : {}
+            })
+          });
+          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ". Saved on the server.";
+          rememberSandbox();
+          show("Pilot draft saved for this sandbox organization. Nothing was published or sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("submit-pilot-intake").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake/submit", { method: "POST" });
+          $("pilot-receipt").textContent = "Receipt " + saved.receipt + ". Status " + saved.status + ".";
+          show("Pilot application submitted. The campaign was not published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("revoke-pilot").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/intake/revoke", { method: "POST" });
+          $("pilot-receipt").textContent = "Consent revoked. Receipt " + saved.receipt + ".";
+          show("Consent revoked. Contact details and the audition link were cleared.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("pilot-review-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/review-queue?limit=20&offset=0&q=" + encodeURIComponent($("pilot-query").value.trim()));
+          $("pilot-output").textContent = JSON.stringify(page.items || [], null, 2);
+        } catch (err) { /* banner already set */ }
+      });
+      $("pilot-shortlist").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/pilot-review", {
+            method: "POST",
+            body: JSON.stringify({ stage: "In review", shortlisted: true })
+          });
+          show("Shortlist recorded by a person. Automatic casting is " + String(saved.automatic_cast) + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("save-rubric").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/applications/" + encodeURIComponent(applicationId) + "/rubric", {
+            method: "POST",
+            body: JSON.stringify({
+              criterion: "clarity",
+              score: Number($("pilot-score").value),
+              comment: $("pilot-rubric").value
+            })
+          });
+          show("Rubric note saved. Decision: " + saved.decision + ".", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("draft-invite").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !applicationId) return;
+          var saved = await api(base() + "/messages", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "invite",
+              application_id: applicationId,
+              idempotency_key: "sandbox-invite-" + applicationId.slice(0, 12),
+              channel: "email"
+            })
+          });
+          pilotMessageId = saved.id || "";
+          $("pilot-message").textContent = saved.body + " Delivered: " + String(saved.delivered) + ".";
+          show("Callback draft stored. No invitation was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("approve-invite").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotMessageId) return;
+          var saved = await api(base() + "/messages/" + encodeURIComponent(pilotMessageId) + "/approve", { method: "POST" });
+          $("pilot-message").textContent = "Status " + saved.status + ". Delivered: " + String(saved.delivered) + ".";
+          show("Draft approved for preview only. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-call-sheet").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotRoleId) return;
+          var sheet = await api(base() + "/roles/" + encodeURIComponent(pilotRoleId) + "/call-sheet");
+          var people = Array.isArray(sheet.people) ? sheet.people : [];
+          var summary = [
+            "Call sheet",
+            "Timezone: " + String(sheet.timezone || ""),
+            "Call time: " + String(sheet.call_time || ""),
+            "Location: " + String(sheet.location_label || ""),
+            "People: " + String(people.length),
+            "Document: " + String(sheet.document_preview || "hidden"),
+            "External delivery: " + String(sheet.external_delivery)
+          ];
+          people.forEach(function (person) {
+            summary.push("Receipt " + String(person.receipt || "") + " at " + String(person.call_time || ""));
+          });
+          $("pilot-output").textContent = summary.join("\n");
+          show("Call sheet loaded. No notification was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      try {
+        var stored = sessionStorage.getItem(resumeKey) || "";
+        var remembered = stored ? JSON.parse(stored) : null;
+        if (remembered) {
+          if (remembered.organizationId) $("organization-id").value = remembered.organizationId;
+          if (remembered.campaignId) $("application-campaign").value = remembered.campaignId;
+          if (remembered.applicationId) {
+            applicationId = remembered.applicationId;
+            $("review-application").value = applicationId;
+          }
+        }
+      } catch (err) { /* tab memory is optional; the server copy remains */ }
+      function pad(value) { return String(value).padStart(2, "0"); }
+      function localStamp(date) {
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+      }
+      $("journey-expires").value = localStamp(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      $("journey-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          if (!pilotRoleId) {
+            show("Save a role before issuing an invitation. Nothing was sent.", false);
+            return;
+          }
+          var campaignId = $("application-campaign").value.trim();
+          var expires = new Date($("journey-expires").value);
+          var issued = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/invites", {
+            method: "POST",
+            body: JSON.stringify({ role_id: pilotRoleId, expires_at: expires.toISOString() })
+          });
+          $("journey-token").value = issued.token || "";
+          $("journey-status").textContent = "Invitation " + issued.status + ". Published: " + String(issued.published) + ". Nothing was sent.";
+          show("Invitation stored in this sandbox. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-redeem").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var redeemed = await api(base() + "/invites/redeem", {
+            method: "POST",
+            body: JSON.stringify({ token: $("journey-token").value.trim() })
+          });
+          if (redeemed.application_id) {
+            applicationId = redeemed.application_id;
+            $("review-application").value = applicationId;
+            rememberSandbox();
+          }
+          if (redeemed.role_id) {
+            pilotRoleId = redeemed.role_id;
+            $("pilot-role-id").value = pilotRoleId;
+          }
+          $("journey-status").textContent = "Invitation redeemed. Application " + (redeemed.application_id || "") + ". Nothing was sent.";
+          show("Invitation redeemed for this signed-in account. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-expired").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox()) || !pilotRoleId) return;
+          var campaignId = $("application-campaign").value.trim();
+          var issued = await api(base() + "/campaigns/" + encodeURIComponent(campaignId) + "/invites", {
+            method: "POST",
+            body: JSON.stringify({ role_id: pilotRoleId, expires_at: new Date(Date.now() - 3600000).toISOString() })
+          });
+          $("journey-token").value = issued.token || "";
+          await api(base() + "/invites/redeem", {
+            method: "POST",
+            body: JSON.stringify({ token: issued.token })
+          });
+          show("Expired invitation was accepted.", false);
+        } catch (err) {
+          $("journey-status").textContent = "Expired invitation stayed closed. Nothing was sent.";
+        }
+      });
+      $("journey-mock").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          if (!pilotMessageId) {
+            show("Approve a draft before the mock transport. Nothing was sent.", false);
+            return;
+          }
+          var result = await api(base() + "/messages/" + encodeURIComponent(pilotMessageId) + "/mock-dispatch", {
+            method: "POST",
+            body: JSON.stringify({ fail: false })
+          });
+          $("journey-status").textContent = "Mock outcome " + result.mock_outcome + ". Receipt " + (result.mock_receipt || "none") + ". Real delivery: " + String(result.real_delivery) + ".";
+          show("Mock transport finished inside this sandbox. Nothing was delivered.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("journey-export").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = await fetch(base() + "/pilot-export?include_contact=false", { headers: headers });
+          var text = await response.text();
+          if (!response.ok) {
+            show("Export unavailable. Nothing was sent.", false);
+            return;
+          }
+          $("pilot-output").textContent = text;
+          $("journey-status").textContent = "Sandbox CSV is on this page. Nothing was sent.";
+          show("Export loaded in the page. Nothing was sent.", true);
+        } catch (err) {
+          show("Export unavailable. Nothing was sent.", false);
+        }
+      });
+      $("mock-upload-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          if (!applicationId) {
+            show("Save an application before mock upload. Nothing was stored.", false);
+            return;
+          }
+          var file = $("mock-file").files && $("mock-file").files[0];
+          if (!file) {
+            show("Choose a file. Nothing was stored.", false);
+            return;
+          }
+          var data = new FormData();
+          data.append("file", file);
+          data.append("mime_type", $("mock-mime").value);
+          data.append("consent_accepted", "true");
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = await fetch(base() + "/applications/" + encodeURIComponent(applicationId) + "/mock-upload", {
+            method: "POST",
+            headers: headers,
+            body: data
+          });
+          var body = await response.json();
+          if (!response.ok) {
+            show(body.detail || "Request rejected", false);
+            return;
+          }
+          $("journey-status").textContent = "Mock scan " + body.scan_status + ". Playback " + body.playback + ". Public URL empty. Bytes released: " + String(body.bytes_released) + ".";
+          show("Mock upload stayed in disposable memory. Nothing was published.", true);
+        } catch (err) {
+          show("Mock upload failed. Nothing was published.", false);
+        }
+      });
+      $("mock-wipe").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var wiped = await api(base() + "/mock-uploads/wipe", { method: "POST" });
+          $("journey-status").textContent = "Wiped " + String(wiped.wiped) + " mock object(s). Bytes released: " + String(wiped.bytes_released) + ".";
+          show("Disposable mock memory cleared. Nothing was published.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      var faqTicketId = "";
+      $("faq-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        try {
+          if (!(await requireSandbox())) return;
+          var asked = await api(base() + "/subscriber-faq", {
+            method: "POST",
+            body: JSON.stringify({ question: $("faq-question").value })
+          });
+          faqTicketId = asked.id || "";
+          $("faq-status").textContent = "Topic " + asked.topic + ". Status " + asked.status
+            + ". Human required: " + String(asked.human_required)
+            + ". External delivery: " + String(asked.external_delivery)
+            + ". Billing collected: " + String(asked.billing_collected)
+            + ". " + asked.answer;
+          show("Subscriber question saved in the sandbox. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("load-faq").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          var page = await api(base() + "/subscriber-faq");
+          var first = (page.items || [])[0];
+          if (first) faqTicketId = first.id;
+          $("faq-status").textContent = "Saved questions: " + String((page.items || []).length)
+            + ". External delivery: " + String(page.external_delivery)
+            + ". Billing collected: " + String(page.billing_collected) + ".";
+          show("Subscriber questions reloaded. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      $("ack-faq").addEventListener("click", async function () {
+        try {
+          if (!(await requireSandbox())) return;
+          if (!faqTicketId) {
+            show("Load a question that is waiting for a person first.", false);
+            return;
+          }
+          var acked = await api(base() + "/subscriber-faq/" + encodeURIComponent(faqTicketId) + "/acknowledge", { method: "POST" });
+          $("faq-status").textContent = "Status " + acked.status
+            + ". External delivery: " + String(acked.external_delivery)
+            + ". A person acknowledged the question. Nothing was sent.";
+          show("A person acknowledged the question. Nothing was sent.", true);
+        } catch (err) { /* banner already set */ }
+      });
+      syncAuthControls();
+      if (token()) {
+        refreshReadiness().then(function (ready) {
+          if (ready && org()) return restorePilot();
+        }).catch(function () {});
+      } else {
+        $("status").textContent = "Sign in to check sandbox readiness.";
+      }
     }());
   </script>
 </body>

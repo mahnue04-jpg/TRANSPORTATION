@@ -686,3 +686,8 @@ def list_audit(
         db=db, user_id=user_id, tenant_id=tenant_id, organization_id=organization_id,
         limit=parsed_limit, offset=parsed_offset,
     ))
+
+
+from .casting_router_pilot import pilot_router
+
+sandbox_router.include_router(pilot_router)

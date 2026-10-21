@@ -558,12 +558,113 @@ if SECRET_KEY and JWT_SECRET and SECRET_KEY != JWT_SECRET:
         "SECRET_KEY and JWT_SECRET differ; using JWT_SECRET for token signing and verification."
     )
 
+def _load_durable_signing_key() -> str:
+    """Read or create the stage signing key beside a durable SQLite store.
+
+    The key stays out of logs. An explicit JWT_SECRET or SECRET_KEY always wins.
+    """
+    from app.db.session import DATABASE_URL as resolved_database_url
+    from app.db.session import auth_store_is_durable
+
+    if not auth_store_is_durable():
+        return ""
+    if not str(resolved_database_url).startswith("sqlite:///"):
+        return ""
+    db_path = str(resolved_database_url)[len("sqlite:///"):]
+    if not db_path or db_path == ":memory:":
+        return ""
+    key_path = os.path.join(os.path.dirname(db_path), ".signing_key")
+    try:
+        with open(key_path, "r", encoding="ascii") as handle:
+            existing = handle.read().strip()
+        if len(existing) == 64 and all(char in "0123456789abcdef" for char in existing):
+            return existing
+    except OSError:
+        existing = ""
+    if existing:
+        logger.warning("Durable signing key file is unreadable; sessions will not survive this process.")
+        return ""
+    generated = secrets.token_hex(32)
+    try:
+        fd = os.open(key_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        try:
+            with open(key_path, "r", encoding="ascii") as handle:
+                raced = handle.read().strip()
+        except OSError:
+            return ""
+        if len(raced) == 64 and all(char in "0123456789abcdef" for char in raced):
+            return raced
+        return ""
+    try:
+        os.write(fd, generated.encode("ascii"))
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass
+    return generated
+
+
+def signing_key_source() -> str:
+    return _SIGNING_KEY_SOURCE
+
+
+_PROVEN_STORE_LOCATIONS = {"configured-directory", "render-disk", "postgres"}
+
+
+def signin_gate_from_store(store: dict, signing: str) -> dict[str, str | bool]:
+    """Apply the retry rule to an already measured store. This does not connect."""
+    durable = bool(store.get("durable"))
+    key_ok = signing in {"env", "durable-file"}
+    restart_ok = bool(store.get("restart_observed"))
+    location = str(store.get("location") or "")
+    allowed = (
+        durable
+        and key_ok
+        and restart_ok
+        and location in _PROVEN_STORE_LOCATIONS
+    )
+    if allowed:
+        reason = ""
+    elif not durable:
+        reason = "accounts are stored in ephemeral sqlite"
+    elif not key_ok:
+        reason = "signing key is ephemeral"
+    else:
+        reason = "restart survival has not been observed on this store"
+    return {
+        "signing_key": signing,
+        "owner_retry_allowed": allowed,
+        "blocked_reason": reason,
+    }
+
+
+def owner_signin_gate() -> dict[str, str | bool]:
+    """Whether an existing password can be tried again.
+
+    A durable store and a stable signing key are not enough. A later process
+    must have seen the restart marker. Postgres counts only after a different
+    instance id is already stored. The first process writes that row and
+    leaves the gate closed. This function does not connect.
+    """
+    from app.db.session import auth_store_metadata
+
+    return signin_gate_from_store(auth_store_metadata(), signing_key_source())
+
+
 TOKEN_SIGNING_SECRET = (JWT_SECRET or SECRET_KEY).strip()
+_SIGNING_KEY_SOURCE = "env"
 
 # Warn if no secret key configured
 if not TOKEN_SIGNING_SECRET:
-    _fallback = secrets.token_hex(32)
-    TOKEN_SIGNING_SECRET = _fallback # type: ignore
+    TOKEN_SIGNING_SECRET = _load_durable_signing_key()
+    if TOKEN_SIGNING_SECRET:
+        _SIGNING_KEY_SOURCE = "durable-file"
+if not TOKEN_SIGNING_SECRET:
+    TOKEN_SIGNING_SECRET = secrets.token_hex(32)
+    _SIGNING_KEY_SOURCE = "ephemeral"
     logger.warning(
         "JWT_SECRET/SECRET_KEY not set — using ephemeral key. Tokens will be invalid after restart. "
         "Set JWT_SECRET (or SECRET_KEY) env var in production."
@@ -1094,9 +1195,16 @@ def deployment_seed_status(db: Session = Depends(get_db)):
     }
     present = sorted(by_email.keys())
     present_set = set(present)
+    from app.db.session import auth_store_metadata, observe_postgres_restart_marker
+
+    observe_postgres_restart_marker()
     allowlist = active_seed_emails()
     sync_key_env = deployment_sync_key()
+    gate = owner_signin_gate()
     return {
+        "auth_store": {**auth_store_metadata(), "signing_key": gate["signing_key"]},
+        "owner_retry_allowed": gate["owner_retry_allowed"],
+        "blocked_reason": gate["blocked_reason"],
         "expected_accounts": len(emails),
         "present_accounts": len(present),
         "missing_accounts": [email for email in emails if email not in present_set],
@@ -1171,9 +1279,10 @@ def _fetch_login_user(db: Session, email: str) -> Any | None:
 
     normalized = email.strip().lower()
     try:
+        # Match the stored address without rewriting it or its password hash.
         return (
             db.query(UserModel)
-            .filter(UserModel.email == normalized)
+            .filter(func.lower(UserModel.email) == normalized)
             .first()
         )
     except Exception:
@@ -1223,7 +1332,8 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
         logger.exception("Login user lookup failed for email=%s", req.email)
         raise HTTPException(status_code=503, detail="Login database unavailable") from exc
     if not user or not verify_password(req.password, user.hashed_password):
-        # Constant-time-ish rejection
+        # Same client response for a missing account and a bad password.
+        logger.info("Login rejected reason=%s", "no_account" if user is None else "password_mismatch")
         time.sleep(0.2)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:

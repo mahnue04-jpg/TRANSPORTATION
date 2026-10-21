@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
 
+from app.core.casting_trusted_signin import router as trusted_signin_router
+
 from .casting_access import CastingAccessDenied
 from .casting_flags import casting_sandbox_writes_enabled, casting_staging_reads_enabled
 from .casting_router_sandbox import sandbox_router
@@ -74,6 +76,7 @@ def casting_readiness(user: UserContext = Depends(get_current_user_context)):
 
 
 router.include_router(sandbox_router)
+router.include_router(trusted_signin_router)
 
 
 @router.get(

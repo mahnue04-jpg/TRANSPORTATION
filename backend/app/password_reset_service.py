@@ -22,6 +22,9 @@ logger = logging.getLogger("amicor.auth.password_reset")
 GENERIC_REQUEST_MESSAGE = (
     "If an account exists for that email, password reset instructions have been sent."
 )
+EMAIL_UNAVAILABLE_MESSAGE = (
+    "Password reset email is not available in this environment. No message was sent."
+)
 RESET_TOKEN_BYTES = 32
 _TEST_CAPTURE: dict[str, str] = {}
 
@@ -124,7 +127,12 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     from app.db.models import User as UserModel
 
     ensure_password_reset_schema()
-    public_response = {"status": "ok", "message": GENERIC_REQUEST_MESSAGE}
+    # The same sentence is returned for known and unknown emails. When mail is
+    # not configured, that sentence must not claim a message was sent.
+    public_response = {
+        "status": "ok",
+        "message": GENERIC_REQUEST_MESSAGE if password_reset_email_configured() else EMAIL_UNAVAILABLE_MESSAGE,
+    }
     try:
         normalized = _validate_email(email)
     except Exception:

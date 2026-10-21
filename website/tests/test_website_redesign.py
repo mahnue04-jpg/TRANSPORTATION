@@ -141,6 +141,10 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert len(set(hashes)) == 12
     for src, _alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
+        if src.endswith(".svg"):
+            assert "card-farm-app.svg" in src
+            assert path.stat().st_size > 500, src
+            continue
         assert src.endswith(".jpg"), src
         assert path.stat().st_size > 40_000, src
         assert path.read_bytes()[:3] == b"\xff\xd8\xff"
@@ -150,7 +154,8 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert "Nova%20Casting%20and%20Auditions" not in html
     assert "\\n              <tr><td>Nova Creative Studio" not in html
     assert "card-home-hub.jpg" in html
-    assert "card-car-hub.jpg" in html
+    assert "card-farm-app.svg" in html
+    assert "card-car-hub.jpg" not in html
     assert "AMICOR Health" in html
     assert 'src="../assets/img/card-health.jpg"' in html
     assert "No public rides and no licensed-market claim." in html
@@ -168,7 +173,9 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert ">AMICOR Health</h3>" in html
     assert "Conceptual illustrations." in html
     assert 'src="../assets/img/card-home-hub.jpg"' in _html(PAGES["/home-hub/"])
-    assert 'src="../assets/img/card-car-hub.jpg"' in _html(PAGES["/car-hub/"])
+    retired = _html(PAGES["/car-hub/"])
+    assert "Car Hub has been retired" in retired
+    assert 'href="/farm-app/"' in retired
 
 
 def test_hardware_assets_exist() -> None:
@@ -177,7 +184,7 @@ def test_hardware_assets_exist() -> None:
         assert path.is_file(), name
         assert path.stat().st_size > 40_000, name
     assert "See More. Care More. Be There." in _html(PAGES["/home-hub/"])
-    assert "On the Road. On Your Team." in _html(PAGES["/car-hub/"])
+    assert "Car Hub has been retired" in _html(PAGES["/car-hub/"])
 
 
 def test_customer_paths_and_price_consistency() -> None:
@@ -282,7 +289,7 @@ def test_one_catalog_card_per_product() -> None:
 
 def test_sitemap_includes_new_routes() -> None:
     sitemap = (ROOT / "sitemap.xml").read_text(encoding="utf-8")
-    for route in ("/work-revenue/", "/car-hub/", "/products/", "/signin/", "/nova-snap/"):
+    for route in ("/work-revenue/", "/farm-app/", "/products/", "/signin/", "/nova-snap/"):
         assert f"https://getamicor.com{route}" in sitemap
 
 

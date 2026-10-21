@@ -1,3 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Creative Studio</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+</head>
+<body>
+  <header class="studio-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker">AMICOR NOVA</p>
+        <h1>Creative Studio</h1>
+      </div>
+    </div>
+    <nav class="studio-nav" aria-label="Nova destinations">
+      <a href="/nova">Nova Home</a>
+      <a href="/nova/work">Work</a>
+      <a href="/nova/creative" aria-current="page">Creative</a>
+      <a href="/static/nova-creative/casting-preview.html">Casting &amp; Auditions</a>
+      <a href="/static/nova-creative/casting-sandbox.html">Casting sandbox</a>
+      <a href="/nova/one-minute-demo">60s Demo</a>
+      <a href="/nova/master-demo">Master Demo</a>
+      <a href="/nova/today">Today</a>
+    </nav>
+  </header>
+
+  <main class="studio-main">
+    <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, owner-enabled image generation, provider-backed true text-to-video and voice generation, plus a separate local branded image-animation fallback. Cost-bearing media providers remain owner-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
+    <div id="staging-environment-warning" role="status" style="display:none; padding:16px; margin:12px 0; border:2px solid #976b14; border-radius:12px; background:#fff6db; color:#3f3215;">
+      <strong>Creative Studio test environment</strong>
+      <p>This website has its own separate test accounts. Your regular AMICOR production password will not sign you in here. Do not reset your production password or enter sensitive customer data on this test site.</p>
+      <a href="https://amicor-health-isf-py.onrender.com/static/nova-creative/index.html">Open existing AMICOR Studio</a>
+    </div>
+    <script>
+      if (location.hostname === "nova-studio-validation-350.onrender.com") {
+        document.getElementById("staging-environment-warning").style.display = "block";
+      }
+    </script>
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="card" aria-label="Approved 60-second AMICOR Nova demo">
+      <h2>Approved 60-second full-body AMICOR Nova demo</h2>
+      <p class="hint">Full-body Genova · Coral female narration · synchronized captions · live Nova product screens.</p>
+      <div class="actions"><a class="button" href="/nova/one-minute-demo">Open the 60-second full-body demo</a></div>
+    </section>
+
+    <section class="card" aria-label="Sign in">
+      <p id="session-meta" class="hint">Sign in to use Creative Studio.</p>
+      <div class="actions">
+        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-out" class="secondary hidden" hidden>Sign out</button>
+      </div>
+      <div id="staging-register-panel" style="display:none; margin-top:16px;">
+        <p><strong>New test account required.</strong> Use a separate test email and a NEW password, not your regular AMICOR password. Test accounts may be lost when this free staging server restarts.</p>
+        <button type="button" id="staging-register-toggle" class="secondary">Create test account</button>
+        <form id="staging-register-form" class="grid hidden" autocomplete="off">
+          <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
+          <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <button type="submit">Create separate test account</button>
+        </form>
+      </div>
+      <form id="login-form" class="grid hidden" hidden>
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="card path-card" aria-label="Second commercial path">
+      <p class="path-kicker">Second commercial · 30 seconds</p>
+      <h2>Walking commercial</h2>
+      <p class="hint">Full-body presenter, natural female narration, lip sync, and captions. Does not change the approved 60-second demo. Customer price <strong>$49</strong>.</p>
+      <p id="active-project-label" class="hint path-active" role="status">No project selected yet.</p>
+      <ol class="path-steps">
+        <li>Select <strong>AMICOR Second Commercial</strong> (or create a 30s project + storyboard)</li>
+        <li>Accept the voice license</li>
+        <li>Build the 30s commercial and download on your phone</li>
+        <li>Start checkout for the receipt</li>
+      </ol>
+      <div class="actions wrap path-actions">
+        <button type="button" id="select-second-commercial" class="secondary">Select Second Commercial</button>
+        <button type="button" id="accept-voice-license" class="secondary">Accept voice license</button>
+        <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
+      </div>
+      <details class="studio-details">
+        <summary>Optional · 5s preview &amp; montage fallback</summary>
+        <p class="hint">Prefer the 30s walking commercial above. Montage is title-card only (no speech/lip sync). Put the prepared link in TikTok/Instagram profile Website — captions are not clickable.</p>
+        <div class="actions wrap">
+          <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking preview</button>
+          <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage</button>
+          <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card" aria-label="AMICOR Studio checkout">
+      <h2>Checkout <span class="badge mode-badge">TEST</span></h2>
+      <p class="hint">Branded Stripe Checkout for the 30s commercial. Live billing stays off until you enable it. No automatic billing and no third-party vendor checkout.</p>
+      <div id="studio-pricing" class="hint">Sign in to load pricing.</div>
+      <div id="studio-orders" class="hint"></div>
+      <div class="actions wrap path-actions">
+        <button type="button" id="start-studio-checkout" class="btn-primary">Start checkout</button>
+        <button type="button" id="load-studio-pricing" class="secondary">Show price</button>
+        <button type="button" id="refresh-studio-orders" class="secondary">Refresh orders</button>
+      </div>
+      <details class="studio-details">
+        <summary>Owner · simulated payment</summary>
+        <div class="actions wrap">
+          <button type="button" id="complete-studio-test-checkout" class="secondary">Complete TEST payment (simulated)</button>
+        </div>
+      </details>
+    </section>
+
+    <details class="card studio-details readiness-panel" aria-label="Studio readiness">
+      <summary>Studio readiness <span class="badge mode-badge">TEST details</span></summary>
+      <p class="hint">Walking commercial and Stripe Checkout are in TEST mode. Live billing, paid Genova providers, and public ad publish stay OFF.</p>
+      <div id="studio-test-readiness" class="hint">Sign in to load readiness.</div>
+    </details>
+
+    <section class="card" aria-label="Provider status">
+      <h2>Provider status</h2>
+      <div id="provider-status" class="hint">Sign in to load provider status.</div>
+    </section>
+
+    <section class="card" aria-label="Render preflight">
+      <h2>Render preflight (no purchase)</h2>
+      <p class="hint">Estimates credits for the active project. Nova never auto-top-ups or buys provider credit. Paid fal/Kling/D-ID/OpenAI renders stay blocked until owner budget confirmation after preflight. Local motion fallback does not call paid video providers.</p>
+      <div id="preflight-status" class="hint">Select a project, then run preflight.</div>
+      <div class="actions wrap">
+        <button type="button" id="run-preflight" class="secondary">Run preflight quote</button>
+        <button type="button" id="confirm-budget" disabled>Confirm owner budget for this quote</button>
+      </div>
+    </section>
+
+    <section class="card" aria-label="Brand profile">
+      <h2>Brand profile</h2>
+      <form id="brand-form" class="grid">
+        <label>Business name<input id="brand-name" required maxlength="200" /></label>
+        <label>Tagline<input id="brand-tagline" maxlength="200" /></label>
+        <label>Tone<input id="brand-tone" maxlength="120" /></label>
+        <label>Audience<input id="brand-audience" maxlength="200" /></label>
+        <label>Preferred CTA<input id="brand-cta" maxlength="200" /></label>
+        <label class="wide">Brand description<textarea id="brand-description" rows="3"></textarea></label>
+        <div class="actions wide">
+          <button type="button" id="load-amicor-brand-defaults" class="secondary">Load AMICOR Nova defaults</button>
+          <button type="submit">Save brand</button>
+        </div>
+      </form>
+      <div id="brand-list" class="list"></div>
+    </section>
+
+    <section class="card" aria-label="New project">
+      <h2>1. New Project</h2>
+      <form id="project-form" class="grid" novalidate>
+        <label>Title<input id="project-title" name="title" maxlength="200" autocomplete="off" /></label>
+        <label>Type
+          <select id="project-type">
+            <option value="social_post">social_post</option>
+            <option value="social_image">social_image</option>
+            <option value="short_video" selected>short_video</option>
+            <option value="short_drama">Short drama · two characters</option>
+            <option value="ad_creative">ad_creative</option>
+            <option value="promo_video">promo_video</option>
+            <option value="explainer">explainer</option>
+            <option value="presentation_asset">presentation_asset</option>
+          </select>
+        </label>
+        <label>Production preset
+          <select id="production-preset">
+            <option value="vertical_short" selected>30s vertical commercial · Reels / TikTok / Shorts</option>
+            <option value="social_square">Social feed square</option>
+            <option value="youtube_web">YouTube / web / demo</option>
+          </select>
+        </label>
+        <label>Platform
+          <select id="project-platform">
+            <option selected>TikTok</option>
+            <option>Instagram</option>
+            <option>Facebook</option>
+            <option>YouTube Shorts</option>
+            <option>YouTube</option>
+            <option>LinkedIn</option>
+            <option>X</option>
+            <option>generic</option>
+          </select>
+        </label>
+        <label>Duration
+          <select id="project-duration">
+            <option value="15">15</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
+          </select>
+        </label>
+        <label>Audience<input id="project-audience" maxlength="200" /></label>
+        <label>Tone<input id="project-tone" maxlength="120" /></label>
+        <label class="wide">Objective<input id="project-objective" maxlength="300" /></label>
+        <div class="actions wide">
+          <button type="submit" id="project-create-btn">Create project</button>
+          <button type="button" id="project-save-settings" class="secondary">Save active project settings</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Content brief">
+      <h2>2. Content Brief</h2>
+      <form id="brief-form" class="grid">
+        <label class="wide">Topic<input id="brief-topic" required maxlength="300" /></label>
+        <label>CTA<input id="brief-cta" maxlength="200" value="Visit getamicor.com to explore AMICOR Nova." /></label>
+        <label>Style<input id="brief-style" maxlength="120" /></label>
+        <button type="submit">Save brief on active project</button>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Generate">
+      <h2>Generate</h2>
+      <div class="image-controls">
+        <label>Custom image prompt (optional)
+          <textarea id="custom-image-prompt" rows="3" maxlength="4000">Genova presenter v3. Photorealistic full-body, head-to-toe view of a professional young Black/African American woman in her late twenties, standing naturally in a polished contemporary business setting, confident welcoming expression, professional outfit and shoes fully visible, natural hand gestures suitable for explaining products, camera-facing three-quarter stance, realistic skin texture, soft studio lighting, enough clear space beside her for product-screen overlays, no text, no logos, no watermarks, no provider marks.</textarea>
+        </label>
+        <p class="hint">Generate Image uses this description when provided. Leave it blank to use the project’s marketing artwork prompt.</p>
+        <label>Image aspect ratio
+          <select id="image-aspect">
+            <option value="1:1">1:1 square</option>
+            <option value="4:5">4:5 portrait</option>
+            <option value="9:16" selected>9:16 vertical</option>
+            <option value="16:9">16:9 landscape</option>
+          </select>
+        </label>
+        <span class="hint">AMICOR previews use the official logo overlay.</span>
+      </div>
+      <div class="presenter-controls">
+        <div class="presenter-settings">
+          <label>Presenter mode
+            <select id="presenter-mode">
+              <option value="head">Talking head</option>
+              <option value="half_body">Half body motion</option>
+              <option value="full_body" selected>Full body motion</option>
+            </select>
+          </label>
+          <label>Motion style
+            <select id="presenter-motion-style">
+              <option value="calm_professional" selected>Calm professional</option>
+              <option value="friendly_explainer">Friendly explainer</option>
+              <option value="energetic_promo">Energetic promo</option>
+            </select>
+          </label>
+          <label>Framing
+            <select id="presenter-framing">
+              <option value="close_up">Close-up</option>
+              <option value="waist_up">Waist-up</option>
+              <option value="full_frame" selected>Full frame</option>
+            </select>
+          </label>
+          <label>Output
+            <select id="presenter-output-preset">
+              <option value="9:16" selected>9:16 · Reels / TikTok / Shorts</option>
+              <option value="1:1">1:1 · Social feed</option>
+              <option value="16:9">16:9 · YouTube / web / demo</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Genova uses a young Black/African American female presenter. Full body motion starts with head-to-toe framing. Body motion previews do not include narration or lip sync yet. Talking head uses the exact generated Presenter Voice audio for D-ID lip sync. A D-ID trial/account watermark cannot be removed by Nova; final publishing requires watermark-free output enabled by the provider account.</p>
+    <label>Presenter voice
+      <select id="presenter-voice"><option value="shimmer">Genova · youthful female voice</option><option value="coral" selected>Coral · clear female voice</option><option value="nova">Nova · warm female voice</option></select>
+    </label>
+    <p class="hint">Presenter narration is adjusted for clear phone playback. Timed captions are included in the downloaded video. Generate Presenter Voice after changing the script or voice.</p>
+    <label>Talking presenter script
+          <textarea id="presenter-script" rows="6" maxlength="1600">Meet AMICOR Nova, your AI operations workspace for everyday business work. Busywork piles up fast for small business owners, and it steals focus from the work that matters. Nova helps with research, admin follow-ups, workflows, and data cleanup. Nova prepares AI-assisted drafts and next steps, then you review before anything moves forward. Keep ownership, clear the busywork, and make room for real business progress. Visit getamicor.com to explore AMICOR Nova.</textarea>
+        </label>
+        <p class="hint">Use this exact text for the presenter voice. AMICOR Nova is written separately so the voice pronounces the brand correctly.</p>
+        <div class="actions wrap">
+          <button type="button" id="save-presenter-script">Save Presenter Script</button>
+          <button type="button" id="generate-presenter-voice">Generate Presenter Voice</button>
+          <button type="button" id="preview-talking-presenter">Talking Presenter Preview</button>
+        </div>
+      </div>
+      <div class="actions wrap actions-dense" aria-label="Project generate steps">
+        <button type="button" data-action="script" class="secondary">3. Script</button>
+        <button type="button" data-action="caption" class="secondary">4. Caption</button>
+        <button type="button" data-action="storyboard" class="secondary">5. Storyboard</button>
+        <button type="button" data-action="image-prompt" class="secondary">6. Image prompt</button>
+        <button type="button" data-action="image" class="secondary">7. Image</button>
+        <button type="button" data-action="video" class="secondary">8. Next scene</button>
+        <button type="button" data-action="voice" class="secondary">9. Voice</button>
+        <button type="button" id="build-final-promo" class="secondary">10. Final promo</button>
+        <button type="button" data-action="export" class="secondary">13. Export</button>
+      </div>
+      <pre id="output" class="output" aria-live="polite"></pre>
+    </section>
+
+    <section class="card" aria-label="Short drama creator">
+      <h2>Short drama creator</h2>
+      <p class="hint">Create a Short drama project above. Save two characters and dialogue, generate each motion shot, then generate voices and render. Voices and captions are included; lip-sync and character continuity require review.</p>
+      <button type="button" id="drama-sample" class="secondary">Load “The Envelope” sample</button>
+      <label>Setting<textarea id="drama-setting" rows="3" maxlength="1000"></textarea></label>
+      <div class="grid">
+<fieldset><legend>Character 1</legend><label>Name<input id="drama-name-1" maxlength="40" value="Maya" /></label><label>Appearance<textarea id="drama-description-1" maxlength="600" rows="3"></textarea></label><label>Voice<select id="drama-voice-1"><option value="nova" selected>nova</option><option value="onyx">onyx</option><option value="alloy">alloy</option><option value="ash">ash</option><option value="ballad">ballad</option><option value="coral">coral</option><option value="echo">echo</option><option value="fable">fable</option><option value="sage">sage</option><option value="shimmer">shimmer</option></select></label></fieldset>
+<fieldset><legend>Character 2</legend><label>Name<input id="drama-name-2" maxlength="40" value="Eli" /></label><label>Appearance<textarea id="drama-description-2" maxlength="600" rows="3"></textarea></label><label>Voice<select id="drama-voice-2"><option value="nova">nova</option><option value="onyx" selected>onyx</option><option value="alloy">alloy</option><option value="ash">ash</option><option value="ballad">ballad</option><option value="coral">coral</option><option value="echo">echo</option><option value="fable">fable</option><option value="sage">sage</option><option value="shimmer">shimmer</option></select></label></fieldset>
+      </div>
+      <label>Dialogue · one Name: line per shot<textarea id="drama-dialogue" rows="8" maxlength="3500" placeholder="Eli: Someone told me to leave this at midnight.&#10;Maya: That envelope was supposed to disappear."></textarea></label>
+      <p id="drama-progress" class="hint" role="status">Select a Short drama project to begin.</p>
+      <div class="actions wrap">
+        <button type="button" id="drama-plan">1. Save cast &amp; dialogue</button>
+        <button type="button" id="drama-motion">2. Generate next motion shot</button>
+        <button type="button" id="drama-voices">3. Generate character voices</button>
+        <button type="button" id="drama-render">4. Render captioned preview</button>
+      </div>
+      <p class="hint">Saving the plan is free. Motion and voice generation use the configured providers and may consume credits. A failed motion request stays failed. The rendered video is a preview for review before publishing.</p>
+    </section>
+
+    <section class="card" aria-label="Project history">
+      <h2>11. Project history</h2>
+      <div id="project-list" class="list"></div>
+    </section>
+
+    <section class="card" aria-label="Production readiness">
+      <h2>12. Production readiness</h2>
+      <p class="hint">Shows whether the active project is ready for social media, website/demo, or YouTube use. External publishing remains owner-controlled.</p>
+      <div id="production-readiness" class="readiness-grid">
+        <div class="readiness-empty">Select a project to check readiness.</div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="Assets">
+      <h2>13. Asset list</h2>
+      <div class="actions">
+        <button type="button" id="clear-legacy-preview-videos" class="secondary">Remove old headshot / short previews</button>
+        <button type="button" id="reset-project-media" class="secondary">Clear all generated media from this project</button>
+        <button type="button" id="clear-failed-video-assets" class="secondary">Clear failed video attempts</button>
+      </div>
+      <div id="asset-list" class="list"></div>
+    </section>
+  </main>
+
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
   <script src="/static/nova-creative/creative.js?v=force-project-select-20261017b"></script>
+</body>
+</html>
