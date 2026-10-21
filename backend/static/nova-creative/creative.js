@@ -577,7 +577,10 @@
       var currentSession = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
       if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
       if (typeof setSignedIn === "function") setSignedIn(false);
-      if (typeof $ === "function" && $("login-form")) $("login-form").classList.remove("hidden");
+      if (typeof setBlockHidden === "function" && typeof $ === "function" && $("login-form")) {
+        setBlockHidden($("login-form"), false);
+        setBlockHidden($("sign-in-toggle"), true);
+      }
       throw new Error("Your login session expired (401). Sign in again. On this temporary test server, projects may disappear after a restart; saved work has not been verified.");
     }
     if (res.status === 403) throw new Error("Access denied. (403)");
@@ -615,17 +618,20 @@
     return body;
   }
 
+  function setBlockHidden(el, hidden) {
+    if (!el) return;
+    el.hidden = hidden;
+    el.classList.toggle("hidden", hidden);
+  }
   function setSignedIn(on) {
     // Signed in → only Sign out. Signed out → only Sign in.
-    var signInBtn = $("sign-in-toggle");
-    var signOutBtn = $("sign-out");
-    if (signInBtn) signInBtn.classList.toggle("hidden", !!on);
-    if (signOutBtn) signOutBtn.classList.toggle("hidden", !on);
+    setBlockHidden($("sign-in-toggle"), !!on);
+    setBlockHidden($("sign-out"), !on);
+    setBlockHidden($("login-form"), true);
     if ($("staging-register-panel")) {
       $("staging-register-panel").style.display =
         (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
     }
-    $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
   function renderOutput(data) {
@@ -1773,7 +1779,8 @@
         });
         $("login-email").value = email;
         $("login-password").value = "";
-        $("login-form").classList.remove("hidden");
+        setBlockHidden($("login-form"), false);
+        setBlockHidden($("sign-in-toggle"), true);
         $("staging-register-form").classList.add("hidden");
         $("staging-register-password").value = "";
         showBanner("Test account created. Enter your NEW test password in the sign-in form. Never use your production password.", true);
@@ -1783,7 +1790,12 @@
     });
   }
   $("sign-in-toggle").addEventListener("click", function () {
-    $("login-form").classList.toggle("hidden");
+    if ($("sign-out") && !$("sign-out").hidden) return;
+    var form = $("login-form");
+    var showForm = form.hidden || form.classList.contains("hidden");
+    setBlockHidden(form, !showForm);
+    setBlockHidden($("sign-in-toggle"), showForm);
+    setBlockHidden($("sign-out"), true);
   });
   $("sign-out").addEventListener("click", function () {
     setToken("");

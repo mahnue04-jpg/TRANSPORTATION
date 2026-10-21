@@ -46,7 +46,7 @@
     <p id="scanner-readiness" class="hint" aria-live="polite">Scanner readiness has not been checked.</p>
 
     <section class="card" aria-label="Sign in">
-      <p id="session-meta" class="hint">Use the shared Nova account. This page does not create a separate casting password.</p>
+      <p id="session-meta" class="hint">This preview keeps its own accounts. A main Nova sign-in is not in this database.</p>
       <p id="auth-http" class="hint" aria-live="polite">No auth response yet.</p>
       <div id="signed-out-login">
         <h2>Sign in</h2>
@@ -58,7 +58,7 @@
           </div>
         </form>
       </div>
-      <div id="signed-in-auth" class="hidden">
+      <div id="signed-in-auth" class="hidden" hidden>
         <h2>Signed in</h2>
         <div class="actions wide">
           <button type="button" id="sign-out" class="secondary">Sign out</button>
@@ -340,21 +340,27 @@
         if (status === 409) return "409 Conflict";
         return "HTTP " + String(status);
       }
+      function setExclusive(id, hidden) {
+        var el = $(id);
+        if (!el) return;
+        el.hidden = hidden;
+        el.classList.toggle("hidden", hidden);
+      }
       function syncAuthControls() {
         var on = Boolean(token());
-        $("signed-out-login").classList.toggle("hidden", on);
-        $("signup-block").classList.toggle("hidden", on);
-        $("signed-in-auth").classList.toggle("hidden", !on);
+        setExclusive("signed-out-login", on);
+        setExclusive("signup-block", on);
+        setExclusive("signed-in-auth", !on);
         $("session-meta").textContent = on
-          ? "Signed in with the shared Nova account. Sign out before using a different account."
-          : "Use the shared Nova account. This page does not create a separate casting password.";
+          ? "Signed in on this preview. Sign out before using another preview account."
+          : "This preview keeps its own accounts. A main Nova sign-in is not in this database.";
       }
       function show(message, ok, statusText) {
         var el = $("banner");
         el.textContent = message;
         el.classList.remove("hidden");
         el.classList.toggle("error", !ok);
-        $("status").textContent = statusText || (ok ? "Ready" : "Request error");
+        $("status").textContent = statusText || (ok ? "Ready" : "Not completed");
       }
       function showSandboxOff(prefix) {
         var el = $("banner");
@@ -377,6 +383,11 @@
           try { body = JSON.parse(text); } catch (err) { body = {}; }
         }
         if (!response.ok) {
+          if (response.status === 401) {
+            setToken("");
+            setRefresh("");
+            syncAuthControls();
+          }
           var detail = body && body.detail ? body.detail : "Request failed";
           var failure = new Error(String(detail));
           failure.status = response.status;

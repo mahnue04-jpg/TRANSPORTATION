@@ -48,7 +48,12 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "No message was sent." in sandbox
     assert "Sign in with Google" not in sandbox
     assert "accounts.google.com" not in sandbox
-    assert "separate casting password" in sandbox
+    assert "This preview keeps its own accounts." in sandbox
+    assert "A main Nova sign-in is not in this database." in sandbox
+    assert "Request error" not in sandbox
+    assert 'id="signed-in-auth" class="hidden" hidden' in sandbox
+    guard = (ROOT / "static" / "nova-creative" / "auth-session-guard.js").read_text(encoding="utf-8")
+    assert "Nova rejected these sign-in credentials" not in guard
     assert "Resume saved application" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):
         assert label in sandbox

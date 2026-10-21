@@ -190,6 +190,24 @@ def test_login_200_with_disabled_readiness_keeps_session(page) -> None:
     assert "External delivery: false" in page.inner_text("#faq-status")
 
 
+def test_stale_token_401_clears_the_session_and_shows_only_sign_in(page) -> None:
+    LOG.reset()
+    page.goto("/static/nova-creative/casting-sandbox.html", wait_until="domcontentloaded")
+    page.evaluate("() => localStorage.setItem('amicor_nova_creative_token', 'stale-token')")
+    with page.expect_response(lambda response: response.url.endswith("/api/nova/casting/readiness") and response.status == 401):
+        page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector("#banner:has-text('Authentication required')")
+    assert page.is_visible("#sign-in")
+    assert page.is_hidden("#sign-out")
+    assert page.is_hidden("#signed-in-auth")
+    assert page.is_visible("#signed-out-login")
+    state = _session(page)
+    assert state["status"] == "401 Unauthorized"
+    assert state["token"] in (None, "")
+    assert "Request error" not in state["status"]
+    assert "Nova rejected" not in state["banner"]
+
+
 def test_login_401_is_a_request_error_without_a_session(page) -> None:
     LOG.reset()
     page.goto("/static/nova-creative/casting-sandbox.html", wait_until="domcontentloaded")
