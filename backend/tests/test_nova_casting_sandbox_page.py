@@ -50,6 +50,7 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "accounts.google.com" not in sandbox
     assert "This preview keeps its own accounts." in sandbox
     assert "A main Nova sign-in is not in this database." in sandbox
+    assert '"/api/auth/login"' in sandbox
     assert "Request error" not in sandbox
     assert 'id="signed-in-auth" class="hidden" hidden' in sandbox
     guard = (ROOT / "static" / "nova-creative" / "auth-session-guard.js").read_text(encoding="utf-8")

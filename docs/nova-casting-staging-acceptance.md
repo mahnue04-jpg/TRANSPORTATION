@@ -2,6 +2,29 @@
 
 Draft pull request #339. Nothing here merges, deploys production, opens public intake, sends a message, resets a password, or copies a connection string.
 
+## Shared sign-in, 2026-10-21
+
+The live preview form posts to this preview's `/api/auth/login`. Session copy on the deployed sandbox says the preview keeps its own accounts and a main Nova sign-in is not in this database. A 401 from that form is that local check. It is not a finding that the owner password is wrong.
+
+No supported shared-auth path exists. The blocker and the design that stays off are in `docs/nova-casting-trusted-signin.md`. `trusted_signin_decision()` stays disabled even when the proposed issuer variables are set. Account rows are not imported. Production integration is not turned on.
+
+Checked the deployed preview at SHA `cbd43874ec1d1d66a2127847175c03681c51ba54` before this design commit. `GET /api/health/live` returned 200. The sandbox page returned 200, posts to `/api/auth/login`, includes the own-accounts sentence, starts with Sign out hidden, and clears the stored token on HTTP 401. It does not contain "Request error" or "Nova rejected these sign-in credentials". `auth-session-guard.js` is the no-op and does not contain that sentence. Local tests for the decision, the sandbox page, a stale-token 401, and a login 401 passed. The owner password was not used.
+
+## Measured 2026-10-21 after the preview woke
+
+The free preview was asleep. The first live request took 123 seconds and then returned 200. Short checks during that wake can show HTTP 503 from the platform. After the wake, on `108cf63258e0d313aa1b58668ba4076a0d136ef7`:
+
+| Check | Result |
+| --- | --- |
+| `GET /api/health/live` | 200. SHA `108cf63258e0d313aa1b58668ba4076a0d136ef7`. Branch `cursor/casting-auditions-pilot-e1ae`. |
+| `GET /api/health/readiness` | 200. `overall_status` `ready`. Database connected. `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION` are present with `DATABASE_URL`, `SECRET_KEY`, and `JWT_SECRET`. |
+| `GET /api/auth/deployment/seed-status` | 200. Postgres, durable, `signing_key` env, `restart_observed` true, `restart_marker_recorded` true, `owner_retry_allowed` true. |
+| Synthetic accounts | Two new preview accounts. Each signup returned 200, trialing, price 0, no checkout. Each login returned 200. `/api/auth/me` matched that account's user id and organization id. The two accounts had different user ids and organization ids. A wrong password returned 401 `Invalid email or password`. The response did not contain the browser sentence "Nova rejected". |
+| Production | `https://amicor-health-isf-py.onrender.com/api/health/live` returned 200 with SHA `3ad96ec64dc35f4774496253ea08333375d66447` on `main`. That service was not changed. |
+| Casting flags | Authenticated readiness 200. `enabled`, `applications_enabled`, `media_uploads_enabled`, `staging_reads_enabled`, and `sandbox_writes_enabled` are false. |
+
+The sentence "Nova rejected these sign-in credentials" is not returned by the login API. On SHA `108cf632` it lived only in `auth-session-guard.js`, which `/nova/creative` loads and `/static/nova-creative/casting-sandbox.html` does not. That script blocked a login submit when the browser already had a session and showed a 401 without asking this database. The sandbox page also kept a stale token after a real 401, so Sign out could stay on screen. The following change removes that invented 401 and keeps Sign in and Sign out exclusive. The owner password was not used.
+
 ## Measured 2026-10-20 after the studio-page merge
 
 Preview deploy `8d0a71f2ccb946a03d60d545a2b1f96dd7e9ae10` finished at `2026-10-20T20:11:55Z`. `GET /api/health/live` returned 200 with that SHA. Seed-status stayed postgres, `durable` true, `signing_key` env, `restart_observed` true, `restart_marker_recorded` true, and `owner_retry_allowed` true. Readiness stayed 503 for the same three unset names: `ALLOWED_ORIGINS`, `AMICOR_PUBLIC_URL`, and `APP_VERSION`. `GET /nova/creative` returned 200 and the full page, including the casting preview link, the casting sandbox link, the project form, and `auth-session-guard.js`. The saved synthetic token from the earlier process was not replayed. `preview-regressions` and `backend-diagnostic` passed on this commit.
