@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+  <link rel="stylesheet" href="/static/nova-language/surface.css" />
 </head>
 <body>
   <header class="studio-header">
@@ -31,6 +32,24 @@
 
   <main class="studio-main">
     <p class="disclaimer">Creative Studio supports planning, scripts, storyboards, owner-enabled image generation, provider-backed true text-to-video and voice generation, plus a separate local branded image-animation fallback. Cost-bearing media providers remain owner-gated. Generated AMICOR previews use the official brand mark instead of asking the image model to recreate it. External publishing, submission, and financial execution remain OFF.</p>
+    <section class="nova-language-bar" aria-label="Screen language" data-nova-language-surface="studio">
+      <label for="screen-language">Screen language</label>
+      <select id="screen-language" aria-label="Screen language">
+        <option value="en">English</option>
+        <option value="so">Af-Soomaali</option>
+        <option value="ar">العربية</option>
+        <option value="fr">Français</option>
+        <option value="es">Español</option>
+        <option value="ja" data-rollout="planned">日本語</option>
+        <option value="ko" data-rollout="planned">한국어</option>
+        <option value="el" data-rollout="planned">Ελληνικά</option>
+        <option value="ru" data-rollout="planned">Русский</option>
+        <option value="de" data-rollout="planned">Deutsch</option>
+      </select>
+      <p id="language-fallback" class="hint">If this screen cannot show the selected language, the original text stays in place.</p>
+      <p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
+      <p class="hint">Live voice interpretation is not available. Bidirectional conversation translation is not available yet.</p>
+    </section>
     <div id="staging-environment-warning" role="status" style="display:none; padding:16px; margin:12px 0; border:2px solid #976b14; border-radius:12px; background:#fff6db; color:#3f3215;">
       <strong>Creative Studio test environment</strong>
       <p>This website has its own separate test accounts. Your regular AMICOR production password will not sign you in here. Do not reset your production password or enter sensitive customer data on this test site.</p>
@@ -338,6 +357,8 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-language/preference.js?v=20261022.3"></script>
+  <script src="/static/nova-language/surface.js?v=20261022.3"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
   <script src="/static/nova-creative/creative.js?v=force-project-select-20261017b"></script>
 </body>
