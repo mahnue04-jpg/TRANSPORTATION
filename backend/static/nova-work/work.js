@@ -143,6 +143,66 @@
     }
     return html;
   }
+  function deriveFunnelStage(row) {
+    row = row || {};
+    var qual = row.live_qualification || row.qualification || {};
+    var approval = String(row.approval_state || "");
+    var applicationState = String(row.application_state || "");
+    var status = String(row.status || "");
+    var outcome = String(
+      row.qualification_outcome || row.outcome || qual.outcome || qual.qualification_status || row.qualification_status || ""
+    );
+    var eligibility = String(row.eligibility_decision || qual.eligibility_decision || "");
+    var saved = Boolean(row.opportunity_id || row.work_opportunity_id || row.persisted === true);
+    var sent = Boolean(
+      row.externally_submitted || row.manual_submission_recorded || applicationState === "submitted_externally_recorded"
+    );
+    function done(stage, label, externalSend) {
+      return { funnel_stage: stage, funnel_stage_label: label, external_send: externalSend === true };
+    }
+    if (sent) return done("external_send", "Sent externally.", true);
+    if (row.approved_for_future_submission || approval === "APPROVED" || applicationState === "approved_for_future_submission") {
+      return done("approved_not_sent", "Approved for future submission. Not sent.", false);
+    }
+    if (approval === "REJECTED" || status === "REJECTED" || status === "CLOSED") {
+      return done("not_qualified", "Closed. Not sent.", false);
+    }
+    if (approval === "READY_FOR_OWNER_REVIEW" || applicationState === "READY_FOR_OWNER_REVIEW") {
+      return done("owner_review", "In the owner-review queue. Not sent.", false);
+    }
+    if (approval === "DRAFT" || approval === "NEEDS_CHANGES" || applicationState === "DRAFT" || applicationState === "NEEDS_CHANGES" || status === "APPLICATION_PREPARED") {
+      return done("application_draft", "Application draft. Not sent.", false);
+    }
+    var liveStatus = String(row.qualification_status || qual.qualification_status || "");
+    var band = String(row.discovery_band || qual.discovery_band || "");
+    if (status === "NOT_QUALIFIED" || outcome === "NOT_SUITABLE" || outcome === "NOT_QUALIFIED" || outcome === "PROHIBITED" || liveStatus === "NOT_QUALIFIED" || band === "REJECT" || eligibility === "fail_closed") {
+      return done("not_qualified", "Not qualified. Closed.", false);
+    }
+    var qualified = status === "QUALIFIED" || status === "OWNER_REVIEW" || outcome === "NOVA_CAN_PERFORM" || outcome === "QUALIFIED" || outcome === "NOVA_WITH_OWNER_REVIEW";
+    if (qualified && saved) return done("saved_lead", "Qualified saved lead. Not sent.", false);
+    if (qualified) return done("qualification", "Qualified. Not saved yet.", false);
+    if (!saved && liveStatus === "NEEDS_OWNER_REVIEW") {
+      return done("qualification", "Qualification needs owner review. Not saved yet.", false);
+    }
+    if (status === "DISCOVERED" && saved) return done("saved_lead", "Saved lead. Qualification pending. Not sent.", false);
+    if (status === "DISCOVERED" || row.title || row.opportunity_title) {
+      return done("discovery", "Discovered. Not yet a saved lead.", false);
+    }
+    return done("unconfirmed", "Stage not confirmed. Not sent.", false);
+  }
+  function funnelStageMarkup(row) {
+    row = row || {};
+    var stage = row.funnel_stage || "";
+    var label = row.funnel_stage_label || "";
+    var externalSend = row.external_send === true;
+    if (!stage || !label) {
+      var derived = deriveFunnelStage(row);
+      stage = derived.funnel_stage;
+      label = derived.funnel_stage_label;
+      externalSend = derived.external_send === true;
+    }
+    return "<div class=\"funnel-stage\" data-funnel-stage=\"" + escapeHtml(stage) + "\" data-external-send=\"" + (externalSend ? "true" : "false") + "\">" + escapeHtml(label) + "</div>";
+  }
   function liveJobItem(row) {
     var opp = row.opportunity || row;
     var qual = opp.live_qualification || {};
@@ -176,6 +236,7 @@
       (opp.why_searched || (opp.live_qualification && opp.live_qualification.why_searched) ? "<div class=\"muted\">Why searched: " + escapeHtml(opp.why_searched || opp.live_qualification.why_searched) + "</div>" : "") +
       (opp.search_family_label || (opp.live_qualification && opp.live_qualification.search_family_label) ? "<div class=\"muted\">Search family: " + escapeHtml(opp.search_family_label || opp.live_qualification.search_family_label) + "</div>" : "") +
       (fitSummary ? "<div class=\"muted\">Fit: " + escapeHtml(fitSummary) + "</div>" : "") +
+      funnelStageMarkup(opp) +
       eligibilityMarkup(opp) +
       (reviewReason ? "<div class=\"muted\">Owner review: " + escapeHtml(reviewReason) + "</div>" : "") +
       (url ? "<div><a href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Source URL</a></div>" : "") +
@@ -391,6 +452,7 @@
       (row.application_state ? " · " + escapeHtml(row.application_state) : "") +
       "</div>" +
       "<div>Why: " + escapeHtml(why || "Not stated") + "</div>" +
+      funnelStageMarkup(row) +
       eligibilityMarkup(row) +
       "<details class=\"opportunity-details\" id=\"" + escapeHtml(detailsId) + "\"><summary>View details</summary>" +
       "<div class=\"muted\">source " + escapeHtml(row.source || row.source_type) +
@@ -421,6 +483,7 @@
       "<strong>" + escapeHtml(row.opportunity_title || row.application_id) + "</strong>" +
       "<div class=\"muted\">" + escapeHtml(approvalLabel(row)) +
       " · " + escapeHtml(row.application_id) + "</div>" +
+      funnelStageMarkup(row) +
       eligibilityMarkup(row) +
       applicationActions(row) + "</div>";
   }

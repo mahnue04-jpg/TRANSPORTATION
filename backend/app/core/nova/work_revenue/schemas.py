@@ -355,6 +355,9 @@ class OpportunityOut(BaseModel):
     blocked_reason: str | None = None
     archive_reason: str | None = None
     qualification_reason: str | None = None
+    funnel_stage: str = ""
+    funnel_stage_label: str = ""
+    external_send: bool = False
 
 
 class ArchiveSimulatedOut(BaseModel):
@@ -546,6 +549,9 @@ class ApplicationOut(BaseModel):
     eligibility_decision: str = ""
     native_fluency_claimed: bool = False
     native_speaker_capability: bool = False
+    funnel_stage: str = ""
+    funnel_stage_label: str = ""
+    external_send: bool = False
 
 
 class TrackerOut(BaseModel):
