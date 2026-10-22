@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
+from app.core.nova.language.catalog import SUPPORTED, status
+from app.core.nova.language.guards import assess_operations_task
 from app.core.nova.router import require_nova_access
 from app.db.session import get_db
 from .models import NovaLanguagePreference
@@ -16,24 +18,21 @@ router = APIRouter(
     dependencies=[Depends(require_nova_access)],
 )
 
-# These five catalogs already exist in Workspace and Synapse. Other codes are refused
-# until those products have the copy. German is not in that shared set.
-SUPPORTED = ("en", "so", "ar", "fr", "es")
-
 
 class LanguageUpdate(BaseModel):
     screen_language: str = Field(min_length=2, max_length=8)
 
 
+class TaskGuardIn(BaseModel):
+    text: str = Field(default="", max_length=8000)
+    requested_language: str = Field(default="en", max_length=8)
+
+
 def _payload(code: str, persisted: bool) -> dict:
-    return {
-        "screen_language": code,
-        "persisted": persisted,
-        "workspace_fallback": False,
-        "voice_interpretation": False,
-        "bidirectional_text": False,
-        "supported": list(SUPPORTED),
-    }
+    body = status(code)
+    body["persisted"] = persisted
+    body["workspace_fallback"] = False
+    return body
 
 
 def _owned(db: Session, user: UserContext) -> NovaLanguagePreference | None:
@@ -86,3 +85,15 @@ def update_language(
     db.commit()
     response.headers["Cache-Control"] = "no-store"
     return _payload(code, True)
+
+
+@router.post("/task-guard")
+def task_guard(
+    payload: TaskGuardIn,
+    response: Response,
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Operations Agent language check. The task text is returned unchanged."""
+    del user
+    response.headers["Cache-Control"] = "no-store"
+    return assess_operations_task(payload.text, payload.requested_language)

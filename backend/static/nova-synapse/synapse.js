@@ -29,7 +29,23 @@
     if (room) { controlLabels(); participants(); }
     if (meeting) invitationExpiry();
   }
-  $('language').addEventListener('change', function () { lang = phrases[$('language').value] ? $('language').value : 'en'; try { localStorage.setItem('amicor_synapse_language', lang); localStorage.setItem('amicor_nova_screen_language', lang); } catch (_) {} if (window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(lang); translate(); });
+  $('language').addEventListener('change', function () {
+    var requested = $('language').value;
+    var planned = window.AmiCorLanguage && window.AmiCorLanguage.rollout && window.AmiCorLanguage.rollout.indexOf(requested) >= 0;
+    if (planned) {
+      try { localStorage.setItem('amicor_nova_screen_language', requested); } catch (_) {}
+      if (window.AmiCorLanguage.push) window.AmiCorLanguage.push(requested);
+      lang = 'en';
+      translate();
+      if (window.AmiCorLanguage.applyNotice) window.AmiCorLanguage.applyNotice($('language-rollout-notice'), requested);
+      return;
+    }
+    lang = phrases[requested] ? requested : 'en';
+    try { localStorage.setItem('amicor_synapse_language', lang); localStorage.setItem('amicor_nova_screen_language', lang); } catch (_) {}
+    if (window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(lang);
+    if (window.AmiCorLanguage && window.AmiCorLanguage.applyNotice) window.AmiCorLanguage.applyNotice($('language-rollout-notice'), '');
+    translate();
+  });
   function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
   function token() { return window.AmiCorSession && window.AmiCorSession.getAccessToken(); }
   async function api(path, method, data, guest) {

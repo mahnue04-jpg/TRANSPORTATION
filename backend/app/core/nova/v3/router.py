@@ -132,6 +132,7 @@ class ManualOpportunityIn(OrgIn):
 
 class ProposalIn(OrgIn):
     opportunity_id: str
+    requested_language: str | None = None
 
 
 class ApprovalIn(OrgIn):
@@ -670,7 +671,10 @@ def v3_opportunities(organization_id: str | None = None, user: UserContext = Dep
 def v3_proposal(payload: ProposalIn, user: UserContext = Depends(get_current_user_context)):
     try:
         row = get_kernel().prepare_proposal(
-            payload.opportunity_id, organization_id=_org(user, payload.organization_id), owner_user_id=user.user_id
+            payload.opportunity_id,
+            organization_id=_org(user, payload.organization_id),
+            owner_user_id=user.user_id,
+            requested_language=payload.requested_language or "",
         )
         return jsonable_encoder(row)
     except V3Error as exc:

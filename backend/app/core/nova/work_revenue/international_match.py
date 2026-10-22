@@ -1026,6 +1026,8 @@ def assess_international_match(job: dict[str, Any], facts: Any | None = None) ->
         support = "not_required"
     label = AI_ASSISTED_TRANSLATION_LABEL if support == "ai_assisted_translation" else ""
     view = build_owner_eligibility_view(text, facts, blockers)
+    from app.core.nova.language.guards import opportunity_language_plan
+
     return {
         "tested_language_codes": tested,
         "tested_languages": [
@@ -1047,4 +1049,5 @@ def assess_international_match(job: dict[str, Any], facts: Any | None = None) ->
         "eligibility_rules": view["eligibility_rules"],
         "eligibility_decision": view["eligibility_decision"],
         "blockers": blockers,
+        "language_rollout": opportunity_language_plan(text),
     }

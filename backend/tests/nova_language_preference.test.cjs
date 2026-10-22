@@ -77,5 +77,7 @@ test('Nova Today reuses the workspace catalog and states the unavailable capabil
   assert.match(home, /data-nova-i18n="Workspace"/);
   assert.match(home, /Live voice interpretation is not available/);
   assert.match(home, /Bidirectional conversation translation is not available yet/);
-  assert.doesNotMatch(home, /value="de"/);
+  assert.match(home, /data-rollout="planned"/);
+  assert.match(home, /Business delivery in those languages is not verified/);
+  assert.doesNotMatch(home, /Japanese is operational/);
 });

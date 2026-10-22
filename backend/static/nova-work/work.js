@@ -1457,5 +1457,37 @@
     if (session() && session().logout) await session().logout();
     window.location.href = "/nova/work";
   });
+  function showWorkflowLanguage(code) {
+    var api = window.AmiCorLanguage;
+    if (!api) return;
+    if (api.applyNotice) api.applyNotice($("language-rollout-notice"), code);
+    var copy = api.approvalCopy ? api.approvalCopy(code) : null;
+    var slot = $("workflow-approval-copy");
+    if (!slot || !copy) return;
+    slot.textContent = [
+      copy.approval_is_not_execution,
+      copy.original_preserved,
+      copy.unsupported_not_applied,
+      copy.legal_not_translated,
+      copy.client_approval_not_translated
+    ].join(" ");
+  }
+  var screenLanguage = $("screen-language");
+  if (screenLanguage) {
+    var savedLanguage = window.AmiCorLanguage && window.AmiCorLanguage.read ? window.AmiCorLanguage.read() : "";
+    if (savedLanguage) screenLanguage.value = savedLanguage;
+    screenLanguage.addEventListener("change", function () {
+      var code = screenLanguage.value;
+      if (window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(code);
+      showWorkflowLanguage(code);
+    });
+  }
+  showWorkflowLanguage(window.AmiCorLanguage && window.AmiCorLanguage.read ? window.AmiCorLanguage.read() : "en");
+  if (window.AmiCorLanguage && window.AmiCorLanguage.pull) {
+    window.AmiCorLanguage.pull().then(function (code) {
+      if (screenLanguage && code) screenLanguage.value = code;
+      showWorkflowLanguage(code);
+    }).catch(function () {});
+  }
   refresh().catch(function (err) { showBanner(err.message); });
 })();

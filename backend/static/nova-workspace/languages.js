@@ -560,7 +560,35 @@
     document.querySelectorAll('[data-nova-placeholder]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-nova-placeholder'))); });
     document.querySelectorAll('[data-nova-label]').forEach(function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-nova-label'))); });
   }
+  function rolloutCode(code) {
+    return window.AmiCorLanguage && window.AmiCorLanguage.rollout && window.AmiCorLanguage.rollout.indexOf(code) >= 0;
+  }
+  var rolloutPlan = 'Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.';
+  function showRollout(code) {
+    var el = document.getElementById('language-rollout-notice');
+    if (!el) return;
+    if (rolloutCode(code) && window.AmiCorLanguage && window.AmiCorLanguage.applyNotice) {
+      window.AmiCorLanguage.applyNotice(el, code);
+      return;
+    }
+    el.hidden = false;
+    el.textContent = rolloutPlan;
+  }
   function setLanguage(code, options) {
+    if (rolloutCode(code)) {
+      try {
+        localStorage.setItem('amicor_nova_screen_language', code);
+        localStorage.setItem('nova-workspace-screen-language', 'en');
+      } catch (_) {}
+      current = 'en';
+      var rolloutSelect = document.getElementById('screen-language');
+      if (rolloutSelect) rolloutSelect.value = code;
+      apply();
+      showRollout(code);
+      window.dispatchEvent(new Event('nova-language-change'));
+      if (!(options && options.localOnly) && window.AmiCorLanguage.push) window.AmiCorLanguage.push(code);
+      return;
+    }
     current = codes.indexOf(code) >= 0 ? code : 'en';
     try {
       localStorage.setItem('nova-workspace-screen-language', current);
@@ -569,12 +597,19 @@
     var select = document.getElementById('screen-language');
     if (select) select.value = current;
     apply();
+    showRollout('');
     window.dispatchEvent(new Event('nova-language-change'));
     if (!(options && options.localOnly) && window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(current);
   }
   window.NovaWorkspaceLanguage = { t: t, apply: apply, setLanguage: setLanguage, current: function () { return current; }, catalog: catalog };
-  try { current = localStorage.getItem('amicor_nova_screen_language') || localStorage.getItem('nova-workspace-screen-language') || 'en'; } catch (_) {}
+  var storedPreference = 'en';
+  try { storedPreference = localStorage.getItem('amicor_nova_screen_language') || localStorage.getItem('nova-workspace-screen-language') || 'en'; } catch (_) {}
+  current = storedPreference;
   if (codes.indexOf(current) < 0) current = 'en';
   document.getElementById('screen-language').value = current;
   apply();
+  if (rolloutCode(storedPreference)) {
+    document.getElementById('screen-language').value = storedPreference;
+    showRollout(storedPreference);
+  }
 })();

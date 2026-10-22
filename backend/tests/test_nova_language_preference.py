@@ -33,7 +33,7 @@ def test_account_preference_is_kept_for_the_same_account_and_hidden_from_another
 def test_language_change_does_not_accept_another_account_or_an_unsupported_code(db):
     caller = user(role="staff")
     with pytest.raises(HTTPException) as unsupported:
-        language.update_language(language.LanguageUpdate(screen_language="de"), type("R", (), {"headers": {}})(), caller, db)
+        language.update_language(language.LanguageUpdate(screen_language="zh"), type("R", (), {"headers": {}})(), caller, db)
     assert unsupported.value.status_code == 422
     assert caller.role == "staff"
     assert db.get(NovaLanguagePreference, caller.user_id) is None
@@ -48,4 +48,4 @@ def test_language_change_does_not_accept_another_account_or_an_unsupported_code(
 def test_language_routes_require_nova_access():
     assert language.router.dependencies
     paths = {route.path for route in language.router.routes}
-    assert paths == {"/api/nova/language"}
+    assert paths == {"/api/nova/language", "/api/nova/language/task-guard"}

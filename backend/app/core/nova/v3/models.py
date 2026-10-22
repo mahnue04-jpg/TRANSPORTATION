@@ -149,6 +149,7 @@ class Proposal:
     status: str = "APPLICATION_PREPARED"
     externally_submitted: bool = False
     mock_submitted: bool = False
+    language_guard: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
