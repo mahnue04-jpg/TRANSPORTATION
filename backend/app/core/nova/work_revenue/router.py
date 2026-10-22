@@ -12,6 +12,7 @@ from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_cont
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.signup.service import customer_access
+from app.core.nova.work_revenue import first_client_pipeline
 from app.core.nova.work_revenue import service
 from app.core.nova.work_revenue import submission
 from app.core.nova.work_revenue.flags import engine_guardrails, live_discovery_enabled
@@ -135,6 +136,97 @@ def _raise(exc: Exception) -> None:
     if isinstance(exc, service.NovaWorkError):
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     raise exc
+
+
+@router.get("/first-client/board")
+def first_client_board(
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner board for saved matches. Does not search, send, or mark anything paid."""
+    if organization_id and organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
+    try:
+        return first_client_pipeline.build_board(
+            db,
+            organization_id=_resolve_org(user, organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/first-client/applications/{application_id}/submission-attempt")
+def first_client_submission_attempt(
+    application_id: str,
+    payload: first_client_pipeline.SubmissionAttemptRequest | None = None,
+    organization_id: str | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Store a consented mock receipt. This route never marks a real send.
+
+    Missing auth stays BLOCKED. Missing consent does not call the transport.
+    """
+    body = payload or first_client_pipeline.SubmissionAttemptRequest()
+    requested_org = organization_id or body.organization_id
+    if requested_org and requested_org != user.organization_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
+    try:
+        return first_client_pipeline.record_submission_attempt(
+            db,
+            application_id,
+            organization_id=_resolve_org(user, requested_org),
+            user=user,
+            mock_receipt_consent=bool(body.mock_receipt_consent),
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/first-client/applications/{application_id}/follow-up")
+def first_client_follow_up(
+    application_id: str,
+    payload: first_client_pipeline.FollowUpRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Schedule a follow-up only after a stored send receipt. Does not send it."""
+    if payload.organization_id and payload.organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
+    try:
+        return first_client_pipeline.schedule_follow_up(
+            db,
+            application_id,
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
+
+
+@router.post("/first-client/applications/{application_id}/response")
+def first_client_response(
+    application_id: str,
+    payload: first_client_pipeline.ResponseRecordRequest,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Record an employer acknowledgement or delivery failure. Does not send a message."""
+    if payload.organization_id and payload.organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
+    try:
+        return first_client_pipeline.record_response(
+            db,
+            application_id,
+            payload,
+            organization_id=_resolve_org(user, payload.organization_id),
+            user=user,
+        )
+    except service.NovaWorkError as exc:
+        _raise(exc)
 
 
 @router.get("/dashboard", response_model=DashboardOut)

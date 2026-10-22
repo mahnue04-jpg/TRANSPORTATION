@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from app.core.nova.v3.capability_catalog import capability_search_queries
-from app.core.nova.v3.live_qualification import qualify_and_rank_live_jobs, qualify_live_job
+from app.core.nova.v3.live_qualification import (
+    partition_by_qualification,
+    qualify_and_rank_live_jobs,
+    qualify_live_job,
+)
 from app.core.nova.work_revenue.capability_classification import (
     CANNOT_PERFORM,
     CAN_PERFORM,
@@ -313,8 +317,39 @@ def test_bookkeeping_family_rejects_unrelated_ai_trainer() -> None:
         }],
     )
     assert ranked[0]["discovery_band"] == "REJECT"
+    assert ranked[0]["qualification_status"] == "NOT_QUALIFIED"
     assert ranked[0]["live_qualification"]["qualification_status"] == "NOT_QUALIFIED"
     assert ranked[0]["live_qualification"]["auto_prepare_allowed"] is False
+    assert "planned_family_duty_mismatch" in ranked[0]["live_qualification"]["blockers"]
+
+
+def test_rejected_discovery_row_is_not_left_in_owner_review() -> None:
+    ranked = qualify_and_rank_live_jobs(
+        "bookkeeping support contractor remote",
+        [{
+            "provider_id": "remotive",
+            "title": "Freelance Copywriter",
+            "company_name": "Fixture Co",
+            "description": "Freelance copywriter for marketing pages. Remote project. No application fee.",
+            "source_url": "https://example.invalid/freelance-copywriter",
+            "remote_status": "remote",
+            "job_type": "freelance",
+            "compensation_text": "$20k-$35k",
+            "search_family": "bookkeeping_support",
+            "record_class": "FIXTURE",
+        }],
+    )
+    row = ranked[0]
+    qual = row["live_qualification"]
+    assert row["discovery_band"] == "REJECT"
+    assert row["qualification_status"] == "NOT_QUALIFIED"
+    assert qual["qualification_status"] == "NOT_QUALIFIED"
+    assert "planned_family_duty_mismatch" in qual["blockers"]
+    assert "capability family" in str(qual["owner_review_reason"]).lower()
+    buckets = partition_by_qualification(ranked)
+    assert buckets["NOT_QUALIFIED"]
+    assert not buckets["NEEDS_OWNER_REVIEW"]
+    assert not buckets["QUALIFIED"]
 
 
 def test_bookkeeping_family_keeps_actual_bookkeeping_duties() -> None:

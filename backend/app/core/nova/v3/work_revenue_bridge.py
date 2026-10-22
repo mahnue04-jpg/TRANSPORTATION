@@ -6,6 +6,7 @@ Approval remains separate from submission.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -35,6 +36,22 @@ def _amount_from_job(job: dict[str, Any]) -> float | None:
         return float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+
+
+def source_eligibility_reasons(job: dict[str, Any]) -> list[str]:
+    """Owner-facing reasons already computed for this source listing.
+
+    Empty when the listing has none. This does not invent a reason.
+    """
+    live = job.get("live_qualification") if isinstance(job.get("live_qualification"), dict) else {}
+    seen: list[str] = []
+    for item in list(job.get("eligibility_explanations") or []) + list(live.get("eligibility_explanations") or []):
+        text = str(item).strip()
+        if text and text not in seen:
+            seen.append(text[:500])
+        if len(seen) >= 8:
+            return seen
+    return seen
 
 
 def _response_deadline(job: dict[str, Any]):
@@ -153,7 +170,7 @@ def persist_live_job(
             tags=[
                 "live_discovery",
                 provider_id[:60],
-                str(job.get("qualification_status") or "unclassified")[:60],
+                str(_live_status(job) or "unclassified")[:60],
                 *(
                     [f"search_family:{str(job.get('search_family')).strip()[:80]}"]
                     if str(job.get("search_family") or "").strip()
@@ -206,6 +223,31 @@ def persist_live_job(
         organization_id=organization_id,
         user=user,
     )
+    stored = {}
+    try:
+        stored = json.loads(work_row.qualification_json or "{}")
+    except json.JSONDecodeError:
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    fetched_at = str(job.get("fetched_at") or "").strip()
+    if fetched_at:
+        stored["fetched_at"] = fetched_at
+    if source_url:
+        stored["source_url"] = source_url
+    stored["provenance_provider"] = provider_id
+    stored["source_provider_id"] = provider_id
+    reasons = source_eligibility_reasons(job)
+    if reasons:
+        stored["source_eligibility_reasons"] = reasons
+        stored["eligibility_explanations"] = reasons
+    live = job.get("live_qualification") if isinstance(job.get("live_qualification"), dict) else {}
+    decision = str(job.get("eligibility_decision") or live.get("eligibility_decision") or "").strip()
+    if decision:
+        stored["eligibility_decision"] = decision[:80]
+    work_row.qualification_json = json.dumps(stored)
+    db.commit()
+    db.refresh(work_row)
 
     application = work_service.get_application_for_opportunity(
         db,
