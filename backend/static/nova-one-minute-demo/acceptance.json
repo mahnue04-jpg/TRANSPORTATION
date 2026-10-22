@@ -1,0 +1,66 @@
+{
+  "schema": "amicor.studio.release_acceptance.v1",
+  "assessed_at": "2026-10-12",
+  "deadline": "2026-10-14",
+  "subject": "CIGO AI Automator photorealistic sitting talking presenter",
+  "commit": "21c7345eb39c562d88c90e3b183ce4b06a9118d4",
+  "file": "amicor-nova-60-second-full-body.mp4",
+  "assessment_ready": false,
+  "paid_provider_called_this_pass": false,
+  "originals_replaced": false,
+  "blocking_gaps": [
+    "not_vertical_9_16",
+    "not_sitting",
+    "not_lip_synced",
+    "motion_repeats_about_every_5_04s",
+    "commercial_license_not_established"
+  ],
+  "measured": {
+    "container": "mp4",
+    "duration_seconds": 59.875,
+    "audio_duration_seconds": 59.856,
+    "width": 1280,
+    "height": 948,
+    "display": "landscape",
+    "vertical_9_16": false,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "audio_sample_rate_hz": 24000,
+    "audio_channels": 1,
+    "mean_volume_db": -28.7,
+    "max_volume_db": -7.8,
+    "faststart": true,
+    "captions_burned_in": true,
+    "sidecar_captions": ["srt", "vtt"],
+    "loop_period_seconds": 5.04,
+    "presenter_pose": "standing_full_body",
+    "watermark_visible_in_sampled_frames": false,
+    "chrome_playback": {
+      "played": true,
+      "muted": false,
+      "ready_state": 4,
+      "duration_seconds": 59.875,
+      "video_width": 1280,
+      "video_height": 948,
+      "current_time_after_2s": 1.93,
+      "audio_decoded_bytes_after_2s": 23454,
+      "mobile_viewport": "390x844",
+      "mobile_rendered_css_px": "390x289",
+      "burned_in_caption_css_px_at_390_wide": 8.5,
+      "caption_at_22_5s": "The Operations Agent turns business requests into clear"
+    }
+  },
+  "sources": {
+    "presenter": "/media/nova-creative/nova-da25e10f80924d6ca99e62a04c9eb346.mp4",
+    "narration": "/media/nova-creative/nova-bb9d59169aef4733ba8c07d1b0d418f6.mp3",
+    "assembly": "local ffmpeg via assemble_full_body_demo; no new generation",
+    "motion_provider": "prior fal-ai/kling-video image-to-video, about 5 seconds",
+    "voice_provider": "prior OpenAI TTS voice coral"
+  },
+  "licensing": {
+    "new_license_granted": false,
+    "ip_agreement_signed": false,
+    "commercial_use_cleared": false,
+    "notes": "FFmpeg only muxed existing files. Fal/Kling terms govern the motion plate and OpenAI terms govern the Coral narration. This pass does not create a commercial license, does not sign an IP agreement, and does not claim the file is watermark-free for submission."
+  }
+}
