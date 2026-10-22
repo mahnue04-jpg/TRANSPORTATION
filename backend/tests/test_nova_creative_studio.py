@@ -1832,3 +1832,50 @@ def test_project_media_reset_includes_presenter_video() -> None:
     service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
     assert '"presenter_video"' in service
     assert 'removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}' in service
+
+
+def test_studio_staging_registration_login_same_email_regression(client: TestClient):
+    """Synthetic end-to-end auth probe; no owner login, credentials, paid video, or deployment.
+
+    A 201 registration must immediately permit login with precisely the same
+    account and password; 409 on a repeated registration is not enough to
+    establish that authentication works.
+    """
+    from uuid import uuid4
+
+    address = f"studio-auth-probe-{uuid4().hex}@example.invalid"
+    password = "TemporaryStudioProbe!63"
+
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": address.upper(),
+            "password": password,
+            "role": "staff",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+
+    duplicated = client.post(
+        "/api/auth/register",
+        json={"email": address, "password": password, "role": "staff"},
+    )
+    assert duplicated.status_code == 409, duplicated.text
+
+    signed_in = client.post(
+        "/api/auth/login",
+        json={"email": address.upper(), "password": password},
+    )
+    assert signed_in.status_code == 200, (
+        "Freshly registered Studio test account could not log in: "
+        + signed_in.text
+    )
+    token = signed_in.json()["access_token"]
+    whoami = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert whoami.status_code == 200, whoami.text
+
+    rejected = client.post(
+        "/api/auth/login",
+        json={"email": address, "password": "IncorrectSyntheticProbe!64"},
+    )
+    assert rejected.status_code == 401
