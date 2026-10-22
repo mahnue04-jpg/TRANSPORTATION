@@ -527,6 +527,20 @@
     "أوقف صوت Nova",
     "Arrêter la voix Nova",
     "Detener voz de Nova"
+  ],
+  [
+    "Live voice interpretation is not available.",
+    "Turjumidda codka tooska ah lama hayo.",
+    "الترجمة الفورية للصوت غير متاحة.",
+    "L’interprétation vocale en direct n’est pas disponible.",
+    "La interpretación de voz en vivo no está disponible."
+  ],
+  [
+    "Bidirectional conversation translation is not available yet.",
+    "Turjumidda wada hadalka labada dhinac weli lama hayo.",
+    "ترجمة المحادثة في الاتجاهين غير متاحة بعد.",
+    "La traduction bidirectionnelle des conversations n’est pas encore disponible.",
+    "La traducción bidireccional de conversaciones aún no está disponible."
   ]
 ]);
   var codes = ['en', 'so', 'ar', 'fr', 'es'];
@@ -546,14 +560,20 @@
     document.querySelectorAll('[data-nova-placeholder]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-nova-placeholder'))); });
     document.querySelectorAll('[data-nova-label]').forEach(function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-nova-label'))); });
   }
-  function setLanguage(code) {
+  function setLanguage(code, options) {
     current = codes.indexOf(code) >= 0 ? code : 'en';
-    try { localStorage.setItem('nova-workspace-screen-language', current); } catch (_) {}
+    try {
+      localStorage.setItem('nova-workspace-screen-language', current);
+      localStorage.setItem('amicor_nova_screen_language', current);
+    } catch (_) {}
+    var select = document.getElementById('screen-language');
+    if (select) select.value = current;
     apply();
     window.dispatchEvent(new Event('nova-language-change'));
+    if (!(options && options.localOnly) && window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(current);
   }
   window.NovaWorkspaceLanguage = { t: t, apply: apply, setLanguage: setLanguage, current: function () { return current; }, catalog: catalog };
-  try { current = localStorage.getItem('nova-workspace-screen-language') || 'en'; } catch (_) {}
+  try { current = localStorage.getItem('amicor_nova_screen_language') || localStorage.getItem('nova-workspace-screen-language') || 'en'; } catch (_) {}
   if (codes.indexOf(current) < 0) current = 'en';
   document.getElementById('screen-language').value = current;
   apply();

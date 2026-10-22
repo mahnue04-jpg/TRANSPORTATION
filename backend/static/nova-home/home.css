@@ -21,6 +21,22 @@ html, body {
   font-family: "Segoe UI", Tahoma, sans-serif;
 }
 
+.language-card {
+  margin: 18px 0 8px;
+  display: grid;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.language-card select {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--nova-line);
+  background: var(--nova-surface);
+  color: var(--nova-text);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

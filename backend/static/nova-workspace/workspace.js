@@ -196,6 +196,13 @@
   }
 
   if (session() && session().restore) session().restore();
+  if (window.AmiCorLanguage && window.AmiCorLanguage.pull && window.NovaWorkspaceLanguage) {
+    window.AmiCorLanguage.pull().then(function (code) {
+      if (code && window.AmiCorLanguage.workspace.indexOf(code) >= 0 && window.NovaWorkspaceLanguage.current() !== code) {
+        window.NovaWorkspaceLanguage.setLanguage(code, {localOnly: true});
+      }
+    }).catch(function () {});
+  }
   refresh().catch(function (err) { showBanner(err.message); });
   function releaseMicrophone() {
     if (recordingStream) recordingStream.getTracks().forEach(function (track) { track.stop(); });

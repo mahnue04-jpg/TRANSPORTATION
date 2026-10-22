@@ -177,6 +177,19 @@
   window.setTimeout(function () { $("boot-screen").classList.add("is-done"); }, 700);
 
   if (session() && session().restore) session().restore();
+  var screenLanguage = $("screen-language");
+  if (screenLanguage) {
+    screenLanguage.addEventListener("change", function () {
+      if (window.NovaWorkspaceLanguage) window.NovaWorkspaceLanguage.setLanguage(screenLanguage.value);
+    });
+  }
+  if (window.AmiCorLanguage && window.AmiCorLanguage.pull && window.NovaWorkspaceLanguage) {
+    window.AmiCorLanguage.pull().then(function (code) {
+      if (code && window.AmiCorLanguage.workspace.indexOf(code) >= 0 && window.NovaWorkspaceLanguage.current() !== code) {
+        window.NovaWorkspaceLanguage.setLanguage(code, {localOnly: true});
+      }
+    }).catch(function () {});
+  }
   refreshBrain();
   if (new URLSearchParams(window.location.search).get("signin") === "1") {
     $("login-form").classList.remove("hidden");

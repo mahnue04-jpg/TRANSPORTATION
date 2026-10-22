@@ -18,7 +18,7 @@
   phrases.en.joined = 'You are connected.'; phrases.so.joined = 'Waad ku xiran tahay.'; phrases.ar.joined = 'أنت متصل.'; phrases.fr.joined = 'Vous êtes connecté.'; phrases.es.joined = 'Estás conectado.';
   var invitedMeeting = null;
   var lang = 'en', configured = false, room = null, meeting = null, previewStream = null, connecting = false;
-  try { lang = localStorage.getItem('amicor_synapse_language') || 'en'; } catch (_) {}
+  try { lang = localStorage.getItem('amicor_nova_screen_language') || localStorage.getItem('amicor_synapse_language') || 'en'; } catch (_) {}
   if (!phrases[lang]) lang = 'en';
   var t = function (key) { return phrases[lang][key] || phrases.en[key] || key; };
   function translate() {
@@ -29,7 +29,7 @@
     if (room) { controlLabels(); participants(); }
     if (meeting) invitationExpiry();
   }
-  $('language').addEventListener('change', function () { lang = $('language').value; try { localStorage.setItem('amicor_synapse_language', lang); } catch (_) {} translate(); });
+  $('language').addEventListener('change', function () { lang = phrases[$('language').value] ? $('language').value : 'en'; try { localStorage.setItem('amicor_synapse_language', lang); localStorage.setItem('amicor_nova_screen_language', lang); } catch (_) {} if (window.AmiCorLanguage && window.AmiCorLanguage.push) window.AmiCorLanguage.push(lang); translate(); });
   function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
   function token() { return window.AmiCorSession && window.AmiCorSession.getAccessToken(); }
   async function api(path, method, data, guest) {
@@ -124,5 +124,5 @@
   $('end').addEventListener('click', async function () { if (!meeting || !meeting.host) return; $('end').disabled = true; try { await api('/meetings/'+meeting.meeting_id+'/end','POST'); if (room) await room.disconnect(); room = null; controls(false); $('invitation-controls').hidden = true; notice(t('ended')); await refreshMeetings(); } catch (err) { notice(err.message); } finally { $('end').disabled = false; } });
   $('chat-form').addEventListener('submit', async function (event) { event.preventDefault(); if (!room) return; var text = $('chat-input').value.trim(); if (!text) return; try { await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({text:text})),{reliable:true}); addChat(room.localParticipant.name || 'You',text); $('chat-input').value = ''; } catch (_) { notice(t('failed')); } });
   window.addEventListener('pagehide', function () { stopPreview(); if (room) room.disconnect(); });
-  (async function () { if (window.AmiCorSession && window.AmiCorSession.restore) await window.AmiCorSession.restore(); var result = await api('/status',null,null,true); configured = result.configured; translate(); $('create').disabled = !configured || !token(); $('guest-join').disabled = !configured; $('signin').hidden = !!token(); await refreshMeetings(); })().catch(function (err) { configured = false; $('create').disabled = true; $('guest-join').disabled = true; notice(err.message); });
+  (async function () { if (window.AmiCorSession && window.AmiCorSession.restore) await window.AmiCorSession.restore(); if (window.AmiCorLanguage && window.AmiCorLanguage.pull) { try { var accountLang = await window.AmiCorLanguage.pull(); if (accountLang && phrases[accountLang]) lang = accountLang; } catch (_) {} } var result = await api('/status',null,null,true); configured = result.configured; translate(); $('create').disabled = !configured || !token(); $('guest-join').disabled = !configured; $('signin').hidden = !!token(); await refreshMeetings(); })().catch(function (err) { configured = false; $('create').disabled = true; $('guest-join').disabled = true; notice(err.message); });
 }());
