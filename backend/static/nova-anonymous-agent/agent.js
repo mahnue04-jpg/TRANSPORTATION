@@ -69,10 +69,14 @@
       return;
     }
     var result=classifyDemo(request);
+    var requested=(document.getElementById("task-language")||{}).value||"en";
+    var guard=window.AmiCorLanguage&&window.AmiCorLanguage.guardTask?window.AmiCorLanguage.guardTask(request,requested):{output_text:request,translation_applied:false,notice:"",approval_copy:{original_preserved:"Original language is preserved.",legal_not_translated:"Legal terms were not translated.",client_approval_not_translated:"Client approval text was not translated.",unsupported_not_applied:"Unsupported translation was not applied."}};
+    if(window.AmiCorLanguage&&window.AmiCorLanguage.applyNotice) window.AmiCorLanguage.applyNotice(document.getElementById("language-rollout-notice"),requested);
     demoText("demo-intake",compact(name,80)+" · "+compact(business,100)+" · Source: workflow example · Captured: "+new Date().toLocaleTimeString()+" · Request present.");
-    demoText("demo-classification",result.category+" · Priority: "+result.priority+" · Summary: "+compact(request,220));
+    demoText("demo-classification",result.category+" · Priority: "+result.priority+" · Summary: "+compact(guard.output_text,220));
     demoText("demo-record","Sample status: New → Prepared for review. Owner: Operations queue. Next action: "+result.nextAction+". No external system is changed in this sandbox.");
     demoText("demo-followup","Draft: “Hi "+compact(name,60)+", thanks for reaching out. We received your request and are organizing the next steps. We’ll confirm any item that requires an owner decision before action is taken.”");
+    demoText("demo-language-guard",[guard.notice,guard.approval_copy.original_preserved,guard.approval_copy.unsupported_not_applied,guard.legal_terms_present?guard.approval_copy.legal_not_translated:"",guard.client_approval_present?guard.approval_copy.client_approval_not_translated:""].filter(Boolean).join(" "));
     demoText("demo-escalation","Nova would route "+result.escalation+" to the authorized owner instead of deciding or acting on it automatically.");
     demoText("demo-report","Sample report: 1 request captured, 1 item prepared for review, 1 draft prepared, and "+(result.urgent||result.decision?"1 owner-review flag":"0 owner-review flags")+" to the daily operations summary.");
     var output=document.getElementById("demo-output");
@@ -124,6 +128,12 @@
       return;
     }
     setStatus("Submitting your work request…",true);
+    var taskText=document.getElementById("message").value.trim();
+    var taskLanguage=(document.getElementById("task-language")||{}).value||"en";
+    var taskGuard=window.AmiCorLanguage&&window.AmiCorLanguage.guardTask?window.AmiCorLanguage.guardTask(taskText,taskLanguage):null;
+    if(taskGuard&&taskGuard.unsupported_translation_refused&&window.AmiCorLanguage.applyNotice){
+      window.AmiCorLanguage.applyNotice(document.getElementById("language-rollout-notice"),taskLanguage);
+    }
     var payload={
       lead_type:"anonymous_operations",
       organization_name:document.getElementById("organization").value.trim()||null,
@@ -133,7 +143,7 @@
       preferred_contact_method:document.getElementById("contact-method").value,
       subject:"Nova Anonymous Operations Agent work request",
       service_plan:plan,
-      message:document.getElementById("message").value.trim(),
+      message:taskText,
       consent:document.getElementById("consent").checked,
       source_path:"/nova/anonymous-agent",
       lead_source:"nova_anonymous_operations",

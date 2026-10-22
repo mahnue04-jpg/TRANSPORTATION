@@ -445,7 +445,14 @@ class NovaV3Kernel:
             "native_speaker_capability": False,
         }
 
-    def prepare_proposal(self, opportunity_id: str, *, organization_id: str, owner_user_id: str) -> Proposal:
+    def prepare_proposal(
+        self,
+        opportunity_id: str,
+        *,
+        organization_id: str,
+        owner_user_id: str,
+        requested_language: str = "",
+    ) -> Proposal:
         opp = self.get_opportunity(opportunity_id, organization_id=organization_id, owner_user_id=owner_user_id)
         if opp.status in {"REJECTED", "EXPIRED", "CANCELLED", "ARCHIVED"} or opp.workflow_state in {"REJECTED", "EXPIRED", "CANCELLED", "ARCHIVED"}:
             raise V3Error("INVALID_STATE", "rejected or closed opportunity cannot receive a proposal")
@@ -473,6 +480,13 @@ class NovaV3Kernel:
             "Nova did not submit this. Missing facts remain [OWNER INPUT REQUIRED]."
             f"{eligibility_note}"
         )
+        from app.core.nova.language.guards import guard_proposal
+
+        listing = " ".join(
+            part for part in (opp.title, opp.description, opp.company_name) if part
+        )
+        guarded = guard_proposal(listing, body, requested_language)
+        body = guarded.pop("body")
         proposal = Proposal(
             proposal_id=self._id("V3APP"),
             organization_id=organization_id,
@@ -480,6 +494,7 @@ class NovaV3Kernel:
             opportunity_id=opportunity_id,
             body=body,
             status="APPLICATION_PREPARED",
+            language_guard=guarded,
         )
         self.proposals[proposal.proposal_id] = proposal
         opp.status = "APPLICATION_PREPARED"

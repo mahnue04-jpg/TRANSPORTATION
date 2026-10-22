@@ -4,14 +4,14 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const root = __dirname + '/../static/nova-workspace/';
 
-function localeContext(saved = 'en') {
+function localeContext(saved = 'en', keys) {
   const attributes = {};
   const storage = {};
   const label = {textContent: '', getAttribute: () => 'Continue work'};
   const original = {textContent: 'Issa · PCA 15 minutes'};
   const select = {value: ''};
   const context = {
-    Event, localStorage: {getItem: () => saved, setItem: (k,v) => storage[k] = v},
+    Event, localStorage: {getItem: (key) => keys ? (Object.prototype.hasOwnProperty.call(keys, key) ? keys[key] : null) : saved, setItem: (k,v) => storage[k] = v},
     window: {dispatchEvent() {}},
     document: {documentElement: {setAttribute: (k,v) => attributes[k] = v},
       getElementById: () => select,
@@ -31,10 +31,26 @@ test('five screen languages, Arabic direction, persisted preference and untouche
     assert.equal(state.attributes.lang, code);
     assert.equal(state.attributes.dir, 'ltr');
     assert.equal(state.storage['nova-workspace-screen-language'], code);
+    assert.equal(state.storage['amicor_nova_screen_language'], code);
     assert.equal(state.original.textContent, 'Issa · PCA 15 minutes');
   }
   state.api.setLanguage('ar');
   assert.equal(state.api.t('Selected project: {title}', {title:'Easy Care PCA'}), 'المشروع المحدد: Easy Care PCA');
+});
+
+test('shared account language overrides the older workspace key', () => {
+  const chosen = localeContext('en', {'amicor_nova_screen_language':'fr','nova-workspace-screen-language':'es'});
+  assert.equal(chosen.attributes.lang, 'fr');
+  assert.equal(chosen.attributes.dir, 'ltr');
+  assert.equal(chosen.label.textContent, 'Continuer le travail');
+  assert.deepEqual(chosen.storage, {});
+  const unknown = localeContext('en', {'amicor_nova_screen_language':'de','nova-workspace-screen-language':'fr'});
+  assert.equal(unknown.attributes.lang, 'en');
+  assert.equal(unknown.label.textContent, 'Continue work');
+  assert.deepEqual(unknown.storage, {});
+  assert.equal(unknown.api.t('Live voice interpretation is not available.'), 'Live voice interpretation is not available.');
+  unknown.api.setLanguage('fr');
+  assert.equal(unknown.api.t('Bidirectional conversation translation is not available yet.'), 'La traduction bidirectionnelle des conversations n’est pas encore disponible.');
 });
 
 test('every bound static interface label has all five translations', () => {

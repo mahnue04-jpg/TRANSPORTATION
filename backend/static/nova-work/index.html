@@ -219,6 +219,21 @@
       <article class="card" data-panel="applications"><h2>Applications</h2><div id="app-list">None.</div></article>
       <article class="card" data-panel="applications owner-actions"><h2>Owner Approvals</h2>
         <p class="hint">Approve means APPROVED FOR FUTURE SUBMISSION only. Nova will not send an application.</p>
+        <label for="screen-language">Screen language</label>
+        <select id="screen-language" aria-label="Screen language">
+          <option value="en">English</option>
+          <option value="so">Af-Soomaali</option>
+          <option value="ar">العربية</option>
+          <option value="fr">Français</option>
+          <option value="es">Español</option>
+          <option value="ja" data-rollout="planned">日本語</option>
+          <option value="ko" data-rollout="planned">한국어</option>
+          <option value="el" data-rollout="planned">Ελληνικά</option>
+          <option value="ru" data-rollout="planned">Русский</option>
+          <option value="de" data-rollout="planned">Deutsch</option>
+        </select>
+        <p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
+        <p id="workflow-approval-copy" class="hint"></p>
         <div id="approval-list">None.</div>
       </article>
       <article class="card" data-panel="opportunities"><h2>Follow-Ups</h2><div id="follow-list">None.</div></article>
@@ -398,6 +413,7 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-language/preference.js?v=20261022.2"></script>
   <script src="/static/nova-work/work.js"></script>
 </body>
 </html>

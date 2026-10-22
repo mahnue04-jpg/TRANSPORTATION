@@ -80,6 +80,21 @@
           <input id="demo-business" maxlength="160" value="Northstar Home Services" />
         </label>
       </div>
+      <label>Task language
+        <select id="task-language" aria-label="Task language">
+          <option value="en">English</option>
+          <option value="so">Af-Soomaali</option>
+          <option value="ar">العربية</option>
+          <option value="fr">Français</option>
+          <option value="es">Español</option>
+          <option value="ja" data-rollout="planned">日本語</option>
+          <option value="ko" data-rollout="planned">한국어</option>
+          <option value="el" data-rollout="planned">Ελληνικά</option>
+          <option value="ru" data-rollout="planned">Русский</option>
+          <option value="de" data-rollout="planned">Deutsch</option>
+        </select>
+      </label>
+      <p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
       <label>Incoming request
         <textarea id="demo-request" aria-describedby="demo-summary" rows="5" maxlength="1200">We need help organizing customer inquiries, following up on estimates that have not received responses, and making sure urgent requests get to the owner.</textarea>
       </label>
@@ -95,6 +110,7 @@
         <div class="demo-step"><span>4</span><div><strong>Follow-up draft</strong><p id="demo-followup"></p></div></div>
         <div class="demo-step"><span>5</span><div><strong>Human escalation</strong><p id="demo-escalation"></p></div></div>
         <div class="demo-step"><span>6</span><div><strong>Daily report impact</strong><p id="demo-report"></p></div></div>
+        <div class="demo-step"><span>7</span><div><strong>Language guard</strong><p id="demo-language-guard"></p></div></div>
       </div>
       <p class="hint demo-disclosure">Demo results are generated from the text entered above using a safe local ruleset for illustration. Client deployments can connect approved tools and AI providers only after scope, access, and approval rules are configured.</p>
     </section>
@@ -156,6 +172,7 @@
     </section>
   </main>
   <script src="/static/ux/sessionManager.js"></script>
-  <script src="/static/nova-anonymous-agent/agent.js?v=guided-demo-20261005"></script>
+  <script src="/static/nova-language/preference.js?v=20261022.2"></script>
+  <script src="/static/nova-anonymous-agent/agent.js?v=20261022.2"></script>
 </body>
 </html>

@@ -78,6 +78,7 @@ from app import logging_utils                     # type: ignore
 from app.core.nova import router as nova_router, actions_router as nova_actions_router  # type: ignore
 from app.core.nova.freight.router import router as nova_freight_router  # type: ignore
 from app.core.nova.synapse.router import router as nova_synapse_router
+from app.core.nova.language.router import router as nova_language_router
 from app.core.nova.workspace.router import router as nova_workspace_router  # type: ignore
 from app.core.nova.communications.router import router as nova_communications_router  # type: ignore
 from app.core.nova.government.router import router as nova_government_router  # type: ignore
@@ -484,6 +485,7 @@ app.include_router(assistant_execution_router)
 app.include_router(nova_freight_router)
 app.include_router(nova_workspace_router)
 app.include_router(nova_synapse_router)
+app.include_router(nova_language_router)
 app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
 app.include_router(nova_business_router)

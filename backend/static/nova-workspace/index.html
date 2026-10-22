@@ -37,7 +37,8 @@
 <main class="ws-main">
 <section class="card language-card">
 <label data-nova-i18n="Screen language" for="screen-language">Screen language</label>
-<select aria-label="Screen language" data-nova-label="Screen language" id="screen-language"><option value="en">English</option><option value="so">Af-Soomaali</option><option value="ar">العربية</option><option value="fr">Français</option><option value="es">Español</option></select>
+<select aria-label="Screen language" data-nova-label="Screen language" id="screen-language"><option value="en">English</option><option value="so">Af-Soomaali</option><option value="ar">العربية</option><option value="fr">Français</option><option value="es">Español</option><option value="ja" data-rollout="planned">日本語</option><option value="ko" data-rollout="planned">한국어</option><option value="el" data-rollout="planned">Ελληνικά</option><option value="ru" data-rollout="planned">Русский</option><option value="de" data-rollout="planned">Deutsch</option></select>
+<p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
 <p class="hint" data-nova-i18n="Change the Workspace interface and default answer language. Saved documents keep their original wording.">Change the Workspace interface and default answer language. Saved documents keep their original wording.</p>
 </section>
 <div class="banner hidden" id="banner"></div>
@@ -154,7 +155,8 @@
 </main>
 <script src="/static/ux/sessionManager.js"></script>
 <script src="/static/ux/humanVoiceEngine.js?v=20261010.1"></script>
-<script src="/static/nova-workspace/languages.js?v=20261010.1"></script>
+<script src="/static/nova-language/preference.js?v=20261022.2"></script>
+<script src="/static/nova-workspace/languages.js?v=20261022.2"></script>
 <script src="/static/nova-workspace/speech.js?v=20261010.1"></script>
 <script src="/static/nova-workspace/workspace.js?v=20261010.1"></script>
 <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>

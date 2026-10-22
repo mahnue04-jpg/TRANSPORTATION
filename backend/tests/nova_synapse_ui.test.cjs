@@ -4,8 +4,9 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../static/nova-synapse/synapse.js'),'utf8');
-function setup(configured,guest=false){
- const nodes=new Map(),requests=[],connections=[];
+function setup(configured,guest=false,stored=null){
+ const nodes=new Map(),requests=[],connections=[],memory={};
+ if(stored) memory.amicor_nova_screen_language=stored;
  const element=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,style:{},children:[],handlers:{},appendChild(x){this.children.push(x);},replaceChildren(){this.children=[];},setAttribute(k,v){this[k]=v;},removeAttribute(k){delete this[k];},addEventListener(k,fn){this.handlers[k]=fn;},scrollIntoView(){}});return nodes.get(id);};
  class Room{constructor(){this.state='connected';this.handlers={};this.remoteParticipants=new Map();this.localParticipant={isMicrophoneEnabled:false,isCameraEnabled:false,isScreenShareEnabled:false,async setMicrophoneEnabled(value){this.isMicrophoneEnabled=value;},async setCameraEnabled(value){this.isCameraEnabled=value;}};}on(k,fn){this.handlers[k]=fn;}async connect(url,token){connections.push({url,token});}async disconnect(){}}
  const document={documentElement:{},querySelectorAll(){return [];},getElementById:element,createElement:()=>element('new')};
@@ -22,8 +23,8 @@ function setup(configured,guest=false){
  };
  const window={AmiCorSession:{getAccessToken(){return guest?null:'session';},async restore(){}},addEventListener(){}};
  const location={origin:'https://amicor.example.com',hash:guest?'#room=meeting&invite=private-secret':''};
- vm.runInNewContext(source,{document,window,location,localStorage:{getItem(){return null;},setItem(){}},navigator:{},URLSearchParams,TextEncoder,TextDecoder,fetch,LivekitClient:{Room,RoomEvent:{}}});
- return {element,requests,connections,document};
+ vm.runInNewContext(source,{document,window,location,localStorage:{getItem(key){return Object.prototype.hasOwnProperty.call(memory,key)?memory[key]:null;},setItem(key,value){memory[key]=value;}},navigator:{},URLSearchParams,TextEncoder,TextDecoder,fetch,LivekitClient:{Room,RoomEvent:{}}});
+ return {element,requests,connections,document,memory};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('unconfigured service disables creation and joining without claiming a working call',async()=>{const s=setup(false);await settle();assert.equal(s.element('create').disabled,true);assert.equal(s.element('guest-join').disabled,true);assert.match(s.element('connection').textContent,/not connected/);assert.equal(s.connections.length,0);});
@@ -55,4 +56,18 @@ test('media status follows toggles and remains correct after switching language'
  assert.match(s.element('room-status').textContent,/الميكروفون مفتوح.*الكاميرا مفتوحة/);
  assert.equal(s.element('rename-form').hidden,true);
  assert.equal(s.element('share').hidden,true);
+});
+
+test('shared account language is applied and a meeting language change writes the same key',async()=>{
+ const french=setup(true,false,'fr');await settle();
+ assert.equal(french.document.documentElement.lang,'fr');
+ assert.equal(french.document.documentElement.dir,'ltr');
+ assert.match(french.element('connection').textContent,/Service vidéo configuré/);
+ french.element('language').value='es';
+ french.element('language').handlers.change();
+ assert.equal(french.memory.amicor_nova_screen_language,'es');
+ assert.equal(french.memory.amicor_synapse_language,'es');
+ const unknown=setup(true,false,'de');await settle();
+ assert.equal(unknown.document.documentElement.lang,'en');
+ assert.match(unknown.element('connection').textContent,/Video service configured/);
 });
