@@ -471,7 +471,7 @@ def test_create_project_ux_static_contract(client: TestClient):
     assert "createBtn.disabled = true" in js
     assert "createBtn.disabled = false" in js
     assert "await refreshProjects()" in js
-    assert "Session expired. Sign in again. (401)" in js
+    assert "Your login session expired (401). Sign in again." in js
     assert "Access denied. (403)" in js
     assert "Validation failed. (422)" in js or "(422)" in js
     assert 'res.status >= 500' in js
@@ -563,7 +563,7 @@ def test_generate_actions_ux_static_contract(client: TestClient):
     assert "await refreshProjects()" in js
     assert "renderOutput(body)" in js
     assert "Not found. Check the selected project. (404)" in js
-    assert "Session expired. Sign in again. (401)" in js
+    assert "Your login session expired (401). Sign in again." in js
     css = (ROOT / "static" / "nova-creative" / "creative.css").read_text(encoding="utf-8")
     assert "button:disabled" in css
     work = client.get("/nova/work")
