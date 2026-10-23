@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -1368,6 +1368,22 @@ def click_destinations(
     return get_service().click_destinations(platform, verify=verify)
 
 
+@router.post("/projects/{project_id}/click-destination")
+def save_click_destination(
+    project_id: str,
+    platform: str = "TikTok",
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Probe the first-party Nova URL and store the result. verified is computed here."""
+    _require_owner(user)
+    try:
+        return get_service(db).record_click_destination(user.user_id, project_id, platform)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.get("/projects/{project_id}/jobs/{job_id}")
 def project_job(
     project_id: str,
@@ -1388,17 +1404,40 @@ def project_job(
 def download_asset_file(
     project_id: str,
     asset_id: str,
+    request: Request,
+    part: str = Query(default="media"),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Signed-in owner download. A different account cannot read the file."""
+    """Signed-in owner download. The bearer token is never accepted from the URL."""
+    leaked = (
+        request.query_params.get("token")
+        or request.query_params.get("access_token")
+        or request.query_params.get("authorization")
+    )
+    if leaked:
+        raise HTTPException(
+            status_code=400,
+            detail="Send the bearer token in the Authorization header, not the URL.",
+        )
     _require_owner(user)
     try:
-        path, media_type, filename = get_service(db).open_asset_file(user.user_id, project_id, asset_id)
+        path, media_type, filename = get_service(db).open_asset_file(
+            user.user_id,
+            project_id,
+            asset_id,
+            part=part,
+        )
     except CreativeStudioError as exc:
         _raise(exc)
         raise
-    return FileResponse(path, media_type=media_type, filename=filename)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="attachment",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 class WalkingPresenterIn(BaseModel):

@@ -96,6 +96,7 @@ def test_export_holds_green_until_license_audio_captions_and_click_through_pass(
     assert social["readiness"]["overall"] == "AMBER"
     assert social["readiness"]["public_publish"] == "HOLD"
     assert social["readiness"]["lip_sync_presenter"] == "RED"
+    assert social["commercial_complete"] is False
 
 
 @pytest.mark.skipif(shutil.which("espeak-ng") is None and shutil.which("espeak") is None, reason="local narration engine is not installed")
@@ -127,6 +128,12 @@ def test_offline_thirty_second_montage_is_downloadable_and_not_a_paid_render(tmp
     assert meta["paid_provider_charges"] is False
     assert meta["lip_sync"] is False
     assert meta["presenter"] is False
+    assert meta["presenter_used"] is False
+    assert meta["quality_state"] == "PREVIEW_ONLY"
+    assert meta["pipeline"] == "offline_title_card_fallback"
+    assert meta["commercial_complete"] is False
+    assert rendered["pipeline"] == "offline_title_card_fallback"
+    assert rendered["commercial_complete"] is False
     assert meta["publish_ready"] is False
     assert meta["captions_burned_in"] is True
     assert meta["audio_present"] is True

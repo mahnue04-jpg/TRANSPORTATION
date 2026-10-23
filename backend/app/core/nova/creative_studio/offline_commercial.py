@@ -278,6 +278,10 @@ def render_offline_montage(
     has_audio = _has_audio_stream(output_mp4)
     return {
         "render_mode": "offline_montage_not_lipsync",
+        "quality_state": "PREVIEW_ONLY",
+        "presenter_used": False,
+        "pipeline": "offline_title_card_fallback",
+        "commercial_complete": False,
         "duration_seconds": round(duration, 3),
         "planned_seconds": round(planned, 3),
         "width": width,
