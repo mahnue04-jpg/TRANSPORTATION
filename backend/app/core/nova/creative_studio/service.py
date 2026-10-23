@@ -704,6 +704,13 @@ class CreativeStudioService(ShortDramaMixin):
             except (TypeError, ValueError):
                 duration_seconds = None
 
+            # The 30s offline montage is PREVIEW_ONLY on purpose. The headshot
+            # cleanup must not delete it or its file.
+            render_mode = str(meta.get("render_mode") or "")
+            pipeline = str(meta.get("pipeline") or "")
+            if render_mode == "offline_montage_not_lipsync" or pipeline == "offline_title_card_fallback":
+                continue
+
             is_old_headshot = asset.kind == "presenter_video" and presenter_mode in {"", "head", "headshot"}
             is_preview_only = quality_state in {"PREVIEW_ONLY", "DEMO_READY_WITH_PROVIDER_WATERMARK"}
             is_short_generated_clip = duration_seconds is not None and duration_seconds <= 8.5

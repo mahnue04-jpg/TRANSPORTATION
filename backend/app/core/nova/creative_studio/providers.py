@@ -54,19 +54,76 @@ def resolve_studio_voice(voice: str | None, *, presenter: bool) -> str:
     return selected
 
 
-def _creative_media_root_and_prefix() -> tuple[Path, str]:
+_MEDIA_PREFIX = "/media/nova-creative"
+_EPHEMERAL_PREFIX = "/static/generated/nova-creative"
+
+
+def _ephemeral_media_root() -> Path:
+    return Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
+
+
+def choose_creative_media_root(
+    *,
+    configured: str,
+    onboarding_docs_exists: bool,
+    data_dir_exists: bool,
+    ephemeral: Path,
+    public_prefix: str,
+) -> tuple[Path, str]:
+    """Pick the directory new Studio media is written to.
+
+    An explicit NOVA_CREATIVE_MEDIA_DIR wins. Production keeps
+    /data/onboarding_docs/nova_creative_media when that disk folder exists.
+    A staging disk mounted at /data, without that folder, uses
+    /data/nova_creative_media so a deploy does not leave the file inside
+    the container image. The container static tree is only the last resort.
+    """
+    selected = str(configured or "").strip()
+    if selected:
+        return Path(selected), public_prefix
+    if onboarding_docs_exists:
+        return Path("/data/onboarding_docs/nova_creative_media"), _MEDIA_PREFIX
+    if data_dir_exists:
+        return Path("/data/nova_creative_media"), _MEDIA_PREFIX
+    return ephemeral, _EPHEMERAL_PREFIX
+
+
+def creative_media_search_roots() -> list[Path]:
+    """Every directory that may already hold a saved Studio file."""
+    roots: list[Path] = []
     configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
     if configured:
-        root = Path(configured)
-        prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or "/media/nova-creative").rstrip("/")
-        return root, prefix
+        roots.append(Path(configured))
+    roots.append(Path("/data/onboarding_docs/nova_creative_media"))
+    roots.append(Path("/data/nova_creative_media"))
+    roots.append(_ephemeral_media_root())
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
 
-    persistent_parent = Path("/data/onboarding_docs")
-    if persistent_parent.exists():
-        return persistent_parent / "nova_creative_media", "/media/nova-creative"
 
-    root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
-    return root, "/static/generated/nova-creative"
+def _creative_media_root_and_prefix() -> tuple[Path, str]:
+    public_prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or _MEDIA_PREFIX).rstrip("/")
+    return choose_creative_media_root(
+        configured=str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or ""),
+        onboarding_docs_exists=Path("/data/onboarding_docs").is_dir(),
+        data_dir_exists=Path("/data").is_dir(),
+        ephemeral=_ephemeral_media_root(),
+        public_prefix=public_prefix,
+    )
+
+
+def _media_filename(raw: str) -> str | None:
+    name = raw.rsplit("/", 1)[-1].strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        return None
+    return name
 
 
 def _resolve_creative_media_url(value: str | None) -> Path | None:
@@ -74,12 +131,21 @@ def _resolve_creative_media_url(value: str | None) -> Path | None:
     if not raw:
         return None
     root, prefix = _creative_media_root_and_prefix()
-    if raw.startswith(prefix + "/"):
-        return root / raw.rsplit("/", 1)[-1]
-    if raw.startswith("/static/generated/nova-creative/"):
-        backend_root = Path(__file__).resolve().parents[4]
-        return backend_root / raw.lstrip("/")
-    return None
+    filename = None
+    for known in (prefix, _MEDIA_PREFIX, _EPHEMERAL_PREFIX):
+        if known and raw.startswith(known + "/"):
+            filename = _media_filename(raw)
+            break
+    if filename is None:
+        return None
+    primary = root / filename
+    if primary.is_file():
+        return primary
+    for candidate in creative_media_search_roots():
+        path = candidate / filename
+        if path.is_file():
+            return path
+    return primary
 
 AVAILABLE = "AVAILABLE"
 CONFIG_REQUIRED = "CONFIG_REQUIRED"
