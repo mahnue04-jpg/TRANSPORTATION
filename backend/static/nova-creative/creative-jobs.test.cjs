@@ -128,3 +128,239 @@ test('sign-in uses one unauthenticated request and surfaces the login error with
   assert.equal(calls.length, 1);
   assert.equal(calls[0].options.headers.Authorization, undefined);
 });
+
+function response({status, contentType, disposition, bytes, jsonBody}) {
+  const ok = status >= 200 && status < 300;
+  return {
+    status,
+    ok,
+    headers: {get: (name) => {
+      const key = String(name || "").toLowerCase();
+      if (key === "content-type") return contentType || "";
+      if (key === "content-disposition") return disposition || "";
+      return "";
+    }},
+    blob: async () => new Blob([bytes || new Uint8Array()], {type: (contentType || "application/octet-stream").split(";")[0]}),
+    json: async () => jsonBody || {},
+  };
+}
+
+test('asset download sends the current bearer, keeps the token out of the URL, and revokes the blob', async () => {
+  const helper = source.slice(source.indexOf('  function assertDownloadUrlHasNoToken('), source.indexOf('  async function downloadBrandedImage('));
+  const calls = [];
+  let current = "owner-token";
+  let created = 0;
+  let revoked = 0;
+  let signedIn = true;
+  const link = {click() { link.clicked = true; }, remove() { link.removed = true; }};
+  const ctx = vm.createContext({
+    token: () => current,
+    setToken: (value) => { current = value || ""; },
+    setSignedIn: (on) => { signedIn = !!on; },
+    session: () => null,
+    fetch: async (url, options) => { calls.push({url, options}); return response({
+      status: 200,
+      contentType: "video/mp4",
+      disposition: 'attachment; filename="nova-offline-montage.mp4"',
+      bytes: Buffer.from("ftyp-playable"),
+    }); },
+    URL: {
+      createObjectURL: () => { created += 1; return "blob:nova-mp4"; },
+      revokeObjectURL: (url) => { revoked += 1; assert.equal(url, "blob:nova-mp4"); },
+    },
+    document: {
+      createElement: () => link,
+      body: {appendChild(node) { node.parentNode = true; }},
+    },
+    setTimeout: (fn) => { fn(); },
+    Blob,
+  });
+  vm.runInContext(helper, ctx);
+  const fileUrl = "/api/nova/creative/projects/cproj_293e7b8547d4/assets/asset-1/file";
+  const saved = await ctx.downloadProtectedAsset(fileUrl, "fallback.mp4");
+  assert.equal(saved.fileName, "nova-offline-montage.mp4");
+  assert.equal(saved.mime, "video/mp4");
+  assert.equal(calls[0].url, fileUrl);
+  assert.equal(calls[0].options.headers.Authorization, "Bearer owner-token");
+  assert.equal(calls[0].url.includes("token="), false);
+  assert.equal(link.download, "nova-offline-montage.mp4");
+  assert.equal(created, 1);
+  assert.equal(revoked, 1);
+  assert.equal(signedIn, true);
+
+  current = "refreshed-token";
+  calls.length = 0;
+  await ctx.downloadProtectedAsset(fileUrl + "?part=captions", "nova-captions.srt");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer refreshed-token");
+  assert.equal(calls[0].url.endsWith("?part=captions"), true);
+  assert.equal(calls[0].url.includes("access_token"), false);
+});
+
+test('a revoked session and a JSON error do not save file.json', async () => {
+  const helper = source.slice(source.indexOf('  function assertDownloadUrlHasNoToken('), source.indexOf('  async function downloadBrandedImage('));
+  const calls = [];
+  let current = "revoked-token";
+  let created = 0;
+  const ctx = vm.createContext({
+    token: () => current,
+    setToken: (value) => { current = value || ""; },
+    setSignedIn: () => {},
+    session: () => ({clear() { ctx.cleared = true; }}),
+    fetch: async (url, options) => {
+      calls.push({url, authorization: options.headers.Authorization});
+      if (calls.length === 1) return response({status: 401, contentType: "application/json", jsonBody: {detail: "Authentication required"}});
+      if (String(url).includes("forbidden")) return response({status: 403, contentType: "application/json", jsonBody: {detail: "Access denied"}});
+      return response({status: 404, contentType: "application/json", jsonBody: {detail: "Asset not found"}});
+    },
+    URL: {createObjectURL: () => { created += 1; return "blob:should-not"; }, revokeObjectURL: () => {}},
+    document: {createElement: () => { throw new Error("no anchor for an error"); }, body: {appendChild() {}}},
+    setTimeout: (fn) => fn(),
+    Blob,
+  });
+  vm.runInContext(helper, ctx);
+  await assert.rejects(ctx.downloadProtectedAsset("/api/nova/creative/projects/p/assets/a/file", "x.mp4"), /Session expired/);
+  assert.equal(current, "");
+  assert.equal(ctx.cleared, true);
+  assert.equal(created, 0);
+  current = "other-tenant";
+  await assert.rejects(ctx.downloadProtectedAsset("/api/nova/creative/projects/p/assets/a/file?forbidden=1", "x.mp4"), /403/);
+  await assert.rejects(ctx.downloadProtectedAsset("/api/nova/creative/projects/p/assets/a/file", "x.mp4"), /404/);
+  await assert.rejects(
+    ctx.downloadProtectedAsset("/api/nova/creative/projects/p/assets/a/file?access_token=secret", "x.mp4"),
+    /Refusing to put an access token/
+  );
+  assert.equal(calls.some(call => String(call.url).includes("access_token")), false);
+});
+
+test('offline montage readiness stays preview-only and does not false-green the click URL', async () => {
+  const helpers = source.slice(source.indexOf('  function presenterMarkedPublishReady('), source.indexOf('  function memoryHeadroomNotice('))
+    + source.slice(source.indexOf('  function clickVerified('), source.indexOf('  function assetFailureHtml('))
+    + source.slice(source.indexOf('  function latestAsset('), source.indexOf('  var dramaLoadedProject'));
+  const elements = {"production-readiness": {innerHTML: "", querySelectorAll: () => []}};
+  const ctx = vm.createContext({
+    $: (id) => elements[id],
+    activeProjectId: "cproj_293e7b8547d4",
+    escapeHtml: (value) => String(value == null ? "" : value),
+    document: {querySelectorAll: () => []},
+    showBanner: () => {},
+    api: async () => ({}),
+  });
+  vm.runInContext(helpers, ctx);
+  await ctx.renderProductionReadiness({
+    project: {project_type: "short_video", platform: "TikTok"},
+    brand: null,
+    assets: [{
+      id: "vid",
+      kind: "video",
+      status: "GENERATED",
+      url: "/media/offline.mp4",
+      metadata: {
+        final_promo: true,
+        render_mode: "offline_montage_not_lipsync",
+        pipeline: "offline_title_card_fallback",
+        quality_state: "PREVIEW_ONLY",
+        presenter_used: false,
+        presenter: false,
+        lip_sync: false,
+        commercial_complete: true,
+        license_status: "AMBER",
+        narration: {engine: "espeak-ng", license: "GPL-3.0-or-later"},
+        click_destination: {
+          website_field_url: "https://getamicor.com/nova-today/?utm_source=tiktok&utm_medium=profile_website&utm_campaign=nova_30s_commercial",
+          classification: "first_party_nova",
+          verified: true,
+        },
+      },
+    }],
+  });
+  const html = elements["production-readiness"].innerHTML;
+  assert.match(html, /NEEDS WORK/);
+  assert.match(html, /PREVIEW_ONLY title cards/);
+  assert.match(html, /NOT USED/);
+  assert.match(html, /not yet verified/);
+  assert.match(html, /Select or save brand/);
+  assert.doesNotMatch(html, /COMMERCIAL COMPLETE/);
+
+  await ctx.renderProductionReadiness({
+    project: {project_type: "short_video"},
+    brand: {id: "brand-1", business_name: "AMICOR Nova"},
+    assets: [{
+      id: "vid",
+      kind: "video",
+      status: "GENERATED",
+      url: "/media/offline.mp4",
+      metadata: {
+        final_promo: true,
+        render_mode: "offline_montage_not_lipsync",
+        quality_state: "PREVIEW_ONLY",
+        presenter_used: false,
+        click_destination: {
+          website_field_url: "https://www.tiktok.com/",
+          classification: "platform_home",
+          verified: true,
+          http_status: 200,
+        },
+      },
+    }],
+  });
+  const diverted = elements["production-readiness"].innerHTML;
+  function item(html, label) {
+    const marker = "<strong>" + label + "</strong>";
+    const at = html.indexOf(marker);
+    assert.notEqual(at, -1, label);
+    return html.slice(Math.max(0, at - 220), at);
+  }
+  assert.match(item(diverted, "Brand profile"), /readiness-item ready/);
+  assert.match(item(diverted, "Nova click destination"), /readiness-item missing/);
+  assert.match(item(html, "Commercial complete"), /readiness-item missing/);
+  assert.match(item(html, "Nova click destination"), /readiness-item missing/);
+  assert.match(item(html, "Brand profile"), /readiness-item missing/);
+});
+
+test('offline asset markup downloads through a button and never puts the file API in an href', async () => {
+  const escape = source.slice(source.indexOf('  function escapeHtml('), source.indexOf('  function loadImage('));
+  const memoryNotice = source.slice(source.indexOf('  function memoryHeadroomNotice('), source.indexOf('  function clickVerified('));
+  const failure = source.slice(source.indexOf('  function assetFailureHtml('), source.indexOf('  function assertDownloadUrlHasNoToken('));
+  const labels = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('  async function waitForScene('));
+  const end = labels.indexOf('\n  var clearLegacyPreviews');
+  assert.ok(end > 0, "refreshAssets slice marker missing");
+  const elements = {"asset-list": {innerHTML: ""}};
+  const ctx = vm.createContext({
+    activeProjectId: "cproj_293e7b8547d4",
+    $: (id) => elements[id],
+    refreshDrama: () => {},
+    renderProductionReadiness: () => {},
+    document: {querySelectorAll: () => []},
+    api: async () => ({
+      project: {title: "Validation", metadata: {production_settings: {}}},
+      assets: [{
+        id: "asset-1",
+        title: "Offline 30s",
+        kind: "video",
+        status: "GENERATED",
+        url: "/media/nova-creative/offline.mp4",
+        content: "title cards",
+        metadata: {
+          render_mode: "offline_montage_not_lipsync",
+          pipeline: "offline_title_card_fallback",
+          quality_state: "PREVIEW_ONLY",
+          presenter_used: false,
+          license_status: "AMBER",
+          subtitle_url: "/media/nova-creative/offline.srt",
+          narration: {commercial_use: "GPL review only"},
+        },
+      }],
+    }),
+  });
+  vm.runInContext(escape + memoryNotice + failure + labels.slice(0, end), ctx);
+  await ctx.refreshAssets();
+  const html = elements["asset-list"].innerHTML;
+  assert.match(html, /asset-auth-download/);
+  assert.match(html, /Download offline montage/);
+  assert.match(html, /Download captions/);
+  assert.match(html, /part=captions/);
+  assert.match(html, /PREVIEW_ONLY/);
+  assert.match(html, /Presenter NOT USED/);
+  assert.doesNotMatch(html, /href="\/api\/nova\/creative\/[^"]+\/file/);
+  assert.doesNotMatch(html, /access_token|Bearer /);
+});

@@ -116,6 +116,35 @@
     if (text.toLowerCase().indexOf("insufficient server memory headroom") === -1) return "";
     return "<p class=\"hint memory-notice\">Nova paused extra video processing because server memory was tight. Your existing presenter video is still available to preview and download.</p>";
   }
+  function clickVerified(meta) {
+    var click = meta && meta.website_field_url ? meta : (meta && meta.click_destination);
+    if (!click || click.verified !== true) return false;
+    if (click.classification !== "first_party_nova") return false;
+    var status = Number(click.http_status);
+    if (!(status >= 200 && status < 300)) return false;
+    var url = String(click.website_field_url || "");
+    return url.indexOf("https://getamicor.com/nova-today/") === 0 &&
+      url.indexOf("utm_campaign=nova_30s_commercial") >= 0;
+  }
+  function commercialComplete(meta) {
+    meta = meta || {};
+    if (meta.commercial_complete !== true) return false;
+    if (String(meta.quality_state || "").toUpperCase() === "PREVIEW_ONLY") return false;
+    if (meta.pipeline !== "presenter_30s") return false;
+    if (meta.presenter_used !== true || meta.presenter === false) return false;
+    if (meta.lip_sync !== true) return false;
+    if (meta.illustrated_fallback === true || meta.commercial_slideshow === true) return false;
+    if (meta.render_mode === "offline_montage_not_lipsync") return false;
+    if (meta.true_ai_motion_synthesis !== true && meta.real_motion !== true) return false;
+    if (String(meta.visual_mode || "") === "illustrated_fallback" || String(meta.visual_mode || "") === "title_cards") return false;
+    var narration = meta.narration || {};
+    var engine = String(narration.engine || meta.narration_engine || "").toLowerCase();
+    if (engine.indexOf("espeak") >= 0) return false;
+    if (String(narration.license || meta.voice_license || "").toUpperCase().indexOf("GPL") >= 0) return false;
+    if (String(meta.license_status || "").toUpperCase() !== "GREEN") return false;
+    if (meta.provider_clearance !== true) return false;
+    return true;
+  }
   function assetFailureHtml(row) {
     if (String(row.status || "").toUpperCase() !== "ERROR") return "";
     var provider = (row.metadata || {}).provider_result || {};
@@ -126,6 +155,75 @@
       .replace(/\b(?:sk-|key_)[A-Za-z0-9_-]+/g, "[redacted]");
     return "<p class=\"error asset-failure\"><strong>Generation failed:</strong> " +
       escapeHtml(message.slice(0, 2000)) + "</p>";
+  }
+  function assertDownloadUrlHasNoToken(url) {
+    var text = String(url || "");
+    if (/[?&](access_token|token|authorization)=/i.test(text) || /bearer\s+[A-Za-z0-9._~+/-]+=*/i.test(text)) {
+      throw new Error("Refusing to put an access token in the download URL.");
+    }
+  }
+  function filenameFromDisposition(header, fallback) {
+    var value = String(header || "");
+    var star = /filename\*=UTF-8''([^;]+)/i.exec(value);
+    if (star) {
+      try { return decodeURIComponent(star[1].trim()); } catch (err) { return star[1].trim(); }
+    }
+    var plain = /filename="([^"]+)"/i.exec(value) || /filename=([^;]+)/i.exec(value);
+    if (plain) return plain[1].trim().replace(/^"|"$/g, "");
+    return fallback || "download";
+  }
+  async function downloadProtectedAsset(assetUrl, fallbackName) {
+    assertDownloadUrlHasNoToken(assetUrl);
+    var headers = {};
+    var shared = session();
+    if (shared && typeof shared.ensureReady === "function") {
+      try { await shared.ensureReady(); } catch (err) { /* a failed refresh still uses the current bearer below */ }
+    }
+    var currentToken = token();
+    if (currentToken) headers.Authorization = "Bearer " + currentToken;
+    var res;
+    if (shared && typeof shared.authFetch === "function") {
+      res = await shared.authFetch(assetUrl, { method: "GET", headers: headers });
+    } else {
+      res = await fetch(assetUrl, { method: "GET", headers: headers });
+    }
+    var contentType = "";
+    if (res.headers && typeof res.headers.get === "function") {
+      contentType = String(res.headers.get("content-type") || "");
+    }
+    if (res.status === 401) {
+      setToken("");
+      if (shared && typeof shared.clear === "function") shared.clear("studio_download_unauthorized");
+      setSignedIn(false);
+      throw new Error("Session expired. Sign in again. (401)");
+    }
+    if (res.status === 403) throw new Error("Access denied. (403)");
+    if (res.status === 404) throw new Error("Not found. Check the selected project. (404)");
+    if (!res.ok || contentType.indexOf("application/json") >= 0 || contentType.indexOf("text/html") >= 0) {
+      var errBody = null;
+      try { errBody = await res.json(); } catch (err) { errBody = null; }
+      var detail = errBody && typeof errBody.detail === "string" ? errBody.detail : "";
+      if (!detail && errBody && errBody.detail && errBody.detail.message) detail = String(errBody.detail.message);
+      throw new Error(detail || ("Download failed. (" + res.status + ")"));
+    }
+    var blob = await res.blob();
+    if (!blob || !blob.size) throw new Error("Download was empty.");
+    var mime = (contentType.split(";")[0] || blob.type || "application/octet-stream").trim();
+    if (mime && blob.type !== mime) blob = new Blob([blob], { type: mime });
+    var disposition = res.headers && typeof res.headers.get === "function" ? res.headers.get("content-disposition") : "";
+    var fileName = filenameFromDisposition(disposition, fallbackName || "download");
+    var objectUrl = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1500);
+    }
+    return { fileName: fileName, mime: mime };
   }
   async function downloadBrandedImage(imageUrl, fileStem) {
     var artwork = await loadImage(imageUrl);
@@ -770,7 +868,12 @@
       presenterMeta.presenter_mode === "full_body" &&
       presenterMeta.captions_burned_in === true
     );
-    var presenterReady = !presenter || presenterMarkedPublishReady(presenterMeta) || presenterDemoAccepted || bodyLipSyncReady || bodyCaptionedReady;
+    var offlinePreview = !!(
+      finalVideoMeta.render_mode === "offline_montage_not_lipsync" ||
+      finalVideoMeta.pipeline === "offline_title_card_fallback" ||
+      (String(finalVideoMeta.quality_state || "").toUpperCase() === "PREVIEW_ONLY" && finalVideoMeta.presenter_used === false)
+    );
+    var presenterReady = !!(presenter && (presenterMarkedPublishReady(presenterMeta) || presenterDemoAccepted || bodyLipSyncReady || bodyCaptionedReady));
     var presenterState = !presenter ? "NOT USED" :
       (presenterMarkedPublishReady(presenterMeta) ? "PUBLISH_READY" :
         (bodyCaptionedReady ? "FULL_BODY_CAPTIONED_READY" :
@@ -789,25 +892,35 @@
       finalVideoMeta.subtitle_url ||
       finalVideoMeta.captions_sidecar_ready
     );
-    var commercialCandidate = !!(finalVideo && finalVideo.url && finalIsMp4 && !finalIsSlideshow && finalCaptionsOk);
+    var commercialCandidate = !!(finalVideo && finalVideo.url && finalIsMp4 && !finalIsSlideshow && finalCaptionsOk && !offlinePreview);
+    var clickReady = clickVerified(finalVideoMeta);
+    var clickUrl = finalVideoMeta.click_destination && finalVideoMeta.click_destination.website_field_url;
+    var commerciallyComplete = commercialComplete(finalVideoMeta);
     var checks = [
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
       { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
-      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build Final Promo or the offline 30s montage" : (finalIsSlideshow ? "Blocked: still slideshow" : (finalVideoMeta.render_mode === "offline_montage_not_lipsync" ? "Offline montage for review. Not lip sync." : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))), action: "build-final-promo", actionLabel: "Build final promo" },
-      { label: "Nova click destination", ok: !!(finalVideoMeta.click_destination && finalVideoMeta.click_destination.verified === true), note: (finalVideoMeta.click_destination && finalVideoMeta.click_destination.website_field_url) ? String(finalVideoMeta.click_destination.website_field_url) + (finalVideoMeta.click_destination.verified ? " verified" : " not yet verified") : "Prepare the profile Website link. Captions are not clickable.", action: "prepare-nova-links", actionLabel: "Prepare Nova links" },
+      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build the 30s presenter pipeline. The offline montage is preview only." : (offlinePreview ? "PREVIEW_ONLY title cards. Presenter NOT USED." : (finalIsSlideshow ? "Blocked: still slideshow" : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))), action: (offlinePreview || !finalVideo || !finalVideo.url) ? "build-walking-commercial" : "build-final-promo", actionLabel: (offlinePreview || !finalVideo || !finalVideo.url) ? "Build 30s presenter" : "Build Final Promo" },
+      { label: "Commercial complete", ok: commerciallyComplete, note: commerciallyComplete ? "Real motion, lip-sync, clean narration, and provider clearance are on file." : "Held until real motion, lip-sync, clean narration, and provider/license clearance.", action: "build-walking-commercial", actionLabel: "Build 30s presenter" },
+      { label: "Nova click destination", ok: clickReady, note: clickUrl ? (String(clickUrl) + (clickReady ? " verified" : " not yet verified")) : "Prepare the profile Website link. Captions are not clickable.", action: "prepare-nova-links", actionLabel: "Prepare Nova links" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
       { label: "Voice audio", ok: !!(audio && audio.url), note: audio && audio.url ? "Ready" : "Generate voice", action: "generate-voice", actionLabel: "Generate voice" },
       { label: "Caption copy", ok: !!(caption && String(caption.content || "").trim()) || finalCaptionsOk, note: (caption || finalCaptionsOk) ? "Ready" : "Generate caption", action: "generate-caption", actionLabel: "Generate caption" },
       { label: "Brand profile", ok: !!brand, note: brand ? (brand.business_name || "Ready") : "Select or save brand", action: "brand-profile", actionLabel: "Set up brand" }
     ];
 
-    var allReady = checks.every(function (item) { return item.ok; });
+    var reviewChecks = checks.filter(function (item) { return item.label !== "Commercial complete"; });
+    var allReady = reviewChecks.every(function (item) { return item.ok; });
+    var summaryLabel = !allReady ? "NEEDS WORK" : (commerciallyComplete ? "COMMERCIAL COMPLETE" : "READY FOR OWNER REVIEW");
+    var summaryNote = !allReady
+      ? "Complete the missing or preview-only items before final publishing."
+      : (commerciallyComplete
+        ? "Commercial gates passed. Publishing still requires a separate owner action."
+        : "Core production assets are ready for owner review. Commercial complete stays held.");
     var header = "<div class=\"readiness-summary " + (allReady ? "ready" : "needs-work") + "\">" +
-      "<strong>" + (allReady ? "READY FOR OWNER REVIEW" : "NEEDS WORK") + "</strong>" +
-      "<span>" + (allReady ? "Core production assets are ready. Publishing still requires owner action." :
-        "Complete the missing or preview-only items before final publishing.") + "</span></div>";
+      "<strong>" + summaryLabel + "</strong>" +
+      "<span>" + summaryNote + "</span></div>";
 
-    var next = checks.find(function (item) { return !item.ok; });
+    var next = reviewChecks.find(function (item) { return !item.ok; });
     if (next) {
       header += "<div class=\"next-action-card\"><strong>Next action</strong><span>" +
         escapeHtml(next.actionLabel) + "</span><button type=\"button\" class=\"secondary readiness-action\" data-next-action=\"" +
@@ -855,6 +968,7 @@
           return;
         }
         if (action === "build-final-promo") targetButton = $("build-final-promo");
+        else if (action === "build-walking-commercial") targetButton = $("build-walking-commercial-30s");
         else if (action === "prepare-nova-links") targetButton = $("prepare-nova-links");
         else if (action === "preview-talking-presenter") targetButton = $("preview-talking-presenter");
         else if (action === "generate-image") targetButton = document.querySelector('[data-action="image"]');
@@ -1054,23 +1168,37 @@
         var isPresenterVideo = row.kind === "presenter_video";
         var isBodyMotion = isPresenterVideo && row.metadata &&
           (row.metadata.presenter_mode === "half_body" || row.metadata.presenter_mode === "full_body");
-        var offlineMontage = !isPresenterVideo && row.metadata && row.metadata.render_mode === "offline_montage_not_lipsync";
+        var offlineMontage = !isPresenterVideo && row.metadata && (
+          row.metadata.render_mode === "offline_montage_not_lipsync" ||
+          row.metadata.pipeline === "offline_title_card_fallback"
+        );
         var videoLabel = offlineMontage
           ? "Download offline montage"
           : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"));
-        var downloadHref = offlineMontage
+        var filePath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
-          : row.url;
+          : "";
+        var fallbackVideoName = offlineMontage ? "nova-offline-montage.mp4" : "nova-video.mp4";
+        var downloadControl = filePath
+          ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
+            escapeHtml(filePath) + "\" data-download-name=\"" + fallbackVideoName + "\">" + videoLabel + "</button>")
+          : (String(row.url).indexOf("/api/") === 0 ? "" : ("<a class=\"button secondary\" href=\"" +
+            escapeHtml(row.url) + "\" download>" + videoLabel + "</a>"));
         var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
         var subtitleUrl = row.metadata && row.metadata.subtitle_url ? String(row.metadata.subtitle_url) : "";
-        var subtitleTrack = subtitleUrl ? "<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" +
-          escapeHtml(subtitleUrl) + "\" default>" : "";
+        var subtitleTrack = subtitleUrl && String(subtitleUrl).indexOf("/api/") !== 0
+          ? ("<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" + escapeHtml(subtitleUrl) + "\" default>")
+          : "";
+        var captionControl = filePath && (subtitleUrl || offlineMontage)
+          ? (" <button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
+            escapeHtml(filePath + "?part=captions") + "\" data-download-name=\"nova-captions.srt\">Download captions</button>")
+          : "";
         var licenseNote = "";
         if (offlineMontage) {
           var license = String((row.metadata && row.metadata.license_status) || "AMBER");
           var clearance = (row.metadata && row.metadata.narration && row.metadata.narration.commercial_use) ||
             "Local narration is not cleared for a public ad.";
-          licenseNote = "<p class=\"hint\">Lip-sync presenter: no. Commercial-use clearance: " +
+          licenseNote = "<p class=\"hint\">PREVIEW_ONLY. Presenter NOT USED. Lip-sync presenter: no. Commercial-use clearance: " +
             escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
         }
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
@@ -1078,13 +1206,17 @@
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + licenseNote + "<a class=\"button secondary\" href=\"" +
-          escapeHtml(downloadHref) + "\" download>" + videoLabel + "</a>" +
-          (subtitleUrl ? " <a class=\"button secondary\" href=\"" + escapeHtml(subtitleUrl) + "\" download>Download captions</a>" : "");
+          "</figure>" + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
+        var audioPath = row.id
+          ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
+          : "";
+        var audioControl = audioPath
+          ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
+            escapeHtml(audioPath) + "\" data-download-name=\"nova-voice.wav\">Download voice</button>")
+          : ("<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
         media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
-          escapeHtml(row.url) + "\"></audio></div><a class=\"button secondary\" href=\"" +
-          escapeHtml(row.url) + "\" download>Download voice</a>";
+          escapeHtml(row.url) + "\"></audio></div>" + audioControl;
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -1111,6 +1243,22 @@
       video.addEventListener("timeupdate", updatePresenterCaption);
       video.addEventListener("play", updatePresenterCaption);
       video.addEventListener("ended", function () { caption.textContent = ""; });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .asset-auth-download"), function (button) {
+      button.addEventListener("click", async function () {
+        button.disabled = true;
+        try {
+          var saved = await downloadProtectedAsset(
+            button.getAttribute("data-download-url"),
+            button.getAttribute("data-download-name")
+          );
+          showBanner("Downloaded " + saved.fileName + " (" + saved.mime + ").", true);
+        } catch (err) {
+          showBanner(err.message || "Download failed.", false);
+        } finally {
+          button.disabled = false;
+        }
+      });
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .branded-download"), function (button) {
       button.addEventListener("click", async function () {
@@ -1396,7 +1544,13 @@
       if (status === "ERROR") {
         showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
       } else {
-        showBanner(successMessage, true);
+        var complete = rendered && rendered.commercial_complete === true;
+        showBanner(
+          complete
+            ? successMessage
+            : (successMessage + " Commercial complete stays off until real motion, lip-sync, clean narration, and provider/license clearance."),
+          true
+        );
       }
     } catch (err) {
       showBanner(err.message || "Walking render failed.", false);
@@ -1424,7 +1578,7 @@
         "/assemble/walking-commercial-30s",
         walkingCommercialButton,
         "Rendering the 30s walking talking commercial. No paid provider is charged.",
-        "30s walking commercial ready for mobile download. Accept the voice license before public ads."
+        "30s presenter pipeline is ready for owner review and download. This is separate from the title-card montage."
       );
     });
   }
@@ -1634,7 +1788,7 @@
         if (status === "ERROR") {
           showBanner("Offline render failed: " + (polled.job.message || "Unknown error. Check the job result."), false);
         } else if (status === "GENERATED" || (polled && polled.ready === true)) {
-          showBanner("Offline render completed. Check the asset list for the MP4 preview and download. No publication was made.", true);
+          showBanner("Offline montage is PREVIEW_ONLY. Presenter was NOT USED. Download uses your signed-in session. Nothing was published.", true);
         } else {
           showBanner("Offline render is still processing or its final status was not confirmed. Refresh this project and check assets before attempting download.", false);
         }
@@ -1653,10 +1807,19 @@
       var platform = platformSelect ? platformSelect.value : "TikTok";
       novaLinksButton.disabled = true;
       try {
-        var pack = await api("/api/nova/creative/click-destinations?platform=" + encodeURIComponent(platform) + "&verify=true");
+        var pack;
+        if (activeProjectId) {
+          pack = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/click-destination?platform=" + encodeURIComponent(platform), {
+            method: "POST"
+          });
+          await refreshAssets();
+        } else {
+          pack = await api("/api/nova/creative/click-destinations?platform=" + encodeURIComponent(platform) + "&verify=true");
+        }
         renderOutput(pack);
-        var verified = pack.verified ? "Verified." : "Not verified from this network.";
-        showBanner("Profile Website field: " + pack.website_field_url + " " + verified + " Nothing was posted.", pack.verified === true);
+        var clickReady = clickVerified(pack);
+        var verified = clickReady ? "Verified first-party Nova URL." : "Not verified. Readiness stays orange.";
+        showBanner("Profile Website field: " + pack.website_field_url + " " + verified + " Nothing was posted.", clickReady);
       } catch (err) {
         showBanner(err.message || "Could not prepare Nova links.", false);
       } finally {
@@ -1899,8 +2062,22 @@
         })
       });
       activeBrandId = row.id;
-      showBanner("Brand saved.", true);
-      refreshBrands();
+      if (!activeProjectId) {
+        showBanner("Brand saved. Select a project before readiness can turn green.", true);
+        await refreshBrands();
+        return;
+      }
+      await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/brand", {
+        method: "POST",
+        body: JSON.stringify({ brand_id: row.id })
+      });
+      var persisted = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+      if (!persisted.brand || persisted.brand.id !== row.id) {
+        throw new Error("Brand did not persist on this project.");
+      }
+      showBanner("Brand saved on this project.", true);
+      await refreshBrands();
+      await refreshAssets();
     } catch (err) {
       showBanner(err.message, false);
     }

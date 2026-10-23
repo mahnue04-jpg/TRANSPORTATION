@@ -8,7 +8,12 @@ import tempfile
 import time
 from typing import Any
 
-from app.core.nova.creative_studio.export import export_project_package, presenter_publish_ready
+from app.core.nova.creative_studio.export import (
+    commercial_complete_allowed,
+    export_project_package,
+    presenter_publish_ready,
+    providers_cleared,
+)
 from app.core.nova.creative_studio.drama import ShortDramaMixin
 from app.core.nova.creative_studio.media_runtime import memory_budget, run_encoder, serialized_media
 from app.core.nova.creative_studio.flags import creative_guardrails
@@ -1898,6 +1903,61 @@ class CreativeStudioService(ShortDramaMixin):
         pack["publish"] = False
         return pack
 
+    def record_click_destination(
+        self,
+        owner_id: str,
+        project_id: str,
+        platform: str,
+        *,
+        fetch=None,
+    ) -> dict[str, Any]:
+        """Verify the first-party profile URL and store that result. Clients cannot set verified."""
+        from app.core.nova.creative_studio.click_destinations import replacement_pack, verify_click_destination
+
+        project = self._project_or_404(owner_id, project_id)
+        pack = replacement_pack(platform or project.platform)
+        pack["verified"] = False
+        pack["http_status"] = None
+        probed = verify_click_destination(pack["website_field_url"], fetch=fetch)
+        pack.update(
+            {
+                "http_status": probed["http_status"],
+                "final_url": probed["final_url"],
+                "redirect_chain": probed["chain"],
+                "classification": probed["classification"],
+                "verified": bool(
+                    probed.get("verified") is True
+                    and probed.get("classification") == "first_party_nova"
+                ),
+            }
+        )
+        pack["publish"] = False
+        pack["commercial_complete"] = False
+        stored = {key: value for key, value in pack.items() if key != "redirect_chain"}
+        metadata = dict(project.metadata or {})
+        metadata["click_destination"] = stored
+        project.metadata = metadata
+        project.updated_at = _now()
+        self.store.save_project(project)
+        complete = False
+        for asset in reversed(self.store.list_assets(project_id, owner_id)):
+            asset_meta = dict(asset.metadata or {})
+            if asset.kind != "video" or not asset_meta.get("final_promo"):
+                continue
+            asset_meta["click_destination"] = stored
+            asset_meta["commercial_complete"] = commercial_complete_allowed(asset_meta)
+            complete = bool(asset_meta["commercial_complete"])
+            asset.metadata = asset_meta
+            self.store.save_asset(asset)
+            break
+        detail = self.get_project(owner_id, project_id)
+        return {
+            **stored,
+            "redirect_chain": pack.get("redirect_chain") or [],
+            "brand_saved": bool(detail.get("brand")),
+            "commercial_complete": complete,
+        }
+
     def _project_voice_license(self, owner_id: str, project_id: str) -> str | None:
         project = self._project_or_404(owner_id, project_id)
         acceptance = (project.metadata or {}).get("voice_license_acceptance") or {}
@@ -2086,6 +2146,10 @@ class CreativeStudioService(ShortDramaMixin):
                 "quality_state": "OWNER_REVIEW_READY",
                 "publish_ready": False,
                 "external_publishing": False,
+                "pipeline": "presenter_5s_proof",
+                "presenter_used": True,
+                "commercial_complete": False,
+                "provider_clearance": False,
             },
             url=public_url,
         )
@@ -2122,6 +2186,9 @@ class CreativeStudioService(ShortDramaMixin):
             "paid_provider_charges": False,
             "publish_ready": False,
             "owner_review_required": True,
+            "pipeline": "presenter_5s_proof",
+            "presenter_used": True,
+            "commercial_complete": False,
         }
 
     @serialized_media
@@ -2172,9 +2239,26 @@ class CreativeStudioService(ShortDramaMixin):
             )
 
         click = replacement_pack(project.platform)
+        from app.core.nova.creative_studio.providers import provider_statuses
+
+        cleared = providers_cleared(provider_statuses())
         public_url = public_prefix + "/" + output_path.name
         audio_url = public_prefix + "/" + output_path.with_suffix(".wav").name
         subtitle_url = public_prefix + "/" + output_path.with_suffix(".srt").name
+        video_metadata = {
+            "final_promo": True,
+            **{key: value for key, value in rendered.items() if key not in {"subtitle_path", "audio_path"}},
+            "subtitle_url": subtitle_url,
+            "click_destination": click,
+            "body_lipsync": True,
+            "external_publishing": False,
+            "quality_state": "OWNER_REVIEW_READY",
+            "pipeline": "presenter_30s",
+            "presenter_used": True,
+            "provider_clearance": cleared,
+            "publish_ready": False,
+        }
+        video_metadata["commercial_complete"] = commercial_complete_allowed(video_metadata)
         audio_asset = self._save_text_asset(
             owner_id=owner_id,
             project_id=project_id,
@@ -2197,15 +2281,7 @@ class CreativeStudioService(ShortDramaMixin):
             title="30s AMICOR walking talking commercial",
             content=rendered.get("script") or "",
             status="GENERATED",
-            metadata={
-                "final_promo": True,
-                **{key: value for key, value in rendered.items() if key not in {"subtitle_path", "audio_path"}},
-                "subtitle_url": subtitle_url,
-                "click_destination": click,
-                "body_lipsync": True,
-                "external_publishing": False,
-                "quality_state": "OWNER_REVIEW_READY",
-            },
+            metadata=video_metadata,
             url=public_url,
         )
         visual_mode = str(rendered.get("visual_mode") or "illustrated_fallback")
@@ -2213,9 +2289,10 @@ class CreativeStudioService(ShortDramaMixin):
             job,
             status="GENERATED",
             message=(
-                f"30s walking talking commercial ready at {rendered['duration_seconds']}s "
-                f"({visual_mode}). Downloadable H.264/AAC with speech, phoneme lip motion, and captions. "
-                "No paid provider was charged. Owner review still required before public ads."
+                f"30s presenter pipeline rendered at {rendered['duration_seconds']}s "
+                f"({visual_mode}). Separate from the title-card montage. "
+                "Commercial complete stays off until real motion, lip-sync, clean narration, "
+                "and provider/license clearance. No paid provider was charged."
             ),
             asset_ids=[video_asset.id, audio_asset.id],
             provider="nova_walking_commercial",
@@ -2242,6 +2319,10 @@ class CreativeStudioService(ShortDramaMixin):
             "mobile_download_ready": True,
             "publish_ready": False,
             "owner_review_required": True,
+            "pipeline": "presenter_30s",
+            "presenter_used": True,
+            "commercial_complete": bool(video_metadata["commercial_complete"]),
+            "provider_clearance": cleared,
         }
 
     def complete_studio_test_checkout(self, owner_id: str, project_id: str, order_id: str) -> dict[str, Any]:
@@ -2415,6 +2496,13 @@ class CreativeStudioService(ShortDramaMixin):
                 "subtitle_url": subtitle_url,
                 "click_destination": click,
                 "external_publishing": False,
+                "quality_state": "PREVIEW_ONLY",
+                "presenter": False,
+                "presenter_used": False,
+                "pipeline": "offline_title_card_fallback",
+                "lip_sync": False,
+                "commercial_complete": False,
+                "provider_clearance": False,
             },
             url=public_url,
         )
@@ -2444,7 +2532,14 @@ class CreativeStudioService(ShortDramaMixin):
             "commercial_use": narration.get("commercial_use") or "",
             "paid_provider_charges": False,
             "paid_render_allowed": False,
-            "readiness_note": "License stays AMBER until the owner accepts the local narration license. Publishing is held.",
+            "quality_state": "PREVIEW_ONLY",
+            "presenter_used": False,
+            "pipeline": "offline_title_card_fallback",
+            "commercial_complete": False,
+            "readiness_note": (
+                "PREVIEW_ONLY title-card montage. Presenter was not used. "
+                "License stays AMBER until a cleared narration replaces eSpeak. Publishing is held."
+            ),
         }
 
     def get_generation_job(self, owner_id: str, project_id: str, job_id: str) -> dict[str, Any]:
@@ -2455,38 +2550,87 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError("NOT_FOUND", "Job not found", http_status=404)
         lip_sync = None
         paid = None
+        quality_state = None
+        presenter_used = None
+        commercial_complete = None
+        pipeline = None
         if job.provider == "nova_offline_montage":
             lip_sync = False
             paid = False
-        elif job.provider in {"nova_walking_presenter", "nova_walking_commercial"}:
+            quality_state = "PREVIEW_ONLY"
+            presenter_used = False
+            commercial_complete = False
+            pipeline = "offline_title_card_fallback"
+        elif job.provider == "nova_walking_presenter":
             lip_sync = True
             paid = False
+            presenter_used = True
+            commercial_complete = False
+            pipeline = "presenter_5s_proof"
+        elif job.provider == "nova_walking_commercial":
+            lip_sync = True
+            paid = False
+            presenter_used = True
+            pipeline = "presenter_30s"
+            commercial_complete = False
+            for asset in self.store.list_assets(project_id, owner_id):
+                if asset.kind == "video" and asset.id in (job.result_asset_ids or []):
+                    commercial_complete = commercial_complete_allowed(asset.metadata or {})
         return {
             "job": job.as_dict(),
             "ready": job.status in {"GENERATED", "ERROR"},
             "lip_sync": lip_sync,
             "paid_provider_charges": paid,
+            "quality_state": quality_state,
+            "presenter_used": presenter_used,
+            "commercial_complete": commercial_complete,
+            "pipeline": pipeline,
         }
 
-    def open_asset_file(self, owner_id: str, project_id: str, asset_id: str) -> tuple[Path, str, str]:
+    def open_asset_file(
+        self,
+        owner_id: str,
+        project_id: str,
+        asset_id: str,
+        *,
+        part: str = "media",
+    ) -> tuple[Path, str, str]:
         """Owner-scoped file for playback download. Another account gets not found."""
         from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix, _resolve_creative_media_url
 
+        requested = str(part or "media").strip().lower()
+        if requested not in {"media", "captions"}:
+            raise CreativeStudioError("INVALID_INPUT", "Unknown download part.", http_status=400)
         self._project_or_404(owner_id, project_id)
         asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
         if asset is None:
             raise CreativeStudioError("NOT_FOUND", "Asset not found", http_status=404)
         path = _resolve_creative_media_url(asset.url)
         root, _prefix = _creative_media_root_and_prefix()
-        if path is None or not path.is_file():
+        if path is None:
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "This asset has no downloadable file.", http_status=404)
+        if requested == "captions":
+            path = path.with_suffix(".srt")
+        if not path.is_file():
+            message = "Caption file is not available." if requested == "captions" else "This asset has no downloadable file."
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", message, http_status=404)
         resolved = path.resolve()
         root_resolved = root.resolve()
         if resolved != root_resolved and root_resolved not in resolved.parents:
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "Asset file is outside the studio media directory.", http_status=404)
-        media_types = {".mp4": "video/mp4", ".wav": "audio/wav", ".srt": "text/plain; charset=utf-8"}
+        media_types = {
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".srt": "application/x-subrip",
+        }
         media_type = media_types.get(resolved.suffix.lower(), "application/octet-stream")
-        return resolved, media_type, resolved.name
+        filename = _download_filename(asset.title, resolved.suffix.lower(), captions=requested == "captions")
+        return resolved, media_type, filename
 
     def export_project(self, owner_id: str, project_id: str, *, fmt: str = "json") -> dict[str, Any]:
         detail = self.get_project(owner_id, project_id)
@@ -2504,6 +2648,16 @@ class CreativeStudioService(ShortDramaMixin):
         )
         self._finish_job(job, status="GENERATED", message="Export package ready for download.", asset_ids=[asset.id])
         return {"job": job.as_dict(), "export": exported, "asset": asset.as_dict()}
+
+
+def _download_filename(title: str, suffix: str, *, captions: bool = False) -> str:
+    cleaned = []
+    for char in str(title or ""):
+        cleaned.append(char if char.isalnum() or char in {"-", "_"} else "-")
+    stem = "".join(cleaned).strip("-")[:80] or "nova-asset"
+    if captions:
+        return stem + "-captions.srt"
+    return stem + (suffix if suffix.startswith(".") else "")
 
 
 def get_service(db=None) -> CreativeStudioService:

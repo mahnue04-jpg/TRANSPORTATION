@@ -97,6 +97,10 @@ def test_signed_in_owner_polls_and_downloads_offline_montage(tmp_path, monkeypat
     assets = {item["id"]: item for item in detail.json()["assets"]}
     assert assets[asset_id]["metadata"]["render_mode"] == "offline_montage_not_lipsync"
     assert assets[asset_id]["metadata"]["lip_sync"] is False
+    assert assets[asset_id]["metadata"]["quality_state"] == "PREVIEW_ONLY"
+    assert assets[asset_id]["metadata"]["presenter_used"] is False
+    assert assets[asset_id]["metadata"]["pipeline"] == "offline_title_card_fallback"
+    assert assets[asset_id]["metadata"]["commercial_complete"] is False
     assert assets[asset_id]["media_available"] is True
 
     downloaded = client.get(f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file")
@@ -119,9 +123,13 @@ def test_signed_in_owner_polls_and_downloads_offline_montage(tmp_path, monkeypat
     html = (ROOT / "static/nova-creative/index.html").read_text(encoding="utf-8")
     script = (ROOT / "static/nova-creative/creative.js").read_text(encoding="utf-8")
     css = (ROOT / "static/nova-creative/creative.css").read_text(encoding="utf-8")
-    assert "offline-montage-download-20261015" in html
+    assert "studio-auth-download-20261022" in html
     assert "Offline montage, not lip sync" in script
     assert "Download offline montage" in script
+    assert "PREVIEW_ONLY" in script
+    assert "Presenter NOT USED" in script
+    assert "downloadProtectedAsset" in script
+    assert "?part=captions" in script
     assert "Commercial-use clearance" in script
     assert "playsinline" in script
     assert "@media (max-width: 420px)" in css

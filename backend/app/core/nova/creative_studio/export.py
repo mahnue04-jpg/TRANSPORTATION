@@ -8,6 +8,64 @@ from typing import Any
 from app.core.nova.creative_studio.click_destinations import classify_destination, replacement_pack
 
 
+_FALLBACK_RENDER_MODES = {
+    "offline_montage_not_lipsync",
+    "ffmpeg_compat_stills",
+    "browser_artwork_slideshow",
+    "browser_safe_upload",
+}
+_FALLBACK_VISUALS = {"illustrated_fallback", "title_cards", "title_card"}
+_PRESENTER_PIPELINE = "presenter_30s"
+
+
+def providers_cleared(rows: list[dict[str, Any]] | None) -> bool:
+    """Image, voice, video, and talking-presenter providers must all be configured."""
+    found = {str(row.get("kind") or ""): row for row in (rows or [])}
+    for kind in ("image", "voice", "video", "talking_presenter"):
+        row = found.get(kind) or {}
+        if str(row.get("status") or "") != "AVAILABLE" or row.get("configured") is not True:
+            return False
+    return True
+
+
+def commercial_complete_allowed(metadata: dict[str, Any] | None) -> bool:
+    """A commercial is complete only with real motion, lip-sync, clean narration, and clearance.
+
+    Title-card montages, eSpeak/GPL narration, illustrated fallbacks, and
+    unconfigured providers stay incomplete. This does not publish anything.
+    """
+    meta = metadata or {}
+    if str(meta.get("quality_state") or "").strip().upper() == "PREVIEW_ONLY":
+        return False
+    render_mode = str(meta.get("render_mode") or "")
+    if render_mode in _FALLBACK_RENDER_MODES:
+        return False
+    if str(meta.get("pipeline") or "") != _PRESENTER_PIPELINE:
+        return False
+    if meta.get("presenter_used") is not True or meta.get("presenter") is False:
+        return False
+    if meta.get("lip_sync") is not True:
+        return False
+    if meta.get("commercial_slideshow") is True or meta.get("illustrated_fallback") is True:
+        return False
+    if str(meta.get("visual_mode") or "") in _FALLBACK_VISUALS:
+        return False
+    if meta.get("true_ai_motion_synthesis") is not True and meta.get("real_motion") is not True:
+        return False
+    narration = meta.get("narration") if isinstance(meta.get("narration"), dict) else {}
+    engine = str(narration.get("engine") or meta.get("narration_engine") or "").lower()
+    if "espeak" in engine:
+        return False
+    license_name = str(narration.get("license") or meta.get("voice_license") or "")
+    if "GPL" in license_name.upper():
+        return False
+    if str(meta.get("license_status") or "").upper() != "GREEN":
+        return False
+    if meta.get("provider_clearance") is not True:
+        return False
+    return True
+
+
 def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dict[str, Any]:
     fmt_norm = str(fmt or "json").strip().lower()
     if fmt_norm not in {"json", "markdown", "md", "text"}:
@@ -62,6 +120,7 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
     lip_sync_ok = bool(final_meta.get("lip_sync") is True or final_meta.get("body_lipsync") is True)
     # Publishing stays closed unless media, a verified Nova click-through, and a GREEN license all exist.
     # An offline montage is a review file, not that approval.
+    commercial_complete = commercial_complete_allowed(final_meta)
     production_ready = bool(
         commercial_ready_candidate
         and (not presenter_video or presenter_is_publish_ready)
@@ -122,6 +181,8 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
             "click_through_verified": click_verified,
             "readiness": readiness,
             "offline_montage": offline_montage,
+            "commercial_complete": commercial_complete,
+            "presenter_pipeline": str(final_meta.get("pipeline") or "") == _PRESENTER_PIPELINE and not offline_montage,
         },
         "delivery_checklist": {
             "video_ready": final_video_ready,
@@ -132,6 +193,7 @@ def export_project_package(payload: dict[str, Any], *, fmt: str = "json") -> dic
             "voice_ready": bool(audio_asset and audio_asset.get("url")),
             "brand_present": bool(brand),
             "not_static_slideshow": not slideshow_blocked,
+            "commercial_complete": commercial_complete,
         },
         "metadata": {
             "asset_count": len(assets),

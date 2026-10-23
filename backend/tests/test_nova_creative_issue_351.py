@@ -291,6 +291,11 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     assert rendered["mobile_download_ready"] is True
     assert rendered["paid_provider_charges"] is False
     assert rendered["license_status"] == "GREEN"
+    assert rendered["pipeline"] == "presenter_30s"
+    assert rendered["presenter_used"] is True
+    assert rendered["commercial_complete"] is False
+    assert rendered["asset"]["metadata"]["pipeline"] == "presenter_30s"
+    assert rendered["asset"]["metadata"]["render_mode"] == "local_walking_commercial_30s"
     assert rendered["validation"]["ok"] is True
     video = tmp_path / rendered["url"].rsplit("/", 1)[-1]
     probe = validate_presenter_mp4(video, min_seconds=28.0, max_seconds=32.0)
