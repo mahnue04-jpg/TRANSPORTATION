@@ -34,6 +34,7 @@ from app.core.nova.creative_studio.providers import (
     CONFIG_REQUIRED,
     IMAGE_ASPECTS,
     image_provider,
+    approved_60s_demo_report,
     provider_statuses,
     video_provider,
     voice_provider,
@@ -176,6 +177,7 @@ class CreativeStudioService(ShortDramaMixin):
         return {
             **creative_guardrails(),
             "providers": provider_statuses(),
+            "approved_60s_demo": approved_60s_demo_report(),
             "media_storage": media_storage_report(),
             "project_types": list(PROJECT_TYPES),
             "platforms": list(PLATFORMS),

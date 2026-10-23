@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.core.nova.creative_studio.providers import media_storage_report, provider_statuses
+from app.core.nova.creative_studio.providers import (
+    approved_60s_demo_report,
+    media_storage_report,
+    provider_statuses,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SENTINEL = "sk-test-sentinel-must-not-leak"
@@ -79,3 +83,18 @@ def test_status_ui_names_the_block_and_keeps_commercial_complete_off() -> None:
     assert "The asset record is no longer in this project" in script
     assert "Commercial complete stays off." in script
     assert "regenerate the file" in script
+
+
+def test_approved_60s_demo_is_saved_playback_not_a_provider_call() -> None:
+    demo = (ROOT / "static" / "nova-one-minute-demo" / "index.html").read_text(encoding="utf-8")
+    studio = (ROOT / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    report = approved_60s_demo_report()
+    assert report["mode"] == "static_playback"
+    assert report["uses_live_providers"] is False
+    assert report["provider_calls"] == []
+    assert report["claims_lip_sync"] is False
+    assert report["proves_studio_provider_configuration"] is False
+    assert report["video_path"] in demo
+    assert report["audio_path"] in demo
+    assert "does not call the live image, video, voice, or talking-presenter providers" in studio
+    assert "It does not claim lip-sync." in demo

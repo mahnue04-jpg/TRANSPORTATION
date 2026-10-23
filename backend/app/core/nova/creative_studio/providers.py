@@ -1029,6 +1029,28 @@ def _block_reason(status: str, configured: bool) -> str:
     return str(status or "unknown").lower()
 
 
+APPROVED_60S_DEMO_VIDEO = "/media/nova-creative/nova-da25e10f80924d6ca99e62a04c9eb346.mp4"
+APPROVED_60S_DEMO_AUDIO = "/media/nova-creative/nova-bb9d59169aef4733ba8c07d1b0d418f6.mp3"
+
+
+def approved_60s_demo_report() -> dict[str, Any]:
+    """The approved one-minute demo is saved playback, not a live provider call.
+
+    The page serves two fixed files and a scripted product tour. It does not
+    call OpenAI, Runway, fal, or D-ID, and a working playback does not mean
+    Creative Studio providers are configured.
+    """
+    return {
+        "mode": "static_playback",
+        "uses_live_providers": False,
+        "provider_calls": [],
+        "claims_lip_sync": False,
+        "proves_studio_provider_configuration": False,
+        "video_path": APPROVED_60S_DEMO_VIDEO,
+        "audio_path": APPROVED_60S_DEMO_AUDIO,
+    }
+
+
 def provider_statuses() -> list[dict[str, Any]]:
     """Provider readiness. Names and booleans only; never credential values."""
     specs = (
