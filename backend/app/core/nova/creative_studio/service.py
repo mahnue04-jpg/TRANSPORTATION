@@ -38,6 +38,7 @@ from app.core.nova.creative_studio.providers import (
     video_provider,
     voice_provider,
     _creative_media_root_and_prefix,
+    media_storage_report,
     _resolve_creative_media_url,
 )
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
@@ -175,6 +176,7 @@ class CreativeStudioService(ShortDramaMixin):
         return {
             **creative_guardrails(),
             "providers": provider_statuses(),
+            "media_storage": media_storage_report(),
             "project_types": list(PROJECT_TYPES),
             "platforms": list(PLATFORMS),
             "durations": list(DURATIONS),

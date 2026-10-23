@@ -1005,10 +1005,81 @@ def talking_presenter_provider() -> TalkingPresenterProvider:
     return DidTalkingPresenterProvider()
 
 
+def _video_credential_names() -> list[str]:
+    selected = selected_video_provider()
+    if selected in {"fal", "kling", "fal_kling"}:
+        return ["FAL_KEY"]
+    return ["RUNWAYML_API_SECRET", "NOVA_CREATIVE_VIDEO_API_KEY"]
+
+
+def _video_live_flag_names() -> list[str]:
+    names = ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED"]
+    if selected_video_provider() in {"fal", "kling", "fal_kling"}:
+        names.append("NOVA_CREATIVE_KLING_LIVE_ENABLED")
+    return names
+
+
+def _block_reason(status: str, configured: bool) -> str:
+    if status == AVAILABLE and configured:
+        return "ready"
+    if status == DISABLED and configured:
+        return "live_flag_off"
+    if status == CONFIG_REQUIRED or not configured:
+        return "credential_missing"
+    return str(status or "unknown").lower()
+
+
 def provider_statuses() -> list[dict[str, Any]]:
-    return [
-        image_provider().status().as_dict(),
-        video_provider().status().as_dict(),
-        voice_provider().status().as_dict(),
-        talking_presenter_provider().status().as_dict(),
-    ]
+    """Provider readiness. Names and booleans only; never credential values."""
+    specs = (
+        (image_provider().status(), ["OPENAI_API_KEY"], ["NOVA_CREATIVE_IMAGE_LIVE_ENABLED"]),
+        (video_provider().status(), _video_credential_names(), _video_live_flag_names()),
+        (voice_provider().status(), ["OPENAI_API_KEY"], ["NOVA_CREATIVE_VOICE_LIVE_ENABLED"]),
+        (
+            talking_presenter_provider().status(),
+            ["DID_API_KEY"],
+            ["NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED"],
+        ),
+    )
+    rows: list[dict[str, Any]] = []
+    for status, credential_names, live_flag_names in specs:
+        row = status.as_dict()
+        row["credential_env_names"] = list(credential_names)
+        row["live_flag_names"] = list(live_flag_names)
+        row["block_reason"] = _block_reason(str(row.get("status") or ""), bool(row.get("configured")))
+        rows.append(row)
+    return rows
+
+
+def media_storage_report() -> dict[str, Any]:
+    """How the media directory was chosen. Custom env paths are not echoed."""
+    configured_set = bool(str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip())
+    prefix_set = bool(str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or "").strip())
+    onboarding = Path("/data/onboarding_docs").is_dir()
+    data_dir = Path("/data").is_dir()
+    root, prefix = _creative_media_root_and_prefix()
+    if configured_set:
+        selection = "configured"
+        reported_path = "custom"
+    elif onboarding:
+        selection = "onboarding_docs"
+        reported_path = "/data/onboarding_docs/nova_creative_media"
+    elif data_dir:
+        selection = "data_disk"
+        reported_path = "/data/nova_creative_media"
+    else:
+        selection = "ephemeral"
+        reported_path = "container_static"
+    safe_prefix = prefix if prefix in {_MEDIA_PREFIX, _EPHEMERAL_PREFIX} else "custom"
+    return {
+        "selection": selection,
+        "path": reported_path,
+        "public_prefix": safe_prefix,
+        "selected_dir_exists": bool(root.is_dir()),
+        "env_present": {
+            "NOVA_CREATIVE_MEDIA_DIR": configured_set,
+            "NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX": prefix_set,
+        },
+        "onboarding_docs_dir_exists": onboarding,
+        "data_dir_exists": data_dir,
+    }

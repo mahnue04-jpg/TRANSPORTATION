@@ -123,7 +123,7 @@ def test_signed_in_owner_polls_and_downloads_offline_montage(tmp_path, monkeypat
     html = (ROOT / "static/nova-creative/index.html").read_text(encoding="utf-8")
     script = (ROOT / "static/nova-creative/creative.js").read_text(encoding="utf-8")
     css = (ROOT / "static/nova-creative/creative.css").read_text(encoding="utf-8")
-    assert "studio-auth-download-20261022" in html
+    assert "studio-provider-status-20261023" in html
     assert "Offline montage, not lip sync" in script
     assert "Download offline montage" in script
     assert "PREVIEW_ONLY" in script

@@ -729,11 +729,44 @@
   function renderOutput(data) {
     $("output").textContent = JSON.stringify(data, null, 2);
   }
+  function providerStatusText(row) {
+    var names = (row.credential_env_names || []).join(" or ");
+    var flags = (row.live_flag_names || []).join(", ");
+    if (row.block_reason === "credential_missing") {
+      return row.kind + ": CONFIG_REQUIRED. Credential missing" +
+        (names ? " (" + names + ")" : "") +
+        ". A live flag is not the cause. " + (row.message || "");
+    }
+    if (row.block_reason === "live_flag_off") {
+      return row.kind + ": DISABLED. Credential is present. Live flag is off" +
+        (flags ? " (" + flags + ")" : "") +
+        ". " + (row.message || "");
+    }
+    if (row.block_reason === "ready") {
+      return row.kind + ": AVAILABLE. Credential present and live flag on.";
+    }
+    return row.kind + ": " + row.status + ". " + (row.message || "");
+  }
+  function mediaStorageText(storage) {
+    storage = storage || {};
+    if (storage.selection === "configured") {
+      return "Media storage: custom directory from NOVA_CREATIVE_MEDIA_DIR. Path is not shown.";
+    }
+    if (storage.selection === "data_disk") {
+      return "Media storage: /data/nova_creative_media on the persistent disk.";
+    }
+    if (storage.selection === "onboarding_docs") {
+      return "Media storage: /data/onboarding_docs/nova_creative_media.";
+    }
+    if (storage.selection === "ephemeral") {
+      return "Media storage: container static directory. Files here disappear on deploy.";
+    }
+    return "Media storage: " + (storage.selection || "unknown") + ".";
+  }
   async function refreshProviders() {
     var guards = await api("/api/nova/creative/guardrails");
-    var bits = (guards.providers || []).map(function (row) {
-      return row.kind + ": " + row.status + " — " + row.message;
-    });
+    var bits = (guards.providers || []).map(providerStatusText);
+    bits.unshift(mediaStorageText(guards.media_storage));
     $("provider-status").innerHTML = bits.map(function (line) {
       return "<div class=\"item\">" + escapeHtml(line) + "</div>";
     }).join("") || "No providers.";
@@ -1150,7 +1183,24 @@
     if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
-    $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
+    var assetIds = {};
+    (detail.assets || []).forEach(function (row) {
+      if (row && row.id) assetIds[row.id] = true;
+    });
+    var orphanNotes = (detail.jobs || []).filter(function (job) {
+      var generated = String(job && job.status || "").toUpperCase() === "GENERATED";
+      var montageJob = job && (job.provider === "nova_offline_montage" || job.kind === "offline_commercial");
+      var resultIds = (job && job.result_asset_ids) || [];
+      if (!generated || !montageJob || !resultIds.length) return false;
+      return resultIds.some(function (id) { return !assetIds[id]; });
+    }).map(function (job) {
+      var resultIds = job.result_asset_ids || [];
+      return "<div class=\"item\"><strong>Offline montage job finished</strong>" +
+        "<div class=\"muted\">The asset record is no longer in this project (" +
+        escapeHtml(resultIds.join(", ")) +
+        "). This note does not restore or regenerate the file. Commercial complete stays off.</div></div>";
+    }).join("");
+    $("asset-list").innerHTML = orphanNotes + (detail.assets || []).map(function (row) {
       var media = "";
       var mediaAvailable = row.media_available !== false;
       if (row.kind === "image" && row.url && mediaAvailable) {
