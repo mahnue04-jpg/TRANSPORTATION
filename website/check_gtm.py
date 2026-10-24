@@ -12,6 +12,9 @@ def main():
     failures = []
     for path in pages:
         html = path.read_text(encoding="utf-8")
+        # Retired-route redirect documents do not load the site template.
+        if '<meta http-equiv="refresh"' in html or '<meta http-equiv="refresh"' in html.lower():
+            continue
         script_start = "<!-- Google Tag Manager -->"
         script_url = "https://www.googletagmanager.com/gtm.js?id="
         noscript_url = f"https://www.googletagmanager.com/ns.html?id={GTM_ID}"
