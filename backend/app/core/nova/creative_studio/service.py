@@ -2037,8 +2037,8 @@ class CreativeStudioService(ShortDramaMixin):
                 score += 100
             if _is_genova(asset):
                 score += 50
-            if name.startswith("nova-") and name.endswith(".png"):
-                score += 5
+            # Do not select an unrelated project image merely because its filename
+            # starts with nova-. Only explicitly identified Genova assets qualify.
             if score:
                 scored.append((score, path))
         if scored:
