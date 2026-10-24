@@ -290,6 +290,23 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
 
     provider_id = "fal_kling_avatar_v2"
 
+    def _validate_task(self, task):
+        """Restrict saved avatar queue URLs to this model and request id."""
+        request_id = task.get("request_id")
+        if not isinstance(request_id, str) or not request_id or len(request_id) > 200:
+            raise _SafeKlingError("Missing fal avatar request id.")
+        prefix = "/" + AVATAR_MODEL + "/requests/"
+        for key in ("status_url", "response_url"):
+            value = task.get(key)
+            if not isinstance(value, str):
+                raise _SafeKlingError("Missing fal avatar queue tracking URL.")
+            url = urllib.parse.urlsplit(value)
+            if (url.scheme != "https" or url.netloc != "queue.fal.run"
+                    or not url.path.startswith(prefix)
+                    or request_id not in url.path.split("/")
+                    or url.query or url.fragment):
+                raise _SafeKlingError("Invalid fal avatar queue tracking URL.")
+
     @staticmethod
     def validate_avatar_input(*, image_url, audio_url, prompt=""):
         image = str(image_url or "").strip()
