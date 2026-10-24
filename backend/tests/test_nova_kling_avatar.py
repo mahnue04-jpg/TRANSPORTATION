@@ -65,3 +65,31 @@ def test_reject_missing_inputs_without_network(avatar, monkeypatch):
     monkeypatch.setattr(avatar, "_request_json", lambda *a, **k: pytest.fail("Paid call attempted"))
     result = avatar.generate_avatar(image_url="", audio_url="")
     assert result["status"] == "ERROR"
+
+
+def test_genova_readiness_is_read_only(monkeypatch):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("owner-genova", {"title": "Genova", "project_type": "short_video"})
+    monkeypatch.setenv("FAL_KEY", "test-only")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "kling")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "false")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "false")
+    monkeypatch.setattr(FalKlingAvatarProvider, "_request_json",
+                        lambda *a, **kw: pytest.fail("Provider call not allowed in readiness"))
+    result = svc.genova_avatar_readiness("owner-genova", project["id"])
+    assert result["mode"] == "PREVIEW_PREFLIGHT_ONLY"
+    assert result["provider_status"] == "DISABLED"
+    assert result["can_generate"] is False
+    assert result["paid_request_submitted"] is False
+    assert result["budget_enforcement_ready"] is False
+
+
+def test_genova_readiness_enforces_project_ownership():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("owner-a", {"title": "Private Genova", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.genova_avatar_readiness("owner-b", project["id"])
