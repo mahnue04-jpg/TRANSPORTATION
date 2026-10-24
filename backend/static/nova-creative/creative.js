@@ -64,6 +64,34 @@
   }
 
   function $(id) { return document.getElementById(id); }
+  async function checkGenovaAvatarReadiness() {
+    var target = $("genova-avatar-readiness-result");
+    var button = $("check-genova-avatar-readiness");
+    if (!target || !button) return;
+    var projectId = activeProjectId;
+    if (!projectId) {
+      target.textContent = "Select an AMICOR 30-second project first. No provider request made.";
+      return;
+    }
+    button.disabled = true;
+    target.textContent = "Checking saved presenter and provider settings (no paid generation)...";
+    try {
+      var state = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/genova-avatar-readiness");
+      target.textContent =
+        "Genova image: " + (state.approved_presenter_image_found ? "found" : "not found") +
+        " | Kling: " + (state.provider_status || "unknown") +
+        " | Approved narration audio: " + (state.approved_narration_audio_found ? "found" : "not ready") +
+        " | Spending gate: " + (state.budget_enforcement_ready ? "ready" : "not ready") +
+        " | Paid generation: " + (state.can_generate ? "requires separate owner action" : "blocked") +
+        ". No paid request submitted.";
+    } catch (err) {
+      target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
+    } finally { button.disabled = false; }
+  }
+
+  var genovaReadinessButton = $("check-genova-avatar-readiness");
+  if (genovaReadinessButton) genovaReadinessButton.addEventListener("click", checkGenovaAvatarReadiness);
+
   function session() { return window.AmiCorSession || null; }
   function token() {
     var shared = session();

@@ -2002,6 +2002,27 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
+    def genova_avatar_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Read-only owner-scoped preflight. Never invokes or charges a provider."""
+        from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
+
+        self._project_or_404(owner_id, project_id)
+        presenter = self._resolve_genova_presenter_image(owner_id, project_id)
+        provider = FalKlingAvatarProvider().status()
+        return {
+            "project_id": project_id,
+            "mode": "PREVIEW_PREFLIGHT_ONLY",
+            "provider": "fal_kling_avatar_v2",
+            "provider_status": provider.status,
+            "provider_configured": provider.configured,
+            "approved_presenter_image_found": bool(presenter),
+            "approved_narration_audio_found": False,
+            "budget_enforcement_ready": False,
+            "can_generate": False,
+            "reason": "An approved narration asset and enforced per-request budget are required before paid generation.",
+            "paid_request_submitted": False,
+        }
+
     def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
         """Prefer project Genova full-body stills; fall back to known media-root plates."""
         preferred_names = (
