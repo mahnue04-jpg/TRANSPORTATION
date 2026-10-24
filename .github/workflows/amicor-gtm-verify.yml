@@ -1,0 +1,26 @@
+name: Verify AMICOR Google Tag Manager installation
+on:
+  pull_request:
+    paths:
+      - 'website/_generate.py'
+      - 'website/_refresh.py'
+      - 'website/check_gtm.py'
+      - '.github/workflows/amicor-gtm-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-gtm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate website pages
+        run: python3 website/_generate.py
+      - name: Verify GTM installation in generated pages
+        run: python3 website/check_gtm.py
+      - name: Upload generated pages for review (not deployed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: amicor-gtm-preview-pages
+          path: website/
+          retention-days: 3
