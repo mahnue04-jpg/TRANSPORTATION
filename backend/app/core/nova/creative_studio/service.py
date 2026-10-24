@@ -2265,6 +2265,14 @@ class CreativeStudioService(ShortDramaMixin):
             "provider_clearance": cleared,
             "publish_ready": False,
         }
+        # A generated playable MP4 is not necessarily an acceptable commercial.
+        # Explicitly classify missing presenter-image fallback as preview only.
+        if str(rendered.get("visual_mode") or "") == "illustrated_fallback":
+            video_metadata["quality_state"] = "PREVIEW_ONLY_ILLUSTRATED"
+            video_metadata["presenter_used"] = False
+            video_metadata["body_lipsync"] = False
+            video_metadata["publish_ready"] = False
+            video_metadata["illustrated_fallback"] = True
         video_metadata["commercial_complete"] = commercial_complete_allowed(video_metadata)
         audio_asset = self._save_text_asset(
             owner_id=owner_id,
