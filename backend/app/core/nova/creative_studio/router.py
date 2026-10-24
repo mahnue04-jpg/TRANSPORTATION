@@ -1572,6 +1572,21 @@ def accept_project_voice_license(
         raise
 
 
+@router.get("/projects/{project_id}/genova-avatar-readiness")
+def genova_avatar_readiness(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-only Genova provider preflight, no generation or billing."""
+    _require_owner(user)
+    try:
+        return get_service(db).genova_avatar_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assemble/walking-presenter-proof")
 def assemble_walking_presenter_proof(
     project_id: str,
