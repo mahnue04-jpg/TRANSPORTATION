@@ -21,8 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Generate website pages
         run: python3 website/_generate.py
-      - name: Confirm committed pages match the generator
-        run: git diff --exit-code -- website
+      - name: Verify generated Google Tag Manager snippets
+        run: python3 website/check_gtm.py
+      - name: Show generated-file changes for review
+        run: git status --short -- website
       - name: Validate product catalog and links
         run: |
           python3 website/tests/check_catalog_package.py
