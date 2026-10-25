@@ -61,12 +61,15 @@
         <form id="staging-register-form" class="grid hidden" autocomplete="off">
           <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
           <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <label><input type="checkbox" class="studio-password-visibility" data-target="staging-register-password" /> Show new test password</label>
           <button type="submit">Create separate test account</button>
         </form>
       </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <label><input type="checkbox" class="studio-password-visibility" data-target="login-password" /> Show password</label>
+        <p class="hint">Staging uses separate test accounts. Your production password may not work here. Forgot your test password? Create a new disposable test account with a different test email; never reuse your production password.</p>
         <button type="submit">Sign in</button>
       </form>
     </section>
@@ -342,6 +345,14 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
+  <script>
+    document.querySelectorAll(".studio-password-visibility").forEach(function (control) {
+      control.addEventListener("change", function () {
+        var field = document.getElementById(control.dataset.target);
+        if (field) field.type = control.checked ? "text" : "password";
+      });
+    });
+  </script>
   <script src="/static/nova-creative/creative.js?v=genova-image-approval-20261025"></script>
 </body>
 </html>
