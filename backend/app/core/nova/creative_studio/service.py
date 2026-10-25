@@ -2039,9 +2039,10 @@ class CreativeStudioService(ShortDramaMixin):
             "provider": "fal_kling_avatar_v2",
             "provider_status": provider.status,
             "provider_configured": provider.configured,
-            "approved_presenter_image_found": bool(presenter),
+            "approved_presenter_image_found": bool(approved_id and presenter),
             "generated_image_assets_in_project": len(image_assets),
-            "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]} for a in image_assets[:12]],
+            "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]}
+                                 for a in image_assets if (lambda p: p is not None and p.is_file())(_resolve_creative_media_url(a.url))][:12],
             "candidate_images_are_approved": bool(approved_id and presenter),
             "approved_image_asset_id": approved_id if presenter else None,
             "presenter_image_next_step": ("Approved Genova image located." if presenter else
