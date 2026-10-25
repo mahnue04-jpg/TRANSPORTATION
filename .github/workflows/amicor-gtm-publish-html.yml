@@ -5,6 +5,9 @@ on:
       - fix/gtm-generated-production-html-20261024
     paths:
       - '.github/workflows/amicor-gtm-publish-html.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/amicor-gtm-publish-html.yml'
   workflow_dispatch:
 permissions:
   contents: write
