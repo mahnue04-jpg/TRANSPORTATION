@@ -24,7 +24,12 @@ def main():
             continue
         if not (html.index("<head>") < html.index(script_start) < html.index("<meta charset=")):
             failures.append(f"{path.relative_to(ROOT)}: head snippet misplaced")
-        if not (html.index("<body") < html.index("<!-- Google Tag Manager (noscript) -->") < html.index('class="skip"')):
+        body_pos = html.find("<body")
+        noscript_pos = html.find("<!-- Google Tag Manager (noscript) -->")
+        content_pos = html.find('class="skip"')
+        if content_pos < 0:
+            content_pos = html.find("<main")
+        if not (body_pos >= 0 and body_pos < noscript_pos < content_pos):
             failures.append(f"{path.relative_to(ROOT)}: body snippet misplaced")
     if failures:
         raise SystemExit("\n".join(failures))
