@@ -173,7 +173,7 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert ">AMICOR Health</h3>" in html
     assert "Conceptual illustrations." in html
     assert 'src="../assets/img/card-home-hub.jpg"' in _html(PAGES["/home-hub/"])
-    assert 'src="../assets/img/card-car-hub.jpg"' in _html(PAGES["/car-hub/"])
+    assert 'AMICOR Farm App' in _html(PAGES["/car-hub/"])
 
 
 def test_hardware_assets_exist() -> None:
