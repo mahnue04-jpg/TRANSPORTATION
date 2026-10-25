@@ -10,6 +10,8 @@
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
+    var gallery = document.getElementById("genova-image-choices");
+    if (gallery) gallery.textContent = "Project changed. Select Show presenter image choices to load this project’s images.";
   }
 
   function updateActiveProjectLabel() {
@@ -100,6 +102,7 @@
     try {
       var p = activeProjectId;
       var state = await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-avatar-readiness");
+      if (p !== activeProjectId) return; // Prevent stale cross-project gallery after switching projects.
       target.textContent = "";
       var selected = document.createElement("p");
       selected.textContent = state.approved_image_asset_id ? "Approved image: " + state.approved_image_asset_id : "No image approved yet.";
