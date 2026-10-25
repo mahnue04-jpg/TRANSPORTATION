@@ -56,10 +56,11 @@
         <label>Organization name<input id="organization-name" maxlength="80" value="Disposable studio" required /></label>
         <label>Casting organization id<input id="organization-id" maxlength="36" autocomplete="off" /></label>
         <div class="actions wide">
-          <button type="submit" id="create-organization">Create sandbox organization</button>
+          <button type="submit" id="create-organization" disabled aria-describedby="organization-readiness">Create sandbox organization</button>
         </div>
       </form>
-      <p class="hint">This creates a disposable organization for the signed-in account. It does not publish a campaign.</p>
+      <p id="organization-readiness" class="hint" role="status" aria-live="polite">Checking sandbox readiness. No organization ID has been created.</p>
+      <p class="hint">This creates a disposable organization for the signed-in account. It does not publish a campaign. <a href="/static/nova-creative/casting-preview.html">Open the fictional preview</a> when sandbox writes are unavailable.</p>
     </section>
 
     <section class="card" aria-label="Organizer workspace">
@@ -146,6 +147,7 @@
       <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
     </section>
   </main>
+  <script src="/static/ux/sessionManager.js"></script>
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
@@ -154,6 +156,10 @@
       var playbackUrl = "";
       var applicationId = "";
       var resumeKey = "nova_casting_sandbox_application";
+      function setOrganizationReadiness(enabled, message) {
+        $("create-organization").disabled = !enabled;
+        $("organization-readiness").textContent = message;
+      }
       function rememberApplication() {
         if (!applicationId) return;
         sessionStorage.setItem(resumeKey, JSON.stringify({
@@ -186,9 +192,17 @@
       function base() { return "/api/nova/casting/organizations/" + encodeURIComponent(org()); }
       async function api(path, options) {
         $("status").textContent = "Loading";
+        var isLogin = path === "/api/auth/login";
         var headers = { "Content-Type": "application/json" };
-        if (token()) headers.Authorization = "Bearer " + token();
-        var response = await fetch(path, Object.assign({ headers: headers }, options || {}));
+        var shared = window.AmiCorSession || null;
+        var response;
+        if (!isLogin && shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+        if (!isLogin && shared && typeof shared.authFetch === "function") {
+          response = await shared.authFetch(path, Object.assign({ headers: headers }, options || {}));
+        } else {
+          if (!isLogin && token()) headers.Authorization = "Bearer " + token();
+          response = await fetch(path, Object.assign({ headers: headers }, options || {}));
+        }
         var text = await response.text();
         var body = {};
         if (text) {
@@ -196,6 +210,15 @@
         }
         if (!response.ok) {
           var detail = body && body.detail ? body.detail : "Request failed";
+          if (response.status === 401) {
+            if (isLogin) detail = "Nova rejected these sign-in credentials (401). Main Nova sign-in may use a different session; check this server account without creating a second casting password.";
+            else {
+              setToken("");
+              writesEnabled = false;
+              setOrganizationReadiness(false, "Session expired or unauthorized. No organization ID was created.");
+              detail = "Casting session is unauthorized (401). Return to the main Nova sign-in on this server, then reopen Casting. No data was submitted.";
+            }
+          }
           show(String(detail), false);
           throw new Error(String(detail));
         }
@@ -205,6 +228,7 @@
       async function refreshReadiness() {
         if (!token()) {
           writesEnabled = false;
+          setOrganizationReadiness(false, "Sign in to check sandbox availability. No organization ID has been created.");
           $("status").textContent = "Sign in to check sandbox readiness.";
           return false;
         }
@@ -218,9 +242,11 @@
           ? "Antivirus signatures are current."
           : "Structural scan only. Antivirus is not ready.";
         if (!writesEnabled) {
+          setOrganizationReadiness(false, "Organization creation is unavailable: sandbox workflows are off. No organization ID was generated. Use the fictional preview or ask the operator to enable a disposable non-production staging environment.");
           show("Sandbox workflows are off. Use the fictional preview. Nothing was submitted.", false);
           return false;
         }
+        setOrganizationReadiness(true, "Sandbox organization creation is available for this disposable test environment. A successful creation will fill the organization ID below.");
         show("Sandbox writes are enabled for this disposable environment. Nothing is published.", true);
         return true;
       }
@@ -241,6 +267,21 @@
               password: $("login-password").value
             })
           });
+          var shared = window.AmiCorSession || null;
+          if (shared && typeof shared.start === "function") {
+            shared.start({
+              userId: body.user_id,
+              email: body.email || $("login-email").value.trim(),
+              name: body.name || body.display_name || $("login-email").value.trim(),
+              role: body.role || body.session_role || "staff",
+              organizationId: body.organization_id || null,
+              organizationName: body.organization_name || null,
+              accessToken: body.access_token || null,
+              refreshToken: body.refresh_token || null,
+              tokenExpiresAt: body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null
+            });
+            if (typeof shared.applyAuthTokens === "function") shared.applyAuthTokens(body);
+          }
           setToken(body.access_token || "");
           await refreshReadiness();
         } catch (err) { /* banner already set */ }
@@ -248,6 +289,7 @@
       $("sign-out").addEventListener("click", function () {
         setToken("");
         writesEnabled = false;
+        setOrganizationReadiness(false, "Signed out. Sign in to check sandbox availability.");
         show("Signed out. Nothing was submitted.", true);
       });
       $("organization-form").addEventListener("submit", async function (event) {
