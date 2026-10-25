@@ -2033,27 +2033,79 @@ class CreativeStudioService(ShortDramaMixin):
         image_assets = [a for a in self.store.list_assets(project_id, owner_id)
                         if a.kind == "image" and a.url and str(a.status or "").upper() == "GENERATED"]
         provider = FalKlingAvatarProvider().status()
+        audio_found = self._provider_backed_narration_present(owner_id, project_id)
+        confirmation = (project.metadata or {}).get("budget_confirmation") or {}
+        budget_confirmed = confirmation.get("confirmed") is True
+        image_found = bool(approved_id and presenter)
+        if provider.status == "AVAILABLE" and provider.configured:
+            provider_block = "ready"
+        elif provider.configured:
+            provider_block = "live_flag_off"
+        else:
+            provider_block = "credential_missing"
+        blockers: list[str] = []
+        if provider_block != "ready":
+            blockers.append(provider_block)
+        if not image_found:
+            blockers.append("missing_presenter_image")
+        if not audio_found:
+            blockers.append("missing_narration_audio")
+        if not budget_confirmed:
+            blockers.append("budget_not_confirmed")
+        blockers.append("avatar_route_not_activated")
+        reasons = {
+            "credential_missing": "FAL_KEY is not set on this service. No provider request was sent.",
+            "live_flag_off": "The Kling avatar credential is present, and generation stays off until both live flags are on.",
+            "missing_presenter_image": "No approved Genova image file is saved on this project.",
+            "missing_narration_audio": "No provider-backed narration file is saved. Local eSpeak audio does not count.",
+            "budget_not_confirmed": "This project has no saved owner budget confirmation.",
+            "avatar_route_not_activated": "The paid avatar route is not connected, so this check cannot start generation.",
+        }
+        from app.core.nova.creative_studio.providers import media_selection_label
+
         return {
             "project_id": project_id,
             "mode": "PREVIEW_PREFLIGHT_ONLY",
             "provider": "fal_kling_avatar_v2",
             "provider_status": provider.status,
             "provider_configured": provider.configured,
-            "approved_presenter_image_found": bool(approved_id and presenter),
+            "provider_block_reason": provider_block,
+            "credential_env_names": ["FAL_KEY"],
+            "live_flag_names": ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "NOVA_CREATIVE_KLING_LIVE_ENABLED"],
+            "invalid_credential_checked": False,
+            "authorization_checked": False,
+            "provider_error_checked": False,
+            "approved_presenter_image_found": image_found,
             "generated_image_assets_in_project": len(image_assets),
             "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]}
                                  for a in image_assets if (lambda p: p is not None and p.is_file())(_resolve_creative_media_url(a.url))][:12],
-            "candidate_images_are_approved": bool(approved_id and presenter),
+            "candidate_images_are_approved": image_found,
             "approved_image_asset_id": approved_id if presenter else None,
             "presenter_image_next_step": ("Approved Genova image located." if presenter else
                  "Project has images but none match approved Genova presenter criteria." if image_assets else
                  "No generated image assets in this project; add or generate an approved Genova image."),
-            "approved_narration_audio_found": False,
+            "approved_narration_audio_found": audio_found,
+            "owner_budget_confirmed": budget_confirmed,
             "budget_enforcement_ready": False,
+            "media_selection": media_selection_label(),
+            "blockers": blockers,
             "can_generate": False,
-            "reason": "An approved narration asset and enforced per-request budget are required before paid generation.",
+            "reason": reasons[blockers[0]],
             "paid_request_submitted": False,
         }
+
+    def _provider_backed_narration_present(self, owner_id: str, project_id: str) -> bool:
+        """True only for a saved OpenAI voice file. Local eSpeak audio stays excluded."""
+        for asset in reversed(self.store.list_assets(project_id, owner_id)):
+            if asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
+                continue
+            provider = str(((asset.metadata or {}).get("provider_result") or {}).get("provider") or "")
+            if provider != "openai_voice":
+                continue
+            path = _resolve_creative_media_url(asset.url)
+            if path is not None and path.is_file():
+                return True
+        return False
 
     def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
         """Prefer project Genova full-body stills; fall back to known media-root plates."""

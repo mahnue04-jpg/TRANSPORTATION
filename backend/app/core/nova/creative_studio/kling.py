@@ -285,10 +285,55 @@ AVATAR_MODEL = "fal-ai/kling-video/ai-avatar/v2/standard"
 AVATAR_TOKEN_PREFIX = "fal-kling-avatar-v2:"
 
 
+def _avatar_block_reason(message: str) -> str:
+    """Map the fixed local error text to a blocker. Never inspect provider bodies."""
+    text = str(message or "").lower()
+    if "api key was rejected" in text:
+        return "invalid_credential"
+    if "access denied" in text:
+        return "authorization"
+    if "presenter image" in text or "narration" in text or "accessible to fal" in text:
+        return "missing_media"
+    return "provider_error"
+
+
 class FalKlingAvatarProvider(FalKlingLipSyncProvider):
     """Owner-gated, queued talking-avatar generation; no implicit paid calls."""
 
     provider_id = "fal_kling_avatar_v2"
+
+    def status(self):
+        """Require the Kling flags even when the selected video provider is Runway.
+
+        FalKlingVideoProvider.status follows the selected video provider. With the
+        default Runway selection, a Runway live flag would otherwise mark this
+        paid avatar adapter available. This check does not contact fal.
+        """
+        if not self._key():
+            return ProviderStatus(
+                self.provider_id,
+                "talking_avatar",
+                CONFIG_REQUIRED,
+                "FAL_KEY is missing. Kling avatar did not send a request.",
+                False,
+            )
+        video_on = str(os.getenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+        kling_on = str(os.getenv("NOVA_CREATIVE_KLING_LIVE_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if not (video_on and kling_on):
+            return ProviderStatus(
+                self.provider_id,
+                "talking_avatar",
+                DISABLED,
+                "Kling avatar stays off until NOVA_CREATIVE_VIDEO_LIVE_ENABLED and NOVA_CREATIVE_KLING_LIVE_ENABLED are both on. A Runway live flag does not turn this adapter on.",
+                True,
+            )
+        return ProviderStatus(
+            self.provider_id,
+            "talking_avatar",
+            AVAILABLE,
+            "Kling avatar flags are on. This status check did not submit a job.",
+            True,
+        )
 
     def _validate_task(self, task):
         """Restrict saved avatar queue URLs to this model and request id."""
@@ -330,7 +375,8 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                   "generation_mode": "talking_avatar", "watermark_free": False}
         state = self.status()
         if state.status != AVAILABLE:
-            return dict(result, status=state.status, message=state.message)
+            reason = "credential_missing" if not state.configured else "live_flag_off"
+            return dict(result, status=state.status, message=state.message, block_reason=reason)
         token = str(resume_task_id or "").strip()
         try:
             if token:
@@ -373,6 +419,20 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                 time.sleep(5)
             return dict(result, status="PROCESSING", task_id=token,
                         message="Kling avatar still processing; resume existing request.")
-        except (RuntimeError, ValueError, TypeError, KeyError):
-            return dict(result, status=ERROR, task_id=token or None,
-                        message="Kling avatar request could not proceed; check setup and Fal usage.")
+        except _SafeKlingError as exc:
+            message = str(exc)
+            return dict(
+                result,
+                status=ERROR,
+                task_id=token or None,
+                message=message,
+                block_reason=_avatar_block_reason(message),
+            )
+        except (RuntimeError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return dict(
+                result,
+                status=ERROR,
+                task_id=token or None,
+                message="Kling avatar request could not proceed; check setup and Fal usage.",
+                block_reason="provider_error",
+            )
