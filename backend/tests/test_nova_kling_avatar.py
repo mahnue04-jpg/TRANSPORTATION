@@ -93,3 +93,19 @@ def test_genova_readiness_enforces_project_ownership():
     project = svc.create_project("owner-a", {"title": "Private Genova", "project_type": "short_video"})
     with pytest.raises(CreativeStudioError):
         svc.genova_avatar_readiness("owner-b", project["id"])
+
+
+def test_genova_missing_image_guidance(monkeypatch):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("diagnostic-owner", {"title": "Test commercial", "project_type": "short_video"})
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "false")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "false")
+    monkeypatch.setattr(FalKlingAvatarProvider, "_request_json",
+                        lambda *a, **kw: pytest.fail("Readiness must not call Fal"))
+    state = svc.genova_avatar_readiness("diagnostic-owner", project["id"])
+    assert state["generated_image_assets_in_project"] == 0
+    assert state["approved_presenter_image_found"] is False
+    assert "No generated image assets" in state["presenter_image_next_step"]
+    assert state["can_generate"] is False

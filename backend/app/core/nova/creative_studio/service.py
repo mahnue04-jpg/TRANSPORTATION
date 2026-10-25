@@ -2008,6 +2008,8 @@ class CreativeStudioService(ShortDramaMixin):
 
         self._project_or_404(owner_id, project_id)
         presenter = self._resolve_genova_presenter_image(owner_id, project_id)
+        image_assets = [a for a in self.store.list_assets(project_id, owner_id)
+                        if a.kind == "image" and a.url and str(a.status or "").upper() == "GENERATED"]
         provider = FalKlingAvatarProvider().status()
         return {
             "project_id": project_id,
@@ -2016,6 +2018,10 @@ class CreativeStudioService(ShortDramaMixin):
             "provider_status": provider.status,
             "provider_configured": provider.configured,
             "approved_presenter_image_found": bool(presenter),
+            "generated_image_assets_in_project": len(image_assets),
+            "presenter_image_next_step": ("Approved Genova image located." if presenter else
+                 "Project has images but none match approved Genova presenter criteria." if image_assets else
+                 "No generated image assets in this project; add or generate an approved Genova image."),
             "approved_narration_audio_found": False,
             "budget_enforcement_ready": False,
             "can_generate": False,

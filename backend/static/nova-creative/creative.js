@@ -83,7 +83,8 @@
         " | Approved narration audio: " + (state.approved_narration_audio_found ? "found" : "not ready") +
         " | Spending gate: " + (state.budget_enforcement_ready ? "ready" : "not ready") +
         " | Paid generation: " + (state.can_generate ? "requires separate owner action" : "blocked") +
-        ". No paid request submitted.";
+        ". No paid request submitted." +
+        (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "");
     } catch (err) {
       target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
     } finally { button.disabled = false; }
