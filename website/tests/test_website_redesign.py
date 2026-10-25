@@ -141,16 +141,21 @@ def test_product_catalog_uses_distinct_images() -> None:
     assert len(set(hashes)) == 12
     for src, _alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
-        assert src.endswith(".jpg"), src
-        assert path.stat().st_size > 40_000, src
-        assert path.read_bytes()[:3] == b"\xff\xd8\xff"
+        if src.endswith(".jpg"):
+            assert path.stat().st_size > 40_000, src
+            assert path.read_bytes()[:3] == b"\xff\xd8\xff"
+        elif src.endswith(".svg"):
+            assert path.stat().st_size > 100, src
+            assert b"<svg" in path.read_bytes(), src
+        else:
+            raise AssertionError(f"Unexpected image type: {src}")
     assert 'type="file"' not in html
     assert "public submissions disabled" in html.lower()
     assert 'href="/early-access/?product=Nova%20Casting%20%26%20Auditions"' in html
     assert "Nova%20Casting%20and%20Auditions" not in html
     assert "\\n              <tr><td>Nova Creative Studio" not in html
     assert "card-home-hub.jpg" in html
-    assert "card-car-hub.jpg" in html
+    assert "card-farm-app.svg" in html
     assert "AMICOR Health" in html
     assert 'src="../assets/img/card-health.jpg"' in html
     assert "No public rides and no licensed-market claim." in html
