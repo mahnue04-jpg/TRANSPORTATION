@@ -157,7 +157,8 @@ def test_worker_crash_recovers_without_lease_mismatch_or_duplicate() -> None:
     crash_job.lease_expires_at = kernel.now - timedelta(seconds=1)
     recovered = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a", worker_id="worker-a")
     assert crash_job.job_id in {item.job_id for item in recovered}
-    assert crash_job.status == "EXECUTED"
+    assert crash_job.status == "PREPARED"
+    assert crash_job.next_run_at is not None and crash_job.next_run_at > kernel.now
     assert crash_job.run_count == 1
     assert foreign.lease_owner == "worker-b"
     assert foreign.run_count == 0

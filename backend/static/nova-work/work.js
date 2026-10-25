@@ -889,6 +889,7 @@
     if (selectedOpportunityId) {
       await loadDetail(selectedOpportunityId);
     }
+    document.dispatchEvent(new CustomEvent("nova-work-refreshed"));
   }
   async function novaSubmitApplication(id) {
     setWorkActionStatus(id, "Nova is attempting the approved submission.", true);
@@ -1357,17 +1358,25 @@
         var prepared = body.prepared || [];
         var ranked = body.ranked_jobs || [];
         var counts = body.qualification_counts || {};
-        $("live-job-status").textContent =
-          "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
-          " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
-          " · found/ranked " + (body.ranked_count || 0) +
-          " · selected " + (body.selected_count || 0) +
-          " · QUALIFIED " + (counts.QUALIFIED || 0) +
-          " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
-          " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
-          " · auto-prepared " + (body.prepared_count || 0) +
-          " · external action: " + String(body.external_action_taken === true) +
-          " · financial execution: " + String(body.financial_execution === true) + ".";
+        if (body.live_search_claimed === false || body.live_search_status === "unavailable") {
+          var failedSources = (body.providers_failed || []).join(", ") || "every source";
+          $("live-job-status").textContent =
+            "Live search was not completed. " + failedSources +
+            " failed, so this is not a zero-match result. Nothing was submitted.";
+        } else {
+          $("live-job-status").textContent =
+            "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
+            " · search " + (body.live_search_status || "ok") +
+            " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
+            " · found/ranked " + (body.ranked_count || 0) +
+            " · selected " + (body.selected_count || 0) +
+            " · QUALIFIED " + (counts.QUALIFIED || 0) +
+            " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
+            " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
+            " · auto-prepared " + (body.prepared_count || 0) +
+            " · external action: " + String(body.external_action_taken === true) +
+            " · financial execution: " + String(body.financial_execution === true) + ".";
+        }
         var preparedIds = {};
         prepared.forEach(function (item) {
           var opp = item.opportunity || {};

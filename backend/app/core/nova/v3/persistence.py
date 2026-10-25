@@ -35,6 +35,17 @@ def _lookup_filters(model, key_cols: dict[str, Any]) -> dict[str, Any]:
     return {name: key_cols[name] for name in key_cols if hasattr(model, name)}
 
 
+def _payloads(rows: list[Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        parsed = json.loads(row.payload_json)
+        if isinstance(parsed, dict):
+            out.append(parsed)
+        else:
+            out.append({"payload": parsed})
+    return out
+
+
 class V3Store:
     def __init__(self, url: str | None = None, *, engine: Engine | None = None) -> None:
         if engine is not None:
@@ -91,14 +102,15 @@ class V3Store:
             if owner_user_id is not None and hasattr(model, "owner_user_id"):
                 query = query.where(model.owner_user_id == owner_user_id)
             rows = db.execute(query).scalars().all()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            parsed = json.loads(row.payload_json)
-            if isinstance(parsed, dict):
-                out.append(parsed)
-            else:
-                out.append({"payload": parsed})
-        return out
+        return _payloads(rows)
+
+    def fetch_all(self, table: str) -> list[dict[str, Any]]:
+        if table not in V3_TABLES:
+            raise V3Error("PERSISTENCE_REFUSED", f"unknown V3 table {table}")
+        model = V3_MODEL_BY_TABLE[table]
+        with self.session() as db:
+            rows = db.execute(select(model)).scalars().all()
+        return _payloads(rows)
 
     def count(self, table: str) -> int:
         if table not in V3_TABLES:

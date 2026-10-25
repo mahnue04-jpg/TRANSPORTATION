@@ -29,7 +29,9 @@ from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.multi_source_discovery import (
+    classify_live_search,
     dedupe_opportunities,
+    merge_search_funnels,
     provider_catalog,
     provider_health_snapshot,
     search_multi_source_jobs,
@@ -393,6 +395,10 @@ def v3_live_job_search(
             "source": "multi_source",
             "sources": multi.get("providers_queried") or [],
             "provider_result_counts": multi.get("provider_result_counts") or {},
+            "provider_screened_counts": multi.get("provider_screened_counts") or {},
+            "exclusion_reason_counts": multi.get("exclusion_reason_counts") or {},
+            "exclusion_samples": multi.get("exclusion_samples") or [],
+            "funnel": multi.get("funnel") or {},
             "provider_errors": multi.get("provider_errors") or [],
             "provider_health": multi.get("provider_health") or [],
             "read_only": True,
@@ -400,6 +406,7 @@ def v3_live_job_search(
             "external_submission": False,
             "financial_execution": False,
             "jobs": ranked,
+            **classify_live_search({**multi, "jobs": ranked}),
         }
     except V3Error as exc:
         _raise(exc)
@@ -454,6 +461,12 @@ def v3_live_job_discover(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": multi.get("providers_queried") or [],
+                "provider_result_counts": multi.get("provider_result_counts") or {},
+                "provider_errors": multi.get("provider_errors") or [],
+                "jobs": ranked,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
@@ -462,6 +475,11 @@ def v3_live_job_discover(
                 OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
                 OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
             },
+            "qualification_reconciled": (
+                len(buckets[OUTCOME_QUALIFIED])
+                + len(buckets[OUTCOME_NEEDS_OWNER_REVIEW])
+                + len(buckets[OUTCOME_NOT_QUALIFIED])
+            ) == len(ranked),
             "ranked_jobs": visible_ranked,
             "saved": saved,
             "persistent_results": persistent_results,
@@ -492,8 +510,10 @@ def v3_live_job_prepare(
         provider_counts: dict[str, int] = {}
         provider_errors: list[dict[str, Any]] = []
         provider_health: list[dict[str, Any]] = []
+        funnel_parts: list[dict[str, Any]] = []
         for planned in search_plan:
             multi_part = search_multi_source_jobs(planned["query"], limit=payload.limit)
+            funnel_parts.append(multi_part)
             for job in multi_part["jobs"]:
                 item = dict(job)
                 item["search_family"] = planned.get("search_family")
@@ -610,11 +630,18 @@ def v3_live_job_prepare(
             "provider_result_counts": provider_counts,
             "provider_errors": provider_errors,
             "provider_health": provider_health,
+            "funnel": merge_search_funnels(funnel_parts),
             "search_plan": search_plan,
             "reset_result": reset_result,
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": sources,
+                "provider_result_counts": provider_counts,
+                "provider_errors": provider_errors,
+                "jobs": collected,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
@@ -627,6 +654,11 @@ def v3_live_job_prepare(
                 OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
                 OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
             },
+            "qualification_reconciled": (
+                len(buckets[OUTCOME_QUALIFIED])
+                + len(buckets[OUTCOME_NEEDS_OWNER_REVIEW])
+                + len(buckets[OUTCOME_NOT_QUALIFIED])
+            ) == len(ranked),
             "auto_prepared_only_qualified": True,
             "held_for_owner_review": held_for_owner_review,
             "skipped_not_qualified": skipped_not_qualified,

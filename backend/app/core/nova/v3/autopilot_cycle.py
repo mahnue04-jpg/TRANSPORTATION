@@ -18,7 +18,11 @@ from app.core.nova.v3.live_qualification import (
     partition_by_qualification,
     qualify_and_rank_live_jobs,
 )
-from app.core.nova.v3.multi_source_discovery import search_multi_source_jobs
+from app.core.nova.v3.multi_source_discovery import (
+    classify_live_search,
+    merge_search_funnels,
+    search_multi_source_jobs,
+)
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs
 from app.core.nova.work_revenue.capability_first_discovery import generate_capability_first_queries
 
@@ -107,17 +111,30 @@ def run_autopilot_cycle(
 
     combined: list[dict[str, Any]] = []
     providers_queried: set[str] = set()
+    provider_counts: dict[str, int] = {}
     provider_errors: list[dict[str, Any]] = []
     per_query: list[dict[str, Any]] = []
+    funnel_parts: list[dict[str, Any]] = []
+
+    def _merge_provider_counts(result: dict[str, Any]) -> None:
+        for provider_id, count in (result.get("provider_result_counts") or {}).items():
+            key = str(provider_id or "").strip()
+            if not key:
+                continue
+            provider_counts[key] = provider_counts.get(key, 0) + int(count or 0)
 
     for query in selected_queries:
         multi = search_multi_source_jobs(query, limit=result_limit)
+        funnel_parts.append(multi)
+        _merge_provider_counts(multi)
         used_query = query
         fallback_query = None
         if not (multi.get("jobs") or []):
             fallback_query = _fallback_query(query)
             if fallback_query and fallback_query.lower() != query.lower():
                 retry = search_multi_source_jobs(fallback_query, limit=result_limit)
+                funnel_parts.append(retry)
+                _merge_provider_counts(retry)
                 providers_queried.update(str(item) for item in (retry.get("providers_queried") or []))
                 provider_errors.extend(list(retry.get("provider_errors") or []))
                 if retry.get("jobs"):
@@ -183,6 +200,7 @@ def run_autopilot_cycle(
         "per_query": per_query,
         "providers_queried": sorted(providers_queried),
         "provider_errors": provider_errors,
+        "funnel": merge_search_funnels(funnel_parts),
         "ranked_count": len(combined),
         "selected_count": len(unique),
         "qualification_counts": {
@@ -201,6 +219,21 @@ def run_autopilot_cycle(
         "held_for_owner_review": held_for_owner_review,
         "blocked_packages": blocked_packages,
         "persistent_results": persistent,
+        **classify_live_search({
+            "providers_queried": sorted(providers_queried),
+            # Keep a provider that finished any query, including a zero-row
+            # search. One later timeout must not drop that source.
+            "provider_result_counts": {
+                provider_id: provider_counts.get(provider_id, 0)
+                for provider_id in providers_queried
+                if provider_id in provider_counts
+                or provider_id not in {
+                    str(item.get("provider_id")) for item in provider_errors if item.get("provider_id")
+                }
+            },
+            "provider_errors": provider_errors,
+            "jobs": unique,
+        }),
         "external_action_taken": False,
         "external_submission": False,
         "agency_contact": False,
