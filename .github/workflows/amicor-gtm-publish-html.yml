@@ -1,0 +1,51 @@
+name: Commit verified GTM production HTML
+on:
+  push:
+    branches:
+      - fix/gtm-generated-production-html-20261024
+    paths:
+      - '.github/workflows/amicor-gtm-publish-html.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  generate-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/gtm-generated-production-html-20261024
+          persist-credentials: true
+      - name: Regenerate pages and check GTM
+        run: |
+          python3 website/_generate.py
+          python3 website/check_gtm.py
+      - name: Reject unrelated generated differences
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          if not changed:
+              raise SystemExit('No generated HTML changes found')
+          if any(not p.startswith('website/') or not p.endswith('.html') for p in changed):
+              raise SystemExit('Unexpected non-HTML changes: '+str(changed))
+          for p in changed:
+              old=subprocess.check_output(['git','show',f'HEAD:{p}'],text=True)
+              new=Path(p).read_text(encoding='utf-8')
+              for start,end in (('  <!-- Google Tag Manager -->\n','  <!-- End Google Tag Manager -->\n'),('  <!-- Google Tag Manager (noscript) -->\n','  <!-- End Google Tag Manager (noscript) -->\n')):
+                  if new.count(start)!=1 or new.count(end)!=1:
+                      raise SystemExit(f'Missing or duplicate GTM snippet: {p}')
+                  i=new.index(start);j=new.index(end,i)+len(end)
+                  new=new[:i]+new[j:]
+              if new!=old:
+                  raise SystemExit(f'Unrelated HTML diff in {p}; no automatic commit')
+          print('Only GTM additions verified in',len(changed),'HTML pages')
+          PY
+      - name: Commit verified generated HTML to PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u -- website
+          git commit -m "Publish verified GTM snippets in static HTML pages"
+          git push origin HEAD:fix/gtm-generated-production-html-20261024
