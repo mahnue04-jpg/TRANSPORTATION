@@ -88,6 +88,7 @@
         <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
         <button type="button" id="check-genova-avatar-readiness" class="secondary">Check Genova professional presenter readiness (free)</button>
       </div>
+      <section aria-label="Genova image approval"><h3>Approve Genova presenter image</h3><p class="hint">Choose one existing image from this project. Approval is saved to this project only; no paid generation.</p><div class="actions wrap"><button type="button" id="genova-load-images" class="secondary">Show presenter image choices</button><button type="button" id="genova-revoke-image" class="secondary">Remove approval</button></div><div id="genova-image-choices" role="status" aria-live="polite"></div></section>
       <div id="genova-avatar-readiness-result" class="hint" role="status" aria-live="polite">Professional presenter test is not activated. Run the free readiness check to see missing requirements.</div>
       <details class="studio-details">
         <summary>Optional · 5s preview &amp; montage fallback</summary>
@@ -341,6 +342,6 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
-  <script src="/static/nova-creative/creative.js?v=genova-image-diagnostics-20261025"></script>
+  <script src="/static/nova-creative/creative.js?v=genova-image-approval-20261025"></script>
 </body>
 </html>
