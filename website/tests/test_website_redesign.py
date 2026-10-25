@@ -177,7 +177,7 @@ def test_hardware_assets_exist() -> None:
         assert path.is_file(), name
         assert path.stat().st_size > 40_000, name
     assert "See More. Care More. Be There." in _html(PAGES["/home-hub/"])
-    assert "On the Road. On Your Team." in _html(PAGES["/car-hub/"])
+    assert "AMICOR Farm App" in _html(PAGES["/car-hub/"])
 
 
 def test_customer_paths_and_price_consistency() -> None:
