@@ -109,3 +109,27 @@ def test_genova_missing_image_guidance(monkeypatch):
     assert state["approved_presenter_image_found"] is False
     assert "No generated image assets" in state["presenter_image_next_step"]
     assert state["can_generate"] is False
+
+
+def test_genova_approval_rejects_unknown_image():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("approval-owner", {"title": "Commercial", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("approval-owner", p["id"], "not-in-project")
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("other-owner", p["id"], "not-in-project")
+    state = svc.genova_avatar_readiness("approval-owner", p["id"])
+    assert state["approved_image_asset_id"] is None
+    assert not state["can_generate"]
+
+
+def test_genova_approval_revocation_is_project_scoped():
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("approval-owner-revoke", {"title": "Commercial", "project_type": "short_video"})
+    result = svc.set_genova_presenter_approval("approval-owner-revoke", p["id"], None)
+    assert result["approved"] is False
+    assert result["approved_asset_id"] is None
