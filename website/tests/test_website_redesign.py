@@ -287,7 +287,7 @@ def test_one_catalog_card_per_product() -> None:
 
 def test_sitemap_includes_new_routes() -> None:
     sitemap = (ROOT / "sitemap.xml").read_text(encoding="utf-8")
-    for route in ("/work-revenue/", "/car-hub/", "/products/", "/signin/", "/nova-snap/"):
+    for route in ("/work-revenue/", "/farm-app/", "/products/", "/signin/", "/nova-snap/"):
         assert f"https://getamicor.com{route}" in sitemap
 
 
