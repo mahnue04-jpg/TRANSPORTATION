@@ -2019,6 +2019,8 @@ class CreativeStudioService(ShortDramaMixin):
             "provider_configured": provider.configured,
             "approved_presenter_image_found": bool(presenter),
             "generated_image_assets_in_project": len(image_assets),
+            "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]} for a in image_assets[:12]],
+            "candidate_images_are_approved": False,
             "presenter_image_next_step": ("Approved Genova image located." if presenter else
                  "Project has images but none match approved Genova presenter criteria." if image_assets else
                  "No generated image assets in this project; add or generate an approved Genova image."),
