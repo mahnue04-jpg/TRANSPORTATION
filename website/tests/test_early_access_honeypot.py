@@ -127,7 +127,11 @@ def test_site_js_uses_new_honeypot_and_preserves_submit_path() -> None:
     assert 'method: "POST"' in JS
     assert 'headers: { "Content-Type": "application/json" }' in JS
     assert "JSON.stringify(payload)" in JS
-    assert "Thank you. Your request was sent to AMICOR." in JS
+    assert "AMICOR saved your request." in JS
+    assert "Email delivery was not confirmed." in JS
+    assert "A notification email was sent." not in JS
+    assert "result.referenceId" in JS
+    assert "result.stored" in JS
     assert "Request could not be sent." in JS
     for field in VISIBLE_FIELDS:
         assert f"{field}:" in JS or f"data.{field}" in JS
@@ -179,8 +183,10 @@ def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
     assert 'source: "amicor-public-website-w8"' in LEADS
-    assert "store.put(`lead:${payload.receivedAt}:${id}`" in LEADS
-    assert 'return json(202, { ok: true, stored, notified });' in LEADS
+    assert "store.put(`lead:${referenceId}`" in LEADS
+    assert "referenceId" in LEADS
+    assert "emailNotification" in LEADS
+    assert "duplicate" in LEADS
 
 
 def main() -> None:
