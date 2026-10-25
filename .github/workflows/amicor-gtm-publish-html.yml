@@ -5,9 +5,6 @@ on:
       - fix/gtm-generated-production-html-20261024
     paths:
       - '.github/workflows/amicor-gtm-publish-html.yml'
-  pull_request:
-    paths:
-      - '.github/workflows/amicor-gtm-publish-html.yml'
   workflow_dispatch:
 permissions:
   contents: write
@@ -19,36 +16,67 @@ jobs:
         with:
           ref: fix/gtm-generated-production-html-20261024
           persist-credentials: true
-      - name: Regenerate pages and check GTM
-        run: |
-          python3 website/_generate.py
-          python3 website/check_gtm.py
-      - name: Reject unrelated generated differences
+      - name: Insert GTM into existing published HTML only
         run: |
           python3 - <<'PY'
-          import subprocess
           from pathlib import Path
-          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
-          if not changed:
-              raise SystemExit('No generated HTML changes found')
-          if any(not p.startswith('website/') or not p.endswith('.html') for p in changed):
-              raise SystemExit('Unexpected non-HTML changes: '+str(changed))
+          root=Path('website')
+          head="""  <!-- Google Tag Manager -->
+            <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+            new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+            j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+            'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+            })(window,document,'script','dataLayer','GTM-KTQ6Q68T');</script>
+            <!-- End Google Tag Manager -->
+          """
+          body="""  <!-- Google Tag Manager (noscript) -->
+            <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KTQ6Q68T"
+            height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+            <!-- End Google Tag Manager (noscript) -->
+          """
+          updated=0
+          for p in root.rglob('*.html'):
+              old=p.read_text(encoding='utf-8')
+              if not old.lstrip().lower().startswith('<!doctype html'):
+                  continue
+              if 'http-equiv="refresh"' in old.lower():
+                  continue
+              if 'GTM-KTQ6Q68T' in old:
+                  continue
+              if old.count('<head>')!=1 or '<body' not in old:
+                  raise SystemExit(f'Unexpected HTML page structure: {p}')
+              new=old.replace('<head>', '<head>\n'+head,1)
+              import re
+              new,count=re.subn(r'(<body[^>]*>)',lambda m:m.group(1)+'\n'+body,new,count=1)
+              if count!=1:
+                  raise SystemExit(f'Cannot find body tag: {p}')
+              p.write_text(new,encoding='utf-8')
+              updated+=1
+          assert updated>=20, f'Only {updated} pages updated'
+          print('Inserted GTM into',updated,'existing HTML pages')
+          PY
+      - name: Verify no unrelated changes and validate GTM
+        run: |
+          python3 website/check_gtm.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          changed=subprocess.check_output(['git','diff','--name-only','--','website'],text=True).splitlines()
+          assert changed and all(p.endswith('.html') for p in changed), changed
           for p in changed:
               old=subprocess.check_output(['git','show',f'HEAD:{p}'],text=True)
               new=Path(p).read_text(encoding='utf-8')
-              for start,end in (('  <!-- Google Tag Manager -->\n','  <!-- End Google Tag Manager -->\n'),('  <!-- Google Tag Manager (noscript) -->\n','  <!-- End Google Tag Manager (noscript) -->\n')):
-                  if new.count(start)!=1 or new.count(end)!=1:
-                      raise SystemExit(f'Missing or duplicate GTM snippet: {p}')
+              for start,end in (('  <!-- Google Tag Manager -->\n','<!-- End Google Tag Manager -->\n'),('  <!-- Google Tag Manager (noscript) -->\n','<!-- End Google Tag Manager (noscript) -->\n')):
+                  assert new.count(start)==1 and new.count(end)==1, p
                   i=new.index(start);j=new.index(end,i)+len(end)
                   new=new[:i]+new[j:]
-              if new!=old:
-                  raise SystemExit(f'Unrelated HTML diff in {p}; no automatic commit')
-          print('Only GTM additions verified in',len(changed),'HTML pages')
+              assert new==old, f'Unrelated change in {p}'
+          print('GTM-only change verified for',len(changed),'files')
           PY
-      - name: Commit verified generated HTML to PR branch
+      - name: Commit verified HTML to PR branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -u -- website
-          git commit -m "Publish verified GTM snippets in static HTML pages"
+          git commit -m "Install GTM in existing production HTML without other changes"
           git push origin HEAD:fix/gtm-generated-production-html-20261024
