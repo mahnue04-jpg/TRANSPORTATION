@@ -124,7 +124,28 @@
             await checkGenovaAvatarReadiness();
           } catch (error) { target.textContent = "Approval failed: " + error.message; }
         });
-        wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
+        var thumb = document.createElement("img");
+        thumb.alt = "Candidate image: " + (item.title || item.asset_id);
+        thumb.loading = "lazy";
+        thumb.style.cssText = "width:96px;height:120px;object-fit:contain;display:block;border-radius:8px;";
+        var mediaPath = "/api/nova/creative/projects/" + encodeURIComponent(p) +
+          "/assets/" + encodeURIComponent(item.asset_id) + "/file";
+        (async function () {
+          try {
+            var shared = session();
+            var response = shared && shared.authFetch
+              ? await shared.authFetch(mediaPath, {method:"GET"})
+              : await fetch(mediaPath, {headers: {"Authorization": "Bearer " + token()}});
+            if (!response.ok) throw new Error("Image unavailable");
+            var blob = await response.blob();
+            if (!blob.type.startsWith("image/")) throw new Error("Not image media");
+            var objectUrl = URL.createObjectURL(blob);
+            thumb.onload = function () { URL.revokeObjectURL(objectUrl); };
+            thumb.onerror = function () { URL.revokeObjectURL(objectUrl); };
+            thumb.src = objectUrl;
+          } catch (err) { thumb.alt = "Preview unavailable: " + (item.title || "image"); }
+        })();
+        wrapper.appendChild(thumb); wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
       });
       if (!(state.candidate_images || []).length) target.appendChild(document.createTextNode("No eligible generated image assets in this project."));
     } catch (error) { target.textContent = "Could not load images: " + error.message; }
