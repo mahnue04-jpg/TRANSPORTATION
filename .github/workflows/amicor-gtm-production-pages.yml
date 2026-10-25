@@ -1,0 +1,52 @@
+name: Generate production GTM pages safely
+on:
+  push:
+    branches:
+      - fix/gtm-production-main-20261024
+    paths:
+      - '.github/workflows/amicor-gtm-production-pages.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Generate and verify pages
+        run: |
+          python3 website/_generate.py
+          python3 website/check_gtm.py
+      - name: Ensure only GTM additions to generated HTML
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          root=Path('website')
+          changed=subprocess.check_output(['git','diff','--name-only','--','website'],text=True).splitlines()
+          assert changed, 'Expected generated HTML differences'
+          assert all(p.endswith('.html') for p in changed), f'Unexpected generated file changes: {changed}'
+          for filename in changed:
+              old=subprocess.check_output(['git','show',f'HEAD:{filename}'],text=True)
+              new=Path(filename).read_text(encoding='utf-8')
+              head_start='  <!-- Google Tag Manager -->\n'
+              head_end='  <!-- End Google Tag Manager -->\n'
+              body_start='  <!-- Google Tag Manager (noscript) -->\n'
+              body_end='  <!-- End Google Tag Manager (noscript) -->\n'
+              def strip_block(text,a,b):
+                  assert text.count(a)==1 and text.count(b)==1, (filename,a)
+                  i=text.index(a); j=text.index(b,i)+len(b)
+                  return text[:i]+text[j:]
+              stripped=strip_block(strip_block(new,head_start,head_end),body_start,body_end)
+              assert stripped==old, f'Unrelated change in {filename}; refusing auto commit'
+          print('Only GTM snippet additions in',len(changed),'generated HTML files')
+          PY
+      - name: Commit generated HTML into PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- 'website/**/*.html' 'website/*.html'
+          git commit -m "Generate GTM snippets into production website HTML"
+          git push origin HEAD:fix/gtm-production-main-20261024
