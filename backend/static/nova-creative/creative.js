@@ -93,6 +93,74 @@
   var genovaReadinessButton = $("check-genova-avatar-readiness");
   if (genovaReadinessButton) genovaReadinessButton.addEventListener("click", checkGenovaAvatarReadiness);
 
+  async function genovaImageChoices() {
+    var target = $("genova-image-choices");
+    if (!target || !activeProjectId) { if (target) target.textContent = "Select a project first."; return; }
+    target.textContent = "Loading project images...";
+    try {
+      var p = activeProjectId;
+      var state = await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-avatar-readiness");
+      target.textContent = "";
+      var selected = document.createElement("p");
+      selected.textContent = state.approved_image_asset_id ? "Approved image: " + state.approved_image_asset_id : "No image approved yet.";
+      target.appendChild(selected);
+      (state.candidate_images || []).forEach(function (item) {
+        var wrapper = document.createElement("div");
+        wrapper.className = "actions wrap";
+        var label = document.createElement("span");
+        label.textContent = item.title || item.asset_id;
+        var button = document.createElement("button");
+        button.type = "button"; button.className = "secondary";
+        button.textContent = state.approved_image_asset_id === item.asset_id ? "Approved" : "Approve this image";
+        button.disabled = state.approved_image_asset_id === item.asset_id;
+        button.addEventListener("click", async function () {
+          if (!window.confirm("Approve this project image as Genova presenter?")) return;
+          button.disabled = true;
+          try {
+            await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-image-approval", {
+              method: "PUT", body: JSON.stringify({asset_id: item.asset_id})
+            });
+            await genovaImageChoices();
+            await checkGenovaAvatarReadiness();
+          } catch (error) { target.textContent = "Approval failed: " + error.message; }
+        });
+        var thumb = document.createElement("img");
+        thumb.alt = "Candidate image: " + (item.title || item.asset_id);
+        thumb.loading = "lazy";
+        thumb.style.cssText = "width:96px;height:120px;object-fit:contain;display:block;border-radius:8px;";
+        var mediaPath = "/api/nova/creative/projects/" + encodeURIComponent(p) +
+          "/assets/" + encodeURIComponent(item.asset_id) + "/file";
+        (async function () {
+          try {
+            var shared = session();
+            var response = shared && shared.authFetch
+              ? await shared.authFetch(mediaPath, {method:"GET"})
+              : await fetch(mediaPath, {headers: {"Authorization": "Bearer " + token()}});
+            if (!response.ok) throw new Error("Image unavailable");
+            var blob = await response.blob();
+            if (!blob.type.startsWith("image/")) throw new Error("Not image media");
+            var objectUrl = URL.createObjectURL(blob);
+            thumb.onload = function () { URL.revokeObjectURL(objectUrl); };
+            thumb.onerror = function () { URL.revokeObjectURL(objectUrl); };
+            thumb.src = objectUrl;
+          } catch (err) { thumb.alt = "Preview unavailable: " + (item.title || "image"); }
+        })();
+        wrapper.appendChild(thumb); wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
+      });
+      if (!(state.candidate_images || []).length) target.appendChild(document.createTextNode("No eligible generated image assets in this project."));
+    } catch (error) { target.textContent = "Could not load images: " + error.message; }
+  }
+  var genovaLoad = $("genova-load-images");
+  if (genovaLoad) genovaLoad.addEventListener("click", genovaImageChoices);
+  var genovaRevoke = $("genova-revoke-image");
+  if (genovaRevoke) genovaRevoke.addEventListener("click", async function () {
+    if (!activeProjectId || !window.confirm("Remove Genova image approval?")) return;
+    try {
+      await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/genova-image-approval", {method:"PUT", body: JSON.stringify({asset_id:null})});
+      await genovaImageChoices(); await checkGenovaAvatarReadiness();
+    } catch (error) { showBanner("Could not remove approval: " + error.message, false); }
+  });
+
   function session() { return window.AmiCorSession || null; }
   function token() {
     var shared = session();

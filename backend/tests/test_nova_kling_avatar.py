@@ -109,3 +109,52 @@ def test_genova_missing_image_guidance(monkeypatch):
     assert state["approved_presenter_image_found"] is False
     assert "No generated image assets" in state["presenter_image_next_step"]
     assert state["can_generate"] is False
+
+
+def test_genova_approval_rejects_unknown_image():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("approval-owner", {"title": "Commercial", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("approval-owner", p["id"], "not-in-project")
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("other-owner", p["id"], "not-in-project")
+    state = svc.genova_avatar_readiness("approval-owner", p["id"])
+    assert state["approved_image_asset_id"] is None
+    assert not state["can_generate"]
+
+
+def test_genova_approval_revocation_is_project_scoped():
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("approval-owner-revoke", {"title": "Commercial", "project_type": "short_video"})
+    result = svc.set_genova_presenter_approval("approval-owner-revoke", p["id"], None)
+    assert result["approved"] is False
+    assert result["approved_asset_id"] is None
+
+
+def test_genova_approval_persists_and_revokes(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as module
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("genova-persist-owner", {"title": "Test", "project_type": "short_video"})
+    image = tmp_path / "genova.png"
+    image.write_bytes(b"test-picture")
+    asset = svc._save_text_asset(owner_id="genova-persist-owner", project_id=project["id"],
+                                 kind="image", title="Genova Still", content="approved project still",
+                                 status="GENERATED", url="/media/nova-creative/genova.png")
+    monkeypatch.setattr(module, "_resolve_creative_media_url", lambda url: image if url.endswith("genova.png") else None)
+    approved = svc.set_genova_presenter_approval("genova-persist-owner", project["id"], asset.id)
+    assert approved["approved"] is True
+    restored = svc._project_or_404("genova-persist-owner", project["id"])
+    assert restored.metadata["approved_genova_image_asset_id"] == asset.id
+    check = svc.genova_avatar_readiness("genova-persist-owner", project["id"])
+    assert check["approved_presenter_image_found"] is True
+    assert check["approved_image_asset_id"] == asset.id
+    revoked = svc.set_genova_presenter_approval("genova-persist-owner", project["id"], None)
+    assert revoked["approved"] is False
+    check = svc.genova_avatar_readiness("genova-persist-owner", project["id"])
+    assert check["approved_image_asset_id"] is None

@@ -1572,6 +1572,25 @@ def accept_project_voice_license(
         raise
 
 
+class GenovaImageApprovalIn(BaseModel):
+    asset_id: str | None = None
+
+
+@router.put("/projects/{project_id}/genova-image-approval")
+def approve_genova_image(
+    project_id: str,
+    payload: GenovaImageApprovalIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_presenter_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.get("/projects/{project_id}/genova-avatar-readiness")
 def genova_avatar_readiness(
     project_id: str,
