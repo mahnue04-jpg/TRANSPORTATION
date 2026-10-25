@@ -1222,8 +1222,17 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
         db.rollback()
         logger.exception("Login user lookup failed for email=%s", req.email)
         raise HTTPException(status_code=503, detail="Login database unavailable") from exc
-    if not user or not verify_password(req.password, user.hashed_password):
-        # Constant-time-ish rejection
+    # Stage-only, server-side diagnostic: distinguish missing record from
+    # nonmatching stored credential without logging identity or secret data.
+    # Never expose the reason in the API response (account enumeration risk).
+    password_valid = bool(user) and verify_password(req.password, user.hashed_password)
+    if not password_valid:
+        if os.getenv("APP_ENV", "").strip().lower() == "staging":
+            logger.warning(
+                "studio_staging_auth_rejected reason=%s",
+                "account_not_found" if user is None else "password_verification_failed",
+            )
+        # Preserve the original generic rejection and timing mitigation.
         time.sleep(0.2)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
