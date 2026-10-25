@@ -2002,12 +2002,34 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
+    def set_genova_presenter_approval(self, owner_id: str, project_id: str, asset_id: str | None) -> dict[str, Any]:
+        """Persist an owner-approved generated image ID, never a client-supplied path."""
+        project = self._project_or_404(owner_id, project_id)
+        if asset_id:
+            asset = next((a for a in self.store.list_assets(project_id, owner_id)
+                          if a.id == asset_id and a.kind == "image"
+                          and str(a.status or "").upper() == "GENERATED"), None)
+            path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
+            if path is None or not path.is_file():
+                raise CreativeStudioError("INVALID_PRESENTER", "Select an available generated image from this project.", http_status=422)
+        meta = dict(project.metadata or {})
+        if asset_id:
+            meta["approved_genova_image_asset_id"] = asset_id
+        else:
+            meta.pop("approved_genova_image_asset_id", None)
+        project.metadata = meta
+        project.updated_at = _now()
+        self.store.save_project(project)
+        return {"project_id": project_id, "approved_asset_id": asset_id, "approved": bool(asset_id)}
+
     def genova_avatar_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
         """Read-only owner-scoped preflight. Never invokes or charges a provider."""
         from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
 
         self._project_or_404(owner_id, project_id)
+        project = self._project_or_404(owner_id, project_id)
         presenter = self._resolve_genova_presenter_image(owner_id, project_id)
+        approved_id = str((project.metadata or {}).get("approved_genova_image_asset_id") or "")
         image_assets = [a for a in self.store.list_assets(project_id, owner_id)
                         if a.kind == "image" and a.url and str(a.status or "").upper() == "GENERATED"]
         provider = FalKlingAvatarProvider().status()
@@ -2020,7 +2042,8 @@ class CreativeStudioService(ShortDramaMixin):
             "approved_presenter_image_found": bool(presenter),
             "generated_image_assets_in_project": len(image_assets),
             "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]} for a in image_assets[:12]],
-            "candidate_images_are_approved": False,
+            "candidate_images_are_approved": bool(approved_id and presenter),
+            "approved_image_asset_id": approved_id if presenter else None,
             "presenter_image_next_step": ("Approved Genova image located." if presenter else
                  "Project has images but none match approved Genova presenter criteria." if image_assets else
                  "No generated image assets in this project; add or generate an approved Genova image."),
@@ -2033,6 +2056,14 @@ class CreativeStudioService(ShortDramaMixin):
 
     def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
         """Prefer project Genova full-body stills; fall back to known media-root plates."""
+        project = self._project_or_404(owner_id, project_id)
+        approved_id = str((project.metadata or {}).get("approved_genova_image_asset_id") or "")
+        if approved_id:
+            asset = next((a for a in self.store.list_assets(project_id, owner_id)
+                          if a.id == approved_id and a.kind == "image"
+                          and str(a.status or "").upper() == "GENERATED"), None)
+            path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
+            return path if path is not None and path.is_file() else None
         preferred_names = (
             "nova-c4edd02f88a04f7081a79a18fd98a935.png",
             "nova-18f6ccddce0249f7a77e696c808fdf89.png",
