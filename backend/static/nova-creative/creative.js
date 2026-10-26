@@ -139,10 +139,15 @@
             if (!response.ok) throw new Error("Image unavailable");
             var blob = await response.blob();
             if (!blob.type.startsWith("image/")) throw new Error("Not image media");
-            var objectUrl = URL.createObjectURL(blob);
-            thumb.onload = function () { URL.revokeObjectURL(objectUrl); };
-            thumb.onerror = function () { URL.revokeObjectURL(objectUrl); };
-            thumb.src = objectUrl;
+            // Studio CSP permits data: images, not blob: image URLs.
+            // Read only the owner-authenticated image response; never expose tokens in URLs.
+            var reader = new FileReader();
+            reader.onload = function () {
+              if (activeProjectId !== p || !target.contains(thumb)) return;
+              thumb.src = reader.result;
+            };
+            reader.onerror = function () { thumb.alt = "Preview unavailable: " + (item.title || "image"); };
+            reader.readAsDataURL(blob);
           } catch (err) { thumb.alt = "Preview unavailable: " + (item.title || "image"); }
         })();
         wrapper.appendChild(thumb); wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
