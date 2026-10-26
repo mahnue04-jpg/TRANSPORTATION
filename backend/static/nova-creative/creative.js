@@ -170,7 +170,7 @@
       target.textContent = state.message;
       (state.candidate_audio || []).forEach(function (item) {
         var row = document.createElement("div"); row.className = "actions wrap";
-        var title = document.createElement("span"); title.textContent = item.title;
+        var title = document.createElement("span"); title.textContent = item.title + (item.matches_saved_script === false ? " — does not match the latest saved presenter script" : "");
         var listen = document.createElement("button"); listen.type = "button"; listen.className = "secondary";
         listen.textContent = "Download narration to review";
         listen.addEventListener("click", async function () {
@@ -180,7 +180,7 @@
         });
         var approve = document.createElement("button"); approve.type = "button"; approve.className = "secondary";
         approve.textContent = state.approved_asset_id === item.asset_id ? "Narration approved" : "Approve narration";
-        approve.disabled = state.approved_asset_id === item.asset_id;
+        approve.disabled = state.approved_asset_id === item.asset_id || item.matches_saved_script === false;
         approve.addEventListener("click", async function () {
           if (activeProjectId !== p || !window.confirm("Have you listened to this narration and approved its voice, words and timing for this project?")) return;
           approve.disabled = true;
