@@ -272,10 +272,10 @@ def test_readiness_separates_audio_budget_and_credential(monkeypatch, tmp_path):
     saved.metadata = meta
     svc.store.save_project(saved)
     state = svc.genova_avatar_readiness("audit-owner", project["id"])
-    assert state["approved_narration_audio_found"] is True
-    assert state["owner_budget_confirmed"] is True
-    assert "missing_narration_audio" not in state["blockers"]
-    assert "budget_not_confirmed" not in state["blockers"]
+    assert state["approved_narration_audio_found"] is False
+    assert state["budget_confirmation_valid"] is False
+    assert "missing_narration_audio" in state["blockers"]
+    assert "budget_not_confirmed" in state["blockers"]
     assert state["budget_enforcement_ready"] is False
     assert state["can_generate"] is False
 
@@ -290,9 +290,344 @@ def test_provider_banner_names_block_reason_without_secret_values():
     rows = {row["kind"]: row for row in provider_statuses()}
     assert rows["talking_avatar"]["credential_env_names"] == ["FAL_KEY"]
     assert rows["talking_avatar"]["invalid_credential_checked"] is False
-    assert "studio-provider-audit-20261025" in html
+    assert "studio-provider-audit-20261026" in html
     assert 'aria-controls="genova-avatar-readiness-result"' in html
     assert "provider_block_reason" in script
     blob = str(rows)
     assert "sk-" not in blob
     assert "test-only" not in blob
+def test_genova_upload_rejects_invalid_and_preserves_no_approval():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("upload-owner", {"title": "Upload check", "project_type": "short_video"})
+    for payload in (b"", b"not an image", b"x" * (8 * 1024 * 1024 + 1)):
+        with pytest.raises(CreativeStudioError):
+            svc.upload_genova_presenter_image("upload-owner", p["id"], payload, "test.png")
+    assert svc.genova_avatar_readiness("upload-owner", p["id"])["approved_image_asset_id"] is None
+
+
+def test_genova_upload_rejects_other_owner():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    from io import BytesIO
+    from PIL import Image
+    stream = BytesIO()
+    Image.new("RGB", (300, 500)).save(stream, format="PNG")
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("upload-owner-a", {"title": "Upload check", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.upload_genova_presenter_image("upload-owner-b", p["id"], stream.getvalue(), "genova.png")
+
+
+@pytest.fixture
+def upload_context(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as module, providers
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    monkeypatch.setattr(module, "_creative_media_root_and_prefix", lambda: (tmp_path, "/media/nova-creative"))
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (tmp_path, "/media/nova-creative"))
+    monkeypatch.setattr(FalKlingAvatarProvider, "_request_json", lambda *a, **k: pytest.fail("Paid provider called"))
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("image-owner", {"title": "Upload security", "project_type": "short_video"})
+    return svc, project, tmp_path
+
+
+def image_bytes(fmt="PNG", size=(300, 500)):
+    from io import BytesIO
+    from PIL import Image
+    buffer = BytesIO()
+    Image.new("RGB", size, "blue").save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("fmt,mime", [("PNG", "image/png"), ("JPEG", "image/jpeg"), ("WEBP", "image/webp")])
+def test_upload_roundtrip_and_revocation_never_falls_back(upload_context, fmt, mime):
+    from PIL import Image
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    svc, project, root = upload_context
+    pid = project["id"]
+    result = svc.upload_genova_presenter_image("image-owner", pid, image_bytes(fmt), "../../unsafe.svg", content_type=mime)
+    aid = result["asset"]["id"]
+    path, actual_mime, _ = svc.open_asset_file("image-owner", pid, aid)
+    assert path.parent == root
+    assert path.name.startswith("genova_upload_") and path.suffix == ".png"
+    assert actual_mime == "image/png"
+    with Image.open(path) as image:
+        assert image.format == "PNG" and image.size == (300, 500)
+    assert result["approved"] is False
+    # Even a legacy preferred plate must not bypass explicit approval.
+    legacy = root / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+    legacy.write_bytes(image_bytes())
+    assert svc._resolve_genova_presenter_image("image-owner", pid) is None
+    svc.set_genova_presenter_approval("image-owner", pid, aid)
+    restored = CreativeStudioService(svc.store)
+    assert restored.genova_avatar_readiness("image-owner", pid)["approved_image_asset_id"] == aid
+    other = svc.create_project("image-owner", {"title": "Other project", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("image-owner", other["id"], aid)
+    with pytest.raises(CreativeStudioError):
+        svc.open_asset_file("other-owner", pid, aid)
+    svc.set_genova_presenter_approval("image-owner", pid, None)
+    assert svc._resolve_genova_presenter_image("image-owner", pid) is None
+    assert not svc.genova_avatar_readiness("image-owner", pid)["approved_presenter_image_found"]
+    svc.set_genova_presenter_approval("image-owner", pid, aid)
+    assert svc._resolve_genova_presenter_image("image-owner", pid) == path
+    path.unlink()
+    assert not svc.genova_avatar_readiness("image-owner", pid)["approved_presenter_image_found"]
+
+
+@pytest.mark.parametrize("payload,mime", [
+    (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/png"),
+    (image_bytes("GIF"), "image/gif"),
+    (image_bytes("PNG", (100, 100)), "image/png"),
+    (image_bytes("PNG"), "image/jpeg"),
+])
+def test_upload_rejects_unsafe_or_mismatched_content_without_files(upload_context, payload, mime):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    with pytest.raises(CreativeStudioError):
+        svc.upload_genova_presenter_image("image-owner", project["id"], payload, "image.png", content_type=mime)
+    assert not list(root.iterdir())
+    assert not svc.store.list_assets(project["id"], "image-owner")
+
+
+@pytest.mark.parametrize("mime", [None, "application/octet-stream", "image/svg+xml", "image/jpeg"])
+def test_upload_http_rejects_missing_unsupported_or_mismatched_mime(upload_context, monkeypatch, mime):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from importlib import import_module
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id="image-owner")
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    with TestClient(app) as client:
+        url = f"/api/nova/creative/projects/{project['id']}/genova-image-upload"
+        if mime is None:
+            # HTTP clients otherwise infer image/png from the filename.
+            body = (b'--studio-test\r\nContent-Disposition: form-data; name="file"; filename="test.png"\r\n\r\n'
+                    + image_bytes() + b'\r\n--studio-test--\r\n')
+            response = client.post(url, content=body, headers={"Content-Type": "multipart/form-data; boundary=studio-test"})
+        else:
+            response = client.post(url, files={"file": ("test.png", image_bytes(), mime)})
+    assert response.status_code == 422
+    assert not list(root.iterdir())
+    assert not svc.store.list_assets(project["id"], "image-owner")
+
+
+def test_uploaded_image_public_aliases_blocked_but_owner_api_works(upload_context, monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.staticfiles import StaticFiles
+    from app.middleware import SecurityHeadersMiddleware
+    from importlib import import_module
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    app.mount("/media/nova-creative", StaticFiles(directory=root), name="media")
+    app.mount("/static/generated/nova-creative", StaticFiles(directory=root), name="legacy")
+    with TestClient(app) as client:
+        uploaded = client.post(f"/api/nova/creative/projects/{project['id']}/genova-image-upload",
+                               files={"file": ("test.png", image_bytes(), "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        asset = uploaded.json()["asset"]
+        name = asset["url"].rsplit("/", 1)[-1]
+        for url in [asset["url"], "/static/generated/nova-creative/" + name]:
+            response = client.get(url)
+            assert response.status_code == 404
+            assert "no-store" in response.headers["cache-control"]
+        download = f"/api/nova/creative/projects/{project['id']}/assets/{asset['id']}/file"
+        assert client.get(download).status_code == 200
+        user["id"] = "other-owner"
+        assert client.get(download).status_code == 404
+        user["id"] = "image-owner"
+        assert client.get(download + "?token=invalid").status_code == 400
+        # Protect only uploads; approved demo files remain available.
+        (root / "approved-demo.mp4").write_bytes(b"preserved-demo")
+        assert client.get("/media/nova-creative/approved-demo.mp4").content == b"preserved-demo"
+
+
+def save_test_narration(svc, project, root):
+    import wave
+    path = root / "test-narration.wav"
+    with wave.open(str(path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\0\0" * 8000)
+    return svc._save_text_asset(owner_id=project["owner_id"], project_id=project["id"],
+        kind="audio", title="TEST narration - synthetic silence", content="Test narration only.",
+        url="/media/nova-creative/test-narration.wav", status="GENERATED")
+
+
+def test_narration_approval_tracks_exact_file_script_and_revocation(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    assert svc.genova_narration_readiness("image-owner", project["id"])["approved"] is False
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    restored = CreativeStudioService(svc.store)
+    assert restored.genova_avatar_readiness("image-owner", project["id"])["approved_narration_audio_found"]
+    assert not restored.genova_avatar_readiness("image-owner", project["id"])["can_generate"]
+    svc.set_genova_narration_approval("image-owner", project["id"], None)
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    # Changing valid audio bytes also invalidates approval.
+    with (root / "test-narration.wav").open("ab") as stream:
+        stream.write(b"changed")
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+
+
+def test_narration_rejects_foreign_missing_invalid_and_changed_script(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    other = svc.create_project("image-owner", {"title": "Other", "project_type": "short_video"})
+    for owner, pid in [("another-owner", project["id"]), ("image-owner", other["id"])]:
+        with pytest.raises(CreativeStudioError):
+            svc.set_genova_narration_approval(owner, pid, audio.id)
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    svc._save_text_asset(owner_id="image-owner", project_id=project["id"], kind="presenter_script", title="New script", content="Changed words.")
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+    with pytest.raises(CreativeStudioError, match="latest presenter script"):
+        svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    (root / "test-narration.wav").unlink()
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["candidate_audio"]
+
+
+def test_narration_approval_persists_in_database(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+    from app.core.nova.creative_studio.schema_ensure import ensure_nova_creative_schema
+    from app.db.session import SessionLocal, engine
+    _, _, root = upload_context
+    ensure_nova_creative_schema(engine)
+    with SessionLocal() as db:
+        svc = CreativeStudioService(DbCreativeStudioStore(db))
+        project = svc.create_project("narration-db-owner", {"title": "TEST persistence", "project_type": "short_video"})
+        audio = save_test_narration(svc, project, root)
+        svc.set_genova_narration_approval("narration-db-owner", project["id"], audio.id)
+    with SessionLocal() as db:
+        restored = CreativeStudioService(DbCreativeStudioStore(db))
+        result = restored.genova_narration_readiness("narration-db-owner", project["id"])
+        assert result["approved"] and result["approved_asset_id"] == audio.id
+
+
+@pytest.fixture
+def reviewed_budget(upload_context, monkeypatch):
+    for key in ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "NOVA_CREATIVE_KLING_LIVE_ENABLED", "NOVA_CREATIVE_VOICE_LIVE_ENABLED", "NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED"]:
+        monkeypatch.setenv(key, "false")
+    monkeypatch.setenv("NOVA_CREATIVE_IMAGE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", "100")
+    return upload_context
+
+
+@pytest.mark.parametrize("acknowledged", [None, -1, 0, float("nan"), float("inf"), 1000])
+def test_budget_rejects_missing_invalid_or_over_ceiling_acknowledgement(reviewed_budget, acknowledged):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True, acknowledged_estimate_usd=acknowledged, quote_fingerprint=svc.preflight_quote("image-owner", project["id"])["quote_fingerprint"])
+    assert exc.value.code == "INVALID_RENDER_BUDGET"
+
+
+def test_budget_confirmation_expires_and_changes_invalidate_it(reviewed_budget):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    pid = project["id"]
+    quote = svc.preflight_quote("image-owner", pid)
+    svc.confirm_render_budget("image-owner", pid, confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    assert svc.preflight_quote("image-owner", pid)["owner_budget_confirmed"]
+    svc.require_budget_confirmation_for_paid("image-owner", pid)
+    saved = svc._project_or_404("image-owner", pid)
+    saved.metadata["budget_confirmation"]["expires_at"] = "2020-01-01T00:00:00+00:00"
+    svc.store.save_project(saved)
+    with pytest.raises(CreativeStudioError):
+        svc.require_budget_confirmation_for_paid("image-owner", pid)
+    svc.confirm_render_budget("image-owner", pid, confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    svc._save_text_asset(owner_id="image-owner", project_id=pid, kind="presenter_script", title="Changed script", content="New words.")
+    assert not svc.preflight_quote("image-owner", pid)["owner_budget_confirmed"]
+    with pytest.raises(CreativeStudioError):
+        svc.require_budget_confirmation_for_paid("image-owner", pid)
+
+
+@pytest.mark.parametrize("balance", ["nan", "inf", "-1", "0.01"])
+def test_budget_rejects_unknown_invalid_or_insufficient_balance(reviewed_budget, monkeypatch, balance):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", balance)
+    quote = svc.preflight_quote("image-owner", project["id"])
+    with pytest.raises(CreativeStudioError):
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+
+
+def test_cannot_confirm_a_different_project_snapshot_at_the_same_price(reviewed_budget):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    quote = svc.preflight_quote("image-owner", project["id"])
+    svc._save_text_asset(owner_id="image-owner", project_id=project["id"], kind="presenter_script", title="Changed", content="New words.")
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True,
+            acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    assert exc.value.code == "STALE_RENDER_QUOTE"
+
+
+@pytest.mark.parametrize("invalid", ["corrupt", "too_long", "missing"])
+def test_narration_rejects_invalid_audio_files(upload_context, invalid):
+    import wave
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    path = root / "test-narration.wav"
+    if invalid == "missing":
+        path.unlink()
+    elif invalid == "corrupt":
+        path.write_bytes(b"not audio")
+    else:
+        with wave.open(str(path), "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(8000)
+            stream.writeframes(b"\0\0" * 8000 * 37)
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+
+
+def test_narration_http_approval_revoke_and_wrong_owner(upload_context, monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    app = FastAPI()
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    base = f"/api/nova/creative/projects/{project['id']}"
+    with TestClient(app) as client:
+        response = client.put(base + "/genova-narration-approval", json={"asset_id": audio.id})
+        assert response.status_code == 200, response.text
+        assert client.get(base + "/genova-narration").json()["approved"] is True
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": None}).json()["approved"] is False
+        user["id"] = "another-owner"
+        assert client.get(base + "/genova-narration").status_code == 404
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": audio.id}).status_code == 404
+

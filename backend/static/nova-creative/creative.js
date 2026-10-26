@@ -82,13 +82,14 @@
         " | Kling: " + (state.provider_status || "unknown") +
         (state.provider_block_reason ? " (" + state.provider_block_reason + ")" : "") +
         " | Approved narration audio: " + (state.approved_narration_audio_found ? "found" : "not ready") +
-        " | Owner budget confirmation: " + (state.owner_budget_confirmed ? "saved" : "not saved") +
+        " | Estimate confirmation: " + (state.budget_confirmation_valid ? "current" : "not ready") +
         " | Spending gate: " + (state.budget_enforcement_ready ? "ready" : "not ready") +
         " | Paid generation: blocked" +
         ". Blockers: " + ((state.blockers || []).join(", ") || "none") +
         ". " + (state.reason || "") +
         " No paid request submitted." +
-        (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "");
+        (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "") +
+        (state.narration_next_step ? " Narration: " + state.narration_next_step : "");
     } catch (err) {
       target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
     } finally { button.disabled = false; }
@@ -143,10 +144,15 @@
             if (!response.ok) throw new Error("Image unavailable");
             var blob = await response.blob();
             if (!blob.type.startsWith("image/")) throw new Error("Not image media");
-            var objectUrl = URL.createObjectURL(blob);
-            thumb.onload = function () { URL.revokeObjectURL(objectUrl); };
-            thumb.onerror = function () { URL.revokeObjectURL(objectUrl); };
-            thumb.src = objectUrl;
+            // Studio CSP permits data: images, not blob: image URLs.
+            // Read only the owner-authenticated image response; never expose tokens in URLs.
+            var reader = new FileReader();
+            reader.onload = function () {
+              if (activeProjectId !== p || !target.contains(thumb)) return;
+              thumb.src = reader.result;
+            };
+            reader.onerror = function () { thumb.alt = "Preview unavailable: " + (item.title || "image"); };
+            reader.readAsDataURL(blob);
           } catch (err) { thumb.alt = "Preview unavailable: " + (item.title || "image"); }
         })();
         wrapper.appendChild(thumb); wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
@@ -154,6 +160,73 @@
       if (!(state.candidate_images || []).length) target.appendChild(document.createTextNode("No eligible generated image assets in this project."));
     } catch (error) { target.textContent = "Could not load images: " + error.message; }
   }
+  var genovaUpload = $("genova-upload-image");
+  async function genovaNarrationChoices() {
+    var target = $("genova-narration-choices");
+    var p = activeProjectId;
+    if (!target || !p) { if (target) target.textContent = "Select a project first."; return; }
+    target.textContent = "Loading saved narration...";
+    try {
+      var state = await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration");
+      if (activeProjectId !== p) return;
+      target.textContent = state.message;
+      (state.candidate_audio || []).forEach(function (item) {
+        var row = document.createElement("div"); row.className = "actions wrap";
+        var title = document.createElement("span"); title.textContent = item.title + (item.matches_saved_script === false ? " — does not match the latest saved presenter script" : "");
+        var listen = document.createElement("button"); listen.type = "button"; listen.className = "secondary";
+        listen.textContent = "Download narration to review";
+        listen.addEventListener("click", async function () {
+          if (activeProjectId !== p) return;
+          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", "genova-narration.wav"); }
+          catch (error) { showBanner(error.message, false); }
+        });
+        var approve = document.createElement("button"); approve.type = "button"; approve.className = "secondary";
+        approve.textContent = state.approved_asset_id === item.asset_id ? "Narration approved" : "Approve narration";
+        approve.disabled = state.approved_asset_id === item.asset_id || item.matches_saved_script === false;
+        approve.addEventListener("click", async function () {
+          if (activeProjectId !== p || !window.confirm("Have you listened to this narration and approved its voice, words and timing for this project?")) return;
+          approve.disabled = true;
+          try {
+            await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-approval", {method: "PUT", body: JSON.stringify({asset_id: item.asset_id})});
+            if (activeProjectId === p) { await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); }
+          } catch (error) { if (activeProjectId === p) { target.textContent = "Narration approval failed: " + error.message; approve.disabled = false; } }
+        });
+        row.appendChild(title); row.appendChild(listen); row.appendChild(approve); target.appendChild(row);
+      });
+      if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
+    } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
+  }
+  var narrationLoad = $("genova-load-narration");
+  if (narrationLoad) narrationLoad.addEventListener("click", genovaNarrationChoices);
+  var narrationRevoke = $("genova-revoke-narration");
+  if (narrationRevoke) narrationRevoke.addEventListener("click", async function () {
+    var p = activeProjectId;
+    if (!p || !window.confirm("Remove narration approval for this project?")) return;
+    try {
+      await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-approval", {method: "PUT", body: JSON.stringify({asset_id: null})});
+      if (activeProjectId === p) { await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); }
+    } catch (error) { showBanner("Could not remove narration approval: " + error.message, false); }
+  });
+  if (genovaUpload) genovaUpload.addEventListener("click", async function () {
+    var input = $("genova-image-file");
+    var file = input && input.files && input.files[0];
+    if (!activeProjectId || !file) { showBanner("Select a project and image first.", false); return; }
+    if (file.size > 8 * 1024 * 1024) { showBanner("Choose an image under 8 MB.", false); return; }
+    genovaUpload.disabled = true;
+    try {
+      var form = new FormData();
+      form.append("file", file);
+      var shared = session();
+      var path = "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/genova-image-upload";
+      var response = shared && shared.authFetch
+        ? await shared.authFetch(path, {method: "POST", body: form})
+        : await fetch(path, {method: "POST", headers: {"Authorization": "Bearer " + token()}, body: form});
+      if (!response.ok) throw new Error("Upload rejected (" + response.status + ")");
+      showBanner("Image uploaded. Review it below, then approve explicitly.", true);
+      await genovaImageChoices();
+    } catch (error) { showBanner("Image upload failed: " + error.message, false); }
+    finally { genovaUpload.disabled = false; }
+  });
   var genovaLoad = $("genova-load-images");
   if (genovaLoad) genovaLoad.addEventListener("click", genovaImageChoices);
   var genovaRevoke = $("genova-revoke-image");
@@ -1258,7 +1331,11 @@
       var mediaAvailable = row.media_available !== false;
       if (row.kind === "image" && row.url && mediaAvailable) {
         var isAmicor = String(row.content || "").toUpperCase().indexOf("AMICOR") >= 0;
-        media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
+        var isPrivateUpload = (row.metadata || {}).source === "owner_upload" || /\/genova_upload_[^/]+$/.test(row.url);
+        var imageSource = isPrivateUpload
+          ? ("data-private-image-url=\"/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file\"")
+          : ("src=\"" + escapeHtml(row.url) + "\"");
+        media = "<figure class=\"generated-media\"><img " + imageSource + " alt=\"" +
           escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" />" +
           (isAmicor ? "<img class=\"official-brand-overlay\" src=\"/static/branding/amicor-logo-full.png\" alt=\"AMICOR official logo\" />" : "") +
           "</figure>" +
@@ -1327,6 +1404,27 @@
         assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-image-url]"), function (image) {
+      var projectId = activeProjectId;
+      (async function () {
+        try {
+          var shared = session();
+          var url = image.getAttribute("data-private-image-url");
+          var response = shared && shared.authFetch
+            ? await shared.authFetch(url, {method: "GET"})
+            : await fetch(url, {headers: {"Authorization": "Bearer " + token()}});
+          if (!response.ok) throw new Error("Image unavailable");
+          var blob = await response.blob();
+          if (!blob.type.startsWith("image/")) throw new Error("Not image media");
+          var reader = new FileReader();
+          reader.onload = function () {
+            if (activeProjectId === projectId && $("asset-list").contains(image)) image.src = reader.result;
+          };
+          reader.onerror = function () { image.alt = "Preview unavailable"; };
+          reader.readAsDataURL(blob);
+        } catch (error) { image.alt = "Preview unavailable"; }
+      })();
+    });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
       if (!caption) return;
@@ -1609,6 +1707,7 @@
           body: JSON.stringify({
             confirmed: true,
             acknowledged_estimate_usd: latestPreflight.estimated_total_usd,
+            quote_fingerprint: latestPreflight.quote_fingerprint,
             note: "Owner confirmed preflight estimate before paid render."
           })
         });
@@ -2430,3 +2529,4 @@
 
   boot();
 })();
+

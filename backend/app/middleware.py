@@ -87,7 +87,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     })
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response: # type: ignore
-        response = await call_next(request) # type: ignore
+        # Uploaded presenter stills must be read through the project/asset API,
+        # never through any public StaticFiles mount (including legacy aliases).
+        filename = request.url.path.rstrip("/").rsplit("/", 1)[-1]
+        if filename.startswith("genova_upload_"):
+            response = Response(status_code=404, headers={"Cache-Control": "private, no-store"})
+        else:
+            response = await call_next(request) # type: ignore
         headers = dict(self._HEADERS)
         if request.url.path in self._MASTER_DEMO_FRAME_PATHS:
             headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -360,3 +366,4 @@ def log_upload(
             db.close()
     except Exception:
         pass
+
