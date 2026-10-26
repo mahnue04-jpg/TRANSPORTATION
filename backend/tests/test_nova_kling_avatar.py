@@ -271,8 +271,14 @@ def test_upload_http_rejects_missing_unsupported_or_mismatched_mime(upload_conte
     app.dependency_overrides[routes.get_db] = lambda: None
     monkeypatch.setattr(routes, "get_service", lambda db: svc)
     with TestClient(app) as client:
-        response = client.post(f"/api/nova/creative/projects/{project['id']}/genova-image-upload",
-                               files={"file": ("test.png", image_bytes(), mime)})
+        url = f"/api/nova/creative/projects/{project['id']}/genova-image-upload"
+        if mime is None:
+            # HTTP clients otherwise infer image/png from the filename.
+            body = (b'--studio-test\r\nContent-Disposition: form-data; name="file"; filename="test.png"\r\n\r\n'
+                    + image_bytes() + b'\r\n--studio-test--\r\n')
+            response = client.post(url, content=body, headers={"Content-Type": "multipart/form-data; boundary=studio-test"})
+        else:
+            response = client.post(url, files={"file": ("test.png", image_bytes(), mime)})
     assert response.status_code == 422
     assert not list(root.iterdir())
     assert not svc.store.list_assets(project["id"], "image-owner")
