@@ -158,3 +158,27 @@ def test_genova_approval_persists_and_revokes(monkeypatch, tmp_path):
     assert revoked["approved"] is False
     check = svc.genova_avatar_readiness("genova-persist-owner", project["id"])
     assert check["approved_image_asset_id"] is None
+
+
+def test_genova_upload_rejects_invalid_and_preserves_no_approval():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("upload-owner", {"title": "Upload check", "project_type": "short_video"})
+    for payload in (b"", b"not an image", b"x" * (8 * 1024 * 1024 + 1)):
+        with pytest.raises(CreativeStudioError):
+            svc.upload_genova_presenter_image("upload-owner", p["id"], payload, "test.png")
+    assert svc.genova_avatar_readiness("upload-owner", p["id"])["approved_image_asset_id"] is None
+
+
+def test_genova_upload_rejects_other_owner():
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    from io import BytesIO
+    from PIL import Image
+    stream = BytesIO()
+    Image.new("RGB", (300, 500)).save(stream, format="PNG")
+    svc = CreativeStudioService(CreativeStudioStore())
+    p = svc.create_project("upload-owner-a", {"title": "Upload check", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.upload_genova_presenter_image("upload-owner-b", p["id"], stream.getvalue(), "genova.png")

@@ -150,6 +150,27 @@
       if (!(state.candidate_images || []).length) target.appendChild(document.createTextNode("No eligible generated image assets in this project."));
     } catch (error) { target.textContent = "Could not load images: " + error.message; }
   }
+  var genovaUpload = $("genova-upload-image");
+  if (genovaUpload) genovaUpload.addEventListener("click", async function () {
+    var input = $("genova-image-file");
+    var file = input && input.files && input.files[0];
+    if (!activeProjectId || !file) { showBanner("Select a project and image first.", false); return; }
+    if (file.size > 8 * 1024 * 1024) { showBanner("Choose an image under 8 MB.", false); return; }
+    genovaUpload.disabled = true;
+    try {
+      var form = new FormData();
+      form.append("file", file);
+      var shared = session();
+      var path = "/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/genova-image-upload";
+      var response = shared && shared.authFetch
+        ? await shared.authFetch(path, {method: "POST", body: form})
+        : await fetch(path, {method: "POST", headers: {"Authorization": "Bearer " + token()}, body: form});
+      if (!response.ok) throw new Error("Upload rejected (" + response.status + ")");
+      showBanner("Image uploaded. Review it below, then approve explicitly.", true);
+      await genovaImageChoices();
+    } catch (error) { showBanner("Image upload failed: " + error.message, false); }
+    finally { genovaUpload.disabled = false; }
+  });
   var genovaLoad = $("genova-load-images");
   if (genovaLoad) genovaLoad.addEventListener("click", genovaImageChoices);
   var genovaRevoke = $("genova-revoke-image");
