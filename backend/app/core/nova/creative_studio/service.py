@@ -2128,7 +2128,7 @@ class CreativeStudioService(ShortDramaMixin):
             details = json.loads(probe.stdout)
             duration = float(details["format"]["duration"])
             kinds = [s.get("codec_type") for s in details.get("streams", [])]
-            if (not math.isfinite(duration) or not 0 < duration <= min(180, float(project.duration_target or 30) * 1.2)
+            if (not math.isfinite(duration) or not 0 < duration <= min(180, float(project.duration_target or 30))
                     or "audio" not in kinds or "video" in kinds):
                 raise ValueError("Invalid narration duration or stream")
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
@@ -2389,6 +2389,17 @@ class CreativeStudioService(ShortDramaMixin):
         scenes = self.store.list_scenes(project_id, owner_id)
         if not scenes:
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        assets = self.store.list_assets(project_id, owner_id)
+        saved_scripts = [asset for asset in assets if asset.kind == "presenter_script" and str(asset.content or "").strip()]
+        selected_script = saved_scripts[-1].content if saved_scripts else None
+        approved_audio_path = None
+        if (project.metadata or {}).get("approved_genova_narration"):
+            narration_state = self.genova_narration_readiness(owner_id, project_id)
+            if not narration_state["approved"]:
+                raise CreativeStudioError("NARRATION_APPROVAL_REQUIRED", narration_state["message"], http_status=422)
+            approved_audio = next(asset for asset in assets if asset.id == narration_state["approved_asset_id"])
+            selected_script = approved_audio.content
+            approved_audio_path, _mime, _filename = self.open_asset_file(owner_id, project_id, approved_audio.id)
         output_dir, public_prefix = _creative_media_root_and_prefix()
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
@@ -2399,6 +2410,8 @@ class CreativeStudioService(ShortDramaMixin):
             rendered = render_walking_commercial_30s(
                 output_mp4=output_path,
                 scenes=[scene.as_dict() for scene in scenes],
+                script=selected_script,
+                approved_narration_path=approved_audio_path,
                 license_status=self._project_voice_license(owner_id, project_id),
                 presenter_image=presenter_image,
             )
@@ -2463,7 +2476,7 @@ class CreativeStudioService(ShortDramaMixin):
                 "provider_result": rendered.get("narration") or {},
                 "paid_provider_charges": False,
                 "lip_sync": True,
-                "natural_female_voice": True,
+                "natural_female_voice": bool((rendered.get("narration") or {}).get("natural_female_voice")),
             },
             url=audio_url,
         )
