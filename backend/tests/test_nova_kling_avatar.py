@@ -323,3 +323,175 @@ def test_uploaded_image_public_aliases_blocked_but_owner_api_works(upload_contex
         (root / "approved-demo.mp4").write_bytes(b"preserved-demo")
         assert client.get("/media/nova-creative/approved-demo.mp4").content == b"preserved-demo"
 
+
+def save_test_narration(svc, project, root):
+    import wave
+    path = root / "test-narration.wav"
+    with wave.open(str(path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\0\0" * 8000)
+    return svc._save_text_asset(owner_id=project["owner_id"], project_id=project["id"],
+        kind="audio", title="TEST narration - synthetic silence", content="Test narration only.",
+        url="/media/nova-creative/test-narration.wav", status="GENERATED")
+
+
+def test_narration_approval_tracks_exact_file_script_and_revocation(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    assert svc.genova_narration_readiness("image-owner", project["id"])["approved"] is False
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    restored = CreativeStudioService(svc.store)
+    assert restored.genova_avatar_readiness("image-owner", project["id"])["approved_narration_audio_found"]
+    assert not restored.genova_avatar_readiness("image-owner", project["id"])["can_generate"]
+    svc.set_genova_narration_approval("image-owner", project["id"], None)
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    # Changing valid audio bytes also invalidates approval.
+    with (root / "test-narration.wav").open("ab") as stream:
+        stream.write(b"changed")
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+
+
+def test_narration_rejects_foreign_missing_invalid_and_changed_script(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    other = svc.create_project("image-owner", {"title": "Other", "project_type": "short_video"})
+    for owner, pid in [("another-owner", project["id"]), ("image-owner", other["id"])]:
+        with pytest.raises(CreativeStudioError):
+            svc.set_genova_narration_approval(owner, pid, audio.id)
+    svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    svc._save_text_asset(owner_id="image-owner", project_id=project["id"], kind="presenter_script", title="New script", content="Changed words.")
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["approved"]
+    with pytest.raises(CreativeStudioError, match="latest presenter script"):
+        svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+    (root / "test-narration.wav").unlink()
+    assert not svc.genova_narration_readiness("image-owner", project["id"])["candidate_audio"]
+
+
+def test_narration_approval_persists_in_database(upload_context):
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+    from app.core.nova.creative_studio.schema_ensure import ensure_nova_creative_schema
+    from app.db.session import SessionLocal, engine
+    _, _, root = upload_context
+    ensure_nova_creative_schema(engine)
+    with SessionLocal() as db:
+        svc = CreativeStudioService(DbCreativeStudioStore(db))
+        project = svc.create_project("narration-db-owner", {"title": "TEST persistence", "project_type": "short_video"})
+        audio = save_test_narration(svc, project, root)
+        svc.set_genova_narration_approval("narration-db-owner", project["id"], audio.id)
+    with SessionLocal() as db:
+        restored = CreativeStudioService(DbCreativeStudioStore(db))
+        result = restored.genova_narration_readiness("narration-db-owner", project["id"])
+        assert result["approved"] and result["approved_asset_id"] == audio.id
+
+
+@pytest.fixture
+def reviewed_budget(upload_context, monkeypatch):
+    for key in ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "NOVA_CREATIVE_KLING_LIVE_ENABLED", "NOVA_CREATIVE_VOICE_LIVE_ENABLED", "NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED"]:
+        monkeypatch.setenv(key, "false")
+    monkeypatch.setenv("NOVA_CREATIVE_IMAGE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", "100")
+    return upload_context
+
+
+@pytest.mark.parametrize("acknowledged", [None, -1, 0, float("nan"), float("inf"), 1000])
+def test_budget_rejects_missing_invalid_or_over_ceiling_acknowledgement(reviewed_budget, acknowledged):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True, acknowledged_estimate_usd=acknowledged, quote_fingerprint=svc.preflight_quote("image-owner", project["id"])["quote_fingerprint"])
+    assert exc.value.code == "INVALID_RENDER_BUDGET"
+
+
+def test_budget_confirmation_expires_and_changes_invalidate_it(reviewed_budget):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    pid = project["id"]
+    quote = svc.preflight_quote("image-owner", pid)
+    svc.confirm_render_budget("image-owner", pid, confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    assert svc.preflight_quote("image-owner", pid)["owner_budget_confirmed"]
+    svc.require_budget_confirmation_for_paid("image-owner", pid)
+    saved = svc._project_or_404("image-owner", pid)
+    saved.metadata["budget_confirmation"]["expires_at"] = "2020-01-01T00:00:00+00:00"
+    svc.store.save_project(saved)
+    with pytest.raises(CreativeStudioError):
+        svc.require_budget_confirmation_for_paid("image-owner", pid)
+    svc.confirm_render_budget("image-owner", pid, confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    svc._save_text_asset(owner_id="image-owner", project_id=pid, kind="presenter_script", title="Changed script", content="New words.")
+    assert not svc.preflight_quote("image-owner", pid)["owner_budget_confirmed"]
+    with pytest.raises(CreativeStudioError):
+        svc.require_budget_confirmation_for_paid("image-owner", pid)
+
+
+@pytest.mark.parametrize("balance", ["nan", "inf", "-1", "0.01"])
+def test_budget_rejects_unknown_invalid_or_insufficient_balance(reviewed_budget, monkeypatch, balance):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", balance)
+    quote = svc.preflight_quote("image-owner", project["id"])
+    with pytest.raises(CreativeStudioError):
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+
+
+def test_cannot_confirm_a_different_project_snapshot_at_the_same_price(reviewed_budget):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, _ = reviewed_budget
+    quote = svc.preflight_quote("image-owner", project["id"])
+    svc._save_text_asset(owner_id="image-owner", project_id=project["id"], kind="presenter_script", title="Changed", content="New words.")
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.confirm_render_budget("image-owner", project["id"], confirmed=True,
+            acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
+    assert exc.value.code == "STALE_RENDER_QUOTE"
+
+
+@pytest.mark.parametrize("invalid", ["corrupt", "too_long", "missing"])
+def test_narration_rejects_invalid_audio_files(upload_context, invalid):
+    import wave
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    path = root / "test-narration.wav"
+    if invalid == "missing":
+        path.unlink()
+    elif invalid == "corrupt":
+        path.write_bytes(b"not audio")
+    else:
+        with wave.open(str(path), "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(8000)
+            stream.writeframes(b"\0\0" * 8000 * 37)
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+
+
+def test_narration_http_approval_revoke_and_wrong_owner(upload_context, monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    app = FastAPI()
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    base = f"/api/nova/creative/projects/{project['id']}"
+    with TestClient(app) as client:
+        response = client.put(base + "/genova-narration-approval", json={"asset_id": audio.id})
+        assert response.status_code == 200, response.text
+        assert client.get(base + "/genova-narration").json()["approved"] is True
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": None}).json()["approved"] is False
+        user["id"] = "another-owner"
+        assert client.get(base + "/genova-narration").status_code == 404
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": audio.id}).status_code == 404
+

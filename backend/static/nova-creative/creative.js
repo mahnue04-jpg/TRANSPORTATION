@@ -81,10 +81,13 @@
         "Genova image: " + (state.approved_presenter_image_found ? "found" : "not found") +
         " | Kling: " + (state.provider_status || "unknown") +
         " | Approved narration audio: " + (state.approved_narration_audio_found ? "found" : "not ready") +
+        " | Estimate confirmation: " + (state.budget_confirmation_valid ? "current" : "not ready") +
         " | Spending gate: " + (state.budget_enforcement_ready ? "ready" : "not ready") +
         " | Paid generation: " + (state.can_generate ? "requires separate owner action" : "blocked") +
         ". No paid request submitted." +
-        (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "");
+        (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "") +
+        (state.narration_next_step ? " Narration: " + state.narration_next_step : "") +
+        (state.reason ? " " + state.reason : "");
     } catch (err) {
       target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
     } finally { button.disabled = false; }
@@ -156,6 +159,52 @@
     } catch (error) { target.textContent = "Could not load images: " + error.message; }
   }
   var genovaUpload = $("genova-upload-image");
+  async function genovaNarrationChoices() {
+    var target = $("genova-narration-choices");
+    var p = activeProjectId;
+    if (!target || !p) { if (target) target.textContent = "Select a project first."; return; }
+    target.textContent = "Loading saved narration...";
+    try {
+      var state = await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration");
+      if (activeProjectId !== p) return;
+      target.textContent = state.message;
+      (state.candidate_audio || []).forEach(function (item) {
+        var row = document.createElement("div"); row.className = "actions wrap";
+        var title = document.createElement("span"); title.textContent = item.title + (item.matches_saved_script === false ? " — does not match the latest saved presenter script" : "");
+        var listen = document.createElement("button"); listen.type = "button"; listen.className = "secondary";
+        listen.textContent = "Download narration to review";
+        listen.addEventListener("click", async function () {
+          if (activeProjectId !== p) return;
+          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", "genova-narration.wav"); }
+          catch (error) { showBanner(error.message, false); }
+        });
+        var approve = document.createElement("button"); approve.type = "button"; approve.className = "secondary";
+        approve.textContent = state.approved_asset_id === item.asset_id ? "Narration approved" : "Approve narration";
+        approve.disabled = state.approved_asset_id === item.asset_id || item.matches_saved_script === false;
+        approve.addEventListener("click", async function () {
+          if (activeProjectId !== p || !window.confirm("Have you listened to this narration and approved its voice, words and timing for this project?")) return;
+          approve.disabled = true;
+          try {
+            await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-approval", {method: "PUT", body: JSON.stringify({asset_id: item.asset_id})});
+            if (activeProjectId === p) { await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); }
+          } catch (error) { if (activeProjectId === p) { target.textContent = "Narration approval failed: " + error.message; approve.disabled = false; } }
+        });
+        row.appendChild(title); row.appendChild(listen); row.appendChild(approve); target.appendChild(row);
+      });
+      if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
+    } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
+  }
+  var narrationLoad = $("genova-load-narration");
+  if (narrationLoad) narrationLoad.addEventListener("click", genovaNarrationChoices);
+  var narrationRevoke = $("genova-revoke-narration");
+  if (narrationRevoke) narrationRevoke.addEventListener("click", async function () {
+    var p = activeProjectId;
+    if (!p || !window.confirm("Remove narration approval for this project?")) return;
+    try {
+      await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-approval", {method: "PUT", body: JSON.stringify({asset_id: null})});
+      if (activeProjectId === p) { await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); }
+    } catch (error) { showBanner("Could not remove narration approval: " + error.message, false); }
+  });
   if (genovaUpload) genovaUpload.addEventListener("click", async function () {
     var input = $("genova-image-file");
     var file = input && input.files && input.files[0];
@@ -1654,6 +1703,7 @@
           body: JSON.stringify({
             confirmed: true,
             acknowledged_estimate_usd: latestPreflight.estimated_total_usd,
+            quote_fingerprint: latestPreflight.quote_fingerprint,
             note: "Owner confirmed preflight estimate before paid render."
           })
         });

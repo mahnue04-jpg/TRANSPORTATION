@@ -345,6 +345,7 @@ class BudgetConfirmIn(BaseModel):
     confirmed: bool = True
     acknowledged_estimate_usd: float | None = None
     note: str = Field(default="", max_length=500)
+    quote_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 @router.get("/projects/{project_id}/preflight")
@@ -377,6 +378,7 @@ def confirm_project_render_budget(
             confirmed=payload.confirmed,
             acknowledged_estimate_usd=payload.acknowledged_estimate_usd,
             note=payload.note,
+            quote_fingerprint=payload.quote_fingerprint,
         )
     except CreativeStudioError as exc:
         _raise(exc)
@@ -1574,6 +1576,26 @@ def accept_project_voice_license(
 
 class GenovaImageApprovalIn(BaseModel):
     asset_id: str | None = None
+
+
+@router.get("/projects/{project_id}/genova-narration")
+def genova_narration_readiness(project_id: str, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).genova_narration_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/projects/{project_id}/genova-narration-approval")
+def approve_genova_narration(project_id: str, payload: GenovaImageApprovalIn, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_narration_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
 
 
 @router.post("/projects/{project_id}/genova-image-upload")
