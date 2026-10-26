@@ -671,3 +671,15 @@ def test_disabled_avatar_cannot_submit_via_empty_or_invalid_resume(avatar, monke
     result = avatar.generate_avatar(image_url="https://example.test/a.png", audio_url="https://example.test/a.wav", resume_task_id=token)
     assert result["status"] in {"DISABLED", "ERROR"}
     assert result["asset_generated"] is False
+
+
+@pytest.mark.parametrize("payload", [None, [], 12, {"request_id": "avatar-123"}])
+def test_avatar_malformed_saved_task_is_rejected_without_network(avatar, monkeypatch, payload):
+    import base64
+    import json
+    from app.core.nova.creative_studio.kling import AVATAR_TOKEN_PREFIX
+    token = AVATAR_TOKEN_PREFIX + base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    monkeypatch.setattr(avatar, "_request_json", lambda *a, **k: pytest.fail("Invalid task must never make network requests"))
+    result = avatar.generate_avatar(image_url=None, audio_url=None, resume_task_id=token)
+    assert result["status"] == "ERROR" and result["submission_uncertain"] is False
+    assert result["can_resubmit"] is False
