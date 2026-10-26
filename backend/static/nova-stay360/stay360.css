@@ -1,0 +1,159 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--amicor-brand-bg, #020a16);
+  color: var(--amicor-brand-text, #e8f2ff);
+  font: 16px/1.45 "Segoe UI", sans-serif;
+}
+
+.stay-header,
+.stay-main {
+  width: min(1080px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.stay-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  padding: 28px 0 8px;
+}
+
+.brand-kicker {
+  margin: 0;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+}
+
+h1, h2 {
+  margin: 0;
+  font-weight: 650;
+}
+
+h1 {
+  font-size: 1.7rem;
+}
+
+.locale-control {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.stay-main {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 48px;
+}
+
+.notice,
+.scope,
+.status {
+  margin: 0;
+  color: #c5d8ee;
+}
+
+.scope {
+  font-size: 0.92rem;
+}
+
+.panel {
+  background: var(--amicor-brand-surface, #09192d);
+  border: 1px solid rgba(232, 242, 255, 0.12);
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(232, 242, 255, 0.2);
+  background: #04101d;
+  color: inherit;
+}
+
+.actions,
+.stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+button {
+  background: var(--amicor-brand-primary, #0b6bcb);
+  color: white;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  border: 1px solid rgba(232, 242, 255, 0.3);
+}
+
+.counts,
+.result {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.counts div,
+.result div {
+  margin: 0;
+}
+
+dt {
+  font-size: 0.78rem;
+  color: #9eb6d0;
+}
+
+dd {
+  margin: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid rgba(232, 242, 255, 0.12);
+  vertical-align: top;
+}
+
+@media (max-width: 720px) {
+  .stay-header {
+    flex-direction: column;
+    align-items: start;
+  }
+}
