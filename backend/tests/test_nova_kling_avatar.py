@@ -661,3 +661,13 @@ def test_avatar_rejects_invalid_request_ids(avatar, request_id):
 def test_avatar_rejects_swapped_status_and_result_urls(avatar):
     with pytest.raises(RuntimeError):
         avatar._validate_task(dict(TASK, status_url=TASK["response_url"], response_url=TASK["status_url"]))
+
+
+@pytest.mark.parametrize("token", [None, "", " ", "\t\n", "not-an-avatar-token"])
+def test_disabled_avatar_cannot_submit_via_empty_or_invalid_resume(avatar, monkeypatch, token):
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "false")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "false")
+    monkeypatch.setattr(avatar, "_request_json", lambda *a, **k: pytest.fail("Network call while disabled"))
+    result = avatar.generate_avatar(image_url="https://example.test/a.png", audio_url="https://example.test/a.wav", resume_task_id=token)
+    assert result["status"] in {"DISABLED", "ERROR"}
+    assert result["asset_generated"] is False
