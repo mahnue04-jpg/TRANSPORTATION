@@ -261,7 +261,8 @@ def test_upload_http_rejects_missing_unsupported_or_mismatched_mime(upload_conte
     from types import SimpleNamespace
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.core.nova.creative_studio import router as routes
+    from importlib import import_module
+    routes = import_module("app.core.nova.creative_studio.router")
     svc, project, root = upload_context
     app = FastAPI()
     app.include_router(routes.router)
@@ -283,7 +284,8 @@ def test_uploaded_image_public_aliases_blocked_but_owner_api_works(upload_contex
     from fastapi.testclient import TestClient
     from starlette.staticfiles import StaticFiles
     from app.middleware import SecurityHeadersMiddleware
-    from app.core.nova.creative_studio import router as routes
+    from importlib import import_module
+    routes = import_module("app.core.nova.creative_studio.router")
     svc, project, root = upload_context
     app = FastAPI()
     app.add_middleware(SecurityHeadersMiddleware)
