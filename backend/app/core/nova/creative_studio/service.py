@@ -2163,13 +2163,17 @@ class CreativeStudioService(ShortDramaMixin):
             except CreativeStudioError as exc:
                 reason = exc.message
         candidates = []
-        for asset in self.store.list_assets(project_id, owner_id):
+        assets = self.store.list_assets(project_id, owner_id)
+        scripts = [a for a in assets if a.kind == "presenter_script" and str(a.content or "").strip()]
+        latest_script = " ".join(str(scripts[-1].content).split()) if scripts else None
+        for asset in assets:
             if asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
                 continue
             try:
                 path, _mime, _name = self.open_asset_file(owner_id, project_id, asset.id)
                 if path.suffix.lower() in {".wav", ".mp3"}:
-                    candidates.append({"asset_id": asset.id, "title": str(asset.title or "Narration")[:100]})
+                    candidates.append({"asset_id": asset.id, "title": str(asset.title or "Narration")[:100],
+                                       "matches_saved_script": latest_script is None or " ".join(str(asset.content or "").split()) == latest_script})
             except CreativeStudioError:
                 continue
         return {"project_id": project_id, "approved": approved,
