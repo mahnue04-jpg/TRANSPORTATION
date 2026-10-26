@@ -182,3 +182,136 @@ def test_genova_upload_rejects_other_owner():
     p = svc.create_project("upload-owner-a", {"title": "Upload check", "project_type": "short_video"})
     with pytest.raises(CreativeStudioError):
         svc.upload_genova_presenter_image("upload-owner-b", p["id"], stream.getvalue(), "genova.png")
+
+
+@pytest.fixture
+def upload_context(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as module, providers
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+    monkeypatch.setattr(module, "_creative_media_root_and_prefix", lambda: (tmp_path, "/media/nova-creative"))
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (tmp_path, "/media/nova-creative"))
+    monkeypatch.setattr(FalKlingAvatarProvider, "_request_json", lambda *a, **k: pytest.fail("Paid provider called"))
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("image-owner", {"title": "Upload security", "project_type": "short_video"})
+    return svc, project, tmp_path
+
+
+def image_bytes(fmt="PNG", size=(300, 500)):
+    from io import BytesIO
+    from PIL import Image
+    buffer = BytesIO()
+    Image.new("RGB", size, "blue").save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("fmt,mime", [("PNG", "image/png"), ("JPEG", "image/jpeg"), ("WEBP", "image/webp")])
+def test_upload_roundtrip_and_revocation_never_falls_back(upload_context, fmt, mime):
+    from PIL import Image
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    svc, project, root = upload_context
+    pid = project["id"]
+    result = svc.upload_genova_presenter_image("image-owner", pid, image_bytes(fmt), "../../unsafe.svg", content_type=mime)
+    aid = result["asset"]["id"]
+    path, actual_mime, _ = svc.open_asset_file("image-owner", pid, aid)
+    assert path.parent == root
+    assert path.name.startswith("genova_upload_") and path.suffix == ".png"
+    assert actual_mime == "image/png"
+    with Image.open(path) as image:
+        assert image.format == "PNG" and image.size == (300, 500)
+    assert result["approved"] is False
+    # Even a legacy preferred plate must not bypass explicit approval.
+    legacy = root / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+    legacy.write_bytes(image_bytes())
+    assert svc._resolve_genova_presenter_image("image-owner", pid) is None
+    svc.set_genova_presenter_approval("image-owner", pid, aid)
+    restored = CreativeStudioService(svc.store)
+    assert restored.genova_avatar_readiness("image-owner", pid)["approved_image_asset_id"] == aid
+    other = svc.create_project("image-owner", {"title": "Other project", "project_type": "short_video"})
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_presenter_approval("image-owner", other["id"], aid)
+    with pytest.raises(CreativeStudioError):
+        svc.open_asset_file("other-owner", pid, aid)
+    svc.set_genova_presenter_approval("image-owner", pid, None)
+    assert svc._resolve_genova_presenter_image("image-owner", pid) is None
+    assert not svc.genova_avatar_readiness("image-owner", pid)["approved_presenter_image_found"]
+    svc.set_genova_presenter_approval("image-owner", pid, aid)
+    assert svc._resolve_genova_presenter_image("image-owner", pid) == path
+    path.unlink()
+    assert not svc.genova_avatar_readiness("image-owner", pid)["approved_presenter_image_found"]
+
+
+@pytest.mark.parametrize("payload,mime", [
+    (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/png"),
+    (image_bytes("GIF"), "image/gif"),
+    (image_bytes("PNG", (100, 100)), "image/png"),
+    (image_bytes("PNG"), "image/jpeg"),
+])
+def test_upload_rejects_unsafe_or_mismatched_content_without_files(upload_context, payload, mime):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    with pytest.raises(CreativeStudioError):
+        svc.upload_genova_presenter_image("image-owner", project["id"], payload, "image.png", content_type=mime)
+    assert not list(root.iterdir())
+    assert not svc.store.list_assets(project["id"], "image-owner")
+
+
+@pytest.mark.parametrize("mime", [None, "application/octet-stream", "image/svg+xml", "image/jpeg"])
+def test_upload_http_rejects_missing_unsupported_or_mismatched_mime(upload_context, monkeypatch, mime):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.creative_studio import router as routes
+    svc, project, root = upload_context
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id="image-owner")
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    with TestClient(app) as client:
+        response = client.post(f"/api/nova/creative/projects/{project['id']}/genova-image-upload",
+                               files={"file": ("test.png", image_bytes(), mime)})
+    assert response.status_code == 422
+    assert not list(root.iterdir())
+    assert not svc.store.list_assets(project["id"], "image-owner")
+
+
+def test_uploaded_image_public_aliases_blocked_but_owner_api_works(upload_context, monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.staticfiles import StaticFiles
+    from app.middleware import SecurityHeadersMiddleware
+    from app.core.nova.creative_studio import router as routes
+    svc, project, root = upload_context
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    app.mount("/media/nova-creative", StaticFiles(directory=root), name="media")
+    app.mount("/static/generated/nova-creative", StaticFiles(directory=root), name="legacy")
+    with TestClient(app) as client:
+        uploaded = client.post(f"/api/nova/creative/projects/{project['id']}/genova-image-upload",
+                               files={"file": ("test.png", image_bytes(), "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        asset = uploaded.json()["asset"]
+        name = asset["url"].rsplit("/", 1)[-1]
+        for url in [asset["url"], "/static/generated/nova-creative/" + name]:
+            response = client.get(url)
+            assert response.status_code == 404
+            assert "no-store" in response.headers["cache-control"]
+        download = f"/api/nova/creative/projects/{project['id']}/assets/{asset['id']}/file"
+        assert client.get(download).status_code == 200
+        user["id"] = "other-owner"
+        assert client.get(download).status_code == 404
+        user["id"] = "image-owner"
+        assert client.get(download + "?token=invalid").status_code == 400
+        # Protect only uploads; approved demo files remain available.
+        (root / "approved-demo.mp4").write_bytes(b"preserved-demo")
+        assert client.get("/media/nova-creative/approved-demo.mp4").content == b"preserved-demo"
+
