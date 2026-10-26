@@ -1788,7 +1788,7 @@ class CreativeStudioService(ShortDramaMixin):
                  "scripts": [a.content for a in self.store.list_assets(project.id, project.owner_id) if a.kind == "presenter_script"],
                  "scenes": [s.as_dict() for s in self.store.list_scenes(project.id, project.owner_id)],
                  "currency": quote.get("currency"), "estimate": quote.get("estimated_total_usd"),
-                 "items": quote.get("line_items"), "providers": quote.get("providers")}
+                 "items": quote.get("line_items"), "providers": quote.get("providers"), "balance": quote.get("balance")}
         return hashlib.sha256(json.dumps(scope, sort_keys=True, default=str).encode()).hexdigest()
 
     @staticmethod
