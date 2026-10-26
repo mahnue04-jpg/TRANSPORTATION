@@ -495,3 +495,88 @@ def test_narration_http_approval_revoke_and_wrong_owner(upload_context, monkeypa
         assert client.get(base + "/genova-narration").status_code == 404
         assert client.put(base + "/genova-narration-approval", json={"asset_id": audio.id}).status_code == 404
 
+
+def narration_upload_bytes(seconds=1):
+    import io
+    import wave
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\0\0" * (8000 * seconds))
+    return buffer.getvalue()
+
+
+def test_narration_import_preserves_assets_and_requires_separate_approval(upload_context):
+    svc, project, root = upload_context
+    old = save_test_narration(svc, project, root)
+    svc.set_genova_narration_approval("image-owner", project["id"], old.id)
+    result = svc.upload_genova_narration("image-owner", project["id"], narration_upload_bytes(),
+                                         "New reviewed script.", content_type="audio/wav")
+    assert result["approved"] is False and result["paid_request_submitted"] is False
+    state = svc.genova_narration_readiness("image-owner", project["id"])
+    assert state["approved"] is False
+    assert state["candidate_audio"][0]["asset_id"] == result["asset"]["id"]
+    assert state["candidate_audio"][0]["filename"].endswith(".wav")
+    assert old.id in [a.id for a in svc.store.list_assets(project["id"], "image-owner")]
+    path, _, _ = svc.open_asset_file("image-owner", project["id"], result["asset"]["id"])
+    assert path.read_bytes() == narration_upload_bytes()
+    assert result["asset"]["metadata"]["license_status"] == "AMBER"
+    assert svc.set_genova_narration_approval("image-owner", project["id"], result["asset"]["id"])["approved"]
+
+
+@pytest.mark.parametrize("data,script,mime", [
+    (b"not audio", "Script", "audio/wav"),
+    (narration_upload_bytes(), "Script", "audio/mpeg"),
+    (narration_upload_bytes(), "Script", "text/plain"),
+    (narration_upload_bytes(), "  ", "audio/wav"),
+    (narration_upload_bytes(), "x" * 10001, "audio/wav"),
+    (b"x" * (32 * 1024 * 1024 + 1), "Script", "audio/wav"),
+    (narration_upload_bytes(61), "Script", "audio/wav"),
+])
+def test_narration_import_rejects_invalid_without_saved_assets(upload_context, data, script, mime):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    with pytest.raises(CreativeStudioError):
+        svc.upload_genova_narration("image-owner", project["id"], data, script, content_type=mime)
+    assert not svc.store.list_assets(project["id"], "image-owner")
+    assert not list(root.iterdir())
+
+
+def test_imported_narration_http_private_owner_only(upload_context, monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.staticfiles import StaticFiles
+    from app.middleware import SecurityHeadersMiddleware
+    from importlib import import_module
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    app.mount("/media/nova-creative", StaticFiles(directory=root))
+    app.mount("/static/generated/nova-creative", StaticFiles(directory=root))
+    base = f"/api/nova/creative/projects/{project['id']}"
+    with TestClient(app) as client:
+        response = client.post(base + "/genova-narration-upload", data={"script": "Reviewed script."},
+                               files={"file": ("../../unsafe.wav", narration_upload_bytes(), "audio/wav")})
+        assert response.status_code == 200, response.text
+        asset = response.json()["asset"]
+        name = asset["url"].rsplit("/", 1)[-1]
+        assert name.startswith("genova_narration_upload_")
+        for url in [asset["url"], "/static/generated/nova-creative/" + name]:
+            assert client.get(url).status_code == 404
+        download = base + f"/assets/{asset['id']}/file"
+        assert client.get(download).content == narration_upload_bytes()
+        assert client.get(base + "/genova-narration").json()["approved"] is False
+        user["id"] = "other-owner"
+        assert client.get(download).status_code == 404
+        assert client.post(base + "/genova-narration-upload", data={"script": "Reviewed script."},
+                           files={"file": ("a.wav", narration_upload_bytes(), "audio/wav")}).status_code == 404

@@ -90,7 +90,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Uploaded presenter stills must be read through the project/asset API,
         # never through any public StaticFiles mount (including legacy aliases).
         filename = request.url.path.rstrip("/").rsplit("/", 1)[-1]
-        if filename.startswith("genova_upload_"):
+        if filename.startswith(("genova_upload_", "genova_narration_upload_")):
             response = Response(status_code=404, headers={"Cache-Control": "private, no-store"})
         else:
             response = await call_next(request) # type: ignore
