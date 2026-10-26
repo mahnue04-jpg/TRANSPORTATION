@@ -448,3 +448,50 @@ def test_cannot_confirm_a_different_project_snapshot_at_the_same_price(reviewed_
             acknowledged_estimate_usd=quote["estimated_total_usd"], quote_fingerprint=quote["quote_fingerprint"])
     assert exc.value.code == "STALE_RENDER_QUOTE"
 
+
+@pytest.mark.parametrize("invalid", ["corrupt", "too_long", "missing"])
+def test_narration_rejects_invalid_audio_files(upload_context, invalid):
+    import wave
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    path = root / "test-narration.wav"
+    if invalid == "missing":
+        path.unlink()
+    elif invalid == "corrupt":
+        path.write_bytes(b"not audio")
+    else:
+        with wave.open(str(path), "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(8000)
+            stream.writeframes(b"\0\0" * 8000 * 37)
+    with pytest.raises(CreativeStudioError):
+        svc.set_genova_narration_approval("image-owner", project["id"], audio.id)
+
+
+def test_narration_http_approval_revoke_and_wrong_owner(upload_context, monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    routes = import_module("app.core.nova.creative_studio.router")
+    svc, project, root = upload_context
+    audio = save_test_narration(svc, project, root)
+    app = FastAPI()
+    app.include_router(routes.router)
+    user = {"id": "image-owner"}
+    app.dependency_overrides[routes.require_nova_access] = lambda: None
+    app.dependency_overrides[routes.get_current_user_context] = lambda: SimpleNamespace(user_id=user["id"])
+    app.dependency_overrides[routes.get_db] = lambda: None
+    monkeypatch.setattr(routes, "get_service", lambda db: svc)
+    base = f"/api/nova/creative/projects/{project['id']}"
+    with TestClient(app) as client:
+        response = client.put(base + "/genova-narration-approval", json={"asset_id": audio.id})
+        assert response.status_code == 200, response.text
+        assert client.get(base + "/genova-narration").json()["approved"] is True
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": None}).json()["approved"] is False
+        user["id"] = "another-owner"
+        assert client.get(base + "/genova-narration").status_code == 404
+        assert client.put(base + "/genova-narration-approval", json={"asset_id": audio.id}).status_code == 404
+
