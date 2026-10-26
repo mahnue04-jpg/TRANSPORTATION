@@ -1576,6 +1576,23 @@ class GenovaImageApprovalIn(BaseModel):
     asset_id: str | None = None
 
 
+@router.post("/projects/{project_id}/genova-image-upload")
+async def upload_genova_image(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        data = await file.read(8 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_presenter_image(
+            user.user_id, project_id, data, file.filename or "presenter.png")
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.put("/projects/{project_id}/genova-image-approval")
 def approve_genova_image(
     project_id: str,
