@@ -329,11 +329,11 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                   "asset_generated": False, "url": None,
                   "generation_mode": "talking_avatar", "watermark_free": False}
         state = self.status()
+        token = str(resume_task_id or "").strip()
         # Turning paid generation off must not strand a previously saved task.
         # A valid resume token permits GET-only recovery while a key is present.
-        if state.status != AVAILABLE and (not resume_task_id or not self._key()):
+        if state.status != AVAILABLE and (not token or not self._key()):
             return dict(result, status=state.status, message=state.message)
-        token = str(resume_task_id or "").strip()
         task_validated = False
         submission_attempted = False
         request_id = None
