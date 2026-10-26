@@ -175,7 +175,7 @@
         listen.textContent = "Download narration to review";
         listen.addEventListener("click", async function () {
           if (activeProjectId !== p) return;
-          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", "genova-narration.wav"); }
+          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", item.filename || "genova-narration.wav"); }
           catch (error) { showBanner(error.message, false); }
         });
         var approve = document.createElement("button"); approve.type = "button"; approve.className = "secondary";
@@ -194,6 +194,32 @@
       if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
     } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
   }
+  var narrationUpload = $("genova-upload-narration");
+  if (narrationUpload) narrationUpload.addEventListener("click", async function () {
+    var p = activeProjectId;
+    var input = $("genova-narration-file");
+    var file = input && input.files && input.files[0];
+    var script = ($("genova-narration-script").value || "").trim();
+    if (!p || !file || !script) { showBanner("Select a project, recording and its exact script first.", false); return; }
+    if (!file.size || file.size > 32 * 1024 * 1024) { showBanner("Choose audio under 32 MB.", false); return; }
+    narrationUpload.disabled = true;
+    try {
+      var form = new FormData(); form.append("file", file); form.append("script", script);
+      var shared = session();
+      var path = "/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-upload";
+      var response = shared && shared.authFetch
+        ? await shared.authFetch(path, {method: "POST", body: form})
+        : await fetch(path, {method: "POST", headers: {"Authorization": "Bearer " + token()}, body: form});
+      if (!response.ok) {
+        var detail = await response.json().catch(function () { return {}; });
+        throw new Error(typeof detail.detail === "string" ? detail.detail : "Upload rejected (" + response.status + ")");
+      }
+      if (activeProjectId !== p) return;
+      showBanner("Narration and script imported. Listen and approve separately. No generation started.", true);
+      await genovaNarrationChoices(); await checkGenovaAvatarReadiness();
+    } catch (error) { if (activeProjectId === p) showBanner("Narration import failed: " + error.message, false); }
+    finally { narrationUpload.disabled = false; }
+  });
   var narrationLoad = $("genova-load-narration");
   if (narrationLoad) narrationLoad.addEventListener("click", genovaNarrationChoices);
   var narrationRevoke = $("genova-revoke-narration");
