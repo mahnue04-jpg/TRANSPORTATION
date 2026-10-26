@@ -7,6 +7,7 @@ owner-reported via env or returned as cannot_verify — no secret values are exp
 from __future__ import annotations
 
 import os
+import math
 from typing import Any
 
 from app.core.nova.creative_studio.flags import (
@@ -34,7 +35,8 @@ def _env_float(name: str) -> float | None:
     if not raw:
         return None
     try:
-        return float(raw)
+        value = float(raw)
+        return value if math.isfinite(value) else None
     except ValueError:
         return None
 
@@ -49,7 +51,7 @@ def accessible_balance_status() -> dict[str, Any]:
             "amount": None,
             "message": (
                 "Nova cannot verify the live fal credit balance from this environment. "
-                "Owner-reported balance as of 2026-10-15 was negative; do not purchase or top up automatically."
+                "Review the available balance before approving paid work; Nova never tops up automatically."
             ),
         }
     return {
@@ -198,3 +200,4 @@ def quote_project_render(
             "Slideshow-of-stills exports are never commercial-acceptance.",
         ],
     }
+
