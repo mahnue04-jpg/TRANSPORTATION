@@ -2002,6 +2002,36 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
+    def upload_genova_presenter_image(self, owner_id: str, project_id: str, data: bytes, filename: str) -> dict[str, Any]:
+        """Save an owner-scoped local image candidate; no provider calls or implicit approval."""
+        from io import BytesIO
+        from PIL import Image, UnidentifiedImageError
+        self._project_or_404(owner_id, project_id)
+        if not data or len(data) > 8 * 1024 * 1024:
+            raise CreativeStudioError("INVALID_IMAGE", "Image must be between 1 byte and 8 MB.", http_status=422)
+        try:
+            with Image.open(BytesIO(data)) as im:
+                if im.format not in {"PNG", "JPEG", "WEBP"}:
+                    raise ValueError("Unsupported image format")
+                if im.width < 256 or im.height < 256 or im.width * im.height > 20_000_000:
+                    raise ValueError("Invalid image dimensions")
+                im.verify()
+            with Image.open(BytesIO(data)) as im:
+                clean = im.convert("RGB")
+                root, prefix = _creative_media_root_and_prefix()
+                root.mkdir(parents=True, exist_ok=True)
+                name = new_id("genova_upload") + ".png"
+                path = root / name
+                clean.save(path, "PNG")
+        except (UnidentifiedImageError, ValueError, OSError, Image.DecompressionBombError):
+            raise CreativeStudioError("INVALID_IMAGE", "Upload a valid PNG, JPEG, or WebP image (minimum 256px).", http_status=422)
+        asset = self._save_text_asset(owner_id=owner_id, project_id=project_id,
+            kind="image", title="Uploaded presenter image (owner review)",
+            content="Owner-uploaded presenter candidate; NOT automatically approved",
+            status="GENERATED", url=prefix.rstrip("/") + "/" + name,
+            metadata={"source": "owner_upload", "approval_required": True})
+        return {"asset": asset.as_dict(), "approved": False}
+
     def set_genova_presenter_approval(self, owner_id: str, project_id: str, asset_id: str | None) -> dict[str, Any]:
         """Persist an owner-approved generated image ID, never a client-supplied path."""
         project = self._project_or_404(owner_id, project_id)
