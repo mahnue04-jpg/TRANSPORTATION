@@ -2087,6 +2087,36 @@ class CreativeStudioService(ShortDramaMixin):
             metadata={"source": "owner_upload", "approval_required": True})
         return {"asset": asset.as_dict(), "approved": False}
 
+    def upload_genova_narration(self, owner_id: str, project_id: str, data: bytes, script: str, *, content_type: str) -> dict[str, Any]:
+        """Import local audio and a new script revision, without approving or generating."""
+        project = self._project_or_404(owner_id, project_id)
+        script = str(script or "").strip()
+        suffix = {"audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav"}.get(content_type)
+        if not suffix or not data or len(data) > 32 * 1024 * 1024 or not 0 < len(script) <= 10000:
+            raise CreativeStudioError("INVALID_NARRATION", "Choose WAV or MP3 audio under 32 MB and provide its script (up to 10,000 characters).", http_status=422)
+        root, prefix = _creative_media_root_and_prefix()
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="nova-narration-") as temporary:
+            source = Path(temporary) / ("narration" + suffix)
+            source.write_bytes(data)
+            duration = self._validate_genova_narration_file(source, project)
+            try:
+                subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", suffix[1:],
+                                "-i", str(source), "-map", "0:a", "-f", "null", "-"],
+                               capture_output=True, check=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                raise CreativeStudioError("INVALID_NARRATION", "Narration could not be decoded completely. Choose a playable WAV or MP3 file.", http_status=422) from None
+            name = new_id("genova_narration_upload") + suffix
+            (root / name).write_bytes(data)
+        self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="presenter_script",
+            title="Imported narration script", content=script, status="GENERATED")
+        asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="audio",
+            title="Imported narration (owner review)", content=script, status="GENERATED",
+            url=prefix.rstrip("/") + "/" + name,
+            metadata={"source": "owner_audio_upload", "approval_required": True,
+                      "duration_seconds": round(duration, 3), "license_status": "AMBER"})
+        return {"asset": asset.as_dict(), "approved": False, "paid_request_submitted": False}
+
     def set_genova_presenter_approval(self, owner_id: str, project_id: str, asset_id: str | None) -> dict[str, Any]:
         """Persist an owner-approved generated image ID, never a client-supplied path."""
         project = self._project_or_404(owner_id, project_id)
@@ -2107,6 +2137,20 @@ class CreativeStudioService(ShortDramaMixin):
         self.store.save_project(project)
         return {"project_id": project_id, "approved_asset_id": asset_id, "approved": bool(asset_id)}
 
+    def _validate_genova_narration_file(self, path: Path, project: CreativeProject) -> float:
+        try:
+            probe = subprocess.run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", path.suffix.lower().lstrip("."), "-show_entries", "format=duration:stream=codec_type",
+                                    "-of", "json", str(path)], capture_output=True, text=True, check=True, timeout=10)
+            details = json.loads(probe.stdout)
+            duration = float(details["format"]["duration"])
+            kinds = [s.get("codec_type") for s in details.get("streams", [])]
+            if (not math.isfinite(duration) or not 0 < duration <= min(180, float(project.duration_target or 30))
+                    or "audio" not in kinds or "video" in kinds):
+                raise ValueError("Invalid narration duration or stream")
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            raise CreativeStudioError("INVALID_NARRATION", "Narration must be playable audio within the project duration allowance.", http_status=422) from None
+        return duration
+
     def _genova_narration_snapshot(self, owner_id: str, project_id: str, asset_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         assets = self.store.list_assets(project_id, owner_id)
@@ -2122,17 +2166,7 @@ class CreativeStudioService(ShortDramaMixin):
         current_script = " ".join(str(scripts[-1].content).split()) if scripts else script
         if script != current_script:
             raise CreativeStudioError("NARRATION_SCRIPT_MISMATCH", "Saved narration does not match the latest presenter script. Review the script and narration together.", http_status=422)
-        try:
-            probe = subprocess.run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", path.suffix.lower().lstrip("."), "-show_entries", "format=duration:stream=codec_type",
-                                    "-of", "json", str(path)], capture_output=True, text=True, check=True, timeout=10)
-            details = json.loads(probe.stdout)
-            duration = float(details["format"]["duration"])
-            kinds = [s.get("codec_type") for s in details.get("streams", [])]
-            if (not math.isfinite(duration) or not 0 < duration <= min(180, float(project.duration_target or 30))
-                    or "audio" not in kinds or "video" in kinds):
-                raise ValueError("Invalid narration duration or stream")
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-            raise CreativeStudioError("INVALID_NARRATION", "Narration must be playable audio within the project duration allowance.", http_status=422) from None
+        duration = self._validate_genova_narration_file(path, project)
         return {"asset_id": asset.id, "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "script_sha256": hashlib.sha256(script.encode()).hexdigest(), "duration_seconds": round(duration, 3)}
 
@@ -2173,12 +2207,13 @@ class CreativeStudioService(ShortDramaMixin):
                 path, _mime, _name = self.open_asset_file(owner_id, project_id, asset.id)
                 if path.suffix.lower() in {".wav", ".mp3"}:
                     candidates.append({"asset_id": asset.id, "title": str(asset.title or "Narration")[:100],
+                                       "filename": "genova-narration" + path.suffix.lower(),
                                        "matches_saved_script": latest_script is None or " ".join(str(asset.content or "").split()) == latest_script})
             except CreativeStudioError:
                 continue
         return {"project_id": project_id, "approved": approved,
                 "approved_asset_id": approval.get("asset_id") if approved else None,
-                "candidate_audio": candidates[:12], "message": reason, "paid_request_submitted": False}
+                "candidate_audio": list(reversed(candidates[-12:])), "message": reason, "paid_request_submitted": False}
 
     def genova_avatar_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
         """Read-only owner-scoped preflight. Never invokes or charges a provider."""
