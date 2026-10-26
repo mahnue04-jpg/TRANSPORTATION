@@ -216,7 +216,7 @@
       }
       if (activeProjectId !== p) return;
       showBanner("Narration and script imported. Listen and approve separately. No generation started.", true);
-      await genovaNarrationChoices(); await checkGenovaAvatarReadiness();
+      await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); await refreshAssets();
     } catch (error) { if (activeProjectId === p) showBanner("Narration import failed: " + error.message, false); }
     finally { narrationUpload.disabled = false; }
   });
@@ -1413,12 +1413,16 @@
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
           : "";
+        var audioName = /\.mp3(?:$|\?)/i.test(row.url) ? "nova-voice.mp3" : "nova-voice.wav";
         var audioControl = audioPath
           ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
-            escapeHtml(audioPath) + "\" data-download-name=\"nova-voice.wav\">Download voice</button>")
+            escapeHtml(audioPath) + "\" data-download-name=\"" + audioName + "\">Download voice</button>")
           : ("<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
-        media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
-          escapeHtml(row.url) + "\"></audio></div>" + audioControl;
+        var privateAudio = (row.metadata || {}).source === "owner_audio_upload";
+        media = privateAudio
+          ? "<p class=\"hint\">Private recording. Download voice to listen, then use the narration approval section.</p>" + audioControl
+          : "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
+            escapeHtml(row.url) + "\"></audio></div>" + audioControl;
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
