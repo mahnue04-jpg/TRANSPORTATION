@@ -1585,9 +1585,12 @@ async def upload_genova_image(
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise CreativeStudioError("INVALID_IMAGE", "Declare a PNG, JPEG, or WebP image type.", http_status=422)
         data = await file.read(8 * 1024 * 1024 + 1)
         return get_service(db).upload_genova_presenter_image(
-            user.user_id, project_id, data, file.filename or "presenter.png")
+            user.user_id, project_id, data, file.filename or "presenter.png", content_type=content_type)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -1728,3 +1731,4 @@ def export_project(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+

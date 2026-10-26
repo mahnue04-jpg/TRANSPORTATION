@@ -2002,7 +2002,7 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
-    def upload_genova_presenter_image(self, owner_id: str, project_id: str, data: bytes, filename: str) -> dict[str, Any]:
+    def upload_genova_presenter_image(self, owner_id: str, project_id: str, data: bytes, filename: str, *, content_type: str | None = None) -> dict[str, Any]:
         """Save an owner-scoped local image candidate; no provider calls or implicit approval."""
         from io import BytesIO
         from PIL import Image, UnidentifiedImageError
@@ -2013,6 +2013,9 @@ class CreativeStudioService(ShortDramaMixin):
             with Image.open(BytesIO(data)) as im:
                 if im.format not in {"PNG", "JPEG", "WEBP"}:
                     raise ValueError("Unsupported image format")
+                expected_mime = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}[im.format]
+                if content_type is not None and content_type != expected_mime:
+                    raise ValueError("Image content does not match its declared type")
                 if im.width < 256 or im.height < 256 or im.width * im.height > 20_000_000:
                     raise ValueError("Invalid image dimensions")
                 im.verify()
@@ -2086,62 +2089,16 @@ class CreativeStudioService(ShortDramaMixin):
         }
 
     def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
-        """Prefer project Genova full-body stills; fall back to known media-root plates."""
+        """Use only an available image explicitly approved for this owner's project."""
         project = self._project_or_404(owner_id, project_id)
         approved_id = str((project.metadata or {}).get("approved_genova_image_asset_id") or "")
-        if approved_id:
-            asset = next((a for a in self.store.list_assets(project_id, owner_id)
-                          if a.id == approved_id and a.kind == "image"
-                          and str(a.status or "").upper() == "GENERATED"), None)
-            path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
-            return path if path is not None and path.is_file() else None
-        preferred_names = (
-            "nova-c4edd02f88a04f7081a79a18fd98a935.png",
-            "nova-18f6ccddce0249f7a77e696c808fdf89.png",
-        )
-        assets = [
-            asset
-            for asset in self.store.list_assets(project_id, owner_id)
-            if asset.kind == "image"
-            and asset.url
-            and str(asset.status or "").upper() == "GENERATED"
-        ]
-
-        def _is_genova(asset: CreativeAsset) -> bool:
-            content = str(asset.content or "").lower()
-            return (
-                "genova presenter v2" in content
-                or (
-                    ("black woman" in content or "african american woman" in content)
-                    and "presenter" in content
-                )
-            )
-
-        scored: list[tuple[int, Path]] = []
-        for asset in assets:
-            path = _resolve_creative_media_url(asset.url)
-            if path is None or not path.is_file():
-                continue
-            name = path.name.lower()
-            score = 0
-            if name in preferred_names:
-                score += 100
-            if _is_genova(asset):
-                score += 50
-            # Do not select an unrelated project image merely because its filename
-            # starts with nova-. Only explicitly identified Genova assets qualify.
-            if score:
-                scored.append((score, path))
-        if scored:
-            scored.sort(key=lambda item: item[0], reverse=True)
-            return scored[0][1]
-
-        root, _prefix = _creative_media_root_and_prefix()
-        for name in preferred_names:
-            candidate = root / name
-            if candidate.is_file():
-                return candidate
-        return None
+        if not approved_id:
+            return None
+        asset = next((a for a in self.store.list_assets(project_id, owner_id)
+                      if a.id == approved_id and a.kind == "image"
+                      and str(a.status or "").upper() == "GENERATED"), None)
+        path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
+        return path if path is not None and path.is_file() else None
 
     @serialized_media
     def render_walking_presenter_proof(
@@ -2775,3 +2732,4 @@ def get_service(db=None) -> CreativeStudioService:
     if db is not None:
         return CreativeStudioService(get_db_store(db))
     return CreativeStudioService()
+

@@ -1278,7 +1278,11 @@
       var mediaAvailable = row.media_available !== false;
       if (row.kind === "image" && row.url && mediaAvailable) {
         var isAmicor = String(row.content || "").toUpperCase().indexOf("AMICOR") >= 0;
-        media = "<figure class=\"generated-media\"><img src=\"" + escapeHtml(row.url) + "\" alt=\"" +
+        var isPrivateUpload = (row.metadata || {}).source === "owner_upload" || /\/genova_upload_[^/]+$/.test(row.url);
+        var imageSource = isPrivateUpload
+          ? ("data-private-image-url=\"/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file\"")
+          : ("src=\"" + escapeHtml(row.url) + "\"");
+        media = "<figure class=\"generated-media\"><img " + imageSource + " alt=\"" +
           escapeHtml(row.title || "Nova generated image") + "\" loading=\"lazy\" />" +
           (isAmicor ? "<img class=\"official-brand-overlay\" src=\"/static/branding/amicor-logo-full.png\" alt=\"AMICOR official logo\" />" : "") +
           "</figure>" +
@@ -1347,6 +1351,27 @@
         assetFailureHtml(row) + memoryHeadroomNotice(row) + media +
         "<div>" + escapeHtml(String(row.content || "").slice(0, 280)) + "</div></div>";
     }).join("") || "<p class=\"hint\">No assets yet.</p>";
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-image-url]"), function (image) {
+      var projectId = activeProjectId;
+      (async function () {
+        try {
+          var shared = session();
+          var url = image.getAttribute("data-private-image-url");
+          var response = shared && shared.authFetch
+            ? await shared.authFetch(url, {method: "GET"})
+            : await fetch(url, {headers: {"Authorization": "Bearer " + token()}});
+          if (!response.ok) throw new Error("Image unavailable");
+          var blob = await response.blob();
+          if (!blob.type.startsWith("image/")) throw new Error("Not image media");
+          var reader = new FileReader();
+          reader.onload = function () {
+            if (activeProjectId === projectId && $("asset-list").contains(image)) image.src = reader.result;
+          };
+          reader.onerror = function () { image.alt = "Preview unavailable"; };
+          reader.readAsDataURL(blob);
+        } catch (error) { image.alt = "Preview unavailable"; }
+      })();
+    });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
       if (!caption) return;
@@ -2450,3 +2475,4 @@
 
   boot();
 })();
+
