@@ -383,7 +383,7 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                 time.sleep(5)
             return dict(result, status="PROCESSING", task_id=token,
                         message="Kling avatar still processing; resume existing request.")
-        except (RuntimeError, ValueError, TypeError, KeyError, OSError):
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError, AttributeError):
             if task_validated and token:
                 return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
                             can_resubmit=False,
