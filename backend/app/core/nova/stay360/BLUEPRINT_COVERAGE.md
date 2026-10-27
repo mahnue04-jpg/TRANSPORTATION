@@ -36,7 +36,7 @@ The 26-section source document was not found in this repository. Searches covere
 | 8 | Role and tenant isolation | Covered. Cross-tenant references look like unknown references. Driver and dispatcher roles are denied. |
 | 9 | API contracts | Covered by the Stay360 schemas and OpenAPI paths. |
 | 10 | Integration and security tests | Covered by `test_nova_stay360_contracts.py`, `test_nova_stay360_integration.py`, `test_nova_stay360_security.py`, and `stay360_dashboard_behavior.test.cjs`. |
-| 11 | Parking | Not implemented in this package yet. |
+| 11 | Parking | Covered on this branch. Synthetic stall assignment only. No gate, barrier, plate number, or payment. |
 | 12 | Concierge | Not implemented. |
 | 13 | Guest services | Not implemented. |
 | 14 | Room inventory safeguards | Not implemented. |
@@ -45,7 +45,7 @@ The 26-section source document was not found in this repository. Searches covere
 | 17 | Itinerary | Not implemented. |
 | 18–26 | Section titles are not in the repository | Not implemented. |
 
-Nine issue items are covered. Seven named later increments are not implemented. The remaining nine of the 26 section titles cannot be mapped until the source document is added to the repo.
+Ten issue items are covered, including parking stall assignment. Six named later increments are not implemented. The remaining nine of the 26 section titles cannot be mapped until the source document is added to the repo.
 
 ## Isolation and nonproduction readiness
 

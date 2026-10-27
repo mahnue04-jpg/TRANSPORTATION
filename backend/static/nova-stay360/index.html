@@ -33,7 +33,7 @@
     <p class="notice" data-i18n="checkin.no_door_access">No door code, mobile key, or physical access is issued.</p>
     <p class="notice" data-i18n="checkin.no_payment">No payment is captured.</p>
     <p class="notice" data-i18n="blueprint.citation">Blueprint document: Hospitality &amp; Travel Master Blueprint, version 1.1. This is not the product title.</p>
-    <p class="scope" data-i18n="slice.scope_note">This slice covers privacy-safe guest prearrival, reservation lookup, mock flight and road arrivals, housekeeping, room readiness, and eligible mobile check-in simulation. The product title is AMICOR Nova Stay360. The source document title is Hospitality &amp; Travel Master Blueprint version 1.1 (26 sections) and that document is not in the repo. Those titles are different. Sections not implemented: parking, concierge, guest services, inventory safeguards, family/events, marketing, itinerary.</p>
+    <p class="scope" data-i18n="slice.scope_note">This slice covers privacy-safe guest prearrival, reservation lookup, mock flight and road arrivals, housekeeping, room readiness, and eligible mobile check-in simulation. The product title is AMICOR Nova Stay360. The source document title is Hospitality &amp; Travel Master Blueprint version 1.1 (26 sections) and that document is not in the repo. Those titles are different. The parking stall assignment is included. Sections not implemented: concierge, guest services, inventory safeguards, family/events, marketing, itinerary.</p>
 
     <section class="panel" aria-labelledby="session-title">
       <h2 id="session-title" data-i18n="nav.dashboard">Hotel dashboard</h2>
@@ -131,6 +131,41 @@
         <button type="submit" data-i18n="checkin.simulate">Simulate check-in</button>
       </form>
       <dl id="checkin-result" class="result"></dl>
+    </section>
+
+    <section class="panel" aria-labelledby="parking-title">
+      <h2 id="parking-title" data-i18n="parking.title">Parking assignment</h2>
+      <p class="notice" data-i18n="parking.no_gate">No gate code, barrier command, or payment is issued.</p>
+      <p id="parking-empty" class="status" data-i18n="parking.empty">No stall is assigned on this board.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="table.stall">Stall</th>
+              <th data-i18n="table.reference">Reference</th>
+              <th data-i18n="table.guest">Guest label</th>
+              <th data-i18n="table.vehicle">Vehicle label</th>
+              <th data-i18n="table.readiness">Readiness</th>
+            </tr>
+          </thead>
+          <tbody id="parking"></tbody>
+        </table>
+      </div>
+      <form id="parking-form" class="stack">
+        <label>
+          <span data-i18n="parking.stall">Stall code</span>
+          <input id="stall-code" autocomplete="off" />
+        </label>
+        <label>
+          <span data-i18n="parking.update">Update stall</span>
+          <select id="parking-status">
+            <option value="assigned" data-i18n="parking.assigned">Assigned</option>
+            <option value="occupied" data-i18n="parking.occupied">Occupied</option>
+            <option value="released" data-i18n="parking.released">Released</option>
+          </select>
+        </label>
+        <button type="submit" data-i18n="parking.update">Update stall</button>
+      </form>
     </section>
   </main>
   <script src="/static/nova-stay360/stay360.js"></script>

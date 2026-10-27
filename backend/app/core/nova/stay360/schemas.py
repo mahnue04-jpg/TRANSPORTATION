@@ -138,6 +138,27 @@ class MetaResponse(_Strict):
     blueprint_note: str
 
 
+class ParkingAssignment(_Strict):
+    stall_code: str
+    reservation_reference: str
+    guest_label: str
+    vehicle_label: str
+    status: Literal["assigned", "occupied", "released"]
+    gate_access: Literal["not_issued"]
+    payment_captured: Literal[False]
+
+
+class ParkingListResponse(_Strict):
+    synthetic: Literal[True]
+    gate_access: Literal["not_issued"]
+    payment_captured: Literal[False]
+    stalls: list[ParkingAssignment]
+
+
+class ParkingStatusUpdate(_Strict):
+    status: Literal["assigned", "occupied", "released"]
+
+
 class LocaleIndex(_Strict):
     locales: list[str]
     keys: list[str]

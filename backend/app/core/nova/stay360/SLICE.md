@@ -37,7 +37,7 @@ This package is an isolated synthetic slice. It does not rename other products, 
 
 ## Blueprint gap
 
-The product title is AMICOR Nova Stay360. The source document title is Hospitality & Travel Master Blueprint version 1.1 (26 sections) and that document is not in the repo. Those titles are different. Sections not implemented: parking, concierge, guest services, inventory safeguards, family/events, marketing, itinerary.
+The product title is AMICOR Nova Stay360. The source document title is Hospitality & Travel Master Blueprint version 1.1 (26 sections) and that document is not in the repo. Those titles are different. The parking stall assignment is included. Sections not implemented: concierge, guest services, inventory safeguards, family/events, marketing, itinerary.
 
 Section-by-section coverage is in `BLUEPRINT_COVERAGE.md`. The page title is `AMICOR Nova Stay360 — Intelligent Hospitality Operations`. The blueprint title is a separate citation and is not the product title.
 

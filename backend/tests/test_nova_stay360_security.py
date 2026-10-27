@@ -211,6 +211,60 @@ def test_identity_query_params_do_not_mutate_refresh_housekeeping_or_check_in():
     assert_clean(checkin.json())
 
 
+def test_parking_is_tenant_scoped_and_does_not_issue_gate_access():
+    harbor = client_for(user("staff-harbor", "staff", HARBOR_TENANT))
+    cedar = client_for(user("staff-cedar", "staff", CEDAR_TENANT))
+    guest = client_for(user("guest-avery", "rider", HARBOR_TENANT))
+    other_guest = client_for(user("guest-drew", "rider", HARBOR_TENANT))
+    driver = client_for(user("driver-harbor", "driver", HARBOR_TENANT))
+
+    harbor_list = harbor.get("/api/nova/stay360/parking")
+    cedar_list = cedar.get("/api/nova/stay360/parking")
+    assert harbor_list.status_code == 200, harbor_list.text
+    assert cedar_list.status_code == 200, cedar_list.text
+    harbor_codes = {row["stall_code"] for row in harbor_list.json()["stalls"]}
+    cedar_codes = {row["stall_code"] for row in cedar_list.json()["stalls"]}
+    assert "P12" in harbor_codes and "P12" in cedar_codes
+    harbor_p12 = next(row for row in harbor_list.json()["stalls"] if row["stall_code"] == "P12")
+    cedar_p12 = next(row for row in cedar_list.json()["stalls"] if row["stall_code"] == "P12")
+    assert harbor_p12["vehicle_label"] == "Blue sedan"
+    assert cedar_p12["vehicle_label"] == "Silver wagon"
+    assert harbor_p12["gate_access"] == "not_issued"
+    assert harbor_p12["payment_captured"] is False
+    assert "C. Reed" not in harbor_list.text
+    assert "A. Lane" not in cedar_list.text
+    assert_clean(harbor_list.json())
+    assert_clean(cedar_list.json())
+
+    own = guest.get("/api/nova/stay360/parking")
+    assert own.status_code == 200
+    assert [row["stall_code"] for row in own.json()["stalls"]] == ["P12"]
+    assert own.json()["stalls"][0]["guest_label"] == "A. Lane"
+    drew = other_guest.get("/api/nova/stay360/parking")
+    assert [row["stall_code"] for row in drew.json()["stalls"]] == ["P04"]
+    assert "A. Lane" not in drew.text
+    assert "Blue sedan" not in drew.text
+
+    denied = guest.post("/api/nova/stay360/parking/P12/status", json={"status": "occupied"})
+    assert denied.status_code == 403
+    assert harbor.get("/api/nova/stay360/parking").json()["stalls"]
+    still = next(row for row in harbor.get("/api/nova/stay360/parking").json()["stalls"] if row["stall_code"] == "P12")
+    assert still["status"] == "assigned"
+
+    hidden = harbor.post("/api/nova/stay360/parking/P12/status", params={"email": "guest-casey@example.invalid"}, json={"status": "occupied"})
+    assert hidden.status_code == 422
+    assert hidden.json()["detail"]["code"] == "sensitive_lookup_rejected"
+    unchanged = next(row for row in harbor.get("/api/nova/stay360/parking").json()["stalls"] if row["stall_code"] == "P12")
+    assert unchanged["status"] == "assigned"
+    assert "guest-casey@example.invalid" not in hidden.text
+
+    missing = harbor.post("/api/nova/stay360/parking/P99/status", json={"status": "occupied"})
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "stall_not_found"
+    assert driver.get("/api/nova/stay360/parking").status_code == 403
+    assert anonymous_client().get("/api/nova/stay360/parking").status_code == 401
+
+
 def test_dashboard_script_uses_the_current_token_and_clears_the_previous_hotel():
     node = shutil.which("node")
     script = Path(__file__).resolve().parent / "stay360_dashboard_behavior.test.cjs"

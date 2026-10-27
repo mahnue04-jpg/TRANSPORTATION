@@ -46,7 +46,9 @@
     clearNode(document.getElementById("rooms"));
     clearNode(document.getElementById("lookup-result"));
     clearNode(document.getElementById("checkin-result"));
+    clearNode(document.getElementById("parking"));
     document.getElementById("arrivals-empty").hidden = false;
+    document.getElementById("parking-empty").hidden = false;
   }
 
   function setStatus(message) {
@@ -163,12 +165,37 @@
     });
   }
 
+  function renderParking(rows) {
+    var body = document.getElementById("parking");
+    clearNode(body);
+    var empty = document.getElementById("parking-empty");
+    empty.hidden = rows.length > 0;
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      cell(tr, row.stall_code);
+      cell(tr, row.reservation_reference);
+      cell(tr, row.guest_label);
+      cell(tr, row.vehicle_label);
+      cell(tr, row.status);
+      body.appendChild(tr);
+    });
+  }
+
+  function loadParking() {
+    return request("/api/nova/stay360/parking").then(function (payload) {
+      renderParking(payload.stalls || []);
+    });
+  }
+
   function loadDashboard() {
     return request("/api/nova/stay360/dashboard").then(function (dashboard) {
       renderCounts(dashboard);
       renderArrivals(dashboard.arrivals || []);
       renderRooms(dashboard.rooms || []);
       setStatus(text("nav.dashboard"));
+      return loadParking().catch(function (error) {
+        setStatus(error.message);
+      });
     }).catch(function (error) {
       clearOperationalView();
       setStatus(error.message);
@@ -239,6 +266,20 @@
       body: { status: status },
     }).then(function () {
       return loadDashboard();
+    }).catch(function (error) {
+      setStatus(error.message);
+    });
+  });
+  document.getElementById("parking-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    rememberToken();
+    var code = document.getElementById("stall-code").value.trim();
+    var status = document.getElementById("parking-status").value;
+    request("/api/nova/stay360/parking/" + encodeURIComponent(code) + "/status", {
+      method: "POST",
+      body: { status: status },
+    }).then(function () {
+      return loadParking();
     }).catch(function (error) {
       setStatus(error.message);
     });

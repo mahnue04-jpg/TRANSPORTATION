@@ -156,6 +156,31 @@ def test_other_eligibility_blockers_stay_on_the_simulation():
     assert_clean(eden.json())
 
 
+def test_staff_can_move_a_stall_only_along_the_synthetic_path():
+    staff = client_for(user("staff-harbor", "staff", HARBOR_TENANT))
+    skipped = staff.post("/api/nova/stay360/parking/P12/status", json={"status": "released"})
+    assert skipped.status_code == 409
+    assert skipped.json()["detail"]["code"] == "invalid_parking_transition"
+    occupied = staff.post("/api/nova/stay360/parking/P12/status", json={"status": "occupied"})
+    assert occupied.status_code == 200, occupied.text
+    assert occupied.json()["status"] == "occupied"
+    assert occupied.json()["gate_access"] == "not_issued"
+    assert occupied.json()["payment_captured"] is False
+    released = staff.post("/api/nova/stay360/parking/P12/status", json={"status": "released"})
+    assert released.status_code == 200
+    assert released.json()["status"] == "released"
+    paid = staff.post(
+        "/api/nova/stay360/parking/P12/status",
+        json={"status": "assigned", "payment_captured": True, "gate_code": "2468"},
+    )
+    assert paid.status_code == 422
+    assert "2468" not in paid.text
+    current = next(row for row in staff.get("/api/nova/stay360/parking").json()["stalls"] if row["stall_code"] == "P12")
+    assert current["status"] == "released"
+    assert_clean(occupied.json())
+    assert_clean(released.json())
+
+
 def test_drew_can_simulate_check_in_when_the_room_is_already_ready():
     guest = user("guest-drew", "rider", HARBOR_TENANT)
     response = client_for(guest).post("/api/nova/stay360/reservations/STAY-HLI-1008/mobile-check-in", json={})

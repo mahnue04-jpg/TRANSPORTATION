@@ -13,7 +13,8 @@ _SCOPE_ES = (
     "Esta sección cubre la prellegada del huésped con privacidad, la consulta de reservas, "
     "llegadas simuladas por vuelo y carretera, limpieza, disponibilidad de la habitación "
     "y la simulación del registro móvil. "
-    "No están implementados: parking, concierge, guest services, inventory safeguards, "
+    "La asignación de estacionamiento está incluida. "
+    "No están implementados: concierge, guest services, inventory safeguards, "
     "family/events, marketing, itinerary. "
     + BLUEPRINT_NOTE
 )
@@ -21,7 +22,8 @@ _SCOPE_FR = (
     "Cette tranche couvre la préarrivée protégée, la consultation de réservation, "
     "les arrivées simulées par vol et par route, le housekeeping, la disponibilité "
     "de la chambre et la simulation d'enregistrement mobile. "
-    "Ne sont pas implémentés : parking, concierge, guest services, inventory safeguards, "
+    "L'affectation du stationnement est incluse. "
+    "Ne sont pas implémentés : concierge, guest services, inventory safeguards, "
     "family/events, marketing, itinerary. "
     + BLUEPRINT_NOTE
 )
@@ -78,6 +80,16 @@ _EN: dict[str, str] = {
     "table.arrival": "Arrival",
     "table.readiness": "Readiness",
     "table.eligibility": "Check-in",
+    "parking.title": "Parking assignment",
+    "parking.no_gate": "No gate code, barrier command, or payment is issued.",
+    "parking.empty": "No stall is assigned on this board.",
+    "parking.update": "Update stall",
+    "parking.stall": "Stall code",
+    "table.stall": "Stall",
+    "table.vehicle": "Vehicle label",
+    "parking.assigned": "Assigned",
+    "parking.occupied": "Occupied",
+    "parking.released": "Released",
 }
 
 _ES: dict[str, str] = {
@@ -132,6 +144,16 @@ _ES: dict[str, str] = {
     "table.arrival": "Llegada",
     "table.readiness": "Disponibilidad",
     "table.eligibility": "Registro",
+    "parking.title": "Asignación de estacionamiento",
+    "parking.no_gate": "No se emite código de barrera, comando de acceso ni pago.",
+    "parking.empty": "No hay un lugar asignado en este tablero.",
+    "parking.update": "Actualizar lugar",
+    "parking.stall": "Código de lugar",
+    "table.stall": "Lugar",
+    "table.vehicle": "Etiqueta del vehículo",
+    "parking.assigned": "Asignado",
+    "parking.occupied": "Ocupado",
+    "parking.released": "Liberado",
 }
 
 _FR: dict[str, str] = {
@@ -186,6 +208,16 @@ _FR: dict[str, str] = {
     "table.arrival": "Arrivée",
     "table.readiness": "Disponibilité",
     "table.eligibility": "Enregistrement",
+    "parking.title": "Affectation du stationnement",
+    "parking.no_gate": "Aucun code de barrière, commande d'accès ou paiement n'est émis.",
+    "parking.empty": "Aucune place n'est affectée sur ce tableau.",
+    "parking.update": "Mettre à jour la place",
+    "parking.stall": "Code de place",
+    "table.stall": "Place",
+    "table.vehicle": "Étiquette du véhicule",
+    "parking.assigned": "Affectée",
+    "parking.occupied": "Occupée",
+    "parking.released": "Libérée",
 }
 
 CATALOGS: dict[str, dict[str, str]] = {"en": _EN, "es": _ES, "fr": _FR}
