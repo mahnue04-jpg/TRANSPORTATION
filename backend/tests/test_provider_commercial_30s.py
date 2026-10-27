@@ -279,63 +279,24 @@ def test_submit_does_not_post_without_authorization_or_flags(ready, monkeypatch)
     assert gated["offline_demo_fallback"] is False
 
 
-def test_authorized_submit_posts_once_and_resume_does_not_duplicate(ready, monkeypatch):
+def test_in_memory_paid_submit_fails_closed_without_atomic_store(ready, monkeypatch):
+    """Test stores cannot silently bypass the database's atomic claim gate."""
     svc, owner, project_id = ready
     svc.reserve_provider_commercial_30s(owner, project_id, _card())
     monkeypatch.setenv("FAL_KEY", "test-only")
     monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "kling")
     monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
     monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "true")
-    calls = []
-
-    def motion(self, *, brief):
-        kind = "motion-resume" if brief.get("resume_task_id") else "motion"
-        calls.append((kind, brief["shot_index"]))
-        if kind == "motion":
-            return {"status": "PROCESSING", "task_id": f"motion-{brief['shot_index']}", "asset_generated": False}
-        return {
-            "status": "GENERATED",
-            "task_id": brief["resume_task_id"],
-            "url": f"/media/nova-creative/motion-{brief['shot_index']}.mp4",
-            "asset_generated": True,
-            "provider": "fal_kling_video",
-        }
-
-    def lipsync(self, *, video_url, audio_url, resume_task_id=None):
-        kind = "lipsync-resume" if resume_task_id else "lipsync"
-        calls.append((kind, video_url))
-        if kind == "lipsync":
-            return {"status": "PROCESSING", "task_id": f"lip-{video_url}", "asset_generated": False}
-        return {
-            "status": "GENERATED",
-            "task_id": resume_task_id,
-            "url": "/media/nova-creative/lipsync.mp4",
-            "asset_generated": True,
-            "provider": "fal_kling_lipsync",
-        }
-
-    monkeypatch.setattr(FalKlingVideoProvider, "generate", motion)
-    monkeypatch.setattr(FalKlingLipSyncProvider, "generate_lipsync", lipsync)
-    first = svc.render_walking_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert first["provider_posts"] == 6
-    assert [item[0] for item in calls] == ["motion"] * 6
-    assert first["status"] == "PROCESSING"
-    assert first["uses_local_montage"] is False
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Paid provider POST attempted without durable atomic claim")
+    monkeypatch.setattr(FalKlingVideoProvider, "generate", forbidden)
+    monkeypatch.setattr(FalKlingLipSyncProvider, "generate_lipsync", forbidden)
+    first = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
     second = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert second["provider_posts"] == 12
-    assert [item[0] for item in calls].count("motion") == 6
-    assert [item[0] for item in calls].count("lipsync") == 6
-    third = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert third["provider_posts"] == 12
-    assert third["status"] == "GENERATED"
-    assert third["provider_lip_sync"] is True
-    assert third["render_mode"] == "fal_kling_motion_then_lipsync"
-    assert [item[0] for item in calls].count("motion") == 6
-    assert [item[0] for item in calls].count("lipsync") == 6
-    assert third["paid_provider_charges"] is None
-    assert third["charge_status"] == "potential_charge_unverified"
-    assert first["paid_provider_charges"] is None
-    assert first["charge_status"] == "potential_charge_unverified"
+    assert first["submission_authorized"] is False
+    assert second["submission_authorized"] is False
+    assert "submission_claim_unavailable" in first["blockers"]
+    assert first["provider_posts"] == second["provider_posts"] == 0
 
 
 def test_ambiguous_post_does_not_submit_again(ready, monkeypatch):
