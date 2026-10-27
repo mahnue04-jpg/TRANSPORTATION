@@ -503,6 +503,10 @@ app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
 app.include_router(nova_casting_router)
+# Nova Intelligence synthetic media is default off. Routes return 404 unless
+# NOVA_INTELLIGENCE_MEDIA is exactly "1". Isolated from Creative Studio.
+from app.core.nova.intelligence.router import router as nova_intelligence_media_router  # type: ignore
+app.include_router(nova_intelligence_media_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
