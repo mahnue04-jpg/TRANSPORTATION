@@ -2449,14 +2449,63 @@ class CreativeStudioService(ShortDramaMixin):
             "commercial_complete": False,
         }
 
+    def plan_provider_commercial_30s(self, owner_id: str, project_id: str, price_card: dict[str, Any] | None = None) -> dict[str, Any]:
+        from app.core.nova.creative_studio.provider_commercial_30s import plan_provider_commercial_30s
+
+        return plan_provider_commercial_30s(self, owner_id, project_id, price_card=price_card)
+
+    def reserve_provider_commercial_30s(self, owner_id: str, project_id: str, price_card: dict[str, Any] | None) -> dict[str, Any]:
+        from app.core.nova.creative_studio.provider_commercial_30s import reserve_provider_commercial_30s
+
+        return reserve_provider_commercial_30s(self, owner_id, project_id, price_card)
+
+    def validate_provider_commercial_30s_resume(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        from app.core.nova.creative_studio.provider_commercial_30s import validate_provider_commercial_30s_resume
+
+        return validate_provider_commercial_30s_resume(self, owner_id, project_id)
+
+    def submit_provider_commercial_30s(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        authorize_provider_submit: bool = False,
+        price_card: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.core.nova.creative_studio.provider_commercial_30s import submit_provider_commercial_30s
+
+        return submit_provider_commercial_30s(
+            self,
+            owner_id,
+            project_id,
+            authorize_provider_submit=authorize_provider_submit,
+            price_card=price_card,
+        )
+
     @serialized_media
-    def render_walking_commercial_30s(self, owner_id: str, project_id: str) -> dict[str, Any]:
-        """30s H.264/AAC walking talking commercial for mobile download. No paid provider spend."""
+    def render_walking_commercial_30s(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        authorize_provider_submit: bool = False,
+    ) -> dict[str, Any]:
+        """30s commercial. Provider motion is explicit; otherwise this is the labeled offline demo."""
         from app.core.nova.creative_studio.click_destinations import replacement_pack
         from app.core.nova.creative_studio.walking_presenter import (
             WalkingPresenterError,
             render_walking_commercial_30s,
         )
+
+        if authorize_provider_submit is True:
+            submitted = self.submit_provider_commercial_30s(
+                owner_id,
+                project_id,
+                authorize_provider_submit=True,
+            )
+            submitted["offline_demo_fallback"] = False
+            submitted["uses_local_montage"] = False
+            return submitted
 
         project = self._project_or_404(owner_id, project_id)
         scenes = self.store.list_scenes(project_id, owner_id)
@@ -2528,6 +2577,11 @@ class CreativeStudioService(ShortDramaMixin):
             "presenter_used": True,
             "provider_clearance": cleared,
             "publish_ready": False,
+            "output_class": "offline_demo_fallback",
+            "offline_demo_fallback": True,
+            "provider_backed_motion": False,
+            "provider_lip_sync": False,
+            "uses_local_montage": True,
         }
         # A generated playable MP4 is not necessarily an acceptable commercial.
         # Explicitly classify missing presenter-image fallback as preview only.
@@ -2568,10 +2622,10 @@ class CreativeStudioService(ShortDramaMixin):
             job,
             status="GENERATED",
             message=(
-                f"30s presenter pipeline rendered at {rendered['duration_seconds']}s "
-                f"({visual_mode}). Separate from the title-card montage. "
-                "Commercial complete stays off until real motion, lip-sync, clean narration, "
-                "and provider/license clearance. No paid provider was charged."
+                f"Offline demo fallback rendered at {rendered['duration_seconds']}s "
+                f"({visual_mode}). This is the local montage, not Kling motion or synced narration. "
+                "Commercial complete stays off until the guarded provider path finishes. "
+                "No paid provider was charged."
             ),
             asset_ids=[video_asset.id, audio_asset.id],
             provider="nova_walking_commercial",
@@ -2586,6 +2640,11 @@ class CreativeStudioService(ShortDramaMixin):
             "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{job.id}",
             "lip_sync": True,
             "render_mode": "local_walking_commercial_30s",
+            "output_class": "offline_demo_fallback",
+            "offline_demo_fallback": True,
+            "provider_backed_motion": False,
+            "provider_lip_sync": False,
+            "uses_local_montage": True,
             "milestone": "30s_walking_commercial",
             "visual_mode": visual_mode,
             "illustrated_fallback": rendered.get("illustrated_fallback"),

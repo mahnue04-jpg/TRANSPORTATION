@@ -1696,10 +1696,86 @@ def assemble_walking_commercial_30s(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    """Labeled offline 30s demo. Does not submit Fal, Kling, D-ID, or OpenAI."""
     _require_owner(user)
     try:
         return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+class ProviderCommercial30sIn(BaseModel):
+    authorize_provider_submit: bool = False
+    price_card: dict[str, Any] | None = None
+
+
+@router.get("/projects/{project_id}/provider-commercial-30s")
+def provider_commercial_30s_plan(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Non-billable 30s provider plan. Credentials are booleans and no job is submitted."""
+    _require_owner(user)
+    try:
+        return get_service(db).plan_provider_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/reserve")
+def provider_commercial_30s_reserve(
+    project_id: str,
+    payload: ProviderCommercial30sIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Durable idempotent cost hold at or under the internal ceiling. No provider post."""
+    _require_owner(user)
+    try:
+        return get_service(db).reserve_provider_commercial_30s(
+            user.user_id,
+            project_id,
+            payload.price_card,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/resume")
+def provider_commercial_30s_resume(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Validate a saved reservation and download. Does not contact a provider."""
+    _require_owner(user)
+    try:
+        return get_service(db).validate_provider_commercial_30s_resume(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/submit")
+def provider_commercial_30s_submit(
+    project_id: str,
+    payload: ProviderCommercial30sIn | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Provider motion plus lip-sync. Refuses unless this body explicitly authorizes submit."""
+    _require_owner(user)
+    body = payload or ProviderCommercial30sIn()
+    try:
+        return get_service(db).render_walking_commercial_30s(
+            user.user_id,
+            project_id,
+            authorize_provider_submit=body.authorize_provider_submit is True,
+        )
     except CreativeStudioError as exc:
         _raise(exc)
         raise
