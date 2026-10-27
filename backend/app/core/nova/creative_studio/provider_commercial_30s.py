@@ -88,6 +88,31 @@ def _save_reservation(service, project, reservation: dict[str, Any]) -> None:
     service.store.save_project(project)
 
 
+def _atomic_claim_reservation(service, owner_id: str, project_id: str, *, expected_status: str) -> bool:
+    """Claim a reserved job once, across DB-backed concurrent requests.
+
+    A failed or unavailable conditional update refuses any billable work. Recovery
+    from an interrupted claim is deliberately manual until provider reconciliation.
+    """
+    store = service.store
+    claim = getattr(store, "compare_and_swap_project_metadata", None)
+    if not callable(claim):
+        return False
+    project = service._project_or_404(owner_id, project_id)
+    before = json.loads(json.dumps(project.metadata or {}))
+    reservation = before.get("provider_commercial_30s_reservation")
+    if not isinstance(reservation, dict) or reservation.get("status") != expected_status:
+        return False
+    if reservation.get("owner_submit_authorized") or reservation.get("submission_claimed"):
+        return False
+    after = json.loads(json.dumps(before))
+    next_reservation = after["provider_commercial_30s_reservation"]
+    next_reservation["submission_claimed"] = True
+    next_reservation["status"] = "submitting"
+    next_reservation["charge_status"] = "no_provider_post"
+    return bool(claim(project_id, owner_id, before, after))
+
+
 def _provider_status() -> dict[str, Any]:
     from app.core.nova.creative_studio.kling import FalKlingLipSyncProvider, FalKlingVideoProvider
 
