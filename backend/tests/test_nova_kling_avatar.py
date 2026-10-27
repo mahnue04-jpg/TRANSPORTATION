@@ -165,6 +165,142 @@ def test_genova_approval_persists_and_revokes(monkeypatch, tmp_path):
     assert check["approved_image_asset_id"] is None
 
 
+def test_runway_live_flag_does_not_activate_kling_avatar(monkeypatch):
+    monkeypatch.setenv("FAL_KEY", "test-only")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "runway")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
+    monkeypatch.delenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", raising=False)
+    provider = FalKlingAvatarProvider()
+    provider._request_json = lambda *args, **kwargs: pytest.fail("Paid call attempted")
+    result = provider.generate_avatar(
+        image_url="https://example.test/genova.png",
+        audio_url="https://example.test/audio.wav",
+    )
+    assert result["status"] == "DISABLED"
+    assert result["block_reason"] == "live_flag_off"
+    assert result["asset_generated"] is False
+
+
+def test_missing_fal_key_is_credential_missing(monkeypatch):
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "true")
+    provider = FalKlingAvatarProvider()
+    provider._request_json = lambda *args, **kwargs: pytest.fail("Paid call attempted")
+    result = provider.generate_avatar(
+        image_url="https://example.test/genova.png",
+        audio_url="https://example.test/audio.wav",
+    )
+    assert result["status"] == "CONFIG_REQUIRED"
+    assert result["block_reason"] == "credential_missing"
+
+
+def test_rejected_key_and_access_denial_stay_sanitized(avatar, monkeypatch):
+    from app.core.nova.creative_studio.kling import _SafeKlingError
+
+    def reject(method, url, *, payload=None):
+        if "denied" in str(payload or ""):
+            raise _SafeKlingError("fal access denied; check account permissions or funding")
+        raise _SafeKlingError("fal API key was rejected")
+
+    monkeypatch.setattr(avatar, "_request_json", reject)
+    rejected = avatar.generate_avatar(
+        image_url="https://example.test/genova.png",
+        audio_url="https://example.test/audio.wav",
+    )
+    assert rejected["status"] == "ERROR"
+    assert rejected["block_reason"] == "invalid_credential"
+    assert "test-only" not in rejected["message"]
+    denied = avatar.generate_avatar(
+        image_url="https://example.test/genova.png",
+        audio_url="data:audio/wav;base64,denied",
+    )
+    assert denied["block_reason"] == "authorization"
+    assert "test-only" not in denied["message"]
+
+
+def test_readiness_separates_audio_budget_and_credential(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio import service as module
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.setattr(
+        FalKlingAvatarProvider,
+        "_request_json",
+        lambda *args, **kwargs: pytest.fail("Readiness must not call Fal"),
+    )
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("audit-owner", {"title": "Audit", "project_type": "short_video"})
+    local_audio = tmp_path / "local.wav"
+    local_audio.write_bytes(b"espeak")
+    voice = tmp_path / "voice.mp3"
+    voice.write_bytes(b"voice")
+    svc._save_text_asset(
+        owner_id="audit-owner",
+        project_id=project["id"],
+        kind="audio",
+        title="Offline narration",
+        content="Local espeak narration",
+        status="GENERATED",
+        url="/media/nova-creative/local.wav",
+        metadata={"provider_result": {"provider": "espeak"}},
+    )
+    monkeypatch.setattr(module, "_resolve_creative_media_url", lambda url: local_audio if url.endswith("local.wav") else None)
+    state = svc.genova_avatar_readiness("audit-owner", project["id"])
+    assert state["provider_block_reason"] == "credential_missing"
+    assert state["approved_narration_audio_found"] is False
+    assert state["owner_budget_confirmed"] is False
+    assert "credential_missing" in state["blockers"]
+    assert "missing_narration_audio" in state["blockers"]
+    assert state["invalid_credential_checked"] is False
+    assert state["can_generate"] is False
+
+    svc._save_text_asset(
+        owner_id="audit-owner",
+        project_id=project["id"],
+        kind="audio",
+        title="Voice generation result",
+        content="Natural narration",
+        status="GENERATED",
+        url="/media/nova-creative/voice.mp3",
+        metadata={"provider_result": {"provider": "openai_voice"}},
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_creative_media_url",
+        lambda url: voice if str(url).endswith("voice.mp3") else local_audio if str(url).endswith("local.wav") else None,
+    )
+    saved = svc._project_or_404("audit-owner", project["id"])
+    meta = dict(saved.metadata or {})
+    meta["budget_confirmation"] = {"confirmed": True}
+    saved.metadata = meta
+    svc.store.save_project(saved)
+    state = svc.genova_avatar_readiness("audit-owner", project["id"])
+    assert state["approved_narration_audio_found"] is False
+    assert state["budget_confirmation_valid"] is False
+    assert "missing_narration_audio" in state["blockers"]
+    assert "budget_not_confirmed" in state["blockers"]
+    assert state["budget_enforcement_ready"] is False
+    assert state["can_generate"] is False
+
+
+def test_provider_banner_names_block_reason_without_secret_values():
+    from pathlib import Path
+    from app.core.nova.creative_studio.providers import provider_statuses
+
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    script = (root / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    rows = {row["kind"]: row for row in provider_statuses()}
+    assert rows["talking_avatar"]["credential_env_names"] == ["FAL_KEY"]
+    assert rows["talking_avatar"]["invalid_credential_checked"] is False
+    assert "genova-narration-import-20261026" in html
+    assert 'aria-controls="genova-avatar-readiness-result"' in html
+    assert "provider_block_reason" in script
+    blob = str(rows)
+    assert "sk-" not in blob
+    assert "test-only" not in blob
 def test_genova_upload_rejects_invalid_and_preserves_no_approval():
     from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
     from app.core.nova.creative_studio.store import CreativeStudioStore

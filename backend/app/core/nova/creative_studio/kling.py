@@ -286,10 +286,55 @@ AVATAR_MODEL = "fal-ai/kling-video/ai-avatar/v2/standard"
 AVATAR_TOKEN_PREFIX = "fal-kling-avatar-v2:"
 
 
+def _avatar_block_reason(message: str) -> str:
+    """Map the fixed local error text to a blocker. Never inspect provider bodies."""
+    text = str(message or "").lower()
+    if "api key was rejected" in text:
+        return "invalid_credential"
+    if "access denied" in text:
+        return "authorization"
+    if "presenter image" in text or "narration" in text or "accessible to fal" in text:
+        return "missing_media"
+    return "provider_error"
+
+
 class FalKlingAvatarProvider(FalKlingLipSyncProvider):
     """Owner-gated, queued talking-avatar generation; no implicit paid calls."""
 
     provider_id = "fal_kling_avatar_v2"
+
+    def status(self):
+        """Require the Kling flags even when the selected video provider is Runway.
+
+        FalKlingVideoProvider.status follows the selected video provider. With the
+        default Runway selection, a Runway live flag would otherwise mark this
+        paid avatar adapter available. This check does not contact fal.
+        """
+        if not self._key():
+            return ProviderStatus(
+                self.provider_id,
+                "talking_avatar",
+                CONFIG_REQUIRED,
+                "FAL_KEY is missing. Kling avatar did not send a request.",
+                False,
+            )
+        video_on = str(os.getenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+        kling_on = str(os.getenv("NOVA_CREATIVE_KLING_LIVE_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if not (video_on and kling_on):
+            return ProviderStatus(
+                self.provider_id,
+                "talking_avatar",
+                DISABLED,
+                "Kling avatar stays off until NOVA_CREATIVE_VIDEO_LIVE_ENABLED and NOVA_CREATIVE_KLING_LIVE_ENABLED are both on. A Runway live flag does not turn this adapter on.",
+                True,
+            )
+        return ProviderStatus(
+            self.provider_id,
+            "talking_avatar",
+            AVAILABLE,
+            "Kling avatar flags are on. This status check did not submit a job.",
+            True,
+        )
 
     def _validate_task(self, task):
         """fal tracks endpoint jobs under the owner/app, not the model path."""
@@ -333,7 +378,8 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
         # Turning paid generation off must not strand a previously saved task.
         # A valid resume token permits GET-only recovery while a key is present.
         if state.status != AVAILABLE and (not token or not self._key()):
-            return dict(result, status=state.status, message=state.message)
+            reason = "credential_missing" if not state.configured else "live_flag_off"
+            return dict(result, status=state.status, message=state.message, block_reason=reason)
         task_validated = False
         submission_attempted = False
         request_id = None
@@ -383,6 +429,21 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                 time.sleep(5)
             return dict(result, status="PROCESSING", task_id=token,
                         message="Kling avatar still processing; resume existing request.")
+        except _SafeKlingError as exc:
+            if task_validated and token:
+                return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
+                            can_resubmit=False,
+                            message="Avatar status or download was interrupted. Resume the saved task; no replacement was submitted.")
+            message = str(exc)
+            return dict(
+                result,
+                status=ERROR,
+                task_id=None,
+                can_resubmit=False,
+                submission_uncertain=submission_attempted,
+                block_reason=_avatar_block_reason(message),
+                message=message,
+            )
         except (RuntimeError, ValueError, TypeError, KeyError, OSError, AttributeError):
             if task_validated and token:
                 return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
@@ -393,4 +454,3 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                         message=("Avatar submission could not be confirmed. Check fal request history before starting another render."
                                  if submission_attempted else
                                  "Kling avatar input or saved task is invalid. No new request was submitted."))
-

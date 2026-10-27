@@ -106,14 +106,16 @@
       target.textContent =
         "Genova image: " + (state.approved_presenter_image_found ? "found" : "not found") +
         " | Kling: " + (state.provider_status || "unknown") +
+        (state.provider_block_reason ? " (" + state.provider_block_reason + ")" : "") +
         " | Approved narration audio: " + (state.approved_narration_audio_found ? "found" : "not ready") +
         " | Estimate confirmation: " + (state.budget_confirmation_valid ? "current" : "not ready") +
         " | Spending gate: " + (state.budget_enforcement_ready ? "ready" : "not ready") +
-        " | Paid generation: " + (state.can_generate ? "requires separate owner action" : "blocked") +
-        ". No paid request submitted." +
+        " | Paid generation: blocked" +
+        ". Blockers: " + ((state.blockers || []).join(", ") || "none") +
+        ". " + (state.reason || "") +
+        " No paid request submitted." +
         (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "") +
-        (state.narration_next_step ? " Narration: " + state.narration_next_step : "") +
-        (state.reason ? " " + state.reason : "");
+        (state.narration_next_step ? " Narration: " + state.narration_next_step : "");
     } catch (err) {
       if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
       target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
@@ -982,7 +984,9 @@
   async function refreshProviders() {
     var guards = await api("/api/nova/creative/guardrails");
     var bits = (guards.providers || []).map(function (row) {
-      return row.kind + ": " + row.status + " — " + row.message;
+      return row.kind + ": " + row.status +
+        (row.block_reason ? " (" + row.block_reason + ")" : "") +
+        ". " + row.message;
     });
     $("provider-status").innerHTML = bits.map(function (line) {
       return "<div class=\"item\">" + escapeHtml(line) + "</div>";

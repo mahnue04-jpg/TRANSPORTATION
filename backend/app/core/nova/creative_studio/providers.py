@@ -1005,10 +1005,82 @@ def talking_presenter_provider() -> TalkingPresenterProvider:
     return DidTalkingPresenterProvider()
 
 
+def _block_reason(status: str, configured: bool) -> str:
+    if status == AVAILABLE and configured:
+        return "ready"
+    if status == DISABLED and configured:
+        return "live_flag_off"
+    if status == CONFIG_REQUIRED or not configured:
+        return "credential_missing"
+    if status == ERROR:
+        return "provider_error"
+    return "unverified"
+
+
+def _video_credential_names() -> list[str]:
+    selected = selected_video_provider()
+    if selected in {"fal", "kling", "fal_kling"}:
+        return ["FAL_KEY"]
+    return ["RUNWAYML_API_SECRET", "NOVA_CREATIVE_VIDEO_API_KEY"]
+
+
+def _video_live_flag_names() -> list[str]:
+    names = ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED"]
+    if selected_video_provider() in {"fal", "kling", "fal_kling"}:
+        names.append("NOVA_CREATIVE_KLING_LIVE_ENABLED")
+    return names
+
+
+def _annotate_provider_status(row: dict[str, Any], credential_names: list[str], live_flag_names: list[str]) -> dict[str, Any]:
+    annotated = dict(row)
+    annotated["block_reason"] = _block_reason(str(row.get("status") or ""), bool(row.get("configured")))
+    annotated["credential_env_names"] = list(credential_names)
+    annotated["live_flag_names"] = list(live_flag_names)
+    annotated["invalid_credential_checked"] = False
+    return annotated
+
+
+def media_selection_label() -> str:
+    """Name the media root class without echoing a custom directory."""
+    if str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip():
+        return "configured"
+    root, _prefix = _creative_media_root_and_prefix()
+    text = str(root)
+    if text == "/data/onboarding_docs/nova_creative_media":
+        return "onboarding_docs"
+    if text == "/data/nova_creative_media":
+        return "data_disk"
+    return "ephemeral"
+
+
 def provider_statuses() -> list[dict[str, Any]]:
-    return [
-        image_provider().status().as_dict(),
-        video_provider().status().as_dict(),
-        voice_provider().status().as_dict(),
-        talking_presenter_provider().status().as_dict(),
+    from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
+
+    rows = [
+        _annotate_provider_status(
+            image_provider().status().as_dict(),
+            ["OPENAI_API_KEY"],
+            ["NOVA_CREATIVE_IMAGE_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            video_provider().status().as_dict(),
+            _video_credential_names(),
+            _video_live_flag_names(),
+        ),
+        _annotate_provider_status(
+            voice_provider().status().as_dict(),
+            ["OPENAI_API_KEY"],
+            ["NOVA_CREATIVE_VOICE_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            talking_presenter_provider().status().as_dict(),
+            ["DID_API_KEY"],
+            ["NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            FalKlingAvatarProvider().status().as_dict(),
+            ["FAL_KEY"],
+            ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "NOVA_CREATIVE_KLING_LIVE_ENABLED"],
+        ),
     ]
+    return rows
